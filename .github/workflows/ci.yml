@@ -52,7 +52,8 @@ jobs:
       run: |
         echo "Running tests with coverage and race detection..."
         mkdir -p test-results
-        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out ./...
+        # Exclude internal/controller tests - they require envtest and run in separate job
+        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/controller)
         echo "Coverage report generated: coverage.out"
 
     - name: Publish Test Results
