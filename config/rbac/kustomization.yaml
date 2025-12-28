@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the omnia itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- toolregistry_admin_role.yaml
+- toolregistry_editor_role.yaml
+- toolregistry_viewer_role.yaml
 - promptpack_admin_role.yaml
 - promptpack_editor_role.yaml
 - promptpack_viewer_role.yaml
