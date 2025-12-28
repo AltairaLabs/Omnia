@@ -98,7 +98,6 @@ jobs:
 
     - name: SonarCloud Scan
       uses: SonarSource/sonarqube-scan-action@v3
-      continue-on-error: true  # Non-blocking until project is configured in SonarCloud
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
