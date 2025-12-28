@@ -2,4 +2,5 @@
 resources:
 - omnia_v1alpha1_agentruntime.yaml
 - omnia_v1alpha1_promptpack.yaml
+- omnia_v1alpha1_toolregistry.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
