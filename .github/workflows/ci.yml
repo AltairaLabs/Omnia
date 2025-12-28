@@ -120,7 +120,7 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.61.0
+        version: v1.63.0
         args: --issues-exit-code=0
         only-new-issues: true
       env:
@@ -180,11 +180,11 @@ jobs:
     - name: Install envtest
       run: |
         go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-        setup-envtest use --bin-dir /usr/local/kubebuilder/bin
+        setup-envtest use --bin-dir ${{ github.workspace }}/bin/k8s
 
     - name: Run internal package tests
       run: |
-        export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
+        export KUBEBUILDER_ASSETS=$(setup-envtest use -p path --bin-dir ${{ github.workspace }}/bin/k8s)
         go test -v ./internal/... -coverprofile=internal-coverage.out
 
     - name: Upload internal coverage
