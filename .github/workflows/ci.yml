@@ -30,9 +30,6 @@ jobs:
   test:
     name: Test & Coverage
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.22']
 
     steps:
     - name: Checkout code
@@ -43,7 +40,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version-file: go.mod
 
     - name: Install dependencies
       run: go mod download
@@ -118,7 +115,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version-file: go.mod
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6
@@ -140,13 +137,10 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version-file: go.mod
 
-    - name: Build operator
-      run: go build -o bin/operator ./cmd/operator/...
-
-    - name: Build agent
-      run: go build -o bin/agent ./cmd/agent/...
+    - name: Build manager
+      run: go build -o bin/manager ./cmd/...
 
   docker:
     name: Docker Build
@@ -161,21 +155,13 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build operator image
+    - name: Build manager image
       uses: docker/build-push-action@v6
       with:
         context: .
         file: ./Dockerfile
         push: false
-        tags: omnia-operator:latest
-
-    - name: Build agent image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ./Dockerfile.agent
-        push: false
-        tags: omnia-agent:latest
+        tags: omnia-manager:latest
 
   envtest:
     name: Controller Tests (envtest)
@@ -189,21 +175,21 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version-file: go.mod
 
     - name: Install envtest
       run: |
         go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
         setup-envtest use --bin-dir /usr/local/kubebuilder/bin
 
-    - name: Run controller tests
+    - name: Run internal package tests
       run: |
         export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
-        go test -v ./internal/controller/... -coverprofile=controller-coverage.out
+        go test -v ./internal/... -coverprofile=internal-coverage.out
 
-    - name: Upload controller coverage
+    - name: Upload internal coverage
       uses: actions/upload-artifact@v4
       with:
-        name: controller-coverage
-        path: controller-coverage.out
+        name: internal-coverage
+        path: internal-coverage.out
         retention-days: 5
