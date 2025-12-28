@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: omnia
 repo: github.com/altairalabs/omnia
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: altairalabs.ai
+  group: omnia
+  kind: AgentRuntime
+  path: github.com/altairalabs/omnia/api/v1alpha1
+  version: v1alpha1
 version: "3"

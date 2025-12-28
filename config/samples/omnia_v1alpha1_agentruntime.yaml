@@ -1,0 +1,9 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  labels:
+    app.kubernetes.io/name: omnia
+    app.kubernetes.io/managed-by: kustomize
+  name: agentruntime-sample
+spec:
+  # TODO(user): Add fields here

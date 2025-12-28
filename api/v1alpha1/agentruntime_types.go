@@ -1,0 +1,252 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// PromptPackRef references a PromptPack to use for this agent runtime.
+type PromptPackRef struct {
+	// name is the name of the PromptPack resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// version specifies a specific version of the PromptPack to use.
+	// If not specified, the track field is used instead.
+	// +optional
+	Version *string `json:"version,omitempty"`
+
+	// track specifies which release track to follow (e.g., "stable", "canary").
+	// Only used if version is not specified.
+	// +kubebuilder:default="stable"
+	// +optional
+	Track *string `json:"track,omitempty"`
+}
+
+// FacadeType defines the type of facade for client connections.
+// +kubebuilder:validation:Enum=websocket;grpc
+type FacadeType string
+
+const (
+	// FacadeTypeWebSocket uses WebSocket for client connections.
+	FacadeTypeWebSocket FacadeType = "websocket"
+	// FacadeTypeGRPC uses gRPC for client connections.
+	FacadeTypeGRPC FacadeType = "grpc"
+)
+
+// FacadeConfig defines the configuration for the client-facing facade.
+type FacadeConfig struct {
+	// type specifies the facade protocol type.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default="websocket"
+	Type FacadeType `json:"type"`
+
+	// port is the port number for the facade service.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default=8080
+	// +optional
+	Port *int32 `json:"port,omitempty"`
+}
+
+// ToolRegistryRef references a ToolRegistry resource.
+type ToolRegistryRef struct {
+	// name is the name of the ToolRegistry resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// namespace is the namespace of the ToolRegistry resource.
+	// If not specified, the same namespace as the AgentRuntime is used.
+	// +optional
+	Namespace *string `json:"namespace,omitempty"`
+}
+
+// SessionStoreType defines the type of session store.
+// +kubebuilder:validation:Enum=memory;redis;postgres
+type SessionStoreType string
+
+const (
+	// SessionStoreTypeMemory uses in-memory storage (not recommended for production).
+	SessionStoreTypeMemory SessionStoreType = "memory"
+	// SessionStoreTypeRedis uses Redis for session storage.
+	SessionStoreTypeRedis SessionStoreType = "redis"
+	// SessionStoreTypePostgres uses PostgreSQL for session storage.
+	SessionStoreTypePostgres SessionStoreType = "postgres"
+)
+
+// SessionConfig defines the configuration for session management.
+type SessionConfig struct {
+	// type specifies the session store backend.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default="memory"
+	Type SessionStoreType `json:"type"`
+
+	// storeRef references a secret containing connection details for the session store.
+	// Required for redis and postgres store types.
+	// +optional
+	StoreRef *corev1.LocalObjectReference `json:"storeRef,omitempty"`
+
+	// ttl is the time-to-live for sessions in duration format (e.g., "24h", "30m").
+	// +kubebuilder:default="24h"
+	// +optional
+	TTL *string `json:"ttl,omitempty"`
+}
+
+// RuntimeConfig defines deployment-related settings.
+type RuntimeConfig struct {
+	// replicas is the desired number of agent runtime pods.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=1
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// resources defines compute resource requirements for the agent container.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// nodeSelector is a map of node labels for pod scheduling.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// tolerations are tolerations for pod scheduling.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// affinity defines affinity rules for pod scheduling.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+}
+
+// AgentRuntimeSpec defines the desired state of AgentRuntime.
+type AgentRuntimeSpec struct {
+	// promptPackRef references the PromptPack containing agent prompts and configuration.
+	// +kubebuilder:validation:Required
+	PromptPackRef PromptPackRef `json:"promptPackRef"`
+
+	// facade configures the client-facing connection interface.
+	// +kubebuilder:validation:Required
+	Facade FacadeConfig `json:"facade"`
+
+	// toolRegistryRef optionally references a ToolRegistry for available tools.
+	// +optional
+	ToolRegistryRef *ToolRegistryRef `json:"toolRegistryRef,omitempty"`
+
+	// session configures session management and storage.
+	// +optional
+	Session *SessionConfig `json:"session,omitempty"`
+
+	// runtime configures deployment settings like replicas and resources.
+	// +optional
+	Runtime *RuntimeConfig `json:"runtime,omitempty"`
+
+	// providerSecretRef references a secret containing LLM provider credentials.
+	// The secret should contain keys like "api-key" for the provider.
+	// +kubebuilder:validation:Required
+	ProviderSecretRef corev1.LocalObjectReference `json:"providerSecretRef"`
+}
+
+// AgentRuntimePhase represents the current phase of the AgentRuntime.
+// +kubebuilder:validation:Enum=Pending;Running;Failed
+type AgentRuntimePhase string
+
+const (
+	// AgentRuntimePhasePending indicates the runtime is being set up.
+	AgentRuntimePhasePending AgentRuntimePhase = "Pending"
+	// AgentRuntimePhaseRunning indicates the runtime is operational.
+	AgentRuntimePhaseRunning AgentRuntimePhase = "Running"
+	// AgentRuntimePhaseFailed indicates the runtime has failed.
+	AgentRuntimePhaseFailed AgentRuntimePhase = "Failed"
+)
+
+// ReplicaStatus tracks the number of replicas.
+type ReplicaStatus struct {
+	// desired is the desired number of replicas.
+	Desired int32 `json:"desired"`
+
+	// ready is the number of ready replicas.
+	Ready int32 `json:"ready"`
+
+	// available is the number of available replicas.
+	Available int32 `json:"available"`
+}
+
+// AgentRuntimeStatus defines the observed state of AgentRuntime.
+type AgentRuntimeStatus struct {
+	// phase represents the current lifecycle phase of the AgentRuntime.
+	// +optional
+	Phase AgentRuntimePhase `json:"phase,omitempty"`
+
+	// replicas tracks the replica counts for the deployment.
+	// +optional
+	Replicas *ReplicaStatus `json:"replicas,omitempty"`
+
+	// activeVersion is the currently deployed PromptPack version.
+	// +optional
+	ActiveVersion *string `json:"activeVersion,omitempty"`
+
+	// conditions represent the current state of the AgentRuntime resource.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.replicas.ready`
+// +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.activeVersion`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// AgentRuntime is the Schema for the agentruntimes API.
+// It defines a deployment of a PromptKit agent with its associated configuration.
+type AgentRuntime struct {
+	metav1.TypeMeta `json:",inline"`
+
+	// metadata is a standard object metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitzero"`
+
+	// spec defines the desired state of AgentRuntime
+	// +required
+	Spec AgentRuntimeSpec `json:"spec"`
+
+	// status defines the observed state of AgentRuntime
+	// +optional
+	Status AgentRuntimeStatus `json:"status,omitzero"`
+}
+
+// +kubebuilder:object:root=true
+
+// AgentRuntimeList contains a list of AgentRuntime.
+type AgentRuntimeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitzero"`
+	Items           []AgentRuntime `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&AgentRuntime{}, &AgentRuntimeList{})
+}
