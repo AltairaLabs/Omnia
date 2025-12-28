@@ -8,6 +8,7 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes
+  - promptpacks
   verbs:
   - create
   - delete
@@ -20,12 +21,14 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/finalizers
+  - promptpacks/finalizers
   verbs:
   - update
 - apiGroups:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/status
+  - promptpacks/status
   verbs:
   - get
   - patch
