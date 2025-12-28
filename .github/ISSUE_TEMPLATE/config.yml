@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/AltairaLabs/Omnia/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: General Questions
+    url: https://github.com/AltairaLabs/Omnia/discussions/categories/q-a
+    about: Get help with using Omnia
+  - name: Feature Ideas
+    url: https://github.com/AltairaLabs/Omnia/discussions/categories/ideas
+    about: Share ideas for new features (before creating feature requests)
+  - name: Security Issues
+    url: mailto:security@altairalabs.ai
+    about: Report security vulnerabilities (please do not create public issues)
