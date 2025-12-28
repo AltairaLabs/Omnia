@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/omnia.altairalabs.ai_agentruntimes.yaml
+- bases/omnia.altairalabs.ai_promptpacks.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
