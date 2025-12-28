@@ -1,0 +1,57 @@
+# CODEOWNERS for Omnia
+# This file defines code ownership and automatically assigns reviewers for PRs.
+# Learn more: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global fallback - all files not matched below
+# @AltairaLabs/maintainers
+
+# API and CRD definitions
+/api/                               @AltairaLabs/maintainers
+
+# Controllers
+/internal/controller/               @AltairaLabs/maintainers
+
+# WebSocket Facade
+/internal/facade/                   @AltairaLabs/maintainers
+
+# Session Store
+/internal/session/                  @AltairaLabs/maintainers
+
+# Tools integration
+/internal/tools/                    @AltairaLabs/maintainers
+
+# Command entrypoints
+/cmd/                               @AltairaLabs/maintainers
+
+# CI/CD and Infrastructure
+/.github/workflows/                 @AltairaLabs/maintainers
+/.github/CODEOWNERS                 @AltairaLabs/maintainers
+/.goreleaser.yml                    @AltairaLabs/maintainers
+/Makefile                           @AltairaLabs/maintainers
+/Dockerfile*                        @AltairaLabs/maintainers
+
+# Helm Chart
+/charts/                            @AltairaLabs/maintainers
+
+# CRD manifests
+/config/                            @AltairaLabs/maintainers
+
+# Go module files
+go.mod                              @AltairaLabs/maintainers
+go.sum                              @AltairaLabs/maintainers
+
+# Documentation
+/docs/                              @AltairaLabs/maintainers
+/*.md                               @AltairaLabs/maintainers
+
+# Examples
+/examples/                          @AltairaLabs/maintainers
+
+# Security and Governance
+/SECURITY.md                        @AltairaLabs/maintainers
+/CODE_OF_CONDUCT.md                 @AltairaLabs/maintainers
+/LICENSE                            @AltairaLabs/maintainers
+/CONTRIBUTING.md                    @AltairaLabs/maintainers
+
+# Scripts
+/scripts/                           @AltairaLabs/maintainers

@@ -27,3 +27,12 @@ dist/
 
 # macOS
 .DS_Store
+
+# Kubebuilder
+cover.out
+*.swp
+*.swo
+*~
+
+# Local backlog (not for public repo)
+docs/local-backlog/
