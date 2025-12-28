@@ -143,16 +143,17 @@ else
 fi
 
 #
-# 5. Run tests
+# 5. Run tests with coverage
 #
-print_header "Running Tests"
+print_header "Running Tests with Coverage"
 
-# Run tests with short timeout for pre-commit
-if go test -short -timeout 60s ./... 2>&1 | grep -v "no test files"; then
-    print_success "Tests passed"
-else
-    # Check if it was just "no test files" messages
-    TEST_OUTPUT=$(go test -short -timeout 60s ./... 2>&1)
+COVERAGE_THRESHOLD=80
+
+# Run tests with coverage
+TEST_OUTPUT=$(go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
+TEST_EXIT_CODE=$?
+
+if [ $TEST_EXIT_CODE -ne 0 ]; then
     if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
         print_error "Tests failed"
         echo "$TEST_OUTPUT" | grep "FAIL"
@@ -160,6 +161,60 @@ else
     else
         print_success "Tests passed (some packages have no tests)"
     fi
+else
+    print_success "Tests passed"
+fi
+
+# Check coverage for Omnia-specific code (excluding scaffolding and generated files)
+if [ -f coverage.out ]; then
+    print_header "Checking Coverage (threshold: ${COVERAGE_THRESHOLD}%)"
+
+    # Get coverage report, excluding generated files (zz_generated*.go)
+    COVERAGE_REPORT=$(go tool cover -func=coverage.out 2>/dev/null | grep -v "zz_generated")
+
+    FAILED_COVERAGE=0
+
+    # Check coverage for files in api/ and internal/config (Omnia-specific, non-generated code)
+    while IFS= read -r line; do
+        # Skip total line and empty lines
+        if echo "$line" | grep -q "^total:"; then
+            continue
+        fi
+
+        # Get the file path and coverage
+        FILE_PATH=$(echo "$line" | awk '{print $1}')
+
+        # Only check Omnia-specific files (api/*.go and internal/config/*.go, excluding generated)
+        if echo "$FILE_PATH" | grep -qE "^github.com/altairalabs/omnia/(api/v1alpha1/agentruntime_types|internal/config/config)\.go:"; then
+            FUNC_NAME=$(echo "$line" | awk '{print $2}')
+            FUNC_COVERAGE=$(echo "$line" | awk '{print $NF}' | tr -d '%')
+
+            # Skip if coverage is not a number
+            if ! echo "$FUNC_COVERAGE" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
+                continue
+            fi
+
+            # Compare as integers
+            COVERAGE_INT=${FUNC_COVERAGE%.*}
+            if [ "$COVERAGE_INT" -lt "$COVERAGE_THRESHOLD" ]; then
+                if [ $FAILED_COVERAGE -eq 0 ]; then
+                    print_error "Coverage below ${COVERAGE_THRESHOLD}% in Omnia-specific code:"
+                fi
+                echo "  - ${FILE_PATH} ${FUNC_NAME}: ${FUNC_COVERAGE}%"
+                FAILED_COVERAGE=1
+            fi
+        fi
+    done <<< "$COVERAGE_REPORT"
+
+    if [ $FAILED_COVERAGE -eq 1 ]; then
+        CHECKS_FAILED=1
+    else
+        TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print $NF}')
+        print_success "Coverage meets threshold for Omnia-specific code"
+        print_info "Total coverage: $TOTAL_COVERAGE"
+    fi
+
+    rm -f coverage.out
 fi
 
 #
