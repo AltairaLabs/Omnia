@@ -51,6 +51,23 @@ type RedisConfig struct {
 	KeyPrefix string
 }
 
+// ParseRedisURL parses a Redis URL and returns a RedisConfig.
+// Supported formats:
+//   - redis://[:password@]host:port[/db]
+//   - redis://[:password@]host:port[/db]?key_prefix=prefix
+func ParseRedisURL(url string) (RedisConfig, error) {
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		return RedisConfig{}, fmt.Errorf("failed to parse Redis URL: %w", err)
+	}
+
+	return RedisConfig{
+		Addr:     opts.Addr,
+		Password: opts.Password,
+		DB:       opts.DB,
+	}, nil
+}
+
 // RedisStore implements Store using Redis for persistent storage.
 type RedisStore struct {
 	client    *redis.Client
