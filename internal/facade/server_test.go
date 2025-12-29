@@ -370,7 +370,16 @@ func TestServerShutdown(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	if count := server.ConnectionCount(); count != 1 {
+	// Wait for connection to be registered (may take a moment on CI)
+	var count int
+	for i := 0; i < 50; i++ {
+		count = server.ConnectionCount()
+		if count == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if count != 1 {
 		t.Errorf("ConnectionCount = %v, want 1", count)
 	}
 
