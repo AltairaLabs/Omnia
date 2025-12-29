@@ -496,7 +496,9 @@ spec:
 			Expect(err).NotTo(HaveOccurred(), "Failed to create Redis credentials secret")
 
 			By("creating the AgentRuntime")
-			agentRuntimeManifest := fmt.Sprintf(`
+			// Note: The agent image is configured on the operator via --agent-image flag,
+			// not in the CRD spec. The operator was patched in BeforeAll to use the test image.
+			agentRuntimeManifest := `
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -524,11 +526,9 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-    image: "%s"
-    imagePullPolicy: Never
   providerSecretRef:
     name: test-provider
-`, agentImageRef)
+`
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(agentRuntimeManifest)
