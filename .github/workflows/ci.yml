@@ -57,7 +57,7 @@ jobs:
         echo "Coverage report generated: coverage.out"
 
     - name: Publish Test Results
-      uses: dorny/test-reporter@v1
+      uses: dorny/test-reporter@v2
       if: always()
       with:
         name: Test Results
