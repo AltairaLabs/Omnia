@@ -78,9 +78,10 @@ The primary resource for deploying agents. It references:
 
 #### PromptPack
 
-Defines versioned prompt configurations. Supports:
+Defines versioned prompt configurations following the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference). Supports:
 
-- ConfigMap-based prompt storage
+- Structured prompt definitions with variables, parameters, and validators
+- ConfigMap-based storage of compiled PromptPack JSON
 - Canary rollouts for safe prompt updates
 - Automatic agent notification on changes
 

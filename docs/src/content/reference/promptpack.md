@@ -6,7 +6,7 @@ order: 2
 
 # PromptPack CRD Reference
 
-The PromptPack custom resource defines a versioned collection of prompts for AI agents.
+The PromptPack custom resource defines a versioned collection of prompts for AI agents. The ConfigMap it references must contain a valid [PromptPack](https://promptpack.org/docs/spec/schema-reference) - a structured JSON/YAML format for packaging multi-prompt conversational systems.
 
 ## API Version
 
@@ -19,19 +19,19 @@ kind: PromptPack
 
 ### `source`
 
-Source of the prompt content.
+Source of the compiled PromptPack content.
 
 | Field | Type | Required |
 |-------|------|----------|
 | `source.configMapRef.name` | string | Yes |
-| `source.configMapRef.key` | string | No |
+| `source.configMapRef.key` | string | Yes |
 
 ```yaml
 spec:
   source:
     configMapRef:
       name: my-prompts
-      key: prompts.yaml  # Optional, uses all keys if not specified
+      key: promptpack.json  # Key containing the compiled PromptPack
 ```
 
 ### `rollout`
@@ -85,7 +85,7 @@ The canary version during rollout (if applicable).
 
 ## ConfigMap Format
 
-The referenced ConfigMap should contain prompt files:
+The referenced ConfigMap must contain a compiled PromptPack following the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference):
 
 ```yaml
 apiVersion: v1
@@ -93,17 +93,60 @@ kind: ConfigMap
 metadata:
   name: my-prompts
 data:
-  system.txt: |
-    You are a helpful AI assistant.
-    Be concise and accurate.
-
-  greeting.txt: |
-    Hello! How can I help you today?
-
-  error.txt: |
-    I apologize, but I encountered an error.
-    Please try again.
+  promptpack.json: |
+    {
+      "id": "customer-service",
+      "name": "Customer Service Assistant",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "support": {
+          "id": "support",
+          "name": "General Support",
+          "version": "1.0.0",
+          "system_template": "You are a helpful customer service agent for {{company_name}}. Be professional, empathetic, and solution-oriented.",
+          "variables": [
+            {
+              "name": "company_name",
+              "type": "string",
+              "required": true,
+              "description": "Name of the company"
+            }
+          ],
+          "parameters": {
+            "temperature": 0.7,
+            "max_tokens": 1024
+          },
+          "validators": {
+            "banned_words": ["competitor", "lawsuit"]
+          }
+        }
+      },
+      "metadata": {
+        "domain": "customer-service",
+        "language": "en",
+        "tags": ["support", "helpdesk"]
+      }
+    }
 ```
+
+### PromptPack Structure
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier (lowercase, hyphens allowed) |
+| `name` | string | Yes | Human-readable name |
+| `version` | string | Yes | Semantic version (MAJOR.MINOR.PATCH) |
+| `template_engine` | object | Yes | Template configuration |
+| `prompts` | object | Yes | Map of prompt definitions |
+| `metadata` | object | No | Domain, language, tags |
+| `tools` | object | No | Tool definitions for function calling |
+| `fragments` | object | No | Reusable template fragments |
+
+For the complete specification, see [promptpack.org](https://promptpack.org/docs/spec/schema-reference).
 
 ## Canary Rollout
 
@@ -143,7 +186,7 @@ The status will transition from `Canary` to `Active`.
 
 ## Example
 
-Complete PromptPack example:
+Complete PromptPack example with canary rollout:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -155,6 +198,7 @@ spec:
   source:
     configMapRef:
       name: cs-prompts-v2
+      key: promptpack.json
   rollout:
     strategy: canary
     canary:
@@ -174,4 +218,50 @@ status:
     - type: AgentsNotified
       status: "True"
       message: "Notified 3 AgentRuntimes"
+```
+
+## Authoring PromptPacks
+
+PromptPacks can be authored in YAML for readability and compiled to JSON:
+
+```yaml
+# customer-service.promptpack.yaml
+id: customer-service
+name: Customer Service Assistant
+version: 1.0.0
+
+template_engine:
+  version: v1
+  syntax: "{{variable}}"
+
+prompts:
+  support:
+    id: support
+    name: General Support
+    version: 1.0.0
+    system_template: |
+      You are a helpful customer service agent for {{company_name}}.
+      Be professional, empathetic, and solution-oriented.
+
+      Guidelines:
+      - Always greet the customer warmly
+      - Listen actively and acknowledge concerns
+      - Provide clear, actionable solutions
+    variables:
+      - name: company_name
+        type: string
+        required: true
+    parameters:
+      temperature: 0.7
+      max_tokens: 1024
+
+metadata:
+  domain: customer-service
+  language: en
+```
+
+Compile with [packc](https://promptpack.org):
+
+```bash
+packc compile customer-service.promptpack.yaml -o promptpack.json
 ```

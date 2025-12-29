@@ -41,7 +41,9 @@ You should see the operator pod in a `Running` state.
 
 ## Step 2: Create a PromptPack
 
-A PromptPack defines the prompts your agent will use. First, create a ConfigMap with your prompt content:
+A PromptPack defines the prompts your agent will use. PromptPacks follow the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference) - a structured YAML/JSON format for packaging multi-prompt conversational systems.
+
+First, create a ConfigMap containing a compiled PromptPack:
 
 ```yaml
 apiVersion: v1
@@ -50,13 +52,35 @@ metadata:
   name: assistant-prompts
   namespace: default
 data:
-  system.txt: |
-    You are a helpful AI assistant. Be concise and accurate in your responses.
-  greeting.txt: |
-    Hello! I'm your AI assistant. How can I help you today?
+  promptpack.json: |
+    {
+      "id": "assistant-pack",
+      "name": "AI Assistant",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "assistant": {
+          "id": "assistant",
+          "name": "General Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a helpful AI assistant. Be concise and accurate in your responses. Always be polite and professional.",
+          "parameters": {
+            "temperature": 0.7,
+            "max_tokens": 1024
+          }
+        }
+      },
+      "metadata": {
+        "domain": "general",
+        "language": "en"
+      }
+    }
 ```
 
-Then create the PromptPack resource:
+Then create the PromptPack resource that references the ConfigMap:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -68,6 +92,7 @@ spec:
   source:
     configMapRef:
       name: assistant-prompts
+      key: promptpack.json
 ```
 
 Apply both:
@@ -76,6 +101,8 @@ Apply both:
 kubectl apply -f configmap.yaml
 kubectl apply -f promptpack.yaml
 ```
+
+> **Tip**: You can author PromptPacks in YAML and compile them to JSON using the [packc](https://promptpack.org) compiler for validation and optimization.
 
 ## Step 3: Configure Provider Credentials
 
