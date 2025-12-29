@@ -40,6 +40,8 @@ import (
 	// +kubebuilder:scaffold:imports
 )
 
+const logKeyController = "controller"
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -141,7 +143,7 @@ func main() {
 	// generate self-signed certificates for the metrics server. While convenient for development and testing,
 	// this setup is not recommended for production.
 	//
-	// TODO(user): If you enable certManager, uncomment the following lines:
+	// To enable certManager, uncomment the following in your kustomization configs:
 	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to generate and use certificates
 	// managed by cert-manager for the metrics server.
 	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
@@ -182,21 +184,21 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "AgentRuntime")
+		setupLog.Error(err, "unable to create controller", logKeyController, "AgentRuntime")
 		os.Exit(1)
 	}
 	if err := (&controller.PromptPackReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PromptPack")
+		setupLog.Error(err, "unable to create controller", logKeyController, "PromptPack")
 		os.Exit(1)
 	}
 	if err := (&controller.ToolRegistryReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ToolRegistry")
+		setupLog.Error(err, "unable to create controller", logKeyController, "ToolRegistry")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

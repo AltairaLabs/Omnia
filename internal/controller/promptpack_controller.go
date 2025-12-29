@@ -39,18 +39,20 @@ type PromptPackReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the PromptPack object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
+//
+// Implementation planned in GitHub issue #8:
+// - Pack content validation
+// - Reverse lookup of referencing AgentRuntimes
+// - Canary weight propagation
+// - Status updates with version tracking
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.4/pkg/reconcile
 func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
+	log.V(1).Info("reconciling PromptPack", "name", req.Name, "namespace", req.Namespace)
 
-	// TODO(user): your logic here
-
+	// Stub implementation - see issue #8 for full requirements
 	return ctrl.Result{}, nil
 }
 
