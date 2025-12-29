@@ -5,8 +5,8 @@ import sitemap from '@astrojs/sitemap';
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://altairalabs.github.io',
-  base: '/omnia',
+  site: 'https://omnia.altairalabs.ai',
+  base: '/',
   integrations: [
     mdx(),
     sitemap(),
