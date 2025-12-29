@@ -1,0 +1,48 @@
+---
+import { getCollection } from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+
+const howtos = await getCollection('how-to');
+howtos.sort((a, b) => (a.data.order ?? 99) - (b.data.order ?? 99));
+
+const joinPath = (path: string) => {
+  const base = import.meta.env.BASE_URL;
+  if (base === '/') return path.startsWith('/') ? path : `/${path}`;
+  const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${cleanBase}${cleanPath}`;
+};
+---
+
+<DocsLayout title="How-To Guides" description="Task-oriented guides for specific goals" section="how-to">
+  <Sidebar slot="sidebar" section="how-to" currentPath={Astro.url.pathname} />
+
+  <h1>How-To Guides</h1>
+
+  <p>
+    How-to guides are <strong>task-oriented</strong> directions that take you through the steps
+    involved in addressing specific problems or achieving particular goals.
+  </p>
+
+  <hr />
+
+  {howtos.length > 0 ? (
+    <ul>
+      {howtos.map(howto => (
+        <li>
+          <a href={joinPath(`/how-to/${howto.slug}/`)}>
+            <strong>{howto.data.title}</strong>
+          </a>
+          {howto.data.description && (
+            <p style="margin: 0.25rem 0 0.5rem 0; font-size: 0.875rem; color: #57606a;">
+              {howto.data.description}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p>No how-to guides available yet. Check back soon!</p>
+  )}
+</DocsLayout>

@@ -1,0 +1,49 @@
+---
+import { getCollection } from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+
+const tutorials = await getCollection('tutorials');
+tutorials.sort((a, b) => (a.data.order ?? 99) - (b.data.order ?? 99));
+
+const joinPath = (path: string) => {
+  const base = import.meta.env.BASE_URL;
+  if (base === '/') return path.startsWith('/') ? path : `/${path}`;
+  const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${cleanBase}${cleanPath}`;
+};
+---
+
+<DocsLayout title="Tutorials" description="Step-by-step guides to learn Omnia" section="tutorials">
+  <Sidebar slot="sidebar" section="tutorials" currentPath={Astro.url.pathname} />
+
+  <h1>Tutorials</h1>
+
+  <p>
+    Tutorials are <strong>learning-oriented</strong> guides that take you through a series of steps
+    to complete a project. They're designed to help you get started with Omnia and understand
+    the fundamentals.
+  </p>
+
+  <hr />
+
+  {tutorials.length > 0 ? (
+    <ul>
+      {tutorials.map(tutorial => (
+        <li>
+          <a href={joinPath(`/tutorials/${tutorial.slug}/`)}>
+            <strong>{tutorial.data.title}</strong>
+          </a>
+          {tutorial.data.description && (
+            <p style="margin: 0.25rem 0 0.5rem 0; font-size: 0.875rem; color: #57606a;">
+              {tutorial.data.description}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p>No tutorials available yet. Check back soon!</p>
+  )}
+</DocsLayout>

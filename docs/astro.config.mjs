@@ -5,23 +5,15 @@ import sitemap from '@astrojs/sitemap';
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://omnia.altairalabs.ai',
-  base: '/',
+  site: 'https://altairalabs.github.io',
+  base: '/omnia',
   integrations: [
     mdx(),
-    // React removed - using native Astro components only
     sitemap(),
   ],
   markdown: {
     shikiConfig: {
       theme: 'github-dark',
-    },
-    remarkPlugins: [],
-    rehypePlugins: [],
-  },
-  vite: {
-    optimizeDeps: {
-      exclude: ['astro:content'],
     },
   },
 });
