@@ -1,0 +1,20 @@
+apiVersion: v2
+name: omnia
+description: A Helm chart for deploying Omnia - Kubernetes operator for AI agent orchestration
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.26.0-0"
+home: https://github.com/AltairaLabs/Omnia
+sources:
+  - https://github.com/AltairaLabs/Omnia
+maintainers:
+  - name: AltairaLabs
+    url: https://github.com/AltairaLabs
+keywords:
+  - kubernetes
+  - operator
+  - ai
+  - agents
+  - llm
+  - promptkit

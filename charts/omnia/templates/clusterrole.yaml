@@ -1,0 +1,78 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.fullname" . }}-manager-role
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+rules:
+  # Core resources for reading configs and secrets
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Services for agent facade
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Deployments for agent pods
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Omnia CRDs
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes
+      - promptpacks
+      - toolregistries
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/finalizers
+      - promptpacks/finalizers
+      - toolregistries/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      - toolregistries/status
+    verbs:
+      - get
+      - patch
+      - update
+{{- end }}
