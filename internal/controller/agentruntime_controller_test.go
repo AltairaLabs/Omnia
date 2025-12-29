@@ -654,5 +654,349 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(service.Labels["app.kubernetes.io/instance"]).To(Equal(agentRuntimeKey.Name))
 			Expect(service.Labels["app.kubernetes.io/managed-by"]).To(Equal("omnia-operator"))
 		})
+
+		It("should handle ToolRegistry reference", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating a ToolRegistry")
+			toolRegistryKey := types.NamespacedName{
+				Name:      "test-toolregistry",
+				Namespace: "default",
+			}
+			toolURL := "http://tool.example.com"
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      toolRegistryKey.Name,
+					Namespace: toolRegistryKey.Namespace,
+				},
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						{
+							Name: "test-tool",
+							Type: omniav1alpha1.ToolTypeHTTP,
+							Endpoint: omniav1alpha1.ToolEndpoint{
+								URL: &toolURL,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, toolRegistry) }()
+
+			By("creating an AgentRuntime with ToolRegistry reference")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+						Name: toolRegistryKey.Name,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying ToolRegistry environment variables")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			envVars := deployment.Spec.Template.Spec.Containers[0].Env
+			envMap := make(map[string]corev1.EnvVar)
+			for _, env := range envVars {
+				envMap[env.Name] = env
+			}
+
+			Expect(envMap["OMNIA_TOOLREGISTRY_NAME"].Value).To(Equal(toolRegistryKey.Name))
+			Expect(envMap["OMNIA_TOOLREGISTRY_NAMESPACE"].Value).To(Equal(toolRegistryKey.Namespace))
+
+			By("verifying ToolRegistryReady condition")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			toolRegistryCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeToolRegistryReady)
+			Expect(toolRegistryCond).NotTo(BeNil())
+			Expect(toolRegistryCond.Status).To(Equal(metav1.ConditionTrue))
+		})
+
+		It("should handle missing ToolRegistry gracefully", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with non-existent ToolRegistry reference")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+						Name: "nonexistent-toolregistry",
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime - should succeed despite missing ToolRegistry")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			// ToolRegistry is optional, so reconciliation should still succeed
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying ToolRegistryReady condition is False")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			toolRegistryCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeToolRegistryReady)
+			Expect(toolRegistryCond).NotTo(BeNil())
+			Expect(toolRegistryCond.Status).To(Equal(metav1.ConditionFalse))
+		})
+
+		It("should handle session config with TTL", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with session config")
+			sessionTTL := "1h"
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Session: &omniav1alpha1.SessionConfig{
+						Type: omniav1alpha1.SessionStoreTypeRedis,
+						TTL:  &sessionTTL,
+						StoreRef: &corev1.LocalObjectReference{
+							Name: "redis-secret",
+						},
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying session environment variables")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			envVars := deployment.Spec.Template.Spec.Containers[0].Env
+			envMap := make(map[string]corev1.EnvVar)
+			for _, env := range envVars {
+				envMap[env.Name] = env
+			}
+
+			Expect(envMap["OMNIA_SESSION_TYPE"].Value).To(Equal(string(omniav1alpha1.SessionStoreTypeRedis)))
+			Expect(envMap["OMNIA_SESSION_TTL"].Value).To(Equal("1h"))
+			Expect(envMap["OMNIA_SESSION_STORE_URL"].ValueFrom).NotTo(BeNil())
+			Expect(envMap["OMNIA_SESSION_STORE_URL"].ValueFrom.SecretKeyRef.Name).To(Equal("redis-secret"))
+			Expect(envMap["OMNIA_SESSION_STORE_URL"].ValueFrom.SecretKeyRef.Key).To(Equal("url"))
+		})
+
+		It("should mount ConfigMap volume for PromptPack", func() {
+			By("creating a PromptPack with ConfigMap source")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{
+							Name: "prompts-config",
+						},
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying ConfigMap volume is mounted")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			// Check volume mounts
+			container := deployment.Spec.Template.Spec.Containers[0]
+			Expect(container.VolumeMounts).To(HaveLen(1))
+			Expect(container.VolumeMounts[0].Name).To(Equal("promptpack-config"))
+			Expect(container.VolumeMounts[0].MountPath).To(Equal("/etc/omnia/prompts"))
+			Expect(container.VolumeMounts[0].ReadOnly).To(BeTrue())
+
+			// Check volumes
+			Expect(deployment.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(deployment.Spec.Template.Spec.Volumes[0].Name).To(Equal("promptpack-config"))
+			Expect(deployment.Spec.Template.Spec.Volumes[0].ConfigMap.Name).To(Equal("prompts-config"))
+		})
+
+		It("should handle ToolRegistry in different namespace", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with cross-namespace ToolRegistry reference")
+			otherNS := "other-namespace"
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+						Name:      "cross-ns-toolregistry",
+						Namespace: &otherNS,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling - should fail to find ToolRegistry in other namespace")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			// ToolRegistry is optional, so reconciliation should still succeed
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying ToolRegistryReady condition reflects the failure")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			toolRegistryCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeToolRegistryReady)
+			Expect(toolRegistryCond).NotTo(BeNil())
+			Expect(toolRegistryCond.Status).To(Equal(metav1.ConditionFalse))
+		})
 	})
 })
