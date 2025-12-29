@@ -565,9 +565,11 @@ spec:
 
 			By("verifying the agent pod is created")
 			verifyAgentPod := func(g Gomega) {
+				// The controller labels pods with app.kubernetes.io/name=omnia-agent
+				// and app.kubernetes.io/instance=<agentruntime-name>
 				cmd := exec.Command("kubectl", "get", "pods",
 					"-n", agentsNamespace,
-					"-l", "app.kubernetes.io/name=test-agent",
+					"-l", "app.kubernetes.io/instance=test-agent",
 					"-o", "jsonpath={.items[0].metadata.name}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
