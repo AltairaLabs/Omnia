@@ -1,0 +1,48 @@
+# Build stage
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/ cmd/
+COPY api/ api/
+COPY internal/ internal/
+
+# Build the agent binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o agent \
+    ./cmd/agent
+
+# Runtime stage
+FROM scratch
+
+# Import CA certificates and timezone data from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copy the binary
+COPY --from=builder /workspace/agent /agent
+
+# Create non-root user
+# Note: scratch image doesn't support adduser, so we set USER by UID
+# The container orchestrator should ensure proper user mapping
+USER 65532:65532
+
+# Expose default ports
+# 8080 - WebSocket facade
+# 8081 - Health check endpoints
+EXPOSE 8080 8081
+
+# Run the agent
+ENTRYPOINT ["/agent"]
