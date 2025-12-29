@@ -1,0 +1,417 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package facade
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/go-logr/logr"
+	"github.com/gorilla/websocket"
+
+	"github.com/altairalabs/omnia/internal/session"
+)
+
+// ServerConfig contains configuration for the WebSocket server.
+type ServerConfig struct {
+	// ReadBufferSize is the size of the read buffer.
+	ReadBufferSize int
+	// WriteBufferSize is the size of the write buffer.
+	WriteBufferSize int
+	// PingInterval is how often to send ping messages.
+	PingInterval time.Duration
+	// PongTimeout is how long to wait for a pong response.
+	PongTimeout time.Duration
+	// WriteTimeout is the timeout for write operations.
+	WriteTimeout time.Duration
+	// MaxMessageSize is the maximum message size.
+	MaxMessageSize int64
+	// SessionTTL is the default TTL for new sessions.
+	SessionTTL time.Duration
+}
+
+// DefaultServerConfig returns a ServerConfig with default values.
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		PingInterval:    30 * time.Second,
+		PongTimeout:     60 * time.Second,
+		WriteTimeout:    10 * time.Second,
+		MaxMessageSize:  512 * 1024, // 512KB
+		SessionTTL:      24 * time.Hour,
+	}
+}
+
+// MessageHandler handles incoming client messages.
+type MessageHandler interface {
+	// HandleMessage processes a client message and streams responses.
+	// The handler should send responses via the ResponseWriter.
+	HandleMessage(ctx context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter) error
+}
+
+// ResponseWriter allows sending responses back to the client.
+type ResponseWriter interface {
+	// WriteChunk sends a chunk of the response.
+	WriteChunk(content string) error
+	// WriteDone signals the response is complete.
+	WriteDone(content string) error
+	// WriteToolCall notifies of a tool call.
+	WriteToolCall(toolCall *ToolCallInfo) error
+	// WriteToolResult sends a tool result.
+	WriteToolResult(result *ToolResultInfo) error
+	// WriteError sends an error message.
+	WriteError(code, message string) error
+}
+
+// Server is a WebSocket server for agent communication.
+type Server struct {
+	config       ServerConfig
+	upgrader     websocket.Upgrader
+	sessionStore session.Store
+	handler      MessageHandler
+	log          logr.Logger
+
+	mu          sync.RWMutex
+	connections map[*websocket.Conn]*Connection
+	shutdown    bool
+}
+
+// Connection represents an active WebSocket connection.
+type Connection struct {
+	conn      *websocket.Conn
+	sessionID string
+	agentName string
+	namespace string
+	mu        sync.Mutex
+	closed    bool
+}
+
+// NewServer creates a new WebSocket server.
+func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, log logr.Logger) *Server {
+	return &Server{
+		config:       cfg,
+		sessionStore: store,
+		handler:      handler,
+		log:          log.WithName("websocket-server"),
+		connections:  make(map[*websocket.Conn]*Connection),
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  cfg.ReadBufferSize,
+			WriteBufferSize: cfg.WriteBufferSize,
+			CheckOrigin: func(r *http.Request) bool {
+				// Allow all origins for now; can be customized
+				return true
+			},
+		},
+	}
+}
+
+// ServeHTTP handles WebSocket upgrade requests.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	if s.shutdown {
+		s.mu.RUnlock()
+		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	s.mu.RUnlock()
+
+	// Extract agent info from query params or headers
+	agentName := r.URL.Query().Get("agent")
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	if agentName == "" {
+		http.Error(w, "agent parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.log.Error(err, "failed to upgrade connection")
+		return
+	}
+
+	// Create connection wrapper
+	c := &Connection{
+		conn:      conn,
+		agentName: agentName,
+		namespace: namespace,
+	}
+
+	s.mu.Lock()
+	s.connections[conn] = c
+	s.mu.Unlock()
+
+	s.log.Info("new connection", "agent", agentName, "namespace", namespace)
+
+	// Handle connection in goroutine
+	go s.handleConnection(c)
+}
+
+func (s *Server) handleConnection(c *Connection) {
+	defer func() {
+		s.mu.Lock()
+		delete(s.connections, c.conn)
+		s.mu.Unlock()
+
+		c.mu.Lock()
+		c.closed = true
+		c.mu.Unlock()
+
+		if err := c.conn.Close(); err != nil {
+			s.log.Error(err, "error closing connection")
+		}
+	}()
+
+	// Configure connection
+	c.conn.SetReadLimit(s.config.MaxMessageSize)
+	if err := c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout)); err != nil {
+		s.log.Error(err, "failed to set read deadline")
+		return
+	}
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout))
+	})
+
+	// Start ping ticker
+	pingTicker := time.NewTicker(s.config.PingInterval)
+	defer pingTicker.Stop()
+
+	// Handle ping in separate goroutine
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pingTicker.C:
+				c.mu.Lock()
+				if c.closed {
+					c.mu.Unlock()
+					return
+				}
+				if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
+					c.mu.Unlock()
+					return
+				}
+				if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					c.mu.Unlock()
+					return
+				}
+				c.mu.Unlock()
+			}
+		}
+	}()
+
+	// Message read loop
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				s.log.Error(err, "unexpected close error")
+			}
+			return
+		}
+
+		// Parse message
+		var clientMsg ClientMessage
+		if err := json.Unmarshal(message, &clientMsg); err != nil {
+			s.sendError(c, "", ErrorCodeInvalidMessage, "invalid message format")
+			continue
+		}
+
+		// Handle message
+		if err := s.processMessage(ctx, c, &clientMsg); err != nil {
+			s.log.Error(err, "error processing message")
+		}
+	}
+}
+
+func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage) error {
+	// Get or create session
+	sessionID, err := s.ensureSession(ctx, c, msg.SessionID)
+	if err != nil {
+		s.sendError(c, msg.SessionID, ErrorCodeInternalError, "failed to create session")
+		return err
+	}
+
+	// Update connection's session ID
+	c.mu.Lock()
+	c.sessionID = sessionID
+	c.mu.Unlock()
+
+	// Send connected message if this is a new session
+	if msg.SessionID == "" {
+		if err := s.sendConnected(c, sessionID); err != nil {
+			return err
+		}
+	}
+
+	// Store user message
+	if err := s.sessionStore.AppendMessage(ctx, sessionID, session.Message{
+		Role:      session.RoleUser,
+		Content:   msg.Content,
+		Metadata:  msg.Metadata,
+		Timestamp: time.Now(),
+	}); err != nil {
+		s.log.Error(err, "failed to store user message")
+	}
+
+	// Create response writer
+	writer := &connResponseWriter{
+		conn:      c,
+		sessionID: sessionID,
+		server:    s,
+	}
+
+	// Handle message
+	if s.handler != nil {
+		if err := s.handler.HandleMessage(ctx, sessionID, msg, writer); err != nil {
+			s.sendError(c, sessionID, ErrorCodeInternalError, err.Error())
+			return err
+		}
+	} else {
+		// Default echo behavior if no handler
+		if err := writer.WriteDone("Handler not configured"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID string) (string, error) {
+	if sessionID != "" {
+		// Try to resume existing session
+		sess, err := s.sessionStore.GetSession(ctx, sessionID)
+		if err == nil {
+			// Refresh TTL
+			if err := s.sessionStore.RefreshTTL(ctx, sessionID, s.config.SessionTTL); err != nil {
+				s.log.Error(err, "failed to refresh session TTL")
+			}
+			return sess.ID, nil
+		}
+		// Session not found or expired, create new one
+		s.log.Info("session not found, creating new", "requested_id", sessionID)
+	}
+
+	// Create new session
+	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: c.agentName,
+		Namespace: c.namespace,
+		TTL:       s.config.SessionTTL,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return sess.ID, nil
+}
+
+func (s *Server) sendMessage(c *Connection, msg *ServerMessage) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil
+	}
+
+	if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
+		return err
+	}
+
+	return c.conn.WriteJSON(msg)
+}
+
+func (s *Server) sendError(c *Connection, sessionID, code, message string) {
+	if err := s.sendMessage(c, NewErrorMessage(sessionID, code, message)); err != nil {
+		s.log.Error(err, "failed to send error message")
+	}
+}
+
+func (s *Server) sendConnected(c *Connection, sessionID string) error {
+	return s.sendMessage(c, NewConnectedMessage(sessionID))
+}
+
+// Shutdown gracefully shuts down the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.shutdown = true
+	connections := make([]*websocket.Conn, 0, len(s.connections))
+	for conn := range s.connections {
+		connections = append(connections, conn)
+	}
+	s.mu.Unlock()
+
+	// Close all connections
+	for _, conn := range connections {
+		if err := conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutdown"),
+			time.Now().Add(time.Second),
+		); err != nil {
+			s.log.Error(err, "error sending close message")
+		}
+		if err := conn.Close(); err != nil {
+			s.log.Error(err, "error closing connection")
+		}
+	}
+
+	return nil
+}
+
+// ConnectionCount returns the number of active connections.
+func (s *Server) ConnectionCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.connections)
+}
+
+// connResponseWriter implements ResponseWriter for a connection.
+type connResponseWriter struct {
+	conn      *Connection
+	sessionID string
+	server    *Server
+}
+
+func (w *connResponseWriter) WriteChunk(content string) error {
+	return w.server.sendMessage(w.conn, NewChunkMessage(w.sessionID, content))
+}
+
+func (w *connResponseWriter) WriteDone(content string) error {
+	return w.server.sendMessage(w.conn, NewDoneMessage(w.sessionID, content))
+}
+
+func (w *connResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
+	return w.server.sendMessage(w.conn, NewToolCallMessage(w.sessionID, toolCall))
+}
+
+func (w *connResponseWriter) WriteToolResult(result *ToolResultInfo) error {
+	return w.server.sendMessage(w.conn, NewToolResultMessage(w.sessionID, result))
+}
+
+func (w *connResponseWriter) WriteError(code, message string) error {
+	return w.server.sendMessage(w.conn, NewErrorMessage(w.sessionID, code, message))
+}
