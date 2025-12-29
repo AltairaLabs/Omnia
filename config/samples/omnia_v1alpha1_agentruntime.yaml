@@ -4,6 +4,53 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia
     app.kubernetes.io/managed-by: kustomize
-  name: agentruntime-sample
+  name: customer-support-agent
 spec:
-  # TODO(user): Add fields here
+  # Reference to the PromptPack containing agent prompts
+  promptPackRef:
+    name: customer-support
+    track: stable
+  # WebSocket facade for client connections
+  facade:
+    type: websocket
+    port: 8080
+  # Optional tool registry reference
+  toolRegistryRef:
+    name: support-tools
+  # Session configuration using Redis
+  session:
+    type: redis
+    storeRef:
+      name: redis-credentials
+    ttl: "24h"
+  # Deployment configuration
+  runtime:
+    replicas: 2
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+  # LLM provider credentials
+  providerSecretRef:
+    name: openai-credentials
+---
+# Secret containing LLM provider API key
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+type: Opaque
+stringData:
+  api-key: "your-openai-api-key-here"
+---
+# Secret containing Redis connection URL
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-credentials
+type: Opaque
+stringData:
+  url: "redis://redis.cache.svc.cluster.local:6379"
