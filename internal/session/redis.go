@@ -31,6 +31,12 @@ const (
 	sessionKeyPrefix  = "session:"
 	messagesKeySuffix = ":messages"
 	stateKeySuffix    = ":state"
+
+	// Error format strings
+	errMarshalSession   = "failed to marshal session: %w"
+	errUnmarshalSession = "failed to unmarshal session: %w"
+	errGetSession       = "failed to get session: %w"
+	errCheckExistence   = "failed to check session existence: %w"
 )
 
 // RedisConfig contains configuration for the Redis session store.
@@ -119,7 +125,7 @@ func (r *RedisStore) CreateSession(ctx context.Context, opts CreateSessionOption
 	// Serialize session metadata
 	data, err := json.Marshal(session)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal session: %w", err)
+		return nil, fmt.Errorf(errMarshalSession, err)
 	}
 
 	pipe := r.client.Pipeline()
@@ -161,12 +167,12 @@ func (r *RedisStore) GetSession(ctx context.Context, sessionID string) (*Session
 		if err == redis.Nil {
 			return nil, ErrSessionNotFound
 		}
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		return nil, fmt.Errorf(errGetSession, err)
 	}
 
 	var session Session
 	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
+		return nil, fmt.Errorf(errUnmarshalSession, err)
 	}
 
 	// Load messages
@@ -197,7 +203,7 @@ func (r *RedisStore) DeleteSession(ctx context.Context, sessionID string) error 
 	// Check if session exists first
 	exists, err := r.client.Exists(ctx, r.sessionKey(sessionID)).Result()
 	if err != nil {
-		return fmt.Errorf("failed to check session existence: %w", err)
+		return fmt.Errorf(errCheckExistence, err)
 	}
 	if exists == 0 {
 		return ErrSessionNotFound
@@ -226,7 +232,7 @@ func (r *RedisStore) AppendMessage(ctx context.Context, sessionID string, msg Me
 	// Check if session exists
 	exists, err := r.client.Exists(ctx, r.sessionKey(sessionID)).Result()
 	if err != nil {
-		return fmt.Errorf("failed to check session existence: %w", err)
+		return fmt.Errorf(errCheckExistence, err)
 	}
 	if exists == 0 {
 		return ErrSessionNotFound
@@ -270,7 +276,7 @@ func (r *RedisStore) GetMessages(ctx context.Context, sessionID string) ([]Messa
 	// Check if session exists
 	exists, err := r.client.Exists(ctx, r.sessionKey(sessionID)).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to check session existence: %w", err)
+		return nil, fmt.Errorf(errCheckExistence, err)
 	}
 	if exists == 0 {
 		return nil, ErrSessionNotFound
@@ -301,7 +307,7 @@ func (r *RedisStore) SetState(ctx context.Context, sessionID string, key, value 
 	// Check if session exists
 	exists, err := r.client.Exists(ctx, r.sessionKey(sessionID)).Result()
 	if err != nil {
-		return fmt.Errorf("failed to check session existence: %w", err)
+		return fmt.Errorf(errCheckExistence, err)
 	}
 	if exists == 0 {
 		return ErrSessionNotFound
@@ -356,7 +362,7 @@ func (r *RedisStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.
 	// Check if session exists
 	exists, err := r.client.Exists(ctx, r.sessionKey(sessionID)).Result()
 	if err != nil {
-		return fmt.Errorf("failed to check session existence: %w", err)
+		return fmt.Errorf(errCheckExistence, err)
 	}
 	if exists == 0 {
 		return ErrSessionNotFound
@@ -381,12 +387,12 @@ func (r *RedisStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.
 	// Update session metadata
 	data, err := r.client.Get(ctx, r.sessionKey(sessionID)).Bytes()
 	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
+		return fmt.Errorf(errGetSession, err)
 	}
 
 	var session Session
 	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf("failed to unmarshal session: %w", err)
+		return fmt.Errorf(errUnmarshalSession, err)
 	}
 
 	session.UpdatedAt = time.Now()
@@ -398,7 +404,7 @@ func (r *RedisStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.
 
 	updatedData, err := json.Marshal(session)
 	if err != nil {
-		return fmt.Errorf("failed to marshal session: %w", err)
+		return fmt.Errorf(errMarshalSession, err)
 	}
 
 	if ttl > 0 {
@@ -423,19 +429,19 @@ func (r *RedisStore) Close() error {
 func (r *RedisStore) updateSessionTimestamp(ctx context.Context, sessionID string) error {
 	data, err := r.client.Get(ctx, r.sessionKey(sessionID)).Bytes()
 	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
+		return fmt.Errorf(errGetSession, err)
 	}
 
 	var session Session
 	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf("failed to unmarshal session: %w", err)
+		return fmt.Errorf(errUnmarshalSession, err)
 	}
 
 	session.UpdatedAt = time.Now()
 
 	updatedData, err := json.Marshal(session)
 	if err != nil {
-		return fmt.Errorf("failed to marshal session: %w", err)
+		return fmt.Errorf(errMarshalSession, err)
 	}
 
 	// Preserve TTL if set

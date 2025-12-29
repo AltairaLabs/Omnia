@@ -39,18 +39,20 @@ type ToolRegistryReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the ToolRegistry object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
+//
+// Implementation planned in GitHub issue #9:
+// - Inline tool definition processing
+// - Label selector-based discovery
+// - Service annotation parsing
+// - Status updates with discovered tool counts
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.4/pkg/reconcile
 func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
+	log.V(1).Info("reconciling ToolRegistry", "name", req.Name, "namespace", req.Namespace)
 
-	// TODO(user): your logic here
-
+	// Stub implementation - see issue #9 for full requirements
 	return ctrl.Result{}, nil
 }
 

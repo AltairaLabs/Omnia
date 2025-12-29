@@ -75,7 +75,7 @@ jobs:
   sonarcloud:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
-    needs: [test, lint]
+    needs: [test, lint, envtest]
     if: github.actor != 'dependabot[bot]'
 
     steps:
@@ -84,17 +84,35 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Download coverage artifacts
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    - name: Download unit test coverage
       uses: actions/download-artifact@v7
       with:
         name: coverage-report
+        path: coverage-unit
 
-    - name: Verify coverage file
+    - name: Download internal/controller coverage
+      uses: actions/download-artifact@v7
+      with:
+        name: internal-coverage
+        path: coverage-internal
+
+    - name: Merge coverage files
       run: |
-        echo "Checking for coverage files..."
-        ls -la *.out 2>/dev/null || echo "No .out files in root"
-        echo "Coverage file size:"
-        wc -l coverage.out 2>/dev/null || echo "Cannot read coverage.out"
+        echo "Merging coverage files..."
+        # Start with the header from unit coverage
+        head -1 coverage-unit/coverage.out > coverage.out
+        # Append all coverage lines (skip headers)
+        tail -n +2 coverage-unit/coverage.out >> coverage.out
+        tail -n +2 coverage-internal/internal-coverage.out >> coverage.out
+        echo "Merged coverage file:"
+        wc -l coverage.out
+        echo "Coverage summary:"
+        go tool cover -func=coverage.out | tail -5
 
     - name: SonarCloud Scan
       uses: SonarSource/sonarqube-scan-action@v7
