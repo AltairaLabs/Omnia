@@ -4,6 +4,30 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia
     app.kubernetes.io/managed-by: kustomize
-  name: promptpack-sample
+  name: customer-support
 spec:
-  # TODO(user): Add fields here
+  # Source configuration - prompts stored in a ConfigMap
+  source:
+    type: configmap
+    configMapRef:
+      name: customer-support-prompts
+  # Semantic version for this prompt pack
+  version: "1.0.0"
+  # Rollout strategy - immediate deployment
+  rollout:
+    type: immediate
+---
+# ConfigMap containing the prompt configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: customer-support-prompts
+data:
+  system.txt: |
+    You are a helpful customer support agent for TechCorp.
+    Be polite, professional, and helpful. If you cannot
+    answer a question, offer to escalate to a human agent.
+  config.yaml: |
+    model: gpt-4
+    temperature: 0.7
+    max_tokens: 1024

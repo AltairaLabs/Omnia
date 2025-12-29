@@ -4,6 +4,26 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia
     app.kubernetes.io/managed-by: kustomize
-  name: toolregistry-sample
+  name: support-tools
 spec:
-  # TODO(user): Add fields here
+  tools:
+    # Tool for looking up order status
+    - name: order-lookup
+      description: Look up the status of a customer order by order ID
+      type: http
+      endpoint:
+        url: "http://orders-api.backend.svc.cluster.local:8080/api/v1/orders"
+      timeout: "10s"
+      retries: 2
+    # Tool for checking product inventory
+    - name: inventory-check
+      description: Check product availability and stock levels
+      type: http
+      endpoint:
+        # Use service discovery instead of direct URL
+        selector:
+          matchLabels:
+            app: inventory-service
+          namespace: backend
+          port: "http"
+      timeout: "5s"
