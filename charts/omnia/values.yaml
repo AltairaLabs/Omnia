@@ -1,0 +1,119 @@
+# Default values for omnia.
+# This is a YAML-formatted file.
+
+# -- Number of operator replicas
+replicaCount: 1
+
+image:
+  # -- Image repository
+  repository: ghcr.io/altairalabs/omnia
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag (defaults to Chart appVersion)
+  tag: ""
+
+# -- Image pull secrets
+imagePullSecrets: []
+
+# -- Override the name of the chart
+nameOverride: ""
+
+# -- Override the full name of the chart
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a service account
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account (generated if not set)
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# Leader election configuration
+leaderElection:
+  # -- Enable leader election for HA
+  enabled: true
+
+# Health probes configuration
+probes:
+  # -- Port for health probes
+  port: 8081
+  liveness:
+    # -- Initial delay for liveness probe
+    initialDelaySeconds: 15
+    # -- Period for liveness probe
+    periodSeconds: 20
+  readiness:
+    # -- Initial delay for readiness probe
+    initialDelaySeconds: 5
+    # -- Period for readiness probe
+    periodSeconds: 10
+
+# Metrics configuration
+metrics:
+  # -- Enable metrics endpoint
+  enabled: false
+  # -- Port for metrics
+  port: 8443
+  # -- Enable secure metrics (HTTPS)
+  secure: true
+
+# Webhook configuration
+webhook:
+  # -- Enable webhooks
+  enabled: false
+  # -- Port for webhooks
+  port: 9443
+
+# RBAC configuration
+rbac:
+  # -- Create RBAC resources
+  create: true
+
+# CRD configuration
+crds:
+  # -- Install CRDs with the chart
+  install: true
+
+# Agent container configuration (used by AgentRuntime)
+agent:
+  image:
+    # -- Agent image repository
+    repository: ghcr.io/altairalabs/omnia-agent
+    # -- Agent image tag (defaults to Chart appVersion)
+    tag: ""
