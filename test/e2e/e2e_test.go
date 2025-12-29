@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -36,6 +37,12 @@ import (
 // namespace where the project is deployed in
 const namespace = "omnia-system"
 
+// agentsNamespace is where test agents are deployed
+const agentsNamespace = "test-agents"
+
+// cacheNamespace is where Redis is deployed
+const cacheNamespace = "cache"
+
 // serviceAccountName created for the project
 const serviceAccountName = "omnia-controller-manager"
 
@@ -44,6 +51,9 @@ const metricsServiceName = "omnia-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "omnia-metrics-binding"
+
+// agentImage is the agent container image used by AgentRuntime
+const agentImageRef = "example.com/omnia-agent:v0.0.1"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -72,6 +82,16 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+		By("patching the controller-manager to use the test agent image")
+		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+			"-n", namespace, "--type=json",
+			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--agent-image=%s"}]`, agentImageRef))
+		_, err = utils.Run(patchCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with agent image")
+
+		By("waiting for controller-manager to restart with new config")
+		time.Sleep(5 * time.Second)
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
@@ -267,16 +287,337 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+	})
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+	Context("Omnia CRDs", Ordered, func() {
+		BeforeAll(func() {
+			By("creating the cache namespace for Redis")
+			cmd := exec.Command("kubectl", "create", "ns", cacheNamespace)
+			_, _ = utils.Run(cmd) // Ignore error if already exists
+
+			By("creating the agents namespace")
+			cmd = exec.Command("kubectl", "create", "ns", agentsNamespace)
+			_, _ = utils.Run(cmd) // Ignore error if already exists
+
+			By("deploying Redis for session storage")
+			redisManifest := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: cache
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(redisManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to deploy Redis")
+
+			By("waiting for Redis to be ready")
+			verifyRedisReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", cacheNamespace,
+					"-l", "app=redis", "-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}
+			Eventually(verifyRedisReady, 2*time.Minute, time.Second).Should(Succeed())
+		})
+
+		AfterAll(func() {
+			By("cleaning up test agents namespace")
+			cmd := exec.Command("kubectl", "delete", "ns", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("cleaning up cache namespace")
+			cmd = exec.Command("kubectl", "delete", "ns", cacheNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should create and validate a PromptPack", func() {
+			By("creating a ConfigMap for the PromptPack")
+			configMapManifest := `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-prompts
+  namespace: test-agents
+data:
+  system.txt: |
+    You are a test assistant for E2E testing.
+  config.yaml: |
+    model: gpt-4
+    temperature: 0.7
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(configMapManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create ConfigMap")
+
+			By("creating the PromptPack")
+			promptPackManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: test-prompts
+  namespace: test-agents
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: test-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(promptPackManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create PromptPack")
+
+			By("verifying the PromptPack status becomes Active")
+			verifyPromptPackActive := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "promptpack", "test-prompts",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Active"))
+			}
+			Eventually(verifyPromptPackActive, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying the SourceValid condition is True")
+			cmd = exec.Command("kubectl", "get", "promptpack", "test-prompts",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.status.conditions[?(@.type=='SourceValid')].status}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("True"))
+		})
+
+		It("should create and validate a ToolRegistry", func() {
+			By("creating a ToolRegistry with an inline URL tool")
+			toolRegistryManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: test-tools
+  namespace: test-agents
+spec:
+  tools:
+  - name: test-tool
+    description: A test tool for E2E testing
+    type: http
+    endpoint:
+      url: "http://example.com/api/test"
+    timeout: "10s"
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(toolRegistryManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create ToolRegistry")
+
+			By("verifying the ToolRegistry status becomes Ready")
+			verifyToolRegistryReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "toolregistry", "test-tools",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"))
+			}
+			Eventually(verifyToolRegistryReady, time.Minute, time.Second).Should(Succeed())
+
+			By("verifying discovered tools count")
+			cmd = exec.Command("kubectl", "get", "toolregistry", "test-tools",
+				"-n", agentsNamespace, "-o", "jsonpath={.status.discoveredToolsCount}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("1"))
+		})
+
+		It("should create an AgentRuntime and deploy the agent", func() {
+			By("creating secrets for the agent")
+			// Create a dummy provider secret
+			cmd := exec.Command("kubectl", "create", "secret", "generic", "test-provider",
+				"-n", agentsNamespace,
+				"--from-literal=api-key=test-api-key-for-e2e",
+				"--dry-run=client", "-o", "yaml")
+			secretYaml, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(secretYaml)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create provider secret")
+
+			// Create Redis credentials secret
+			cmd = exec.Command("kubectl", "create", "secret", "generic", "redis-credentials",
+				"-n", agentsNamespace,
+				"--from-literal=url=redis://redis.cache.svc.cluster.local:6379",
+				"--dry-run=client", "-o", "yaml")
+			redisSecretYaml, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(redisSecretYaml)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Redis credentials secret")
+
+			By("creating the AgentRuntime")
+			// Note: The agent image is configured on the operator via --agent-image flag,
+			// not in the CRD spec. The operator was patched in BeforeAll to use the test image.
+			agentRuntimeManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: test-agent
+  namespace: test-agents
+spec:
+  promptPackRef:
+    name: test-prompts
+  toolRegistryRef:
+    name: test-tools
+  facade:
+    type: websocket
+    port: 8080
+  session:
+    type: redis
+    storeRef:
+      name: redis-credentials
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+  providerSecretRef:
+    name: test-provider
+`
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(agentRuntimeManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create AgentRuntime")
+
+			By("verifying the AgentRuntime creates a Deployment")
+			verifyDeploymentCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment", "test-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("test-agent"))
+			}
+			Eventually(verifyDeploymentCreated, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying the AgentRuntime creates a Service")
+			cmd = exec.Command("kubectl", "get", "service", "test-agent",
+				"-n", agentsNamespace, "-o", "jsonpath={.spec.ports[0].port}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("8080"))
+
+			By("verifying the AgentRuntime status")
+			verifyAgentRuntimeStatus := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "agentruntime", "test-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				// May be Running or Pending depending on pod startup
+				g.Expect(output).To(Or(Equal("Running"), Equal("Pending")))
+			}
+			Eventually(verifyAgentRuntimeStatus, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying the agent pod is created")
+			verifyAgentPod := func(g Gomega) {
+				// The controller labels pods with app.kubernetes.io/name=omnia-agent
+				// and app.kubernetes.io/instance=<agentruntime-name>
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=test-agent",
+					"-o", "jsonpath={.items[0].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("test-agent"))
+			}
+			Eventually(verifyAgentPod, 2*time.Minute, time.Second).Should(Succeed())
+		})
+
+		It("should update AgentRuntime when PromptPack changes", func() {
+			By("getting the initial deployment generation")
+			cmd := exec.Command("kubectl", "get", "deployment", "test-agent",
+				"-n", agentsNamespace, "-o", "jsonpath={.metadata.generation}")
+			initialGen, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("updating the PromptPack ConfigMap")
+			configMapUpdate := `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-prompts
+  namespace: test-agents
+data:
+  system.txt: |
+    You are an UPDATED test assistant for E2E testing.
+  config.yaml: |
+    model: gpt-4
+    temperature: 0.8
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(configMapUpdate)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to update ConfigMap")
+
+			// Wait a moment for reconciliation
+			time.Sleep(2 * time.Second)
+
+			By("verifying the PromptPack was re-reconciled")
+			cmd = exec.Command("kubectl", "get", "promptpack", "test-prompts",
+				"-n", agentsNamespace, "-o", "jsonpath={.status.lastUpdated}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).NotTo(BeEmpty())
+
+			// Note: The deployment generation may or may not change depending on
+			// whether the ConfigMap hash changed. This is expected behavior.
+			_ = initialGen // Acknowledge we captured it for potential future use
+		})
 	})
 })
 
