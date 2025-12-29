@@ -109,6 +109,20 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+##@ Documentation
+
+.PHONY: docs-install
+docs-install: ## Install documentation dependencies
+	cd docs && npm ci
+
+.PHONY: docs-build
+docs-build: ## Build documentation site
+	cd docs && npm run build
+
+.PHONY: docs-dev
+docs-dev: ## Run documentation site in development mode
+	cd docs && npm run dev
+
 ##@ Build
 
 .PHONY: build

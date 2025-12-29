@@ -1,0 +1,30 @@
+---
+import { getCollection } from 'astro:content';
+import type { GetStaticPaths } from 'astro';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+import TableOfContents from '../../components/TableOfContents.astro';
+
+export const getStaticPaths = (async () => {
+  const entries = await getCollection('explanation');
+  return entries.map(entry => ({
+    params: { slug: entry.slug },
+    props: { entry },
+  }));
+}) satisfies GetStaticPaths;
+
+const { entry } = Astro.props;
+const { Content, headings } = await entry.render();
+---
+
+<DocsLayout
+  title={entry.data.title}
+  description={entry.data.description}
+  section="explanation"
+>
+  <Sidebar slot="sidebar" section="explanation" currentPath={Astro.url.pathname} />
+
+  <Content />
+
+  <TableOfContents slot="toc" headings={headings} />
+</DocsLayout>
