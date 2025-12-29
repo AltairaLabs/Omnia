@@ -158,8 +158,10 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: Build manager
-      run: go build -o bin/manager ./cmd/...
+    - name: Build binaries
+      run: |
+        go build -o bin/manager ./cmd/
+        go build -o bin/agent ./cmd/agent/
 
   docker:
     name: Docker Build
