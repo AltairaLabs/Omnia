@@ -97,6 +97,36 @@ Apply sample manifests:
 kubectl apply -f config/samples/
 ```
 
+## Using Demo Mode for Testing
+
+For local development without LLM costs, use the `demo` or `echo` handler modes:
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: test-agent
+spec:
+  promptPackRef:
+    name: test-prompts
+  facade:
+    type: websocket
+    handler: demo  # Use 'echo' for simple connectivity testing
+  session:
+    type: memory
+```
+
+The demo handler provides:
+- Streaming responses that simulate real LLM output
+- Simulated tool calls for password and weather queries
+- No API key required
+
+This is useful for:
+- UI/frontend development
+- Integration testing
+- Demos and screenshots
+- Validating WebSocket connectivity
+
 ## Connect to an Agent
 
 Forward the agent port:

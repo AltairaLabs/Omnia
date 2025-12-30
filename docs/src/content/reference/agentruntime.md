@@ -95,12 +95,43 @@ WebSocket facade configuration.
 |-------|------|---------|----------|
 | `facade.type` | string | websocket | No |
 | `facade.port` | integer | 8080 | No |
+| `facade.handler` | string | runtime | No |
 
 ```yaml
 spec:
   facade:
     type: websocket
     port: 8080
+    handler: runtime
+```
+
+#### Handler Modes
+
+The `handler` field controls how the agent processes incoming messages:
+
+| Mode | Description | Requires API Key |
+|------|-------------|------------------|
+| `runtime` | Production mode using the runtime framework (e.g., PromptKit) | Yes |
+| `demo` | Demo mode with streaming responses and simulated tool calls | No |
+| `echo` | Simple echo handler for testing connectivity | No |
+
+**`runtime` (default)** - Uses the runtime framework configured in the container image (e.g., PromptKit, LangChain). Requires `providerSecretRef` to be set with valid API credentials.
+
+**`demo`** - Provides canned responses with realistic streaming behavior and simulated tool calls. Useful for demos, screenshots, and UI development without incurring API costs. Responds to:
+- Greetings ("hello", "help") - Returns agent capabilities
+- Password queries - Simulates a user lookup tool call
+- Weather queries - Simulates a weather API tool call
+
+**`echo`** - Simply echoes back the input message. Useful for testing WebSocket connectivity and message flow.
+
+```yaml
+# Demo mode for testing without API costs
+spec:
+  facade:
+    type: websocket
+    handler: demo
+  session:
+    type: memory
 ```
 
 ### `session`
@@ -212,6 +243,7 @@ spec:
   facade:
     type: websocket
     port: 8080
+    handler: runtime
   session:
     type: redis
     ttl: 24h
