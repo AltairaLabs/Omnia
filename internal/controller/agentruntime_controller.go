@@ -279,9 +279,10 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	toolRegistry *omniav1alpha1.ToolRegistry,
 ) {
 	labels := map[string]string{
-		"app.kubernetes.io/name":       "omnia-agent",
-		"app.kubernetes.io/instance":   agentRuntime.Name,
-		"app.kubernetes.io/managed-by": "omnia-operator",
+		"app.kubernetes.io/name":         "omnia-agent",
+		"app.kubernetes.io/instance":     agentRuntime.Name,
+		"app.kubernetes.io/managed-by":   "omnia-operator",
+		"omnia.altairalabs.ai/component": "agent",
 	}
 
 	replicas := int32(1)
@@ -522,9 +523,10 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		}
 
 		labels := map[string]string{
-			"app.kubernetes.io/name":       "omnia-agent",
-			"app.kubernetes.io/instance":   agentRuntime.Name,
-			"app.kubernetes.io/managed-by": "omnia-operator",
+			"app.kubernetes.io/name":         "omnia-agent",
+			"app.kubernetes.io/instance":     agentRuntime.Name,
+			"app.kubernetes.io/managed-by":   "omnia-operator",
+			"omnia.altairalabs.ai/component": "agent",
 		}
 
 		port := int32(DefaultFacadePort)

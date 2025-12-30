@@ -403,3 +403,41 @@ internalGateway:
   prometheus:
     enabled: true
     path: /prometheus
+
+# ============================================================================
+# Authentication Configuration
+# JWT-based authentication using Istio RequestAuthentication
+# ============================================================================
+
+authentication:
+  # -- Enable JWT authentication for agent endpoints
+  enabled: false
+
+  # -- OIDC/JWT provider configuration
+  jwt:
+    # -- JWT issuer URL (e.g., https://auth.example.com, https://accounts.google.com)
+    issuer: ""
+    # -- JWKS URI for validating JWT signatures
+    # If empty, defaults to {issuer}/.well-known/jwks.json
+    jwksUri: ""
+    # -- JWT audiences to accept (optional, validates 'aud' claim)
+    audiences: []
+    # -- Forward the original token to the upstream service
+    forwardOriginalToken: true
+    # -- Headers to output payload claims (optional)
+    # Example: outputClaimToHeaders:
+    #   - header: x-user-id
+    #     claim: sub
+    outputClaimToHeaders: []
+
+  # -- Authorization rules (optional, defaults to requiring valid JWT)
+  authorization:
+    # -- Require specific claims in the JWT
+    # Example: requiredClaims:
+    #   - claim: "scope"
+    #     values: ["agents:access"]
+    requiredClaims: []
+    # -- Allow unauthenticated access to specific paths (e.g., health checks)
+    excludePaths:
+      - /healthz
+      - /readyz
