@@ -1,0 +1,58 @@
+{{- if .Values.internalGateway.enabled }}
+{{- $fullName := include "omnia.fullname" . }}
+{{- $gatewayName := printf "%s-%s" $fullName .Values.internalGateway.name }}
+
+{{- if and .Values.internalGateway.grafana.enabled .Values.grafana.enabled }}
+---
+# HTTPRoute for Grafana (configured with serve_from_sub_path)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}-grafana-route
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $gatewayName }}
+      namespace: {{ .Release.Namespace }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.internalGateway.grafana.path }}
+      backendRefs:
+        - name: {{ $fullName }}-grafana
+          port: 80
+{{- end }}
+
+{{- if and .Values.internalGateway.prometheus.enabled .Values.prometheus.enabled }}
+---
+# HTTPRoute for Prometheus (configured with web.external-url)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}-prometheus-route
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $gatewayName }}
+      namespace: {{ .Release.Namespace }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.internalGateway.prometheus.path }}
+      backendRefs:
+        - name: {{ $fullName }}-prometheus-server
+          port: 80
+{{- end }}
+
+# Note: Tempo and Loki are accessed via Grafana datasources, not directly exposed.
+# Grafana is pre-configured with:
+#   - Prometheus datasource for metrics
+#   - Loki datasource for logs
+#   - Tempo datasource for traces (with trace-to-logs correlation)
+{{- end }}

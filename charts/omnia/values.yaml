@@ -137,6 +137,9 @@ prometheus:
     # -- Disable persistent storage for dev/test
     persistentVolume:
       enabled: false
+    # Configure Prometheus to serve from sub-path
+    prefixURL: /prometheus
+    baseURL: /prometheus
   # -- Disable alertmanager
   alertmanager:
     enabled: false
@@ -157,6 +160,11 @@ grafana:
   enabled: true
   # -- Admin password (change in production!)
   adminPassword: admin
+  # Configure Grafana to serve from sub-path
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+      serve_from_sub_path: true
   # Sidecar configuration for auto-loading dashboards/datasources
   sidecar:
     dashboards:
@@ -218,6 +226,108 @@ loki:
   resultsCache:
     enabled: false
 
+# Alloy configuration (unified telemetry collector)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/alloy
+# Alloy replaces Promtail and can collect logs, metrics, and traces
+alloy:
+  # -- Enable Alloy telemetry collector
+  enabled: true
+  alloy:
+    # Alloy configuration using River syntax
+    configMap:
+      content: |
+        // Discover Kubernetes pods
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        // Relabel discovered pods for log collection
+        discovery.relabel "pods" {
+          targets = discovery.kubernetes.pods.targets
+
+          // Keep only running pods
+          rule {
+            source_labels = ["__meta_kubernetes_pod_phase"]
+            regex         = "Pending|Succeeded|Failed|Unknown"
+            action        = "drop"
+          }
+
+          // Set namespace label
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+
+          // Set pod label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+
+          // Set container label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+
+          // Set app label from pod label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app"]
+            target_label  = "app"
+          }
+
+          // Set app.kubernetes.io/name label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+            target_label  = "app_name"
+          }
+
+          // Build log file path
+          rule {
+            source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+            separator     = "/"
+            target_label  = "__path__"
+            replacement   = "/var/log/pods/*$1/*.log"
+          }
+        }
+
+        // Collect logs from discovered pods
+        loki.source.kubernetes "pods" {
+          targets    = discovery.relabel.pods.output
+          forward_to = [loki.process.pods.receiver]
+        }
+
+        // Process logs (parse JSON, extract level)
+        loki.process "pods" {
+          forward_to = [loki.write.default.receiver]
+
+          // Parse CRI format
+          stage.cri {}
+
+          // Try to parse JSON logs
+          stage.json {
+            expressions = {
+              level  = "level",
+              msg    = "msg",
+              caller = "caller",
+            }
+          }
+
+          // Add level as label if extracted
+          stage.labels {
+            values = {
+              level = "",
+            }
+          }
+        }
+
+        // Write logs to Loki
+        loki.write "default" {
+          endpoint {
+            url = "http://omnia-loki:3100/loki/api/v1/push"
+          }
+        }
+
 # Tempo configuration (traces)
 # See: https://github.com/grafana/helm-charts/tree/main/charts/tempo
 tempo:
@@ -226,6 +336,70 @@ tempo:
   tempo:
     # -- Disable telemetry reporting
     reportingEnabled: false
+  # Disable Jaeger query UI (we use Grafana instead)
+  tempoQuery:
+    enabled: false
   # -- Disable persistence for dev/test
   persistence:
     enabled: false
+
+# ============================================================================
+# Istio Service Mesh Integration
+# Istio should be installed separately before deploying Omnia
+# See: https://istio.io/latest/docs/setup/install/helm/
+# ============================================================================
+
+istio:
+  # -- Enable Istio integration (Telemetry resources for tracing/logging)
+  # Requires Istio to be installed separately in istio-system namespace
+  enabled: false
+  # -- Tempo service for trace export (adjust if using different release name)
+  tempoService: omnia-tempo.omnia-system.svc.cluster.local
+  # -- Tempo OTLP port
+  tempoPort: 4317
+
+# ============================================================================
+# Gateway API Configuration
+# Kubernetes Gateway API is required for agent ingress
+# ============================================================================
+
+# External gateway for agent traffic (WebSocket connections)
+gateway:
+  # -- Enable external Gateway for agent ingress
+  enabled: true
+  # -- Gateway name suffix
+  name: agents
+  # -- Gateway class name (istio when using Istio, or external controller)
+  className: istio
+  # -- Gateway listener configuration
+  listeners:
+    # -- HTTP listener for agent WebSocket connections
+    http:
+      port: 80
+      protocol: HTTP
+    # -- HTTPS listener (requires TLS secret)
+    https:
+      enabled: false
+      port: 443
+      protocol: HTTPS
+      # -- TLS secret name (must exist in the namespace)
+      tlsSecretName: ""
+
+# Internal gateway for observability tools (Grafana, Prometheus, etc.)
+internalGateway:
+  # -- Enable internal Gateway for observability tools
+  enabled: true
+  # -- Gateway name suffix
+  name: internal
+  # -- Gateway class name
+  className: istio
+  # -- Gateway listener port
+  port: 8080
+  # -- Expose Grafana (main observability UI - includes Prometheus, Loki, Tempo datasources)
+  grafana:
+    enabled: true
+    path: /grafana
+  # -- Expose Prometheus UI (optional - metrics also available in Grafana)
+  prometheus:
+    enabled: true
+    path: /prometheus

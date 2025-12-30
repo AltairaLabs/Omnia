@@ -1,0 +1,51 @@
+{{- if .Values.istio.enabled }}
+# Istio Telemetry configuration for Omnia namespace
+# Requires Istio to be installed separately in istio-system
+# Configures tracing to Tempo and access logging for Loki
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: {{ include "omnia.fullname" . }}-telemetry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  # Tracing configuration - sends to Tempo via OpenTelemetry
+  tracing:
+    - providers:
+        - name: opentelemetry
+      randomSamplingPercentage: 100.0
+  # Access logging configuration - logs to stdout for Loki collection
+  accessLogging:
+    - providers:
+        - name: envoy
+---
+# Istio extension provider ConfigMap for OpenTelemetry
+# This configures Istio to send traces to Tempo
+# Apply to istio-system: kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-istio-otel-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+  annotations:
+    # Documentation: This ConfigMap shows the Istio mesh config needed
+    # to enable OpenTelemetry tracing. Apply similar config to istiod.
+    omnia.altairalabs.ai/istio-config: |
+      To enable tracing to Tempo, configure istiod with:
+      meshConfig:
+        extensionProviders:
+          - name: opentelemetry
+            opentelemetry:
+              service: {{ .Values.istio.tempoService }}
+              port: {{ .Values.istio.tempoPort }}
+data:
+  mesh-config-snippet: |
+    extensionProviders:
+      - name: opentelemetry
+        opentelemetry:
+          service: {{ .Values.istio.tempoService }}
+          port: {{ .Values.istio.tempoPort }}
+{{- end }}
