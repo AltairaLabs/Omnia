@@ -33,6 +33,7 @@ const (
 	EnvPromptPackVersion   = "OMNIA_PROMPTPACK_VERSION"
 	EnvFacadeType          = "OMNIA_FACADE_TYPE"
 	EnvFacadePort          = "OMNIA_FACADE_PORT"
+	EnvHandlerMode         = "OMNIA_HANDLER_MODE"
 	EnvProviderAPIKey      = "OMNIA_PROVIDER_API_KEY"
 	EnvToolRegistryName    = "OMNIA_TOOLREGISTRY_NAME"
 	EnvToolRegistryNS      = "OMNIA_TOOLREGISTRY_NAMESPACE"
@@ -66,6 +67,18 @@ const (
 	SessionTypeRedis  SessionType = "redis"
 )
 
+// HandlerMode represents the message handler mode.
+type HandlerMode string
+
+const (
+	// HandlerModeEcho echoes back the input message (for testing).
+	HandlerModeEcho HandlerMode = "echo"
+	// HandlerModeDemo provides canned responses with streaming simulation (for demos).
+	HandlerModeDemo HandlerMode = "demo"
+	// HandlerModeRuntime uses the runtime framework in the container (production).
+	HandlerModeRuntime HandlerMode = "runtime"
+)
+
 // Config holds the agent runtime configuration.
 type Config struct {
 	// AgentName is the name of the agent.
@@ -80,8 +93,9 @@ type Config struct {
 	PromptPackPath    string
 
 	// Facade configuration.
-	FacadeType FacadeType
-	FacadePort int
+	FacadeType  FacadeType
+	FacadePort  int
+	HandlerMode HandlerMode
 
 	// Provider configuration.
 	ProviderAPIKey string
@@ -104,8 +118,9 @@ var (
 	ErrMissingAgentName    = errors.New("OMNIA_AGENT_NAME is required")
 	ErrMissingNamespace    = errors.New("OMNIA_NAMESPACE is required")
 	ErrMissingPromptPack   = errors.New("OMNIA_PROMPTPACK_NAME is required")
-	ErrMissingProviderKey  = errors.New("OMNIA_PROVIDER_API_KEY is required")
+	ErrMissingProviderKey  = errors.New("OMNIA_PROVIDER_API_KEY is required for runtime handler mode")
 	ErrInvalidFacadeType   = errors.New("invalid facade type")
+	ErrInvalidHandlerMode  = errors.New("invalid handler mode")
 	ErrInvalidSessionType  = errors.New("invalid session type")
 	ErrMissingSessionStore = errors.New("OMNIA_SESSION_STORE_URL is required for redis session type")
 )
@@ -127,6 +142,10 @@ func LoadFromEnv() (*Config, error) {
 	// Parse facade type
 	facadeType := getEnvOrDefault(EnvFacadeType, string(FacadeTypeWebSocket))
 	cfg.FacadeType = FacadeType(facadeType)
+
+	// Parse handler mode
+	handlerMode := getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime))
+	cfg.HandlerMode = HandlerMode(handlerMode)
 
 	// Parse facade port
 	facadePort, err := getEnvAsInt(EnvFacadePort, DefaultFacadePort)
@@ -167,8 +186,18 @@ func (c *Config) Validate() error {
 	if c.PromptPackName == "" {
 		return ErrMissingPromptPack
 	}
-	if c.ProviderAPIKey == "" {
-		return ErrMissingProviderKey
+
+	// Validate handler mode
+	switch c.HandlerMode {
+	case HandlerModeEcho, HandlerModeDemo:
+		// Valid, provider API key not required
+	case HandlerModeRuntime:
+		// Runtime mode requires provider API key
+		if c.ProviderAPIKey == "" {
+			return ErrMissingProviderKey
+		}
+	default:
+		return fmt.Errorf("%w: %s", ErrInvalidHandlerMode, c.HandlerMode)
 	}
 
 	// Validate facade type
