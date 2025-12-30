@@ -117,3 +117,115 @@ agent:
     repository: ghcr.io/altairalabs/omnia-agent
     # -- Agent image tag (defaults to Chart appVersion)
     tag: ""
+
+# Observability configuration (for Omnia-specific templates)
+observability:
+  # -- Enable Omnia dashboards/datasources
+  enabled: true
+
+# ============================================================================
+# Subchart configurations (optional observability stack)
+# Set enabled: true to deploy each component
+# ============================================================================
+
+# Prometheus configuration (metrics)
+# See: https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus
+prometheus:
+  # -- Enable Prometheus
+  enabled: true
+  server:
+    # -- Disable persistent storage for dev/test
+    persistentVolume:
+      enabled: false
+  # -- Disable alertmanager
+  alertmanager:
+    enabled: false
+  # -- Disable pushgateway
+  prometheus-pushgateway:
+    enabled: false
+  # -- Disable node-exporter
+  prometheus-node-exporter:
+    enabled: false
+  # -- Disable kube-state-metrics (usually already present)
+  kube-state-metrics:
+    enabled: false
+
+# Grafana configuration (dashboards)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/grafana
+grafana:
+  # -- Enable Grafana
+  enabled: true
+  # -- Admin password (change in production!)
+  adminPassword: admin
+  # Sidecar configuration for auto-loading dashboards/datasources
+  sidecar:
+    dashboards:
+      # -- Enable dashboard sidecar
+      enabled: true
+      # -- Label to identify dashboard ConfigMaps
+      label: grafana_dashboard
+      # -- Search all namespaces for dashboards
+      searchNamespace: ALL
+    datasources:
+      # -- Enable datasource sidecar
+      enabled: true
+      # -- Label to identify datasource ConfigMaps
+      label: grafana_datasource
+      # -- Search all namespaces for datasources
+      searchNamespace: ALL
+  # -- Grafana service type
+  service:
+    type: ClusterIP
+
+# Loki configuration (logs)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/loki
+loki:
+  # -- Enable Loki
+  enabled: true
+  # -- Deploy in single binary mode
+  deploymentMode: SingleBinary
+  loki:
+    # -- Disable auth for simplicity
+    auth_enabled: false
+    # -- Use test schema for quick deployment
+    useTestSchema: true
+    # -- Use filesystem storage
+    storage:
+      type: filesystem
+    # -- Common config for single-binary mode
+    commonConfig:
+      replication_factor: 1
+  singleBinary:
+    # -- Single replica for dev/test
+    replicas: 1
+    persistence:
+      # -- Enable persistence for dev/test
+      enabled: true
+      size: 10Gi
+  # -- Disable distributed components
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  # -- Disable gateway
+  gateway:
+    enabled: false
+  # -- Disable caches for simpler deployment
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+
+# Tempo configuration (traces)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/tempo
+tempo:
+  # -- Enable Tempo
+  enabled: true
+  tempo:
+    # -- Disable telemetry reporting
+    reportingEnabled: false
+  # -- Disable persistence for dev/test
+  persistence:
+    enabled: false

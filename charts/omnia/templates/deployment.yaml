@@ -13,6 +13,14 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        {{- if and .Values.observability.enabled .Values.prometheus.enabled .Values.metrics.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+        prometheus.io/path: "/metrics"
+        {{- if .Values.metrics.secure }}
+        prometheus.io/scheme: "https"
+        {{- end }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

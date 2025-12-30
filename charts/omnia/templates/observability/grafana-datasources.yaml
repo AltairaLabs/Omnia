@@ -1,0 +1,51 @@
+{{- if and .Values.observability.enabled .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-grafana-datasources
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    grafana_datasource: "1"
+data:
+  omnia-datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      {{- if .Values.prometheus.enabled }}
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        url: http://{{ .Release.Name }}-prometheus-server.{{ .Release.Namespace }}:80
+        isDefault: true
+        editable: false
+      {{- end }}
+      {{- if .Values.loki.enabled }}
+      - name: Loki
+        type: loki
+        uid: loki
+        url: http://{{ .Release.Name }}-loki.{{ .Release.Namespace }}:3100
+        editable: false
+        jsonData:
+          derivedFields:
+            - name: TraceID
+              matcherRegex: '"trace_id":"([a-f0-9]+)"'
+              url: "$${__value.raw}"
+              datasourceUid: tempo
+      {{- end }}
+      {{- if .Values.tempo.enabled }}
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        url: http://{{ .Release.Name }}-tempo.{{ .Release.Namespace }}:3100
+        editable: false
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+            filterBySpanID: true
+          serviceMap:
+            datasourceUid: prometheus
+          nodeGraph:
+            enabled: true
+      {{- end }}
+{{- end }}

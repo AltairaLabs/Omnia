@@ -34,5 +34,9 @@ cover.out
 *.swo
 *~
 
+# Helm
+charts/*/charts/
+charts/*/Chart.lock
+
 # Local backlog (not for public repo)
 docs/local-backlog/
