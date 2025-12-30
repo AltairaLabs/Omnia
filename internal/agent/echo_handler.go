@@ -34,8 +34,8 @@ func NewEchoHandler() *EchoHandler {
 
 // HandleMessage echoes back the input message.
 func (h *EchoHandler) HandleMessage(
-	ctx context.Context,
-	sessionID string,
+	_ context.Context,
+	_ string,
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {

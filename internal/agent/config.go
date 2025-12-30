@@ -113,6 +113,9 @@ type Config struct {
 	HealthPort int
 }
 
+// Error format for wrapping validation errors with values.
+const errWithValueFmt = "%w: %s"
+
 // Validation errors.
 var (
 	ErrMissingAgentName    = errors.New("OMNIA_AGENT_NAME is required")
@@ -197,7 +200,7 @@ func (c *Config) Validate() error {
 			return ErrMissingProviderKey
 		}
 	default:
-		return fmt.Errorf("%w: %s", ErrInvalidHandlerMode, c.HandlerMode)
+		return fmt.Errorf(errWithValueFmt, ErrInvalidHandlerMode, c.HandlerMode)
 	}
 
 	// Validate facade type
@@ -205,7 +208,7 @@ func (c *Config) Validate() error {
 	case FacadeTypeWebSocket:
 		// Valid
 	default:
-		return fmt.Errorf("%w: %s", ErrInvalidFacadeType, c.FacadeType)
+		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)
 	}
 
 	// Validate session type
@@ -217,7 +220,7 @@ func (c *Config) Validate() error {
 			return ErrMissingSessionStore
 		}
 	default:
-		return fmt.Errorf("%w: %s", ErrInvalidSessionType, c.SessionType)
+		return fmt.Errorf(errWithValueFmt, ErrInvalidSessionType, c.SessionType)
 	}
 
 	return nil

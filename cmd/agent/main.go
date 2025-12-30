@@ -230,7 +230,7 @@ func createHandler(cfg *agent.Config, log interface{ Info(string, ...any) }) fac
 		return agent.NewDemoHandler()
 	case agent.HandlerModeRuntime:
 		log.Info("using runtime handler mode (not implemented)")
-		// TODO: Implement runtime handler when PromptKit integration is ready
+		// Runtime handler will be implemented with PromptKit integration
 		return nil
 	default:
 		log.Info("unknown handler mode, using nil handler", "mode", cfg.HandlerMode)
