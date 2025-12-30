@@ -316,7 +316,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path: "/healthz",
-					Port: intstr.FromInt32(port),
+					Port: intstr.FromInt32(8081), // Health server port
 				},
 			},
 			InitialDelaySeconds: 5,
@@ -326,7 +326,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path: "/healthz",
-					Port: intstr.FromInt32(port),
+					Port: intstr.FromInt32(8081), // Health server port
 				},
 			},
 			InitialDelaySeconds: 15,
@@ -413,6 +413,16 @@ func (r *AgentRuntimeReconciler) buildEnvVars(
 	envVars = append(envVars, corev1.EnvVar{
 		Name:  "OMNIA_FACADE_PORT",
 		Value: fmt.Sprintf("%d", port),
+	})
+
+	// Add handler mode (defaults to "runtime")
+	handlerMode := omniav1alpha1.HandlerModeRuntime
+	if agentRuntime.Spec.Facade.Handler != nil {
+		handlerMode = *agentRuntime.Spec.Facade.Handler
+	}
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_HANDLER_MODE",
+		Value: string(handlerMode),
 	})
 
 	// Add provider API key from secret

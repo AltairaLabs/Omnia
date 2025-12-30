@@ -27,7 +27,7 @@ func TestLoadFromEnv(t *testing.T) {
 	origEnv := map[string]string{}
 	for _, key := range []string{
 		EnvAgentName, EnvNamespace, EnvPromptPackName, EnvPromptPackVersion,
-		EnvFacadeType, EnvFacadePort, EnvProviderAPIKey, EnvToolRegistryName,
+		EnvFacadeType, EnvFacadePort, EnvHandlerMode, EnvProviderAPIKey, EnvToolRegistryName,
 		EnvToolRegistryNS, EnvSessionType, EnvSessionTTL, EnvSessionStoreURL,
 		EnvPromptPackMountPath, EnvHealthPort,
 	} {
@@ -71,6 +71,7 @@ func TestLoadFromEnv(t *testing.T) {
 				FacadeType:     FacadeTypeWebSocket,
 				FacadePort:     DefaultFacadePort,
 				HealthPort:     DefaultHealthPort,
+				HandlerMode:    HandlerModeRuntime,
 				SessionType:    SessionTypeMemory,
 				SessionTTL:     DefaultSessionTTL,
 			},
@@ -85,6 +86,7 @@ func TestLoadFromEnv(t *testing.T) {
 				EnvPromptPackVersion:   "v1.2.0",
 				EnvFacadeType:          "websocket",
 				EnvFacadePort:          "9090",
+				EnvHandlerMode:         "demo",
 				EnvProviderAPIKey:      "sk-prod-key",
 				EnvToolRegistryName:    "tools",
 				EnvToolRegistryNS:      "shared",
@@ -103,6 +105,7 @@ func TestLoadFromEnv(t *testing.T) {
 				FacadeType:            FacadeTypeWebSocket,
 				FacadePort:            9090,
 				HealthPort:            9091,
+				HandlerMode:           HandlerModeDemo,
 				ProviderAPIKey:        "sk-prod-key",
 				ToolRegistryName:      "tools",
 				ToolRegistryNamespace: "shared",
@@ -177,6 +180,9 @@ func TestLoadFromEnv(t *testing.T) {
 			if got.SessionTTL != tt.want.SessionTTL {
 				t.Errorf("SessionTTL = %v, want %v", got.SessionTTL, tt.want.SessionTTL)
 			}
+			if got.HandlerMode != tt.want.HandlerMode {
+				t.Errorf("HandlerMode = %v, want %v", got.HandlerMode, tt.want.HandlerMode)
+			}
 		})
 	}
 }
@@ -195,6 +201,7 @@ func TestConfigValidate(t *testing.T) {
 				PromptPackName: "my-pack",
 				ProviderAPIKey: "sk-test",
 				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeRuntime,
 				SessionType:    SessionTypeMemory,
 			},
 			wantErr: nil,
@@ -207,8 +214,33 @@ func TestConfigValidate(t *testing.T) {
 				PromptPackName:  "my-pack",
 				ProviderAPIKey:  "sk-test",
 				FacadeType:      FacadeTypeWebSocket,
+				HandlerMode:     HandlerModeRuntime,
 				SessionType:     SessionTypeRedis,
 				SessionStoreURL: "redis://localhost:6379",
+			},
+			wantErr: nil,
+		},
+		{
+			name: "valid config with echo handler (no provider key needed)",
+			config: &Config{
+				AgentName:      "test-agent",
+				Namespace:      "default",
+				PromptPackName: "my-pack",
+				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeEcho,
+				SessionType:    SessionTypeMemory,
+			},
+			wantErr: nil,
+		},
+		{
+			name: "valid config with demo handler (no provider key needed)",
+			config: &Config{
+				AgentName:      "test-agent",
+				Namespace:      "default",
+				PromptPackName: "my-pack",
+				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeDemo,
+				SessionType:    SessionTypeMemory,
 			},
 			wantErr: nil,
 		},
@@ -217,8 +249,8 @@ func TestConfigValidate(t *testing.T) {
 			config: &Config{
 				Namespace:      "default",
 				PromptPackName: "my-pack",
-				ProviderAPIKey: "sk-test",
 				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeEcho,
 				SessionType:    SessionTypeMemory,
 			},
 			wantErr: ErrMissingAgentName,
@@ -228,8 +260,8 @@ func TestConfigValidate(t *testing.T) {
 			config: &Config{
 				AgentName:      "test-agent",
 				PromptPackName: "my-pack",
-				ProviderAPIKey: "sk-test",
 				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeEcho,
 				SessionType:    SessionTypeMemory,
 			},
 			wantErr: ErrMissingNamespace,
@@ -237,24 +269,37 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "missing promptpack",
 			config: &Config{
-				AgentName:      "test-agent",
-				Namespace:      "default",
-				ProviderAPIKey: "sk-test",
-				FacadeType:     FacadeTypeWebSocket,
-				SessionType:    SessionTypeMemory,
+				AgentName:   "test-agent",
+				Namespace:   "default",
+				FacadeType:  FacadeTypeWebSocket,
+				HandlerMode: HandlerModeEcho,
+				SessionType: SessionTypeMemory,
 			},
 			wantErr: ErrMissingPromptPack,
 		},
 		{
-			name: "missing provider key",
+			name: "missing provider key for runtime handler",
 			config: &Config{
 				AgentName:      "test-agent",
 				Namespace:      "default",
 				PromptPackName: "my-pack",
 				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeRuntime,
 				SessionType:    SessionTypeMemory,
 			},
 			wantErr: ErrMissingProviderKey,
+		},
+		{
+			name: "invalid handler mode",
+			config: &Config{
+				AgentName:      "test-agent",
+				Namespace:      "default",
+				PromptPackName: "my-pack",
+				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    "invalid",
+				SessionType:    SessionTypeMemory,
+			},
+			wantErr: ErrInvalidHandlerMode,
 		},
 		{
 			name: "invalid facade type",
@@ -262,8 +307,8 @@ func TestConfigValidate(t *testing.T) {
 				AgentName:      "test-agent",
 				Namespace:      "default",
 				PromptPackName: "my-pack",
-				ProviderAPIKey: "sk-test",
 				FacadeType:     "grpc",
+				HandlerMode:    HandlerModeEcho,
 				SessionType:    SessionTypeMemory,
 			},
 			wantErr: ErrInvalidFacadeType,
@@ -274,8 +319,8 @@ func TestConfigValidate(t *testing.T) {
 				AgentName:      "test-agent",
 				Namespace:      "default",
 				PromptPackName: "my-pack",
-				ProviderAPIKey: "sk-test",
 				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeEcho,
 				SessionType:    "postgres",
 			},
 			wantErr: ErrInvalidSessionType,
@@ -286,8 +331,8 @@ func TestConfigValidate(t *testing.T) {
 				AgentName:      "test-agent",
 				Namespace:      "default",
 				PromptPackName: "my-pack",
-				ProviderAPIKey: "sk-test",
 				FacadeType:     FacadeTypeWebSocket,
+				HandlerMode:    HandlerModeEcho,
 				SessionType:    SessionTypeRedis,
 			},
 			wantErr: ErrMissingSessionStore,

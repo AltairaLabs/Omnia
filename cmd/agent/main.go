@@ -68,6 +68,7 @@ func main() {
 		"namespace", cfg.Namespace,
 		"facade", cfg.FacadeType,
 		"port", cfg.FacadePort,
+		"handler", cfg.HandlerMode,
 	)
 
 	// Initialize session store
@@ -78,10 +79,13 @@ func main() {
 	}
 	defer closeStore(store, log)
 
+	// Create message handler based on mode
+	handler := createHandler(cfg, log)
+
 	// Create WebSocket server
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
-	wsServer := facade.NewServer(wsConfig, store, nil, log)
+	wsServer := facade.NewServer(wsConfig, store, handler, log)
 
 	// Create HTTP mux for routing
 	mux := http.NewServeMux()
@@ -213,4 +217,23 @@ func redactURL(url string) string {
 		return url[:10] + "..." + url[len(url)-5:]
 	}
 	return "***"
+}
+
+// createHandler creates the appropriate message handler based on configuration.
+func createHandler(cfg *agent.Config, log interface{ Info(string, ...any) }) facade.MessageHandler {
+	switch cfg.HandlerMode {
+	case agent.HandlerModeEcho:
+		log.Info("using echo handler mode")
+		return agent.NewEchoHandler()
+	case agent.HandlerModeDemo:
+		log.Info("using demo handler mode")
+		return agent.NewDemoHandler()
+	case agent.HandlerModeRuntime:
+		log.Info("using runtime handler mode (not implemented)")
+		// Runtime handler will be implemented with PromptKit integration
+		return nil
+	default:
+		log.Info("unknown handler mode, using nil handler", "mode", cfg.HandlerMode)
+		return nil
+	}
 }

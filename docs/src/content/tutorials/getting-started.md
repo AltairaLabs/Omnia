@@ -123,6 +123,8 @@ stringData:
 kubectl apply -f secret.yaml
 ```
 
+> **Tip**: Don't have an API key yet? Use `handler: demo` in your AgentRuntime to test with simulated responses. See [Handler Modes](/reference/agentruntime/#handler-modes) for details.
+
 ## Step 4: Deploy the Agent
 
 Now create an AgentRuntime to deploy your agent:

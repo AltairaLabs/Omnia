@@ -57,6 +57,18 @@ spec:
               facade:
                 description: facade configures the client-facing connection interface.
                 properties:
+                  handler:
+                    default: runtime
+                    description: |-
+                      handler specifies the message handler mode.
+                      "echo" returns input messages back (for testing connectivity).
+                      "demo" provides streaming responses with simulated tool calls (for demos).
+                      "runtime" uses the runtime framework in the container (default, for production).
+                    enum:
+                    - echo
+                    - demo
+                    - runtime
+                    type: string
                   port:
                     default: 8080
                     description: port is the port number for the facade service.

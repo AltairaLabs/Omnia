@@ -51,6 +51,19 @@ const (
 	FacadeTypeGRPC FacadeType = "grpc"
 )
 
+// HandlerMode defines the message handler mode for the facade.
+// +kubebuilder:validation:Enum=echo;demo;runtime
+type HandlerMode string
+
+const (
+	// HandlerModeEcho echoes back the input message (for testing).
+	HandlerModeEcho HandlerMode = "echo"
+	// HandlerModeDemo provides canned responses with streaming simulation (for demos).
+	HandlerModeDemo HandlerMode = "demo"
+	// HandlerModeRuntime uses the runtime framework in the container (production).
+	HandlerModeRuntime HandlerMode = "runtime"
+)
+
 // FacadeConfig defines the configuration for the client-facing facade.
 type FacadeConfig struct {
 	// type specifies the facade protocol type.
@@ -64,6 +77,14 @@ type FacadeConfig struct {
 	// +kubebuilder:default=8080
 	// +optional
 	Port *int32 `json:"port,omitempty"`
+
+	// handler specifies the message handler mode.
+	// "echo" returns input messages back (for testing connectivity).
+	// "demo" provides streaming responses with simulated tool calls (for demos).
+	// "runtime" uses the runtime framework in the container (default, for production).
+	// +kubebuilder:default="runtime"
+	// +optional
+	Handler *HandlerMode `json:"handler,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.
