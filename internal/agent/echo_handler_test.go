@@ -75,6 +75,14 @@ func TestNewEchoHandler(t *testing.T) {
 	}
 }
 
+func TestEchoHandler_Name(t *testing.T) {
+	handler := NewEchoHandler()
+	name := handler.Name()
+	if name != "echo" {
+		t.Errorf("Name() = %q, want %q", name, "echo")
+	}
+}
+
 func TestEchoHandler_HandleMessage(t *testing.T) {
 	tests := []struct {
 		name        string

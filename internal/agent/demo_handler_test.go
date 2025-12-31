@@ -31,6 +31,14 @@ func TestNewDemoHandler(t *testing.T) {
 	}
 }
 
+func TestDemoHandler_Name(t *testing.T) {
+	handler := NewDemoHandler()
+	name := handler.Name()
+	if name != "demo" {
+		t.Errorf("Name() = %q, want %q", name, "demo")
+	}
+}
+
 func TestDemoHandler_HandleMessage_Greeting(t *testing.T) {
 	tests := []struct {
 		name    string
