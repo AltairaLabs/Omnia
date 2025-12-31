@@ -1,5 +1,7 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+# Runtime image for PromptKit runtime container
+RUNTIME_IMG ?= omnia-runtime:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -141,6 +143,10 @@ docs-dev: ## Run documentation site in development mode
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
+.PHONY: build-runtime
+build-runtime: fmt vet ## Build runtime binary.
+	go build -o bin/runtime ./cmd/runtime
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
@@ -155,6 +161,16 @@ docker-build: ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+.PHONY: docker-build-runtime
+docker-build-runtime: ## Build docker image for the runtime (PromptKit).
+	go mod vendor
+	$(CONTAINER_TOOL) build -t ${RUNTIME_IMG} -f Dockerfile.runtime .
+	rm -rf vendor
+
+.PHONY: docker-push-runtime
+docker-push-runtime: ## Push docker image for the runtime.
+	$(CONTAINER_TOOL) push ${RUNTIME_IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
