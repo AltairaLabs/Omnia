@@ -17,60 +17,73 @@ kind: AgentRuntime
 
 ## Spec Fields
 
-### `replicas`
-
-Number of agent pod replicas to run.
-
-| Field | Type | Default | Required |
-|-------|------|---------|----------|
-| `replicas` | integer | 1 | No |
-
-```yaml
-spec:
-  replicas: 3
-```
-
-### `provider`
-
-LLM provider configuration.
-
-| Field | Type | Required |
-|-------|------|----------|
-| `provider.name` | string | Yes |
-| `provider.model` | string | Yes |
-| `provider.apiKeySecretRef.name` | string | Yes |
-| `provider.apiKeySecretRef.key` | string | Yes |
-
-```yaml
-spec:
-  provider:
-    name: openai
-    model: gpt-4
-    apiKeySecretRef:
-      name: llm-credentials
-      key: api-key
-```
-
-Supported providers:
-- `openai` - OpenAI GPT models
-- `anthropic` - Anthropic Claude models
-- `google` - Google Gemini models
-
 ### `promptPackRef`
 
-Reference to the PromptPack resource.
+Reference to the PromptPack containing agent prompts.
 
 | Field | Type | Required |
 |-------|------|----------|
 | `promptPackRef.name` | string | Yes |
-| `promptPackRef.namespace` | string | No |
+| `promptPackRef.version` | string | No |
+| `promptPackRef.track` | string | No (default: "stable") |
 
 ```yaml
 spec:
   promptPackRef:
     name: my-prompts
-    namespace: prompts  # Optional, defaults to AgentRuntime namespace
+    version: "1.0.0"  # Or use track: "canary"
 ```
+
+### `providerSecretRef`
+
+Reference to a secret containing LLM provider credentials.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `providerSecretRef.name` | string | Yes |
+
+```yaml
+spec:
+  providerSecretRef:
+    name: llm-credentials
+```
+
+The secret should contain an `api-key` key:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+stringData:
+  api-key: "sk-..."
+```
+
+### `facade`
+
+WebSocket facade configuration.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `facade.type` | string | websocket | Yes |
+| `facade.port` | integer | 8080 | No |
+| `facade.handler` | string | runtime | No |
+
+```yaml
+spec:
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+```
+
+#### Handler Modes
+
+| Mode | Description | Requires API Key |
+|------|-------------|------------------|
+| `runtime` | Production mode using the runtime framework | Yes |
+| `demo` | Demo mode with simulated streaming responses | No |
+| `echo` | Simple echo handler for testing connectivity | No |
 
 ### `toolRegistryRef`
 
@@ -85,53 +98,7 @@ Optional reference to a ToolRegistry resource.
 spec:
   toolRegistryRef:
     name: agent-tools
-```
-
-### `facade`
-
-WebSocket facade configuration.
-
-| Field | Type | Default | Required |
-|-------|------|---------|----------|
-| `facade.type` | string | websocket | No |
-| `facade.port` | integer | 8080 | No |
-| `facade.handler` | string | runtime | No |
-
-```yaml
-spec:
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
-```
-
-#### Handler Modes
-
-The `handler` field controls how the agent processes incoming messages:
-
-| Mode | Description | Requires API Key |
-|------|-------------|------------------|
-| `runtime` | Production mode using the runtime framework (e.g., PromptKit) | Yes |
-| `demo` | Demo mode with streaming responses and simulated tool calls | No |
-| `echo` | Simple echo handler for testing connectivity | No |
-
-**`runtime` (default)** - Uses the runtime framework configured in the container image (e.g., PromptKit, LangChain). Requires `providerSecretRef` to be set with valid API credentials.
-
-**`demo`** - Provides canned responses with realistic streaming behavior and simulated tool calls. Useful for demos, screenshots, and UI development without incurring API costs. Responds to:
-- Greetings ("hello", "help") - Returns agent capabilities
-- Password queries - Simulates a user lookup tool call
-- Weather queries - Simulates a weather API tool call
-
-**`echo`** - Simply echoes back the input message. Useful for testing WebSocket connectivity and message flow.
-
-```yaml
-# Demo mode for testing without API costs
-spec:
-  facade:
-    type: websocket
-    handler: demo
-  session:
-    type: memory
+    namespace: tools  # Optional
 ```
 
 ### `session`
@@ -141,9 +108,8 @@ Session storage configuration.
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
 | `session.type` | string | memory | No |
-| `session.ttl` | duration | 1h | No |
+| `session.ttl` | duration | 24h | No |
 | `session.storeRef.name` | string | - | No |
-| `session.storeRef.key` | string | - | No |
 
 ```yaml
 spec:
@@ -152,45 +118,125 @@ spec:
     ttl: 24h
     storeRef:
       name: redis-credentials
-      key: url
 ```
 
-### `resources`
+Session store types:
+- `memory` - In-memory (not recommended for production)
+- `redis` - Redis backend (recommended)
+- `postgres` - PostgreSQL backend
 
-Container resource requirements.
+### `runtime`
+
+Deployment-related settings including replicas, resources, and autoscaling.
 
 ```yaml
 spec:
-  resources:
-    requests:
-      cpu: "500m"
-      memory: "256Mi"
-    limits:
-      cpu: "1000m"
-      memory: "512Mi"
+  runtime:
+    replicas: 3
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+    nodeSelector:
+      node-type: agents
+    tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "agents"
+        effect: "NoSchedule"
 ```
 
-### `env`
+### `runtime.autoscaling`
 
-Additional environment variables.
+Horizontal pod autoscaling configuration. Supports both standard HPA and KEDA.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | false | Enable autoscaling |
+| `type` | string | hpa | `hpa` or `keda` |
+| `minReplicas` | integer | 1 | Minimum replicas (0 for KEDA scale-to-zero) |
+| `maxReplicas` | integer | 10 | Maximum replicas |
+| `targetMemoryUtilizationPercentage` | integer | 70 | Memory target (HPA only) |
+| `targetCPUUtilizationPercentage` | integer | 90 | CPU target (HPA only) |
+| `scaleDownStabilizationSeconds` | integer | 300 | Scale-down cooldown (HPA only) |
+
+#### Standard HPA Example
 
 ```yaml
 spec:
-  env:
-    - name: LOG_LEVEL
-      value: debug
-    - name: API_TIMEOUT
-      valueFrom:
-        configMapKeyRef:
-          name: agent-config
-          key: timeout
+  runtime:
+    autoscaling:
+      enabled: true
+      type: hpa
+      minReplicas: 2
+      maxReplicas: 10
+      targetMemoryUtilizationPercentage: 70
+      targetCPUUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 300
+```
+
+#### KEDA Example
+
+```yaml
+spec:
+  runtime:
+    autoscaling:
+      enabled: true
+      type: keda
+      minReplicas: 1  # Set to 0 for scale-to-zero
+      maxReplicas: 20
+      keda:
+        pollingInterval: 15
+        cooldownPeriod: 60
+        triggers:
+          - type: prometheus
+            metadata:
+              serverAddress: "http://prometheus-server:9090"
+              query: 'sum(omnia_agent_connections_active{agent="my-agent"})'
+              threshold: "10"
+```
+
+### `runtime.autoscaling.keda`
+
+KEDA-specific configuration (only used when `type: keda`).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pollingInterval` | integer | 30 | Seconds between trigger checks |
+| `cooldownPeriod` | integer | 300 | Seconds before scaling down |
+| `triggers` | array | - | Custom KEDA triggers |
+
+If no triggers are specified, a default Prometheus trigger scales based on `omnia_agent_connections_active`.
+
+#### KEDA Trigger Types
+
+**Prometheus trigger:**
+```yaml
+triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: "http://prometheus:9090"
+      query: 'sum(rate(requests_total[1m]))'
+      threshold: "100"
+```
+
+**Cron trigger:**
+```yaml
+triggers:
+  - type: cron
+    metadata:
+      timezone: "America/New_York"
+      start: "0 8 * * 1-5"   # 8am weekdays
+      end: "0 18 * * 1-5"    # 6pm weekdays
+      desiredReplicas: "5"
 ```
 
 ## Status Fields
 
 ### `phase`
-
-Current phase of the AgentRuntime.
 
 | Value | Description |
 |-------|-------------|
@@ -200,27 +246,23 @@ Current phase of the AgentRuntime.
 
 ### `replicas`
 
-Replica counts.
-
 | Field | Description |
 |-------|-------------|
-| `status.replicas` | Desired replicas |
-| `status.readyReplicas` | Ready replicas |
-| `status.availableReplicas` | Available replicas |
+| `status.replicas.desired` | Desired replicas |
+| `status.replicas.ready` | Ready replicas |
+| `status.replicas.available` | Available replicas |
 
 ### `conditions`
 
-Standard Kubernetes conditions:
-
 | Type | Description |
 |------|-------------|
-| `Available` | Agent is ready to accept connections |
+| `Ready` | Overall readiness |
+| `DeploymentReady` | Deployment is ready |
+| `ServiceReady` | Service is ready |
 | `PromptPackReady` | Referenced PromptPack is valid |
 | `ToolRegistryReady` | Referenced ToolRegistry is valid |
 
-## Example
-
-Complete AgentRuntime example:
+## Complete Example
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -229,35 +271,48 @@ metadata:
   name: production-agent
   namespace: agents
 spec:
-  replicas: 3
-  provider:
-    name: openai
-    model: gpt-4-turbo
-    apiKeySecretRef:
-      name: openai-credentials
-      key: api-key
   promptPackRef:
     name: customer-service-prompts
+    version: "2.1.0"
+
+  providerSecretRef:
+    name: openai-credentials
+
   toolRegistryRef:
     name: service-tools
+
   facade:
     type: websocket
     port: 8080
     handler: runtime
+
   session:
     type: redis
     ttl: 24h
     storeRef:
       name: redis-credentials
-      key: url
-  resources:
-    requests:
-      cpu: "500m"
-      memory: "256Mi"
-    limits:
-      cpu: "1000m"
-      memory: "512Mi"
-  env:
-    - name: LOG_LEVEL
-      value: info
+
+  runtime:
+    replicas: 3  # Ignored when autoscaling enabled
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+    autoscaling:
+      enabled: true
+      type: keda
+      minReplicas: 1
+      maxReplicas: 20
+      keda:
+        pollingInterval: 15
+        cooldownPeriod: 120
+        triggers:
+          - type: prometheus
+            metadata:
+              serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local/prometheus"
+              query: 'sum(omnia_agent_connections_active{agent="production-agent",namespace="agents"}) or vector(0)'
+              threshold: "10"
 ```
