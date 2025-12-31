@@ -145,6 +145,38 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  proto:
+    name: Proto Validation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    - name: Install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        version: "29.x"
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Generate proto
+      run: make generate-proto
+
+    - name: Check for uncommitted changes
+      run: |
+        # Filter out protoc version comments from diff (they vary by protoc version but don't affect code)
+        DIFF=$(git diff pkg/runtime/ | grep "^[-+]" | grep -v "^[-+][-+][-+]" | grep -v "protoc.*v[0-9]" || true)
+        if [ -n "$DIFF" ]; then
+          echo "::error::Generated proto files are out of date. Run 'make generate-proto' and commit the changes."
+          git diff pkg/runtime/
+          exit 1
+        fi
+
   build:
     name: Build
     runs-on: ubuntu-latest

@@ -1,0 +1,129 @@
+// Copyright 2024 Altaira Labs
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package omnia.runtime.v1;
+
+option go_package = "github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1";
+
+// RuntimeService defines the communication protocol between the facade and runtime containers.
+// The facade handles external protocol translation (WebSocket/REST/gRPC to internal gRPC),
+// while the runtime handles all business logic including sessions, LLM calls, and tool execution.
+service RuntimeService {
+  // Converse handles bidirectional streaming for agent conversations.
+  // The client sends messages and receives a stream of responses including
+  // text chunks, tool calls, tool results, and completion signals.
+  rpc Converse(stream ClientMessage) returns (stream ServerMessage);
+
+  // Health checks the runtime's readiness to handle requests.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// ClientMessage represents a message from the client to the runtime.
+message ClientMessage {
+  // session_id identifies the conversation session for state management.
+  string session_id = 1;
+
+  // content is the user's message text.
+  string content = 2;
+
+  // metadata contains optional key-value pairs for additional context.
+  map<string, string> metadata = 3;
+}
+
+// ServerMessage represents a message from the runtime to the client.
+// Uses oneof to ensure only one message type is sent at a time.
+message ServerMessage {
+  oneof message {
+    // chunk contains a partial text response for streaming.
+    Chunk chunk = 1;
+
+    // tool_call is informational, indicating a tool is being invoked.
+    // The client/facade can display "Calling weather API..." but actual
+    // tool execution happens entirely in the runtime.
+    ToolCall tool_call = 2;
+
+    // tool_result is informational, containing the result of a tool call.
+    // This allows the UI to display tool results to the user.
+    ToolResult tool_result = 3;
+
+    // done signals the completion of a response.
+    Done done = 4;
+
+    // error indicates an error occurred during processing.
+    Error error = 5;
+  }
+}
+
+// Chunk contains a partial text response for streaming output.
+message Chunk {
+  // content is the text chunk to append to the response.
+  string content = 1;
+}
+
+// ToolCall represents a tool invocation (informational for UI display).
+message ToolCall {
+  // id is a unique identifier for this tool call.
+  string id = 1;
+
+  // name is the name of the tool being called.
+  string name = 2;
+
+  // arguments_json contains the tool arguments as a JSON string.
+  string arguments_json = 3;
+}
+
+// ToolResult contains the result of a tool execution (informational for UI display).
+message ToolResult {
+  // id matches the corresponding ToolCall id.
+  string id = 1;
+
+  // result_json contains the tool result as a JSON string.
+  string result_json = 2;
+
+  // is_error indicates whether the tool execution failed.
+  bool is_error = 3;
+}
+
+// Done signals the completion of a conversation turn.
+message Done {
+  // final_content contains the complete response text (optional).
+  string final_content = 1;
+
+  // usage contains token usage statistics for this turn.
+  Usage usage = 2;
+}
+
+// Usage contains token usage and cost information.
+message Usage {
+  // input_tokens is the number of tokens in the input/prompt.
+  int32 input_tokens = 1;
+
+  // output_tokens is the number of tokens in the output/response.
+  int32 output_tokens = 2;
+
+  // cost_usd is the estimated cost in USD for this request.
+  float cost_usd = 3;
+}
+
+// Error represents an error that occurred during processing.
+message Error {
+  // code is a machine-readable error code.
+  string code = 1;
+
+  // message is a human-readable error description.
+  string message = 2;
+}
+
+// HealthRequest is an empty message for health checks.
+message HealthRequest {}
+
+// HealthResponse contains the health status of the runtime.
+message HealthResponse {
+  // healthy indicates whether the runtime is ready to handle requests.
+  bool healthy = 1;
+
+  // status provides additional status information.
+  string status = 2;
+}
