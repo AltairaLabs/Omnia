@@ -1,0 +1,49 @@
+# Build stage
+FROM golang:1.25-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/ cmd/
+COPY api/ api/
+COPY internal/ internal/
+COPY pkg/ pkg/
+
+# Build the runtime binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o runtime \
+    ./cmd/runtime
+
+# Runtime stage
+FROM scratch
+
+# Import CA certificates and timezone data from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copy the binary
+COPY --from=builder /workspace/runtime /runtime
+
+# Create non-root user
+# Note: scratch image doesn't support adduser, so we set USER by UID
+# The container orchestrator should ensure proper user mapping
+USER 65532:65532
+
+# Expose default ports
+# 9000 - gRPC for facade communication
+# 9001 - Health check endpoints
+EXPOSE 9000 9001
+
+# Run the runtime
+ENTRYPOINT ["/runtime"]
