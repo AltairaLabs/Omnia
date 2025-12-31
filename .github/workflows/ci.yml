@@ -161,7 +161,7 @@ jobs:
     - name: Install protoc
       uses: arduino/setup-protoc@v3
       with:
-        version: "28.x"
+        version: "29.x"
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Generate proto
@@ -169,7 +169,16 @@ jobs:
 
     - name: Check for uncommitted changes
       run: |
-        if [ -n "$(git status --porcelain pkg/runtime/)" ]; then
+        # Ignore protoc version comments in diff (format: "// - protoc vX.Y.Z" or "// protoc vX.Y.Z")
+        if git diff --quiet pkg/runtime/ -- ':!*.pb.go' 2>/dev/null; then
+          # No non-pb.go changes, check pb.go files ignoring version lines
+          DIFF=$(git diff pkg/runtime/ | grep -v "^[-+]//.*protoc" | grep "^[-+]" | grep -v "^[-+][-+][-+]" || true)
+          if [ -n "$DIFF" ]; then
+            echo "::error::Generated proto files are out of date. Run 'make generate-proto' and commit the changes."
+            git diff pkg/runtime/
+            exit 1
+          fi
+        else
           echo "::error::Generated proto files are out of date. Run 'make generate-proto' and commit the changes."
           git diff pkg/runtime/
           exit 1
