@@ -1,0 +1,53 @@
+{{- if .Values.gateway.enabled }}
+# External Gateway for agent traffic (WebSocket connections)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ include "omnia.fullname" . }}-{{ .Values.gateway.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    omnia.altairalabs.ai/gateway-type: external
+spec:
+  gatewayClassName: {{ .Values.gateway.className }}
+  listeners:
+    - name: http
+      port: {{ .Values.gateway.listeners.http.port }}
+      protocol: {{ .Values.gateway.listeners.http.protocol }}
+      allowedRoutes:
+        namespaces:
+          from: All
+    {{- if .Values.gateway.listeners.https.enabled }}
+    - name: https
+      port: {{ .Values.gateway.listeners.https.port }}
+      protocol: {{ .Values.gateway.listeners.https.protocol }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: {{ .Values.gateway.listeners.https.tlsSecretName }}
+      allowedRoutes:
+        namespaces:
+          from: All
+    {{- end }}
+{{- end }}
+---
+{{- if .Values.internalGateway.enabled }}
+# Internal Gateway for observability tools (Grafana, Prometheus, Tempo)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ include "omnia.fullname" . }}-{{ .Values.internalGateway.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    omnia.altairalabs.ai/gateway-type: internal
+spec:
+  gatewayClassName: {{ .Values.internalGateway.className }}
+  listeners:
+    - name: http
+      port: {{ .Values.internalGateway.port }}
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+{{- end }}

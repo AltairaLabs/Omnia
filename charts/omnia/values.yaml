@@ -117,3 +117,348 @@ agent:
     repository: ghcr.io/altairalabs/omnia-agent
     # -- Agent image tag (defaults to Chart appVersion)
     tag: ""
+
+# Observability configuration (for Omnia-specific templates)
+observability:
+  # -- Enable Omnia dashboards/datasources
+  enabled: true
+
+# ============================================================================
+# Subchart configurations (optional observability stack)
+# Set enabled: true to deploy each component
+# ============================================================================
+
+# Prometheus configuration (metrics)
+# See: https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus
+prometheus:
+  # -- Enable Prometheus
+  enabled: false
+  server:
+    # -- Disable persistent storage for dev/test
+    persistentVolume:
+      enabled: false
+    # Configure Prometheus to serve from sub-path
+    prefixURL: /prometheus
+    baseURL: /prometheus
+  # -- Disable alertmanager
+  alertmanager:
+    enabled: false
+  # -- Disable pushgateway
+  prometheus-pushgateway:
+    enabled: false
+  # -- Disable node-exporter
+  prometheus-node-exporter:
+    enabled: false
+  # -- Disable kube-state-metrics (usually already present)
+  kube-state-metrics:
+    enabled: false
+
+# Grafana configuration (dashboards)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/grafana
+grafana:
+  # -- Enable Grafana
+  enabled: false
+  # -- Admin password (change in production!)
+  adminPassword: admin
+  # Configure Grafana to serve from sub-path
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+      serve_from_sub_path: true
+  # Sidecar configuration for auto-loading dashboards/datasources
+  sidecar:
+    dashboards:
+      # -- Enable dashboard sidecar
+      enabled: true
+      # -- Label to identify dashboard ConfigMaps
+      label: grafana_dashboard
+      # -- Search all namespaces for dashboards
+      searchNamespace: ALL
+    datasources:
+      # -- Enable datasource sidecar
+      enabled: true
+      # -- Label to identify datasource ConfigMaps
+      label: grafana_datasource
+      # -- Search all namespaces for datasources
+      searchNamespace: ALL
+  # -- Grafana service type
+  service:
+    type: ClusterIP
+
+# Loki configuration (logs)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/loki
+loki:
+  # -- Enable Loki
+  enabled: false
+  # -- Deploy in single binary mode
+  deploymentMode: SingleBinary
+  loki:
+    # -- Disable auth for simplicity
+    auth_enabled: false
+    # -- Use test schema for quick deployment
+    useTestSchema: true
+    # -- Use filesystem storage
+    storage:
+      type: filesystem
+    # -- Common config for single-binary mode
+    commonConfig:
+      replication_factor: 1
+  singleBinary:
+    # -- Single replica for dev/test
+    replicas: 1
+    persistence:
+      # -- Enable persistence for dev/test
+      enabled: true
+      size: 10Gi
+  # -- Disable distributed components
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  # -- Disable gateway
+  gateway:
+    enabled: false
+  # -- Disable caches for simpler deployment
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+
+# Alloy configuration (unified telemetry collector)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/alloy
+# Alloy replaces Promtail and can collect logs, metrics, and traces
+alloy:
+  # -- Enable Alloy telemetry collector
+  enabled: false
+  alloy:
+    # Alloy configuration using River syntax
+    configMap:
+      content: |
+        // Discover Kubernetes pods
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        // Relabel discovered pods for log collection
+        discovery.relabel "pods" {
+          targets = discovery.kubernetes.pods.targets
+
+          // Keep only running pods
+          rule {
+            source_labels = ["__meta_kubernetes_pod_phase"]
+            regex         = "Pending|Succeeded|Failed|Unknown"
+            action        = "drop"
+          }
+
+          // Set namespace label
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+
+          // Set pod label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+
+          // Set container label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+
+          // Set app label from pod label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app"]
+            target_label  = "app"
+          }
+
+          // Set app.kubernetes.io/name label
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+            target_label  = "app_name"
+          }
+
+          // Build log file path
+          rule {
+            source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+            separator     = "/"
+            target_label  = "__path__"
+            replacement   = "/var/log/pods/*$1/*.log"
+          }
+        }
+
+        // Collect logs from discovered pods
+        loki.source.kubernetes "pods" {
+          targets    = discovery.relabel.pods.output
+          forward_to = [loki.process.pods.receiver]
+        }
+
+        // Process logs (parse JSON, extract level)
+        loki.process "pods" {
+          forward_to = [loki.write.default.receiver]
+
+          // Parse CRI format
+          stage.cri {}
+
+          // Try to parse JSON logs
+          stage.json {
+            expressions = {
+              level  = "level",
+              msg    = "msg",
+              caller = "caller",
+            }
+          }
+
+          // Add level as label if extracted
+          stage.labels {
+            values = {
+              level = "",
+            }
+          }
+        }
+
+        // Write logs to Loki
+        loki.write "default" {
+          endpoint {
+            url = "http://omnia-loki:3100/loki/api/v1/push"
+          }
+        }
+
+# Tempo configuration (traces)
+# See: https://github.com/grafana/helm-charts/tree/main/charts/tempo
+tempo:
+  # -- Enable Tempo
+  enabled: false
+  tempo:
+    # -- Disable telemetry reporting
+    reportingEnabled: false
+  # Disable Jaeger query UI (we use Grafana instead)
+  tempoQuery:
+    enabled: false
+  # -- Disable persistence for dev/test
+  persistence:
+    enabled: false
+
+# ============================================================================
+# Istio Service Mesh Integration
+# Istio should be installed separately before deploying Omnia
+# See: https://istio.io/latest/docs/setup/install/helm/
+# ============================================================================
+
+istio:
+  # -- Enable Istio integration (Telemetry resources for tracing/logging)
+  # Requires Istio to be installed separately in istio-system namespace
+  enabled: false
+  # -- Tempo service for trace export (adjust if using different release name)
+  tempoService: omnia-tempo.omnia-system.svc.cluster.local
+  # -- Tempo OTLP port
+  tempoPort: 4317
+
+# ============================================================================
+# Gateway API Configuration
+# Kubernetes Gateway API is required for agent ingress
+# ============================================================================
+
+# External gateway for agent traffic (WebSocket connections)
+gateway:
+  # -- Enable external Gateway for agent ingress (requires Istio or Gateway controller)
+  enabled: false
+  # -- Gateway name suffix
+  name: agents
+  # -- Gateway class name (istio when using Istio, or external controller)
+  className: istio
+  # -- Gateway listener configuration
+  listeners:
+    # -- HTTP listener for agent WebSocket connections
+    http:
+      port: 80
+      protocol: HTTP
+    # -- HTTPS listener (requires TLS secret)
+    https:
+      enabled: false
+      port: 443
+      protocol: HTTPS
+      # -- TLS secret name (must exist in the namespace)
+      tlsSecretName: ""
+
+# Internal gateway for observability tools (Grafana, Prometheus, etc.)
+internalGateway:
+  # -- Enable internal Gateway for observability tools (requires Istio or Gateway controller)
+  enabled: false
+  # -- Gateway name suffix
+  name: internal
+  # -- Gateway class name
+  className: istio
+  # -- Gateway listener port
+  port: 8080
+  # -- Expose Grafana (main observability UI - includes Prometheus, Loki, Tempo datasources)
+  grafana:
+    enabled: true
+    path: /grafana
+  # -- Expose Prometheus UI (optional - metrics also available in Grafana)
+  prometheus:
+    enabled: true
+    path: /prometheus
+
+# ============================================================================
+# Authentication Configuration
+# JWT-based authentication using Istio RequestAuthentication
+# ============================================================================
+
+authentication:
+  # -- Enable JWT authentication for agent endpoints
+  enabled: false
+
+  # -- OIDC/JWT provider configuration
+  jwt:
+    # -- JWT issuer URL (e.g., https://auth.example.com, https://accounts.google.com)
+    issuer: ""
+    # -- JWKS URI for validating JWT signatures
+    # If empty, defaults to {issuer}/.well-known/jwks.json
+    jwksUri: ""
+    # -- JWT audiences to accept (optional, validates 'aud' claim)
+    audiences: []
+    # -- Forward the original token to the upstream service
+    forwardOriginalToken: true
+    # -- Headers to output payload claims (optional)
+    # Example: outputClaimToHeaders:
+    #   - header: x-user-id
+    #     claim: sub
+    outputClaimToHeaders: []
+
+  # -- Authorization rules (optional, defaults to requiring valid JWT)
+  authorization:
+    # -- Require specific claims in the JWT
+    # Example: requiredClaims:
+    #   - claim: "scope"
+    #     values: ["agents:access"]
+    requiredClaims: []
+    # -- Allow unauthenticated access to specific paths (e.g., health checks)
+    excludePaths:
+      - /healthz
+      - /readyz
+
+# ============================================================================
+# KEDA Configuration (Advanced Autoscaling)
+# KEDA enables scale-to-zero, custom metrics scaling, and cron-based scaling
+# See: https://keda.sh/docs/
+# ============================================================================
+
+keda:
+  # -- Enable KEDA (Kubernetes Event-driven Autoscaler)
+  # Required for AgentRuntime autoscaling with type: keda
+  enabled: false
+  # -- KEDA operator configuration
+  # See: https://github.com/kedacore/charts/tree/main/keda
+  operator:
+    # -- Watch all namespaces (recommended for cluster-wide use)
+    watchNamespace: ""
+  # -- Prometheus metrics adapter
+  prometheus:
+    # -- Prometheus server address for KEDA triggers
+    # This is the default when using the Prometheus subchart
+    serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"

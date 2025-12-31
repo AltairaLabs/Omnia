@@ -8,11 +8,11 @@ order: 3
 
 This guide covers scaling strategies for Omnia agent deployments.
 
-## Horizontal Scaling
+## Manual Scaling
 
-### Increase Replicas
+### Set Replicas
 
-Scale by adjusting the `replicas` field:
+Scale by adjusting the `runtime.replicas` field:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -20,40 +20,67 @@ kind: AgentRuntime
 metadata:
   name: my-agent
 spec:
-  replicas: 3  # Run 3 agent instances
+  runtime:
+    replicas: 3
   # ...
 ```
 
 Or use kubectl:
 
 ```bash
-kubectl scale agentruntime my-agent --replicas=5
+kubectl patch agentruntime my-agent --type=merge \
+  -p '{"spec":{"runtime":{"replicas":5}}}'
 ```
 
-### Horizontal Pod Autoscaler
+## Automatic Scaling with HPA
 
-Create an HPA for automatic scaling:
+Enable built-in HPA autoscaling:
 
 ```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: my-agent-hpa
 spec:
-  scaleTargetRef:
-    apiVersion: omnia.altairalabs.ai/v1alpha1
-    kind: AgentRuntime
-    name: my-agent
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
+  runtime:
+    autoscaling:
+      enabled: true
+      type: hpa
+      minReplicas: 2
+      maxReplicas: 10
+      targetMemoryUtilizationPercentage: 70
+      targetCPUUtilizationPercentage: 90
 ```
+
+The HPA automatically adjusts replicas based on resource utilization.
+
+### Check HPA Status
+
+```bash
+kubectl get hpa
+kubectl describe hpa my-agent
+```
+
+## Advanced Scaling with KEDA
+
+For custom metrics and scale-to-zero capabilities, use KEDA:
+
+```yaml
+spec:
+  runtime:
+    autoscaling:
+      enabled: true
+      type: keda
+      minReplicas: 1
+      maxReplicas: 20
+      keda:
+        pollingInterval: 30
+        cooldownPeriod: 300
+        triggers:
+          - type: prometheus
+            metadata:
+              serverAddress: "http://prometheus:9090"
+              query: 'sum(omnia_agent_connections_active{agent="my-agent"})'
+              threshold: "10"
+```
+
+See [Autoscaling Explained](/explanation/autoscaling) for detailed KEDA configuration.
 
 ## Resource Configuration
 
@@ -63,13 +90,14 @@ Configure CPU and memory for predictable performance:
 
 ```yaml
 spec:
-  resources:
-    requests:
-      cpu: "500m"
-      memory: "256Mi"
-    limits:
-      cpu: "1000m"
-      memory: "512Mi"
+  runtime:
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
 ```
 
 ### Resource Guidelines
@@ -84,7 +112,7 @@ spec:
 
 When using multiple replicas, ensure session affinity:
 
-### With Redis Sessions
+### With Redis Sessions (Recommended)
 
 Redis-backed sessions work seamlessly with any replica:
 
@@ -112,33 +140,6 @@ spec:
       timeoutSeconds: 3600
 ```
 
-## Load Balancing
-
-The agent Service automatically load balances across replicas. For WebSocket connections, consider:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: my-agent
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
-spec:
-  rules:
-    - host: agent.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: my-agent
-                port:
-                  number: 8080
-```
-
 ## Monitoring Scale
 
 Check replica status:
@@ -152,3 +153,20 @@ View status conditions:
 ```bash
 kubectl describe agentruntime my-agent
 ```
+
+View autoscaling metrics:
+
+```bash
+# For HPA
+kubectl get hpa my-agent
+
+# For KEDA
+kubectl get scaledobject my-agent
+kubectl get hpa keda-hpa-my-agent
+```
+
+## Next Steps
+
+- [Autoscaling Explained](/explanation/autoscaling) - Deep dive into HPA vs KEDA
+- [Set Up Observability](/how-to/setup-observability) - Monitor scaling metrics
+- [AgentRuntime Reference](/reference/agentruntime) - Full autoscaling configuration

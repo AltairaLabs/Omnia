@@ -75,4 +75,30 @@ rules:
       - get
       - patch
       - update
+  # HorizontalPodAutoscaler for standard autoscaling
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # KEDA ScaledObjects for advanced autoscaling
+  - apiGroups:
+      - keda.sh
+    resources:
+      - scaledobjects
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
 {{- end }}

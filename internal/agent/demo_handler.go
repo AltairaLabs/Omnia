@@ -33,6 +33,11 @@ func NewDemoHandler() *DemoHandler {
 	return &DemoHandler{}
 }
 
+// Name returns the handler name for metrics.
+func (h *DemoHandler) Name() string {
+	return "demo"
+}
+
 // HandleMessage processes messages and returns demo responses with streaming.
 func (h *DemoHandler) HandleMessage(
 	ctx context.Context,

@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -65,9 +66,16 @@ var _ = Describe("AgentRuntime Controller", func() {
 		})
 
 		AfterEach(func() {
+			// Clean up HPA
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			err := k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			if err == nil {
+				_ = k8sClient.Delete(ctx, hpa)
+			}
+
 			// Clean up AgentRuntime
 			agentRuntime := &omniav1alpha1.AgentRuntime{}
-			err := k8sClient.Get(ctx, agentRuntimeKey, agentRuntime)
+			err = k8sClient.Get(ctx, agentRuntimeKey, agentRuntime)
 			if err == nil {
 				// Remove finalizer first to allow deletion
 				agentRuntime.Finalizers = nil
@@ -997,6 +1005,804 @@ var _ = Describe("AgentRuntime Controller", func() {
 			toolRegistryCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeToolRegistryReady)
 			Expect(toolRegistryCond).NotTo(BeNil())
 			Expect(toolRegistryCond.Status).To(Equal(metav1.ConditionFalse))
+		})
+
+		It("should create HPA when HPA autoscaling is enabled", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with HPA autoscaling")
+			minReplicas := int32(2)
+			maxReplicas := int32(8)
+			targetCPU := int32(75)
+			targetMemory := int32(80)
+			scaleDownStabilization := int32(120)
+
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled:                           true,
+							Type:                              omniav1alpha1.AutoscalerTypeHPA,
+							MinReplicas:                       &minReplicas,
+							MaxReplicas:                       &maxReplicas,
+							TargetCPUUtilizationPercentage:    &targetCPU,
+							TargetMemoryUtilizationPercentage: &targetMemory,
+							ScaleDownStabilizationSeconds:     &scaleDownStabilization,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HPA was created")
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			}, timeout, interval).Should(Succeed())
+
+			Expect(hpa.Spec.ScaleTargetRef.Name).To(Equal(agentRuntimeKey.Name))
+			Expect(hpa.Spec.ScaleTargetRef.Kind).To(Equal("Deployment"))
+			Expect(*hpa.Spec.MinReplicas).To(Equal(minReplicas))
+			Expect(hpa.Spec.MaxReplicas).To(Equal(maxReplicas))
+
+			// Verify metrics
+			Expect(hpa.Spec.Metrics).To(HaveLen(2))
+
+			// Verify behavior
+			Expect(hpa.Spec.Behavior).NotTo(BeNil())
+			Expect(hpa.Spec.Behavior.ScaleDown).NotTo(BeNil())
+			Expect(*hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds).To(Equal(scaleDownStabilization))
+		})
+
+		It("should use default HPA values when not specified", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with minimal HPA config")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeHPA,
+							// All other values should use defaults
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HPA has default values")
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			}, timeout, interval).Should(Succeed())
+
+			// Defaults: minReplicas=1, maxReplicas=10
+			Expect(*hpa.Spec.MinReplicas).To(Equal(int32(1)))
+			Expect(hpa.Spec.MaxReplicas).To(Equal(int32(10)))
+
+			// Default scaleDown stabilization = 300 seconds
+			Expect(*hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds).To(Equal(int32(300)))
+		})
+
+		It("should clean up HPA when autoscaling is disabled", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with HPA")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeHPA,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling to create HPA")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying HPA exists")
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			}, timeout, interval).Should(Succeed())
+
+			By("disabling autoscaling")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			updated.Spec.Runtime.Autoscaling.Enabled = false
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			By("reconciling again")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HPA was deleted")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, agentRuntimeKey, hpa)
+				return errors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
+		})
+
+		It("should clean up HPA when Runtime is nil", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime without runtime config")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					// Runtime is nil - should not create HPA
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying no HPA was created")
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			err = k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("should handle KEDA autoscaling type gracefully when KEDA is not installed", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with KEDA autoscaling")
+			minReplicas := int32(0)
+			maxReplicas := int32(5)
+			pollingInterval := int32(15)
+			cooldownPeriod := int32(60)
+
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled:     true,
+							Type:        omniav1alpha1.AutoscalerTypeKEDA,
+							MinReplicas: &minReplicas,
+							MaxReplicas: &maxReplicas,
+							KEDA: &omniav1alpha1.KEDAConfig{
+								PollingInterval: &pollingInterval,
+								CooldownPeriod:  &cooldownPeriod,
+								Triggers: []omniav1alpha1.KEDATrigger{
+									{
+										Type: "prometheus",
+										Metadata: map[string]string{
+											"serverAddress": "http://prometheus:9090",
+											"query":         "test_metric",
+											"threshold":     "5",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime - should not fail even though KEDA is not installed")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			// The reconciliation should succeed because autoscaling errors are logged but don't fail reconciliation
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying Deployment was still created")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+		})
+
+		It("should handle switching from KEDA to HPA autoscaling", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with KEDA autoscaling first")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling with KEDA type")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("switching to HPA autoscaling")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			updated.Spec.Runtime.Autoscaling.Type = omniav1alpha1.AutoscalerTypeHPA
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			By("reconciling again - should create HPA")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HPA was created")
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			}, timeout, interval).Should(Succeed())
+		})
+
+		It("should return early when AgentRuntime is not found", func() {
+			By("reconciling a non-existent AgentRuntime")
+			nonExistentKey := types.NamespacedName{
+				Name:      "non-existent-agent",
+				Namespace: "default",
+			}
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nonExistentKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+		})
+
+		It("should handle deletion with finalizer", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling to add finalizer")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying finalizer was added")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			Expect(updated.Finalizers).To(ContainElement(FinalizerName))
+
+			By("deleting the AgentRuntime")
+			Expect(k8sClient.Delete(ctx, updated)).To(Succeed())
+
+			By("reconciling the deletion")
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying AgentRuntime is gone")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, agentRuntimeKey, &omniav1alpha1.AgentRuntime{})
+				return errors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
+		})
+
+		It("should update HPA when autoscaling config changes", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with HPA")
+			minReplicas := int32(1)
+			maxReplicas := int32(5)
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderSecretRef: corev1.LocalObjectReference{
+						Name: "test-secret",
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled:     true,
+							Type:        omniav1alpha1.AutoscalerTypeHPA,
+							MinReplicas: &minReplicas,
+							MaxReplicas: &maxReplicas,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling to create HPA")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying initial HPA config")
+			hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
+			}, timeout, interval).Should(Succeed())
+			Expect(hpa.Spec.MaxReplicas).To(Equal(int32(5)))
+
+			By("updating autoscaling config")
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
+			newMaxReplicas := int32(15)
+			updated.Spec.Runtime.Autoscaling.MaxReplicas = &newMaxReplicas
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			By("reconciling again")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HPA was updated")
+			Eventually(func() int32 {
+				hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+				if err := k8sClient.Get(ctx, agentRuntimeKey, hpa); err != nil {
+					return 0
+				}
+				return hpa.Spec.MaxReplicas
+			}, timeout, interval).Should(Equal(int32(15)))
+		})
+	})
+})
+
+// Test helper functions and buildKEDATriggers (unit tests, no envtest required)
+var _ = Describe("AgentRuntime Controller Unit Tests", func() {
+	Describe("ptr helper function", func() {
+		It("should return a pointer to an int32 value", func() {
+			val := int32(42)
+			result := ptr(val)
+			Expect(result).NotTo(BeNil())
+			Expect(*result).To(Equal(int32(42)))
+		})
+
+		It("should return a pointer to a bool value", func() {
+			val := true
+			result := ptr(val)
+			Expect(result).NotTo(BeNil())
+			Expect(*result).To(BeTrue())
+		})
+
+		It("should return a pointer to a string value", func() {
+			val := "test"
+			result := ptr(val)
+			Expect(result).NotTo(BeNil())
+			Expect(*result).To(Equal("test"))
+		})
+	})
+
+	Describe("ptrSelectPolicy helper function", func() {
+		It("should return a pointer to MaxChangePolicySelect", func() {
+			result := ptrSelectPolicy(autoscalingv2.MaxChangePolicySelect)
+			Expect(result).NotTo(BeNil())
+			Expect(*result).To(Equal(autoscalingv2.MaxChangePolicySelect))
+		})
+
+		It("should return a pointer to MinChangePolicySelect", func() {
+			result := ptrSelectPolicy(autoscalingv2.MinChangePolicySelect)
+			Expect(result).NotTo(BeNil())
+			Expect(*result).To(Equal(autoscalingv2.MinChangePolicySelect))
+		})
+
+		It("should return a pointer to DisabledPolicySelect", func() {
+			result := ptrSelectPolicy(autoscalingv2.DisabledPolicySelect)
+			Expect(result).NotTo(BeNil())
+			Expect(*result).To(Equal(autoscalingv2.DisabledPolicySelect))
+		})
+	})
+
+	Describe("buildKEDATriggers function", func() {
+		var reconciler *AgentRuntimeReconciler
+
+		BeforeEach(func() {
+			reconciler = &AgentRuntimeReconciler{}
+		})
+
+		It("should return default Prometheus trigger when no custom triggers specified", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+						},
+					},
+				},
+			}
+
+			triggers := reconciler.buildKEDATriggers(agentRuntime)
+
+			Expect(triggers).To(HaveLen(1))
+			trigger := triggers[0].(map[string]interface{})
+			Expect(trigger["type"]).To(Equal("prometheus"))
+
+			metadata := trigger["metadata"].(map[string]interface{})
+			Expect(metadata["serverAddress"]).To(Equal("http://omnia-prometheus-server.omnia-system.svc.cluster.local/prometheus"))
+			Expect(metadata["query"]).To(ContainSubstring("test-agent"))
+			Expect(metadata["query"]).To(ContainSubstring("test-ns"))
+			Expect(metadata["threshold"]).To(Equal("10"))
+		})
+
+		It("should return default trigger when KEDA config is nil", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-agent",
+					Namespace: "production",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+							KEDA:    nil, // Explicitly nil
+						},
+					},
+				},
+			}
+
+			triggers := reconciler.buildKEDATriggers(agentRuntime)
+
+			Expect(triggers).To(HaveLen(1))
+			trigger := triggers[0].(map[string]interface{})
+			Expect(trigger["type"]).To(Equal("prometheus"))
+		})
+
+		It("should return custom triggers when specified", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+							KEDA: &omniav1alpha1.KEDAConfig{
+								Triggers: []omniav1alpha1.KEDATrigger{
+									{
+										Type: "prometheus",
+										Metadata: map[string]string{
+											"serverAddress": "http://custom-prometheus:9090",
+											"query":         "custom_metric",
+											"threshold":     "5",
+										},
+									},
+									{
+										Type: "rabbitmq",
+										Metadata: map[string]string{
+											"queueName":   "tasks",
+											"queueLength": "10",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			triggers := reconciler.buildKEDATriggers(agentRuntime)
+
+			Expect(triggers).To(HaveLen(2))
+
+			// First trigger
+			trigger1 := triggers[0].(map[string]interface{})
+			Expect(trigger1["type"]).To(Equal("prometheus"))
+			metadata1 := trigger1["metadata"].(map[string]interface{})
+			Expect(metadata1["serverAddress"]).To(Equal("http://custom-prometheus:9090"))
+			Expect(metadata1["query"]).To(Equal("custom_metric"))
+			Expect(metadata1["threshold"]).To(Equal("5"))
+
+			// Second trigger
+			trigger2 := triggers[1].(map[string]interface{})
+			Expect(trigger2["type"]).To(Equal("rabbitmq"))
+			metadata2 := trigger2["metadata"].(map[string]interface{})
+			Expect(metadata2["queueName"]).To(Equal("tasks"))
+			Expect(metadata2["queueLength"]).To(Equal("10"))
+		})
+
+		It("should prefer custom triggers over defaults when triggers list is not empty", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+							KEDA: &omniav1alpha1.KEDAConfig{
+								PollingInterval: ptr(int32(15)),
+								CooldownPeriod:  ptr(int32(60)),
+								Triggers: []omniav1alpha1.KEDATrigger{
+									{
+										Type: "cpu",
+										Metadata: map[string]string{
+											"type":  "Utilization",
+											"value": "80",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			triggers := reconciler.buildKEDATriggers(agentRuntime)
+
+			// Should use custom trigger, not default
+			Expect(triggers).To(HaveLen(1))
+			trigger := triggers[0].(map[string]interface{})
+			Expect(trigger["type"]).To(Equal("cpu"))
+		})
+
+		It("should use default trigger when triggers list is empty", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+							KEDA: &omniav1alpha1.KEDAConfig{
+								PollingInterval: ptr(int32(15)),
+								Triggers:        []omniav1alpha1.KEDATrigger{}, // Empty list
+							},
+						},
+					},
+				},
+			}
+
+			triggers := reconciler.buildKEDATriggers(agentRuntime)
+
+			// Should fall back to default prometheus trigger
+			Expect(triggers).To(HaveLen(1))
+			trigger := triggers[0].(map[string]interface{})
+			Expect(trigger["type"]).To(Equal("prometheus"))
 		})
 	})
 })

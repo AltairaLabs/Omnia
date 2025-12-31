@@ -1,0 +1,96 @@
+{{- if and .Values.authentication.enabled .Values.istio.enabled }}
+{{- $fullName := include "omnia.fullname" . }}
+
+# RequestAuthentication defines how to validate JWTs for agent workloads
+apiVersion: security.istio.io/v1
+kind: RequestAuthentication
+metadata:
+  name: {{ $fullName }}-agent-jwt
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  # Apply to all AgentRuntime pods (they have this label)
+  selector:
+    matchLabels:
+      omnia.altairalabs.ai/component: agent
+  jwtRules:
+    - issuer: {{ .Values.authentication.jwt.issuer | quote }}
+      {{- if .Values.authentication.jwt.jwksUri }}
+      jwksUri: {{ .Values.authentication.jwt.jwksUri | quote }}
+      {{- else }}
+      jwksUri: {{ printf "%s/.well-known/jwks.json" .Values.authentication.jwt.issuer | quote }}
+      {{- end }}
+      {{- if .Values.authentication.jwt.audiences }}
+      audiences:
+        {{- toYaml .Values.authentication.jwt.audiences | nindent 8 }}
+      {{- end }}
+      forwardOriginalToken: {{ .Values.authentication.jwt.forwardOriginalToken }}
+      {{- if .Values.authentication.jwt.outputClaimToHeaders }}
+      outputClaimToHeaders:
+        {{- toYaml .Values.authentication.jwt.outputClaimToHeaders | nindent 8 }}
+      {{- end }}
+
+---
+# AuthorizationPolicy enforces that requests have a valid JWT
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ $fullName }}-agent-require-jwt
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      omnia.altairalabs.ai/component: agent
+  action: ALLOW
+  rules:
+    {{- if .Values.authentication.authorization.excludePaths }}
+    # Allow unauthenticated access to excluded paths (health checks)
+    - to:
+        - operation:
+            paths:
+              {{- toYaml .Values.authentication.authorization.excludePaths | nindent 14 }}
+    {{- end }}
+    # Require valid JWT for all other requests
+    - from:
+        - source:
+            requestPrincipals: ["*"]
+      {{- if .Values.authentication.authorization.requiredClaims }}
+      when:
+        {{- range .Values.authentication.authorization.requiredClaims }}
+        - key: request.auth.claims[{{ .claim }}]
+          values:
+            {{- toYaml .values | nindent 12 }}
+        {{- end }}
+      {{- end }}
+
+---
+# Deny policy for requests without valid JWT (catch-all)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ $fullName }}-agent-deny-unauthenticated
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      omnia.altairalabs.ai/component: agent
+  action: DENY
+  rules:
+    - from:
+        - source:
+            notRequestPrincipals: ["*"]
+      to:
+        - operation:
+            notPaths:
+              {{- if .Values.authentication.authorization.excludePaths }}
+              {{- toYaml .Values.authentication.authorization.excludePaths | nindent 14 }}
+              {{- else }}
+              - /healthz
+              - /readyz
+              {{- end }}
+{{- end }}

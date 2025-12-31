@@ -32,6 +32,11 @@ func NewEchoHandler() *EchoHandler {
 	return &EchoHandler{}
 }
 
+// Name returns the handler name for metrics.
+func (h *EchoHandler) Name() string {
+	return "echo"
+}
+
 // HandleMessage echoes back the input message.
 func (h *EchoHandler) HandleMessage(
 	_ context.Context,
