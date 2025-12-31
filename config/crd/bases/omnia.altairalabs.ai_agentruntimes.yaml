@@ -1047,6 +1047,45 @@ spec:
                             x-kubernetes-list-type: atomic
                         type: object
                     type: object
+                  autoscaling:
+                    description: autoscaling configures horizontal pod autoscaling
+                      for the agent.
+                    properties:
+                      enabled:
+                        default: false
+                        description: |-
+                          enabled specifies whether autoscaling is enabled.
+                          When enabled, the HPA will manage replica count instead of spec.runtime.replicas.
+                        type: boolean
+                      maxReplicas:
+                        default: 10
+                        description: maxReplicas is the maximum number of replicas.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        default: 1
+                        description: minReplicas is the minimum number of replicas.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      targetCPUUtilizationPercentage:
+                        default: 80
+                        description: targetCPUUtilizationPercentage is the target
+                          average CPU utilization.
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      targetMemoryUtilizationPercentage:
+                        description: |-
+                          targetMemoryUtilizationPercentage is the target average memory utilization.
+                          If not set, memory-based scaling is not used.
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                    type: object
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -1054,7 +1093,9 @@ spec:
                     type: object
                   replicas:
                     default: 1
-                    description: replicas is the desired number of agent runtime pods.
+                    description: |-
+                      replicas is the desired number of agent runtime pods.
+                      This field is ignored when autoscaling is enabled.
                     format: int32
                     minimum: 0
                     type: integer

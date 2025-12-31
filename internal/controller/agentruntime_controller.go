@@ -22,6 +22,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -73,6 +74,7 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -168,6 +170,12 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	r.setCondition(agentRuntime, ConditionTypeServiceReady, metav1.ConditionTrue,
 		"ServiceCreated", "Service created/updated successfully")
+
+	// Reconcile HPA (if autoscaling is enabled)
+	if err := r.reconcileHPA(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile HPA")
+		// Don't fail the reconciliation for HPA errors, just log
+	}
 
 	// Update status from deployment
 	r.updateStatusFromDeployment(agentRuntime, deployment, promptPack)
@@ -589,12 +597,123 @@ func (r *AgentRuntimeReconciler) setCondition(
 	})
 }
 
+func (r *AgentRuntimeReconciler) reconcileHPA(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) error {
+	log := logf.FromContext(ctx)
+
+	// Check if autoscaling is enabled
+	autoscalingEnabled := agentRuntime.Spec.Runtime != nil &&
+		agentRuntime.Spec.Runtime.Autoscaling != nil &&
+		agentRuntime.Spec.Runtime.Autoscaling.Enabled
+
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRuntime.Name,
+			Namespace: agentRuntime.Namespace,
+		},
+	}
+
+	if !autoscalingEnabled {
+		// Delete HPA if it exists
+		if err := r.Delete(ctx, hpa); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to delete HPA: %w", err)
+		}
+		log.Info("Deleted HPA (autoscaling disabled)")
+		return nil
+	}
+
+	// Create or update HPA
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, hpa, func() error {
+		// Set owner reference
+		if err := controllerutil.SetControllerReference(agentRuntime, hpa, r.Scheme); err != nil {
+			return err
+		}
+
+		autoscaling := agentRuntime.Spec.Runtime.Autoscaling
+
+		// Set defaults
+		minReplicas := int32(1)
+		if autoscaling.MinReplicas != nil {
+			minReplicas = *autoscaling.MinReplicas
+		}
+
+		maxReplicas := int32(10)
+		if autoscaling.MaxReplicas != nil {
+			maxReplicas = *autoscaling.MaxReplicas
+		}
+
+		targetCPU := int32(80)
+		if autoscaling.TargetCPUUtilizationPercentage != nil {
+			targetCPU = *autoscaling.TargetCPUUtilizationPercentage
+		}
+
+		labels := map[string]string{
+			"app.kubernetes.io/name":         "omnia-agent",
+			"app.kubernetes.io/instance":     agentRuntime.Name,
+			"app.kubernetes.io/managed-by":   "omnia-operator",
+			"omnia.altairalabs.ai/component": "agent",
+		}
+
+		hpa.Labels = labels
+		hpa.Spec = autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       agentRuntime.Name,
+			},
+			MinReplicas: &minReplicas,
+			MaxReplicas: maxReplicas,
+			Metrics: []autoscalingv2.MetricSpec{
+				{
+					Type: autoscalingv2.ResourceMetricSourceType,
+					Resource: &autoscalingv2.ResourceMetricSource{
+						Name: corev1.ResourceCPU,
+						Target: autoscalingv2.MetricTarget{
+							Type:               autoscalingv2.UtilizationMetricType,
+							AverageUtilization: &targetCPU,
+						},
+					},
+				},
+			},
+		}
+
+		// Add memory metric if configured
+		if autoscaling.TargetMemoryUtilizationPercentage != nil {
+			hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
+				Type: autoscalingv2.ResourceMetricSourceType,
+				Resource: &autoscalingv2.ResourceMetricSource{
+					Name: corev1.ResourceMemory,
+					Target: autoscalingv2.MetricTarget{
+						Type:               autoscalingv2.UtilizationMetricType,
+						AverageUtilization: autoscaling.TargetMemoryUtilizationPercentage,
+					},
+				},
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to reconcile HPA: %w", err)
+	}
+
+	log.Info("HPA reconciled", "result", result)
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&omniav1alpha1.AgentRuntime{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Named("agentruntime").
 		Complete(r)
 }

@@ -131,13 +131,53 @@ type SessionConfig struct {
 	TTL *string `json:"ttl,omitempty"`
 }
 
+// AutoscalingConfig defines horizontal pod autoscaling settings.
+type AutoscalingConfig struct {
+	// enabled specifies whether autoscaling is enabled.
+	// When enabled, the HPA will manage replica count instead of spec.runtime.replicas.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// minReplicas is the minimum number of replicas.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+
+	// maxReplicas is the maximum number of replicas.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=10
+	// +optional
+	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
+
+	// targetCPUUtilizationPercentage is the target average CPU utilization.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:default=80
+	// +optional
+	TargetCPUUtilizationPercentage *int32 `json:"targetCPUUtilizationPercentage,omitempty"`
+
+	// targetMemoryUtilizationPercentage is the target average memory utilization.
+	// If not set, memory-based scaling is not used.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	TargetMemoryUtilizationPercentage *int32 `json:"targetMemoryUtilizationPercentage,omitempty"`
+}
+
 // RuntimeConfig defines deployment-related settings.
 type RuntimeConfig struct {
 	// replicas is the desired number of agent runtime pods.
+	// This field is ignored when autoscaling is enabled.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
+
+	// autoscaling configures horizontal pod autoscaling for the agent.
+	// +optional
+	Autoscaling *AutoscalingConfig `json:"autoscaling,omitempty"`
 
 	// resources defines compute resource requirements for the agent container.
 	// +optional
