@@ -36,6 +36,10 @@ type mockHandler struct {
 	handleFunc func(ctx context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter) error
 }
 
+func (m *mockHandler) Name() string {
+	return "mock"
+}
+
 func (m *mockHandler) HandleMessage(ctx context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter) error {
 	if m.handleFunc != nil {
 		return m.handleFunc(ctx, sessionID, msg, writer)

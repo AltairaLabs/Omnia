@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-logr/zapr"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/altairalabs/omnia/internal/agent"
@@ -82,14 +83,18 @@ func main() {
 	// Create message handler based on mode
 	handler := createHandler(cfg, log)
 
-	// Create WebSocket server
+	// Create Prometheus metrics
+	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+
+	// Create WebSocket server with metrics
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
-	wsServer := facade.NewServer(wsConfig, store, handler, log)
+	wsServer := facade.NewServer(wsConfig, store, handler, log, facade.WithMetrics(metrics))
 
 	// Create HTTP mux for routing
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// Create facade HTTP server
 	facadeServer := &http.Server{

@@ -62,6 +62,8 @@ func DefaultServerConfig() ServerConfig {
 
 // MessageHandler handles incoming client messages.
 type MessageHandler interface {
+	// Name returns the handler name for metrics labeling.
+	Name() string
 	// HandleMessage processes a client message and streams responses.
 	// The handler should send responses via the ResponseWriter.
 	HandleMessage(ctx context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter) error
@@ -87,6 +89,7 @@ type Server struct {
 	upgrader     websocket.Upgrader
 	sessionStore session.Store
 	handler      MessageHandler
+	metrics      ServerMetrics
 	log          logr.Logger
 
 	mu          sync.RWMutex
@@ -104,12 +107,23 @@ type Connection struct {
 	closed    bool
 }
 
+// ServerOption is a functional option for configuring the server.
+type ServerOption func(*Server)
+
+// WithMetrics sets the metrics collector for the server.
+func WithMetrics(m ServerMetrics) ServerOption {
+	return func(s *Server) {
+		s.metrics = m
+	}
+}
+
 // NewServer creates a new WebSocket server.
-func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, log logr.Logger) *Server {
-	return &Server{
+func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, log logr.Logger, opts ...ServerOption) *Server {
+	s := &Server{
 		config:       cfg,
 		sessionStore: store,
 		handler:      handler,
+		metrics:      &NoOpMetrics{}, // Default to no-op
 		log:          log.WithName("websocket-server"),
 		connections:  make(map[*websocket.Conn]*Connection),
 		upgrader: websocket.Upgrader{
@@ -121,6 +135,12 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 			},
 		},
 	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
 
 // ServeHTTP handles WebSocket upgrade requests.
@@ -162,6 +182,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.connections[conn] = c
 	s.mu.Unlock()
 
+	// Record connection metrics
+	s.metrics.ConnectionOpened()
+
 	s.log.Info("new connection", "agent", agentName, "namespace", namespace)
 
 	// Handle connection in goroutine
@@ -177,6 +200,9 @@ func (s *Server) handleConnection(c *Connection) {
 		c.mu.Lock()
 		c.closed = true
 		c.mu.Unlock()
+
+		// Record connection closed
+		s.metrics.ConnectionClosed()
 
 		if err := c.conn.Close(); err != nil {
 			s.log.Error(err, "error closing connection")
@@ -235,6 +261,9 @@ func (s *Server) handleConnection(c *Connection) {
 			return
 		}
 
+		// Record message received
+		s.metrics.MessageReceived()
+
 		// Parse message
 		var clientMsg ClientMessage
 		if err := json.Unmarshal(message, &clientMsg); err != nil {
@@ -242,10 +271,23 @@ func (s *Server) handleConnection(c *Connection) {
 			continue
 		}
 
-		// Handle message
-		if err := s.processMessage(ctx, c, &clientMsg); err != nil {
+		// Handle message with timing
+		s.metrics.RequestStarted()
+		startTime := time.Now()
+
+		err = s.processMessage(ctx, c, &clientMsg)
+
+		duration := time.Since(startTime).Seconds()
+		status := "success"
+		if err != nil {
+			status = "error"
 			s.log.Error(err, "error processing message")
 		}
+		handlerName := "none"
+		if s.handler != nil {
+			handlerName = s.handler.Name()
+		}
+		s.metrics.RequestCompleted(status, duration, handlerName)
 	}
 }
 
@@ -342,7 +384,13 @@ func (s *Server) sendMessage(c *Connection, msg *ServerMessage) error {
 		return err
 	}
 
-	return c.conn.WriteJSON(msg)
+	if err := c.conn.WriteJSON(msg); err != nil {
+		return err
+	}
+
+	// Record message sent
+	s.metrics.MessageSent()
+	return nil
 }
 
 func (s *Server) sendError(c *Connection, sessionID, code, message string) {
