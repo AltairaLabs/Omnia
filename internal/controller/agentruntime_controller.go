@@ -682,7 +682,11 @@ func (r *AgentRuntimeReconciler) cleanupKEDA(ctx context.Context, agentRuntime *
 	scaledObject.SetName(agentRuntime.Name)
 	scaledObject.SetNamespace(agentRuntime.Namespace)
 
-	if err := r.Delete(ctx, scaledObject); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.Delete(ctx, scaledObject); err != nil {
+		// Ignore NotFound (object doesn't exist) and NoMatch (KEDA CRDs not installed)
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to delete ScaledObject: %w", err)
 	}
 	return nil
