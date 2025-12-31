@@ -132,6 +132,8 @@ type SessionConfig struct {
 }
 
 // AutoscalingConfig defines horizontal pod autoscaling settings.
+// Agents are typically I/O bound (waiting on LLM API calls), not CPU bound.
+// Memory-based scaling is the default since each connection/session uses memory.
 type AutoscalingConfig struct {
 	// enabled specifies whether autoscaling is enabled.
 	// When enabled, the HPA will manage replica count instead of spec.runtime.replicas.
@@ -151,19 +153,32 @@ type AutoscalingConfig struct {
 	// +optional
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
 
-	// targetCPUUtilizationPercentage is the target average CPU utilization.
+	// targetMemoryUtilizationPercentage is the target average memory utilization.
+	// Memory is the primary scaling metric since each WebSocket connection and
+	// session consumes memory. Defaults to 70%.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
-	// +kubebuilder:default=80
+	// +kubebuilder:default=70
+	// +optional
+	TargetMemoryUtilizationPercentage *int32 `json:"targetMemoryUtilizationPercentage,omitempty"`
+
+	// targetCPUUtilizationPercentage is the target average CPU utilization.
+	// CPU is a secondary metric since agents are typically I/O bound.
+	// Set to nil to disable CPU-based scaling. Defaults to 90% as a safety valve.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:default=90
 	// +optional
 	TargetCPUUtilizationPercentage *int32 `json:"targetCPUUtilizationPercentage,omitempty"`
 
-	// targetMemoryUtilizationPercentage is the target average memory utilization.
-	// If not set, memory-based scaling is not used.
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=100
+	// scaleDownStabilizationSeconds is the number of seconds to wait before
+	// scaling down after a scale-up. This prevents thrashing when connections
+	// are bursty. Defaults to 300 (5 minutes).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=3600
+	// +kubebuilder:default=300
 	// +optional
-	TargetMemoryUtilizationPercentage *int32 `json:"targetMemoryUtilizationPercentage,omitempty"`
+	ScaleDownStabilizationSeconds *int32 `json:"scaleDownStabilizationSeconds,omitempty"`
 }
 
 // RuntimeConfig defines deployment-related settings.

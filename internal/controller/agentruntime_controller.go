@@ -49,6 +49,15 @@ const (
 	FinalizerName = "agentruntime.omnia.altairalabs.ai/finalizer"
 )
 
+// Helper functions for creating pointers
+func ptr[T any](v T) *T {
+	return &v
+}
+
+func ptrSelectPolicy(p autoscalingv2.ScalingPolicySelect) *autoscalingv2.ScalingPolicySelect {
+	return &p
+}
+
 // Condition types for AgentRuntime
 const (
 	ConditionTypeReady             = "Ready"
@@ -647,9 +656,24 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 			maxReplicas = *autoscaling.MaxReplicas
 		}
 
-		targetCPU := int32(80)
+		// Memory is the primary metric (default 70%)
+		// Agents are I/O bound, not CPU bound - each connection uses memory
+		targetMemory := int32(70)
+		if autoscaling.TargetMemoryUtilizationPercentage != nil {
+			targetMemory = *autoscaling.TargetMemoryUtilizationPercentage
+		}
+
+		// CPU is secondary/safety valve (default 90%)
+		targetCPU := int32(90)
 		if autoscaling.TargetCPUUtilizationPercentage != nil {
 			targetCPU = *autoscaling.TargetCPUUtilizationPercentage
+		}
+
+		// Scale-down stabilization (default 5 minutes)
+		// Prevents thrashing when connections are bursty
+		scaleDownStabilization := int32(300)
+		if autoscaling.ScaleDownStabilizationSeconds != nil {
+			scaleDownStabilization = *autoscaling.ScaleDownStabilizationSeconds
 		}
 
 		labels := map[string]string{
@@ -668,7 +692,18 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 			},
 			MinReplicas: &minReplicas,
 			MaxReplicas: maxReplicas,
+			// Memory is primary metric for agents (I/O bound workloads)
 			Metrics: []autoscalingv2.MetricSpec{
+				{
+					Type: autoscalingv2.ResourceMetricSourceType,
+					Resource: &autoscalingv2.ResourceMetricSource{
+						Name: corev1.ResourceMemory,
+						Target: autoscalingv2.MetricTarget{
+							Type:               autoscalingv2.UtilizationMetricType,
+							AverageUtilization: &targetMemory,
+						},
+					},
+				},
 				{
 					Type: autoscalingv2.ResourceMetricSourceType,
 					Resource: &autoscalingv2.ResourceMetricSource{
@@ -680,20 +715,36 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 					},
 				},
 			},
-		}
-
-		// Add memory metric if configured
-		if autoscaling.TargetMemoryUtilizationPercentage != nil {
-			hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
-				Type: autoscalingv2.ResourceMetricSourceType,
-				Resource: &autoscalingv2.ResourceMetricSource{
-					Name: corev1.ResourceMemory,
-					Target: autoscalingv2.MetricTarget{
-						Type:               autoscalingv2.UtilizationMetricType,
-						AverageUtilization: autoscaling.TargetMemoryUtilizationPercentage,
+			// Behavior controls scale-up/scale-down rates
+			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
+				ScaleDown: &autoscalingv2.HPAScalingRules{
+					StabilizationWindowSeconds: &scaleDownStabilization,
+					Policies: []autoscalingv2.HPAScalingPolicy{
+						{
+							Type:          autoscalingv2.PercentScalingPolicy,
+							Value:         50, // Scale down max 50% of pods at a time
+							PeriodSeconds: 60,
+						},
 					},
 				},
-			})
+				ScaleUp: &autoscalingv2.HPAScalingRules{
+					// Scale up faster than scale down (responsive to load)
+					StabilizationWindowSeconds: ptr(int32(0)),
+					Policies: []autoscalingv2.HPAScalingPolicy{
+						{
+							Type:          autoscalingv2.PercentScalingPolicy,
+							Value:         100, // Can double pods
+							PeriodSeconds: 15,
+						},
+						{
+							Type:          autoscalingv2.PodsScalingPolicy,
+							Value:         4, // Or add up to 4 pods
+							PeriodSeconds: 15,
+						},
+					},
+					SelectPolicy: ptrSelectPolicy(autoscalingv2.MaxChangePolicySelect),
+				},
+			},
 		}
 
 		return nil

@@ -163,13 +163,18 @@ func (in *AutoscalingConfig) DeepCopyInto(out *AutoscalingConfig) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.TargetMemoryUtilizationPercentage != nil {
+		in, out := &in.TargetMemoryUtilizationPercentage, &out.TargetMemoryUtilizationPercentage
+		*out = new(int32)
+		**out = **in
+	}
 	if in.TargetCPUUtilizationPercentage != nil {
 		in, out := &in.TargetCPUUtilizationPercentage, &out.TargetCPUUtilizationPercentage
 		*out = new(int32)
 		**out = **in
 	}
-	if in.TargetMemoryUtilizationPercentage != nil {
-		in, out := &in.TargetMemoryUtilizationPercentage, &out.TargetMemoryUtilizationPercentage
+	if in.ScaleDownStabilizationSeconds != nil {
+		in, out := &in.ScaleDownStabilizationSeconds, &out.ScaleDownStabilizationSeconds
 		*out = new(int32)
 		**out = **in
 	}

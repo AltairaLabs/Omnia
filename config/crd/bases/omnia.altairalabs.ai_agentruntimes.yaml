@@ -1069,18 +1069,32 @@ spec:
                         format: int32
                         minimum: 1
                         type: integer
+                      scaleDownStabilizationSeconds:
+                        default: 300
+                        description: |-
+                          scaleDownStabilizationSeconds is the number of seconds to wait before
+                          scaling down after a scale-up. This prevents thrashing when connections
+                          are bursty. Defaults to 300 (5 minutes).
+                        format: int32
+                        maximum: 3600
+                        minimum: 0
+                        type: integer
                       targetCPUUtilizationPercentage:
-                        default: 80
-                        description: targetCPUUtilizationPercentage is the target
-                          average CPU utilization.
+                        default: 90
+                        description: |-
+                          targetCPUUtilizationPercentage is the target average CPU utilization.
+                          CPU is a secondary metric since agents are typically I/O bound.
+                          Set to nil to disable CPU-based scaling. Defaults to 90% as a safety valve.
                         format: int32
                         maximum: 100
                         minimum: 1
                         type: integer
                       targetMemoryUtilizationPercentage:
+                        default: 70
                         description: |-
                           targetMemoryUtilizationPercentage is the target average memory utilization.
-                          If not set, memory-based scaling is not used.
+                          Memory is the primary scaling metric since each WebSocket connection and
+                          session consumes memory. Defaults to 70%.
                         format: int32
                         maximum: 100
                         minimum: 1
