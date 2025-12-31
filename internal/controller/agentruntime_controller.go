@@ -27,7 +27,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -84,6 +86,7 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -180,10 +183,10 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	r.setCondition(agentRuntime, ConditionTypeServiceReady, metav1.ConditionTrue,
 		"ServiceCreated", "Service created/updated successfully")
 
-	// Reconcile HPA (if autoscaling is enabled)
-	if err := r.reconcileHPA(ctx, agentRuntime); err != nil {
-		log.Error(err, "Failed to reconcile HPA")
-		// Don't fail the reconciliation for HPA errors, just log
+	// Reconcile autoscaling (HPA or KEDA if enabled)
+	if err := r.reconcileAutoscaling(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile autoscaling")
+		// Don't fail the reconciliation for autoscaling errors, just log
 	}
 
 	// Update status from deployment
@@ -380,6 +383,13 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		}
 	}
 
+	// Prometheus scrape annotations for metrics collection
+	podAnnotations := map[string]string{
+		"prometheus.io/scrape": "true",
+		"prometheus.io/port":   fmt.Sprintf("%d", port),
+		"prometheus.io/path":   "/metrics",
+	}
+
 	deployment.Labels = labels
 	deployment.Spec = appsv1.DeploymentSpec{
 		Replicas: &replicas,
@@ -388,7 +398,8 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		},
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: labels,
+				Labels:      labels,
+				Annotations: podAnnotations,
 			},
 			Spec: podSpec,
 		},
@@ -551,7 +562,15 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 			port = *agentRuntime.Spec.Facade.Port
 		}
 
+		// Prometheus scrape annotations on Service (not pod, as Istio overrides pod annotations)
+		annotations := map[string]string{
+			"prometheus.io/scrape": "true",
+			"prometheus.io/port":   fmt.Sprintf("%d", port),
+			"prometheus.io/path":   "/metrics",
+		}
+
 		service.Labels = labels
+		service.Annotations = annotations
 		service.Spec = corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{
@@ -606,16 +625,219 @@ func (r *AgentRuntimeReconciler) setCondition(
 	})
 }
 
-func (r *AgentRuntimeReconciler) reconcileHPA(
+func (r *AgentRuntimeReconciler) reconcileAutoscaling(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) error {
+	// Check if autoscaling is enabled and what type
+	if agentRuntime.Spec.Runtime == nil ||
+		agentRuntime.Spec.Runtime.Autoscaling == nil ||
+		!agentRuntime.Spec.Runtime.Autoscaling.Enabled {
+		// Autoscaling disabled - clean up any autoscalers
+		if err := r.cleanupHPA(ctx, agentRuntime); err != nil {
+			return err
+		}
+		return r.cleanupKEDA(ctx, agentRuntime)
+	}
+
+	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
+
+	// Route based on autoscaler type
+	if autoscaling.Type == omniav1alpha1.AutoscalerTypeKEDA {
+		// Clean up HPA if switching to KEDA
+		if err := r.cleanupHPA(ctx, agentRuntime); err != nil {
+			return err
+		}
+		return r.reconcileKEDA(ctx, agentRuntime)
+	}
+
+	// Default to HPA - clean up KEDA if switching from KEDA
+	if err := r.cleanupKEDA(ctx, agentRuntime); err != nil {
+		return err
+	}
+	return r.reconcileHPA(ctx, agentRuntime)
+}
+
+func (r *AgentRuntimeReconciler) cleanupHPA(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) error {
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRuntime.Name,
+			Namespace: agentRuntime.Namespace,
+		},
+	}
+	if err := r.Delete(ctx, hpa); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete HPA: %w", err)
+	}
+	return nil
+}
+
+func (r *AgentRuntimeReconciler) cleanupKEDA(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) error {
+	// KEDA ScaledObject cleanup using unstructured
+	scaledObject := &unstructured.Unstructured{}
+	scaledObject.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "keda.sh",
+		Version: "v1alpha1",
+		Kind:    "ScaledObject",
+	})
+	scaledObject.SetName(agentRuntime.Name)
+	scaledObject.SetNamespace(agentRuntime.Namespace)
+
+	if err := r.Delete(ctx, scaledObject); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete ScaledObject: %w", err)
+	}
+	return nil
+}
+
+func (r *AgentRuntimeReconciler) reconcileKEDA(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) error {
 	log := logf.FromContext(ctx)
 
-	// Check if autoscaling is enabled
-	autoscalingEnabled := agentRuntime.Spec.Runtime != nil &&
-		agentRuntime.Spec.Runtime.Autoscaling != nil &&
-		agentRuntime.Spec.Runtime.Autoscaling.Enabled
+	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
+
+	// Build KEDA ScaledObject using unstructured to avoid dependency on KEDA API
+	scaledObject := &unstructured.Unstructured{}
+	scaledObject.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "keda.sh",
+		Version: "v1alpha1",
+		Kind:    "ScaledObject",
+	})
+	scaledObject.SetName(agentRuntime.Name)
+	scaledObject.SetNamespace(agentRuntime.Namespace)
+
+	labels := map[string]string{
+		"app.kubernetes.io/name":         "omnia-agent",
+		"app.kubernetes.io/instance":     agentRuntime.Name,
+		"app.kubernetes.io/managed-by":   "omnia-operator",
+		"omnia.altairalabs.ai/component": "agent",
+	}
+	scaledObject.SetLabels(labels)
+
+	// Set owner reference for garbage collection
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         agentRuntime.APIVersion,
+		Kind:               agentRuntime.Kind,
+		Name:               agentRuntime.Name,
+		UID:                agentRuntime.UID,
+		Controller:         ptr(true),
+		BlockOwnerDeletion: ptr(true),
+	}
+	scaledObject.SetOwnerReferences([]metav1.OwnerReference{ownerRef})
+
+	// Set defaults
+	minReplicas := int64(0) // KEDA supports scale-to-zero
+	if autoscaling.MinReplicas != nil {
+		minReplicas = int64(*autoscaling.MinReplicas)
+	}
+
+	maxReplicas := int64(10)
+	if autoscaling.MaxReplicas != nil {
+		maxReplicas = int64(*autoscaling.MaxReplicas)
+	}
+
+	pollingInterval := int64(30)
+	cooldownPeriod := int64(300)
+	if autoscaling.KEDA != nil {
+		if autoscaling.KEDA.PollingInterval != nil {
+			pollingInterval = int64(*autoscaling.KEDA.PollingInterval)
+		}
+		if autoscaling.KEDA.CooldownPeriod != nil {
+			cooldownPeriod = int64(*autoscaling.KEDA.CooldownPeriod)
+		}
+	}
+
+	// Build triggers
+	triggers := r.buildKEDATriggers(agentRuntime)
+
+	// Set spec
+	spec := map[string]interface{}{
+		"scaleTargetRef": map[string]interface{}{
+			"name": agentRuntime.Name,
+		},
+		"pollingInterval": pollingInterval,
+		"cooldownPeriod":  cooldownPeriod,
+		"minReplicaCount": minReplicas,
+		"maxReplicaCount": maxReplicas,
+		"triggers":        triggers,
+	}
+
+	if err := unstructured.SetNestedField(scaledObject.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("failed to set ScaledObject spec: %w", err)
+	}
+
+	// Check if ScaledObject exists
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "keda.sh",
+		Version: "v1alpha1",
+		Kind:    "ScaledObject",
+	})
+	err := r.Get(ctx, types.NamespacedName{Name: agentRuntime.Name, Namespace: agentRuntime.Namespace}, existing)
+
+	if apierrors.IsNotFound(err) {
+		// Create ScaledObject
+		if err := r.Create(ctx, scaledObject); err != nil {
+			return fmt.Errorf("failed to create ScaledObject: %w", err)
+		}
+		log.Info("Created KEDA ScaledObject")
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get ScaledObject: %w", err)
+	}
+
+	// Update existing ScaledObject
+	existing.Object["spec"] = scaledObject.Object["spec"]
+	existing.SetLabels(labels)
+	existing.SetOwnerReferences([]metav1.OwnerReference{ownerRef})
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ScaledObject: %w", err)
+	}
+	log.Info("Updated KEDA ScaledObject")
+
+	return nil
+}
+
+func (r *AgentRuntimeReconciler) buildKEDATriggers(agentRuntime *omniav1alpha1.AgentRuntime) []interface{} {
+	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
+
+	// Use custom triggers if specified
+	if autoscaling.KEDA != nil && len(autoscaling.KEDA.Triggers) > 0 {
+		triggers := make([]interface{}, 0, len(autoscaling.KEDA.Triggers))
+		for _, t := range autoscaling.KEDA.Triggers {
+			// Convert map[string]string to map[string]interface{} for unstructured
+			metadata := make(map[string]interface{}, len(t.Metadata))
+			for k, v := range t.Metadata {
+				metadata[k] = v
+			}
+			triggers = append(triggers, map[string]interface{}{
+				"type":     t.Type,
+				"metadata": metadata,
+			})
+		}
+		return triggers
+	}
+
+	// Default: Prometheus trigger for active connections
+	// This assumes Prometheus is configured via the Omnia Helm chart with default settings
+	// Users with custom Prometheus setups should specify triggers explicitly
+	return []interface{}{
+		map[string]interface{}{
+			"type": "prometheus",
+			"metadata": map[string]interface{}{
+				"serverAddress": "http://omnia-prometheus-server.omnia-system.svc.cluster.local/prometheus",
+				"query":         fmt.Sprintf(`sum(omnia_agent_connections_active{agent="%s",namespace="%s"}) or vector(0)`, agentRuntime.Name, agentRuntime.Namespace),
+				"threshold":     "10", // Scale when avg connections per pod > 10
+			},
+		},
+	}
+}
+
+func (r *AgentRuntimeReconciler) reconcileHPA(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) error {
+	log := logf.FromContext(ctx)
 
 	hpa := &autoscalingv2.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
@@ -624,7 +846,8 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 		},
 	}
 
-	if !autoscalingEnabled {
+	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
+	if autoscaling == nil || !autoscaling.Enabled {
 		// Delete HPA if it exists
 		if err := r.Delete(ctx, hpa); err != nil {
 			if apierrors.IsNotFound(err) {

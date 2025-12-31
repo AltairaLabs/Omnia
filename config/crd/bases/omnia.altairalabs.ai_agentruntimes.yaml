@@ -1055,8 +1055,52 @@ spec:
                         default: false
                         description: |-
                           enabled specifies whether autoscaling is enabled.
-                          When enabled, the HPA will manage replica count instead of spec.runtime.replicas.
+                          When enabled, the autoscaler will manage replica count instead of spec.runtime.replicas.
                         type: boolean
+                      keda:
+                        description: keda contains KEDA-specific configuration. Only
+                          used when type is "keda".
+                        properties:
+                          cooldownPeriod:
+                            default: 300
+                            description: cooldownPeriod is the wait period in seconds
+                              after last trigger before scaling down. Defaults to
+                              300.
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          pollingInterval:
+                            default: 30
+                            description: pollingInterval is the interval in seconds
+                              to check triggers. Defaults to 30.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          triggers:
+                            description: |-
+                              triggers is the list of KEDA triggers for scaling.
+                              If empty, a default Prometheus trigger for connections is configured.
+                            items:
+                              description: KEDATrigger defines a KEDA scaling trigger.
+                              properties:
+                                metadata:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    metadata contains trigger-specific configuration.
+                                    For prometheus: serverAddress, query, threshold
+                                    For cron: timezone, start, end, desiredReplicas
+                                  type: object
+                                type:
+                                  description: type is the KEDA trigger type (e.g.,
+                                    "prometheus", "cron").
+                                  type: string
+                              required:
+                              - metadata
+                              - type
+                              type: object
+                            type: array
+                        type: object
                       maxReplicas:
                         default: 10
                         description: maxReplicas is the maximum number of replicas.
@@ -1065,16 +1109,18 @@ spec:
                         type: integer
                       minReplicas:
                         default: 1
-                        description: minReplicas is the minimum number of replicas.
+                        description: |-
+                          minReplicas is the minimum number of replicas.
+                          For KEDA, set to 0 to enable scale-to-zero.
                         format: int32
-                        minimum: 1
+                        minimum: 0
                         type: integer
                       scaleDownStabilizationSeconds:
                         default: 300
                         description: |-
                           scaleDownStabilizationSeconds is the number of seconds to wait before
                           scaling down after a scale-up. This prevents thrashing when connections
-                          are bursty. Defaults to 300 (5 minutes).
+                          are bursty. Defaults to 300 (5 minutes). Only used for HPA type.
                         format: int32
                         maximum: 3600
                         minimum: 0
@@ -1085,6 +1131,7 @@ spec:
                           targetCPUUtilizationPercentage is the target average CPU utilization.
                           CPU is a secondary metric since agents are typically I/O bound.
                           Set to nil to disable CPU-based scaling. Defaults to 90% as a safety valve.
+                          Only used for HPA type.
                         format: int32
                         maximum: 100
                         minimum: 1
@@ -1094,11 +1141,20 @@ spec:
                         description: |-
                           targetMemoryUtilizationPercentage is the target average memory utilization.
                           Memory is the primary scaling metric since each WebSocket connection and
-                          session consumes memory. Defaults to 70%.
+                          session consumes memory. Defaults to 70%. Only used for HPA type.
                         format: int32
                         maximum: 100
                         minimum: 1
                         type: integer
+                      type:
+                        default: hpa
+                        description: |-
+                          type specifies which autoscaler to use. Defaults to "hpa".
+                          Use "keda" for advanced scaling (scale to zero, Prometheus metrics, cron).
+                        enum:
+                        - hpa
+                        - keda
+                        type: string
                     type: object
                   nodeSelector:
                     additionalProperties:

@@ -131,18 +131,69 @@ type SessionConfig struct {
 	TTL *string `json:"ttl,omitempty"`
 }
 
+// AutoscalerType defines the type of autoscaler to use.
+// +kubebuilder:validation:Enum=hpa;keda
+type AutoscalerType string
+
+const (
+	// AutoscalerTypeHPA uses standard Kubernetes HPA.
+	AutoscalerTypeHPA AutoscalerType = "hpa"
+	// AutoscalerTypeKEDA uses KEDA for advanced scaling (requires KEDA installed).
+	AutoscalerTypeKEDA AutoscalerType = "keda"
+)
+
+// KEDATrigger defines a KEDA scaling trigger.
+type KEDATrigger struct {
+	// type is the KEDA trigger type (e.g., "prometheus", "cron").
+	// +kubebuilder:validation:Required
+	Type string `json:"type"`
+
+	// metadata contains trigger-specific configuration.
+	// For prometheus: serverAddress, query, threshold
+	// For cron: timezone, start, end, desiredReplicas
+	// +kubebuilder:validation:Required
+	Metadata map[string]string `json:"metadata"`
+}
+
+// KEDAConfig defines KEDA-specific autoscaling configuration.
+type KEDAConfig struct {
+	// pollingInterval is the interval in seconds to check triggers. Defaults to 30.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=30
+	// +optional
+	PollingInterval *int32 `json:"pollingInterval,omitempty"`
+
+	// cooldownPeriod is the wait period in seconds after last trigger before scaling down. Defaults to 300.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=300
+	// +optional
+	CooldownPeriod *int32 `json:"cooldownPeriod,omitempty"`
+
+	// triggers is the list of KEDA triggers for scaling.
+	// If empty, a default Prometheus trigger for connections is configured.
+	// +optional
+	Triggers []KEDATrigger `json:"triggers,omitempty"`
+}
+
 // AutoscalingConfig defines horizontal pod autoscaling settings.
 // Agents are typically I/O bound (waiting on LLM API calls), not CPU bound.
 // Memory-based scaling is the default since each connection/session uses memory.
 type AutoscalingConfig struct {
 	// enabled specifies whether autoscaling is enabled.
-	// When enabled, the HPA will manage replica count instead of spec.runtime.replicas.
+	// When enabled, the autoscaler will manage replica count instead of spec.runtime.replicas.
 	// +kubebuilder:default=false
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 
+	// type specifies which autoscaler to use. Defaults to "hpa".
+	// Use "keda" for advanced scaling (scale to zero, Prometheus metrics, cron).
+	// +kubebuilder:default="hpa"
+	// +optional
+	Type AutoscalerType `json:"type,omitempty"`
+
 	// minReplicas is the minimum number of replicas.
-	// +kubebuilder:validation:Minimum=1
+	// For KEDA, set to 0 to enable scale-to-zero.
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
 	// +optional
 	MinReplicas *int32 `json:"minReplicas,omitempty"`
@@ -155,7 +206,7 @@ type AutoscalingConfig struct {
 
 	// targetMemoryUtilizationPercentage is the target average memory utilization.
 	// Memory is the primary scaling metric since each WebSocket connection and
-	// session consumes memory. Defaults to 70%.
+	// session consumes memory. Defaults to 70%. Only used for HPA type.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	// +kubebuilder:default=70
@@ -165,6 +216,7 @@ type AutoscalingConfig struct {
 	// targetCPUUtilizationPercentage is the target average CPU utilization.
 	// CPU is a secondary metric since agents are typically I/O bound.
 	// Set to nil to disable CPU-based scaling. Defaults to 90% as a safety valve.
+	// Only used for HPA type.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100
 	// +kubebuilder:default=90
@@ -173,12 +225,16 @@ type AutoscalingConfig struct {
 
 	// scaleDownStabilizationSeconds is the number of seconds to wait before
 	// scaling down after a scale-up. This prevents thrashing when connections
-	// are bursty. Defaults to 300 (5 minutes).
+	// are bursty. Defaults to 300 (5 minutes). Only used for HPA type.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=3600
 	// +kubebuilder:default=300
 	// +optional
 	ScaleDownStabilizationSeconds *int32 `json:"scaleDownStabilizationSeconds,omitempty"`
+
+	// keda contains KEDA-specific configuration. Only used when type is "keda".
+	// +optional
+	KEDA *KEDAConfig `json:"keda,omitempty"`
 }
 
 // RuntimeConfig defines deployment-related settings.

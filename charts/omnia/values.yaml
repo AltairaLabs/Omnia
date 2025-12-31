@@ -441,3 +441,24 @@ authentication:
     excludePaths:
       - /healthz
       - /readyz
+
+# ============================================================================
+# KEDA Configuration (Advanced Autoscaling)
+# KEDA enables scale-to-zero, custom metrics scaling, and cron-based scaling
+# See: https://keda.sh/docs/
+# ============================================================================
+
+keda:
+  # -- Enable KEDA (Kubernetes Event-driven Autoscaler)
+  # Required for AgentRuntime autoscaling with type: keda
+  enabled: false
+  # -- KEDA operator configuration
+  # See: https://github.com/kedacore/charts/tree/main/keda
+  operator:
+    # -- Watch all namespaces (recommended for cluster-wide use)
+    watchNamespace: ""
+  # -- Prometheus metrics adapter
+  prometheus:
+    # -- Prometheus server address for KEDA triggers
+    # This is the default when using the Prometheus subchart
+    serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"
