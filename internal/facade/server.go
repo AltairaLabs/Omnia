@@ -267,6 +267,7 @@ func (s *Server) handleConnection(c *Connection) {
 		// Parse message
 		var clientMsg ClientMessage
 		if err := json.Unmarshal(message, &clientMsg); err != nil {
+			s.log.Error(err, "failed to unmarshal message", "raw", string(message))
 			s.sendError(c, "", ErrorCodeInvalidMessage, "invalid message format")
 			continue
 		}

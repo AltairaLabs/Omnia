@@ -132,7 +132,7 @@ observability:
 # See: https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus
 prometheus:
   # -- Enable Prometheus
-  enabled: true
+  enabled: false
   server:
     # -- Disable persistent storage for dev/test
     persistentVolume:
@@ -157,7 +157,7 @@ prometheus:
 # See: https://github.com/grafana/helm-charts/tree/main/charts/grafana
 grafana:
   # -- Enable Grafana
-  enabled: true
+  enabled: false
   # -- Admin password (change in production!)
   adminPassword: admin
   # Configure Grafana to serve from sub-path
@@ -189,7 +189,7 @@ grafana:
 # See: https://github.com/grafana/helm-charts/tree/main/charts/loki
 loki:
   # -- Enable Loki
-  enabled: true
+  enabled: false
   # -- Deploy in single binary mode
   deploymentMode: SingleBinary
   loki:
@@ -231,7 +231,7 @@ loki:
 # Alloy replaces Promtail and can collect logs, metrics, and traces
 alloy:
   # -- Enable Alloy telemetry collector
-  enabled: true
+  enabled: false
   alloy:
     # Alloy configuration using River syntax
     configMap:
@@ -332,7 +332,7 @@ alloy:
 # See: https://github.com/grafana/helm-charts/tree/main/charts/tempo
 tempo:
   # -- Enable Tempo
-  enabled: true
+  enabled: false
   tempo:
     # -- Disable telemetry reporting
     reportingEnabled: false
@@ -365,8 +365,8 @@ istio:
 
 # External gateway for agent traffic (WebSocket connections)
 gateway:
-  # -- Enable external Gateway for agent ingress
-  enabled: true
+  # -- Enable external Gateway for agent ingress (requires Istio or Gateway controller)
+  enabled: false
   # -- Gateway name suffix
   name: agents
   # -- Gateway class name (istio when using Istio, or external controller)
@@ -387,8 +387,8 @@ gateway:
 
 # Internal gateway for observability tools (Grafana, Prometheus, etc.)
 internalGateway:
-  # -- Enable internal Gateway for observability tools
-  enabled: true
+  # -- Enable internal Gateway for observability tools (requires Istio or Gateway controller)
+  enabled: false
   # -- Gateway name suffix
   name: internal
   # -- Gateway class name

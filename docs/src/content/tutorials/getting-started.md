@@ -43,7 +43,7 @@ You should see the operator pod in a `Running` state.
 
 A PromptPack defines the prompts your agent will use. PromptPacks follow the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference) - a structured YAML/JSON format for packaging multi-prompt conversational systems.
 
-First, create a ConfigMap containing a compiled PromptPack:
+First, create a ConfigMap containing your prompts:
 
 ```yaml
 apiVersion: v1
@@ -52,32 +52,9 @@ metadata:
   name: assistant-prompts
   namespace: default
 data:
-  promptpack.json: |
-    {
-      "id": "assistant-pack",
-      "name": "AI Assistant",
-      "version": "1.0.0",
-      "template_engine": {
-        "version": "v1",
-        "syntax": "{{variable}}"
-      },
-      "prompts": {
-        "assistant": {
-          "id": "assistant",
-          "name": "General Assistant",
-          "version": "1.0.0",
-          "system_template": "You are a helpful AI assistant. Be concise and accurate in your responses. Always be polite and professional.",
-          "parameters": {
-            "temperature": 0.7,
-            "max_tokens": 1024
-          }
-        }
-      },
-      "metadata": {
-        "domain": "general",
-        "language": "en"
-      }
-    }
+  system.txt: |
+    You are a helpful AI assistant. Be concise and accurate in your responses.
+    Always be polite and professional.
 ```
 
 Then create the PromptPack resource that references the ConfigMap:
@@ -89,10 +66,12 @@ metadata:
   name: assistant-pack
   namespace: default
 spec:
+  version: "1.0.0"
+  rollout:
+    type: immediate
   source:
     configMapRef:
       name: assistant-prompts
-      key: promptpack.json
 ```
 
 Apply both:
@@ -102,7 +81,14 @@ kubectl apply -f configmap.yaml
 kubectl apply -f promptpack.yaml
 ```
 
-> **Tip**: You can author PromptPacks in YAML and compile them to JSON using the [packc](https://promptpack.org) compiler for validation and optimization.
+Verify the PromptPack is ready:
+
+```bash
+kubectl get promptpack assistant-pack
+# Should show: assistant-pack   Active   1.0.0   ...
+```
+
+> **Tip**: For production use, you can author PromptPacks in YAML and compile them to JSON using the [packc](https://promptpack.org) compiler for validation and optimization.
 
 ## Step 3: Configure Provider Credentials
 
@@ -136,19 +122,20 @@ metadata:
   name: my-assistant
   namespace: default
 spec:
-  replicas: 1
-  provider:
-    name: openai
-    model: gpt-4
-    apiKeySecretRef:
-      name: llm-credentials
-      key: api-key
   promptPackRef:
     name: assistant-pack
+  providerSecretRef:
+    name: llm-credentials
   facade:
     type: websocket
     port: 8080
+    handler: demo  # Use "demo" for testing without an API key
+  session:
+    type: memory
+    ttl: "1h"
 ```
+
+> **Note**: The `handler: demo` setting provides simulated streaming responses for testing. For production with a real LLM, change to `handler: runtime` (the default).
 
 ```bash
 kubectl apply -f agentruntime.yaml
@@ -180,16 +167,29 @@ kubectl port-forward svc/my-assistant 8080:8080
 Now you can connect using any WebSocket client. Using `websocat`:
 
 ```bash
-websocat ws://localhost:8080?agent=my-assistant
+# Interactive mode - type messages directly
+websocat "ws://localhost:8080/ws?agent=my-assistant"
 ```
 
-Send a message:
+Send a JSON message (the `?agent=` parameter is required):
 
 ```json
 {"type": "message", "content": "Hello, who are you?"}
 ```
 
-You'll receive a response with the agent's reply.
+You should see responses like:
+
+```json
+{"type":"connected","session_id":"abc123...","timestamp":"..."}
+{"type":"chunk","session_id":"abc123...","content":"Hello","timestamp":"..."}
+{"type":"chunk","session_id":"abc123...","content":"!","timestamp":"..."}
+{"type":"done","session_id":"abc123...","content":"","timestamp":"..."}
+```
+
+> **Tip**: To send a single test message programmatically:
+> ```bash
+> echo '{"type":"message","content":"Hello!"}' | websocat "ws://localhost:8080/ws?agent=my-assistant"
+> ```
 
 ## Next Steps
 
