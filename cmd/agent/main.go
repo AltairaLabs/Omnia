@@ -81,7 +81,10 @@ func main() {
 	defer closeStore(store, log)
 
 	// Create message handler based on mode
-	handler := createHandler(cfg, log)
+	handler, handlerCleanup := createHandler(cfg, log)
+	if handlerCleanup != nil {
+		defer handlerCleanup()
+	}
 
 	// Create Prometheus metrics
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
@@ -108,7 +111,7 @@ func main() {
 	// Create health check server
 	healthMux := http.NewServeMux()
 	healthMux.HandleFunc("/healthz", healthzHandler)
-	healthMux.HandleFunc("/readyz", readyzHandler(store))
+	healthMux.HandleFunc("/readyz", readyzHandler(store, handler))
 
 	healthServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
@@ -196,18 +199,32 @@ func healthzHandler(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-func readyzHandler(store session.Store) http.HandlerFunc {
+func readyzHandler(store session.Store, handler facade.MessageHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check session store connectivity
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Try to check if a non-existent session exists (quick health check)
+		// Check session store connectivity
 		_, err := store.GetSession(ctx, "health-check-probe")
 		if err != nil && err != session.ErrSessionNotFound {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
 			return
+		}
+
+		// Check runtime health if using runtime handler
+		if runtimeHandler, ok := handler.(*agent.RuntimeHandler); ok {
+			resp, err := runtimeHandler.Client().Health(ctx)
+			if err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintf(w, "runtime unavailable: %v", err)
+				return
+			}
+			if !resp.Healthy {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintf(w, "runtime unhealthy: %s", resp.Status)
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -225,20 +242,37 @@ func redactURL(url string) string {
 }
 
 // createHandler creates the appropriate message handler based on configuration.
-func createHandler(cfg *agent.Config, log interface{ Info(string, ...any) }) facade.MessageHandler {
+// Returns the handler and an optional cleanup function.
+func createHandler(cfg *agent.Config, log interface {
+	Info(string, ...any)
+	Error(error, string, ...any)
+}) (facade.MessageHandler, func()) {
 	switch cfg.HandlerMode {
 	case agent.HandlerModeEcho:
 		log.Info("using echo handler mode")
-		return agent.NewEchoHandler()
+		return agent.NewEchoHandler(), nil
 	case agent.HandlerModeDemo:
 		log.Info("using demo handler mode")
-		return agent.NewDemoHandler()
+		return agent.NewDemoHandler(), nil
 	case agent.HandlerModeRuntime:
-		log.Info("using runtime handler mode (not implemented)")
-		// Runtime handler will be implemented with PromptKit integration
-		return nil
+		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
+		client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+			Address:     cfg.RuntimeAddress,
+			DialTimeout: 30 * time.Second,
+		})
+		if err != nil {
+			log.Error(err, "failed to connect to runtime, falling back to nil handler")
+			return nil, nil
+		}
+		handler := agent.NewRuntimeHandler(client)
+		cleanup := func() {
+			if err := client.Close(); err != nil {
+				log.Error(err, "error closing runtime client")
+			}
+		}
+		return handler, cleanup
 	default:
 		log.Info("unknown handler mode, using nil handler", "mode", cfg.HandlerMode)
-		return nil
+		return nil, nil
 	}
 }

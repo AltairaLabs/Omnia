@@ -29,6 +29,7 @@ type mockResponseWriter struct {
 	doneMsg     string
 	toolCalls   []*facade.ToolCallInfo
 	toolResults []*facade.ToolResultInfo
+	errors      []struct{ code, message string }
 	err         error
 }
 
@@ -65,6 +66,10 @@ func (m *mockResponseWriter) WriteToolResult(info *facade.ToolResultInfo) error 
 }
 
 func (m *mockResponseWriter) WriteError(code, message string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.errors = append(m.errors, struct{ code, message string }{code, message})
 	return nil
 }
 
