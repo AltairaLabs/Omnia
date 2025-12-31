@@ -34,6 +34,7 @@ const (
 	EnvFacadeType          = "OMNIA_FACADE_TYPE"
 	EnvFacadePort          = "OMNIA_FACADE_PORT"
 	EnvHandlerMode         = "OMNIA_HANDLER_MODE"
+	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
 	EnvProviderAPIKey      = "OMNIA_PROVIDER_API_KEY"
 	EnvToolRegistryName    = "OMNIA_TOOLREGISTRY_NAME"
 	EnvToolRegistryNS      = "OMNIA_TOOLREGISTRY_NAMESPACE"
@@ -48,6 +49,7 @@ const (
 const (
 	DefaultFacadePort          = 8080
 	DefaultHealthPort          = 8081
+	DefaultRuntimeAddress      = "localhost:9000"
 	DefaultSessionTTL          = 24 * time.Hour
 	DefaultPromptPackMountPath = "/etc/promptpack"
 )
@@ -93,9 +95,10 @@ type Config struct {
 	PromptPackPath    string
 
 	// Facade configuration.
-	FacadeType  FacadeType
-	FacadePort  int
-	HandlerMode HandlerMode
+	FacadeType     FacadeType
+	FacadePort     int
+	HandlerMode    HandlerMode
+	RuntimeAddress string
 
 	// Provider configuration.
 	ProviderAPIKey string
@@ -150,6 +153,9 @@ func LoadFromEnv() (*Config, error) {
 	handlerMode := getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime))
 	cfg.HandlerMode = HandlerMode(handlerMode)
 
+	// Parse runtime address (for runtime handler mode)
+	cfg.RuntimeAddress = getEnvOrDefault(EnvRuntimeAddress, DefaultRuntimeAddress)
+
 	// Parse facade port
 	facadePort, err := getEnvAsInt(EnvFacadePort, DefaultFacadePort)
 	if err != nil {
@@ -192,13 +198,8 @@ func (c *Config) Validate() error {
 
 	// Validate handler mode
 	switch c.HandlerMode {
-	case HandlerModeEcho, HandlerModeDemo:
-		// Valid, provider API key not required
-	case HandlerModeRuntime:
-		// Runtime mode requires provider API key
-		if c.ProviderAPIKey == "" {
-			return ErrMissingProviderKey
-		}
+	case HandlerModeEcho, HandlerModeDemo, HandlerModeRuntime:
+		// Valid - runtime mode delegates to sidecar which handles provider keys
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidHandlerMode, c.HandlerMode)
 	}

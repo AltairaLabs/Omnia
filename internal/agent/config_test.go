@@ -278,7 +278,7 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: ErrMissingPromptPack,
 		},
 		{
-			name: "missing provider key for runtime handler",
+			name: "runtime handler mode valid without provider key",
 			config: &Config{
 				AgentName:      "test-agent",
 				Namespace:      "default",
@@ -287,7 +287,7 @@ func TestConfigValidate(t *testing.T) {
 				HandlerMode:    HandlerModeRuntime,
 				SessionType:    SessionTypeMemory,
 			},
-			wantErr: ErrMissingProviderKey,
+			wantErr: nil, // Facade delegates to runtime sidecar which handles provider keys
 		},
 		{
 			name: "invalid handler mode",
