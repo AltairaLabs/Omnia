@@ -33,5 +33,5 @@ jobs:
 
       - name: Running Tests
         run: |
-          go mod tidy
+          # Skip go mod tidy - may fail on local replace directives for PromptKit
           make test

@@ -60,7 +60,8 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
-	go fmt ./...
+	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
+	go fmt $$(go list ./... | grep -v /internal/runtime | grep -v /cmd/runtime)
 
 .PHONY: generate-proto
 generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto files.
@@ -76,11 +77,13 @@ generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto 
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet ./...
+	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
+	go vet $$(go list ./... | grep -v /internal/runtime | grep -v /cmd/runtime)
 
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	# Exclude e2e tests, internal/runtime and cmd/runtime (require local PromptKit dependency)
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e | grep -v /internal/runtime | grep -v /cmd/runtime) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
