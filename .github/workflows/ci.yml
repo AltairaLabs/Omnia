@@ -42,9 +42,6 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: Install dependencies
-      run: go mod download
-
     - name: Install gotestsum
       run: go install gotest.tools/gotestsum@latest
 
@@ -52,8 +49,11 @@ jobs:
       run: |
         echo "Running tests with coverage and race detection..."
         mkdir -p test-results
-        # Exclude internal/controller tests - they require envtest and run in separate job
-        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/controller)
+        # Exclude:
+        # - internal/controller: requires envtest (runs in separate job)
+        # - internal/runtime: requires local PromptKit dependency (not published yet)
+        # - cmd/runtime: requires local PromptKit dependency (not published yet)
+        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/controller | grep -v /internal/runtime | grep -v /cmd/runtime)
         echo "Coverage report generated: coverage.out"
 
     - name: Publish Test Results
@@ -238,7 +238,8 @@ jobs:
     - name: Run internal package tests
       run: |
         export KUBEBUILDER_ASSETS=$(setup-envtest use -p path --bin-dir ${{ github.workspace }}/bin/k8s)
-        go test -v ./internal/... -coverprofile=internal-coverage.out
+        # Exclude internal/runtime - requires local PromptKit dependency (not published yet)
+        go test -v $(go list ./internal/... | grep -v /internal/runtime) -coverprofile=internal-coverage.out
 
     - name: Upload internal coverage
       uses: actions/upload-artifact@v6
