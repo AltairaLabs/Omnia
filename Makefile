@@ -52,11 +52,13 @@ setup: ## Set up development environment (install git hooks)
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/..." paths="./cmd/agent/..." paths="./cmd/main.go" paths="./internal/agent/..." paths="./internal/controller/..." paths="./internal/facade/..." paths="./internal/session/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./cmd/agent/..." paths="./cmd/main.go" paths="./internal/agent/..." paths="./internal/controller/..." paths="./internal/facade/..." paths="./internal/session/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.

@@ -42,5 +42,5 @@ jobs:
 
       - name: Running Test e2e
         run: |
-          go mod tidy
+          # Skip go mod tidy - may fail on local replace directives for PromptKit
           make test-e2e
