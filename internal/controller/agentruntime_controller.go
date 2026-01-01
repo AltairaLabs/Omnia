@@ -79,6 +79,42 @@ func ptrSelectPolicy(p autoscalingv2.ScalingPolicySelect) *autoscalingv2.Scaling
 	return &p
 }
 
+// buildSessionEnvVars creates environment variables for session configuration.
+// The urlEnvName parameter allows different env var names for different containers.
+func buildSessionEnvVars(session *omniav1alpha1.SessionConfig, urlEnvName string) []corev1.EnvVar {
+	if session == nil {
+		return nil
+	}
+
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "OMNIA_SESSION_TYPE",
+			Value: string(session.Type),
+		},
+	}
+
+	if session.TTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_SESSION_TTL",
+			Value: *session.TTL,
+		})
+	}
+
+	if session.StoreRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: urlEnvName,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *session.StoreRef,
+					Key:                  "url",
+				},
+			},
+		})
+	}
+
+	return envVars
+}
+
 // Condition types for AgentRuntime
 const (
 	ConditionTypeReady             = "Ready"
@@ -558,29 +594,7 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	}
 
 	// Add session config (facade needs this for session management)
-	if agentRuntime.Spec.Session != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_SESSION_TYPE",
-			Value: string(agentRuntime.Spec.Session.Type),
-		})
-		if agentRuntime.Spec.Session.TTL != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_SESSION_TTL",
-				Value: *agentRuntime.Spec.Session.TTL,
-			})
-		}
-		if agentRuntime.Spec.Session.StoreRef != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name: "OMNIA_SESSION_STORE_URL",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: *agentRuntime.Spec.Session.StoreRef,
-						Key:                  "url",
-					},
-				},
-			})
-		}
-	}
+	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_STORE_URL")...)
 
 	return envVars
 }
@@ -658,29 +672,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	}
 
 	// Add session config for conversation persistence
-	if agentRuntime.Spec.Session != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_SESSION_TYPE",
-			Value: string(agentRuntime.Spec.Session.Type),
-		})
-		if agentRuntime.Spec.Session.TTL != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_SESSION_TTL",
-				Value: *agentRuntime.Spec.Session.TTL,
-			})
-		}
-		if agentRuntime.Spec.Session.StoreRef != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name: "OMNIA_SESSION_URL",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: *agentRuntime.Spec.Session.StoreRef,
-						Key:                  "url",
-					},
-				},
-			})
-		}
-	}
+	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_URL")...)
 
 	return envVars
 }
