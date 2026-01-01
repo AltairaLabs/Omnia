@@ -53,7 +53,10 @@ const metricsServiceName = "omnia-controller-manager-metrics-service"
 const metricsRoleBindingName = "omnia-metrics-binding"
 
 // agentImage is the agent container image used by AgentRuntime
-const agentImageRef = "example.com/omnia-agent:v0.0.1"
+const (
+	facadeImageRef  = "example.com/omnia-agent:v0.0.1"
+	runtimeImageRef = "example.com/omnia-runtime:v0.0.1"
+)
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -83,12 +86,12 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
-		By("patching the controller-manager to use the test agent image")
+		By("patching the controller-manager to use the test facade and runtime images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=json",
-			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--agent-image=%s"}]`, agentImageRef))
+			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--runtime-image=%s"}]`, facadeImageRef, runtimeImageRef))
 		_, err = utils.Run(patchCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with agent image")
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with facade and runtime images")
 
 		By("waiting for controller-manager to restart with new config")
 		time.Sleep(5 * time.Second)

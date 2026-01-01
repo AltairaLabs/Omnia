@@ -44,8 +44,11 @@ var (
 	// with the code source changes to be tested.
 	projectImage = "example.com/omnia:v0.0.1"
 
-	// agentImage is the name of the agent image used by AgentRuntime
-	agentImage = "example.com/omnia-agent:v0.0.1"
+	// facadeImage is the name of the facade image used by AgentRuntime
+	facadeImage = "example.com/omnia-agent:v0.0.1"
+
+	// runtimeImage is the name of the runtime image used by AgentRuntime
+	runtimeImage = "example.com/omnia-runtime:v0.0.1"
 )
 
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
@@ -64,10 +67,15 @@ var _ = BeforeSuite(func() {
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 
-	By("building the agent image")
-	cmd = exec.Command("docker", "build", "-t", agentImage, "-f", "Dockerfile.agent", ".")
+	By("building the facade image")
+	cmd = exec.Command("docker", "build", "-t", facadeImage, "-f", "Dockerfile.agent", ".")
 	_, err = utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the agent image")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the facade image")
+
+	By("building the runtime image")
+	cmd = exec.Command("docker", "build", "-t", runtimeImage, "-f", "Dockerfile.runtime", ".")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the runtime image")
 
 	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
 	// built and available before running the tests. Also, remove the following block.
@@ -75,9 +83,13 @@ var _ = BeforeSuite(func() {
 	err = utils.LoadImageToKindClusterWithName(projectImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
 
-	By("loading the agent image on Kind")
-	err = utils.LoadImageToKindClusterWithName(agentImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the agent image into Kind")
+	By("loading the facade image on Kind")
+	err = utils.LoadImageToKindClusterWithName(facadeImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the facade image into Kind")
+
+	By("loading the runtime image on Kind")
+	err = utils.LoadImageToKindClusterWithName(runtimeImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the runtime image into Kind")
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,
