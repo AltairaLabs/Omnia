@@ -1,23 +1,20 @@
 # Build stage
-# NOTE: This Dockerfile requires the binary to be pre-built with vendor dependencies
-# or PromptKit to be published to a module proxy.
-#
-# Build with: make docker-build-runtime
 FROM golang:1.25-alpine AS builder
 
-WORKDIR /workspace
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
-# Install dependencies
-RUN apk add --no-cache git ca-certificates
+# Set working directory
+WORKDIR /workspace
 
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Copy vendor directory if it exists (for local builds with vendored deps)
-COPY vendor/ vendor/ 2>/dev/null || true
-
-# Download dependencies (if not vendored)
-RUN if [ ! -d vendor ]; then go mod download; fi
+# NOTE: Skipping go mod download due to local replace directives for PromptKit
+# which aren't available in the Docker build context. Dependencies will be
+# downloaded during the build step instead.
+# TODO: Re-enable once PromptKit is published to a module proxy
+# RUN go mod download
 
 # Copy source code
 COPY cmd/ cmd/
@@ -26,27 +23,30 @@ COPY pkg/ pkg/
 COPY api/ api/
 
 # Build the runtime binary
-# Use -mod=vendor if vendor directory exists
-RUN if [ -d vendor ]; then \
-        CGO_ENABLED=0 GOOS=linux go build -mod=vendor -a -o runtime ./cmd/runtime; \
-    else \
-        CGO_ENABLED=0 GOOS=linux go build -a -o runtime ./cmd/runtime; \
-    fi
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o runtime \
+    ./cmd/runtime
 
 # Runtime stage
 FROM scratch
 
-WORKDIR /
+# Import CA certificates and timezone data from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Copy the binary
-COPY --from=builder /workspace/runtime .
+COPY --from=builder /workspace/runtime /runtime
 
-# Copy CA certificates for HTTPS connections
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+# Create non-root user
+# Note: scratch image doesn't support adduser, so we set USER by UID
+# The container orchestrator should ensure proper user mapping
+USER 65532:65532
 
-# gRPC port
-EXPOSE 9000
-# Health port
-EXPOSE 9001
+# Expose default ports
+# 9000 - gRPC server
+# 9001 - Health check endpoints
+EXPOSE 9000 9001
 
+# Run the runtime
 ENTRYPOINT ["/runtime"]

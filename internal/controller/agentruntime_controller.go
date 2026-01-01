@@ -36,19 +36,38 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 const (
-	// AgentContainerName is the name of the agent container in the pod.
-	AgentContainerName = "agent"
-	// DefaultAgentImage is the default image for the agent container.
-	DefaultAgentImage = "ghcr.io/altairalabs/omnia-agent:latest"
+	// FacadeContainerName is the name of the facade container in the pod.
+	FacadeContainerName = "facade"
+	// RuntimeContainerName is the name of the runtime container in the pod.
+	RuntimeContainerName = "runtime"
+	// DefaultFacadeImage is the default image for the facade container.
+	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-agent:latest"
+	// DefaultRuntimeImage is the default image for the runtime container.
+	DefaultRuntimeImage = "ghcr.io/altairalabs/omnia-runtime:latest"
 	// DefaultFacadePort is the default port for the WebSocket facade.
 	DefaultFacadePort = 8080
+	// DefaultFacadeHealthPort is the health port for the facade container.
+	DefaultFacadeHealthPort = 8081
+	// DefaultRuntimeGRPCPort is the gRPC port for the runtime container.
+	DefaultRuntimeGRPCPort = 9000
+	// DefaultRuntimeHealthPort is the health port for the runtime container.
+	DefaultRuntimeHealthPort = 9001
 	// FinalizerName is the finalizer for AgentRuntime resources.
 	FinalizerName = "agentruntime.omnia.altairalabs.ai/finalizer"
+	// ToolsConfigMapSuffix is the suffix for the tools ConfigMap name.
+	ToolsConfigMapSuffix = "-tools"
+	// ToolsConfigFileName is the filename for tools configuration.
+	ToolsConfigFileName = "tools.yaml"
+	// ToolsMountPath is the mount path for tools configuration.
+	ToolsMountPath = "/etc/omnia/tools"
+	// PromptPackMountPath is the mount path for PromptPack files.
+	PromptPackMountPath = "/etc/omnia/pack"
 )
 
 // Helper functions for creating pointers
@@ -58,6 +77,42 @@ func ptr[T any](v T) *T {
 
 func ptrSelectPolicy(p autoscalingv2.ScalingPolicySelect) *autoscalingv2.ScalingPolicySelect {
 	return &p
+}
+
+// buildSessionEnvVars creates environment variables for session configuration.
+// The urlEnvName parameter allows different env var names for different containers.
+func buildSessionEnvVars(session *omniav1alpha1.SessionConfig, urlEnvName string) []corev1.EnvVar {
+	if session == nil {
+		return nil
+	}
+
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "OMNIA_SESSION_TYPE",
+			Value: string(session.Type),
+		},
+	}
+
+	if session.TTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_SESSION_TTL",
+			Value: *session.TTL,
+		})
+	}
+
+	if session.StoreRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: urlEnvName,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *session.StoreRef,
+					Key:                  "url",
+				},
+			},
+		})
+	}
+
+	return envVars
 }
 
 // Condition types for AgentRuntime
@@ -72,8 +127,9 @@ const (
 // AgentRuntimeReconciler reconciles a AgentRuntime object
 type AgentRuntimeReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	AgentImage string
+	Scheme       *runtime.Scheme
+	FacadeImage  string
+	RuntimeImage string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -84,7 +140,7 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
 
@@ -153,6 +209,14 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		} else {
 			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionTrue,
 				"ToolRegistryFound", "ToolRegistry resource found")
+		}
+	}
+
+	// Reconcile tools ConfigMap (if ToolRegistry is present)
+	if toolRegistry != nil {
+		if err := r.reconcileToolsConfigMap(ctx, agentRuntime, toolRegistry); err != nil {
+			log.Error(err, "Failed to reconcile tools ConfigMap")
+			// Don't fail the entire reconciliation, tools are optional
 		}
 	}
 
@@ -310,63 +374,23 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		replicas = *agentRuntime.Spec.Runtime.Replicas
 	}
 
-	port := int32(DefaultFacadePort)
+	facadePort := int32(DefaultFacadePort)
 	if agentRuntime.Spec.Facade.Port != nil {
-		port = *agentRuntime.Spec.Facade.Port
+		facadePort = *agentRuntime.Spec.Facade.Port
 	}
 
-	image := r.AgentImage
-	if image == "" {
-		image = DefaultAgentImage
-	}
+	// Build volumes (shared between containers)
+	volumes := r.buildVolumes(agentRuntime, promptPack, toolRegistry)
 
-	// Build container
-	container := corev1.Container{
-		Name:            AgentContainerName,
-		Image:           image,
-		ImagePullPolicy: corev1.PullIfNotPresent,
-		Ports: []corev1.ContainerPort{
-			{
-				Name:          "facade",
-				ContainerPort: port,
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
-		Env: r.buildEnvVars(agentRuntime, promptPack, toolRegistry),
-		ReadinessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/healthz",
-					Port: intstr.FromInt32(8081), // Health server port
-				},
-			},
-			InitialDelaySeconds: 5,
-			PeriodSeconds:       10,
-		},
-		LivenessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/healthz",
-					Port: intstr.FromInt32(8081), // Health server port
-				},
-			},
-			InitialDelaySeconds: 15,
-			PeriodSeconds:       20,
-		},
-	}
+	// Build facade container
+	facadeContainer := r.buildFacadeContainer(agentRuntime, promptPack, facadePort)
 
-	// Add resources if specified
-	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Resources != nil {
-		container.Resources = *agentRuntime.Spec.Runtime.Resources
-	}
+	// Build runtime container
+	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
 
-	// Build volume mounts
-	volumeMounts, volumes := r.buildVolumes(agentRuntime, promptPack)
-	container.VolumeMounts = volumeMounts
-
-	// Build pod spec
+	// Build pod spec with both containers
 	podSpec := corev1.PodSpec{
-		Containers: []corev1.Container{container},
+		Containers: []corev1.Container{facadeContainer, runtimeContainer},
 		Volumes:    volumes,
 	}
 
@@ -386,7 +410,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// Prometheus scrape annotations for metrics collection
 	podAnnotations := map[string]string{
 		"prometheus.io/scrape": "true",
-		"prometheus.io/port":   fmt.Sprintf("%d", port),
+		"prometheus.io/port":   fmt.Sprintf("%d", facadePort),
 		"prometheus.io/path":   "/metrics",
 	}
 
@@ -406,11 +430,128 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	}
 }
 
-func (r *AgentRuntimeReconciler) buildEnvVars(
+// buildFacadeContainer creates the facade container spec.
+func (r *AgentRuntimeReconciler) buildFacadeContainer(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	facadePort int32,
+) corev1.Container {
+	facadeImage := r.FacadeImage
+	if facadeImage == "" {
+		facadeImage = DefaultFacadeImage
+	}
+
+	container := corev1.Container{
+		Name:            FacadeContainerName,
+		Image:           facadeImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "facade",
+				ContainerPort: facadePort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				Name:          "facade-health",
+				ContainerPort: DefaultFacadeHealthPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env: r.buildFacadeEnvVars(agentRuntime, promptPack),
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/readyz",
+					Port: intstr.FromInt32(DefaultFacadeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/healthz",
+					Port: intstr.FromInt32(DefaultFacadeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 15,
+			PeriodSeconds:       20,
+		},
+	}
+
+	return container
+}
+
+// buildRuntimeContainer creates the runtime container spec.
+func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
+) corev1.Container {
+	runtimeImage := r.RuntimeImage
+	if runtimeImage == "" {
+		runtimeImage = DefaultRuntimeImage
+	}
+
+	container := corev1.Container{
+		Name:            RuntimeContainerName,
+		Image:           runtimeImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "grpc",
+				ContainerPort: DefaultRuntimeGRPCPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				Name:          "runtime-health",
+				ContainerPort: DefaultRuntimeHealthPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry),
+		VolumeMounts: r.buildRuntimeVolumeMounts(promptPack, toolRegistry),
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/healthz",
+					Port: intstr.FromInt32(DefaultRuntimeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/healthz",
+					Port: intstr.FromInt32(DefaultRuntimeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 15,
+			PeriodSeconds:       20,
+		},
+	}
+
+	// Add resources if specified
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Resources != nil {
+		container.Resources = *agentRuntime.Spec.Runtime.Resources
+	}
+
+	return container
+}
+
+// buildFacadeEnvVars creates environment variables for the facade container.
+func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
 ) []corev1.EnvVar {
+	port := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		port = *agentRuntime.Spec.Facade.Port
+	}
+
 	envVars := []corev1.EnvVar{
 		{
 			Name:  "OMNIA_AGENT_NAME",
@@ -432,38 +573,86 @@ func (r *AgentRuntimeReconciler) buildEnvVars(
 			Name:  "OMNIA_FACADE_TYPE",
 			Value: string(agentRuntime.Spec.Facade.Type),
 		},
+		{
+			Name:  "OMNIA_FACADE_PORT",
+			Value: fmt.Sprintf("%d", port),
+		},
+		{
+			Name:  "OMNIA_HEALTH_PORT",
+			Value: fmt.Sprintf("%d", DefaultFacadeHealthPort),
+		},
+		// Handler mode is always "runtime" for 2-container architecture
+		{
+			Name:  "OMNIA_HANDLER_MODE",
+			Value: string(omniav1alpha1.HandlerModeRuntime),
+		},
+		// Runtime address for facade to connect to runtime sidecar
+		{
+			Name:  "OMNIA_RUNTIME_ADDRESS",
+			Value: fmt.Sprintf("localhost:%d", DefaultRuntimeGRPCPort),
+		},
 	}
 
-	// Add facade port
-	port := int32(DefaultFacadePort)
-	if agentRuntime.Spec.Facade.Port != nil {
-		port = *agentRuntime.Spec.Facade.Port
-	}
-	envVars = append(envVars, corev1.EnvVar{
-		Name:  "OMNIA_FACADE_PORT",
-		Value: fmt.Sprintf("%d", port),
-	})
+	// Add session config (facade needs this for session management)
+	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_STORE_URL")...)
 
-	// Add handler mode (defaults to "runtime")
-	handlerMode := omniav1alpha1.HandlerModeRuntime
-	if agentRuntime.Spec.Facade.Handler != nil {
-		handlerMode = *agentRuntime.Spec.Facade.Handler
-	}
-	envVars = append(envVars, corev1.EnvVar{
-		Name:  "OMNIA_HANDLER_MODE",
-		Value: string(handlerMode),
-	})
+	return envVars
+}
 
-	// Add provider API key from secret
-	envVars = append(envVars, corev1.EnvVar{
-		Name: "OMNIA_PROVIDER_API_KEY",
-		ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: agentRuntime.Spec.ProviderSecretRef,
-				Key:                  "api-key",
+// buildRuntimeEnvVars creates environment variables for the runtime container.
+func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "OMNIA_AGENT_NAME",
+			Value: agentRuntime.Name,
+		},
+		{
+			Name:  "OMNIA_NAMESPACE",
+			Value: agentRuntime.Namespace,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_NAME",
+			Value: promptPack.Name,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_VERSION",
+			Value: promptPack.Spec.Version,
+		},
+		// PromptPack path for the runtime to load
+		{
+			Name:  "OMNIA_PROMPTPACK_PATH",
+			Value: PromptPackMountPath + "/pack.json",
+		},
+		// Default prompt name (can be overridden per-request)
+		{
+			Name:  "OMNIA_PROMPT_NAME",
+			Value: "default",
+		},
+		// gRPC port for the runtime server
+		{
+			Name:  "OMNIA_GRPC_PORT",
+			Value: fmt.Sprintf("%d", DefaultRuntimeGRPCPort),
+		},
+		// Health check port
+		{
+			Name:  "OMNIA_HEALTH_PORT",
+			Value: fmt.Sprintf("%d", DefaultRuntimeHealthPort),
+		},
+		// Provider API key from secret
+		{
+			Name: "OMNIA_PROVIDER_API_KEY",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: agentRuntime.Spec.ProviderSecretRef,
+					Key:                  "api-key",
+				},
 			},
 		},
-	})
+	}
 
 	// Add tool registry info if present
 	if toolRegistry != nil {
@@ -475,52 +664,29 @@ func (r *AgentRuntimeReconciler) buildEnvVars(
 			Name:  "OMNIA_TOOLREGISTRY_NAMESPACE",
 			Value: toolRegistry.Namespace,
 		})
+		// Tools config path
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_TOOLS_CONFIG_PATH",
+			Value: ToolsMountPath + "/" + ToolsConfigFileName,
+		})
 	}
 
-	// Add session config
-	if agentRuntime.Spec.Session != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_SESSION_TYPE",
-			Value: string(agentRuntime.Spec.Session.Type),
-		})
-		if agentRuntime.Spec.Session.TTL != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_SESSION_TTL",
-				Value: *agentRuntime.Spec.Session.TTL,
-			})
-		}
-		if agentRuntime.Spec.Session.StoreRef != nil {
-			// Add session store connection string from secret
-			envVars = append(envVars, corev1.EnvVar{
-				Name: "OMNIA_SESSION_STORE_URL",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: *agentRuntime.Spec.Session.StoreRef,
-						Key:                  "url",
-					},
-				},
-			})
-		}
-	}
+	// Add session config for conversation persistence
+	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_URL")...)
 
 	return envVars
 }
 
 func (r *AgentRuntimeReconciler) buildVolumes(
-	_ *omniav1alpha1.AgentRuntime,
+	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
-) ([]corev1.VolumeMount, []corev1.Volume) {
-	var volumeMounts []corev1.VolumeMount
+	toolRegistry *omniav1alpha1.ToolRegistry,
+) []corev1.Volume {
 	var volumes []corev1.Volume
 
 	// Mount PromptPack ConfigMap if source type is configmap
 	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
 		promptPack.Spec.Source.ConfigMapRef != nil {
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "promptpack-config",
-			MountPath: "/etc/omnia/prompts",
-			ReadOnly:  true,
-		})
 		volumes = append(volumes, corev1.Volume{
 			Name: "promptpack-config",
 			VolumeSource: corev1.VolumeSource{
@@ -531,7 +697,173 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		})
 	}
 
-	return volumeMounts, volumes
+	// Mount tools ConfigMap if ToolRegistry is present
+	if toolRegistry != nil {
+		volumes = append(volumes, corev1.Volume{
+			Name: "tools-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: agentRuntime.Name + ToolsConfigMapSuffix,
+					},
+				},
+			},
+		})
+	}
+
+	return volumes
+}
+
+// buildRuntimeVolumeMounts creates volume mounts for the runtime container.
+func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+) []corev1.VolumeMount {
+	var volumeMounts []corev1.VolumeMount
+
+	// Mount PromptPack ConfigMap
+	if promptPack.Spec.Source.Type == omniav1alpha1.PromptPackSourceTypeConfigMap &&
+		promptPack.Spec.Source.ConfigMapRef != nil {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "promptpack-config",
+			MountPath: PromptPackMountPath,
+			ReadOnly:  true,
+		})
+	}
+
+	// Mount tools ConfigMap if ToolRegistry is present
+	if toolRegistry != nil {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "tools-config",
+			MountPath: ToolsMountPath,
+			ReadOnly:  true,
+		})
+	}
+
+	return volumeMounts
+}
+
+// ToolConfig represents the tools configuration file format.
+type ToolConfig struct {
+	Tools []ToolEntry `json:"tools"`
+}
+
+// ToolEntry represents a single tool in the config.
+type ToolEntry struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Config      ToolHTTP `json:"config,omitempty"`
+	Timeout     string   `json:"timeout,omitempty"`
+	Retries     int32    `json:"retries,omitempty"`
+}
+
+// ToolHTTP represents HTTP configuration for a tool.
+type ToolHTTP struct {
+	Endpoint string `json:"endpoint"`
+	Method   string `json:"method,omitempty"`
+}
+
+// reconcileToolsConfigMap creates or updates the tools ConfigMap from ToolRegistry.
+func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+) error {
+	log := logf.FromContext(ctx)
+
+	// Build tools config from ToolRegistry
+	toolsConfig := r.buildToolsConfig(toolRegistry)
+
+	// Serialize to YAML
+	configData, err := yaml.Marshal(toolsConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tools config: %w", err)
+	}
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRuntime.Name + ToolsConfigMapSuffix,
+			Namespace: agentRuntime.Namespace,
+		},
+	}
+
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
+		// Set owner reference
+		if err := controllerutil.SetControllerReference(agentRuntime, configMap, r.Scheme); err != nil {
+			return err
+		}
+
+		labels := map[string]string{
+			"app.kubernetes.io/name":         "omnia-agent",
+			"app.kubernetes.io/instance":     agentRuntime.Name,
+			"app.kubernetes.io/managed-by":   "omnia-operator",
+			"omnia.altairalabs.ai/component": "tools-config",
+		}
+
+		configMap.Labels = labels
+		configMap.Data = map[string]string{
+			ToolsConfigFileName: string(configData),
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to reconcile tools ConfigMap: %w", err)
+	}
+
+	log.Info("Tools ConfigMap reconciled", "result", result, "tools", len(toolsConfig.Tools))
+	return nil
+}
+
+// buildToolsConfig builds the tools configuration from ToolRegistry status.
+func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.ToolRegistry) ToolConfig {
+	config := ToolConfig{
+		Tools: make([]ToolEntry, 0, len(toolRegistry.Status.DiscoveredTools)),
+	}
+
+	// Use discovered tools from status (includes resolved endpoints)
+	for _, discovered := range toolRegistry.Status.DiscoveredTools {
+		if discovered.Status != omniav1alpha1.ToolStatusAvailable {
+			continue // Skip unavailable tools
+		}
+
+		// Find the matching spec to get additional info
+		var spec *omniav1alpha1.ToolDefinition
+		for i := range toolRegistry.Spec.Tools {
+			if toolRegistry.Spec.Tools[i].Name == discovered.Name {
+				spec = &toolRegistry.Spec.Tools[i]
+				break
+			}
+		}
+
+		entry := ToolEntry{
+			Name: discovered.Name,
+			Type: "http", // Default to HTTP
+			Config: ToolHTTP{
+				Endpoint: discovered.Endpoint,
+				Method:   "POST", // Default method
+			},
+		}
+
+		if spec != nil {
+			entry.Type = string(spec.Type)
+			if spec.Description != nil {
+				entry.Description = *spec.Description
+			}
+			if spec.Timeout != nil {
+				entry.Timeout = *spec.Timeout
+			}
+			if spec.Retries != nil {
+				entry.Retries = *spec.Retries
+			}
+		}
+
+		config.Tools = append(config.Tools, entry)
+	}
+
+	return config
 }
 
 func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) error {
