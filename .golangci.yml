@@ -41,8 +41,8 @@ linters:
       - builtin$
       - examples$
       # Exclude runtime packages - require local PromptKit dependency (not published yet)
-      - internal/runtime
-      - cmd/runtime
+      - ^internal/runtime/
+      - ^cmd/runtime/
 formatters:
   enable:
     - gofmt
