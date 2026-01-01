@@ -59,9 +59,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Namespace: "default",
 			}
 			reconciler = &AgentRuntimeReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				AgentImage: "test-agent:v1.0.0",
+				Client:       k8sClient,
+				Scheme:       k8sClient.Scheme(),
+				FacadeImage:  "test-facade:v1.0.0",
+				RuntimeImage: "test-runtime:v1.0.0",
 			}
 		})
 
@@ -193,12 +194,30 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
 			}, timeout, interval).Should(Succeed())
 
-			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
-			container := deployment.Spec.Template.Spec.Containers[0]
-			Expect(container.Name).To(Equal(AgentContainerName))
-			Expect(container.Image).To(Equal("test-agent:v1.0.0"))
-			Expect(container.Ports).To(HaveLen(1))
-			Expect(container.Ports[0].ContainerPort).To(Equal(int32(DefaultFacadePort)))
+			By("verifying both facade and runtime containers exist")
+			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+			// Find facade container
+			var facadeContainer, runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				switch c.Name {
+				case FacadeContainerName:
+					facadeContainer = c
+				case RuntimeContainerName:
+					runtimeContainer = c
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil(), "facade container should exist")
+			Expect(runtimeContainer).NotTo(BeNil(), "runtime container should exist")
+
+			Expect(facadeContainer.Image).To(Equal("test-facade:v1.0.0"))
+			Expect(facadeContainer.Ports).To(HaveLen(2)) // facade port + health port
+			Expect(facadeContainer.Ports[0].ContainerPort).To(Equal(int32(DefaultFacadePort)))
+
+			Expect(runtimeContainer.Image).To(Equal("test-runtime:v1.0.0"))
+			Expect(runtimeContainer.Ports).To(HaveLen(2)) // gRPC port + health port
+			Expect(runtimeContainer.Ports[0].ContainerPort).To(Equal(int32(DefaultRuntimeGRPCPort)))
 
 			By("verifying the Service was created")
 			service := &corev1.Service{}
@@ -512,23 +531,44 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
 			}, timeout, interval).Should(Succeed())
 
-			envVars := deployment.Spec.Template.Spec.Containers[0].Env
-			envMap := make(map[string]corev1.EnvVar)
-			for _, env := range envVars {
-				envMap[env.Name] = env
+			// Find facade and runtime containers
+			var facadeContainer, runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				switch c.Name {
+				case FacadeContainerName:
+					facadeContainer = c
+				case RuntimeContainerName:
+					runtimeContainer = c
+				}
 			}
+			Expect(facadeContainer).NotTo(BeNil())
+			Expect(runtimeContainer).NotTo(BeNil())
 
-			Expect(envMap["OMNIA_AGENT_NAME"].Value).To(Equal(agentRuntimeKey.Name))
-			Expect(envMap["OMNIA_NAMESPACE"].Value).To(Equal(agentRuntimeKey.Namespace))
-			Expect(envMap["OMNIA_PROMPTPACK_NAME"].Value).To(Equal(promptPackKey.Name))
-			Expect(envMap["OMNIA_PROMPTPACK_VERSION"].Value).To(Equal("2.1.0"))
-			Expect(envMap["OMNIA_FACADE_TYPE"].Value).To(Equal(string(omniav1alpha1.FacadeTypeWebSocket)))
-			Expect(envMap["OMNIA_FACADE_PORT"].Value).To(Equal("8080"))
+			// Check facade container env vars
+			facadeEnvMap := make(map[string]corev1.EnvVar)
+			for _, env := range facadeContainer.Env {
+				facadeEnvMap[env.Name] = env
+			}
+			Expect(facadeEnvMap["OMNIA_AGENT_NAME"].Value).To(Equal(agentRuntimeKey.Name))
+			Expect(facadeEnvMap["OMNIA_NAMESPACE"].Value).To(Equal(agentRuntimeKey.Namespace))
+			Expect(facadeEnvMap["OMNIA_PROMPTPACK_NAME"].Value).To(Equal(promptPackKey.Name))
+			Expect(facadeEnvMap["OMNIA_PROMPTPACK_VERSION"].Value).To(Equal("2.1.0"))
+			Expect(facadeEnvMap["OMNIA_FACADE_TYPE"].Value).To(Equal(string(omniav1alpha1.FacadeTypeWebSocket)))
+			Expect(facadeEnvMap["OMNIA_FACADE_PORT"].Value).To(Equal("8080"))
+			Expect(facadeEnvMap["OMNIA_HANDLER_MODE"].Value).To(Equal("runtime"))
+			Expect(facadeEnvMap["OMNIA_RUNTIME_ADDRESS"].Value).To(Equal("localhost:9000"))
 
-			// Verify secret reference for API key
-			Expect(envMap["OMNIA_PROVIDER_API_KEY"].ValueFrom).NotTo(BeNil())
-			Expect(envMap["OMNIA_PROVIDER_API_KEY"].ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
-			Expect(envMap["OMNIA_PROVIDER_API_KEY"].ValueFrom.SecretKeyRef.Key).To(Equal("api-key"))
+			// Check runtime container env vars - API key should be on runtime
+			runtimeEnvMap := make(map[string]corev1.EnvVar)
+			for _, env := range runtimeContainer.Env {
+				runtimeEnvMap[env.Name] = env
+			}
+			Expect(runtimeEnvMap["OMNIA_AGENT_NAME"].Value).To(Equal(agentRuntimeKey.Name))
+			Expect(runtimeEnvMap["OMNIA_GRPC_PORT"].Value).To(Equal("9000"))
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_API_KEY"].ValueFrom).NotTo(BeNil())
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_API_KEY"].ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_API_KEY"].ValueFrom.SecretKeyRef.Key).To(Equal("api-key"))
 		})
 
 		It("should handle non-existent resource gracefully", func() {
@@ -542,7 +582,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(result).To(Equal(reconcile.Result{}))
 		})
 
-		It("should use default image when AgentImage is not set", func() {
+		It("should use default images when FacadeImage and RuntimeImage are not set", func() {
 			By("creating a PromptPack")
 			promptPack := &omniav1alpha1.PromptPack{
 				ObjectMeta: metav1.ObjectMeta{
@@ -561,11 +601,11 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
 
-			By("creating an AgentRuntime with reconciler without AgentImage")
+			By("creating an AgentRuntime with reconciler without images set")
 			defaultReconciler := &AgentRuntimeReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
-				// AgentImage not set - should use default
+				// FacadeImage and RuntimeImage not set - should use defaults
 			}
 
 			agentRuntime := &omniav1alpha1.AgentRuntime{
@@ -591,12 +631,27 @@ var _ = Describe("AgentRuntime Controller", func() {
 			_, _ = defaultReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
 			_, _ = defaultReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
 
-			By("verifying the Deployment uses default image")
+			By("verifying the Deployment uses default images")
 			deployment := &appsv1.Deployment{}
 			Eventually(func() error {
 				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
 			}, timeout, interval).Should(Succeed())
-			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal(DefaultAgentImage))
+
+			// Find containers by name
+			var facadeContainer, runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				switch c.Name {
+				case FacadeContainerName:
+					facadeContainer = c
+				case RuntimeContainerName:
+					runtimeContainer = c
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil())
+			Expect(runtimeContainer).NotTo(BeNil())
+			Expect(facadeContainer.Image).To(Equal(DefaultFacadeImage))
+			Expect(runtimeContainer.Image).To(Equal(DefaultRuntimeImage))
 		})
 
 		It("should set correct labels on Deployment and Service", func() {
@@ -741,9 +796,19 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
 			}, timeout, interval).Should(Succeed())
 
-			envVars := deployment.Spec.Template.Spec.Containers[0].Env
+			// Find runtime container (ToolRegistry env vars are on runtime)
+			var runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == RuntimeContainerName {
+					runtimeContainer = c
+					break
+				}
+			}
+			Expect(runtimeContainer).NotTo(BeNil())
+
 			envMap := make(map[string]corev1.EnvVar)
-			for _, env := range envVars {
+			for _, env := range runtimeContainer.Env {
 				envMap[env.Name] = env
 			}
 
@@ -936,12 +1001,22 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
 			}, timeout, interval).Should(Succeed())
 
-			// Check volume mounts
-			container := deployment.Spec.Template.Spec.Containers[0]
-			Expect(container.VolumeMounts).To(HaveLen(1))
-			Expect(container.VolumeMounts[0].Name).To(Equal("promptpack-config"))
-			Expect(container.VolumeMounts[0].MountPath).To(Equal("/etc/omnia/prompts"))
-			Expect(container.VolumeMounts[0].ReadOnly).To(BeTrue())
+			// Find runtime container (volume mounts are on runtime)
+			var runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == RuntimeContainerName {
+					runtimeContainer = c
+					break
+				}
+			}
+			Expect(runtimeContainer).NotTo(BeNil())
+
+			// Check volume mounts on runtime container
+			Expect(runtimeContainer.VolumeMounts).To(HaveLen(1))
+			Expect(runtimeContainer.VolumeMounts[0].Name).To(Equal("promptpack-config"))
+			Expect(runtimeContainer.VolumeMounts[0].MountPath).To(Equal(PromptPackMountPath))
+			Expect(runtimeContainer.VolumeMounts[0].ReadOnly).To(BeTrue())
 
 			// Check volumes
 			Expect(deployment.Spec.Template.Spec.Volumes).To(HaveLen(1))
