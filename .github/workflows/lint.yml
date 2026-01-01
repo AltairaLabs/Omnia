@@ -9,6 +9,9 @@ on:
       - '.gitignore'
       - '.github/CODEOWNERS'
       - '.github/workflows/docs.yml'
+      # Skip this workflow when only runtime packages change (they have local PromptKit deps)
+      - 'internal/runtime/**'
+      - 'cmd/runtime/**'
   pull_request:
     paths-ignore:
       - 'docs/**'
@@ -17,6 +20,9 @@ on:
       - '.gitignore'
       - '.github/CODEOWNERS'
       - '.github/workflows/docs.yml'
+      # Skip this workflow when only runtime packages change (they have local PromptKit deps)
+      - 'internal/runtime/**'
+      - 'cmd/runtime/**'
 
 jobs:
   lint:
@@ -30,6 +36,11 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+
+      - name: Remove runtime packages before linting
+        run: |
+          # Remove runtime packages that depend on local PromptKit (not published yet)
+          rm -rf internal/runtime cmd/runtime
 
       - name: Run linter
         uses: golangci/golangci-lint-action@v9

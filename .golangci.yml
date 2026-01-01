@@ -40,6 +40,9 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      # Exclude runtime packages - require local PromptKit dependency (not published yet)
+      - ^internal/runtime/
+      - ^cmd/runtime/
 formatters:
   enable:
     - gofmt

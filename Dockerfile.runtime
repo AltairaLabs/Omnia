@@ -1,0 +1,52 @@
+# Build stage
+# NOTE: This Dockerfile requires the binary to be pre-built with vendor dependencies
+# or PromptKit to be published to a module proxy.
+#
+# Build with: make docker-build-runtime
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /workspace
+
+# Install dependencies
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+
+# Copy vendor directory if it exists (for local builds with vendored deps)
+COPY vendor/ vendor/ 2>/dev/null || true
+
+# Download dependencies (if not vendored)
+RUN if [ ! -d vendor ]; then go mod download; fi
+
+# Copy source code
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY pkg/ pkg/
+COPY api/ api/
+
+# Build the runtime binary
+# Use -mod=vendor if vendor directory exists
+RUN if [ -d vendor ]; then \
+        CGO_ENABLED=0 GOOS=linux go build -mod=vendor -a -o runtime ./cmd/runtime; \
+    else \
+        CGO_ENABLED=0 GOOS=linux go build -a -o runtime ./cmd/runtime; \
+    fi
+
+# Runtime stage
+FROM scratch
+
+WORKDIR /
+
+# Copy the binary
+COPY --from=builder /workspace/runtime .
+
+# Copy CA certificates for HTTPS connections
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# gRPC port
+EXPOSE 9000
+# Health port
+EXPOSE 9001
+
+ENTRYPOINT ["/runtime"]
