@@ -1,5 +1,9 @@
 cel.dev/expr v0.24.0 h1:56OvJKSH3hDGL0ml5uSxZmz3/3Pq4tJ+fb1unVLAFcY=
 cel.dev/expr v0.24.0/go.mod h1:hLPLo1W4QUmuYdA72RBX06QTs6MXw941piREPl3Yfiw=
+github.com/AltairaLabs/PromptKit/runtime v1.1.6 h1:knLyNdgUYMBWrfFwitYRlh6JhJpfIb+tDQlo26wSGNQ=
+github.com/AltairaLabs/PromptKit/runtime v1.1.6/go.mod h1:m+rWDkMOjdVmXsZC9pAMxgLVkagUwrh/vWuQ6WSF6xg=
+github.com/AltairaLabs/PromptKit/sdk v1.1.6 h1:HgtIZBQ4fxRoexrGZRmzFDJfetL3F35IOzLa2wav1Tk=
+github.com/AltairaLabs/PromptKit/sdk v1.1.6/go.mod h1:c+vAhLWSGFravdRQ1gf9wUTF3CqIiVvFRYiK7QeFoi8=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/alicebob/miniredis/v2 v2.35.0 h1:QwLphYqCEAo1eu1TqPRN2jgVMPBweeQcR21jeqDCONI=

@@ -1880,4 +1880,266 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(trigger["type"]).To(Equal("prometheus"))
 		})
 	})
+
+	Context("buildRuntimeEnvVars", func() {
+		var reconciler *AgentRuntimeReconciler
+
+		BeforeEach(func() {
+			reconciler = &AgentRuntimeReconciler{
+				FacadeImage:  "test-facade:v1.0.0",
+				RuntimeImage: "test-runtime:v1.0.0",
+			}
+		})
+
+		It("should include mock provider env var when annotation is set", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						MockProviderAnnotation: "true",
+					},
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+
+			// Find the mock provider env var
+			var found bool
+			for _, env := range envVars {
+				if env.Name == "OMNIA_MOCK_PROVIDER" && env.Value == "true" {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue(), "OMNIA_MOCK_PROVIDER env var should be set")
+		})
+
+		It("should not include mock provider env var when annotation is not set", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+
+			// Ensure mock provider env var is NOT set
+			for _, env := range envVars {
+				Expect(env.Name).NotTo(Equal("OMNIA_MOCK_PROVIDER"), "OMNIA_MOCK_PROVIDER should not be set without annotation")
+			}
+		})
+
+		It("should not include mock provider env var when annotation is false", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						MockProviderAnnotation: "false",
+					},
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+
+			// Ensure mock provider env var is NOT set
+			for _, env := range envVars {
+				Expect(env.Name).NotTo(Equal("OMNIA_MOCK_PROVIDER"), "OMNIA_MOCK_PROVIDER should not be set when annotation is false")
+			}
+		})
+	})
+
+	Context("buildToolsConfig", func() {
+		var reconciler *AgentRuntimeReconciler
+
+		BeforeEach(func() {
+			reconciler = &AgentRuntimeReconciler{
+				FacadeImage:  "test-facade:v1.0.0",
+				RuntimeImage: "test-runtime:v1.0.0",
+			}
+		})
+
+		It("should build config from available tools", func() {
+			description := "Test tool description"
+			timeout := "30s"
+			retries := int32(3)
+
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						{
+							Name:        "tool1",
+							Type:        omniav1alpha1.ToolTypeHTTP,
+							Description: &description,
+							Timeout:     &timeout,
+							Retries:     &retries,
+						},
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+						{
+							Name:     "tool1",
+							Endpoint: "http://tool1-service:8080/api",
+							Status:   omniav1alpha1.ToolStatusAvailable,
+						},
+					},
+				},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(HaveLen(1))
+			Expect(config.Tools[0].Name).To(Equal("tool1"))
+			Expect(config.Tools[0].Type).To(Equal("http"))
+			Expect(config.Tools[0].Description).To(Equal(description))
+			Expect(config.Tools[0].Timeout).To(Equal(timeout))
+			Expect(config.Tools[0].Retries).To(Equal(retries))
+			Expect(config.Tools[0].Config.Endpoint).To(Equal("http://tool1-service:8080/api"))
+		})
+
+		It("should skip unavailable tools", func() {
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						{Name: "tool1", Type: omniav1alpha1.ToolTypeHTTP},
+						{Name: "tool2", Type: omniav1alpha1.ToolTypeHTTP},
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+						{
+							Name:     "tool1",
+							Endpoint: "http://tool1:8080",
+							Status:   omniav1alpha1.ToolStatusAvailable,
+						},
+						{
+							Name:     "tool2",
+							Endpoint: "http://tool2:8080",
+							Status:   omniav1alpha1.ToolStatusUnavailable,
+						},
+					},
+				},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(HaveLen(1))
+			Expect(config.Tools[0].Name).To(Equal("tool1"))
+		})
+
+		It("should use defaults when spec not found", func() {
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						// Tool "orphan" is in status but not in spec
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+						{
+							Name:     "orphan",
+							Endpoint: "http://orphan:8080",
+							Status:   omniav1alpha1.ToolStatusAvailable,
+						},
+					},
+				},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(HaveLen(1))
+			Expect(config.Tools[0].Name).To(Equal("orphan"))
+			Expect(config.Tools[0].Type).To(Equal("http"))
+			Expect(config.Tools[0].Description).To(BeEmpty())
+			Expect(config.Tools[0].Timeout).To(BeEmpty())
+			Expect(config.Tools[0].Retries).To(Equal(int32(0)))
+		})
+
+		It("should handle empty tool registry", func() {
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec:   omniav1alpha1.ToolRegistrySpec{},
+				Status: omniav1alpha1.ToolRegistryStatus{},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(BeEmpty())
+		})
+
+		It("should handle gRPC tool type", func() {
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						{
+							Name: "grpc-tool",
+							Type: omniav1alpha1.ToolTypeGRPC,
+						},
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+						{
+							Name:     "grpc-tool",
+							Endpoint: "grpc://grpc-service:9090",
+							Status:   omniav1alpha1.ToolStatusAvailable,
+						},
+					},
+				},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(HaveLen(1))
+			Expect(config.Tools[0].Name).To(Equal("grpc-tool"))
+			Expect(config.Tools[0].Type).To(Equal("grpc"))
+		})
+	})
 })

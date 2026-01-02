@@ -121,3 +121,39 @@ func TestLoadConfig_InvalidTTL(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), envSessionTTL)
 }
+
+func TestLoadConfig_MockProvider(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envMockProvider, "true")
+	t.Setenv(envMockConfigPath, "/etc/omnia/mock-config.yaml")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.MockProvider)
+	assert.Equal(t, "/etc/omnia/mock-config.yaml", cfg.MockConfigPath)
+}
+
+func TestLoadConfig_MockProviderDisabled(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	// MockProvider not set
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.MockProvider)
+	assert.Empty(t, cfg.MockConfigPath)
+}
+
+func TestLoadConfig_MockProviderInvalidValue(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envMockProvider, "yes") // Not "true", should be false
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.MockProvider, "MockProvider should only be true when value is exactly 'true'")
+}

@@ -3,8 +3,8 @@ module github.com/altairalabs/omnia
 go 1.25.1
 
 require (
-	github.com/AltairaLabs/PromptKit/runtime v0.0.0
-	github.com/AltairaLabs/PromptKit/sdk v0.0.0-00010101000000-000000000000
+	github.com/AltairaLabs/PromptKit/runtime v1.1.6
+	github.com/AltairaLabs/PromptKit/sdk v1.1.6
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/google/uuid v1.6.0
@@ -22,6 +22,7 @@ require (
 	k8s.io/apimachinery v0.35.0
 	k8s.io/client-go v0.35.0
 	sigs.k8s.io/controller-runtime v0.22.4
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -106,10 +107,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
-)
-
-replace (
-	github.com/AltairaLabs/PromptKit/runtime => ../promptkit/runtime
-	github.com/AltairaLabs/PromptKit/sdk => ../promptkit/sdk
 )

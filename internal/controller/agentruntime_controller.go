@@ -68,6 +68,8 @@ const (
 	ToolsMountPath = "/etc/omnia/tools"
 	// PromptPackMountPath is the mount path for PromptPack files.
 	PromptPackMountPath = "/etc/omnia/pack"
+	// MockProviderAnnotation enables mock provider for testing.
+	MockProviderAnnotation = "omnia.altairalabs.ai/mock-provider"
 )
 
 // Helper functions for creating pointers
@@ -673,6 +675,14 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 
 	// Add session config for conversation persistence
 	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_URL")...)
+
+	// Check for mock provider annotation (for E2E testing)
+	if mockProvider, ok := agentRuntime.Annotations[MockProviderAnnotation]; ok && mockProvider == "true" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_MOCK_PROVIDER",
+			Value: "true",
+		})
+	}
 
 	return envVars
 }

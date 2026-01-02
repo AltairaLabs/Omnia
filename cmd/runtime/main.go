@@ -61,7 +61,8 @@ func main() {
 		"grpcPort", cfg.GRPCPort,
 		"healthPort", cfg.HealthPort,
 		"packPath", cfg.PromptPackPath,
-		"promptName", cfg.PromptName)
+		"promptName", cfg.PromptName,
+		"mockProvider", cfg.MockProvider)
 
 	// Create state store for conversation persistence
 	var store statestore.Store
@@ -97,6 +98,8 @@ func main() {
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
 		pkruntime.WithStateStore(store),
+		pkruntime.WithMockProvider(cfg.MockProvider),
+		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
 	)
 	defer func() { _ = runtimeServer.Close() }()
 

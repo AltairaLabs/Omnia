@@ -39,6 +39,10 @@ type Config struct {
 	SessionURL  string        // Redis URL for session store
 	SessionTTL  time.Duration // Session TTL
 
+	// Mock provider configuration (for testing)
+	MockProvider   bool   // Enable mock provider instead of real LLM
+	MockConfigPath string // Path to mock responses YAML file (optional)
+
 	// Server ports
 	GRPCPort   int
 	HealthPort int
@@ -53,6 +57,8 @@ const (
 	envSessionType    = "OMNIA_SESSION_TYPE"
 	envSessionURL     = "OMNIA_SESSION_URL"
 	envSessionTTL     = "OMNIA_SESSION_TTL"
+	envMockProvider   = "OMNIA_MOCK_PROVIDER"
+	envMockConfigPath = "OMNIA_MOCK_CONFIG"
 	envGRPCPort       = "OMNIA_GRPC_PORT"
 	envHealthPort     = "OMNIA_HEALTH_PORT"
 )
@@ -82,6 +88,8 @@ func LoadConfig() (*Config, error) {
 		PromptName:     getEnvOrDefault(envPromptName, defaultPromptName),
 		SessionType:    getEnvOrDefault(envSessionType, defaultSessionType),
 		SessionURL:     os.Getenv(envSessionURL),
+		MockProvider:   os.Getenv(envMockProvider) == "true",
+		MockConfigPath: os.Getenv(envMockConfigPath),
 		GRPCPort:       defaultGRPCPort,
 		HealthPort:     defaultHealthPort,
 		SessionTTL:     defaultSessionTTL,
