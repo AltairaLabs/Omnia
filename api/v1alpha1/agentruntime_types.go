@@ -237,6 +237,93 @@ type AutoscalingConfig struct {
 	KEDA *KEDAConfig `json:"keda,omitempty"`
 }
 
+// ProviderType defines the LLM provider type.
+// +kubebuilder:validation:Enum=auto;claude;openai;gemini
+type ProviderType string
+
+const (
+	// ProviderTypeAuto uses PromptKit's auto-detection based on available credentials.
+	ProviderTypeAuto ProviderType = "auto"
+	// ProviderTypeClaude uses Anthropic's Claude models.
+	ProviderTypeClaude ProviderType = "claude"
+	// ProviderTypeOpenAI uses OpenAI's GPT models.
+	ProviderTypeOpenAI ProviderType = "openai"
+	// ProviderTypeGemini uses Google's Gemini models.
+	ProviderTypeGemini ProviderType = "gemini"
+)
+
+// ProviderDefaults defines tuning parameters for the LLM provider.
+type ProviderDefaults struct {
+	// temperature controls randomness in responses (0.0-2.0).
+	// Lower values make output more focused and deterministic.
+	// Specified as a string to support decimal values (e.g., "0.7").
+	// +optional
+	Temperature *string `json:"temperature,omitempty"`
+
+	// topP controls nucleus sampling (0.0-1.0).
+	// Specified as a string to support decimal values (e.g., "0.9").
+	// +optional
+	TopP *string `json:"topP,omitempty"`
+
+	// maxTokens limits the maximum number of tokens in the response.
+	// +optional
+	MaxTokens *int32 `json:"maxTokens,omitempty"`
+}
+
+// ProviderPricing defines cost tracking configuration for the provider.
+type ProviderPricing struct {
+	// inputCostPer1K is the cost per 1000 input tokens (e.g., "0.003").
+	// +optional
+	InputCostPer1K *string `json:"inputCostPer1K,omitempty"`
+
+	// outputCostPer1K is the cost per 1000 output tokens (e.g., "0.015").
+	// +optional
+	OutputCostPer1K *string `json:"outputCostPer1K,omitempty"`
+
+	// cachedCostPer1K is the cost per 1000 cached tokens (e.g., "0.0003").
+	// Cached tokens have reduced cost with some providers.
+	// +optional
+	CachedCostPer1K *string `json:"cachedCostPer1K,omitempty"`
+}
+
+// ProviderConfig defines the LLM provider configuration.
+type ProviderConfig struct {
+	// type specifies the provider type.
+	// "auto" uses PromptKit's auto-detection based on available credentials.
+	// "claude", "openai", "gemini" explicitly select a provider.
+	// +kubebuilder:default=auto
+	// +optional
+	Type ProviderType `json:"type,omitempty"`
+
+	// model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
+	// If not specified, the provider's default model is used.
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// secretRef references a Secret containing API credentials.
+	// The secret should contain a key matching the provider's expected env var:
+	// - ANTHROPIC_API_KEY for Claude
+	// - OPENAI_API_KEY for OpenAI
+	// - GEMINI_API_KEY or GOOGLE_API_KEY for Gemini
+	// Or use "api-key" as a generic key name.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// baseURL overrides the provider's default API endpoint.
+	// Useful for proxies or self-hosted models.
+	// +optional
+	BaseURL string `json:"baseURL,omitempty"`
+
+	// config contains provider tuning parameters.
+	// +optional
+	Config *ProviderDefaults `json:"config,omitempty"`
+
+	// pricing configures cost tracking for this provider.
+	// If not specified, PromptKit's built-in pricing is used.
+	// +optional
+	Pricing *ProviderPricing `json:"pricing,omitempty"`
+}
+
 // RuntimeConfig defines deployment-related settings.
 type RuntimeConfig struct {
 	// replicas is the desired number of agent runtime pods.
@@ -289,10 +376,11 @@ type AgentRuntimeSpec struct {
 	// +optional
 	Runtime *RuntimeConfig `json:"runtime,omitempty"`
 
-	// providerSecretRef references a secret containing LLM provider credentials.
-	// The secret should contain keys like "api-key" for the provider.
-	// +kubebuilder:validation:Required
-	ProviderSecretRef corev1.LocalObjectReference `json:"providerSecretRef"`
+	// provider configures the LLM provider (type, model, credentials, tuning).
+	// If not specified, PromptKit's auto-detection is used with credentials
+	// from a secret named "<agentruntime-name>-provider" if it exists.
+	// +optional
+	Provider *ProviderConfig `json:"provider,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.

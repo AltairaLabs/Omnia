@@ -111,11 +111,26 @@ func TestServerOptions(t *testing.T) {
 		assert.Equal(t, "/path/to/mock.yaml", server.mockConfigPath)
 	})
 
+	t.Run("WithModel", func(t *testing.T) {
+		server := NewServer(
+			WithModel("claude-3-opus-20240229"),
+		)
+		// WithModel adds to sdkOptions, verify it was added
+		assert.Len(t, server.sdkOptions, 1)
+
+		// Empty model should not add an option
+		server2 := NewServer(
+			WithModel(""),
+		)
+		assert.Len(t, server2.sdkOptions, 0)
+	})
+
 	t.Run("AllOptionsCombined", func(t *testing.T) {
 		server := NewServer(
 			WithLogger(logr.Discard()),
 			WithPackPath("/test/pack.json"),
 			WithPromptName("assistant"),
+			WithModel("claude-3-opus-20240229"),
 			WithMockProvider(true),
 			WithMockConfigPath("/mock.yaml"),
 		)
@@ -124,6 +139,8 @@ func TestServerOptions(t *testing.T) {
 		assert.Equal(t, "assistant", server.promptName)
 		assert.True(t, server.mockProvider)
 		assert.Equal(t, "/mock.yaml", server.mockConfigPath)
+		// Model option was added
+		assert.Len(t, server.sdkOptions, 1)
 	})
 }
 

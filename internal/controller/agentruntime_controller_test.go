@@ -112,8 +112,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -171,8 +173,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -268,8 +272,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -334,8 +340,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -401,8 +409,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 						Port: &customPort,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -463,8 +473,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Replicas: &replicas,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -501,7 +513,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
 
-			By("creating an AgentRuntime")
+			By("creating an AgentRuntime with claude provider")
 			agentRuntime := &omniav1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      agentRuntimeKey.Name,
@@ -514,8 +526,11 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -566,9 +581,209 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(runtimeEnvMap["OMNIA_AGENT_NAME"].Value).To(Equal(agentRuntimeKey.Name))
 			Expect(runtimeEnvMap["OMNIA_GRPC_PORT"].Value).To(Equal("9000"))
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_API_KEY"].ValueFrom).NotTo(BeNil())
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_API_KEY"].ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_API_KEY"].ValueFrom.SecretKeyRef.Key).To(Equal("api-key"))
+			// Provider type should be set
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_TYPE"].Value).To(Equal("claude"))
+			// For claude provider, check ANTHROPIC_API_KEY from secret
+			// The env var may appear twice (one with key matching env name, one with api-key fallback)
+			var foundAnthropicKey bool
+			for _, env := range runtimeContainer.Env {
+				if env.Name == "ANTHROPIC_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
+					foundAnthropicKey = true
+				}
+			}
+			Expect(foundAnthropicKey).To(BeTrue(), "Expected ANTHROPIC_API_KEY env var from secret")
+		})
+
+		It("should set all provider configuration environment variables", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with full provider config")
+			temperature := "0.7"
+			topP := "0.9"
+			maxTokens := int32(4096)
+			inputCost := "0.003"
+			outputCost := "0.015"
+			cachedCost := "0.001"
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						Type:    omniav1alpha1.ProviderTypeOpenAI,
+						Model:   "gpt-4o",
+						BaseURL: "https://api.openai.com/v1",
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "openai-secret",
+						},
+						Config: &omniav1alpha1.ProviderDefaults{
+							Temperature: &temperature,
+							TopP:        &topP,
+							MaxTokens:   &maxTokens,
+						},
+						Pricing: &omniav1alpha1.ProviderPricing{
+							InputCostPer1K:  &inputCost,
+							OutputCostPer1K: &outputCost,
+							CachedCostPer1K: &cachedCost,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying all provider environment variables are set")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			// Find runtime container
+			var runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == RuntimeContainerName {
+					runtimeContainer = c
+					break
+				}
+			}
+			Expect(runtimeContainer).NotTo(BeNil())
+
+			// Build env var map
+			runtimeEnvMap := make(map[string]corev1.EnvVar)
+			for _, env := range runtimeContainer.Env {
+				runtimeEnvMap[env.Name] = env
+			}
+
+			// Check provider type
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_TYPE"].Value).To(Equal("openai"))
+
+			// Check model
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_MODEL"].Value).To(Equal("gpt-4o"))
+
+			// Check base URL
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_BASE_URL"].Value).To(Equal("https://api.openai.com/v1"))
+
+			// Check provider config
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_TEMPERATURE"].Value).To(Equal("0.7"))
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_TOP_P"].Value).To(Equal("0.9"))
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_MAX_TOKENS"].Value).To(Equal("4096"))
+
+			// Check pricing config
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_INPUT_COST"].Value).To(Equal("0.003"))
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_OUTPUT_COST"].Value).To(Equal("0.015"))
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_CACHED_COST"].Value).To(Equal("0.001"))
+
+			// Check OpenAI API key is injected
+			var foundOpenAIKey bool
+			for _, env := range runtimeContainer.Env {
+				if env.Name == "OPENAI_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("openai-secret"))
+					foundOpenAIKey = true
+				}
+			}
+			Expect(foundOpenAIKey).To(BeTrue(), "Expected OPENAI_API_KEY env var from secret")
+		})
+
+		It("should handle nil provider config gracefully", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime without provider config")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					// No Provider config - should default to auto
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying default provider type is set")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			// Find runtime container
+			var runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == RuntimeContainerName {
+					runtimeContainer = c
+					break
+				}
+			}
+			Expect(runtimeContainer).NotTo(BeNil())
+
+			// Build env var map
+			runtimeEnvMap := make(map[string]corev1.EnvVar)
+			for _, env := range runtimeContainer.Env {
+				runtimeEnvMap[env.Name] = env
+			}
+
+			// Check provider type defaults to auto
+			Expect(runtimeEnvMap["OMNIA_PROVIDER_TYPE"].Value).To(Equal("auto"))
+
+			// Optional fields should not be present
+			_, hasModel := runtimeEnvMap["OMNIA_PROVIDER_MODEL"]
+			Expect(hasModel).To(BeFalse())
+			_, hasBaseURL := runtimeEnvMap["OMNIA_PROVIDER_BASE_URL"]
+			Expect(hasBaseURL).To(BeFalse())
 		})
 
 		It("should handle non-existent resource gracefully", func() {
@@ -620,8 +835,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -686,8 +903,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -779,8 +998,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
 						Name: toolRegistryKey.Name,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -858,8 +1079,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
 						Name: "nonexistent-toolregistry",
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -919,8 +1142,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 							Name: "redis-secret",
 						},
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -984,8 +1209,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -1061,8 +1288,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Name:      "cross-ns-toolregistry",
 						Namespace: &otherNS,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -1120,8 +1349,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Autoscaling: &omniav1alpha1.AutoscalingConfig{
@@ -1195,8 +1426,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Autoscaling: &omniav1alpha1.AutoscalingConfig{
@@ -1260,8 +1493,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Autoscaling: &omniav1alpha1.AutoscalingConfig{
@@ -1333,8 +1568,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					// Runtime is nil - should not create HPA
 				},
@@ -1389,8 +1626,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Autoscaling: &omniav1alpha1.AutoscalingConfig{
@@ -1463,8 +1702,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Autoscaling: &omniav1alpha1.AutoscalingConfig{
@@ -1541,8 +1782,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 				},
 			}
@@ -1605,8 +1848,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "test-secret",
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
 					},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Autoscaling: &omniav1alpha1.AutoscalingConfig{
