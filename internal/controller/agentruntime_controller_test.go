@@ -1881,6 +1881,121 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 		})
 	})
 
+	Context("buildRuntimeEnvVars", func() {
+		var reconciler *AgentRuntimeReconciler
+
+		BeforeEach(func() {
+			reconciler = &AgentRuntimeReconciler{
+				FacadeImage:  "test-facade:v1.0.0",
+				RuntimeImage: "test-runtime:v1.0.0",
+			}
+		})
+
+		It("should include mock provider env var when annotation is set", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						MockProviderAnnotation: "true",
+					},
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+
+			// Find the mock provider env var
+			var found bool
+			for _, env := range envVars {
+				if env.Name == "OMNIA_MOCK_PROVIDER" && env.Value == "true" {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue(), "OMNIA_MOCK_PROVIDER env var should be set")
+		})
+
+		It("should not include mock provider env var when annotation is not set", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+
+			// Ensure mock provider env var is NOT set
+			for _, env := range envVars {
+				Expect(env.Name).NotTo(Equal("OMNIA_MOCK_PROVIDER"), "OMNIA_MOCK_PROVIDER should not be set without annotation")
+			}
+		})
+
+		It("should not include mock provider env var when annotation is false", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						MockProviderAnnotation: "false",
+					},
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+
+			// Ensure mock provider env var is NOT set
+			for _, env := range envVars {
+				Expect(env.Name).NotTo(Equal("OMNIA_MOCK_PROVIDER"), "OMNIA_MOCK_PROVIDER should not be set when annotation is false")
+			}
+		})
+	})
+
 	Context("buildToolsConfig", func() {
 		var reconciler *AgentRuntimeReconciler
 
