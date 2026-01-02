@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -174,9 +175,41 @@ func (m *Manager) LoadFromToolConfig(config *ToolConfig) error {
 				return fmt.Errorf("failed to register MCP adapter %q: %w", tool.Name, err)
 			}
 
-		case ToolTypeHTTP, ToolTypeGRPC:
-			// HTTP and gRPC tools are handled differently (not via adapters)
-			m.log.V(1).Info("skipping non-MCP tool", "tool", tool.Name, "type", tool.Type)
+		case ToolTypeGRPC:
+			if tool.GRPCConfig == nil {
+				m.log.Info("skipping gRPC tool without config", "tool", tool.Name)
+				continue
+			}
+
+			// Parse timeout if provided
+			var timeout time.Duration
+			if tool.Timeout != "" {
+				var err error
+				timeout, err = time.ParseDuration(tool.Timeout)
+				if err != nil {
+					m.log.Info("invalid timeout, using default", "tool", tool.Name, "timeout", tool.Timeout)
+				}
+			}
+
+			adapterConfig := GRPCAdapterConfig{
+				Name:                  tool.Name,
+				Endpoint:              tool.GRPCConfig.Endpoint,
+				TLS:                   tool.GRPCConfig.TLS,
+				TLSCertPath:           tool.GRPCConfig.TLSCertPath,
+				TLSKeyPath:            tool.GRPCConfig.TLSKeyPath,
+				TLSCAPath:             tool.GRPCConfig.TLSCAPath,
+				TLSInsecureSkipVerify: tool.GRPCConfig.TLSInsecureSkipVerify,
+				Timeout:               timeout,
+			}
+
+			adapter := NewGRPCAdapter(adapterConfig, m.log)
+			if err := m.RegisterAdapter(adapter); err != nil {
+				return fmt.Errorf("failed to register gRPC adapter %q: %w", tool.Name, err)
+			}
+
+		case ToolTypeHTTP:
+			// HTTP tools are handled differently (not via adapters for now)
+			m.log.V(1).Info("skipping HTTP tool", "tool", tool.Name)
 
 		default:
 			m.log.Info("unknown tool type", "tool", tool.Name, "type", tool.Type)

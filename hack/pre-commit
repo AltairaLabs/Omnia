@@ -195,6 +195,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip generated protobuf files
+        if [[ "$file" == *.pb.go ]] || [[ "$file" == *_grpc.pb.go ]]; then
+            continue
+        fi
+
         # Skip E2E test utilities
         if [[ "$file" == test/* ]]; then
             continue

@@ -34,6 +34,7 @@ type ToolEntry struct {
 	Type        string   `json:"type" yaml:"type"`
 	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 	HTTPConfig  *HTTPCfg `json:"httpConfig,omitempty" yaml:"httpConfig,omitempty"`
+	GRPCConfig  *GRPCCfg `json:"grpcConfig,omitempty" yaml:"grpcConfig,omitempty"`
 	MCPConfig   *MCPCfg  `json:"mcpConfig,omitempty" yaml:"mcpConfig,omitempty"`
 	Timeout     string   `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Retries     int32    `json:"retries,omitempty" yaml:"retries,omitempty"`
@@ -43,6 +44,16 @@ type ToolEntry struct {
 type HTTPCfg struct {
 	Endpoint string `json:"endpoint" yaml:"endpoint"`
 	Method   string `json:"method,omitempty" yaml:"method,omitempty"`
+}
+
+// GRPCCfg represents gRPC configuration for a tool.
+type GRPCCfg struct {
+	Endpoint              string `json:"endpoint" yaml:"endpoint"`
+	TLS                   bool   `json:"tls,omitempty" yaml:"tls,omitempty"`
+	TLSCertPath           string `json:"tlsCertPath,omitempty" yaml:"tlsCertPath,omitempty"`
+	TLSKeyPath            string `json:"tlsKeyPath,omitempty" yaml:"tlsKeyPath,omitempty"`
+	TLSCAPath             string `json:"tlsCAPath,omitempty" yaml:"tlsCAPath,omitempty"`
+	TLSInsecureSkipVerify bool   `json:"tlsInsecureSkipVerify,omitempty" yaml:"tlsInsecureSkipVerify,omitempty"`
 }
 
 // MCPCfg represents MCP configuration for a tool.

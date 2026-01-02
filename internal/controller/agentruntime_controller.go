@@ -764,6 +764,7 @@ type ToolEntry struct {
 	Type        string    `json:"type"`
 	Description string    `json:"description,omitempty"`
 	HTTPConfig  *ToolHTTP `json:"httpConfig,omitempty"`
+	GRPCConfig  *ToolGRPC `json:"grpcConfig,omitempty"`
 	MCPConfig   *ToolMCP  `json:"mcpConfig,omitempty"`
 	Timeout     string    `json:"timeout,omitempty"`
 	Retries     int32     `json:"retries,omitempty"`
@@ -773,6 +774,16 @@ type ToolEntry struct {
 type ToolHTTP struct {
 	Endpoint string `json:"endpoint"`
 	Method   string `json:"method,omitempty"`
+}
+
+// ToolGRPC represents gRPC configuration for a tool.
+type ToolGRPC struct {
+	Endpoint              string `json:"endpoint"`
+	TLS                   bool   `json:"tls,omitempty"`
+	TLSCertPath           string `json:"tlsCertPath,omitempty"`
+	TLSKeyPath            string `json:"tlsKeyPath,omitempty"`
+	TLSCAPath             string `json:"tlsCAPath,omitempty"`
+	TLSInsecureSkipVerify bool   `json:"tlsInsecureSkipVerify,omitempty"`
 }
 
 // ToolMCP represents MCP configuration for a tool.
@@ -899,8 +910,13 @@ func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.To
 						entry.MCPConfig.Env = spec.MCPConfig.Env
 					}
 				}
+			case omniav1alpha1.ToolTypeGRPC:
+				// gRPC tools use the discovered endpoint (from service selector)
+				entry.GRPCConfig = &ToolGRPC{
+					Endpoint: discovered.Endpoint,
+				}
 			default:
-				// HTTP and gRPC use HTTPConfig with the discovered endpoint
+				// HTTP uses HTTPConfig with the discovered endpoint
 				entry.HTTPConfig = &ToolHTTP{
 					Endpoint: discovered.Endpoint,
 					Method:   "POST", // Default method
