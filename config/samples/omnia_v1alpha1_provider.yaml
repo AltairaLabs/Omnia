@@ -1,0 +1,47 @@
+# Sample Provider - defines reusable LLM provider configuration
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-sonnet
+  namespace: omnia-system
+spec:
+  # Provider type: claude, openai, gemini
+  type: claude
+
+  # Model to use
+  model: claude-sonnet-4-20250514
+
+  # Secret containing API credentials
+  # The secret should have a key matching the provider:
+  # - ANTHROPIC_API_KEY for claude
+  # - OPENAI_API_KEY for openai
+  # - GEMINI_API_KEY for gemini
+  secretRef:
+    name: anthropic-credentials
+    # Optional: specify which key in the secret if it's not provider-specific
+    # key: api-key
+
+  # Optional: default tuning parameters
+  defaults:
+    temperature: "0.7"
+    topP: "1.0"
+    maxTokens: 4096
+
+  # Optional: pricing for cost tracking
+  pricing:
+    inputCostPer1K: "0.003"
+    outputCostPer1K: "0.015"
+    cachedCostPer1K: "0.0003"
+
+  # Optional: validate credentials on reconciliation
+  # validateCredentials: true
+---
+# Sample Secret for the Provider
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-credentials
+  namespace: omnia-system
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "sk-ant-your-api-key-here"

@@ -66,6 +66,7 @@ rules:
   resources:
   - agentruntimes
   - promptpacks
+  - providers
   - toolregistries
   verbs:
   - create
@@ -80,6 +81,7 @@ rules:
   resources:
   - agentruntimes/finalizers
   - promptpacks/finalizers
+  - providers/finalizers
   - toolregistries/finalizers
   verbs:
   - update
@@ -88,6 +90,7 @@ rules:
   resources:
   - agentruntimes/status
   - promptpacks/status
+  - providers/status
   - toolregistries/status
   verbs:
   - get

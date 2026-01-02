@@ -110,9 +110,9 @@ spec:
                 type: object
               provider:
                 description: |-
-                  provider configures the LLM provider (type, model, credentials, tuning).
-                  If not specified, PromptKit's auto-detection is used with credentials
-                  from a secret named "<agentruntime-name>-provider" if it exists.
+                  provider configures the LLM provider inline (type, model, credentials, tuning).
+                  If not specified and providerRef is also not specified, PromptKit's auto-detection
+                  is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
                 properties:
                   baseURL:
                     description: |-
@@ -195,6 +195,24 @@ spec:
                     - openai
                     - gemini
                     type: string
+                type: object
+              providerRef:
+                description: |-
+                  providerRef references a Provider resource for LLM configuration.
+                  If specified, the referenced Provider's configuration is used.
+                  If both providerRef and provider are specified, providerRef takes precedence.
+                properties:
+                  name:
+                    description: name is the name of the Provider resource.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      namespace is the namespace of the Provider resource.
+                      If not specified, the same namespace as the AgentRuntime is used.
+                    type: string
+                required:
+                - name
                 type: object
               runtime:
                 description: runtime configures deployment settings like replicas

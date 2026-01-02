@@ -57,6 +57,18 @@ spec:
               facade:
                 description: facade configures the client-facing connection interface.
                 properties:
+                  handler:
+                    default: runtime
+                    description: |-
+                      handler specifies the message handler mode.
+                      "echo" returns input messages back (for testing connectivity).
+                      "demo" provides streaming responses with simulated tool calls (for demos).
+                      "runtime" uses the runtime framework in the container (default, for production).
+                    enum:
+                    - echo
+                    - demo
+                    - runtime
+                    type: string
                   port:
                     default: 8080
                     description: port is the port number for the facade service.
@@ -96,22 +108,112 @@ spec:
                 required:
                 - name
                 type: object
-              providerSecretRef:
+              provider:
                 description: |-
-                  providerSecretRef references a secret containing LLM provider credentials.
-                  The secret should contain keys like "api-key" for the provider.
+                  provider configures the LLM provider inline (type, model, credentials, tuning).
+                  If not specified and providerRef is also not specified, PromptKit's auto-detection
+                  is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
                 properties:
-                  name:
-                    default: ""
+                  baseURL:
                     description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      baseURL overrides the provider's default API endpoint.
+                      Useful for proxies or self-hosted models.
+                    type: string
+                  config:
+                    description: config contains provider tuning parameters.
+                    properties:
+                      maxTokens:
+                        description: maxTokens limits the maximum number of tokens
+                          in the response.
+                        format: int32
+                        type: integer
+                      temperature:
+                        description: |-
+                          temperature controls randomness in responses (0.0-2.0).
+                          Lower values make output more focused and deterministic.
+                          Specified as a string to support decimal values (e.g., "0.7").
+                        type: string
+                      topP:
+                        description: |-
+                          topP controls nucleus sampling (0.0-1.0).
+                          Specified as a string to support decimal values (e.g., "0.9").
+                        type: string
+                    type: object
+                  model:
+                    description: |-
+                      model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
+                      If not specified, the provider's default model is used.
+                    type: string
+                  pricing:
+                    description: |-
+                      pricing configures cost tracking for this provider.
+                      If not specified, PromptKit's built-in pricing is used.
+                    properties:
+                      cachedCostPer1K:
+                        description: |-
+                          cachedCostPer1K is the cost per 1000 cached tokens (e.g., "0.0003").
+                          Cached tokens have reduced cost with some providers.
+                        type: string
+                      inputCostPer1K:
+                        description: inputCostPer1K is the cost per 1000 input tokens
+                          (e.g., "0.003").
+                        type: string
+                      outputCostPer1K:
+                        description: outputCostPer1K is the cost per 1000 output tokens
+                          (e.g., "0.015").
+                        type: string
+                    type: object
+                  secretRef:
+                    description: |-
+                      secretRef references a Secret containing API credentials.
+                      The secret should contain a key matching the provider's expected env var:
+                      - ANTHROPIC_API_KEY for Claude
+                      - OPENAI_API_KEY for OpenAI
+                      - GEMINI_API_KEY or GOOGLE_API_KEY for Gemini
+                      Or use "api-key" as a generic key name.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  type:
+                    default: auto
+                    description: |-
+                      type specifies the provider type.
+                      "auto" uses PromptKit's auto-detection based on available credentials.
+                      "claude", "openai", "gemini" explicitly select a provider.
+                    enum:
+                    - auto
+                    - claude
+                    - openai
+                    - gemini
                     type: string
                 type: object
-                x-kubernetes-map-type: atomic
+              providerRef:
+                description: |-
+                  providerRef references a Provider resource for LLM configuration.
+                  If specified, the referenced Provider's configuration is used.
+                  If both providerRef and provider are specified, providerRef takes precedence.
+                properties:
+                  name:
+                    description: name is the name of the Provider resource.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      namespace is the namespace of the Provider resource.
+                      If not specified, the same namespace as the AgentRuntime is used.
+                    type: string
+                required:
+                - name
+                type: object
               runtime:
                 description: runtime configures deployment settings like replicas
                   and resources.
@@ -1035,6 +1137,115 @@ spec:
                             x-kubernetes-list-type: atomic
                         type: object
                     type: object
+                  autoscaling:
+                    description: autoscaling configures horizontal pod autoscaling
+                      for the agent.
+                    properties:
+                      enabled:
+                        default: false
+                        description: |-
+                          enabled specifies whether autoscaling is enabled.
+                          When enabled, the autoscaler will manage replica count instead of spec.runtime.replicas.
+                        type: boolean
+                      keda:
+                        description: keda contains KEDA-specific configuration. Only
+                          used when type is "keda".
+                        properties:
+                          cooldownPeriod:
+                            default: 300
+                            description: cooldownPeriod is the wait period in seconds
+                              after last trigger before scaling down. Defaults to
+                              300.
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          pollingInterval:
+                            default: 30
+                            description: pollingInterval is the interval in seconds
+                              to check triggers. Defaults to 30.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          triggers:
+                            description: |-
+                              triggers is the list of KEDA triggers for scaling.
+                              If empty, a default Prometheus trigger for connections is configured.
+                            items:
+                              description: KEDATrigger defines a KEDA scaling trigger.
+                              properties:
+                                metadata:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    metadata contains trigger-specific configuration.
+                                    For prometheus: serverAddress, query, threshold
+                                    For cron: timezone, start, end, desiredReplicas
+                                  type: object
+                                type:
+                                  description: type is the KEDA trigger type (e.g.,
+                                    "prometheus", "cron").
+                                  type: string
+                              required:
+                              - metadata
+                              - type
+                              type: object
+                            type: array
+                        type: object
+                      maxReplicas:
+                        default: 10
+                        description: maxReplicas is the maximum number of replicas.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        default: 1
+                        description: |-
+                          minReplicas is the minimum number of replicas.
+                          For KEDA, set to 0 to enable scale-to-zero.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      scaleDownStabilizationSeconds:
+                        default: 300
+                        description: |-
+                          scaleDownStabilizationSeconds is the number of seconds to wait before
+                          scaling down after a scale-up. This prevents thrashing when connections
+                          are bursty. Defaults to 300 (5 minutes). Only used for HPA type.
+                        format: int32
+                        maximum: 3600
+                        minimum: 0
+                        type: integer
+                      targetCPUUtilizationPercentage:
+                        default: 90
+                        description: |-
+                          targetCPUUtilizationPercentage is the target average CPU utilization.
+                          CPU is a secondary metric since agents are typically I/O bound.
+                          Set to nil to disable CPU-based scaling. Defaults to 90% as a safety valve.
+                          Only used for HPA type.
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      targetMemoryUtilizationPercentage:
+                        default: 70
+                        description: |-
+                          targetMemoryUtilizationPercentage is the target average memory utilization.
+                          Memory is the primary scaling metric since each WebSocket connection and
+                          session consumes memory. Defaults to 70%. Only used for HPA type.
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      type:
+                        default: hpa
+                        description: |-
+                          type specifies which autoscaler to use. Defaults to "hpa".
+                          Use "keda" for advanced scaling (scale to zero, Prometheus metrics, cron).
+                        enum:
+                        - hpa
+                        - keda
+                        type: string
+                    type: object
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -1042,7 +1253,9 @@ spec:
                     type: object
                   replicas:
                     default: 1
-                    description: replicas is the desired number of agent runtime pods.
+                    description: |-
+                      replicas is the desired number of agent runtime pods.
+                      This field is ignored when autoscaling is enabled.
                     format: int32
                     minimum: 0
                     type: integer
@@ -1201,7 +1414,6 @@ spec:
             required:
             - facade
             - promptPackRef
-            - providerSecretRef
             type: object
           status:
             description: status defines the observed state of AgentRuntime

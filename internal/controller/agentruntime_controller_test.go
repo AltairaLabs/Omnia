@@ -2162,7 +2162,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
 
 			// Find the mock provider env var
 			var found bool
@@ -2198,7 +2198,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -2232,7 +2232,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -2469,6 +2469,145 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(config.Tools[0].MCPConfig.Args).To(Equal([]string{"--verbose", "--port=8080"}))
 			Expect(config.Tools[0].MCPConfig.WorkDir).To(Equal(workDir))
 			Expect(config.Tools[0].MCPConfig.Env).To(HaveKeyWithValue("DEBUG", "true"))
+		})
+	})
+
+	Context("buildProviderEnvVarsFromCRD", func() {
+		It("should build env vars from Provider CRD with all fields", func() {
+			temperature := "0.7"
+			topP := "0.9"
+			maxTokens := int32(4096)
+			inputCost := "0.003"
+			outputCost := "0.015"
+			cachedCost := "0.0003"
+
+			provider := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:    omniav1alpha1.ProviderTypeClaude,
+					Model:   "claude-sonnet-4-20250514",
+					BaseURL: "https://api.anthropic.com",
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "test-secret",
+					},
+					Defaults: &omniav1alpha1.ProviderDefaults{
+						Temperature: &temperature,
+						TopP:        &topP,
+						MaxTokens:   &maxTokens,
+					},
+					Pricing: &omniav1alpha1.ProviderPricing{
+						InputCostPer1K:  &inputCost,
+						OutputCostPer1K: &outputCost,
+						CachedCostPer1K: &cachedCost,
+					},
+				},
+			}
+
+			envVars := buildProviderEnvVarsFromCRD(provider)
+
+			// Check all env vars are present
+			envMap := make(map[string]string)
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("claude"))
+			Expect(envMap["OMNIA_PROVIDER_MODEL"]).To(Equal("claude-sonnet-4-20250514"))
+			Expect(envMap["OMNIA_PROVIDER_BASE_URL"]).To(Equal("https://api.anthropic.com"))
+			Expect(envMap["OMNIA_PROVIDER_TEMPERATURE"]).To(Equal("0.7"))
+			Expect(envMap["OMNIA_PROVIDER_TOP_P"]).To(Equal("0.9"))
+			Expect(envMap["OMNIA_PROVIDER_MAX_TOKENS"]).To(Equal("4096"))
+			Expect(envMap["OMNIA_PROVIDER_INPUT_COST"]).To(Equal("0.003"))
+			Expect(envMap["OMNIA_PROVIDER_OUTPUT_COST"]).To(Equal("0.015"))
+			Expect(envMap["OMNIA_PROVIDER_CACHED_COST"]).To(Equal("0.0003"))
+		})
+
+		It("should build env vars from Provider CRD with minimal fields", func() {
+			provider := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "test-secret",
+					},
+				},
+			}
+
+			envVars := buildProviderEnvVarsFromCRD(provider)
+
+			// Check that provider type is set
+			var foundType bool
+			for _, env := range envVars {
+				if env.Name == "OMNIA_PROVIDER_TYPE" && env.Value == "openai" {
+					foundType = true
+					break
+				}
+			}
+			Expect(foundType).To(BeTrue())
+		})
+
+		It("should use custom secret key when specified", func() {
+			customKey := "my-api-key"
+			provider := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeClaude,
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "test-secret",
+						Key:  &customKey,
+					},
+				},
+			}
+
+			envVars := buildProviderEnvVarsFromCRD(provider)
+
+			// Find the ANTHROPIC_API_KEY env var and check it uses the custom key
+			var foundKey bool
+			for _, env := range envVars {
+				if env.Name == "ANTHROPIC_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+					Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("my-api-key"))
+					foundKey = true
+					break
+				}
+			}
+			Expect(foundKey).To(BeTrue())
+		})
+	})
+
+	Context("buildSecretEnvVarsWithKey", func() {
+		It("should create env var with correct name for Claude", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeClaude, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("ANTHROPIC_API_KEY"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
+		})
+
+		It("should create env var with correct name for OpenAI", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeOpenAI, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("OPENAI_API_KEY"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
+		})
+
+		It("should create env var with correct name for Gemini", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeGemini, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("GEMINI_API_KEY"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
+		})
+
+		It("should default to ANTHROPIC_API_KEY for auto provider", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeAuto, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("ANTHROPIC_API_KEY"))
 		})
 	})
 })
