@@ -193,13 +193,13 @@ func TestManager_LoadFromToolConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should have registered the MCP adapter (HTTP tools are skipped)
+	// Should have registered both the HTTP and MCP adapters
 	m.mu.RLock()
 	adapterCount := len(m.adapters)
 	m.mu.RUnlock()
 
-	if adapterCount != 1 {
-		t.Errorf("expected 1 adapter, got %d", adapterCount)
+	if adapterCount != 2 {
+		t.Errorf("expected 2 adapters, got %d", adapterCount)
 	}
 }
 

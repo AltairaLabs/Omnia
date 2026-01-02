@@ -42,8 +42,12 @@ type ToolEntry struct {
 
 // HTTPCfg represents HTTP configuration for a tool.
 type HTTPCfg struct {
-	Endpoint string `json:"endpoint" yaml:"endpoint"`
-	Method   string `json:"method,omitempty" yaml:"method,omitempty"`
+	Endpoint    string            `json:"endpoint" yaml:"endpoint"`
+	Method      string            `json:"method,omitempty" yaml:"method,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	ContentType string            `json:"contentType,omitempty" yaml:"contentType,omitempty"`
+	AuthType    string            `json:"authType,omitempty" yaml:"authType,omitempty"`
+	AuthToken   string            `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 }
 
 // GRPCCfg represents gRPC configuration for a tool.
