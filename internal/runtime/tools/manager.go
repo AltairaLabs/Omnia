@@ -208,8 +208,36 @@ func (m *Manager) LoadFromToolConfig(config *ToolConfig) error {
 			}
 
 		case ToolTypeHTTP:
-			// HTTP tools are handled differently (not via adapters for now)
-			m.log.V(1).Info("skipping HTTP tool", "tool", tool.Name)
+			if tool.HTTPConfig == nil {
+				m.log.Info("skipping HTTP tool without config", "tool", tool.Name)
+				continue
+			}
+
+			// Parse timeout if provided
+			var timeout time.Duration
+			if tool.Timeout != "" {
+				var err error
+				timeout, err = time.ParseDuration(tool.Timeout)
+				if err != nil {
+					m.log.Info("invalid timeout, using default", "tool", tool.Name, "timeout", tool.Timeout)
+				}
+			}
+
+			adapterConfig := HTTPAdapterConfig{
+				Name:        tool.Name,
+				Endpoint:    tool.HTTPConfig.Endpoint,
+				Method:      tool.HTTPConfig.Method,
+				Headers:     tool.HTTPConfig.Headers,
+				ContentType: tool.HTTPConfig.ContentType,
+				AuthType:    tool.HTTPConfig.AuthType,
+				AuthToken:   tool.HTTPConfig.AuthToken,
+				Timeout:     timeout,
+			}
+
+			adapter := NewHTTPAdapter(adapterConfig, m.log)
+			if err := m.RegisterAdapter(adapter); err != nil {
+				return fmt.Errorf("failed to register HTTP adapter %q: %w", tool.Name, err)
+			}
 
 		default:
 			m.log.Info("unknown tool type", "tool", tool.Name, "type", tool.Type)
