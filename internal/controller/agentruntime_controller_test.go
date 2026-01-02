@@ -36,8 +36,9 @@ import (
 
 var _ = Describe("AgentRuntime Controller", func() {
 	const (
-		timeout  = time.Second * 10
-		interval = time.Millisecond * 250
+		timeout         = time.Second * 10
+		interval        = time.Millisecond * 250
+		anthropicAPIKey = "ANTHROPIC_API_KEY"
 	)
 
 	Context("When reconciling AgentRuntime", func() {
@@ -587,7 +588,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			// The env var may appear twice (one with key matching env name, one with api-key fallback)
 			var foundAnthropicKey bool
 			for _, env := range runtimeContainer.Env {
-				if env.Name == "ANTHROPIC_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+				if env.Name == anthropicAPIKey && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
 					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
 					foundAnthropicKey = true
 				}
@@ -1898,10 +1899,200 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}, timeout, interval).Should(Equal(int32(15)))
 		})
 	})
+
+	Context("When using providerRef", func() {
+		var (
+			ctx             context.Context
+			agentRuntimeKey types.NamespacedName
+			promptPackKey   types.NamespacedName
+			providerKey     types.NamespacedName
+			reconciler      *AgentRuntimeReconciler
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			agentRuntimeKey = types.NamespacedName{
+				Name:      "test-provider-ref-agent",
+				Namespace: "default",
+			}
+			promptPackKey = types.NamespacedName{
+				Name:      "test-provider-ref-promptpack",
+				Namespace: "default",
+			}
+			providerKey = types.NamespacedName{
+				Name:      "test-provider-ref",
+				Namespace: "default",
+			}
+			reconciler = &AgentRuntimeReconciler{
+				Client:       k8sClient,
+				Scheme:       k8sClient.Scheme(),
+				FacadeImage:  "test-facade:latest",
+				RuntimeImage: "test-runtime:latest",
+			}
+		})
+
+		AfterEach(func() {
+			// Clean up all resources
+			agentRuntime := &omniav1alpha1.AgentRuntime{}
+			if err := k8sClient.Get(ctx, agentRuntimeKey, agentRuntime); err == nil {
+				_ = k8sClient.Delete(ctx, agentRuntime)
+			}
+			promptPack := &omniav1alpha1.PromptPack{}
+			if err := k8sClient.Get(ctx, promptPackKey, promptPack); err == nil {
+				_ = k8sClient.Delete(ctx, promptPack)
+			}
+			provider := &omniav1alpha1.Provider{}
+			if err := k8sClient.Get(ctx, providerKey, provider); err == nil {
+				_ = k8sClient.Delete(ctx, provider)
+			}
+			configMap := &corev1.ConfigMap{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: promptPackKey.Name + "-prompts", Namespace: promptPackKey.Namespace}, configMap); err == nil {
+				_ = k8sClient.Delete(ctx, configMap)
+			}
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: "provider-secret", Namespace: "default"}, secret); err == nil {
+				_ = k8sClient.Delete(ctx, secret)
+			}
+		})
+
+		It("should fetch provider from same namespace", func() {
+			By("creating the secret")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("test-key"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			By("creating the Provider")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerKey.Name,
+					Namespace: providerKey.Namespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "provider-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			By("creating the AgentRuntime with providerRef")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ProviderRef: &omniav1alpha1.ProviderRef{
+						Name: providerKey.Name,
+					},
+				},
+			}
+
+			fetchedProvider, err := reconciler.fetchProvider(ctx, agentRuntime)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fetchedProvider).NotTo(BeNil())
+			Expect(fetchedProvider.Spec.Type).To(Equal(omniav1alpha1.ProviderTypeClaude))
+			Expect(fetchedProvider.Spec.Model).To(Equal("claude-sonnet-4-20250514"))
+		})
+
+		It("should fetch provider from different namespace", func() {
+			By("creating a namespace for cross-namespace test")
+			otherNs := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "provider-ns",
+				},
+			}
+			// Ignore error if namespace exists
+			_ = k8sClient.Create(ctx, otherNs)
+
+			By("creating the secret in other namespace")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-secret",
+					Namespace: "provider-ns",
+				},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("test-key"),
+				},
+			}
+			// Ignore error if secret exists
+			_ = k8sClient.Create(ctx, secret)
+
+			By("creating the Provider in other namespace")
+			crossNsProvider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cross-ns-provider",
+					Namespace: "provider-ns",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeOpenAI,
+					Model: "gpt-4o",
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "provider-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, crossNsProvider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, crossNsProvider) }()
+
+			By("creating the AgentRuntime with cross-namespace providerRef")
+			crossNs := "provider-ns"
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ProviderRef: &omniav1alpha1.ProviderRef{
+						Name:      "cross-ns-provider",
+						Namespace: &crossNs,
+					},
+				},
+			}
+
+			fetchedProvider, err := reconciler.fetchProvider(ctx, agentRuntime)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fetchedProvider).NotTo(BeNil())
+			Expect(fetchedProvider.Spec.Type).To(Equal(omniav1alpha1.ProviderTypeOpenAI))
+			Expect(fetchedProvider.Spec.Model).To(Equal("gpt-4o"))
+		})
+
+		It("should fail when provider does not exist", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ProviderRef: &omniav1alpha1.ProviderRef{
+						Name: "nonexistent-provider",
+					},
+				},
+			}
+
+			_, err := reconciler.fetchProvider(ctx, agentRuntime)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get Provider"))
+		})
+
+	})
 })
 
 // Test helper functions and buildKEDATriggers (unit tests, no envtest required)
 var _ = Describe("AgentRuntime Controller Unit Tests", func() {
+	const (
+		anthropicAPIKey = "ANTHROPIC_API_KEY"
+	)
+
 	Describe("ptr helper function", func() {
 		It("should return a pointer to an int32 value", func() {
 			val := int32(42)
@@ -2162,7 +2353,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
 
 			// Find the mock provider env var
 			var found bool
@@ -2198,7 +2389,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -2232,7 +2423,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -2469,6 +2660,145 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(config.Tools[0].MCPConfig.Args).To(Equal([]string{"--verbose", "--port=8080"}))
 			Expect(config.Tools[0].MCPConfig.WorkDir).To(Equal(workDir))
 			Expect(config.Tools[0].MCPConfig.Env).To(HaveKeyWithValue("DEBUG", "true"))
+		})
+	})
+
+	Context("buildProviderEnvVarsFromCRD", func() {
+		It("should build env vars from Provider CRD with all fields", func() {
+			temperature := "0.7"
+			topP := "0.9"
+			maxTokens := int32(4096)
+			inputCost := "0.003"
+			outputCost := "0.015"
+			cachedCost := "0.0003"
+
+			provider := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:    omniav1alpha1.ProviderTypeClaude,
+					Model:   "claude-sonnet-4-20250514",
+					BaseURL: "https://api.anthropic.com",
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "test-secret",
+					},
+					Defaults: &omniav1alpha1.ProviderDefaults{
+						Temperature: &temperature,
+						TopP:        &topP,
+						MaxTokens:   &maxTokens,
+					},
+					Pricing: &omniav1alpha1.ProviderPricing{
+						InputCostPer1K:  &inputCost,
+						OutputCostPer1K: &outputCost,
+						CachedCostPer1K: &cachedCost,
+					},
+				},
+			}
+
+			envVars := buildProviderEnvVarsFromCRD(provider)
+
+			// Check all env vars are present
+			envMap := make(map[string]string)
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("claude"))
+			Expect(envMap["OMNIA_PROVIDER_MODEL"]).To(Equal("claude-sonnet-4-20250514"))
+			Expect(envMap["OMNIA_PROVIDER_BASE_URL"]).To(Equal("https://api.anthropic.com"))
+			Expect(envMap["OMNIA_PROVIDER_TEMPERATURE"]).To(Equal("0.7"))
+			Expect(envMap["OMNIA_PROVIDER_TOP_P"]).To(Equal("0.9"))
+			Expect(envMap["OMNIA_PROVIDER_MAX_TOKENS"]).To(Equal("4096"))
+			Expect(envMap["OMNIA_PROVIDER_INPUT_COST"]).To(Equal("0.003"))
+			Expect(envMap["OMNIA_PROVIDER_OUTPUT_COST"]).To(Equal("0.015"))
+			Expect(envMap["OMNIA_PROVIDER_CACHED_COST"]).To(Equal("0.0003"))
+		})
+
+		It("should build env vars from Provider CRD with minimal fields", func() {
+			provider := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeOpenAI,
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "test-secret",
+					},
+				},
+			}
+
+			envVars := buildProviderEnvVarsFromCRD(provider)
+
+			// Check that provider type is set
+			var foundType bool
+			for _, env := range envVars {
+				if env.Name == "OMNIA_PROVIDER_TYPE" && env.Value == "openai" {
+					foundType = true
+					break
+				}
+			}
+			Expect(foundType).To(BeTrue())
+		})
+
+		It("should use custom secret key when specified", func() {
+			customKey := "my-api-key"
+			provider := &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: omniav1alpha1.ProviderTypeClaude,
+					SecretRef: omniav1alpha1.SecretKeyRef{
+						Name: "test-secret",
+						Key:  &customKey,
+					},
+				},
+			}
+
+			envVars := buildProviderEnvVarsFromCRD(provider)
+
+			// Find the ANTHROPIC_API_KEY env var and check it uses the custom key
+			var foundKey bool
+			for _, env := range envVars {
+				if env.Name == anthropicAPIKey && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+					Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("my-api-key"))
+					foundKey = true
+					break
+				}
+			}
+			Expect(foundKey).To(BeTrue())
+		})
+	})
+
+	Context("buildSecretEnvVarsWithKey", func() {
+		It("should create env var with correct name for Claude", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeClaude, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal(anthropicAPIKey))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
+		})
+
+		It("should create env var with correct name for OpenAI", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeOpenAI, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("OPENAI_API_KEY"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
+		})
+
+		It("should create env var with correct name for Gemini", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeGemini, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("GEMINI_API_KEY"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
+		})
+
+		It("should default to ANTHROPIC_API_KEY for auto provider", func() {
+			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
+			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeAuto, "custom-key")
+
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal(anthropicAPIKey))
 		})
 	})
 })

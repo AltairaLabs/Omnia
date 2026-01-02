@@ -266,6 +266,121 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
+// buildProviderEnvVarsFromCRD creates environment variables from a Provider CRD.
+// This is used when an AgentRuntime references a Provider resource.
+func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvVar {
+	var envVars []corev1.EnvVar
+
+	// Provider type
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_PROVIDER_TYPE",
+		Value: string(provider.Spec.Type),
+	})
+
+	// Model
+	if provider.Spec.Model != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_PROVIDER_MODEL",
+			Value: provider.Spec.Model,
+		})
+	}
+
+	// Base URL
+	if provider.Spec.BaseURL != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_PROVIDER_BASE_URL",
+			Value: provider.Spec.BaseURL,
+		})
+	}
+
+	// Provider defaults (temperature, topP, maxTokens)
+	if provider.Spec.Defaults != nil {
+		if provider.Spec.Defaults.Temperature != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_PROVIDER_TEMPERATURE",
+				Value: *provider.Spec.Defaults.Temperature,
+			})
+		}
+		if provider.Spec.Defaults.TopP != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_PROVIDER_TOP_P",
+				Value: *provider.Spec.Defaults.TopP,
+			})
+		}
+		if provider.Spec.Defaults.MaxTokens != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_PROVIDER_MAX_TOKENS",
+				Value: fmt.Sprintf("%d", *provider.Spec.Defaults.MaxTokens),
+			})
+		}
+	}
+
+	// Pricing
+	if provider.Spec.Pricing != nil {
+		if provider.Spec.Pricing.InputCostPer1K != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_PROVIDER_INPUT_COST",
+				Value: *provider.Spec.Pricing.InputCostPer1K,
+			})
+		}
+		if provider.Spec.Pricing.OutputCostPer1K != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_PROVIDER_OUTPUT_COST",
+				Value: *provider.Spec.Pricing.OutputCostPer1K,
+			})
+		}
+		if provider.Spec.Pricing.CachedCostPer1K != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_PROVIDER_CACHED_COST",
+				Value: *provider.Spec.Pricing.CachedCostPer1K,
+			})
+		}
+	}
+
+	// API key from secret
+	// Use the specific key if provided, otherwise use provider-appropriate keys
+	secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
+	if provider.Spec.SecretRef.Key != nil {
+		// User specified a specific key to use
+		envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *provider.Spec.SecretRef.Key)...)
+	} else {
+		// Use provider-appropriate keys
+		envVars = append(envVars, buildSecretEnvVars(&secretRef, provider.Spec.Type)...)
+	}
+
+	return envVars
+}
+
+// buildSecretEnvVarsWithKey creates environment variables from a secret using a specific key.
+func buildSecretEnvVarsWithKey(secretRef *corev1.LocalObjectReference, providerType omniav1alpha1.ProviderType, key string) []corev1.EnvVar {
+	var envVars []corev1.EnvVar
+
+	// Map of provider types to their expected API key env var names
+	providerKeyNames := map[omniav1alpha1.ProviderType]string{
+		omniav1alpha1.ProviderTypeClaude: "ANTHROPIC_API_KEY",
+		omniav1alpha1.ProviderTypeOpenAI: "OPENAI_API_KEY",
+		omniav1alpha1.ProviderTypeGemini: "GEMINI_API_KEY",
+	}
+
+	// Get the target env var name for this provider type
+	envVarName := "ANTHROPIC_API_KEY" // Default
+	if name, ok := providerKeyNames[providerType]; ok {
+		envVarName = name
+	}
+
+	envVars = append(envVars, corev1.EnvVar{
+		Name: envVarName,
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: *secretRef,
+				Key:                  key,
+			},
+		},
+	})
+
+	return envVars
+}
+
 // Condition types for AgentRuntime
 const (
 	ConditionTypeReady             = "Ready"
@@ -273,6 +388,7 @@ const (
 	ConditionTypeServiceReady      = "ServiceReady"
 	ConditionTypePromptPackReady   = "PromptPackReady"
 	ConditionTypeToolRegistryReady = "ToolRegistryReady"
+	ConditionTypeProviderReady     = "ProviderReady"
 )
 
 // AgentRuntimeReconciler reconciles a AgentRuntime object
@@ -288,6 +404,7 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=promptpacks,verbs=get;list;watch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=toolregistries,verbs=get;list;watch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
@@ -363,6 +480,34 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
+	// Fetch referenced Provider (optional, takes precedence over inline provider)
+	var provider *omniav1alpha1.Provider
+	if agentRuntime.Spec.ProviderRef != nil {
+		provider, err = r.fetchProvider(ctx, agentRuntime)
+		if err != nil {
+			r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
+				"ProviderNotFound", err.Error())
+			agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
+			if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+				log.Error(statusErr, "Failed to update status")
+			}
+			return ctrl.Result{}, err
+		}
+		// Check if Provider is ready
+		if provider.Status.Phase != omniav1alpha1.ProviderPhaseReady {
+			r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
+				"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
+			agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
+			if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+				log.Error(statusErr, "Failed to update status")
+			}
+			// Requeue to wait for Provider to become ready
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionTrue,
+			"ProviderFound", "Provider resource found and ready")
+	}
+
 	// Reconcile tools ConfigMap (if ToolRegistry is present)
 	if toolRegistry != nil {
 		if err := r.reconcileToolsConfigMap(ctx, agentRuntime, toolRegistry); err != nil {
@@ -372,7 +517,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Reconcile Deployment
-	deployment, err := r.reconcileDeployment(ctx, agentRuntime, promptPack, toolRegistry)
+	deployment, err := r.reconcileDeployment(ctx, agentRuntime, promptPack, toolRegistry, provider)
 	if err != nil {
 		r.setCondition(agentRuntime, ConditionTypeDeploymentReady, metav1.ConditionFalse,
 			"DeploymentFailed", err.Error())
@@ -473,11 +618,31 @@ func (r *AgentRuntimeReconciler) fetchToolRegistry(ctx context.Context, agentRun
 	return toolRegistry, nil
 }
 
+func (r *AgentRuntimeReconciler) fetchProvider(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.Provider, error) {
+	ref := agentRuntime.Spec.ProviderRef
+	provider := &omniav1alpha1.Provider{}
+
+	namespace := agentRuntime.Namespace
+	if ref.Namespace != nil {
+		namespace = *ref.Namespace
+	}
+
+	key := types.NamespacedName{
+		Name:      ref.Name,
+		Namespace: namespace,
+	}
+	if err := r.Get(ctx, key, provider); err != nil {
+		return nil, fmt.Errorf("failed to get Provider %s: %w", key, err)
+	}
+	return provider, nil
+}
+
 func (r *AgentRuntimeReconciler) reconcileDeployment(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
 
@@ -495,7 +660,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry)
+		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, provider)
 		return nil
 	})
 
@@ -512,6 +677,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
 ) {
 	labels := map[string]string{
 		"app.kubernetes.io/name":         "omnia-agent",
@@ -537,7 +703,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	facadeContainer := r.buildFacadeContainer(agentRuntime, promptPack, facadePort)
 
 	// Build runtime container
-	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
+	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry, provider)
 
 	// Build pod spec with both containers
 	podSpec := corev1.PodSpec{
@@ -639,6 +805,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
 ) corev1.Container {
 	runtimeImage := r.RuntimeImage
 	if runtimeImage == "" {
@@ -661,7 +828,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry),
+		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry, provider),
 		VolumeMounts: r.buildRuntimeVolumeMounts(promptPack, toolRegistry),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
@@ -755,6 +922,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
 ) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
 		{
@@ -796,7 +964,12 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	}
 
 	// Add provider configuration
-	envVars = append(envVars, buildProviderEnvVars(agentRuntime.Spec.Provider)...)
+	// Provider CRD takes precedence over inline provider config
+	if provider != nil {
+		envVars = append(envVars, buildProviderEnvVarsFromCRD(provider)...)
+	} else {
+		envVars = append(envVars, buildProviderEnvVars(agentRuntime.Spec.Provider)...)
+	}
 
 	// Add tool registry info if present
 	if toolRegistry != nil {

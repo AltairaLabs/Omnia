@@ -286,6 +286,19 @@ type ProviderPricing struct {
 	CachedCostPer1K *string `json:"cachedCostPer1K,omitempty"`
 }
 
+// ProviderRef references a Provider resource.
+type ProviderRef struct {
+	// name is the name of the Provider resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// namespace is the namespace of the Provider resource.
+	// If not specified, the same namespace as the AgentRuntime is used.
+	// +optional
+	Namespace *string `json:"namespace,omitempty"`
+}
+
 // ProviderConfig defines the LLM provider configuration.
 type ProviderConfig struct {
 	// type specifies the provider type.
@@ -376,9 +389,15 @@ type AgentRuntimeSpec struct {
 	// +optional
 	Runtime *RuntimeConfig `json:"runtime,omitempty"`
 
-	// provider configures the LLM provider (type, model, credentials, tuning).
-	// If not specified, PromptKit's auto-detection is used with credentials
-	// from a secret named "<agentruntime-name>-provider" if it exists.
+	// providerRef references a Provider resource for LLM configuration.
+	// If specified, the referenced Provider's configuration is used.
+	// If both providerRef and provider are specified, providerRef takes precedence.
+	// +optional
+	ProviderRef *ProviderRef `json:"providerRef,omitempty"`
+
+	// provider configures the LLM provider inline (type, model, credentials, tuning).
+	// If not specified and providerRef is also not specified, PromptKit's auto-detection
+	// is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
 	// +optional
 	Provider *ProviderConfig `json:"provider,omitempty"`
 }
