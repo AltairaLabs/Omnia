@@ -36,8 +36,9 @@ import (
 
 var _ = Describe("AgentRuntime Controller", func() {
 	const (
-		timeout  = time.Second * 10
-		interval = time.Millisecond * 250
+		timeout         = time.Second * 10
+		interval        = time.Millisecond * 250
+		anthropicAPIKey = "ANTHROPIC_API_KEY"
 	)
 
 	Context("When reconciling AgentRuntime", func() {
@@ -587,7 +588,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			// The env var may appear twice (one with key matching env name, one with api-key fallback)
 			var foundAnthropicKey bool
 			for _, env := range runtimeContainer.Env {
-				if env.Name == "ANTHROPIC_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+				if env.Name == anthropicAPIKey && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
 					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
 					foundAnthropicKey = true
 				}
@@ -1902,6 +1903,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 // Test helper functions and buildKEDATriggers (unit tests, no envtest required)
 var _ = Describe("AgentRuntime Controller Unit Tests", func() {
+	const (
+		anthropicAPIKey = "ANTHROPIC_API_KEY"
+	)
+
 	Describe("ptr helper function", func() {
 		It("should return a pointer to an int32 value", func() {
 			val := int32(42)
@@ -2563,7 +2568,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			// Find the ANTHROPIC_API_KEY env var and check it uses the custom key
 			var foundKey bool
 			for _, env := range envVars {
-				if env.Name == "ANTHROPIC_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+				if env.Name == anthropicAPIKey && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
 					Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("my-api-key"))
 					foundKey = true
 					break
@@ -2579,7 +2584,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeClaude, "custom-key")
 
 			Expect(envVars).To(HaveLen(1))
-			Expect(envVars[0].Name).To(Equal("ANTHROPIC_API_KEY"))
+			Expect(envVars[0].Name).To(Equal(anthropicAPIKey))
 			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
 			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
 		})
@@ -2607,7 +2612,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeAuto, "custom-key")
 
 			Expect(envVars).To(HaveLen(1))
-			Expect(envVars[0].Name).To(Equal("ANTHROPIC_API_KEY"))
+			Expect(envVars[0].Name).To(Equal(anthropicAPIKey))
 		})
 	})
 })
