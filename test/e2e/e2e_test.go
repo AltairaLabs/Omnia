@@ -472,7 +472,7 @@ spec:
 
 		It("should create an AgentRuntime and deploy the agent", func() {
 			By("creating secrets for the agent")
-			// Create a dummy provider secret
+			// Create a dummy provider secret (not used when mock provider is enabled)
 			cmd := exec.Command("kubectl", "create", "secret", "generic", "test-provider",
 				"-n", agentsNamespace,
 				"--from-literal=api-key=test-api-key-for-e2e",
@@ -498,15 +498,18 @@ spec:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create Redis credentials secret")
 
-			By("creating the AgentRuntime")
-			// Note: The agent image is configured on the operator via --agent-image flag,
-			// not in the CRD spec. The operator was patched in BeforeAll to use the test image.
+			By("creating the AgentRuntime with mock provider annotation")
+			// Note: The agent image is configured on the operator via --facade-image/--runtime-image flags,
+			// not in the CRD spec. The operator was patched in BeforeAll to use the test images.
+			// The mock provider annotation enables mock mode for E2E testing without real API keys.
 			agentRuntimeManifest := `
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
   name: test-agent
   namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
 spec:
   promptPackRef:
     name: test-prompts
@@ -620,6 +623,99 @@ data:
 			// Note: The deployment generation may or may not change depending on
 			// whether the ConfigMap hash changed. This is expected behavior.
 			_ = initialGen // Acknowledge we captured it for potential future use
+		})
+
+		It("should have both facade and runtime containers running", func() {
+			By("waiting for the agent pod to be ready with all containers")
+			verifyContainersReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=test-agent",
+					"-o", "jsonpath={.items[0].status.containerStatuses[*].ready}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				// Both containers should be ready (true true)
+				g.Expect(output).To(ContainSubstring("true"))
+				g.Expect(strings.Count(output, "true")).To(Equal(2), "Expected 2 containers to be ready")
+			}
+			Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying the pod has facade and runtime containers")
+			cmd := exec.Command("kubectl", "get", "pods",
+				"-n", agentsNamespace,
+				"-l", "app.kubernetes.io/instance=test-agent",
+				"-o", "jsonpath={.items[0].spec.containers[*].name}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(ContainSubstring("facade"))
+			Expect(output).To(ContainSubstring("runtime"))
+
+			By("verifying the runtime container has mock provider enabled")
+			cmd = exec.Command("kubectl", "get", "pods",
+				"-n", agentsNamespace,
+				"-l", "app.kubernetes.io/instance=test-agent",
+				"-o", "jsonpath={.items[0].spec.containers[?(@.name=='runtime')].env[?(@.name=='OMNIA_MOCK_PROVIDER')].value}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("true"), "Mock provider should be enabled for E2E testing")
+		})
+
+		It("should handle WebSocket connections to the facade", func() {
+			By("waiting for the service to be ready")
+			time.Sleep(5 * time.Second)
+
+			By("creating a test pod to connect to the WebSocket")
+			// Use a curl pod to test the WebSocket upgrade request
+			testPodManifest := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ws-test
+  namespace: test-agents
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ["sh", "-c"]
+    args:
+    - |
+      # Test WebSocket upgrade to the facade service
+      curl -v --no-buffer \
+        -H "Connection: Upgrade" \
+        -H "Upgrade: websocket" \
+        -H "Sec-WebSocket-Version: 13" \
+        -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+        http://test-agent.test-agents.svc.cluster.local:8080/ws 2>&1 || true
+      # Keep pod alive briefly for log collection
+      sleep 5
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(testPodManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create WebSocket test pod")
+
+			By("waiting for the test pod to complete")
+			verifyTestPodComplete := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "ws-test",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Or(Equal("Succeeded"), Equal("Running")))
+			}
+			Eventually(verifyTestPodComplete, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("checking the test pod logs for WebSocket upgrade response")
+			time.Sleep(10 * time.Second) // Wait for test to complete
+			cmd = exec.Command("kubectl", "logs", "ws-test", "-n", agentsNamespace)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			// Verify we got a WebSocket upgrade response (101 Switching Protocols)
+			Expect(output).To(ContainSubstring("101"), "Expected WebSocket upgrade response (101 Switching Protocols)")
+
+			By("cleaning up test pod")
+			cmd = exec.Command("kubectl", "delete", "pod", "ws-test", "-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
 		})
 	})
 })

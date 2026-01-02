@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -40,6 +41,8 @@ type Server struct {
 	packPath       string
 	promptName     string
 	stateStore     statestore.Store
+	mockProvider   bool
+	mockConfigPath string
 	sdkOptions     []sdk.Option
 	conversations  map[string]*sdk.Conversation
 	conversationMu sync.RWMutex
@@ -83,6 +86,20 @@ func WithStateStore(store statestore.Store) ServerOption {
 func WithSDKOptions(opts ...sdk.Option) ServerOption {
 	return func(s *Server) {
 		s.sdkOptions = append(s.sdkOptions, opts...)
+	}
+}
+
+// WithMockProvider enables mock provider mode for testing.
+func WithMockProvider(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.mockProvider = enabled
+	}
+}
+
+// WithMockConfigPath sets the path to the mock responses file.
+func WithMockConfigPath(path string) ServerOption {
+	return func(s *Server) {
+		s.mockConfigPath = path
 	}
 }
 
@@ -237,6 +254,24 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 	opts := append([]sdk.Option{
 		sdk.WithConversationID(sessionID),
 	}, s.sdkOptions...)
+
+	// Add mock provider if enabled
+	if s.mockProvider {
+		s.log.Info("using mock provider for conversation", "sessionID", sessionID)
+		var provider *mock.Provider
+		if s.mockConfigPath != "" {
+			// Use file-based mock repository
+			repo, err := mock.NewFileMockRepository(s.mockConfigPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load mock config: %w", err)
+			}
+			provider = mock.NewProviderWithRepository("mock", "mock-model", false, repo)
+		} else {
+			// Use in-memory mock provider with default responses
+			provider = mock.NewProvider("mock", "mock-model", false)
+		}
+		opts = append(opts, sdk.WithProvider(provider))
+	}
 
 	// Try to resume existing conversation first
 	conv, err := sdk.Resume(sessionID, s.packPath, s.promptName, opts...)
