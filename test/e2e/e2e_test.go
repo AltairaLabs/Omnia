@@ -686,7 +686,7 @@ spec:
         -H "Upgrade: websocket" \
         -H "Sec-WebSocket-Version: 13" \
         -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-        http://test-agent.test-agents.svc.cluster.local:8080/ws 2>&1 || true
+        "http://test-agent.test-agents.svc.cluster.local:8080/ws?agent=test-agent" 2>&1 || true
       # Keep pod alive briefly for log collection
       sleep 5
 `
@@ -743,7 +743,7 @@ spec:
       import sys
 
       async def test_conversation():
-          uri = "ws://test-agent.test-agents.svc.cluster.local:8080/ws"
+          uri = "ws://test-agent.test-agents.svc.cluster.local:8080/ws?agent=test-agent"
           try:
               async with websockets.connect(uri, ping_interval=None) as ws:
                   # Wait for connected message
@@ -853,7 +853,7 @@ spec:
       import sys
 
       async def test_session_persistence():
-          uri = "ws://test-agent.test-agents.svc.cluster.local:8080/ws"
+          uri = "ws://test-agent.test-agents.svc.cluster.local:8080/ws?agent=test-agent"
           redis_client = redis.from_url("redis://redis.cache.svc.cluster.local:6379")
 
           try:
