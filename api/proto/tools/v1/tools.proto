@@ -1,0 +1,66 @@
+// Copyright 2025 Altaira Labs
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package omnia.tools.v1;
+
+option go_package = "github.com/altairalabs/omnia/pkg/tools/v1;toolsv1";
+
+// ToolService defines the standard interface for gRPC tool services.
+// Tool providers implement this service to expose their tools to Omnia agents.
+service ToolService {
+  // Execute invokes a tool with the given request and returns the result.
+  rpc Execute(ToolRequest) returns (ToolResponse);
+
+  // ListTools returns the list of available tools from this service.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+}
+
+// ToolRequest contains the request to execute a tool.
+message ToolRequest {
+  // tool_name identifies which tool to execute.
+  string tool_name = 1;
+
+  // arguments_json contains the tool arguments as a JSON string.
+  // The schema depends on the specific tool being invoked.
+  string arguments_json = 2;
+
+  // metadata contains optional key-value pairs for additional context.
+  map<string, string> metadata = 3;
+}
+
+// ToolResponse contains the result of a tool execution.
+message ToolResponse {
+  // result_json contains the tool result as a JSON string.
+  string result_json = 1;
+
+  // is_error indicates whether the tool execution failed.
+  bool is_error = 2;
+
+  // error_message contains the error description if is_error is true.
+  string error_message = 3;
+}
+
+// ListToolsRequest is the request to list available tools.
+message ListToolsRequest {
+  // Empty for now, can be extended with filters.
+}
+
+// ListToolsResponse contains the list of available tools.
+message ListToolsResponse {
+  // tools is the list of available tools.
+  repeated ToolInfo tools = 1;
+}
+
+// ToolInfo describes a single tool.
+message ToolInfo {
+  // name is the unique identifier for this tool.
+  string name = 1;
+
+  // description describes what the tool does.
+  string description = 2;
+
+  // input_schema is a JSON schema describing the tool's input parameters.
+  string input_schema = 3;
+}

@@ -2141,8 +2141,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(config.Tools).To(HaveLen(1))
 			Expect(config.Tools[0].Name).To(Equal("grpc-tool"))
 			Expect(config.Tools[0].Type).To(Equal("grpc"))
-			Expect(config.Tools[0].HTTPConfig).NotTo(BeNil())
-			Expect(config.Tools[0].HTTPConfig.Endpoint).To(Equal("grpc://grpc-service:9090"))
+			Expect(config.Tools[0].GRPCConfig).NotTo(BeNil())
+			Expect(config.Tools[0].GRPCConfig.Endpoint).To(Equal("grpc://grpc-service:9090"))
 		})
 
 		It("should handle MCP tool type with SSE transport", func() {

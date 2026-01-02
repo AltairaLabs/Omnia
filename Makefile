@@ -68,13 +68,14 @@ fmt: ## Run go fmt against code.
 .PHONY: generate-proto
 generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto files.
 	@echo "Generating Go code from proto files..."
-	@mkdir -p pkg/runtime/v1
+	@mkdir -p pkg/runtime/v1 pkg/tools/v1
 	PATH="$(LOCALBIN):$$PATH" "$(PROTOC)" \
 		--go_out=. \
 		--go_opt=module=github.com/altairalabs/omnia \
 		--go-grpc_out=. \
 		--go-grpc_opt=module=github.com/altairalabs/omnia \
-		api/proto/runtime/v1/runtime.proto
+		api/proto/runtime/v1/runtime.proto \
+		api/proto/tools/v1/tools.proto
 	@echo "Proto generation complete."
 
 .PHONY: vet
