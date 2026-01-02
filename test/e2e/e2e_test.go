@@ -746,46 +746,45 @@ spec:
           uri = "ws://test-agent.test-agents.svc.cluster.local:8080/ws?agent=test-agent"
           try:
               async with websockets.connect(uri, ping_interval=None) as ws:
-                  # Wait for connected message
-                  response = await asyncio.wait_for(ws.recv(), timeout=10)
-                  msg = json.loads(response)
-                  print(f"Connected: {msg}")
-
-                  if msg.get("type") != "connected":
-                      print(f"ERROR: Expected 'connected' message, got: {msg.get('type')}")
-                      sys.exit(1)
-
-                  session_id = msg.get("session_id", "")
-                  print(f"Session ID: {session_id}")
-
-                  # Send a test message
+                  # Send a test message first (without session_id to trigger connected message)
                   test_message = {
                       "type": "message",
-                      "content": "Hello, this is a test message",
-                      "session_id": session_id
+                      "content": "Hello, this is a test message"
                   }
                   await ws.send(json.dumps(test_message))
                   print(f"Sent: {test_message}")
 
-                  # Wait for response (chunk or done)
+                  # Server sends "connected" after receiving first message, then response
+                  session_id = ""
+                  received_connected = False
                   received_response = False
+
                   for _ in range(10):  # Max 10 messages
                       try:
                           response = await asyncio.wait_for(ws.recv(), timeout=30)
                           msg = json.loads(response)
                           print(f"Received: {msg}")
 
-                          if msg.get("type") == "chunk":
+                          msg_type = msg.get("type")
+                          if msg_type == "connected":
+                              received_connected = True
+                              session_id = msg.get("session_id", "")
+                              print(f"Session ID: {session_id}")
+                          elif msg_type == "chunk":
                               received_response = True
-                          elif msg.get("type") == "done":
+                          elif msg_type == "done":
                               received_response = True
                               print("SUCCESS: Conversation completed")
                               break
-                          elif msg.get("type") == "error":
+                          elif msg_type == "error":
                               print(f"ERROR: {msg.get('error')}")
                               sys.exit(1)
                       except asyncio.TimeoutError:
                           break
+
+                  if not received_connected:
+                      print("ERROR: Did not receive connected message")
+                      sys.exit(1)
 
                   if not received_response:
                       print("ERROR: No response received from agent")
@@ -859,34 +858,33 @@ spec:
           try:
               # First connection - establish session
               async with websockets.connect(uri, ping_interval=None) as ws:
-                  response = await asyncio.wait_for(ws.recv(), timeout=10)
-                  msg = json.loads(response)
-
-                  if msg.get("type") != "connected":
-                      print(f"ERROR: Expected 'connected', got: {msg.get('type')}")
-                      sys.exit(1)
-
-                  session_id = msg.get("session_id", "")
-                  print(f"First connection - Session ID: {session_id}")
-
-                  # Send first message
+                  # Send first message (no session_id to trigger connected message)
                   await ws.send(json.dumps({
                       "type": "message",
-                      "content": "Remember this: the secret code is ALPHA123",
-                      "session_id": session_id
+                      "content": "Remember this: the secret code is ALPHA123"
                   }))
                   print("Sent first message")
 
-                  # Wait for response
+                  # Wait for connected + response
+                  session_id = ""
                   for _ in range(10):
                       try:
                           response = await asyncio.wait_for(ws.recv(), timeout=30)
                           msg = json.loads(response)
-                          print(f"First response: {msg.get('type')}")
-                          if msg.get("type") == "done":
+                          msg_type = msg.get("type")
+                          print(f"First response: {msg_type}")
+
+                          if msg_type == "connected":
+                              session_id = msg.get("session_id", "")
+                              print(f"Session ID: {session_id}")
+                          elif msg_type == "done":
                               break
                       except asyncio.TimeoutError:
                           break
+
+                  if not session_id:
+                      print("ERROR: Did not receive session_id")
+                      sys.exit(1)
 
               # Check Redis for session data
               print("Checking Redis for session data...")
