@@ -62,6 +62,8 @@ func main() {
 		"healthPort", cfg.HealthPort,
 		"packPath", cfg.PromptPackPath,
 		"promptName", cfg.PromptName,
+		"providerType", cfg.ProviderType,
+		"model", cfg.Model,
 		"mockProvider", cfg.MockProvider)
 
 	// Create state store for conversation persistence
@@ -98,6 +100,7 @@ func main() {
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
 		pkruntime.WithStateStore(store),
+		pkruntime.WithModel(cfg.Model),
 		pkruntime.WithMockProvider(cfg.MockProvider),
 		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
 	)

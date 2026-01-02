@@ -103,6 +103,15 @@ func WithMockConfigPath(path string) ServerOption {
 	}
 }
 
+// WithModel overrides the model from the pack.
+func WithModel(model string) ServerOption {
+	return func(s *Server) {
+		if model != "" {
+			s.sdkOptions = append(s.sdkOptions, sdk.WithModel(model))
+		}
+	}
+}
+
 // NewServer creates a new runtime server.
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{

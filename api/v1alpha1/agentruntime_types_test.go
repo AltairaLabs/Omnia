@@ -159,8 +159,10 @@ func TestAgentRuntimeCreation(t *testing.T) {
 					"node-type": "agent",
 				},
 			},
-			ProviderSecretRef: corev1.LocalObjectReference{
-				Name: testCredentials,
+			Provider: &ProviderConfig{
+				SecretRef: &corev1.LocalObjectReference{
+					Name: testCredentials,
+				},
 			},
 		},
 	}
@@ -193,8 +195,8 @@ func TestAgentRuntimeCreation(t *testing.T) {
 	if *ar.Spec.Runtime.Replicas != 3 {
 		t.Errorf("Runtime.Replicas = %d, want %d", *ar.Spec.Runtime.Replicas, 3)
 	}
-	if ar.Spec.ProviderSecretRef.Name != testCredentials {
-		t.Errorf("ProviderSecretRef.Name = %q, want %q", ar.Spec.ProviderSecretRef.Name, testCredentials)
+	if ar.Spec.Provider.SecretRef.Name != testCredentials {
+		t.Errorf("Provider.SecretRef.Name = %q, want %q", ar.Spec.Provider.SecretRef.Name, testCredentials)
 	}
 }
 
@@ -258,8 +260,10 @@ func TestAgentRuntimeListCreation(t *testing.T) {
 				Spec: AgentRuntimeSpec{
 					PromptPackRef: PromptPackRef{Name: "pack-1"},
 					Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "secret-1",
+					Provider: &ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "secret-1",
+						},
 					},
 				},
 			},
@@ -271,8 +275,10 @@ func TestAgentRuntimeListCreation(t *testing.T) {
 				Spec: AgentRuntimeSpec{
 					PromptPackRef: PromptPackRef{Name: "pack-2"},
 					Facade:        FacadeConfig{Type: FacadeTypeGRPC},
-					ProviderSecretRef: corev1.LocalObjectReference{
-						Name: "secret-2",
+					Provider: &ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "secret-2",
+						},
 					},
 				},
 			},
@@ -304,8 +310,10 @@ func TestMinimalAgentRuntime(t *testing.T) {
 			Facade: FacadeConfig{
 				Type: FacadeTypeWebSocket,
 			},
-			ProviderSecretRef: corev1.LocalObjectReference{
-				Name: testCredentials,
+			Provider: &ProviderConfig{
+				SecretRef: &corev1.LocalObjectReference{
+					Name: testCredentials,
+				},
 			},
 		},
 	}
@@ -317,8 +325,8 @@ func TestMinimalAgentRuntime(t *testing.T) {
 	if ar.Spec.Facade.Type != FacadeTypeWebSocket {
 		t.Errorf("Facade.Type = %q, want %q", ar.Spec.Facade.Type, FacadeTypeWebSocket)
 	}
-	if ar.Spec.ProviderSecretRef.Name != testCredentials {
-		t.Errorf("ProviderSecretRef.Name = %q, want %q", ar.Spec.ProviderSecretRef.Name, testCredentials)
+	if ar.Spec.Provider.SecretRef.Name != testCredentials {
+		t.Errorf("Provider.SecretRef.Name = %q, want %q", ar.Spec.Provider.SecretRef.Name, testCredentials)
 	}
 
 	// Verify optional fields are nil
@@ -608,8 +616,10 @@ func TestAgentRuntimeDeepCopy(t *testing.T) {
 			Runtime: &RuntimeConfig{
 				Replicas: &replicas,
 			},
-			ProviderSecretRef: corev1.LocalObjectReference{
-				Name: "llm-credentials",
+			Provider: &ProviderConfig{
+				SecretRef: &corev1.LocalObjectReference{
+					Name: "llm-credentials",
+				},
 			},
 		},
 		Status: AgentRuntimeStatus{
@@ -656,9 +666,11 @@ func TestAgentRuntimeListDeepCopy(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: AgentRuntimeSpec{
-					PromptPackRef:     PromptPackRef{Name: "pack-1"},
-					Facade:            FacadeConfig{Type: FacadeTypeWebSocket},
-					ProviderSecretRef: corev1.LocalObjectReference{Name: "secret-1"},
+					PromptPackRef: PromptPackRef{Name: "pack-1"},
+					Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+					Provider: &ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{Name: "secret-1"},
+					},
 				},
 			},
 		},
@@ -691,7 +703,9 @@ func TestAgentRuntimeSpecDeepCopy(t *testing.T) {
 			Type: SessionStoreTypeRedis,
 			TTL:  &ttl,
 		},
-		ProviderSecretRef: corev1.LocalObjectReference{Name: "secret"},
+		Provider: &ProviderConfig{
+			SecretRef: &corev1.LocalObjectReference{Name: "secret"},
+		},
 	}
 
 	copied := original.DeepCopy()

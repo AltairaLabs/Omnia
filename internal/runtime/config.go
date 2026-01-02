@@ -39,6 +39,11 @@ type Config struct {
 	SessionURL  string        // Redis URL for session store
 	SessionTTL  time.Duration // Session TTL
 
+	// Provider configuration
+	ProviderType string // "auto", "claude", "openai", "gemini"
+	Model        string // Model override (e.g., "claude-3-opus")
+	BaseURL      string // Custom base URL for API calls
+
 	// Mock provider configuration (for testing)
 	MockProvider   bool   // Enable mock provider instead of real LLM
 	MockConfigPath string // Path to mock responses YAML file (optional)
@@ -60,6 +65,9 @@ const (
 	envSessionType     = "OMNIA_SESSION_TYPE"
 	envSessionURL      = "OMNIA_SESSION_URL"
 	envSessionTTL      = "OMNIA_SESSION_TTL"
+	envProviderType    = "OMNIA_PROVIDER_TYPE"
+	envProviderModel   = "OMNIA_PROVIDER_MODEL"
+	envProviderBaseURL = "OMNIA_PROVIDER_BASE_URL"
 	envMockProvider    = "OMNIA_MOCK_PROVIDER"
 	envMockConfigPath  = "OMNIA_MOCK_CONFIG"
 	envToolsConfigPath = "OMNIA_TOOLS_CONFIG"
@@ -73,6 +81,7 @@ const (
 	defaultPromptName      = "default"
 	defaultSessionType     = "memory"
 	defaultSessionTTL      = 24 * time.Hour
+	defaultProviderType    = "auto"
 	defaultToolsConfigPath = "/etc/omnia/tools/tools.yaml"
 	defaultGRPCPort        = 9000
 	defaultHealthPort      = 9001
@@ -84,6 +93,14 @@ const (
 	SessionTypeRedis  = "redis"
 )
 
+// Provider type constants.
+const (
+	ProviderTypeAuto   = "auto"
+	ProviderTypeClaude = "claude"
+	ProviderTypeOpenAI = "openai"
+	ProviderTypeGemini = "gemini"
+)
+
 // LoadConfig loads configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
@@ -93,6 +110,9 @@ func LoadConfig() (*Config, error) {
 		PromptName:      getEnvOrDefault(envPromptName, defaultPromptName),
 		SessionType:     getEnvOrDefault(envSessionType, defaultSessionType),
 		SessionURL:      os.Getenv(envSessionURL),
+		ProviderType:    getEnvOrDefault(envProviderType, defaultProviderType),
+		Model:           os.Getenv(envProviderModel),
+		BaseURL:         os.Getenv(envProviderBaseURL),
 		MockProvider:    os.Getenv(envMockProvider) == "true",
 		MockConfigPath:  os.Getenv(envMockConfigPath),
 		ToolsConfigPath: getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
@@ -146,6 +166,14 @@ func LoadConfig() (*Config, error) {
 	// Validate Redis URL if using Redis
 	if cfg.SessionType == SessionTypeRedis && cfg.SessionURL == "" {
 		return nil, fmt.Errorf("%s is required when using Redis sessions", envSessionURL)
+	}
+
+	// Validate provider type
+	switch cfg.ProviderType {
+	case ProviderTypeAuto, ProviderTypeClaude, ProviderTypeOpenAI, ProviderTypeGemini:
+		// Valid
+	default:
+		return nil, fmt.Errorf("invalid %s: must be 'auto', 'claude', 'openai', or 'gemini'", envProviderType)
 	}
 
 	return cfg, nil
