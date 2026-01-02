@@ -147,8 +147,6 @@ fi
 #
 print_header "Running Tests with Coverage"
 
-COVERAGE_THRESHOLD=80
-
 # Run tests with coverage
 TEST_OUTPUT=$(go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
 TEST_EXIT_CODE=$?
@@ -165,32 +163,108 @@ else
     print_success "Tests passed"
 fi
 
-# Check total coverage (SonarCloud checks new code coverage, not function-level)
+#
+# 5b. Check coverage on changed files only
+#
 if [ -f coverage.out ]; then
-    print_header "Checking Coverage (threshold: ${COVERAGE_THRESHOLD}%)"
+    print_header "Checking Coverage on Changed Files"
 
-    # Get total coverage percentage
-    TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print $NF}' | tr -d '%')
+    COVERAGE_THRESHOLD=80.0
+    COVERAGE_FAILED=0
+    COVERAGE_RESULTS=()
 
-    if [ -z "$TOTAL_COVERAGE" ]; then
-        print_warning "Could not determine coverage"
-    else
-        COVERAGE_INT=${TOTAL_COVERAGE%.*}
-        print_info "Total coverage: ${TOTAL_COVERAGE}%"
+    # Check each staged Go file (excluding test files and entry points)
+    for file in $STAGED_GO_FILES; do
+        # Skip test files
+        if [[ "$file" == *_test.go ]]; then
+            continue
+        fi
 
-        # Note: We don't fail on total coverage because:
-        # 1. Generated code (kubebuilder scaffolding) lowers the average
-        # 2. SonarCloud checks coverage on NEW code only, not total
-        # 3. Function-level 80% is too strict for controller reconciliation loops
-        #
-        # SonarCloud quality gate is the authoritative coverage check.
-        # This is informational only.
-        if [ "$COVERAGE_INT" -lt 50 ]; then
-            print_warning "Coverage is below 50% - consider adding more tests"
+        # Skip cmd entry points (main.go files are hard to test)
+        if [[ "$file" == cmd/* ]]; then
+            continue
+        fi
+
+        # Skip generated files (kubebuilder)
+        if [[ "$file" == *zz_generated*.go ]] || [[ "$file" == api/*/groupversion_info.go ]]; then
+            continue
+        fi
+
+        # Skip E2E test utilities
+        if [[ "$file" == test/* ]]; then
+            continue
+        fi
+
+        # Calculate ACTUAL statement coverage from raw coverage.out
+        # Format: file:startLine.startCol,endLine.endCol numStatements count
+        # count > 0 means covered, count = 0 means not covered
+        FILE_COV_PERCENT=$(grep "/$file:" coverage.out 2>/dev/null | awk -F'[ ]' '
+        {
+            # Last two fields: numStatements count
+            # Split on space, get the numeric fields
+            n = split($0, parts, " ")
+            if (n >= 2) {
+                count = parts[n]      # coverage count (0 = not covered, 1+ = covered)
+                stmts = parts[n-1]    # number of statements in this block
+                if (stmts ~ /^[0-9]+$/ && count ~ /^[0-9]+$/) {
+                    total_stmts += stmts
+                    if (count > 0) {
+                        covered_stmts += stmts
+                    }
+                }
+            }
+        }
+        END {
+            if (total_stmts > 0) {
+                printf "%.1f", (covered_stmts / total_stmts) * 100
+            }
+        }')
+
+        if [ -n "$FILE_COV_PERCENT" ]; then
+            # Check if coverage meets threshold
+            COV_OK=$(echo "$FILE_COV_PERCENT $COVERAGE_THRESHOLD" | awk '{if ($1 >= $2) print "1"; else print "0"}')
+
+            if [ "$COV_OK" = "1" ]; then
+                COVERAGE_RESULTS+=("✓ $file: ${FILE_COV_PERCENT}%")
+            else
+                COVERAGE_RESULTS+=("✗ $file: ${FILE_COV_PERCENT}% (below ${COVERAGE_THRESHOLD}%)")
+                COVERAGE_FAILED=1
+            fi
         else
-            print_success "Coverage check passed (SonarCloud enforces 80% on new code)"
+            # No coverage data for this file - check if it has any executable code
+            # Files with only type definitions won't have coverage data
+            HAS_FUNCS=$(grep -l "^func " "$REPO_ROOT/$file" 2>/dev/null || true)
+            if [ -n "$HAS_FUNCS" ]; then
+                COVERAGE_RESULTS+=("✗ $file: 0.0% (no coverage data)")
+                COVERAGE_FAILED=1
+            else
+                COVERAGE_RESULTS+=("○ $file: N/A (no executable code)")
+            fi
+        fi
+    done
+
+    # Print results
+    if [ ${#COVERAGE_RESULTS[@]} -eq 0 ]; then
+        print_info "No non-test Go files to check (all changes in test/cmd files)"
+    else
+        for result in "${COVERAGE_RESULTS[@]}"; do
+            echo "  $result"
+        done
+
+        echo ""
+        if [ $COVERAGE_FAILED -eq 1 ]; then
+            print_error "Some files have insufficient test coverage (threshold: ${COVERAGE_THRESHOLD}%)"
+            print_info "Add tests for the uncovered code"
+            CHECKS_FAILED=1
+        else
+            print_success "All changed files meet coverage threshold (≥${COVERAGE_THRESHOLD}%)"
         fi
     fi
+
+    # Show overall summary
+    echo ""
+    TOTAL_COVERAGE=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+%')
+    print_info "Overall project coverage: $TOTAL_COVERAGE"
 
     rm -f coverage.out
 fi
