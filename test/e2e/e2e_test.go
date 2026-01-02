@@ -532,8 +532,9 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  providerSecretRef:
-    name: test-provider
+  provider:
+    secretRef:
+      name: test-provider
 `
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
