@@ -33,6 +33,7 @@ func TestLoadConfig_AllFields(t *testing.T) {
 	t.Setenv(envSessionType, "redis")
 	t.Setenv(envSessionURL, "redis://localhost:6379")
 	t.Setenv(envSessionTTL, "2h")
+	t.Setenv(envToolsConfigPath, "/custom/tools.yaml")
 	t.Setenv(envGRPCPort, "8000")
 	t.Setenv(envHealthPort, "8001")
 
@@ -46,6 +47,7 @@ func TestLoadConfig_AllFields(t *testing.T) {
 	assert.Equal(t, SessionTypeRedis, cfg.SessionType)
 	assert.Equal(t, "redis://localhost:6379", cfg.SessionURL)
 	assert.Equal(t, 2*time.Hour, cfg.SessionTTL)
+	assert.Equal(t, "/custom/tools.yaml", cfg.ToolsConfigPath)
 	assert.Equal(t, 8000, cfg.GRPCPort)
 	assert.Equal(t, 8001, cfg.HealthPort)
 }
@@ -62,6 +64,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, defaultPromptName, cfg.PromptName)
 	assert.Equal(t, defaultSessionType, cfg.SessionType)
 	assert.Equal(t, defaultSessionTTL, cfg.SessionTTL)
+	assert.Equal(t, defaultToolsConfigPath, cfg.ToolsConfigPath)
 	assert.Equal(t, defaultGRPCPort, cfg.GRPCPort)
 	assert.Equal(t, defaultHealthPort, cfg.HealthPort)
 }

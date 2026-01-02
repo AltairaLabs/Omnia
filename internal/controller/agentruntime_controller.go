@@ -760,18 +760,29 @@ type ToolConfig struct {
 
 // ToolEntry represents a single tool in the config.
 type ToolEntry struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Config      ToolHTTP `json:"config,omitempty"`
-	Timeout     string   `json:"timeout,omitempty"`
-	Retries     int32    `json:"retries,omitempty"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Description string    `json:"description,omitempty"`
+	HTTPConfig  *ToolHTTP `json:"httpConfig,omitempty"`
+	MCPConfig   *ToolMCP  `json:"mcpConfig,omitempty"`
+	Timeout     string    `json:"timeout,omitempty"`
+	Retries     int32     `json:"retries,omitempty"`
 }
 
 // ToolHTTP represents HTTP configuration for a tool.
 type ToolHTTP struct {
 	Endpoint string `json:"endpoint"`
 	Method   string `json:"method,omitempty"`
+}
+
+// ToolMCP represents MCP configuration for a tool.
+type ToolMCP struct {
+	Transport string            `json:"transport"`
+	Endpoint  string            `json:"endpoint,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	WorkDir   string            `json:"workDir,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
 }
 
 // reconcileToolsConfigMap creates or updates the tools ConfigMap from ToolRegistry.
@@ -851,10 +862,6 @@ func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.To
 		entry := ToolEntry{
 			Name: discovered.Name,
 			Type: "http", // Default to HTTP
-			Config: ToolHTTP{
-				Endpoint: discovered.Endpoint,
-				Method:   "POST", // Default method
-			},
 		}
 
 		if spec != nil {
@@ -867,6 +874,43 @@ func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.To
 			}
 			if spec.Retries != nil {
 				entry.Retries = *spec.Retries
+			}
+
+			// Set type-specific configuration
+			switch spec.Type {
+			case omniav1alpha1.ToolTypeMCP:
+				if spec.MCPConfig != nil {
+					entry.MCPConfig = &ToolMCP{
+						Transport: string(spec.MCPConfig.Transport),
+					}
+					if spec.MCPConfig.Endpoint != nil {
+						entry.MCPConfig.Endpoint = *spec.MCPConfig.Endpoint
+					}
+					if spec.MCPConfig.Command != nil {
+						entry.MCPConfig.Command = *spec.MCPConfig.Command
+					}
+					if len(spec.MCPConfig.Args) > 0 {
+						entry.MCPConfig.Args = spec.MCPConfig.Args
+					}
+					if spec.MCPConfig.WorkDir != nil {
+						entry.MCPConfig.WorkDir = *spec.MCPConfig.WorkDir
+					}
+					if len(spec.MCPConfig.Env) > 0 {
+						entry.MCPConfig.Env = spec.MCPConfig.Env
+					}
+				}
+			default:
+				// HTTP and gRPC use HTTPConfig with the discovered endpoint
+				entry.HTTPConfig = &ToolHTTP{
+					Endpoint: discovered.Endpoint,
+					Method:   "POST", // Default method
+				}
+			}
+		} else {
+			// No spec found, default to HTTP config
+			entry.HTTPConfig = &ToolHTTP{
+				Endpoint: discovered.Endpoint,
+				Method:   "POST",
 			}
 		}
 

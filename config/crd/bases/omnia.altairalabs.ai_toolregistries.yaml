@@ -97,6 +97,42 @@ spec:
                             Mutually exclusive with selector.
                           type: string
                       type: object
+                    mcpConfig:
+                      description: |-
+                        mcpConfig contains MCP-specific configuration (for type=mcp).
+                        Required when type is "mcp".
+                      properties:
+                        args:
+                          description: args are the command arguments for stdio transport.
+                          items:
+                            type: string
+                          type: array
+                        command:
+                          description: command is the command to run for stdio transport.
+                          type: string
+                        endpoint:
+                          description: endpoint is the SSE server URL (required for
+                            SSE transport).
+                          type: string
+                        env:
+                          additionalProperties:
+                            type: string
+                          description: env are additional environment variables for
+                            stdio transport.
+                          type: object
+                        transport:
+                          description: transport specifies the MCP transport type.
+                          enum:
+                          - sse
+                          - stdio
+                          type: string
+                        workDir:
+                          description: workDir is the working directory for stdio
+                            transport.
+                          type: string
+                      required:
+                      - transport
+                      type: object
                     name:
                       description: |-
                         name is the unique identifier for this tool within the registry.
