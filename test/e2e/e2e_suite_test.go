@@ -72,13 +72,10 @@ var _ = BeforeSuite(func() {
 	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the facade image")
 
-	// NOTE: Skipping runtime image build because it depends on PromptKit which isn't published yet.
-	// The runtime container tests will be added once PromptKit is available on a module proxy.
-	// For now, E2E tests only validate the operator and facade container functionality.
-	// By("building the runtime image")
-	// cmd = exec.Command("docker", "build", "-t", runtimeImage, "-f", "Dockerfile.runtime", ".")
-	// _, err = utils.Run(cmd)
-	// ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the runtime image")
+	By("building the runtime image")
+	cmd = exec.Command("docker", "build", "-t", runtimeImage, "-f", "Dockerfile.runtime", ".")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the runtime image")
 
 	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
 	// built and available before running the tests. Also, remove the following block.
@@ -90,10 +87,9 @@ var _ = BeforeSuite(func() {
 	err = utils.LoadImageToKindClusterWithName(facadeImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the facade image into Kind")
 
-	// NOTE: Skipping runtime image load - see comment above about PromptKit dependency
-	// By("loading the runtime image on Kind")
-	// err = utils.LoadImageToKindClusterWithName(runtimeImage)
-	// ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the runtime image into Kind")
+	By("loading the runtime image on Kind")
+	err = utils.LoadImageToKindClusterWithName(runtimeImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the runtime image into Kind")
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,

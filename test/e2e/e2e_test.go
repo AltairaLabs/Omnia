@@ -86,15 +86,12 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
-		By("patching the controller-manager to use the test facade image")
-		// NOTE: Using facade image for both containers until PromptKit is published and runtime image can be built.
-		// The runtime container will start but won't be functional - this is acceptable for E2E testing
-		// of operator reconciliation, deployment creation, and service exposure.
+		By("patching the controller-manager to use the test facade and runtime images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=json",
-			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--runtime-image=%s"}]`, facadeImageRef, facadeImageRef))
+			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--runtime-image=%s"}]`, facadeImageRef, runtimeImageRef))
 		_, err = utils.Run(patchCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with facade image")
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with facade and runtime images")
 
 		By("waiting for controller-manager to restart with new config")
 		time.Sleep(5 * time.Second)
@@ -474,12 +471,6 @@ spec:
 		})
 
 		It("should create an AgentRuntime and deploy the agent", func() {
-			// Skip this test until PromptKit is published and we can build the runtime image.
-			// The 2-container architecture (facade + runtime) requires both images to be available.
-			// Once PromptKit is on a module proxy, remove this Skip and uncomment the runtime
-			// image build/load steps in e2e_suite_test.go.
-			Skip("Skipping AgentRuntime test: runtime image requires PromptKit dependency")
-
 			By("creating secrets for the agent")
 			// Create a dummy provider secret
 			cmd := exec.Command("kubectl", "create", "secret", "generic", "test-provider",
@@ -591,9 +582,6 @@ spec:
 		})
 
 		It("should update AgentRuntime when PromptPack changes", func() {
-			// Skip this test until PromptKit is published - depends on AgentRuntime being deployed
-			Skip("Skipping AgentRuntime test: runtime image requires PromptKit dependency")
-
 			By("getting the initial deployment generation")
 			cmd := exec.Command("kubectl", "get", "deployment", "test-agent",
 				"-n", agentsNamespace, "-o", "jsonpath={.metadata.generation}")
