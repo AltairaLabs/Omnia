@@ -43,6 +43,9 @@ type Config struct {
 	MockProvider   bool   // Enable mock provider instead of real LLM
 	MockConfigPath string // Path to mock responses YAML file (optional)
 
+	// Tools configuration
+	ToolsConfigPath string // Path to tools.yaml configuration file
+
 	// Server ports
 	GRPCPort   int
 	HealthPort int
@@ -50,27 +53,29 @@ type Config struct {
 
 // Environment variable names.
 const (
-	envAgentName      = "OMNIA_AGENT_NAME"
-	envNamespace      = "OMNIA_NAMESPACE"
-	envPromptPackPath = "OMNIA_PROMPTPACK_PATH"
-	envPromptName     = "OMNIA_PROMPT_NAME"
-	envSessionType    = "OMNIA_SESSION_TYPE"
-	envSessionURL     = "OMNIA_SESSION_URL"
-	envSessionTTL     = "OMNIA_SESSION_TTL"
-	envMockProvider   = "OMNIA_MOCK_PROVIDER"
-	envMockConfigPath = "OMNIA_MOCK_CONFIG"
-	envGRPCPort       = "OMNIA_GRPC_PORT"
-	envHealthPort     = "OMNIA_HEALTH_PORT"
+	envAgentName       = "OMNIA_AGENT_NAME"
+	envNamespace       = "OMNIA_NAMESPACE"
+	envPromptPackPath  = "OMNIA_PROMPTPACK_PATH"
+	envPromptName      = "OMNIA_PROMPT_NAME"
+	envSessionType     = "OMNIA_SESSION_TYPE"
+	envSessionURL      = "OMNIA_SESSION_URL"
+	envSessionTTL      = "OMNIA_SESSION_TTL"
+	envMockProvider    = "OMNIA_MOCK_PROVIDER"
+	envMockConfigPath  = "OMNIA_MOCK_CONFIG"
+	envToolsConfigPath = "OMNIA_TOOLS_CONFIG"
+	envGRPCPort        = "OMNIA_GRPC_PORT"
+	envHealthPort      = "OMNIA_HEALTH_PORT"
 )
 
 // Default values.
 const (
-	defaultPromptPackPath = "/etc/omnia/pack/pack.json"
-	defaultPromptName     = "default"
-	defaultSessionType    = "memory"
-	defaultSessionTTL     = 24 * time.Hour
-	defaultGRPCPort       = 9000
-	defaultHealthPort     = 9001
+	defaultPromptPackPath  = "/etc/omnia/pack/pack.json"
+	defaultPromptName      = "default"
+	defaultSessionType     = "memory"
+	defaultSessionTTL      = 24 * time.Hour
+	defaultToolsConfigPath = "/etc/omnia/tools/tools.yaml"
+	defaultGRPCPort        = 9000
+	defaultHealthPort      = 9001
 )
 
 // Session type constants.
@@ -82,17 +87,18 @@ const (
 // LoadConfig loads configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		AgentName:      os.Getenv(envAgentName),
-		Namespace:      os.Getenv(envNamespace),
-		PromptPackPath: getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
-		PromptName:     getEnvOrDefault(envPromptName, defaultPromptName),
-		SessionType:    getEnvOrDefault(envSessionType, defaultSessionType),
-		SessionURL:     os.Getenv(envSessionURL),
-		MockProvider:   os.Getenv(envMockProvider) == "true",
-		MockConfigPath: os.Getenv(envMockConfigPath),
-		GRPCPort:       defaultGRPCPort,
-		HealthPort:     defaultHealthPort,
-		SessionTTL:     defaultSessionTTL,
+		AgentName:       os.Getenv(envAgentName),
+		Namespace:       os.Getenv(envNamespace),
+		PromptPackPath:  getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
+		PromptName:      getEnvOrDefault(envPromptName, defaultPromptName),
+		SessionType:     getEnvOrDefault(envSessionType, defaultSessionType),
+		SessionURL:      os.Getenv(envSessionURL),
+		MockProvider:    os.Getenv(envMockProvider) == "true",
+		MockConfigPath:  os.Getenv(envMockConfigPath),
+		ToolsConfigPath: getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
+		GRPCPort:        defaultGRPCPort,
+		HealthPort:      defaultHealthPort,
+		SessionTTL:      defaultSessionTTL,
 	}
 
 	// Parse ports

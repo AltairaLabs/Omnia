@@ -33,6 +33,44 @@ const (
 	ToolTypeMCP ToolType = "mcp"
 )
 
+// MCPTransport defines the transport type for MCP connections
+// +kubebuilder:validation:Enum=sse;stdio
+type MCPTransport string
+
+const (
+	// MCPTransportSSE indicates connection via Server-Sent Events
+	MCPTransportSSE MCPTransport = "sse"
+	// MCPTransportStdio indicates connection via spawned subprocess stdin/stdout
+	MCPTransportStdio MCPTransport = "stdio"
+)
+
+// MCPConfig contains MCP-specific tool configuration
+type MCPConfig struct {
+	// transport specifies the MCP transport type.
+	// +kubebuilder:validation:Required
+	Transport MCPTransport `json:"transport"`
+
+	// endpoint is the SSE server URL (required for SSE transport).
+	// +optional
+	Endpoint *string `json:"endpoint,omitempty"`
+
+	// command is the command to run for stdio transport.
+	// +optional
+	Command *string `json:"command,omitempty"`
+
+	// args are the command arguments for stdio transport.
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// workDir is the working directory for stdio transport.
+	// +optional
+	WorkDir *string `json:"workDir,omitempty"`
+
+	// env are additional environment variables for stdio transport.
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+}
+
 // ToolEndpoint defines how to connect to the tool
 type ToolEndpoint struct {
 	// url specifies the direct URL endpoint for the tool.
@@ -115,6 +153,11 @@ type ToolDefinition struct {
 	// +kubebuilder:default=0
 	// +optional
 	Retries *int32 `json:"retries,omitempty"`
+
+	// mcpConfig contains MCP-specific configuration (for type=mcp).
+	// Required when type is "mcp".
+	// +optional
+	MCPConfig *MCPConfig `json:"mcpConfig,omitempty"`
 }
 
 // ToolRegistrySpec defines the desired state of ToolRegistry

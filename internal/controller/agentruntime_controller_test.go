@@ -2042,7 +2042,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(config.Tools[0].Description).To(Equal(description))
 			Expect(config.Tools[0].Timeout).To(Equal(timeout))
 			Expect(config.Tools[0].Retries).To(Equal(retries))
-			Expect(config.Tools[0].Config.Endpoint).To(Equal("http://tool1-service:8080/api"))
+			Expect(config.Tools[0].HTTPConfig).NotTo(BeNil())
+			Expect(config.Tools[0].HTTPConfig.Endpoint).To(Equal("http://tool1-service:8080/api"))
 		})
 
 		It("should skip unavailable tools", func() {
@@ -2140,6 +2141,89 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(config.Tools).To(HaveLen(1))
 			Expect(config.Tools[0].Name).To(Equal("grpc-tool"))
 			Expect(config.Tools[0].Type).To(Equal("grpc"))
+			Expect(config.Tools[0].HTTPConfig).NotTo(BeNil())
+			Expect(config.Tools[0].HTTPConfig.Endpoint).To(Equal("grpc://grpc-service:9090"))
+		})
+
+		It("should handle MCP tool type with SSE transport", func() {
+			endpoint := "http://mcp-server:8080/sse"
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						{
+							Name: "mcp-tool",
+							Type: omniav1alpha1.ToolTypeMCP,
+							MCPConfig: &omniav1alpha1.MCPConfig{
+								Transport: omniav1alpha1.MCPTransportSSE,
+								Endpoint:  &endpoint,
+							},
+						},
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+						{
+							Name:     "mcp-tool",
+							Endpoint: endpoint,
+							Status:   omniav1alpha1.ToolStatusAvailable,
+						},
+					},
+				},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(HaveLen(1))
+			Expect(config.Tools[0].Name).To(Equal("mcp-tool"))
+			Expect(config.Tools[0].Type).To(Equal("mcp"))
+			Expect(config.Tools[0].HTTPConfig).To(BeNil())
+			Expect(config.Tools[0].MCPConfig).NotTo(BeNil())
+			Expect(config.Tools[0].MCPConfig.Transport).To(Equal("sse"))
+			Expect(config.Tools[0].MCPConfig.Endpoint).To(Equal(endpoint))
+		})
+
+		It("should handle MCP tool type with stdio transport", func() {
+			command := "/usr/local/bin/mcp-server"
+			workDir := "/app"
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Tools: []omniav1alpha1.ToolDefinition{
+						{
+							Name: "mcp-stdio-tool",
+							Type: omniav1alpha1.ToolTypeMCP,
+							MCPConfig: &omniav1alpha1.MCPConfig{
+								Transport: omniav1alpha1.MCPTransportStdio,
+								Command:   &command,
+								Args:      []string{"--verbose", "--port=8080"},
+								WorkDir:   &workDir,
+								Env:       map[string]string{"DEBUG": "true"},
+							},
+						},
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+						{
+							Name:     "mcp-stdio-tool",
+							Endpoint: "stdio://mcp-server",
+							Status:   omniav1alpha1.ToolStatusAvailable,
+						},
+					},
+				},
+			}
+
+			config := reconciler.buildToolsConfig(toolRegistry)
+
+			Expect(config.Tools).To(HaveLen(1))
+			Expect(config.Tools[0].Name).To(Equal("mcp-stdio-tool"))
+			Expect(config.Tools[0].Type).To(Equal("mcp"))
+			Expect(config.Tools[0].HTTPConfig).To(BeNil())
+			Expect(config.Tools[0].MCPConfig).NotTo(BeNil())
+			Expect(config.Tools[0].MCPConfig.Transport).To(Equal("stdio"))
+			Expect(config.Tools[0].MCPConfig.Command).To(Equal(command))
+			Expect(config.Tools[0].MCPConfig.Args).To(Equal([]string{"--verbose", "--port=8080"}))
+			Expect(config.Tools[0].MCPConfig.WorkDir).To(Equal(workDir))
+			Expect(config.Tools[0].MCPConfig.Env).To(HaveKeyWithValue("DEBUG", "true"))
 		})
 	})
 })
