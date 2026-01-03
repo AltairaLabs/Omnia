@@ -941,6 +941,190 @@ spec:
 			cmd = exec.Command("kubectl", "delete", "pod", "session-test", "-n", agentsNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
+
+		It("should handle tool calls via demo handler", func() {
+			By("creating an AgentRuntime with demo handler for tool call testing")
+			// The demo handler simulates tool calls for weather and password queries
+			toolTestAgentManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: tool-test-agent
+  namespace: test-agents
+spec:
+  promptPackRef:
+    name: test-prompts
+  facade:
+    type: websocket
+    port: 8080
+    handler: demo
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+  provider:
+    secretRef:
+      name: test-provider
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(toolTestAgentManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create tool-test-agent")
+
+			By("waiting for the tool-test-agent to be ready")
+			verifyToolAgentReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=tool-test-agent",
+					"-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}
+			Eventually(verifyToolAgentReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			// Wait for service to be ready
+			time.Sleep(5 * time.Second)
+
+			By("creating a test pod to verify tool call messages")
+			toolCallTestManifest := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tool-call-test
+  namespace: test-agents
+spec:
+  restartPolicy: Never
+  containers:
+  - name: python
+    image: python:3.11-slim
+    command: ["sh", "-c"]
+    args:
+    - |
+      pip install websockets --quiet
+      python3 << 'PYTHON_SCRIPT'
+      import asyncio
+      import json
+      import websockets
+      import sys
+
+      async def test_tool_calls():
+          uri = "ws://tool-test-agent.test-agents.svc.cluster.local:8080/ws?agent=tool-test-agent"
+          try:
+              async with websockets.connect(uri, ping_interval=None) as ws:
+                  # Send a weather query which triggers tool calls in demo handler
+                  weather_message = {
+                      "type": "message",
+                      "content": "What's the weather like?"
+                  }
+                  await ws.send(json.dumps(weather_message))
+                  print(f"Sent: {weather_message}")
+
+                  # Track message types received
+                  received_types = []
+                  received_tool_call = False
+                  received_tool_result = False
+                  tool_call_name = ""
+                  tool_result_data = None
+
+                  for _ in range(20):  # Max 20 messages
+                      try:
+                          response = await asyncio.wait_for(ws.recv(), timeout=30)
+                          msg = json.loads(response)
+                          msg_type = msg.get("type")
+                          received_types.append(msg_type)
+                          print(f"Received: {msg_type} - {json.dumps(msg)[:200]}")
+
+                          if msg_type == "tool_call":
+                              received_tool_call = True
+                              tool_call_name = msg.get("tool_call", {}).get("name", "")
+                              print(f"Tool call: {tool_call_name}")
+
+                          elif msg_type == "tool_result":
+                              received_tool_result = True
+                              tool_result_data = msg.get("tool_result", {})
+                              print(f"Tool result received")
+
+                          elif msg_type == "done":
+                              print("Conversation complete")
+                              break
+
+                          elif msg_type == "error":
+                              print(f"ERROR: {msg.get('error')}")
+                              sys.exit(1)
+
+                      except asyncio.TimeoutError:
+                          print("Timeout waiting for messages")
+                          break
+
+                  # Verify we received tool_call and tool_result
+                  print(f"\nMessage types received: {received_types}")
+
+                  if not received_tool_call:
+                      print("ERROR: Did not receive tool_call message")
+                      sys.exit(1)
+
+                  if not received_tool_result:
+                      print("ERROR: Did not receive tool_result message")
+                      sys.exit(1)
+
+                  if tool_call_name != "weather":
+                      print(f"ERROR: Expected tool name 'weather', got '{tool_call_name}'")
+                      sys.exit(1)
+
+                  print("\nTEST PASSED: Tool call flow verified")
+                  print(f"  - Received tool_call for '{tool_call_name}'")
+                  print(f"  - Received tool_result with data")
+
+          except Exception as e:
+              print(f"ERROR: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+
+      asyncio.run(test_tool_calls())
+      PYTHON_SCRIPT
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(toolCallTestManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create tool call test pod")
+
+			By("waiting for the tool call test to complete")
+			verifyToolCallTest := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "tool-call-test",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyToolCallTest, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("checking the tool call test logs")
+			cmd = exec.Command("kubectl", "logs", "tool-call-test", "-n", agentsNamespace)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			_, _ = fmt.Fprintf(GinkgoWriter, "Tool call test output:\n%s\n", output)
+			Expect(output).To(ContainSubstring("TEST PASSED"), "Tool call test should pass")
+			Expect(output).To(ContainSubstring("tool_call"), "Should receive tool_call message")
+			Expect(output).To(ContainSubstring("tool_result"), "Should receive tool_result message")
+
+			By("cleaning up tool call test resources")
+			cmd = exec.Command("kubectl", "delete", "pod", "tool-call-test",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "agentruntime", "tool-test-agent",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
 	})
 })
 
