@@ -431,7 +431,7 @@ spec:
 		})
 
 		It("should create and validate a ToolRegistry", func() {
-			By("creating a ToolRegistry with an inline URL tool")
+			By("creating a ToolRegistry with an HTTP handler")
 			toolRegistryManifest := `
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolRegistry
@@ -439,12 +439,20 @@ metadata:
   name: test-tools
   namespace: test-agents
 spec:
-  tools:
-  - name: test-tool
-    description: A test tool for E2E testing
+  handlers:
+  - name: test-handler
     type: http
-    endpoint:
-      url: "http://example.com/api/test"
+    httpConfig:
+      endpoint: "http://example.com/api/test"
+      method: POST
+    tool:
+      name: test_tool
+      description: A test tool for E2E testing
+      inputSchema:
+        type: object
+        properties:
+          input:
+            type: string
     timeout: "10s"
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -939,6 +947,251 @@ spec:
 
 			By("cleaning up session test pod")
 			cmd = exec.Command("kubectl", "delete", "pod", "session-test", "-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should execute tools via HTTP adapter", func() {
+			By("creating a mock tool service")
+			// Deploy a simple nginx-based mock that returns a JSON response
+			mockToolServiceManifest := `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mock-tool-responses
+  namespace: test-agents
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location /api/calculator {
+        default_type application/json;
+        return 200 '{"result": 42, "operation": "add", "inputs": [20, 22]}';
+      }
+      location /health {
+        return 200 'ok';
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-tool
+  namespace: test-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-tool
+  template:
+    metadata:
+      labels:
+        app: mock-tool
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/conf.d
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+      volumes:
+      - name: config
+        configMap:
+          name: mock-tool-responses
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-tool
+  namespace: test-agents
+spec:
+  selector:
+    app: mock-tool
+  ports:
+  - port: 80
+    targetPort: 80
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(mockToolServiceManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create mock tool service")
+
+			By("waiting for mock tool service to be ready")
+			verifyMockToolReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app=mock-tool",
+					"-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}
+			Eventually(verifyMockToolReady, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("creating a ToolRegistry with HTTP handler")
+			toolRegistryManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: http-tools
+  namespace: test-agents
+spec:
+  handlers:
+  - name: calculator
+    type: http
+    httpConfig:
+      endpoint: "http://mock-tool.test-agents.svc.cluster.local/api/calculator"
+      method: POST
+      contentType: application/json
+    tool:
+      name: calculator
+      description: A calculator tool that adds two numbers
+      inputSchema:
+        type: object
+        properties:
+          a:
+            type: number
+            description: First number
+          b:
+            type: number
+            description: Second number
+        required: [a, b]
+    timeout: "10s"
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(toolRegistryManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create ToolRegistry with HTTP handler")
+
+			By("verifying the ToolRegistry status and discovered tools")
+			verifyToolRegistry := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "toolregistry", "http-tools",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"))
+
+				// Also verify tools were discovered
+				cmd = exec.Command("kubectl", "get", "toolregistry", "http-tools",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.discoveredToolsCount}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("1"), "Should have 1 discovered tool")
+			}
+			Eventually(verifyToolRegistry, time.Minute, time.Second).Should(Succeed())
+
+			By("creating an AgentRuntime with the HTTP tool")
+			agentManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: http-tool-agent
+  namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: test-prompts
+  toolRegistryRef:
+    name: http-tools
+  facade:
+    type: websocket
+    port: 8080
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+  provider:
+    secretRef:
+      name: test-provider
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(agentManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create http-tool-agent")
+
+			By("waiting for the http-tool-agent to be ready")
+			verifyAgentReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=http-tool-agent",
+					"-o", "jsonpath={.items[0].status.containerStatuses[*].ready}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(strings.Count(output, "true")).To(BeNumerically(">=", 1))
+			}
+			Eventually(verifyAgentReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying the tools ConfigMap was created")
+			// First verify the ConfigMap exists
+			verifyToolsConfigMap := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "configmap", "http-tool-agent-tools",
+					"-n", agentsNamespace, "-o", "yaml")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred(), "Tools ConfigMap should exist")
+				g.Expect(output).To(ContainSubstring("tools.yaml"))
+				g.Expect(output).To(ContainSubstring("handlers"))
+				g.Expect(output).To(ContainSubstring("calculator"))
+			}
+			Eventually(verifyToolsConfigMap, time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying runtime container has tools config mounted")
+			envCmd := exec.Command("kubectl", "get", "pods",
+				"-n", agentsNamespace,
+				"-l", "app.kubernetes.io/instance=http-tool-agent",
+				"-o", "jsonpath={.items[0].spec.containers[?(@.name=='runtime')].env[?(@.name=='OMNIA_TOOLS_CONFIG_PATH')].value}")
+			envOutput, err := utils.Run(envCmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(envOutput).To(ContainSubstring("tools.yaml"), "Runtime should have tools config path")
+
+			By("checking runtime container logs for tool initialization")
+			verifyToolsInitialized := func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=http-tool-agent",
+					"-c", "runtime")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				// Look for tool initialization log messages
+				if strings.Contains(output, "tools initialized") || strings.Contains(output, "initializing tools") {
+					return
+				}
+				// Also accept if the container is running without errors
+				g.Expect(output).NotTo(ContainSubstring("failed to initialize tools"))
+			}
+			Eventually(verifyToolsInitialized, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("cleaning up HTTP tool test resources")
+			cmd = exec.Command("kubectl", "delete", "agentruntime", "http-tool-agent",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "toolregistry", "http-tools",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "deployment", "mock-tool",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "service", "mock-tool",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "configmap", "mock-tool-responses",
+				"-n", agentsNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 

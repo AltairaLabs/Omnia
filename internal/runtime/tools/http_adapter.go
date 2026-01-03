@@ -58,6 +58,18 @@ type HTTPAdapterConfig struct {
 
 	// Timeout is the request timeout.
 	Timeout time.Duration
+
+	// ToolName is the tool name exposed by this handler.
+	// If empty, the adapter name is used.
+	ToolName string
+
+	// ToolDescription is the tool description (shown to LLM).
+	// If empty, a default description is generated.
+	ToolDescription string
+
+	// ToolInputSchema is the JSON Schema for the tool's input.
+	// If empty, a generic schema allowing any object is used.
+	ToolInputSchema map[string]any
 }
 
 // HTTPAdapter implements ToolAdapter for HTTP tool endpoints.
@@ -108,15 +120,30 @@ func (a *HTTPAdapter) Connect(ctx context.Context) error {
 		Timeout: a.config.Timeout,
 	}
 
-	// Register the tool with its name
-	// HTTP tools are single-purpose, so the adapter name is the tool name
-	a.tools[a.config.Name] = ToolInfo{
-		Name:        a.config.Name,
-		Description: fmt.Sprintf("HTTP tool at %s", a.config.Endpoint),
-		InputSchema: map[string]any{
+	// Use tool definition from config if provided, otherwise use defaults
+	toolName := a.config.ToolName
+	if toolName == "" {
+		toolName = a.config.Name
+	}
+
+	toolDescription := a.config.ToolDescription
+	if toolDescription == "" {
+		toolDescription = fmt.Sprintf("HTTP tool at %s", a.config.Endpoint)
+	}
+
+	inputSchema := a.config.ToolInputSchema
+	if inputSchema == nil {
+		inputSchema = map[string]any{
 			"type":                 "object",
 			"additionalProperties": true,
-		},
+		}
+	}
+
+	// Register the tool
+	a.tools[toolName] = ToolInfo{
+		Name:        toolName,
+		Description: toolDescription,
+		InputSchema: inputSchema,
 	}
 
 	a.connected = true

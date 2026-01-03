@@ -51,6 +51,12 @@ type Config struct {
 	// Tools configuration
 	ToolsConfigPath string // Path to tools.yaml configuration file
 
+	// Tracing configuration
+	TracingEnabled    bool    // Enable OpenTelemetry tracing
+	TracingEndpoint   string  // OTLP collector endpoint (e.g., "localhost:4317")
+	TracingSampleRate float64 // Sampling rate (0.0 to 1.0)
+	TracingInsecure   bool    // Disable TLS for OTLP connection
+
 	// Server ports
 	GRPCPort   int
 	HealthPort int
@@ -58,21 +64,25 @@ type Config struct {
 
 // Environment variable names.
 const (
-	envAgentName       = "OMNIA_AGENT_NAME"
-	envNamespace       = "OMNIA_NAMESPACE"
-	envPromptPackPath  = "OMNIA_PROMPTPACK_PATH"
-	envPromptName      = "OMNIA_PROMPT_NAME"
-	envSessionType     = "OMNIA_SESSION_TYPE"
-	envSessionURL      = "OMNIA_SESSION_URL"
-	envSessionTTL      = "OMNIA_SESSION_TTL"
-	envProviderType    = "OMNIA_PROVIDER_TYPE"
-	envProviderModel   = "OMNIA_PROVIDER_MODEL"
-	envProviderBaseURL = "OMNIA_PROVIDER_BASE_URL"
-	envMockProvider    = "OMNIA_MOCK_PROVIDER"
-	envMockConfigPath  = "OMNIA_MOCK_CONFIG"
-	envToolsConfigPath = "OMNIA_TOOLS_CONFIG"
-	envGRPCPort        = "OMNIA_GRPC_PORT"
-	envHealthPort      = "OMNIA_HEALTH_PORT"
+	envAgentName         = "OMNIA_AGENT_NAME"
+	envNamespace         = "OMNIA_NAMESPACE"
+	envPromptPackPath    = "OMNIA_PROMPTPACK_PATH"
+	envPromptName        = "OMNIA_PROMPT_NAME"
+	envSessionType       = "OMNIA_SESSION_TYPE"
+	envSessionURL        = "OMNIA_SESSION_URL"
+	envSessionTTL        = "OMNIA_SESSION_TTL"
+	envProviderType      = "OMNIA_PROVIDER_TYPE"
+	envProviderModel     = "OMNIA_PROVIDER_MODEL"
+	envProviderBaseURL   = "OMNIA_PROVIDER_BASE_URL"
+	envMockProvider      = "OMNIA_MOCK_PROVIDER"
+	envMockConfigPath    = "OMNIA_MOCK_CONFIG"
+	envToolsConfigPath   = "OMNIA_TOOLS_CONFIG"
+	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
+	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
+	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
+	envTracingInsecure   = "OMNIA_TRACING_INSECURE"
+	envGRPCPort          = "OMNIA_GRPC_PORT"
+	envHealthPort        = "OMNIA_HEALTH_PORT"
 )
 
 // Default values.
@@ -104,21 +114,37 @@ const (
 // LoadConfig loads configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		AgentName:       os.Getenv(envAgentName),
-		Namespace:       os.Getenv(envNamespace),
-		PromptPackPath:  getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
-		PromptName:      getEnvOrDefault(envPromptName, defaultPromptName),
-		SessionType:     getEnvOrDefault(envSessionType, defaultSessionType),
-		SessionURL:      os.Getenv(envSessionURL),
-		ProviderType:    getEnvOrDefault(envProviderType, defaultProviderType),
-		Model:           os.Getenv(envProviderModel),
-		BaseURL:         os.Getenv(envProviderBaseURL),
-		MockProvider:    os.Getenv(envMockProvider) == "true",
-		MockConfigPath:  os.Getenv(envMockConfigPath),
-		ToolsConfigPath: getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
-		GRPCPort:        defaultGRPCPort,
-		HealthPort:      defaultHealthPort,
-		SessionTTL:      defaultSessionTTL,
+		AgentName:         os.Getenv(envAgentName),
+		Namespace:         os.Getenv(envNamespace),
+		PromptPackPath:    getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
+		PromptName:        getEnvOrDefault(envPromptName, defaultPromptName),
+		SessionType:       getEnvOrDefault(envSessionType, defaultSessionType),
+		SessionURL:        os.Getenv(envSessionURL),
+		ProviderType:      getEnvOrDefault(envProviderType, defaultProviderType),
+		Model:             os.Getenv(envProviderModel),
+		BaseURL:           os.Getenv(envProviderBaseURL),
+		MockProvider:      os.Getenv(envMockProvider) == "true",
+		MockConfigPath:    os.Getenv(envMockConfigPath),
+		ToolsConfigPath:   getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
+		TracingEnabled:    os.Getenv(envTracingEnabled) == "true",
+		TracingEndpoint:   os.Getenv(envTracingEndpoint),
+		TracingSampleRate: 1.0, // Default to sampling all traces
+		TracingInsecure:   os.Getenv(envTracingInsecure) == "true",
+		GRPCPort:          defaultGRPCPort,
+		HealthPort:        defaultHealthPort,
+		SessionTTL:        defaultSessionTTL,
+	}
+
+	// Parse tracing sample rate
+	if rate := os.Getenv(envTracingSampleRate); rate != "" {
+		r, err := strconv.ParseFloat(rate, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s: %w", envTracingSampleRate, err)
+		}
+		if r < 0 || r > 1 {
+			return nil, fmt.Errorf("invalid %s: must be between 0.0 and 1.0", envTracingSampleRate)
+		}
+		cfg.TracingSampleRate = r
 	}
 
 	// Parse ports

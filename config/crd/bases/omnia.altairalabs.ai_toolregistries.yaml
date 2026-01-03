@@ -31,7 +31,7 @@ spec:
       openAPIV3Schema:
         description: |-
           ToolRegistry is the Schema for the toolregistries API.
-          It defines a collection of tools that can be invoked by agents.
+          It defines a collection of tool handlers that expose tools to agents.
         properties:
           apiVersion:
             description: |-
@@ -53,53 +53,91 @@ spec:
           spec:
             description: spec defines the desired state of ToolRegistry
             properties:
-              tools:
-                description: tools defines the list of tools available in this registry.
+              handlers:
+                description: |-
+                  handlers defines the list of tool handlers in this registry.
+                  Each handler can expose one or more tools.
                 items:
-                  description: ToolDefinition defines a single tool that can be invoked
-                    by agents
+                  description: HandlerDefinition defines a tool handler that exposes
+                    one or more tools
                   properties:
-                    description:
+                    grpcConfig:
                       description: |-
-                        description provides a human-readable description of what the tool does.
-                        This is used by agents to understand when to use the tool.
-                      type: string
-                    endpoint:
-                      description: |-
-                        endpoint specifies how to connect to the tool.
-                        Either url or selector must be specified.
+                        grpcConfig contains gRPC-specific configuration.
+                        Required when type is "grpc".
                       properties:
-                        selector:
-                          description: |-
-                            selector specifies label selectors for discovering tool endpoints
-                            from Kubernetes Services. Mutually exclusive with url.
-                          properties:
-                            matchLabels:
-                              additionalProperties:
-                                type: string
-                              description: matchLabels specifies labels that must
-                                match on the Service.
-                              type: object
-                            namespace:
-                              description: |-
-                                namespace specifies the namespace to search for Services.
-                                If empty, searches in the same namespace as the ToolRegistry.
-                              type: string
-                            port:
-                              description: |-
-                                port specifies the port name or number on the Service.
-                                If empty, uses the first port.
-                              type: string
-                          type: object
-                        url:
-                          description: |-
-                            url specifies the direct URL endpoint for the tool.
-                            Mutually exclusive with selector.
+                        endpoint:
+                          description: endpoint is the gRPC server address (host:port).
                           type: string
+                        tls:
+                          description: tls enables TLS for the connection.
+                          type: boolean
+                        tlsCAPath:
+                          description: tlsCAPath is the path to the CA certificate.
+                          type: string
+                        tlsCertPath:
+                          description: tlsCertPath is the path to the TLS certificate.
+                          type: string
+                        tlsInsecureSkipVerify:
+                          description: tlsInsecureSkipVerify skips TLS verification
+                            (not recommended for production).
+                          type: boolean
+                        tlsKeyPath:
+                          description: tlsKeyPath is the path to the TLS key.
+                          type: string
+                      required:
+                      - endpoint
+                      type: object
+                    httpConfig:
+                      description: |-
+                        httpConfig contains HTTP-specific configuration.
+                        Required when type is "http".
+                      properties:
+                        authSecretRef:
+                          description: authSecretRef references a secret containing
+                            auth credentials.
+                          properties:
+                            key:
+                              description: key is the key in the secret to select.
+                              type: string
+                            name:
+                              description: name is the name of the secret.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        authType:
+                          description: authType specifies the authentication type
+                            (none, bearer, basic).
+                          type: string
+                        contentType:
+                          default: application/json
+                          description: |-
+                            contentType is the Content-Type header value.
+                            Defaults to "application/json".
+                          type: string
+                        endpoint:
+                          description: endpoint is the HTTP endpoint URL.
+                          type: string
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: headers are additional HTTP headers to include
+                            in requests.
+                          type: object
+                        method:
+                          default: POST
+                          description: |-
+                            method is the HTTP method to use (GET, POST, PUT, DELETE).
+                            Defaults to POST.
+                          type: string
+                      required:
+                      - endpoint
                       type: object
                     mcpConfig:
                       description: |-
-                        mcpConfig contains MCP-specific configuration (for type=mcp).
+                        mcpConfig contains MCP-specific configuration.
                         Required when type is "mcp".
                       properties:
                         args:
@@ -134,12 +172,35 @@ spec:
                       - transport
                       type: object
                     name:
-                      description: |-
-                        name is the unique identifier for this tool within the registry.
-                        Must be a valid DNS subdomain name.
+                      description: name is a unique identifier for this handler within
+                        the registry.
                       maxLength: 63
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
+                    openAPIConfig:
+                      description: |-
+                        openAPIConfig contains OpenAPI-specific configuration.
+                        Required when type is "openapi".
+                      properties:
+                        baseURL:
+                          description: |-
+                            baseURL overrides the base URL from the OpenAPI spec.
+                            If not specified, uses the first server URL from the spec.
+                          type: string
+                        operationFilter:
+                          description: |-
+                            operationFilter limits which operations are exposed as tools.
+                            If empty, all operations are exposed.
+                          items:
+                            type: string
+                          type: array
+                        specURL:
+                          description: specURL is the URL to the OpenAPI specification
+                            (JSON or YAML).
+                          type: string
+                      required:
+                      - specURL
+                      type: object
                     retries:
                       default: 0
                       description: retries specifies the number of retry attempts
@@ -148,19 +209,26 @@ spec:
                       maximum: 10
                       minimum: 0
                       type: integer
-                    schema:
-                      description: schema defines the input/output schema for the
-                        tool.
+                    selector:
+                      description: |-
+                        selector discovers the handler endpoint from Kubernetes Services.
+                        Mutually exclusive with inline endpoint configuration.
                       properties:
-                        input:
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: matchLabels specifies labels that must match
+                            on the Service.
+                          type: object
+                        namespace:
                           description: |-
-                            input defines the JSON schema for tool input parameters.
-                            Should be a valid JSON Schema object represented as a string.
+                            namespace specifies the namespace to search for Services.
+                            If empty, searches in the same namespace as the ToolRegistry.
                           type: string
-                        output:
+                        port:
                           description: |-
-                            output defines the JSON schema for tool output.
-                            Should be a valid JSON Schema object represented as a string.
+                            port specifies the port name or number on the Service.
+                            If empty, uses the first port.
                           type: string
                       type: object
                     timeout:
@@ -169,23 +237,50 @@ spec:
                         timeout specifies the maximum duration for tool invocation.
                         Defaults to "30s".
                       type: string
+                    tool:
+                      description: |-
+                        tool defines the tool interface (required for http and grpc types).
+                        Self-describing handlers (mcp, openapi) discover tools automatically.
+                      properties:
+                        description:
+                          description: description explains what the tool does (shown
+                            to LLM).
+                          type: string
+                        inputSchema:
+                          description: inputSchema is the JSON Schema for the tool's
+                            input parameters.
+                          x-kubernetes-preserve-unknown-fields: true
+                        name:
+                          description: name is the tool name that will be exposed
+                            to the LLM.
+                          maxLength: 64
+                          pattern: ^[a-z][a-z0-9_]*$
+                          type: string
+                        outputSchema:
+                          description: outputSchema is the JSON Schema for the tool's
+                            output.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - description
+                      - inputSchema
+                      - name
+                      type: object
                     type:
-                      description: type specifies the protocol used to communicate
-                        with the tool.
+                      description: type specifies the handler protocol.
                       enum:
                       - http
+                      - openapi
                       - grpc
                       - mcp
                       type: string
                   required:
-                  - endpoint
                   - name
                   - type
                   type: object
                 minItems: 1
                 type: array
             required:
-            - tools
+            - handlers
             type: object
           status:
             description: status defines the observed state of ToolRegistry
@@ -254,20 +349,35 @@ spec:
               discoveredTools:
                 description: discoveredTools contains details of each discovered tool.
                 items:
-                  description: DiscoveredTool represents a tool that has been successfully
-                    discovered
+                  description: DiscoveredTool represents a tool discovered from a
+                    handler
                   properties:
-                    endpoint:
-                      description: endpoint is the resolved endpoint URL
+                    description:
+                      description: description is the tool description (for LLM)
                       type: string
+                    endpoint:
+                      description: endpoint is the resolved endpoint URL/address
+                      type: string
+                    error:
+                      description: error contains the error message if status is Unavailable
+                      type: string
+                    handlerName:
+                      description: handlerName is the handler that provides this tool
+                      type: string
+                    inputSchema:
+                      description: inputSchema is the JSON Schema for input parameters
+                      x-kubernetes-preserve-unknown-fields: true
                     lastChecked:
                       description: lastChecked is the timestamp of the last availability
                         check
                       format: date-time
                       type: string
                     name:
-                      description: name is the tool name from the spec
+                      description: name is the tool name (used by LLM)
                       type: string
+                    outputSchema:
+                      description: outputSchema is the JSON Schema for output
+                      x-kubernetes-preserve-unknown-fields: true
                     status:
                       description: status indicates whether the tool is available
                       enum:
@@ -276,7 +386,9 @@ spec:
                       - Unknown
                       type: string
                   required:
+                  - description
                   - endpoint
+                  - handlerName
                   - name
                   - status
                   type: object

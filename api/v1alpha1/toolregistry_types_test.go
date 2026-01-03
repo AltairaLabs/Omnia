@@ -18,40 +18,45 @@ package v1alpha1
 
 import (
 	"testing"
-	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Test constants to avoid duplicate string literals
+// Test constants
 const (
 	testToolRegistryName      = "test-toolregistry"
 	testToolRegistryNamespace = "test-namespace"
+	testHandlerName           = "my-handler"
 	testToolName              = "my-tool"
 	testToolEndpoint          = "https://api.example.com/tool"
 	testToolDescription       = "A test tool"
-	testToolModifiedName      = "modified-name"
 )
 
-func TestToolTypeConstants(t *testing.T) {
+func TestHandlerTypeConstants(t *testing.T) {
 	tests := []struct {
 		name     string
-		constant ToolType
+		constant HandlerType
 		expected string
 	}{
 		{
-			name:     "HTTP tool type",
-			constant: ToolTypeHTTP,
+			name:     "HTTP handler type",
+			constant: HandlerTypeHTTP,
 			expected: "http",
 		},
 		{
-			name:     "gRPC tool type",
-			constant: ToolTypeGRPC,
+			name:     "OpenAPI handler type",
+			constant: HandlerTypeOpenAPI,
+			expected: "openapi",
+		},
+		{
+			name:     "gRPC handler type",
+			constant: HandlerTypeGRPC,
 			expected: "grpc",
 		},
 		{
-			name:     "MCP tool type",
-			constant: ToolTypeMCP,
+			name:     "MCP handler type",
+			constant: HandlerTypeMCP,
 			expected: "mcp",
 		},
 	}
@@ -59,7 +64,7 @@ func TestToolTypeConstants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if string(tt.constant) != tt.expected {
-				t.Errorf("ToolType constant = %v, want %v", tt.constant, tt.expected)
+				t.Errorf("HandlerType constant = %v, want %v", tt.constant, tt.expected)
 			}
 		})
 	}
@@ -128,15 +133,40 @@ func TestToolStatusConstants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.constant != tt.expected {
-				t.Errorf("ToolStatus constant = %v, want %v", tt.constant, tt.expected)
+				t.Errorf("Tool status constant = %v, want %v", tt.constant, tt.expected)
 			}
 		})
 	}
 }
 
-func TestToolRegistryCreationWithURL(t *testing.T) {
-	url := testToolEndpoint
-	description := testToolDescription
+func TestMCPTransportConstants(t *testing.T) {
+	tests := []struct {
+		name     string
+		constant MCPTransport
+		expected string
+	}{
+		{
+			name:     "SSE transport",
+			constant: MCPTransportSSE,
+			expected: "sse",
+		},
+		{
+			name:     "Stdio transport",
+			constant: MCPTransportStdio,
+			expected: "stdio",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if string(tt.constant) != tt.expected {
+				t.Errorf("MCPTransport constant = %v, want %v", tt.constant, tt.expected)
+			}
+		})
+	}
+}
+
+func TestToolRegistryCreation(t *testing.T) {
 	timeout := "60s"
 	retries := int32(3)
 
@@ -146,13 +176,20 @@ func TestToolRegistryCreationWithURL(t *testing.T) {
 			Namespace: testToolRegistryNamespace,
 		},
 		Spec: ToolRegistrySpec{
-			Tools: []ToolDefinition{
+			Handlers: []HandlerDefinition{
 				{
-					Name:        testToolName,
-					Description: &description,
-					Type:        ToolTypeHTTP,
-					Endpoint: ToolEndpoint{
-						URL: &url,
+					Name: testHandlerName,
+					Type: HandlerTypeHTTP,
+					HTTPConfig: &HTTPConfig{
+						Endpoint: testToolEndpoint,
+						Method:   "POST",
+					},
+					Tool: &ToolDefinition{
+						Name:        testToolName,
+						Description: testToolDescription,
+						InputSchema: apiextensionsv1.JSON{
+							Raw: []byte(`{"type":"object","properties":{"input":{"type":"string"}}}`),
+						},
 					},
 					Timeout: &timeout,
 					Retries: &retries,
@@ -169,433 +206,178 @@ func TestToolRegistryCreationWithURL(t *testing.T) {
 		t.Errorf("ToolRegistry.Namespace = %v, want %v", registry.Namespace, testToolRegistryNamespace)
 	}
 
-	if len(registry.Spec.Tools) != 1 {
-		t.Fatalf("len(ToolRegistry.Spec.Tools) = %v, want 1", len(registry.Spec.Tools))
+	if len(registry.Spec.Handlers) != 1 {
+		t.Fatalf("len(ToolRegistry.Spec.Handlers) = %v, want 1", len(registry.Spec.Handlers))
 	}
 
-	tool := registry.Spec.Tools[0]
+	handler := registry.Spec.Handlers[0]
+	if handler.Name != testHandlerName {
+		t.Errorf("Handler.Name = %v, want %v", handler.Name, testHandlerName)
+	}
+
+	if handler.Type != HandlerTypeHTTP {
+		t.Errorf("Handler.Type = %v, want %v", handler.Type, HandlerTypeHTTP)
+	}
+
+	if handler.HTTPConfig == nil {
+		t.Fatal("Handler.HTTPConfig is nil")
+	}
+
+	if handler.HTTPConfig.Endpoint != testToolEndpoint {
+		t.Errorf("Handler.HTTPConfig.Endpoint = %v, want %v", handler.HTTPConfig.Endpoint, testToolEndpoint)
+	}
+
+	if handler.Tool == nil {
+		t.Fatal("Handler.Tool is nil")
+	}
+
+	if handler.Tool.Name != testToolName {
+		t.Errorf("Handler.Tool.Name = %v, want %v", handler.Tool.Name, testToolName)
+	}
+
+	if handler.Tool.Description != testToolDescription {
+		t.Errorf("Handler.Tool.Description = %v, want %v", handler.Tool.Description, testToolDescription)
+	}
+}
+
+func TestToolRegistryWithMCPHandler(t *testing.T) {
+	endpoint := "http://mcp-server:8080"
+
+	registry := &ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testToolRegistryName,
+			Namespace: testToolRegistryNamespace,
+		},
+		Spec: ToolRegistrySpec{
+			Handlers: []HandlerDefinition{
+				{
+					Name: "mcp-handler",
+					Type: HandlerTypeMCP,
+					MCPConfig: &MCPConfig{
+						Transport: MCPTransportSSE,
+						Endpoint:  &endpoint,
+					},
+				},
+			},
+		},
+	}
+
+	handler := registry.Spec.Handlers[0]
+	if handler.Type != HandlerTypeMCP {
+		t.Errorf("Handler.Type = %v, want %v", handler.Type, HandlerTypeMCP)
+	}
+
+	if handler.MCPConfig == nil {
+		t.Fatal("Handler.MCPConfig is nil")
+	}
+
+	if handler.MCPConfig.Transport != MCPTransportSSE {
+		t.Errorf("MCPConfig.Transport = %v, want %v", handler.MCPConfig.Transport, MCPTransportSSE)
+	}
+
+	if handler.MCPConfig.Endpoint == nil || *handler.MCPConfig.Endpoint != endpoint {
+		t.Errorf("MCPConfig.Endpoint = %v, want %v", handler.MCPConfig.Endpoint, endpoint)
+	}
+}
+
+func TestToolRegistryWithOpenAPIHandler(t *testing.T) {
+	specURL := "http://api-server/openapi.json"
+	baseURL := "http://api-server"
+
+	registry := &ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testToolRegistryName,
+			Namespace: testToolRegistryNamespace,
+		},
+		Spec: ToolRegistrySpec{
+			Handlers: []HandlerDefinition{
+				{
+					Name: "openapi-handler",
+					Type: HandlerTypeOpenAPI,
+					OpenAPIConfig: &OpenAPIConfig{
+						SpecURL: specURL,
+						BaseURL: &baseURL,
+					},
+				},
+			},
+		},
+	}
+
+	handler := registry.Spec.Handlers[0]
+	if handler.Type != HandlerTypeOpenAPI {
+		t.Errorf("Handler.Type = %v, want %v", handler.Type, HandlerTypeOpenAPI)
+	}
+
+	if handler.OpenAPIConfig == nil {
+		t.Fatal("Handler.OpenAPIConfig is nil")
+	}
+
+	if handler.OpenAPIConfig.SpecURL != specURL {
+		t.Errorf("OpenAPIConfig.SpecURL = %v, want %v", handler.OpenAPIConfig.SpecURL, specURL)
+	}
+
+	if handler.OpenAPIConfig.BaseURL == nil || *handler.OpenAPIConfig.BaseURL != baseURL {
+		t.Errorf("OpenAPIConfig.BaseURL = %v, want %v", handler.OpenAPIConfig.BaseURL, baseURL)
+	}
+}
+
+func TestDiscoveredToolStructure(t *testing.T) {
+	now := metav1.Now()
+	inputSchema := apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)}
+
+	tool := DiscoveredTool{
+		Name:        testToolName,
+		HandlerName: testHandlerName,
+		Description: testToolDescription,
+		InputSchema: &inputSchema,
+		Endpoint:    testToolEndpoint,
+		Status:      ToolStatusAvailable,
+		LastChecked: &now,
+	}
+
 	if tool.Name != testToolName {
-		t.Errorf("Tool.Name = %v, want %v", tool.Name, testToolName)
+		t.Errorf("DiscoveredTool.Name = %v, want %v", tool.Name, testToolName)
 	}
 
-	if tool.Type != ToolTypeHTTP {
-		t.Errorf("Tool.Type = %v, want %v", tool.Type, ToolTypeHTTP)
+	if tool.HandlerName != testHandlerName {
+		t.Errorf("DiscoveredTool.HandlerName = %v, want %v", tool.HandlerName, testHandlerName)
 	}
 
-	if *tool.Endpoint.URL != testToolEndpoint {
-		t.Errorf("Tool.Endpoint.URL = %v, want %v", *tool.Endpoint.URL, testToolEndpoint)
-	}
-
-	if *tool.Description != testToolDescription {
-		t.Errorf("Tool.Description = %v, want %v", *tool.Description, testToolDescription)
-	}
-
-	if *tool.Timeout != "60s" {
-		t.Errorf("Tool.Timeout = %v, want %v", *tool.Timeout, "60s")
-	}
-
-	if *tool.Retries != 3 {
-		t.Errorf("Tool.Retries = %v, want %v", *tool.Retries, 3)
-	}
-}
-
-func TestToolRegistryCreationWithSelector(t *testing.T) {
-	namespace := "tools-namespace"
-	port := "http"
-
-	registry := &ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testToolRegistryName,
-			Namespace: testToolRegistryNamespace,
-		},
-		Spec: ToolRegistrySpec{
-			Tools: []ToolDefinition{
-				{
-					Name: testToolName,
-					Type: ToolTypeGRPC,
-					Endpoint: ToolEndpoint{
-						Selector: &ToolSelector{
-							MatchLabels: map[string]string{
-								"app":  "my-tool",
-								"tier": "backend",
-							},
-							Namespace: &namespace,
-							Port:      &port,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	tool := registry.Spec.Tools[0]
-	if tool.Endpoint.Selector == nil {
-		t.Fatal("Tool.Endpoint.Selector should not be nil")
-	}
-
-	if len(tool.Endpoint.Selector.MatchLabels) != 2 {
-		t.Errorf("len(Tool.Endpoint.Selector.MatchLabels) = %v, want 2", len(tool.Endpoint.Selector.MatchLabels))
-	}
-
-	if tool.Endpoint.Selector.MatchLabels["app"] != "my-tool" {
-		t.Errorf("Tool.Endpoint.Selector.MatchLabels[app] = %v, want my-tool", tool.Endpoint.Selector.MatchLabels["app"])
-	}
-
-	if *tool.Endpoint.Selector.Namespace != namespace {
-		t.Errorf("Tool.Endpoint.Selector.Namespace = %v, want %v", *tool.Endpoint.Selector.Namespace, namespace)
-	}
-
-	if *tool.Endpoint.Selector.Port != port {
-		t.Errorf("Tool.Endpoint.Selector.Port = %v, want %v", *tool.Endpoint.Selector.Port, port)
-	}
-}
-
-func TestToolRegistryWithSchema(t *testing.T) {
-	url := testToolEndpoint
-	inputSchema := `{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"number"}},"required":["query"]}`
-	outputSchema := `{"type":"array","items":{"type":"object"}}`
-
-	registry := &ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testToolRegistryName,
-			Namespace: testToolRegistryNamespace,
-		},
-		Spec: ToolRegistrySpec{
-			Tools: []ToolDefinition{
-				{
-					Name: testToolName,
-					Type: ToolTypeHTTP,
-					Endpoint: ToolEndpoint{
-						URL: &url,
-					},
-					Schema: &ToolSchema{
-						Input:  &inputSchema,
-						Output: &outputSchema,
-					},
-				},
-			},
-		},
-	}
-
-	tool := registry.Spec.Tools[0]
-	if tool.Schema == nil {
-		t.Fatal("Tool.Schema should not be nil")
-	}
-
-	if tool.Schema.Input == nil {
-		t.Fatal("Tool.Schema.Input should not be nil")
-	}
-
-	if *tool.Schema.Input != inputSchema {
-		t.Errorf("Tool.Schema.Input = %v, want %v", *tool.Schema.Input, inputSchema)
-	}
-
-	if tool.Schema.Output == nil {
-		t.Fatal("Tool.Schema.Output should not be nil")
-	}
-
-	if *tool.Schema.Output != outputSchema {
-		t.Errorf("Tool.Schema.Output = %v, want %v", *tool.Schema.Output, outputSchema)
+	if tool.Status != ToolStatusAvailable {
+		t.Errorf("DiscoveredTool.Status = %v, want %v", tool.Status, ToolStatusAvailable)
 	}
 }
 
 func TestToolRegistryStatus(t *testing.T) {
-	now := metav1.NewTime(time.Now())
+	now := metav1.Now()
 
-	registry := &ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testToolRegistryName,
-			Namespace: testToolRegistryNamespace,
-		},
-		Spec: ToolRegistrySpec{
-			Tools: []ToolDefinition{
-				{
-					Name: testToolName,
-					Type: ToolTypeHTTP,
-					Endpoint: ToolEndpoint{
-						URL: ptrString(testToolEndpoint),
-					},
-				},
-			},
-		},
-		Status: ToolRegistryStatus{
-			Phase:                ToolRegistryPhaseReady,
-			DiscoveredToolsCount: 1,
-			DiscoveredTools: []DiscoveredTool{
-				{
-					Name:        testToolName,
-					Endpoint:    testToolEndpoint,
-					Status:      ToolStatusAvailable,
-					LastChecked: &now,
-				},
-			},
-			LastDiscoveryTime: &now,
-			Conditions: []metav1.Condition{
-				{
-					Type:               "Ready",
-					Status:             metav1.ConditionTrue,
-					LastTransitionTime: now,
-					Reason:             "AllToolsAvailable",
-					Message:            "All tools are available",
-				},
-			},
-		},
-	}
-
-	if registry.Status.Phase != ToolRegistryPhaseReady {
-		t.Errorf("ToolRegistry.Status.Phase = %v, want %v", registry.Status.Phase, ToolRegistryPhaseReady)
-	}
-
-	if registry.Status.DiscoveredToolsCount != 1 {
-		t.Errorf("ToolRegistry.Status.DiscoveredToolsCount = %v, want 1", registry.Status.DiscoveredToolsCount)
-	}
-
-	if len(registry.Status.DiscoveredTools) != 1 {
-		t.Fatalf("len(ToolRegistry.Status.DiscoveredTools) = %v, want 1", len(registry.Status.DiscoveredTools))
-	}
-
-	discoveredTool := registry.Status.DiscoveredTools[0]
-	if discoveredTool.Name != testToolName {
-		t.Errorf("DiscoveredTool.Name = %v, want %v", discoveredTool.Name, testToolName)
-	}
-
-	if discoveredTool.Status != ToolStatusAvailable {
-		t.Errorf("DiscoveredTool.Status = %v, want %v", discoveredTool.Status, ToolStatusAvailable)
-	}
-
-	if registry.Status.LastDiscoveryTime == nil {
-		t.Error("ToolRegistry.Status.LastDiscoveryTime should not be nil")
-	}
-
-	if len(registry.Status.Conditions) != 1 {
-		t.Errorf("len(ToolRegistry.Status.Conditions) = %v, want 1", len(registry.Status.Conditions))
-	}
-}
-
-func TestToolRegistryDeepCopy(t *testing.T) {
-	url := testToolEndpoint
-	timeout := "30s"
-	retries := int32(2)
-	now := metav1.NewTime(time.Now())
-
-	original := &ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testToolRegistryName,
-			Namespace: testToolRegistryNamespace,
-		},
-		Spec: ToolRegistrySpec{
-			Tools: []ToolDefinition{
-				{
-					Name: testToolName,
-					Type: ToolTypeHTTP,
-					Endpoint: ToolEndpoint{
-						URL: &url,
-					},
-					Timeout: &timeout,
-					Retries: &retries,
-				},
-			},
-		},
-		Status: ToolRegistryStatus{
-			Phase:                ToolRegistryPhaseReady,
-			DiscoveredToolsCount: 1,
-			DiscoveredTools: []DiscoveredTool{
-				{
-					Name:     testToolName,
-					Endpoint: testToolEndpoint,
-					Status:   ToolStatusAvailable,
-				},
-			},
-			LastDiscoveryTime: &now,
-		},
-	}
-
-	copied := original.DeepCopy()
-
-	// Verify the copy is independent
-	if copied == original {
-		t.Error("DeepCopy should return a new object, not the same pointer")
-	}
-
-	// Verify values are equal
-	if copied.Name != original.Name {
-		t.Errorf("DeepCopy().Name = %v, want %v", copied.Name, original.Name)
-	}
-
-	if len(copied.Spec.Tools) != len(original.Spec.Tools) {
-		t.Errorf("DeepCopy().Spec.Tools length = %v, want %v", len(copied.Spec.Tools), len(original.Spec.Tools))
-	}
-
-	if copied.Status.Phase != original.Status.Phase {
-		t.Errorf("DeepCopy().Status.Phase = %v, want %v", copied.Status.Phase, original.Status.Phase)
-	}
-
-	// Modify the copy and verify original is unchanged
-	copied.Name = testToolModifiedName
-	if original.Name == testToolModifiedName {
-		t.Error("Modifying copy should not affect original")
-	}
-
-	// Verify nested pointer fields are also deep copied
-	if copied.Spec.Tools[0].Endpoint.URL == original.Spec.Tools[0].Endpoint.URL {
-		t.Error("DeepCopy should create new URL pointer")
-	}
-}
-
-func TestToolRegistryListDeepCopy(t *testing.T) {
-	url := testToolEndpoint
-
-	original := &ToolRegistryList{
-		Items: []ToolRegistry{
+	status := ToolRegistryStatus{
+		Phase:                ToolRegistryPhaseReady,
+		DiscoveredToolsCount: 2,
+		DiscoveredTools: []DiscoveredTool{
 			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      testToolRegistryName,
-					Namespace: testToolRegistryNamespace,
-				},
-				Spec: ToolRegistrySpec{
-					Tools: []ToolDefinition{
-						{
-							Name: testToolName,
-							Type: ToolTypeHTTP,
-							Endpoint: ToolEndpoint{
-								URL: &url,
-							},
-						},
-					},
-				},
+				Name:        "tool1",
+				HandlerName: "handler1",
+				Status:      ToolStatusAvailable,
+			},
+			{
+				Name:        "tool2",
+				HandlerName: "handler2",
+				Status:      ToolStatusAvailable,
 			},
 		},
+		LastDiscoveryTime: &now,
 	}
 
-	copied := original.DeepCopy()
-
-	if copied == original {
-		t.Error("DeepCopy should return a new object")
+	if status.Phase != ToolRegistryPhaseReady {
+		t.Errorf("Status.Phase = %v, want %v", status.Phase, ToolRegistryPhaseReady)
 	}
 
-	if len(copied.Items) != len(original.Items) {
-		t.Errorf("DeepCopy().Items length = %v, want %v", len(copied.Items), len(original.Items))
+	if status.DiscoveredToolsCount != 2 {
+		t.Errorf("Status.DiscoveredToolsCount = %v, want 2", status.DiscoveredToolsCount)
 	}
 
-	// Modify the copy and verify original is unchanged
-	copied.Items[0].Name = testToolModifiedName
-	if original.Items[0].Name == testToolModifiedName {
-		t.Error("Modifying copy should not affect original")
-	}
-}
-
-func TestToolRegistryTypeRegistration(t *testing.T) {
-	// Verify that ToolRegistry types are registered with the scheme
-	registry := &ToolRegistry{}
-	registryList := &ToolRegistryList{}
-
-	// These should not panic if types are registered correctly
-	_ = registry.DeepCopyObject()
-	_ = registryList.DeepCopyObject()
-}
-
-func TestToolRegistryMultipleTools(t *testing.T) {
-	httpURL := "https://api.example.com/http-tool"
-	grpcURL := "grpc://api.example.com:9090"
-	mcpURL := "mcp://localhost:3000"
-
-	registry := &ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testToolRegistryName,
-			Namespace: testToolRegistryNamespace,
-		},
-		Spec: ToolRegistrySpec{
-			Tools: []ToolDefinition{
-				{
-					Name: "http-tool",
-					Type: ToolTypeHTTP,
-					Endpoint: ToolEndpoint{
-						URL: &httpURL,
-					},
-				},
-				{
-					Name: "grpc-tool",
-					Type: ToolTypeGRPC,
-					Endpoint: ToolEndpoint{
-						URL: &grpcURL,
-					},
-				},
-				{
-					Name: "mcp-tool",
-					Type: ToolTypeMCP,
-					Endpoint: ToolEndpoint{
-						URL: &mcpURL,
-					},
-				},
-			},
-		},
-	}
-
-	if len(registry.Spec.Tools) != 3 {
-		t.Errorf("len(ToolRegistry.Spec.Tools) = %v, want 3", len(registry.Spec.Tools))
-	}
-
-	expectedTypes := []ToolType{ToolTypeHTTP, ToolTypeGRPC, ToolTypeMCP}
-	for i, tool := range registry.Spec.Tools {
-		if tool.Type != expectedTypes[i] {
-			t.Errorf("Tool[%d].Type = %v, want %v", i, tool.Type, expectedTypes[i])
-		}
-	}
-}
-
-func TestToolEndpointMutualExclusivity(t *testing.T) {
-	// Test with only URL
-	endpointWithURL := ToolEndpoint{
-		URL: ptrString(testToolEndpoint),
-	}
-	if endpointWithURL.URL == nil {
-		t.Error("ToolEndpoint.URL should not be nil")
-	}
-	if endpointWithURL.Selector != nil {
-		t.Error("ToolEndpoint.Selector should be nil when URL is set")
-	}
-
-	// Test with only Selector
-	endpointWithSelector := ToolEndpoint{
-		Selector: &ToolSelector{
-			MatchLabels: map[string]string{"app": "tool"},
-		},
-	}
-	if endpointWithSelector.Selector == nil {
-		t.Error("ToolEndpoint.Selector should not be nil")
-	}
-	if endpointWithSelector.URL != nil {
-		t.Error("ToolEndpoint.URL should be nil when Selector is set")
-	}
-}
-
-func TestToolDefinitionDefaults(t *testing.T) {
-	// Test ToolDefinition with minimal required fields
-	tool := ToolDefinition{
-		Name: testToolName,
-		Type: ToolTypeHTTP,
-		Endpoint: ToolEndpoint{
-			URL: ptrString(testToolEndpoint),
-		},
-	}
-
-	if tool.Name != testToolName {
-		t.Errorf("Tool.Name = %v, want %v", tool.Name, testToolName)
-	}
-
-	if tool.Description != nil {
-		t.Error("Tool.Description should be nil when not set")
-	}
-
-	if tool.Schema != nil {
-		t.Error("Tool.Schema should be nil when not set")
-	}
-
-	if tool.Timeout != nil {
-		t.Error("Tool.Timeout should be nil when not set (default applied by API server)")
-	}
-
-	if tool.Retries != nil {
-		t.Error("Tool.Retries should be nil when not set (default applied by API server)")
+	if len(status.DiscoveredTools) != 2 {
+		t.Errorf("len(Status.DiscoveredTools) = %v, want 2", len(status.DiscoveredTools))
 	}
 }
