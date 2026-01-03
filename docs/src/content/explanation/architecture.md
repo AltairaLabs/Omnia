@@ -12,33 +12,32 @@ This document explains the architecture of Omnia and the design decisions behind
 
 Omnia consists of three main components:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Kubernetes Cluster                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────┐    ┌─────────────────────────────────────┐    │
-│  │   Omnia     │    │          Agent Pod                  │    │
-│  │  Operator   │───▶│  ┌─────────┐    ┌─────────────┐    │    │
-│  └─────────────┘    │  │ Facade  │◀──▶│   Runtime   │    │    │
-│         │           │  │Container│    │  Container  │    │    │
-│         │           │  └────┬────┘    └──────┬──────┘    │    │
-│         │           └───────┼────────────────┼───────────┘    │
-│         │                   │                │                 │
-│         ▼                   │                ▼                 │
-│  ┌─────────────┐     ┌──────┼───────┐   ┌─────────────┐       │
-│  │  PromptPack │     │   Session    │   │    Tool     │       │
-│  │  ConfigMap  │     │    Store     │   │  Services   │       │
-│  └─────────────┘     │   (Redis)    │   └─────────────┘       │
-│                      └──────────────┘                          │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-         │
-         │ WebSocket / gRPC
-         ▼
-    ┌─────────┐
-    │ Clients │
-    └─────────┘
+```mermaid
+graph TB
+    subgraph cluster["Kubernetes Cluster"]
+        subgraph operator["Omnia Operator"]
+            op[Controller Manager]
+        end
+
+        subgraph pod["Agent Pod"]
+            facade[Facade Container]
+            runtime[Runtime Container]
+            facade <-->|gRPC| runtime
+        end
+
+        op -->|creates| pod
+        op -->|watches| pp[PromptPack ConfigMap]
+
+        subgraph storage["Storage Layer"]
+            session[(Session Store<br/>Redis)]
+            tools[Tool Services]
+        end
+
+        facade --> session
+        runtime --> tools
+    end
+
+    clients((Clients)) -->|WebSocket| facade
 ```
 
 ## Components
@@ -125,31 +124,40 @@ Configures LLM provider settings:
 
 ## Tool Execution Flow
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as Facade
+    participant R as Runtime
+    participant TM as Tool Manager
+    participant T as Tool Service
+
+    C->>F: WebSocket message
+    F->>R: gRPC request
+    R->>R: Send to LLM
+    R-->>R: LLM returns tool_call
+    R->>TM: Execute tool
+    TM->>T: Route to adapter (HTTP/gRPC/MCP/OpenAPI)
+    T-->>TM: Tool result
+    TM-->>R: Return result
+    R->>R: Send result to LLM
+    R-->>F: Stream response
+    F-->>C: WebSocket chunks
 ```
-┌─────────┐  WebSocket   ┌─────────┐   gRPC    ┌─────────┐
-│ Client  │─────────────▶│ Facade  │──────────▶│ Runtime │
-└─────────┘              └─────────┘           └────┬────┘
-                                                    │
-                         ┌──────────────────────────┘
-                         │
-                         ▼
-              ┌──────────────────┐
-              │   Tool Manager   │
-              └────────┬─────────┘
-                       │
-       ┌───────────────┼───────────────┐
-       │               │               │
-       ▼               ▼               ▼
-   ┌───────┐      ┌────────┐     ┌─────────┐
-   │ HTTP  │      │  MCP   │     │ OpenAPI │
-   │Adapter│      │Adapter │     │ Adapter │
-   └───┬───┘      └───┬────┘     └────┬────┘
-       │              │               │
-       ▼              ▼               ▼
-   ┌───────┐      ┌────────┐     ┌─────────┐
-   │ Tool  │      │  MCP   │     │  API    │
-   │Service│      │ Server │     │ Service │
-   └───────┘      └────────┘     └─────────┘
+
+The Tool Manager routes calls to the appropriate adapter based on handler type:
+
+```mermaid
+graph LR
+    TM[Tool Manager] --> HTTP[HTTP Adapter]
+    TM --> GRPC[gRPC Adapter]
+    TM --> MCP[MCP Adapter]
+    TM --> OA[OpenAPI Adapter]
+
+    HTTP --> HS[REST Service]
+    GRPC --> GS[gRPC Service]
+    MCP --> MS[MCP Server]
+    OA --> OS[OpenAPI Service]
 ```
 
 1. Client sends message via WebSocket
@@ -253,20 +261,21 @@ The handler abstraction enables:
 
 ## Resource Relationships
 
-```
-AgentRuntime
-    │
-    ├── references ──▶ PromptPack ──▶ ConfigMap
-    │
-    ├── references ──▶ ToolRegistry ──▶ Services (via selector)
-    │                        │
-    │                        └──▶ Tools ConfigMap (generated)
-    │
-    ├── references ──▶ Provider ──▶ Secret (API credentials)
-    │
-    ├── creates ────▶ Deployment (facade + runtime)
-    │
-    └── creates ────▶ Service
+```mermaid
+graph LR
+    AR[AgentRuntime] -->|references| PP[PromptPack]
+    AR -->|references| TR[ToolRegistry]
+    AR -->|references| PR[Provider]
+    AR -->|creates| D[Deployment]
+    AR -->|creates| S[Service]
+
+    PP -->|source| CM1[ConfigMap]
+    TR -->|discovers| SVC[Services]
+    TR -->|generates| CM2[Tools ConfigMap]
+    PR -->|credentials| SEC[Secret]
+
+    D -->|contains| FC[Facade Container]
+    D -->|contains| RC[Runtime Container]
 ```
 
 ## Reconciliation Flow

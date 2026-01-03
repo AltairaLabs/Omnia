@@ -151,40 +151,50 @@ Error message:
 
 ### New Conversation
 
-```
-Client                          Server
-   |                               |
-   |-- connect ------------------>|
-   |<-- connected (session_id) ---|
-   |                               |
-   |-- message ------------------->|
-   |<-- chunk --------------------|
-   |<-- chunk --------------------|
-   |<-- done ---------------------|
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: WebSocket connect
+    S-->>C: connected (session_id)
+    C->>S: message
+    S-->>C: chunk
+    S-->>C: chunk
+    S-->>C: done
 ```
 
 ### With Tool Calls
 
-```
-Client                          Server
-   |                               |
-   |-- message ------------------->|
-   |<-- tool_call ----------------|
-   |<-- tool_result --------------|
-   |<-- chunk --------------------|
-   |<-- done ---------------------|
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant T as Tool Service
+
+    C->>S: message
+    S->>T: Execute tool
+    S-->>C: tool_call
+    T-->>S: Result
+    S-->>C: tool_result
+    S-->>C: chunk
+    S-->>C: done
 ```
 
 ### Session Resumption
 
-```
-Client                          Server
-   |                               |
-   |-- connect ------------------>|
-   |<-- connected (session_id) ---|
-   |                               |
-   |-- message (session_id) ----->|
-   |<-- done ---------------------|
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant R as Session Store
+
+    C->>S: WebSocket connect
+    S-->>C: connected (session_id)
+    C->>S: message (with session_id)
+    S->>R: Load session history
+    R-->>S: History
+    S-->>C: done (with context)
 ```
 
 ## Session Handling

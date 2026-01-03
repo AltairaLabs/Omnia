@@ -20,6 +20,17 @@ Sessions enable multi-turn conversations where the agent remembers previous cont
 
 ## Session Lifecycle
 
+```mermaid
+stateDiagram-v2
+    [*] --> New: Client connects
+    New --> Active: Session created
+    Active --> Active: Message exchanged (TTL reset)
+    Active --> Expired: TTL exceeded
+    Expired --> [*]: Data deleted
+    Active --> Resumed: Client reconnects with session_id
+    Resumed --> Active: History loaded
+```
+
 ### Creation
 
 A new session is created when:
@@ -109,8 +120,15 @@ Clients can resume sessions by including the session ID:
 
 With Redis sessions, clients can resume on any replica:
 
-```
-Client ──▶ Load Balancer ──▶ Any Agent Pod ──▶ Redis
+```mermaid
+graph LR
+    C((Client)) --> LB[Load Balancer]
+    LB --> P1[Agent Pod 1]
+    LB --> P2[Agent Pod 2]
+    LB --> P3[Agent Pod 3]
+    P1 --> R[(Redis)]
+    P2 --> R
+    P3 --> R
 ```
 
 ## Session Data Structure

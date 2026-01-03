@@ -8,6 +8,20 @@ order: 4
 
 Omnia supports two autoscaling mechanisms: standard Kubernetes HPA and KEDA. This document explains when to use each and how they work with AI agents.
 
+## Choosing an Autoscaler
+
+```mermaid
+flowchart TD
+    A{Need scale-to-zero?} -->|Yes| B{Accept cold starts?}
+    A -->|No| C{Need custom metrics?}
+    B -->|Yes| KEDA[Use KEDA]
+    B -->|No| MIN1[Use KEDA with minReplicas: 1]
+    C -->|Yes| KEDA
+    C -->|No| D{Need cron-based scaling?}
+    D -->|Yes| KEDA
+    D -->|No| HPA[Use HPA]
+```
+
 ## Agent Workload Characteristics
 
 AI agents have unique scaling characteristics compared to typical web services:
@@ -152,6 +166,29 @@ triggers:
 KEDA supports scaling to zero replicas, but there are important tradeoffs:
 
 ### The Cold Start Problem
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant K as KEDA
+    participant P as Agent Pod
+
+    Note over P: Scaled to 0
+
+    C->>G: WebSocket connect
+    G->>G: No backend pods!
+    G-->>C: Connection failed
+
+    Note over K: Detects trigger
+    K->>P: Scale to 1
+    Note over P: Pod starting...
+    Note over P: Pod ready (30s later)
+
+    C->>G: Retry connect
+    G->>P: Forward
+    P-->>C: Connected
+```
 
 When scaled to zero:
 1. New connection arrives at the gateway

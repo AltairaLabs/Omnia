@@ -11,6 +11,8 @@
   "dependencies": {
     "@astrojs/mdx": "^4.0.0",
     "@astrojs/sitemap": "^3.2.0",
-    "astro": "^5.0.0"
+    "astro": "^5.0.0",
+    "mermaid": "^11.12.2",
+    "rehype-mermaid": "^3.0.0"
   }
 }

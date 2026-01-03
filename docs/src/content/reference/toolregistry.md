@@ -11,6 +11,29 @@ The ToolRegistry custom resource defines tool handlers available to AI agents. H
 - **Self-describing** (MCP, OpenAPI): Automatically discover tools at runtime
 - **Explicit** (HTTP, gRPC): Require a tool definition with name, description, and input schema
 
+```mermaid
+graph TB
+    TR[ToolRegistry] --> H1[HTTP Handler]
+    TR --> H2[gRPC Handler]
+    TR --> H3[MCP Handler]
+    TR --> H4[OpenAPI Handler]
+
+    subgraph explicit["Explicit (schema required)"]
+        H1
+        H2
+    end
+
+    subgraph selfDesc["Self-Describing (auto-discovery)"]
+        H3
+        H4
+    end
+
+    H1 --> T1[Single Tool]
+    H2 --> T2[Single Tool]
+    H3 --> T3[Multiple Tools]
+    H4 --> T4[Multiple Tools]
+```
+
 ## API Version
 
 ```yaml
@@ -216,6 +239,17 @@ OpenAPI handlers automatically discover tools from an OpenAPI/Swagger specificat
 ## Service Discovery
 
 Handlers can reference Kubernetes Services instead of direct URLs:
+
+```mermaid
+graph LR
+    TR[ToolRegistry] -->|selector| S1[Service A]
+    TR -->|selector| S2[Service B]
+    TR -->|serviceRef| S3[Service C]
+
+    S1 -->|annotations| T1[Tool: action_a]
+    S2 -->|annotations| T2[Tool: action_b]
+    S3 -->|endpoint| T3[Tool: action_c]
+```
 
 ```yaml
 - name: internal-tool

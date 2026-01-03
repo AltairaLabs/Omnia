@@ -21,45 +21,20 @@ Omnia follows the Kubernetes controller reconciliation pattern:
 
 ### Reconciliation Flow
 
-```
-AgentRuntime Change Detected
-           │
-           ▼
-    ┌─────────────────┐
-    │ Validate Spec   │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Fetch PromptPack│
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Fetch ToolReg   │──(optional)
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Build Deployment│
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Create/Update   │
-    │   Deployment    │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Create/Update   │
-    │    Service      │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Update Status   │
-    └─────────────────┘
+```mermaid
+flowchart TD
+    A[AgentRuntime Change Detected] --> B{Validate Spec}
+    B -->|Valid| C[Fetch PromptPack]
+    B -->|Invalid| F1[Set Failed Status]
+    C -->|Found| D{ToolRegistry Referenced?}
+    C -->|Not Found| F1
+    D -->|Yes| E[Fetch ToolRegistry]
+    D -->|No| G[Build Deployment Spec]
+    E -->|Found| G
+    E -->|Not Found| F1
+    G --> H[Create/Update Deployment]
+    H --> I[Create/Update Service]
+    I --> J[Update Status: Running]
 ```
 
 ### Deployment Building
@@ -96,35 +71,22 @@ The AgentRuntime controller watches:
 
 ### Reconciliation Flow
 
-```
-PromptPack Change Detected
-           │
-           ▼
-    ┌─────────────────┐
-    │ Fetch ConfigMap │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Validate Content│
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Find Referencing│
-    │  AgentRuntimes  │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Update Rollout  │
-    │     Status      │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Notify Agents   │
-    └─────────────────┘
+```mermaid
+flowchart TD
+    A[PromptPack Change Detected] --> B[Fetch ConfigMap]
+    B -->|Found| C{Validate Content}
+    B -->|Not Found| F[Set Failed Status]
+    C -->|Valid| D[Find Referencing AgentRuntimes]
+    C -->|Invalid| F
+    D --> E{Rollout Strategy?}
+    E -->|Immediate| G[Update activeVersion]
+    E -->|Canary| H[Update canaryVersion]
+    G --> I[Notify Agents]
+    H --> J{Weight = 100%?}
+    J -->|Yes| K[Promote to Active]
+    J -->|No| I
+    K --> I
+    I --> L[Update Status: Active]
 ```
 
 ### Rollout Strategies
@@ -158,31 +120,21 @@ The PromptPack controller watches:
 
 ### Reconciliation Flow
 
-```
-ToolRegistry Change Detected
-           │
-           ▼
-    ┌─────────────────┐
-    │ Process Inline  │
-    │     Tools       │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Discover Tools  │
-    │ via Selectors   │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Check Service   │
-    │  Availability   │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Update Status   │
-    └─────────────────┘
+```mermaid
+flowchart TD
+    A[ToolRegistry Change Detected] --> B[Process Handlers]
+    B --> C{Handler Type}
+    C -->|HTTP/gRPC| D[Use Explicit Schema]
+    C -->|MCP/OpenAPI| E[Discover Tools from Service]
+    D --> F[Find Matching Services]
+    E --> F
+    F --> G{Services Available?}
+    G -->|All| H[Status: Ready]
+    G -->|Some| I[Status: Degraded]
+    G -->|None| J[Status: Failed]
+    H --> K[Update discoveredTools]
+    I --> K
+    J --> K
 ```
 
 ### Tool Discovery
