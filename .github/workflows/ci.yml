@@ -3,22 +3,34 @@ name: CI
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/CODEOWNERS'
-      - 'charts/**/*.md'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile*'
+      - 'api/**'
+      - 'cmd/**'
+      - 'config/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'test/**'
+      - 'hack/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/CODEOWNERS'
-      - 'charts/**/*.md'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile*'
+      - 'api/**'
+      - 'cmd/**'
+      - 'config/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'test/**'
+      - 'hack/**'
+      - '.github/workflows/ci.yml'
 
 permissions:
   contents: read

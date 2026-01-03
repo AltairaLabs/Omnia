@@ -4,27 +4,29 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/CODEOWNERS'
-      - '.github/workflows/docs.yml'
-      # Skip this workflow when only runtime packages change (they have local PromptKit deps)
-      - 'internal/runtime/**'
-      - 'cmd/runtime/**'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'api/**'
+      - 'cmd/**'
+      - 'config/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - '.github/workflows/lint.yml'
+      # Note: internal/runtime and cmd/runtime are excluded in the job steps
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/CODEOWNERS'
-      - '.github/workflows/docs.yml'
-      # Skip this workflow when only runtime packages change (they have local PromptKit deps)
-      - 'internal/runtime/**'
-      - 'cmd/runtime/**'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'api/**'
+      - 'cmd/**'
+      - 'config/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - '.github/workflows/lint.yml'
+      # Note: internal/runtime and cmd/runtime are excluded in the job steps
 
 jobs:
   lint:
