@@ -143,6 +143,10 @@ docs-build: ## Build documentation site
 docs-dev: ## Run documentation site in development mode
 	cd docs && npm run dev
 
+.PHONY: docs-serve
+docs-serve: docs-install ## Build docs and serve locally (preview)
+	cd docs && npm run build && npm run preview
+
 ##@ Build
 
 .PHONY: build
