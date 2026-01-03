@@ -93,8 +93,11 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with facade and runtime images")
 
-		By("waiting for controller-manager to restart with new config")
-		time.Sleep(5 * time.Second)
+		By("waiting for controller-manager rollout to complete")
+		rolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
+			"-n", namespace, "--timeout=60s")
+		_, err = utils.Run(rolloutCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to wait for controller-manager rollout")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
@@ -619,9 +622,6 @@ data:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to update ConfigMap")
 
-			// Wait a moment for reconciliation
-			time.Sleep(2 * time.Second)
-
 			By("verifying the PromptPack was re-reconciled")
 			cmd = exec.Command("kubectl", "get", "promptpack", "test-prompts",
 				"-n", agentsNamespace, "-o", "jsonpath={.status.lastUpdated}")
@@ -670,9 +670,6 @@ data:
 		})
 
 		It("should handle WebSocket connections to the facade", func() {
-			By("waiting for the service to be ready")
-			time.Sleep(5 * time.Second)
-
 			By("creating a test pod to connect to the WebSocket")
 			// Use a curl pod to test the WebSocket upgrade request
 			testPodManifest := `
@@ -710,12 +707,12 @@ spec:
 					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Or(Equal("Succeeded"), Equal("Running")))
+				// Wait for Succeeded (not just Running) to ensure test completed
+				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyTestPodComplete, 2*time.Minute, 5*time.Second).Should(Succeed())
+			Eventually(verifyTestPodComplete, 2*time.Minute, 2*time.Second).Should(Succeed())
 
 			By("checking the test pod logs for WebSocket upgrade response")
-			time.Sleep(10 * time.Second) // Wait for test to complete
 			cmd = exec.Command("kubectl", "logs", "ws-test", "-n", agentsNamespace)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -1244,8 +1241,15 @@ spec:
 			}
 			Eventually(verifyToolAgentReady, 3*time.Minute, 5*time.Second).Should(Succeed())
 
-			// Wait for service to be ready
-			time.Sleep(5 * time.Second)
+			By("waiting for service endpoint to be ready")
+			verifyServiceEndpoint := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "endpoints", "tool-test-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.subsets[0].addresses[0].ip}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "Service endpoint should have an IP")
+			}
+			Eventually(verifyServiceEndpoint, time.Minute, 2*time.Second).Should(Succeed())
 
 			By("creating a test pod to verify tool call messages")
 			toolCallTestManifest := `

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -51,6 +52,12 @@ var (
 	runtimeImage = "example.com/omnia-runtime:v0.0.1"
 )
 
+// buildResult holds the result of an image build operation
+type buildResult struct {
+	name string
+	err  error
+}
+
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
 // temporary environment to validate project changes with the purpose of being used in CI jobs.
 // The default setup requires Kind, builds/loads the Manager Docker image locally, and installs
@@ -62,34 +69,84 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	By("building the manager(Operator) image")
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
+	// Build all images in parallel for faster setup
+	By("building all container images in parallel")
+	var wg sync.WaitGroup
+	results := make(chan buildResult, 3)
 
-	By("building the facade image")
-	cmd = exec.Command("docker", "build", "-t", facadeImage, "-f", "Dockerfile.agent", ".")
-	_, err = utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the facade image")
+	// Build manager image
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		_, err := utils.Run(cmd)
+		results <- buildResult{name: "manager(Operator)", err: err}
+	}()
 
-	By("building the runtime image")
-	cmd = exec.Command("docker", "build", "-t", runtimeImage, "-f", "Dockerfile.runtime", ".")
-	_, err = utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the runtime image")
+	// Build facade image
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("docker", "build", "-t", facadeImage, "-f", "Dockerfile.agent", ".")
+		_, err := utils.Run(cmd)
+		results <- buildResult{name: "facade", err: err}
+	}()
 
-	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
-	// built and available before running the tests. Also, remove the following block.
-	By("loading the manager(Operator) image on Kind")
-	err = utils.LoadImageToKindClusterWithName(projectImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
+	// Build runtime image
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("docker", "build", "-t", runtimeImage, "-f", "Dockerfile.runtime", ".")
+		_, err := utils.Run(cmd)
+		results <- buildResult{name: "runtime", err: err}
+	}()
 
-	By("loading the facade image on Kind")
-	err = utils.LoadImageToKindClusterWithName(facadeImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the facade image into Kind")
+	// Wait for all builds to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
-	By("loading the runtime image on Kind")
-	err = utils.LoadImageToKindClusterWithName(runtimeImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the runtime image into Kind")
+	// Collect results and check for errors
+	for result := range results {
+		ExpectWithOffset(1, result.err).NotTo(HaveOccurred(),
+			fmt.Sprintf("Failed to build the %s image", result.name))
+		_, _ = fmt.Fprintf(GinkgoWriter, "Built %s image successfully\n", result.name)
+	}
+
+	// Load images into Kind in parallel
+	By("loading all container images into Kind in parallel")
+	var loadWg sync.WaitGroup
+	loadResults := make(chan buildResult, 3)
+
+	images := []struct {
+		name  string
+		image string
+	}{
+		{"manager(Operator)", projectImage},
+		{"facade", facadeImage},
+		{"runtime", runtimeImage},
+	}
+
+	for _, img := range images {
+		loadWg.Add(1)
+		go func(name, image string) {
+			defer loadWg.Done()
+			err := utils.LoadImageToKindClusterWithName(image)
+			loadResults <- buildResult{name: name, err: err}
+		}(img.name, img.image)
+	}
+
+	go func() {
+		loadWg.Wait()
+		close(loadResults)
+	}()
+
+	for result := range loadResults {
+		ExpectWithOffset(1, result.err).NotTo(HaveOccurred(),
+			fmt.Sprintf("Failed to load the %s image into Kind", result.name))
+		_, _ = fmt.Fprintf(GinkgoWriter, "Loaded %s image into Kind successfully\n", result.name)
+	}
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,
