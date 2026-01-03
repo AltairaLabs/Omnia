@@ -1229,8 +1229,8 @@ spec:
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create tool-test-agent")
 
-			By("waiting for the tool-test-agent to be ready")
-			verifyToolAgentReady := func(g Gomega) {
+			By("waiting for the tool-test-agent pod to be running")
+			verifyToolAgentRunning := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "pods",
 					"-n", agentsNamespace,
 					"-l", "app.kubernetes.io/instance=tool-test-agent",
@@ -1239,7 +1239,19 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Running"))
 			}
-			Eventually(verifyToolAgentReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			Eventually(verifyToolAgentRunning, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("waiting for all containers to be ready")
+			verifyContainersReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=tool-test-agent",
+					"-o", "jsonpath={.items[0].status.containerStatuses[*].ready}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true true"), "Both containers should be ready")
+			}
+			Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("waiting for service endpoint to be ready")
 			verifyServiceEndpoint := func(g Gomega) {
