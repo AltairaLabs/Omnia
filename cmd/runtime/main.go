@@ -35,6 +35,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
+	"github.com/altairalabs/omnia/internal/runtime/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -94,8 +95,34 @@ func main() {
 		log.Info("using Redis state store", "url", cfg.SessionURL)
 	}
 
+	// Initialize tracing if enabled
+	var tracingProvider *tracing.Provider
+	if cfg.TracingEnabled {
+		tracingCfg := tracing.Config{
+			Enabled:        true,
+			Endpoint:       cfg.TracingEndpoint,
+			ServiceName:    fmt.Sprintf("omnia-runtime-%s", cfg.AgentName),
+			ServiceVersion: "1.0.0",
+			Environment:    cfg.Namespace,
+			SampleRate:     cfg.TracingSampleRate,
+			Insecure:       cfg.TracingInsecure,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		tracingProvider, err = tracing.NewProvider(ctx, tracingCfg)
+		cancel()
+		if err != nil {
+			log.Error(err, "failed to initialize tracing")
+			// Continue without tracing - it's optional
+		} else {
+			log.Info("tracing initialized",
+				"endpoint", cfg.TracingEndpoint,
+				"sampleRate", cfg.TracingSampleRate)
+		}
+	}
+
 	// Create runtime server
-	runtimeServer := pkruntime.NewServer(
+	serverOpts := []pkruntime.ServerOption{
 		pkruntime.WithLogger(log),
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
@@ -103,8 +130,26 @@ func main() {
 		pkruntime.WithModel(cfg.Model),
 		pkruntime.WithMockProvider(cfg.MockProvider),
 		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
-	)
+		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
+	}
+	if tracingProvider != nil {
+		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
+	}
+	runtimeServer := pkruntime.NewServer(serverOpts...)
 	defer func() { _ = runtimeServer.Close() }()
+
+	// Initialize tools from config
+	if cfg.ToolsConfigPath != "" {
+		initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := runtimeServer.InitializeTools(initCtx); err != nil {
+			initCancel()
+			log.Error(err, "failed to initialize tools", "configPath", cfg.ToolsConfigPath)
+			// Continue without tools - they're optional
+		} else {
+			initCancel()
+			log.Info("tools initialized", "configPath", cfg.ToolsConfigPath)
+		}
+	}
 
 	// Create gRPC server
 	grpcServer := grpc.NewServer()

@@ -899,16 +899,25 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Name:  "OMNIA_HEALTH_PORT",
 			Value: fmt.Sprintf("%d", DefaultFacadeHealthPort),
 		},
-		// Handler mode is always "runtime" for 2-container architecture
-		{
-			Name:  "OMNIA_HANDLER_MODE",
-			Value: string(omniav1alpha1.HandlerModeRuntime),
-		},
-		// Runtime address for facade to connect to runtime sidecar
-		{
+	}
+
+	// Determine handler mode - default to runtime if not specified
+	handlerMode := omniav1alpha1.HandlerModeRuntime
+	if agentRuntime.Spec.Facade.Handler != nil {
+		handlerMode = *agentRuntime.Spec.Facade.Handler
+	}
+
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_HANDLER_MODE",
+		Value: string(handlerMode),
+	})
+
+	// Only add runtime address if using runtime handler mode
+	if handlerMode == omniav1alpha1.HandlerModeRuntime {
+		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_RUNTIME_ADDRESS",
 			Value: fmt.Sprintf("localhost:%d", DefaultRuntimeGRPCPort),
-		},
+		})
 	}
 
 	// Add session config (facade needs this for session management)
@@ -1068,30 +1077,43 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	return volumeMounts
 }
 
-// ToolConfig represents the tools configuration file format.
+// ToolConfig represents the tools configuration file format for the runtime.
+// This is passed to the runtime container as a YAML file.
 type ToolConfig struct {
-	Tools []ToolEntry `json:"tools"`
+	Handlers []HandlerEntry `json:"handlers"`
 }
 
-// ToolEntry represents a single tool in the config.
-type ToolEntry struct {
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Description string    `json:"description,omitempty"`
-	HTTPConfig  *ToolHTTP `json:"httpConfig,omitempty"`
-	GRPCConfig  *ToolGRPC `json:"grpcConfig,omitempty"`
-	MCPConfig   *ToolMCP  `json:"mcpConfig,omitempty"`
-	Timeout     string    `json:"timeout,omitempty"`
-	Retries     int32     `json:"retries,omitempty"`
+// HandlerEntry represents a single handler in the config.
+type HandlerEntry struct {
+	Name          string          `json:"name"`
+	Type          string          `json:"type"`
+	Endpoint      string          `json:"endpoint"`
+	Tool          *ToolDefinition `json:"tool,omitempty"` // For http/grpc handlers
+	HTTPConfig    *ToolHTTP       `json:"httpConfig,omitempty"`
+	GRPCConfig    *ToolGRPC       `json:"grpcConfig,omitempty"`
+	MCPConfig     *ToolMCP        `json:"mcpConfig,omitempty"`
+	OpenAPIConfig *ToolOpenAPI    `json:"openAPIConfig,omitempty"`
+	Timeout       string          `json:"timeout,omitempty"`
+	Retries       int32           `json:"retries,omitempty"`
 }
 
-// ToolHTTP represents HTTP configuration for a tool.
+// ToolDefinition represents the tool interface for HTTP/gRPC handlers.
+type ToolDefinition struct {
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	InputSchema  interface{} `json:"inputSchema"`
+	OutputSchema interface{} `json:"outputSchema,omitempty"`
+}
+
+// ToolHTTP represents HTTP configuration for a handler.
 type ToolHTTP struct {
-	Endpoint string `json:"endpoint"`
-	Method   string `json:"method,omitempty"`
+	Endpoint    string            `json:"endpoint"`
+	Method      string            `json:"method,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	ContentType string            `json:"contentType,omitempty"`
 }
 
-// ToolGRPC represents gRPC configuration for a tool.
+// ToolGRPC represents gRPC configuration for a handler.
 type ToolGRPC struct {
 	Endpoint              string `json:"endpoint"`
 	TLS                   bool   `json:"tls,omitempty"`
@@ -1101,7 +1123,7 @@ type ToolGRPC struct {
 	TLSInsecureSkipVerify bool   `json:"tlsInsecureSkipVerify,omitempty"`
 }
 
-// ToolMCP represents MCP configuration for a tool.
+// ToolMCP represents MCP configuration for a handler.
 type ToolMCP struct {
 	Transport string            `json:"transport"`
 	Endpoint  string            `json:"endpoint,omitempty"`
@@ -1109,6 +1131,13 @@ type ToolMCP struct {
 	Args      []string          `json:"args,omitempty"`
 	WorkDir   string            `json:"workDir,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+}
+
+// ToolOpenAPI represents OpenAPI configuration for a handler.
+type ToolOpenAPI struct {
+	SpecURL         string   `json:"specURL"`
+	BaseURL         string   `json:"baseURL,omitempty"`
+	OperationFilter []string `json:"operationFilter,omitempty"`
 }
 
 // reconcileToolsConfigMap creates or updates the tools ConfigMap from ToolRegistry.
@@ -1160,92 +1189,131 @@ func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
 		return fmt.Errorf("failed to reconcile tools ConfigMap: %w", err)
 	}
 
-	log.Info("Tools ConfigMap reconciled", "result", result, "tools", len(toolsConfig.Tools))
+	log.Info("Tools ConfigMap reconciled", "result", result, "handlers", len(toolsConfig.Handlers))
 	return nil
 }
 
-// buildToolsConfig builds the tools configuration from ToolRegistry status.
+// buildToolsConfig builds the tools configuration from ToolRegistry spec and status.
 func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.ToolRegistry) ToolConfig {
 	config := ToolConfig{
-		Tools: make([]ToolEntry, 0, len(toolRegistry.Status.DiscoveredTools)),
+		Handlers: make([]HandlerEntry, 0, len(toolRegistry.Spec.Handlers)),
 	}
 
-	// Use discovered tools from status (includes resolved endpoints)
-	for _, discovered := range toolRegistry.Status.DiscoveredTools {
-		if discovered.Status != omniav1alpha1.ToolStatusAvailable {
-			continue // Skip unavailable tools
-		}
-
-		// Find the matching spec to get additional info
-		var spec *omniav1alpha1.ToolDefinition
-		for i := range toolRegistry.Spec.Tools {
-			if toolRegistry.Spec.Tools[i].Name == discovered.Name {
-				spec = &toolRegistry.Spec.Tools[i]
+	// Build handler entries from spec, using discovered endpoints from status
+	for _, h := range toolRegistry.Spec.Handlers {
+		// Find the corresponding discovered tool to get the resolved endpoint
+		var endpoint string
+		for _, discovered := range toolRegistry.Status.DiscoveredTools {
+			if discovered.HandlerName == h.Name && discovered.Status == omniav1alpha1.ToolStatusAvailable {
+				endpoint = discovered.Endpoint
 				break
 			}
 		}
 
-		entry := ToolEntry{
-			Name: discovered.Name,
-			Type: "http", // Default to HTTP
+		// Skip if endpoint couldn't be resolved
+		if endpoint == "" {
+			continue
 		}
 
-		if spec != nil {
-			entry.Type = string(spec.Type)
-			if spec.Description != nil {
-				entry.Description = *spec.Description
-			}
-			if spec.Timeout != nil {
-				entry.Timeout = *spec.Timeout
-			}
-			if spec.Retries != nil {
-				entry.Retries = *spec.Retries
-			}
+		entry := HandlerEntry{
+			Name:     h.Name,
+			Type:     string(h.Type),
+			Endpoint: endpoint,
+		}
 
-			// Set type-specific configuration
-			switch spec.Type {
-			case omniav1alpha1.ToolTypeMCP:
-				if spec.MCPConfig != nil {
-					entry.MCPConfig = &ToolMCP{
-						Transport: string(spec.MCPConfig.Transport),
-					}
-					if spec.MCPConfig.Endpoint != nil {
-						entry.MCPConfig.Endpoint = *spec.MCPConfig.Endpoint
-					}
-					if spec.MCPConfig.Command != nil {
-						entry.MCPConfig.Command = *spec.MCPConfig.Command
-					}
-					if len(spec.MCPConfig.Args) > 0 {
-						entry.MCPConfig.Args = spec.MCPConfig.Args
-					}
-					if spec.MCPConfig.WorkDir != nil {
-						entry.MCPConfig.WorkDir = *spec.MCPConfig.WorkDir
-					}
-					if len(spec.MCPConfig.Env) > 0 {
-						entry.MCPConfig.Env = spec.MCPConfig.Env
-					}
-				}
-			case omniav1alpha1.ToolTypeGRPC:
-				// gRPC tools use the discovered endpoint (from service selector)
-				entry.GRPCConfig = &ToolGRPC{
-					Endpoint: discovered.Endpoint,
-				}
-			default:
-				// HTTP uses HTTPConfig with the discovered endpoint
+		// Set timeout and retries
+		if h.Timeout != nil {
+			entry.Timeout = *h.Timeout
+		}
+		if h.Retries != nil {
+			entry.Retries = *h.Retries
+		}
+
+		// Set type-specific configuration
+		switch h.Type {
+		case omniav1alpha1.HandlerTypeHTTP:
+			if h.HTTPConfig != nil {
 				entry.HTTPConfig = &ToolHTTP{
-					Endpoint: discovered.Endpoint,
-					Method:   "POST", // Default method
+					Endpoint:    endpoint,
+					Method:      h.HTTPConfig.Method,
+					Headers:     h.HTTPConfig.Headers,
+					ContentType: h.HTTPConfig.ContentType,
 				}
 			}
-		} else {
-			// No spec found, default to HTTP config
-			entry.HTTPConfig = &ToolHTTP{
-				Endpoint: discovered.Endpoint,
-				Method:   "POST",
+			// Include tool definition for HTTP handlers
+			if h.Tool != nil {
+				entry.Tool = &ToolDefinition{
+					Name:        h.Tool.Name,
+					Description: h.Tool.Description,
+					InputSchema: h.Tool.InputSchema.Raw,
+				}
+				if h.Tool.OutputSchema != nil {
+					entry.Tool.OutputSchema = h.Tool.OutputSchema.Raw
+				}
+			}
+
+		case omniav1alpha1.HandlerTypeGRPC:
+			if h.GRPCConfig != nil {
+				entry.GRPCConfig = &ToolGRPC{
+					Endpoint:              endpoint,
+					TLS:                   h.GRPCConfig.TLS,
+					TLSInsecureSkipVerify: h.GRPCConfig.TLSInsecureSkipVerify,
+				}
+				if h.GRPCConfig.TLSCertPath != nil {
+					entry.GRPCConfig.TLSCertPath = *h.GRPCConfig.TLSCertPath
+				}
+				if h.GRPCConfig.TLSKeyPath != nil {
+					entry.GRPCConfig.TLSKeyPath = *h.GRPCConfig.TLSKeyPath
+				}
+				if h.GRPCConfig.TLSCAPath != nil {
+					entry.GRPCConfig.TLSCAPath = *h.GRPCConfig.TLSCAPath
+				}
+			}
+			// Include tool definition for gRPC handlers
+			if h.Tool != nil {
+				entry.Tool = &ToolDefinition{
+					Name:        h.Tool.Name,
+					Description: h.Tool.Description,
+					InputSchema: h.Tool.InputSchema.Raw,
+				}
+				if h.Tool.OutputSchema != nil {
+					entry.Tool.OutputSchema = h.Tool.OutputSchema.Raw
+				}
+			}
+
+		case omniav1alpha1.HandlerTypeMCP:
+			if h.MCPConfig != nil {
+				entry.MCPConfig = &ToolMCP{
+					Transport: string(h.MCPConfig.Transport),
+					Env:       h.MCPConfig.Env,
+				}
+				if h.MCPConfig.Endpoint != nil {
+					entry.MCPConfig.Endpoint = *h.MCPConfig.Endpoint
+				}
+				if h.MCPConfig.Command != nil {
+					entry.MCPConfig.Command = *h.MCPConfig.Command
+				}
+				if len(h.MCPConfig.Args) > 0 {
+					entry.MCPConfig.Args = h.MCPConfig.Args
+				}
+				if h.MCPConfig.WorkDir != nil {
+					entry.MCPConfig.WorkDir = *h.MCPConfig.WorkDir
+				}
+			}
+
+		case omniav1alpha1.HandlerTypeOpenAPI:
+			if h.OpenAPIConfig != nil {
+				entry.OpenAPIConfig = &ToolOpenAPI{
+					SpecURL:         h.OpenAPIConfig.SpecURL,
+					OperationFilter: h.OpenAPIConfig.OperationFilter,
+				}
+				if h.OpenAPIConfig.BaseURL != nil {
+					entry.OpenAPIConfig.BaseURL = *h.OpenAPIConfig.BaseURL
+				}
 			}
 		}
 
-		config.Tools = append(config.Tools, entry)
+		config.Handlers = append(config.Handlers, entry)
 	}
 
 	return config

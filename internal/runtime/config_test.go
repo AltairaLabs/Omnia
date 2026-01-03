@@ -205,3 +205,63 @@ func TestLoadConfig_ProviderTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_TracingEnabled(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envTracingEnabled, "true")
+	t.Setenv(envTracingEndpoint, "localhost:4317")
+	t.Setenv(envTracingSampleRate, "0.5")
+	t.Setenv(envTracingInsecure, "true")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.TracingEnabled)
+	assert.Equal(t, "localhost:4317", cfg.TracingEndpoint)
+	assert.Equal(t, 0.5, cfg.TracingSampleRate)
+	assert.True(t, cfg.TracingInsecure)
+}
+
+func TestLoadConfig_TracingDefaults(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.TracingEnabled)
+	assert.Empty(t, cfg.TracingEndpoint)
+	assert.Equal(t, 1.0, cfg.TracingSampleRate) // Default to sample all
+	assert.False(t, cfg.TracingInsecure)
+}
+
+func TestLoadConfig_InvalidTracingSampleRate(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envTracingSampleRate, "not-a-number")
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), envTracingSampleRate)
+}
+
+func TestLoadConfig_TracingSampleRateOutOfRange(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envTracingSampleRate, "1.5")
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be between 0.0 and 1.0")
+}
+
+func TestLoadConfig_TracingSampleRateNegative(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envTracingSampleRate, "-0.1")
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be between 0.0 and 1.0")
+}

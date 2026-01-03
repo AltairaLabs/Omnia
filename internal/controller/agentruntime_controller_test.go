@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -596,6 +597,82 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(foundAnthropicKey).To(BeTrue(), "Expected ANTHROPIC_API_KEY env var from secret")
 		})
 
+		It("should respect the facade handler mode when specified", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with demo handler mode")
+			demoMode := omniav1alpha1.HandlerModeDemo
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type:    omniav1alpha1.FacadeTypeWebSocket,
+						Handler: &demoMode,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying the facade container has demo handler mode")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			var facadeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == FacadeContainerName {
+					facadeContainer = c
+					break
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil())
+
+			facadeEnvMap := make(map[string]corev1.EnvVar)
+			for _, env := range facadeContainer.Env {
+				facadeEnvMap[env.Name] = env
+			}
+
+			// Handler mode should be "demo"
+			Expect(facadeEnvMap["OMNIA_HANDLER_MODE"].Value).To(Equal("demo"))
+
+			// Runtime address should NOT be set for non-runtime handlers
+			_, hasRuntimeAddress := facadeEnvMap["OMNIA_RUNTIME_ADDRESS"]
+			Expect(hasRuntimeAddress).To(BeFalse(), "OMNIA_RUNTIME_ADDRESS should not be set for demo handler")
+		})
+
 		It("should set all provider configuration environment variables", func() {
 			By("creating a PromptPack")
 			promptPack := &omniav1alpha1.PromptPack{
@@ -962,19 +1039,25 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Name:      "test-toolregistry",
 				Namespace: "default",
 			}
-			toolURL := "http://tool.example.com"
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      toolRegistryKey.Name,
 					Namespace: toolRegistryKey.Namespace,
 				},
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
+					Handlers: []omniav1alpha1.HandlerDefinition{
 						{
-							Name: "test-tool",
-							Type: omniav1alpha1.ToolTypeHTTP,
-							Endpoint: omniav1alpha1.ToolEndpoint{
-								URL: &toolURL,
+							Name: "test-handler",
+							Type: omniav1alpha1.HandlerTypeHTTP,
+							HTTPConfig: &omniav1alpha1.HTTPConfig{
+								Endpoint: "http://tool.example.com",
+							},
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "test_tool",
+								Description: "A test tool",
+								InputSchema: apiextensionsv1.JSON{
+									Raw: []byte(`{"type":"object"}`),
+								},
 							},
 						},
 					},
@@ -2442,29 +2525,36 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			}
 		})
 
-		It("should build config from available tools", func() {
-			description := "Test tool description"
+		It("should build config from available handlers", func() {
 			timeout := "30s"
 			retries := int32(3)
 
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
+					Handlers: []omniav1alpha1.HandlerDefinition{
+						{
+							Name: "handler1",
+							Type: omniav1alpha1.HandlerTypeHTTP,
+							HTTPConfig: &omniav1alpha1.HTTPConfig{
+								Endpoint: "http://tool1-service:8080/api",
+							},
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "tool1",
+								Description: "Test tool description",
+								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+							},
+							Timeout: &timeout,
+							Retries: &retries,
+						},
+					},
+				},
+				Status: omniav1alpha1.ToolRegistryStatus{
+					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
 						{
 							Name:        "tool1",
-							Type:        omniav1alpha1.ToolTypeHTTP,
-							Description: &description,
-							Timeout:     &timeout,
-							Retries:     &retries,
-						},
-					},
-				},
-				Status: omniav1alpha1.ToolRegistryStatus{
-					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
-						{
-							Name:     "tool1",
-							Endpoint: "http://tool1-service:8080/api",
-							Status:   omniav1alpha1.ToolStatusAvailable,
+							HandlerName: "handler1",
+							Endpoint:    "http://tool1-service:8080/api",
+							Status:      omniav1alpha1.ToolStatusAvailable,
 						},
 					},
 				},
@@ -2472,35 +2562,56 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(HaveLen(1))
-			Expect(config.Tools[0].Name).To(Equal("tool1"))
-			Expect(config.Tools[0].Type).To(Equal("http"))
-			Expect(config.Tools[0].Description).To(Equal(description))
-			Expect(config.Tools[0].Timeout).To(Equal(timeout))
-			Expect(config.Tools[0].Retries).To(Equal(retries))
-			Expect(config.Tools[0].HTTPConfig).NotTo(BeNil())
-			Expect(config.Tools[0].HTTPConfig.Endpoint).To(Equal("http://tool1-service:8080/api"))
+			Expect(config.Handlers).To(HaveLen(1))
+			Expect(config.Handlers[0].Name).To(Equal("handler1"))
+			Expect(config.Handlers[0].Type).To(Equal("http"))
+			Expect(config.Handlers[0].Timeout).To(Equal(timeout))
+			Expect(config.Handlers[0].Retries).To(Equal(retries))
+			Expect(config.Handlers[0].HTTPConfig).NotTo(BeNil())
+			Expect(config.Handlers[0].HTTPConfig.Endpoint).To(Equal("http://tool1-service:8080/api"))
+			Expect(config.Handlers[0].Tool).NotTo(BeNil())
+			Expect(config.Handlers[0].Tool.Name).To(Equal("tool1"))
 		})
 
-		It("should skip unavailable tools", func() {
+		It("should skip unavailable handlers", func() {
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
-						{Name: "tool1", Type: omniav1alpha1.ToolTypeHTTP},
-						{Name: "tool2", Type: omniav1alpha1.ToolTypeHTTP},
+					Handlers: []omniav1alpha1.HandlerDefinition{
+						{
+							Name:       "handler1",
+							Type:       omniav1alpha1.HandlerTypeHTTP,
+							HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "http://tool1:8080"},
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "tool1",
+								Description: "Tool 1",
+								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+							},
+						},
+						{
+							Name:       "handler2",
+							Type:       omniav1alpha1.HandlerTypeHTTP,
+							HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "http://tool2:8080"},
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "tool2",
+								Description: "Tool 2",
+								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+							},
+						},
 					},
 				},
 				Status: omniav1alpha1.ToolRegistryStatus{
 					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
 						{
-							Name:     "tool1",
-							Endpoint: "http://tool1:8080",
-							Status:   omniav1alpha1.ToolStatusAvailable,
+							Name:        "tool1",
+							HandlerName: "handler1",
+							Endpoint:    "http://tool1:8080",
+							Status:      omniav1alpha1.ToolStatusAvailable,
 						},
 						{
-							Name:     "tool2",
-							Endpoint: "http://tool2:8080",
-							Status:   omniav1alpha1.ToolStatusUnavailable,
+							Name:        "tool2",
+							HandlerName: "handler2",
+							Endpoint:    "http://tool2:8080",
+							Status:      omniav1alpha1.ToolStatusUnavailable,
 						},
 					},
 				},
@@ -2508,23 +2619,33 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(HaveLen(1))
-			Expect(config.Tools[0].Name).To(Equal("tool1"))
+			Expect(config.Handlers).To(HaveLen(1))
+			Expect(config.Handlers[0].Name).To(Equal("handler1"))
 		})
 
-		It("should use defaults when spec not found", func() {
+		It("should handle discovered tools with matching handlers", func() {
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
-						// Tool "orphan" is in status but not in spec
+					Handlers: []omniav1alpha1.HandlerDefinition{
+						{
+							Name:       "orphan-handler",
+							Type:       omniav1alpha1.HandlerTypeHTTP,
+							HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "http://orphan:8080"},
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "orphan",
+								Description: "Orphan tool",
+								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+							},
+						},
 					},
 				},
 				Status: omniav1alpha1.ToolRegistryStatus{
 					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
 						{
-							Name:     "orphan",
-							Endpoint: "http://orphan:8080",
-							Status:   omniav1alpha1.ToolStatusAvailable,
+							Name:        "orphan",
+							HandlerName: "orphan-handler",
+							Endpoint:    "http://orphan:8080",
+							Status:      omniav1alpha1.ToolStatusAvailable,
 						},
 					},
 				},
@@ -2532,12 +2653,11 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(HaveLen(1))
-			Expect(config.Tools[0].Name).To(Equal("orphan"))
-			Expect(config.Tools[0].Type).To(Equal("http"))
-			Expect(config.Tools[0].Description).To(BeEmpty())
-			Expect(config.Tools[0].Timeout).To(BeEmpty())
-			Expect(config.Tools[0].Retries).To(Equal(int32(0)))
+			Expect(config.Handlers).To(HaveLen(1))
+			Expect(config.Handlers[0].Name).To(Equal("orphan-handler"))
+			Expect(config.Handlers[0].Type).To(Equal("http"))
+			Expect(config.Handlers[0].Timeout).To(BeEmpty())
+			Expect(config.Handlers[0].Retries).To(Equal(int32(0)))
 		})
 
 		It("should handle empty tool registry", func() {
@@ -2548,25 +2668,34 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(BeEmpty())
+			Expect(config.Handlers).To(BeEmpty())
 		})
 
-		It("should handle gRPC tool type", func() {
+		It("should handle gRPC handler type", func() {
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
+					Handlers: []omniav1alpha1.HandlerDefinition{
 						{
-							Name: "grpc-tool",
-							Type: omniav1alpha1.ToolTypeGRPC,
+							Name: "grpc-handler",
+							Type: omniav1alpha1.HandlerTypeGRPC,
+							GRPCConfig: &omniav1alpha1.GRPCConfig{
+								Endpoint: "grpc://grpc-service:9090",
+							},
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "grpc_tool",
+								Description: "A gRPC tool",
+								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+							},
 						},
 					},
 				},
 				Status: omniav1alpha1.ToolRegistryStatus{
 					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
 						{
-							Name:     "grpc-tool",
-							Endpoint: "grpc://grpc-service:9090",
-							Status:   omniav1alpha1.ToolStatusAvailable,
+							Name:        "grpc_tool",
+							HandlerName: "grpc-handler",
+							Endpoint:    "grpc://grpc-service:9090",
+							Status:      omniav1alpha1.ToolStatusAvailable,
 						},
 					},
 				},
@@ -2574,21 +2703,21 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(HaveLen(1))
-			Expect(config.Tools[0].Name).To(Equal("grpc-tool"))
-			Expect(config.Tools[0].Type).To(Equal("grpc"))
-			Expect(config.Tools[0].GRPCConfig).NotTo(BeNil())
-			Expect(config.Tools[0].GRPCConfig.Endpoint).To(Equal("grpc://grpc-service:9090"))
+			Expect(config.Handlers).To(HaveLen(1))
+			Expect(config.Handlers[0].Name).To(Equal("grpc-handler"))
+			Expect(config.Handlers[0].Type).To(Equal("grpc"))
+			Expect(config.Handlers[0].GRPCConfig).NotTo(BeNil())
+			Expect(config.Handlers[0].GRPCConfig.Endpoint).To(Equal("grpc://grpc-service:9090"))
 		})
 
-		It("should handle MCP tool type with SSE transport", func() {
+		It("should handle MCP handler type with SSE transport", func() {
 			endpoint := "http://mcp-server:8080/sse"
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
+					Handlers: []omniav1alpha1.HandlerDefinition{
 						{
-							Name: "mcp-tool",
-							Type: omniav1alpha1.ToolTypeMCP,
+							Name: "mcp-handler",
+							Type: omniav1alpha1.HandlerTypeMCP,
 							MCPConfig: &omniav1alpha1.MCPConfig{
 								Transport: omniav1alpha1.MCPTransportSSE,
 								Endpoint:  &endpoint,
@@ -2599,9 +2728,10 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Status: omniav1alpha1.ToolRegistryStatus{
 					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
 						{
-							Name:     "mcp-tool",
-							Endpoint: endpoint,
-							Status:   omniav1alpha1.ToolStatusAvailable,
+							Name:        "mcp-tool",
+							HandlerName: "mcp-handler",
+							Endpoint:    endpoint,
+							Status:      omniav1alpha1.ToolStatusAvailable,
 						},
 					},
 				},
@@ -2609,24 +2739,24 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(HaveLen(1))
-			Expect(config.Tools[0].Name).To(Equal("mcp-tool"))
-			Expect(config.Tools[0].Type).To(Equal("mcp"))
-			Expect(config.Tools[0].HTTPConfig).To(BeNil())
-			Expect(config.Tools[0].MCPConfig).NotTo(BeNil())
-			Expect(config.Tools[0].MCPConfig.Transport).To(Equal("sse"))
-			Expect(config.Tools[0].MCPConfig.Endpoint).To(Equal(endpoint))
+			Expect(config.Handlers).To(HaveLen(1))
+			Expect(config.Handlers[0].Name).To(Equal("mcp-handler"))
+			Expect(config.Handlers[0].Type).To(Equal("mcp"))
+			Expect(config.Handlers[0].HTTPConfig).To(BeNil())
+			Expect(config.Handlers[0].MCPConfig).NotTo(BeNil())
+			Expect(config.Handlers[0].MCPConfig.Transport).To(Equal("sse"))
+			Expect(config.Handlers[0].MCPConfig.Endpoint).To(Equal(endpoint))
 		})
 
-		It("should handle MCP tool type with stdio transport", func() {
+		It("should handle MCP handler type with stdio transport", func() {
 			command := "/usr/local/bin/mcp-server"
 			workDir := "/app"
 			toolRegistry := &omniav1alpha1.ToolRegistry{
 				Spec: omniav1alpha1.ToolRegistrySpec{
-					Tools: []omniav1alpha1.ToolDefinition{
+					Handlers: []omniav1alpha1.HandlerDefinition{
 						{
-							Name: "mcp-stdio-tool",
-							Type: omniav1alpha1.ToolTypeMCP,
+							Name: "mcp-stdio-handler",
+							Type: omniav1alpha1.HandlerTypeMCP,
 							MCPConfig: &omniav1alpha1.MCPConfig{
 								Transport: omniav1alpha1.MCPTransportStdio,
 								Command:   &command,
@@ -2640,9 +2770,10 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Status: omniav1alpha1.ToolRegistryStatus{
 					DiscoveredTools: []omniav1alpha1.DiscoveredTool{
 						{
-							Name:     "mcp-stdio-tool",
-							Endpoint: "stdio://mcp-server",
-							Status:   omniav1alpha1.ToolStatusAvailable,
+							Name:        "mcp-stdio-tool",
+							HandlerName: "mcp-stdio-handler",
+							Endpoint:    "stdio://mcp-server",
+							Status:      omniav1alpha1.ToolStatusAvailable,
 						},
 					},
 				},
@@ -2650,16 +2781,16 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 			config := reconciler.buildToolsConfig(toolRegistry)
 
-			Expect(config.Tools).To(HaveLen(1))
-			Expect(config.Tools[0].Name).To(Equal("mcp-stdio-tool"))
-			Expect(config.Tools[0].Type).To(Equal("mcp"))
-			Expect(config.Tools[0].HTTPConfig).To(BeNil())
-			Expect(config.Tools[0].MCPConfig).NotTo(BeNil())
-			Expect(config.Tools[0].MCPConfig.Transport).To(Equal("stdio"))
-			Expect(config.Tools[0].MCPConfig.Command).To(Equal(command))
-			Expect(config.Tools[0].MCPConfig.Args).To(Equal([]string{"--verbose", "--port=8080"}))
-			Expect(config.Tools[0].MCPConfig.WorkDir).To(Equal(workDir))
-			Expect(config.Tools[0].MCPConfig.Env).To(HaveKeyWithValue("DEBUG", "true"))
+			Expect(config.Handlers).To(HaveLen(1))
+			Expect(config.Handlers[0].Name).To(Equal("mcp-stdio-handler"))
+			Expect(config.Handlers[0].Type).To(Equal("mcp"))
+			Expect(config.Handlers[0].HTTPConfig).To(BeNil())
+			Expect(config.Handlers[0].MCPConfig).NotTo(BeNil())
+			Expect(config.Handlers[0].MCPConfig.Transport).To(Equal("stdio"))
+			Expect(config.Handlers[0].MCPConfig.Command).To(Equal(command))
+			Expect(config.Handlers[0].MCPConfig.Args).To(Equal([]string{"--verbose", "--port=8080"}))
+			Expect(config.Handlers[0].MCPConfig.WorkDir).To(Equal(workDir))
+			Expect(config.Handlers[0].MCPConfig.Env).To(HaveKeyWithValue("DEBUG", "true"))
 		})
 	})
 

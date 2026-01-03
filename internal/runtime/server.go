@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -30,6 +32,9 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
+
+	"github.com/altairalabs/omnia/internal/runtime/tools"
+	"github.com/altairalabs/omnia/internal/runtime/tracing"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -48,6 +53,15 @@ type Server struct {
 	conversationMu sync.RWMutex
 	healthy        bool
 	mu             sync.RWMutex
+
+	// Tool management
+	toolManager      *tools.Manager
+	toolExecutor     *tools.ManagerExecutor
+	toolsConfigPath  string
+	toolsInitialized bool
+
+	// Tracing
+	tracingProvider *tracing.Provider
 }
 
 // ServerOption configures the server.
@@ -112,6 +126,20 @@ func WithModel(model string) ServerOption {
 	}
 }
 
+// WithToolsConfig sets the path to the tools configuration file.
+func WithToolsConfig(path string) ServerOption {
+	return func(s *Server) {
+		s.toolsConfigPath = path
+	}
+}
+
+// WithTracingProvider sets the tracing provider for the server.
+func WithTracingProvider(provider *tracing.Provider) ServerOption {
+	return func(s *Server) {
+		s.tracingProvider = provider
+	}
+}
+
 // NewServer creates a new runtime server.
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{
@@ -124,6 +152,39 @@ func NewServer(opts ...ServerOption) *Server {
 	}
 
 	return s
+}
+
+// InitializeTools loads and connects tool adapters from the config file.
+// This should be called before handling any conversations.
+func (s *Server) InitializeTools(ctx context.Context) error {
+	if s.toolsConfigPath == "" {
+		s.log.Info("no tools config path set, skipping tool initialization")
+		return nil
+	}
+
+	s.log.Info("initializing tools", "configPath", s.toolsConfigPath)
+
+	// Create tool manager
+	s.toolManager = tools.NewManager(s.log.WithName("tools"))
+
+	// Load configuration
+	if err := s.toolManager.LoadFromConfig(s.toolsConfigPath); err != nil {
+		return fmt.Errorf("failed to load tools config: %w", err)
+	}
+
+	// Connect all adapters
+	if err := s.toolManager.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect tool adapters: %w", err)
+	}
+
+	// Create the executor for PromptKit integration
+	s.toolExecutor = tools.NewManagerExecutor(s.toolManager, s.log)
+
+	s.toolsInitialized = true
+	s.log.Info("tools initialized successfully",
+		"toolCount", len(s.toolManager.ListTools()))
+
+	return nil
 }
 
 // SetHealthy sets the server health status.
@@ -185,6 +246,13 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	sessionID := msg.GetSessionId()
 	content := msg.GetContent()
 
+	// Start conversation span if tracing is enabled
+	if s.tracingProvider != nil {
+		var span trace.Span
+		ctx, span = s.tracingProvider.StartConversationSpan(ctx, sessionID)
+		defer span.End()
+	}
+
 	s.log.V(1).Info("processing message",
 		"sessionID", sessionID,
 		"contentLength", len(content))
@@ -203,7 +271,7 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 
 	// Stream the response back to the client
 	// For now, send the full response as a single chunk
-	// TODO: Implement streaming when SDK supports it
+	// Note: Streaming will be implemented when SDK supports it
 	responseText := resp.Text()
 
 	// Send chunk
@@ -217,11 +285,23 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 
 	// Build usage info
 	var usage *runtimev1.Usage
+	inputTokens := resp.InputTokens()
+	outputTokens := resp.OutputTokens()
+	costUSD := resp.Cost()
+
 	if resp.TokensUsed() > 0 {
 		usage = &runtimev1.Usage{
-			InputTokens:  int32(resp.InputTokens()),
-			OutputTokens: int32(resp.OutputTokens()),
-			CostUsd:      float32(resp.Cost()),
+			InputTokens:  int32(inputTokens),
+			OutputTokens: int32(outputTokens),
+			CostUsd:      float32(costUSD),
+		}
+
+		// Add LLM metrics to the conversation span
+		if s.tracingProvider != nil {
+			span := trace.SpanFromContext(ctx)
+			tracing.AddLLMMetrics(span, inputTokens, outputTokens, costUSD)
+			tracing.AddConversationMetrics(span, len(content), len(responseText))
+			tracing.SetSuccess(span)
 		}
 	}
 
@@ -295,11 +375,85 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 		s.log.V(1).Info("resumed existing conversation", "sessionID", sessionID)
 	}
 
+	// Register tools with the conversation if available
+	if s.toolsInitialized && s.toolExecutor != nil {
+		if err := s.registerToolsWithConversation(conv); err != nil {
+			s.log.Error(err, "failed to register tools with conversation", "sessionID", sessionID)
+			// Continue without tools - don't fail the conversation
+		}
+	}
+
 	s.conversations[sessionID] = conv
 	return conv, nil
 }
 
-// Close closes all open conversations.
+// registerToolsWithConversation registers all available tools with a conversation.
+func (s *Server) registerToolsWithConversation(conv *sdk.Conversation) error {
+	ctx := context.Background()
+
+	// Get all tool descriptors from the executor
+	descriptors, err := s.toolExecutor.ListTools(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list tools: %w", err)
+	}
+
+	// Register each tool with the conversation using a context-aware handler
+	for _, desc := range descriptors {
+		toolName := desc.Name
+		s.log.V(1).Info("registering tool with conversation", "tool", toolName)
+
+		// Create a closure that captures the executor and descriptor
+		conv.OnToolCtx(toolName, func(ctx context.Context, args map[string]any) (any, error) {
+			return s.executeToolForConversation(ctx, toolName, args)
+		})
+	}
+
+	s.log.Info("registered tools with conversation", "count", len(descriptors))
+	return nil
+}
+
+// executeToolForConversation executes a tool call for a conversation.
+func (s *Server) executeToolForConversation(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	// Start tool span if tracing is enabled
+	var span trace.Span
+	if s.tracingProvider != nil {
+		ctx, span = s.tracingProvider.StartToolSpan(ctx, toolName)
+		defer span.End()
+	}
+
+	s.log.V(1).Info("executing tool for conversation", "tool", toolName)
+
+	// Call the tool through the manager
+	result, err := s.toolManager.Call(ctx, toolName, args)
+	if err != nil {
+		if span != nil {
+			tracing.RecordError(span, err)
+		}
+		return nil, fmt.Errorf("tool execution failed: %w", err)
+	}
+
+	// Add tool result metrics to span
+	if span != nil {
+		resultSize := 0
+		if result.Content != nil {
+			resultSize = len(fmt.Sprintf("%v", result.Content))
+		}
+		tracing.AddToolResult(span, result.IsError, resultSize)
+		if result.IsError {
+			tracing.RecordError(span, fmt.Errorf("tool error: %v", result.Content))
+		} else {
+			tracing.SetSuccess(span)
+		}
+	}
+
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %v", result.Content)
+	}
+
+	return result.Content, nil
+}
+
+// Close closes all open conversations, the tool manager, and the tracing provider.
 func (s *Server) Close() error {
 	s.conversationMu.Lock()
 	defer s.conversationMu.Unlock()
@@ -310,5 +464,26 @@ func (s *Server) Close() error {
 		}
 	}
 	s.conversations = make(map[string]*sdk.Conversation)
+
+	// Close tool manager
+	if s.toolManager != nil {
+		if err := s.toolManager.Close(); err != nil {
+			s.log.Error(err, "failed to close tool manager")
+		}
+		s.toolManager = nil
+		s.toolExecutor = nil
+		s.toolsInitialized = false
+	}
+
+	// Shutdown tracing provider
+	if s.tracingProvider != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.tracingProvider.Shutdown(ctx); err != nil {
+			s.log.Error(err, "failed to shutdown tracing provider")
+		}
+		s.tracingProvider = nil
+	}
+
 	return nil
 }

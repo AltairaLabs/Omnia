@@ -39,7 +39,7 @@ import (
 // ToolRegistry condition types
 const (
 	ToolRegistryConditionTypeToolsDiscovered = "ToolsDiscovered"
-	ToolRegistryConditionTypeServicesFound   = "ServicesFound"
+	ToolRegistryConditionTypeHandlersValid   = "HandlersValid"
 )
 
 // Service annotation keys for tool metadata
@@ -83,8 +83,8 @@ func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		toolRegistry.Status.Phase = omniav1alpha1.ToolRegistryPhasePending
 	}
 
-	// Discover tools
-	discoveredTools := r.discoverTools(ctx, toolRegistry)
+	// Validate handlers and discover tools
+	discoveredTools, validationErrors := r.processHandlers(ctx, toolRegistry)
 
 	// Update status with discovered tools
 	toolRegistry.Status.DiscoveredTools = discoveredTools
@@ -92,12 +92,21 @@ func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	now := metav1.Now()
 	toolRegistry.Status.LastDiscoveryTime = &now
 
-	// Determine phase based on tool availability
-	toolRegistry.Status.Phase = r.determinePhase(discoveredTools)
+	// Determine phase based on tool availability and validation
+	if len(validationErrors) > 0 {
+		toolRegistry.Status.Phase = omniav1alpha1.ToolRegistryPhaseFailed
+		r.setCondition(toolRegistry, ToolRegistryConditionTypeHandlersValid, metav1.ConditionFalse,
+			"ValidationFailed", fmt.Sprintf("Handler validation errors: %v", validationErrors))
+	} else {
+		toolRegistry.Status.Phase = r.determinePhase(discoveredTools)
+		r.setCondition(toolRegistry, ToolRegistryConditionTypeHandlersValid, metav1.ConditionTrue,
+			"HandlersValid", "All handlers validated successfully")
+	}
 
-	// Set conditions
+	// Set discovery condition
 	r.setCondition(toolRegistry, ToolRegistryConditionTypeToolsDiscovered, metav1.ConditionTrue,
-		"ToolsDiscovered", fmt.Sprintf("Discovered %d tool(s)", len(discoveredTools)))
+		"ToolsDiscovered", fmt.Sprintf("Discovered %d tool(s) from %d handler(s)",
+			len(discoveredTools), len(toolRegistry.Spec.Handlers)))
 
 	if err := r.Status().Update(ctx, toolRegistry); err != nil {
 		log.Error(err, "Failed to update ToolRegistry status")
@@ -107,59 +116,117 @@ func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-// discoverTools processes all tool definitions and discovers their endpoints.
-func (r *ToolRegistryReconciler) discoverTools(ctx context.Context, toolRegistry *omniav1alpha1.ToolRegistry) []omniav1alpha1.DiscoveredTool {
-	discoveredTools := make([]omniav1alpha1.DiscoveredTool, 0, len(toolRegistry.Spec.Tools))
+// processHandlers validates handlers and discovers tools from them.
+func (r *ToolRegistryReconciler) processHandlers(ctx context.Context, toolRegistry *omniav1alpha1.ToolRegistry) ([]omniav1alpha1.DiscoveredTool, []string) {
+	var discoveredTools []omniav1alpha1.DiscoveredTool
+	var validationErrors []string
+	log := logf.FromContext(ctx)
 
-	for _, tool := range toolRegistry.Spec.Tools {
-		discovered, err := r.discoverTool(ctx, toolRegistry, &tool)
+	for _, h := range toolRegistry.Spec.Handlers {
+		// Validate handler configuration
+		if err := r.validateHandler(&h); err != nil {
+			validationErrors = append(validationErrors, fmt.Sprintf("handler %q: %v", h.Name, err))
+			continue
+		}
+
+		// Resolve endpoint if using service selector
+		endpoint, err := r.resolveEndpoint(ctx, toolRegistry, &h)
 		if err != nil {
-			// Log but continue with other tools
-			logf.FromContext(ctx).Error(err, "Failed to discover tool", "tool", tool.Name)
+			log.Error(err, "Failed to resolve endpoint", "handler", h.Name)
 			now := metav1.Now()
+			errMsg := err.Error()
 			discoveredTools = append(discoveredTools, omniav1alpha1.DiscoveredTool{
-				Name:        tool.Name,
+				Name:        h.Name,
+				HandlerName: h.Name,
+				Description: fmt.Sprintf("Handler %s (endpoint resolution failed)", h.Type),
 				Endpoint:    "",
 				Status:      omniav1alpha1.ToolStatusUnavailable,
 				LastChecked: &now,
+				Error:       &errMsg,
 			})
 			continue
 		}
-		discoveredTools = append(discoveredTools, *discovered)
+
+		// Process based on handler type
+		tools := r.discoverToolsFromHandler(&h, endpoint)
+		discoveredTools = append(discoveredTools, tools...)
 	}
 
-	return discoveredTools
+	return discoveredTools, validationErrors
 }
 
-// discoverTool discovers a single tool's endpoint.
-func (r *ToolRegistryReconciler) discoverTool(ctx context.Context, toolRegistry *omniav1alpha1.ToolRegistry, tool *omniav1alpha1.ToolDefinition) (*omniav1alpha1.DiscoveredTool, error) {
-	now := metav1.Now()
-
-	// If URL is specified directly, use it
-	if tool.Endpoint.URL != nil && *tool.Endpoint.URL != "" {
-		return &omniav1alpha1.DiscoveredTool{
-			Name:        tool.Name,
-			Endpoint:    *tool.Endpoint.URL,
-			Status:      omniav1alpha1.ToolStatusAvailable,
-			LastChecked: &now,
-		}, nil
+// validateHandler validates a handler configuration.
+func (r *ToolRegistryReconciler) validateHandler(h *omniav1alpha1.HandlerDefinition) error {
+	switch h.Type {
+	case omniav1alpha1.HandlerTypeHTTP:
+		if h.HTTPConfig == nil {
+			return fmt.Errorf("httpConfig is required for http handlers")
+		}
+		if h.Tool == nil {
+			return fmt.Errorf("tool definition is required for http handlers")
+		}
+	case omniav1alpha1.HandlerTypeGRPC:
+		if h.GRPCConfig == nil {
+			return fmt.Errorf("grpcConfig is required for grpc handlers")
+		}
+		if h.Tool == nil {
+			return fmt.Errorf("tool definition is required for grpc handlers")
+		}
+	case omniav1alpha1.HandlerTypeMCP:
+		if h.MCPConfig == nil {
+			return fmt.Errorf("mcpConfig is required for mcp handlers")
+		}
+		if h.MCPConfig.Transport == omniav1alpha1.MCPTransportSSE && h.MCPConfig.Endpoint == nil {
+			return fmt.Errorf("endpoint is required for mcp handlers with SSE transport")
+		}
+		if h.MCPConfig.Transport == omniav1alpha1.MCPTransportStdio && h.MCPConfig.Command == nil {
+			return fmt.Errorf("command is required for mcp handlers with stdio transport")
+		}
+	case omniav1alpha1.HandlerTypeOpenAPI:
+		if h.OpenAPIConfig == nil {
+			return fmt.Errorf("openAPIConfig is required for openapi handlers")
+		}
+	default:
+		return fmt.Errorf("unknown handler type: %s", h.Type)
 	}
-
-	// If selector is specified, discover via Services
-	if tool.Endpoint.Selector != nil {
-		return r.discoverToolViaSelector(ctx, toolRegistry, tool)
-	}
-
-	return nil, fmt.Errorf("tool %q has no endpoint URL or selector", tool.Name)
+	return nil
 }
 
-// discoverToolViaSelector discovers a tool endpoint by finding matching Services.
-func (r *ToolRegistryReconciler) discoverToolViaSelector(ctx context.Context, toolRegistry *omniav1alpha1.ToolRegistry, tool *omniav1alpha1.ToolDefinition) (*omniav1alpha1.DiscoveredTool, error) {
-	now := metav1.Now()
-	selector := tool.Endpoint.Selector
+// resolveEndpoint resolves the handler endpoint, using service selector if specified.
+func (r *ToolRegistryReconciler) resolveEndpoint(ctx context.Context, toolRegistry *omniav1alpha1.ToolRegistry, h *omniav1alpha1.HandlerDefinition) (string, error) {
+	// If using service selector, discover via Services
+	if h.Selector != nil {
+		return r.resolveEndpointViaSelector(ctx, toolRegistry.Namespace, h)
+	}
+
+	// Otherwise, use the endpoint from type-specific config
+	switch h.Type {
+	case omniav1alpha1.HandlerTypeHTTP:
+		return h.HTTPConfig.Endpoint, nil
+	case omniav1alpha1.HandlerTypeGRPC:
+		return h.GRPCConfig.Endpoint, nil
+	case omniav1alpha1.HandlerTypeMCP:
+		if h.MCPConfig.Endpoint != nil {
+			return *h.MCPConfig.Endpoint, nil
+		}
+		// For stdio transport, return command as "endpoint"
+		if h.MCPConfig.Command != nil {
+			return fmt.Sprintf("stdio://%s", *h.MCPConfig.Command), nil
+		}
+		return "", fmt.Errorf("no endpoint configured for MCP handler")
+	case omniav1alpha1.HandlerTypeOpenAPI:
+		return h.OpenAPIConfig.SpecURL, nil
+	}
+
+	return "", fmt.Errorf("cannot determine endpoint for handler type %s", h.Type)
+}
+
+// resolveEndpointViaSelector discovers an endpoint by finding matching Services.
+func (r *ToolRegistryReconciler) resolveEndpointViaSelector(ctx context.Context, registryNamespace string, h *omniav1alpha1.HandlerDefinition) (string, error) {
+	selector := h.Selector
 
 	// Determine namespace to search
-	namespace := toolRegistry.Namespace
+	namespace := registryNamespace
 	if selector.Namespace != nil && *selector.Namespace != "" {
 		namespace = *selector.Namespace
 	}
@@ -170,32 +237,20 @@ func (r *ToolRegistryReconciler) discoverToolViaSelector(ctx context.Context, to
 	// List matching services
 	serviceList := &corev1.ServiceList{}
 	if err := r.List(ctx, serviceList, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: labelSelector}); err != nil {
-		return nil, fmt.Errorf("failed to list services: %w", err)
+		return "", fmt.Errorf("failed to list services: %w", err)
 	}
 
 	if len(serviceList.Items) == 0 {
-		return &omniav1alpha1.DiscoveredTool{
-			Name:        tool.Name,
-			Endpoint:    "",
-			Status:      omniav1alpha1.ToolStatusUnavailable,
-			LastChecked: &now,
-		}, nil
+		return "", fmt.Errorf("no services found matching selector in namespace %s", namespace)
 	}
 
 	// Use the first matching service
 	svc := &serviceList.Items[0]
-	endpoint := r.buildServiceEndpoint(svc, selector.Port, tool.Type)
-
-	return &omniav1alpha1.DiscoveredTool{
-		Name:        tool.Name,
-		Endpoint:    endpoint,
-		Status:      omniav1alpha1.ToolStatusAvailable,
-		LastChecked: &now,
-	}, nil
+	return r.buildServiceEndpoint(svc, selector.Port, h.Type), nil
 }
 
 // buildServiceEndpoint constructs an endpoint URL from a Service.
-func (r *ToolRegistryReconciler) buildServiceEndpoint(svc *corev1.Service, portSpec *string, toolType omniav1alpha1.ToolType) string {
+func (r *ToolRegistryReconciler) buildServiceEndpoint(svc *corev1.Service, portSpec *string, handlerType omniav1alpha1.HandlerType) string {
 	// Determine the port
 	var port int32
 	if len(svc.Spec.Ports) > 0 {
@@ -211,9 +266,9 @@ func (r *ToolRegistryReconciler) buildServiceEndpoint(svc *corev1.Service, portS
 		}
 	}
 
-	// Determine protocol based on tool type
+	// Determine protocol based on handler type
 	protocol := "http"
-	if toolType == omniav1alpha1.ToolTypeGRPC {
+	if handlerType == omniav1alpha1.HandlerTypeGRPC {
 		protocol = "grpc"
 	}
 
@@ -226,6 +281,48 @@ func (r *ToolRegistryReconciler) buildServiceEndpoint(svc *corev1.Service, portS
 	// Build the endpoint URL
 	return fmt.Sprintf("%s://%s.%s.svc.cluster.local:%d%s",
 		protocol, svc.Name, svc.Namespace, port, path)
+}
+
+// discoverToolsFromHandler creates discovered tool entries for a handler.
+func (r *ToolRegistryReconciler) discoverToolsFromHandler(h *omniav1alpha1.HandlerDefinition, endpoint string) []omniav1alpha1.DiscoveredTool {
+	now := metav1.Now()
+
+	switch h.Type {
+	case omniav1alpha1.HandlerTypeHTTP, omniav1alpha1.HandlerTypeGRPC:
+		// For HTTP/gRPC, the tool definition is explicit in the handler
+		if h.Tool == nil {
+			return nil
+		}
+		tool := omniav1alpha1.DiscoveredTool{
+			Name:        h.Tool.Name,
+			HandlerName: h.Name,
+			Description: h.Tool.Description,
+			InputSchema: &h.Tool.InputSchema,
+			Endpoint:    endpoint,
+			Status:      omniav1alpha1.ToolStatusAvailable,
+			LastChecked: &now,
+		}
+		if h.Tool.OutputSchema != nil {
+			tool.OutputSchema = h.Tool.OutputSchema
+		}
+		return []omniav1alpha1.DiscoveredTool{tool}
+
+	case omniav1alpha1.HandlerTypeMCP, omniav1alpha1.HandlerTypeOpenAPI:
+		// For self-describing handlers, we create a placeholder
+		// Actual tools will be discovered at runtime
+		return []omniav1alpha1.DiscoveredTool{
+			{
+				Name:        h.Name,
+				HandlerName: h.Name,
+				Description: fmt.Sprintf("Self-describing %s handler (tools discovered at runtime)", h.Type),
+				Endpoint:    endpoint,
+				Status:      omniav1alpha1.ToolStatusAvailable, // Endpoint is reachable
+				LastChecked: &now,
+			},
+		}
+	}
+
+	return nil
 }
 
 // determinePhase determines the registry phase based on discovered tools.
@@ -280,9 +377,9 @@ func (r *ToolRegistryReconciler) findToolRegistriesForService(ctx context.Contex
 
 	var requests []reconcile.Request
 	for _, tr := range toolRegistryList.Items {
-		// Check if any tool in this registry uses a selector that might match this service
-		for _, tool := range tr.Spec.Tools {
-			if tool.Endpoint.Selector != nil && r.selectorMatchesService(tool.Endpoint.Selector, svc, tr.Namespace) {
+		// Check if any handler in this registry uses a selector that might match this service
+		for _, h := range tr.Spec.Handlers {
+			if h.Selector != nil && r.selectorMatchesService(h.Selector, svc, tr.Namespace) {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Name:      tr.Name,
@@ -297,8 +394,8 @@ func (r *ToolRegistryReconciler) findToolRegistriesForService(ctx context.Contex
 	return requests
 }
 
-// selectorMatchesService checks if a tool selector matches a service.
-func (r *ToolRegistryReconciler) selectorMatchesService(selector *omniav1alpha1.ToolSelector, svc *corev1.Service, registryNamespace string) bool {
+// selectorMatchesService checks if a service selector matches a service.
+func (r *ToolRegistryReconciler) selectorMatchesService(selector *omniav1alpha1.ServiceSelector, svc *corev1.Service, registryNamespace string) bool {
 	// Check namespace
 	targetNamespace := registryNamespace
 	if selector.Namespace != nil && *selector.Namespace != "" {

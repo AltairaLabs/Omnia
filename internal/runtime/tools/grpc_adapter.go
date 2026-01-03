@@ -59,6 +59,16 @@ type GRPCAdapterConfig struct {
 
 	// Timeout is the connection timeout.
 	Timeout time.Duration
+
+	// ToolName is the tool name exposed by this handler.
+	// If provided, tool discovery via ListTools is skipped.
+	ToolName string
+
+	// ToolDescription is the tool description (shown to LLM).
+	ToolDescription string
+
+	// ToolInputSchema is the JSON Schema for the tool's input.
+	ToolInputSchema map[string]any
 }
 
 // GRPCAdapter implements ToolAdapter for gRPC tool services.
@@ -119,16 +129,36 @@ func (a *GRPCAdapter) Connect(ctx context.Context) error {
 	a.conn = conn
 	a.client = toolsv1.NewToolServiceClient(conn)
 
-	// Discover available tools
+	// Initialize tool map
 	a.tools = make(map[string]*toolsv1.ToolInfo)
-	resp, err := a.client.ListTools(ctx, &toolsv1.ListToolsRequest{})
-	if err != nil {
-		// ListTools is optional - some servers may not implement it
-		a.log.V(1).Info("ListTools not available, tools will be discovered on first call", "error", err)
+
+	// If tool definition is provided in config, use it instead of discovery
+	if a.config.ToolName != "" {
+		inputSchemaJSON := ""
+		if a.config.ToolInputSchema != nil {
+			schemaBytes, err := json.Marshal(a.config.ToolInputSchema)
+			if err == nil {
+				inputSchemaJSON = string(schemaBytes)
+			}
+		}
+
+		a.tools[a.config.ToolName] = &toolsv1.ToolInfo{
+			Name:        a.config.ToolName,
+			Description: a.config.ToolDescription,
+			InputSchema: inputSchemaJSON,
+		}
+		a.log.Info("using configured tool definition", "tool", a.config.ToolName)
 	} else {
-		for _, tool := range resp.Tools {
-			a.tools[tool.Name] = tool
-			a.log.V(1).Info("discovered tool", "name", tool.Name, "description", tool.Description)
+		// Discover available tools via ListTools
+		resp, err := a.client.ListTools(ctx, &toolsv1.ListToolsRequest{})
+		if err != nil {
+			// ListTools is optional - some servers may not implement it
+			a.log.V(1).Info("ListTools not available, tools will be discovered on first call", "error", err)
+		} else {
+			for _, tool := range resp.Tools {
+				a.tools[tool.Name] = tool
+				a.log.V(1).Info("discovered tool", "name", tool.Name, "description", tool.Description)
+			}
 		}
 	}
 

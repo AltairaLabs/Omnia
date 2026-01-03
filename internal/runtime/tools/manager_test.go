@@ -229,3 +229,266 @@ func TestManager_LoadFromToolConfig_SkipMissingMCPConfig(t *testing.T) {
 		t.Errorf("expected 0 adapters (tool should be skipped), got %d", adapterCount)
 	}
 }
+
+func TestManager_LoadFromHandlers(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "http-handler",
+				Type:     ToolTypeHTTP,
+				Endpoint: "http://example.com/api",
+				Tool: &ToolDefCfg{
+					Name:        "create_user",
+					Description: "Creates a new user",
+					InputSchema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"name":  map[string]any{"type": "string"},
+							"email": map[string]any{"type": "string"},
+						},
+						"required": []string{"name", "email"},
+					},
+				},
+				HTTPConfig: &HTTPCfg{
+					Endpoint: "http://example.com/api",
+					Method:   "POST",
+				},
+			},
+			{
+				Name:     "openapi-handler",
+				Type:     ToolTypeOpenAPI,
+				Endpoint: "http://api.example.com/openapi.json",
+				OpenAPIConfig: &OpenAPICfg{
+					SpecURL: "http://api.example.com/openapi.json",
+				},
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have registered both handlers
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 2 {
+		t.Errorf("expected 2 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_PrioritizedOverTools(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	// Config with both Handlers and Tools - Handlers should take precedence
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "handler-http",
+				Type:     ToolTypeHTTP,
+				Endpoint: "http://handler.example.com",
+				Tool: &ToolDefCfg{
+					Name:        "handler_tool",
+					Description: "From handler",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				HTTPConfig: &HTTPCfg{
+					Endpoint: "http://handler.example.com",
+				},
+			},
+		},
+		Tools: []ToolEntry{
+			{
+				Name: "legacy-tool",
+				Type: ToolTypeHTTP,
+				HTTPConfig: &HTTPCfg{
+					Endpoint: "http://legacy.example.com",
+				},
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only have the handler adapter, not the legacy tool
+	m.mu.RLock()
+	_, hasHandler := m.adapters["handler-http"]
+	_, hasLegacy := m.adapters["legacy-tool"]
+	m.mu.RUnlock()
+
+	if !hasHandler {
+		t.Error("expected handler-http adapter to be registered")
+	}
+	if hasLegacy {
+		t.Error("legacy tool should not be registered when handlers are present")
+	}
+}
+
+func TestManager_LoadFromHandlers_SkipHTTPWithoutToolDef(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "http-no-tool",
+				Type:     ToolTypeHTTP,
+				Endpoint: "http://example.com",
+				HTTPConfig: &HTTPCfg{
+					Endpoint: "http://example.com",
+				},
+				// Tool is nil - should be skipped
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters (HTTP handler without tool def should be skipped), got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_SkipGRPCWithoutToolDef(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "grpc-no-tool",
+				Type:     ToolTypeGRPC,
+				Endpoint: "localhost:50051",
+				GRPCConfig: &GRPCCfg{
+					Endpoint: "localhost:50051",
+				},
+				// Tool is nil - should be skipped
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters (gRPC handler without tool def should be skipped), got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_MCPDoesNotRequireToolDef(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "mcp-handler",
+				Type:     ToolTypeMCP,
+				Endpoint: "http://mcp-server/sse",
+				MCPConfig: &MCPCfg{
+					Transport: "sse",
+					Endpoint:  "http://mcp-server/sse",
+				},
+				// No Tool definition - MCP is self-describing
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 1 {
+		t.Errorf("expected 1 adapter (MCP is self-describing), got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_OpenAPIDoesNotRequireToolDef(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "openapi-handler",
+				Type:     ToolTypeOpenAPI,
+				Endpoint: "http://api.example.com/openapi.json",
+				OpenAPIConfig: &OpenAPICfg{
+					SpecURL: "http://api.example.com/openapi.json",
+				},
+				// No Tool definition - OpenAPI is self-describing
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 1 {
+		t.Errorf("expected 1 adapter (OpenAPI is self-describing), got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_Timeout(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:     "http-with-timeout",
+				Type:     ToolTypeHTTP,
+				Endpoint: "http://example.com",
+				Timeout:  "5s",
+				Tool: &ToolDefCfg{
+					Name:        "test_tool",
+					Description: "Test",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				HTTPConfig: &HTTPCfg{
+					Endpoint: "http://example.com",
+				},
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 1 {
+		t.Errorf("expected 1 adapter, got %d", adapterCount)
+	}
+}
