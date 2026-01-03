@@ -162,6 +162,50 @@ go test ./internal/controller/... -v
 go test ./internal/facade/... -v
 ```
 
+### E2E Tests
+
+End-to-end tests validate the full operator workflow in a real Kubernetes cluster.
+
+**Running E2E Tests:**
+```bash
+# Run the full E2E test suite (creates a Kind cluster)
+make test-e2e
+```
+
+**Debugging E2E Tests:**
+
+When E2E tests fail, use the debug helper script to step through tests manually:
+
+```bash
+# One-time setup: create cluster, build images, deploy operator
+./hack/e2e-debug.sh setup
+
+# Deploy test agents
+./hack/e2e-debug.sh agent       # Basic runtime mode agent
+./hack/e2e-debug.sh demo-agent  # Demo handler for tool call testing
+
+# Run specific tests
+./hack/e2e-debug.sh test-ws     # Test WebSocket connection
+./hack/e2e-debug.sh test-tool   # Test tool call flow
+
+# Debug failures
+./hack/e2e-debug.sh logs        # View operator and agent logs
+./hack/e2e-debug.sh shell       # Interactive shell in cluster
+
+# After code changes
+./hack/e2e-debug.sh rebuild     # Rebuild images and reload
+./hack/e2e-debug.sh cleanup     # Clear resources for fresh test
+
+# Cleanup
+./hack/e2e-debug.sh teardown    # Delete everything
+```
+
+This workflow allows you to:
+- Inspect deployed resources between test steps
+- View logs in real-time while tests run
+- Make code changes and quickly reload without full cluster recreation
+- Run an interactive shell for in-cluster debugging
+
 ### Session Store (`internal/session/`)
 
 **Focus**: Conversation state persistence

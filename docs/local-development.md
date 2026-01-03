@@ -383,6 +383,94 @@ make run
 
 This runs the operator outside the cluster but manages resources in your kind/minikube cluster.
 
+## E2E Testing and Debugging
+
+### Running E2E Tests
+
+The E2E test suite validates the complete operator workflow:
+
+```bash
+make test-e2e
+```
+
+This creates a temporary Kind cluster, builds images, deploys the operator, and runs all tests.
+
+### Manual E2E Debugging
+
+When E2E tests fail or you need to debug agent behavior, use the debug helper script for a step-by-step workflow:
+
+```bash
+# Initial setup (creates cluster, builds/loads images, deploys operator)
+./hack/e2e-debug.sh setup
+
+# Deploy agents for testing
+./hack/e2e-debug.sh agent       # Runtime mode agent
+./hack/e2e-debug.sh demo-agent  # Demo handler for tool testing
+
+# Test specific functionality
+./hack/e2e-debug.sh test-ws     # WebSocket connectivity
+./hack/e2e-debug.sh test-tool   # Tool call flow
+
+# Debug
+./hack/e2e-debug.sh logs        # View all logs
+./hack/e2e-debug.sh shell       # Interactive shell in cluster
+
+# After code changes
+./hack/e2e-debug.sh rebuild     # Rebuild and reload images
+./hack/e2e-debug.sh cleanup     # Clear test resources
+
+# Full cleanup
+./hack/e2e-debug.sh teardown    # Delete cluster
+```
+
+### Debugging Workflow Example
+
+When an E2E test fails:
+
+1. **Set up the environment:**
+   ```bash
+   ./hack/e2e-debug.sh setup
+   ```
+
+2. **Deploy the failing test's agent:**
+   ```bash
+   ./hack/e2e-debug.sh demo-agent
+   ```
+
+3. **Check the deployed resources:**
+   ```bash
+   kubectl get pods -n test-agents -o wide
+   kubectl describe agentruntime -n test-agents tool-test-agent
+   ```
+
+4. **View logs for errors:**
+   ```bash
+   ./hack/e2e-debug.sh logs
+   # Or watch specific container logs:
+   kubectl logs -n test-agents -l app.kubernetes.io/instance=tool-test-agent -c facade -f
+   kubectl logs -n test-agents -l app.kubernetes.io/instance=tool-test-agent -c runtime -f
+   ```
+
+5. **Run the specific test manually:**
+   ```bash
+   ./hack/e2e-debug.sh test-tool
+   ```
+
+6. **Get a shell for deeper debugging:**
+   ```bash
+   ./hack/e2e-debug.sh shell
+   # Inside the shell, you can curl services, check DNS, etc.
+   curl -v http://tool-test-agent.test-agents.svc.cluster.local:8080/health
+   ```
+
+7. **After fixing code, rebuild and retry:**
+   ```bash
+   ./hack/e2e-debug.sh rebuild
+   ./hack/e2e-debug.sh cleanup
+   ./hack/e2e-debug.sh demo-agent
+   ./hack/e2e-debug.sh test-tool
+   ```
+
 ## Cleanup
 
 ### Delete Sample Resources
