@@ -120,18 +120,101 @@ Logs are collected by Alloy and stored in Loki.
 {namespace="omnia-system", app_name="my-agent"}
 ```
 
-## View Traces
+## Agent Tracing with OpenTelemetry
 
-Tempo collects distributed traces when Istio is enabled.
+The runtime container supports OpenTelemetry tracing for detailed visibility into conversations, LLM calls, and tool executions.
+
+### Enable Tracing
+
+Tracing is configured via environment variables on the AgentRuntime. The operator will pass these to the runtime container:
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-agent
+spec:
+  # ... other config ...
+  runtime:
+    env:
+      - name: OMNIA_TRACING_ENABLED
+        value: "true"
+      - name: OMNIA_TRACING_ENDPOINT
+        value: "tempo.omnia-system.svc.cluster.local:4317"
+      - name: OMNIA_TRACING_SAMPLE_RATE
+        value: "1.0"
+      - name: OMNIA_TRACING_INSECURE
+        value: "true"
+```
+
+### Tracing Configuration Options
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `OMNIA_TRACING_ENABLED` | Enable OpenTelemetry tracing | `false` |
+| `OMNIA_TRACING_ENDPOINT` | OTLP collector endpoint (gRPC) | - |
+| `OMNIA_TRACING_SAMPLE_RATE` | Sampling rate (0.0 to 1.0) | `1.0` |
+| `OMNIA_TRACING_INSECURE` | Disable TLS for OTLP connection | `false` |
+
+### Span Types
+
+The runtime creates three types of spans:
+
+**Conversation Spans** (`conversation.turn`)
+- Created for each message exchange
+- Includes session ID, message length, response length
+- Parent span for LLM and tool spans
+
+**LLM Spans** (`llm.call`)
+- Created for each LLM API call
+- Includes model name, token counts (input/output), cost
+
+**Tool Spans** (`tool.<name>`)
+- Created for each tool execution
+- Includes tool name, success/error status, result size
+
+### Trace Attributes
+
+Traces include rich metadata for debugging:
+
+| Attribute | Description |
+|-----------|-------------|
+| `omnia.session_id` | Conversation session identifier |
+| `llm.model` | LLM model used |
+| `llm.input_tokens` | Input token count |
+| `llm.output_tokens` | Output token count |
+| `llm.cost_usd` | Estimated cost in USD |
+| `tool.name` | Tool that was called |
+| `tool.is_error` | Whether tool returned an error |
+| `tool.result_size` | Size of tool result |
+
+### View Traces in Tempo
+
+Tempo collects distributed traces from agents.
 
 ### Query Traces in Grafana
 
 1. Open Grafana and go to **Explore**
 2. Select the **Tempo** datasource
 3. Search by:
-   - Service name
+   - Service name (e.g., `omnia-runtime-my-agent`)
    - Trace ID
    - Duration
+   - Tags (e.g., `omnia.session_id`)
+
+### Example Trace Query
+
+Find slow conversations:
+
+```
+{ duration > 5s && resource.service.name =~ "omnia-runtime.*" }
+```
+
+Find tool errors:
+
+```
+{ span.tool.is_error = true }
+```
 
 ## Production Considerations
 
