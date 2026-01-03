@@ -4,21 +4,33 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/CODEOWNERS'
-      - '.github/workflows/docs.yml'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile*'
+      - 'api/**'
+      - 'cmd/**'
+      - 'config/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'test/**'
+      - 'hack/**'
+      - '.github/workflows/test-e2e.yml'
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.github/CODEOWNERS'
-      - '.github/workflows/docs.yml'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile*'
+      - 'api/**'
+      - 'cmd/**'
+      - 'config/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'test/**'
+      - 'hack/**'
+      - '.github/workflows/test-e2e.yml'
 
 jobs:
   test-e2e:

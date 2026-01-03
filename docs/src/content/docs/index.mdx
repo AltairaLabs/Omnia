@@ -1,0 +1,87 @@
+---
+title: Omnia
+description: Kubernetes operator for managing AI agent deployments with prompt pack management and tool orchestration
+template: splash
+hero:
+  tagline: Deploy and manage AI agents on Kubernetes with ease
+  image:
+    file: ../../assets/logo-dark.svg
+  actions:
+    - text: Get Started
+      link: /tutorials/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/altairalabs/omnia
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is Omnia?
+
+Omnia is a Kubernetes operator that simplifies the deployment and management of AI agents. It provides custom resources for defining agent configurations, prompt packs, and tool registries, enabling you to deploy intelligent agents at scale.
+
+<CardGrid stagger>
+  <Card title="AgentRuntime CRD" icon="rocket">
+    Deploy AI agents as Kubernetes-native workloads with automatic scaling and health management.
+  </Card>
+  <Card title="PromptPack CRD" icon="document">
+    Version and manage prompt configurations with canary rollouts for safe updates.
+  </Card>
+  <Card title="ToolRegistry CRD" icon="setting">
+    Discover and orchestrate tools via HTTP, gRPC, MCP, or OpenAPI handlers.
+  </Card>
+  <Card title="WebSocket Facade" icon="laptop">
+    Real-time communication with deployed agents through a streaming interface.
+  </Card>
+</CardGrid>
+
+## Quick Start
+
+Install Omnia using Helm:
+
+```bash
+helm repo add omnia https://altairalabs.github.io/omnia/charts
+helm install omnia omnia/omnia --namespace omnia-system --create-namespace
+```
+
+Then deploy your first agent:
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-agent
+spec:
+  replicas: 1
+  providerRef:
+    name: my-provider
+  promptPackRef:
+    name: my-promptpack
+```
+
+For a complete walkthrough, see the [Getting Started Tutorial](/tutorials/getting-started/).
+
+## Documentation Structure
+
+This documentation follows the [Diataxis framework](https://diataxis.fr/):
+
+<CardGrid>
+  <Card title="Tutorials" icon="open-book">
+    Step-by-step guides to get you started with Omnia.
+    [Start Learning →](/tutorials/getting-started/)
+  </Card>
+  <Card title="How-To Guides" icon="puzzle">
+    Practical guides for specific tasks and goals.
+    [Find Solutions →](/how-to/local-development/)
+  </Card>
+  <Card title="Reference" icon="information">
+    Technical specifications, CRD schemas, and API docs.
+    [Browse Reference →](/reference/agentruntime/)
+  </Card>
+  <Card title="Concepts" icon="star">
+    Background and explanations of how Omnia works.
+    [Understand Omnia →](/explanation/architecture/)
+  </Card>
+</CardGrid>

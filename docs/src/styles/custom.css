@@ -1,0 +1,31 @@
+/* Mermaid diagram styling */
+.mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 2rem 0;
+  background: transparent;
+}
+
+.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Force transparent backgrounds on edge labels */
+.mermaid .edgeLabel rect,
+.mermaid .edgeLabel polygon,
+.mermaid .labelBkg,
+.mermaid .label foreignObject div {
+  fill: transparent !important;
+  background: transparent !important;
+}
+
+/* Edge label text in blue */
+.mermaid .edgeLabel span,
+.mermaid .edgeLabel tspan,
+.mermaid .edgeLabel p {
+  color: #3b82f6 !important;
+  fill: #3b82f6 !important;
+  background: transparent !important;
+}
+
