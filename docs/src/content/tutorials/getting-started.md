@@ -90,9 +90,9 @@ kubectl get promptpack assistant-pack
 
 > **Tip**: For production use, you can author PromptPacks in YAML and compile them to JSON using the [packc](https://promptpack.org) compiler for validation and optimization.
 
-## Step 3: Configure Provider Credentials
+## Step 3: Configure the LLM Provider
 
-Create a Secret with your LLM provider API key:
+Create a Secret with your LLM provider API key, then create a Provider resource:
 
 ```yaml
 apiVersion: v1
@@ -102,11 +102,29 @@ metadata:
   namespace: default
 type: Opaque
 stringData:
-  api-key: "your-api-key-here"
+  ANTHROPIC_API_KEY: "sk-ant-..."  # Or OPENAI_API_KEY for OpenAI
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: my-provider
+  namespace: default
+spec:
+  type: claude  # Or "openai", "gemini"
+  model: claude-sonnet-4-20250514
+  secretRef:
+    name: llm-credentials
 ```
 
 ```bash
-kubectl apply -f secret.yaml
+kubectl apply -f provider.yaml
+```
+
+Verify the Provider is ready:
+
+```bash
+kubectl get provider my-provider
+# Should show: my-provider   claude   claude-sonnet-4-20250514   Ready   ...
 ```
 
 > **Tip**: Don't have an API key yet? Use `handler: demo` in your AgentRuntime to test with simulated responses. See [Handler Modes](/reference/agentruntime/#handler-modes) for details.
@@ -124,8 +142,8 @@ metadata:
 spec:
   promptPackRef:
     name: assistant-pack
-  providerSecretRef:
-    name: llm-credentials
+  providerRef:
+    name: my-provider
   facade:
     type: websocket
     port: 8080
@@ -193,8 +211,10 @@ You should see responses like:
 
 ## Next Steps
 
-- Learn about [PromptPack configuration](/how-to/configure-promptpacks/)
+- Learn about [Provider configuration](/reference/provider/) for LLM settings
 - Explore [ToolRegistry](/tutorials/adding-tools/) to give your agent capabilities
 - Read about [session management](/explanation/sessions/) for stateful conversations
+- Set up [observability](/how-to/setup-observability/) for monitoring
+- Configure [autoscaling](/how-to/scale-agents/) for production workloads
 
 Congratulations! You've deployed your first AI agent with Omnia.
