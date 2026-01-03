@@ -38,7 +38,7 @@ helm install omnia oci://ghcr.io/altairalabs/omnia \
 
 ### Deploy Your First Agent
 
-1. Create a PromptPack with your prompts:
+1. Create a PromptPack with compiled prompts:
 
 ```yaml
 apiVersion: v1
@@ -46,8 +46,24 @@ kind: ConfigMap
 metadata:
   name: my-prompts
 data:
-  system.txt: |
-    You are a helpful AI assistant.
+  # Compiled PromptPack JSON (use `packc` to compile from YAML source)
+  promptpack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "id": "my-assistant",
+      "name": "My Assistant",
+      "version": "1.0.0",
+      "template_engine": {"version": "v1", "syntax": "{{variable}}"},
+      "prompts": {
+        "main": {
+          "id": "main",
+          "name": "Main Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a helpful AI assistant. Be concise and accurate.",
+          "parameters": {"temperature": 0.7, "max_tokens": 4096}
+        }
+      }
+    }
 ---
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
@@ -60,6 +76,8 @@ spec:
     configMapRef:
       name: my-prompts
 ```
+
+> **Tip**: Use [packc](https://promptpack.org) to compile PromptPacks from YAML source files with validation.
 
 2. Create a Provider for LLM credentials:
 

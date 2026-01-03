@@ -197,6 +197,8 @@ kubectl create namespace agents
 
 ### 1. Create the PromptPack ConfigMap
 
+Create a ConfigMap with compiled PromptPack JSON (use `packc` to compile from YAML source):
+
 ```bash
 kubectl apply -n agents -f - <<EOF
 apiVersion: v1
@@ -204,13 +206,23 @@ kind: ConfigMap
 metadata:
   name: demo-prompts
 data:
-  system.txt: |
-    You are a helpful AI assistant for local development testing.
-    Respond concisely and helpfully.
-  config.yaml: |
-    model: gpt-4
-    temperature: 0.7
-    max_tokens: 1024
+  promptpack.json: |
+    {
+      "\$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "id": "demo-assistant",
+      "name": "Demo Assistant",
+      "version": "1.0.0",
+      "template_engine": {"version": "v1", "syntax": "{{variable}}"},
+      "prompts": {
+        "main": {
+          "id": "main",
+          "name": "Main Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a helpful AI assistant for local development testing. Respond concisely and helpfully.",
+          "parameters": {"temperature": 0.7, "max_tokens": 1024}
+        }
+      }
+    }
 EOF
 ```
 
@@ -233,13 +245,27 @@ spec:
 EOF
 ```
 
-### 3. Create Provider Secret
+### 3. Create Provider
+
+Create a Secret with your API key and a Provider resource:
 
 ```bash
 # Replace with your actual API key
 kubectl create secret generic openai-credentials \
   -n agents \
-  --from-literal=api-key="sk-your-openai-api-key"
+  --from-literal=OPENAI_API_KEY="sk-your-openai-api-key"
+
+kubectl apply -n agents -f - <<EOF
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: openai-provider
+spec:
+  type: openai
+  model: gpt-4o
+  secretRef:
+    name: openai-credentials
+EOF
 ```
 
 ### 4. Create Redis Credentials Secret
@@ -261,6 +287,8 @@ metadata:
 spec:
   promptPackRef:
     name: demo-assistant
+  providerRef:
+    name: openai-provider
   facade:
     type: websocket
     port: 8080
@@ -278,8 +306,6 @@ spec:
       limits:
         cpu: "500m"
         memory: "256Mi"
-  providerSecretRef:
-    name: openai-credentials
 EOF
 ```
 

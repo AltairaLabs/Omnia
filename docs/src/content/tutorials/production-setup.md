@@ -160,7 +160,33 @@ See [Configure Authentication](/how-to/configure-authentication) for detailed pr
 
 ## Step 5: Deploy a Production Agent
 
-Create an agent with production settings:
+First, create a Provider for your LLM:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+  namespace: default
+stringData:
+  ANTHROPIC_API_KEY: "sk-ant-..."
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-production
+  namespace: default
+spec:
+  type: claude
+  model: claude-sonnet-4-20250514
+  secretRef:
+    name: llm-credentials
+  defaults:
+    temperature: "0.7"
+    maxTokens: 4096
+```
+
+Then create an AgentRuntime with production settings:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -171,8 +197,8 @@ metadata:
 spec:
   promptPackRef:
     name: my-promptpack
-  providerSecretRef:
-    name: llm-credentials
+  providerRef:
+    name: claude-production
   facade:
     type: websocket
     port: 8080

@@ -41,9 +41,9 @@ You should see the operator pod in a `Running` state.
 
 ## Step 2: Create a PromptPack
 
-A PromptPack defines the prompts your agent will use. PromptPacks follow the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference) - a structured YAML/JSON format for packaging multi-prompt conversational systems.
+A PromptPack defines the prompts your agent will use. PromptPacks follow the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference) - a structured JSON format for packaging multi-prompt conversational systems.
 
-First, create a ConfigMap containing your prompts:
+First, create a ConfigMap containing your compiled PromptPack JSON:
 
 ```yaml
 apiVersion: v1
@@ -52,9 +52,30 @@ metadata:
   name: assistant-prompts
   namespace: default
 data:
-  system.txt: |
-    You are a helpful AI assistant. Be concise and accurate in your responses.
-    Always be polite and professional.
+  # Compiled PromptPack JSON (use `packc` to compile from YAML source)
+  promptpack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "id": "assistant",
+      "name": "Assistant",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "main": {
+          "id": "main",
+          "name": "Main Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a helpful AI assistant. Be concise and accurate in your responses. Always be polite and professional.",
+          "parameters": {
+            "temperature": 0.7,
+            "max_tokens": 4096
+          }
+        }
+      }
+    }
 ```
 
 Then create the PromptPack resource that references the ConfigMap:
@@ -88,7 +109,10 @@ kubectl get promptpack assistant-pack
 # Should show: assistant-pack   Active   1.0.0   ...
 ```
 
-> **Tip**: For production use, you can author PromptPacks in YAML and compile them to JSON using the [packc](https://promptpack.org) compiler for validation and optimization.
+> **Tip**: Author PromptPacks in YAML and compile them to JSON using [packc](https://promptpack.org) for validation and optimization:
+> ```bash
+> packc compile prompts.yaml -o promptpack.json
+> ```
 
 ## Step 3: Configure the LLM Provider
 
