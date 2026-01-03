@@ -597,6 +597,82 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(foundAnthropicKey).To(BeTrue(), "Expected ANTHROPIC_API_KEY env var from secret")
 		})
 
+		It("should respect the facade handler mode when specified", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with demo handler mode")
+			demoMode := omniav1alpha1.HandlerModeDemo
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type:    omniav1alpha1.FacadeTypeWebSocket,
+						Handler: &demoMode,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying the facade container has demo handler mode")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			var facadeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == FacadeContainerName {
+					facadeContainer = c
+					break
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil())
+
+			facadeEnvMap := make(map[string]corev1.EnvVar)
+			for _, env := range facadeContainer.Env {
+				facadeEnvMap[env.Name] = env
+			}
+
+			// Handler mode should be "demo"
+			Expect(facadeEnvMap["OMNIA_HANDLER_MODE"].Value).To(Equal("demo"))
+
+			// Runtime address should NOT be set for non-runtime handlers
+			_, hasRuntimeAddress := facadeEnvMap["OMNIA_RUNTIME_ADDRESS"]
+			Expect(hasRuntimeAddress).To(BeFalse(), "OMNIA_RUNTIME_ADDRESS should not be set for demo handler")
+		})
+
 		It("should set all provider configuration environment variables", func() {
 			By("creating a PromptPack")
 			promptPack := &omniav1alpha1.PromptPack{

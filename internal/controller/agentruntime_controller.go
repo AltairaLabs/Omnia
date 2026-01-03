@@ -899,16 +899,25 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Name:  "OMNIA_HEALTH_PORT",
 			Value: fmt.Sprintf("%d", DefaultFacadeHealthPort),
 		},
-		// Handler mode is always "runtime" for 2-container architecture
-		{
-			Name:  "OMNIA_HANDLER_MODE",
-			Value: string(omniav1alpha1.HandlerModeRuntime),
-		},
-		// Runtime address for facade to connect to runtime sidecar
-		{
+	}
+
+	// Determine handler mode - default to runtime if not specified
+	handlerMode := omniav1alpha1.HandlerModeRuntime
+	if agentRuntime.Spec.Facade.Handler != nil {
+		handlerMode = *agentRuntime.Spec.Facade.Handler
+	}
+
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_HANDLER_MODE",
+		Value: string(handlerMode),
+	})
+
+	// Only add runtime address if using runtime handler mode
+	if handlerMode == omniav1alpha1.HandlerModeRuntime {
+		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_RUNTIME_ADDRESS",
 			Value: fmt.Sprintf("localhost:%d", DefaultRuntimeGRPCPort),
-		},
+		})
 	}
 
 	// Add session config (facade needs this for session management)
