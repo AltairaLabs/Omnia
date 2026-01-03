@@ -1,50 +1,170 @@
-# 🌀 Omnia — The Kubernetes Platform for AI Assistant Deployment
-**Author:** Charlie Holland (AltairaLabs)  
-**Date:** November 2025  
+# Omnia
 
-> **Run AI assistants securely inside your own Kubernetes cluster.**  
-> Omnia makes it possible to deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
+[![CI](https://github.com/AltairaLabs/Omnia/workflows/CI/badge.svg)](https://github.com/AltairaLabs/Omnia/actions/workflows/ci.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=coverage)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
+[![Go Report Card](https://goreportcard.com/badge/github.com/AltairaLabs/Omnia)](https://goreportcard.com/report/github.com/AltairaLabs/Omnia)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-## 🔍 What Omnia Is
-**Omnia** is a Kubernetes-native platform for running AI assistants at enterprise scale.  
-Unlike most chatbot and agent builders that operate as SaaS services, Omnia can be **deployed anywhere** — on-prem, in the cloud, or in air-gapped environments.  
+**The Kubernetes Platform for AI Agent Deployment**
 
-Omnia brings the reliability and observability of cloud-native systems to intelligent assistants, allowing organizations to keep data private while unlocking the full potential of LLM-driven workflows.
+Omnia is a Kubernetes operator that makes deploying, scaling, and managing AI agents simple. Deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
 
-Omnia is part of the **AltairaLabs open-core ecosystem**, alongside [PromptKit](https://github.com/AltairaLabs/PromptKit) and [PromptPack](https://promptpack.org), which define how assistants think and reason.  
-Omnia defines **where and how they run**.
+## Features
 
-## 🧭 Why Omnia Exists
-Most “AI assistant” tools today are SaaS products that live outside your organization’s security boundary.  
-That’s fine for public Q&A bots, but not for assistants that need to understand your customers, systems, or codebase.
+- **Kubernetes-Native**: Deploy AI agents as custom resources with full GitOps support
+- **Multiple LLM Providers**: Support for Claude, OpenAI, and Gemini with easy provider switching
+- **Autoscaling**: Scale-to-zero with KEDA or standard HPA based on active connections
+- **Tool Integration**: HTTP, gRPC, and MCP tool adapters for extending agent capabilities
+- **Session Management**: Redis or in-memory session stores for conversation persistence
+- **Observability**: Integrated Prometheus metrics, Grafana dashboards, Loki logs, and Tempo traces
+- **Production-Ready**: Health checks, graceful shutdown, and comprehensive RBAC
 
-Omnia solves that problem by bringing the platform *to your data*, not the other way around.
+## Quick Start
 
-- 🏗️ **Deploy anywhere** — cloud, on-prem, edge, or regulated environments.  
-- 🔐 **Secure by design** — assistants can access internal APIs and systems without exposing data to external SaaS.  
-- 📈 **Scalable and observable** — built on Kubernetes principles for reliability, telemetry, and performance.  
-- ⚙️ **Integrates cleanly** — works alongside your existing CI/CD, identity, and monitoring stack.  
+### Prerequisites
 
-In short:  
-> **Omnia lets you build truly useful AI assistants — ones that can see inside the firewall while staying under your control.**
+- Kubernetes 1.28+
+- Helm 3.x
+- kubectl configured for your cluster
 
-## 🧬 Relationship to the AltairaLabs Ecosystem
+### Install the Operator
 
-| Layer | Project | Purpose |
-|-------|----------|----------|
-| **Specification** | **PromptPack** | Defines assistant logic, tools, and workflows declaratively. |
-| **Runtime** | **PromptKit** | Executes PromptPacks and manages context and reasoning. |
-| **Platform** | **Omnia** | Runs PromptKit workloads securely at scale on Kubernetes. |
-| **Tooling** | **Arena / Compiler** | Test, package, and promote PromptPacks for deployment. |
+```bash
+helm install omnia oci://ghcr.io/altairalabs/omnia \
+  --namespace omnia-system \
+  --create-namespace
+```
 
-## 🚀 Status
-Omnia is currently in **active design and early prototyping** within AltairaLabs.  
-Public details and implementation code will be released later as the open-core reference platform matures.
+### Deploy Your First Agent
 
-## 🪪 Copyright
-© 2025 Charlie Holland, AltairaLabs.  
-All rights reserved.  
+1. Create a PromptPack with your prompts:
 
-The Omnia name and concept are part of the AltairaLabs open-core ecosystem and may not be reused without permission.
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-prompts
+data:
+  system.txt: |
+    You are a helpful AI assistant.
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: my-pack
+spec:
+  version: "1.0.0"
+  source:
+    type: configmap
+    configMapRef:
+      name: my-prompts
+```
 
-*For collaboration or partnership enquiries, contact: [hello@altairalabs.ai](mailto:hello@altairalabs.ai)*
+2. Create a Provider for LLM credentials:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+stringData:
+  ANTHROPIC_API_KEY: "sk-ant-..."
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-provider
+spec:
+  type: claude
+  model: claude-sonnet-4-20250514
+  secretRef:
+    name: llm-credentials
+```
+
+3. Deploy an AgentRuntime:
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-agent
+spec:
+  promptPackRef:
+    name: my-pack
+  providerRef:
+    name: claude-provider
+  facade:
+    type: websocket
+    port: 8080
+```
+
+4. Connect to your agent:
+
+```bash
+kubectl port-forward svc/my-agent 8080:8080
+websocat ws://localhost:8080/ws
+```
+
+## Custom Resources
+
+| CRD | Description |
+|-----|-------------|
+| **AgentRuntime** | Deploys and manages an AI agent with its facade, sessions, and scaling |
+| **PromptPack** | Defines agent prompts and system instructions |
+| **ToolRegistry** | Configures tools available to agents (HTTP, gRPC, MCP) |
+| **Provider** | Reusable LLM provider configuration with credentials |
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Omnia Operator                            │
+│                                                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │
+│  │ AgentRuntime│  │ PromptPack  │  │ToolRegistry │           │
+│  │ Controller  │  │ Controller  │  │ Controller  │           │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘           │
+└─────────┼────────────────┼────────────────┼──────────────────┘
+          │                │                │
+          ▼                ▼                ▼
+┌──────────────────────────────────────────────────────────────┐
+│                      Agent Pod                                │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐              │
+│  │  Facade    │  │  Runtime   │  │   Tools    │              │
+│  │ (WebSocket)│◄─┤  (gRPC)    │──┤  Adapter   │              │
+│  └────────────┘  └────────────┘  └────────────┘              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Documentation
+
+Full documentation is available at [omnia.altairalabs.ai](https://omnia.altairalabs.ai).
+
+- [Getting Started](https://omnia.altairalabs.ai/tutorials/getting-started/)
+- [Local Development](https://omnia.altairalabs.ai/how-to/local-development/)
+- [CRD Reference](https://omnia.altairalabs.ai/reference/agentruntime/)
+- [Scaling Agents](https://omnia.altairalabs.ai/how-to/scale-agents/)
+- [Observability Setup](https://omnia.altairalabs.ai/how-to/setup-observability/)
+
+## Ecosystem
+
+Omnia is part of the AltairaLabs open-source ecosystem:
+
+| Project | Description |
+|---------|-------------|
+| [PromptKit](https://github.com/AltairaLabs/PromptKit) | Go SDK for building AI agents with tool use and streaming |
+| [PromptPack](https://promptpack.org) | Specification for portable, testable AI agent definitions |
+| **Omnia** | Kubernetes platform for deploying PromptKit agents at scale |
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+
+## License
+
+Apache 2.0 - see [LICENSE](LICENSE) for details.
+
+---
+
+Built with care by [AltairaLabs](https://altairalabs.ai)

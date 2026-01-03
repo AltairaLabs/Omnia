@@ -72,6 +72,69 @@ Each tool can be defined inline or discovered via selector.
 |------|-------------|----------|
 | `http` | HTTP REST endpoint | HTTP/HTTPS |
 | `grpc` | gRPC service | gRPC |
+| `mcp` | Model Context Protocol server | SSE or stdio |
+
+### HTTP Tool Configuration
+
+Configure HTTP-specific options:
+
+```yaml
+- name: search-api
+  type: http
+  description: "Search the knowledge base"
+  httpConfig:
+    url: https://api.example.com/search
+    method: POST
+    headers:
+      Authorization: "Bearer ${API_KEY}"
+    timeout: 30s
+    retries: 3
+```
+
+### gRPC Tool Configuration
+
+Configure gRPC-specific options:
+
+```yaml
+- name: grpc-service
+  type: grpc
+  description: "gRPC tool service"
+  grpcConfig:
+    address: tool-service.tools.svc.cluster.local:50051
+    useTLS: false
+    timeout: 30s
+```
+
+### MCP Tool Configuration
+
+Configure MCP (Model Context Protocol) tools:
+
+**SSE Transport** (connect to MCP server via Server-Sent Events):
+
+```yaml
+- name: mcp-tools
+  type: mcp
+  description: "MCP tool server"
+  mcpConfig:
+    transport: sse
+    endpoint: http://mcp-server.tools.svc.cluster.local:8080/sse
+```
+
+**Stdio Transport** (spawn MCP server as subprocess):
+
+```yaml
+- name: filesystem-tools
+  type: mcp
+  description: "Filesystem access via MCP"
+  mcpConfig:
+    transport: stdio
+    command: /usr/local/bin/mcp-filesystem
+    args:
+      - "--root=/data"
+    workDir: /app
+    env:
+      LOG_LEVEL: info
+```
 
 ## Service Discovery
 
@@ -148,7 +211,7 @@ Number of tools currently available.
 
 ## Example
 
-Complete ToolRegistry example:
+Complete ToolRegistry example with multiple tool types:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -158,17 +221,29 @@ metadata:
   namespace: agents
 spec:
   tools:
-    # Inline tool with direct URL
+    # HTTP tool for web search
     - name: web-search
       type: http
-      url: https://api.search.com/query
       description: "Search the web for information"
+      httpConfig:
+        url: https://api.search.com/query
+        method: POST
+        timeout: 30s
 
-    # Inline tool for calculations
-    - name: calculator
-      type: http
-      url: https://api.math.com/calculate
-      description: "Perform mathematical operations"
+    # gRPC tool for internal service
+    - name: user-service
+      type: grpc
+      description: "User management operations"
+      grpcConfig:
+        address: user-service.internal.svc.cluster.local:50051
+
+    # MCP tool via SSE
+    - name: code-tools
+      type: mcp
+      description: "Code analysis and manipulation"
+      mcpConfig:
+        transport: sse
+        endpoint: http://mcp-code.tools.svc.cluster.local:8080/sse
 
     # Discover tools from labeled services
     - name: internal-tools

@@ -34,21 +34,48 @@ spec:
     version: "1.0.0"  # Or use track: "canary"
 ```
 
-### `providerSecretRef`
+### `providerRef` (Recommended)
 
-Reference to a secret containing LLM provider credentials.
+Reference to a [Provider](/reference/provider/) resource for LLM configuration. This is the recommended approach as it enables centralized credential management and consistent configuration across agents.
 
 | Field | Type | Required |
 |-------|------|----------|
-| `providerSecretRef.name` | string | Yes |
+| `providerRef.name` | string | Yes |
+| `providerRef.namespace` | string | No (defaults to same namespace) |
 
 ```yaml
 spec:
-  providerSecretRef:
-    name: llm-credentials
+  providerRef:
+    name: claude-provider
+    namespace: shared-providers  # Optional
 ```
 
-The secret should contain an `api-key` key:
+### `provider` (Inline Configuration)
+
+Inline provider configuration. Use `providerRef` instead for production deployments.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `provider.type` | string | Yes (`claude`, `openai`, `gemini`, `auto`) |
+| `provider.model` | string | No |
+| `provider.secretRef.name` | string | Yes |
+| `provider.secretRef.key` | string | No |
+| `provider.defaults.temperature` | string | No |
+| `provider.defaults.topP` | string | No |
+| `provider.defaults.maxTokens` | integer | No |
+
+```yaml
+spec:
+  provider:
+    type: claude
+    model: claude-sonnet-4-20250514
+    secretRef:
+      name: llm-credentials
+    defaults:
+      temperature: "0.7"
+```
+
+The secret should contain the appropriate API key:
 
 ```yaml
 apiVersion: v1
@@ -56,8 +83,12 @@ kind: Secret
 metadata:
   name: llm-credentials
 stringData:
-  api-key: "sk-..."
+  ANTHROPIC_API_KEY: "sk-ant-..."  # For Claude
+  # Or: OPENAI_API_KEY: "sk-..."   # For OpenAI
+  # Or: GEMINI_API_KEY: "..."      # For Gemini
 ```
+
+> **Note**: If both `providerRef` and `provider` are specified, `providerRef` takes precedence.
 
 ### `facade`
 
@@ -260,6 +291,7 @@ triggers:
 | `DeploymentReady` | Deployment is ready |
 | `ServiceReady` | Service is ready |
 | `PromptPackReady` | Referenced PromptPack is valid |
+| `ProviderReady` | Referenced Provider is valid |
 | `ToolRegistryReady` | Referenced ToolRegistry is valid |
 
 ## Complete Example
@@ -275,8 +307,8 @@ spec:
     name: customer-service-prompts
     version: "2.1.0"
 
-  providerSecretRef:
-    name: openai-credentials
+  providerRef:
+    name: claude-production
 
   toolRegistryRef:
     name: service-tools
