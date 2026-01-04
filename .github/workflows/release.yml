@@ -16,6 +16,11 @@ permissions:
   pages: write
   id-token: write
 
+# Use same concurrency group as docs.yml to prevent race conditions
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   parse-version:
     name: Parse Version
