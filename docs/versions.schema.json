@@ -56,7 +56,7 @@
         "status": {
           "type": "string",
           "description": "Release status of this version",
-          "enum": ["stable", "prerelease", "deprecated"]
+          "enum": ["stable", "prerelease", "archived", "deprecated"]
         },
         "eol": {
           "type": ["string", "null"],

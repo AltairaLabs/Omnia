@@ -4,9 +4,13 @@ import starlight from '@astrojs/starlight';
 import starlightThemeGalaxy from 'starlight-theme-galaxy';
 import d2 from 'astro-d2';
 
+// Support building archived versions at a subpath (e.g., /v0-2/)
+const basePath = process.env.BASE_PATH || '/';
+
 // https://astro.build/config
 export default defineConfig({
   site: 'https://omnia.altairalabs.ai',
+  base: basePath,
   integrations: [
     d2(),
     starlight({

@@ -185,18 +185,120 @@ jobs:
       - name: Install D2
         run: curl -fsSL https://d2lang.com/install.sh | sh -s --
 
+      - name: Check if archiving is needed
+        id: archive-check
+        run: |
+          NEW_MINOR="${{ needs.parse-version.outputs.major }}.${{ needs.parse-version.outputs.minor }}"
+
+          # Get current deployed version from live site
+          LIVE_VERSIONS=$(curl -sf https://omnia.altairalabs.ai/versions.json || echo '{"current":null}')
+          CURRENT_MINOR=$(echo "$LIVE_VERSIONS" | jq -r '.current.version // empty')
+
+          echo "Current deployed minor: $CURRENT_MINOR"
+          echo "New release minor: $NEW_MINOR"
+
+          if [ -n "$CURRENT_MINOR" ] && [ "$CURRENT_MINOR" != "$NEW_MINOR" ]; then
+            echo "Minor version changed - archiving needed"
+            echo "needs_archive=true" >> $GITHUB_OUTPUT
+            echo "archive_minor=$CURRENT_MINOR" >> $GITHUB_OUTPUT
+
+            # Find the last tag for the old minor version
+            ARCHIVE_TAG=$(git tag -l "v${CURRENT_MINOR}.*" | sort -V | tail -1)
+            echo "Archive tag: $ARCHIVE_TAG"
+            echo "archive_tag=$ARCHIVE_TAG" >> $GITHUB_OUTPUT
+
+            # Convert version to path: 0.2 -> v0-2
+            ARCHIVE_PATH="v${CURRENT_MINOR//./-}"
+            echo "archive_path=$ARCHIVE_PATH" >> $GITHUB_OUTPUT
+          else
+            echo "Same minor version - no archiving needed"
+            echo "needs_archive=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build archived version
+        if: steps.archive-check.outputs.needs_archive == 'true'
+        run: |
+          ARCHIVE_TAG="${{ steps.archive-check.outputs.archive_tag }}"
+          ARCHIVE_PATH="${{ steps.archive-check.outputs.archive_path }}"
+
+          echo "Building archived docs from $ARCHIVE_TAG at /$ARCHIVE_PATH/"
+
+          # Save current commit
+          CURRENT_SHA=$(git rev-parse HEAD)
+
+          # Checkout the old tag
+          git checkout "$ARCHIVE_TAG"
+
+          # Install dependencies for old version
+          cd docs && npm ci
+
+          # Build with archive base path
+          BASE_PATH="/$ARCHIVE_PATH" npm run build
+
+          # Save the archived build
+          mv dist "../archived-${ARCHIVE_PATH}"
+          cd ..
+
+          # Return to current commit
+          git checkout "$CURRENT_SHA"
+
+          echo "Archived build saved to archived-${ARCHIVE_PATH}"
+
+      - name: Download existing archives from live site
+        run: |
+          mkdir -p existing-archives
+
+          # Get list of existing archived versions
+          LIVE_VERSIONS=$(curl -sf https://omnia.altairalabs.ai/versions.json || echo '{"archived":[]}')
+          ARCHIVED=$(echo "$LIVE_VERSIONS" | jq -r '.archived[].path // empty' | sed 's|^/||')
+
+          for archive_path in $ARCHIVED; do
+            if [ -n "$archive_path" ]; then
+              echo "Downloading existing archive: $archive_path"
+              mkdir -p "existing-archives/$archive_path"
+              # Use wget to mirror the archive directory
+              wget -q -r -np -nH --cut-dirs=1 -P "existing-archives/$archive_path" \
+                "https://omnia.altairalabs.ai/$archive_path/" || true
+            fi
+          done
+
       - name: Install dependencies
         run: cd docs && npm ci
 
       - name: Update versions.json
         run: |
-          node scripts/update-versions.js "${{ needs.parse-version.outputs.version }}" "${{ needs.parse-version.outputs.is_prerelease }}"
-          # Copy to public folder for serving
-          mkdir -p docs/public
-          cp docs/versions.json docs/public/
+          NEEDS_ARCHIVE="${{ steps.archive-check.outputs.needs_archive }}"
+          ARCHIVE_MINOR="${{ steps.archive-check.outputs.archive_minor }}"
+          ARCHIVE_PATH="${{ steps.archive-check.outputs.archive_path }}"
+
+          node scripts/update-versions.js \
+            "${{ needs.parse-version.outputs.version }}" \
+            "${{ needs.parse-version.outputs.is_prerelease }}" \
+            "$NEEDS_ARCHIVE" \
+            "$ARCHIVE_MINOR" \
+            "$ARCHIVE_PATH"
 
       - name: Build documentation
         run: cd docs && npm run build
+
+      - name: Merge archived docs into build
+        run: |
+          # Copy newly archived version if created
+          if [ -d "archived-${{ steps.archive-check.outputs.archive_path }}" ]; then
+            echo "Adding newly archived version: ${{ steps.archive-check.outputs.archive_path }}"
+            cp -r "archived-${{ steps.archive-check.outputs.archive_path }}" \
+              "docs/dist/${{ steps.archive-check.outputs.archive_path }}"
+          fi
+
+          # Copy existing archives
+          if [ -d "existing-archives" ] && [ "$(ls -A existing-archives 2>/dev/null)" ]; then
+            echo "Adding existing archives:"
+            ls -la existing-archives/
+            cp -r existing-archives/* docs/dist/ 2>/dev/null || true
+          fi
+
+          echo "Final build contents:"
+          ls -la docs/dist/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

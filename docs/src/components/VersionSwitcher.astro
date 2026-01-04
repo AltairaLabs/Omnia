@@ -76,7 +76,7 @@
     fullVersion: string;
     label: string;
     path: string;
-    status: 'stable' | 'prerelease' | 'deprecated';
+    status: 'stable' | 'prerelease' | 'archived' | 'deprecated';
   }
 
   interface VersionsData {
@@ -117,11 +117,16 @@
       // Clear loading option
       select.innerHTML = '';
 
+      // Detect if we're on an archived version by checking the URL path
+      const currentPath = window.location.pathname;
+      const archiveMatch = currentPath.match(/^\/(v\d+-\d+)\//);
+      const currentArchivePath = archiveMatch ? `/${archiveMatch[1]}/` : null;
+
       // Add current version (at root)
       const currentOption = document.createElement('option');
       currentOption.value = '/';
       currentOption.textContent = data.current.label;
-      currentOption.selected = true; // Current is always selected since we're at root
+      currentOption.selected = !currentArchivePath; // Selected if we're not on an archive
       select.appendChild(currentOption);
 
       // Add archived versions
@@ -130,6 +135,7 @@
           const option = document.createElement('option');
           option.value = v.path;
           option.textContent = v.label;
+          option.selected = v.path === currentArchivePath;
           select.appendChild(option);
         }
       }
@@ -137,10 +143,19 @@
       // Handle selection change - navigate to selected version
       select.addEventListener('change', (e) => {
         const target = e.target as HTMLSelectElement;
-        if (target.value && target.value !== '/') {
-          // Navigate to archived version, preserving current page path
-          const currentPath = window.location.pathname;
-          window.location.href = target.value + currentPath.slice(1);
+        const selectedPath = target.value;
+
+        // Get the page path without version prefix
+        let pagePath = currentPath;
+        if (currentArchivePath) {
+          pagePath = currentPath.replace(currentArchivePath, '/');
+        }
+
+        // Navigate to the selected version
+        if (selectedPath === '/') {
+          window.location.href = pagePath;
+        } else {
+          window.location.href = selectedPath + pagePath.slice(1);
         }
       });
     } catch {
