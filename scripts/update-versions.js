@@ -65,7 +65,8 @@ function main() {
     label: isPrerelease
       ? `v${parsed.minorVersion} (${parsed.prerelease || 'Pre-release'})`
       : `v${parsed.minorVersion}${!isPrerelease ? ' (Latest)' : ''}`,
-    path: '/',
+    // Versioned docs are at /v0.2/, unversioned (latest dev) at /
+    path: `/v${parsed.minorVersion}/`,
     released: new Date().toISOString(),
     status: isPrerelease ? 'prerelease' : 'stable',
     eol: null,

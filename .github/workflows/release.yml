@@ -162,6 +162,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -172,6 +174,32 @@ jobs:
 
       - name: Install dependencies
         run: cd docs && npm ci
+
+      - name: Create version snapshot
+        run: |
+          VERSION="v${{ needs.parse-version.outputs.major }}.${{ needs.parse-version.outputs.minor }}"
+          IS_PRERELEASE="${{ needs.parse-version.outputs.is_prerelease }}"
+
+          echo "Creating documentation snapshot for $VERSION"
+
+          # Create versioned content directory
+          VERSION_DIR="docs/src/content/docs/${VERSION}"
+          mkdir -p "$VERSION_DIR"
+
+          # Copy all doc categories to versioned directory
+          for category in tutorials how-to reference explanation; do
+            if [ -d "docs/src/content/docs/${category}" ]; then
+              cp -r "docs/src/content/docs/${category}" "$VERSION_DIR/"
+            fi
+          done
+
+          # Copy index if it exists
+          if [ -f "docs/src/content/docs/index.mdx" ]; then
+            cp "docs/src/content/docs/index.mdx" "$VERSION_DIR/"
+          fi
+
+          echo "Created version snapshot at $VERSION_DIR"
+          ls -la "$VERSION_DIR"
 
       - name: Update versions.json
         run: |

@@ -1,18 +1,6 @@
 {
   "$schema": "./versions.schema.json",
   "latest": null,
-  "latestPrerelease": "0.1.0",
-  "versions": [
-    {
-      "version": "0.1",
-      "fullVersion": "0.1.0",
-      "label": "v0.1 (Pre-release)",
-      "path": "/",
-      "released": "2026-01-03T00:00:00Z",
-      "status": "prerelease",
-      "eol": null,
-      "helmChart": "oci://ghcr.io/altairalabs/charts/omnia:0.1.0",
-      "dockerImage": "ghcr.io/altairalabs/omnia:0.1.0"
-    }
-  ]
+  "latestPrerelease": null,
+  "versions": []
 }
