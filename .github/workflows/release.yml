@@ -7,7 +7,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  CHART_REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
+  # GHCR requires lowercase - github.repository_owner may have mixed case
+  CHART_REGISTRY: ghcr.io/altairalabs/charts
 
 permissions:
   contents: write
