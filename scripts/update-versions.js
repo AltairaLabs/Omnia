@@ -65,8 +65,9 @@ function main() {
     label: isPrerelease
       ? `v${parsed.minorVersion} (${parsed.prerelease || 'Pre-release'})`
       : `v${parsed.minorVersion}${!isPrerelease ? ' (Latest)' : ''}`,
-    // Versioned docs are at /v0.2/, unversioned (latest dev) at /
-    path: `/v${parsed.minorVersion}/`,
+    // Versioned docs are at /v0-2/, unversioned (latest dev) at /
+    // Use hyphen instead of dot to avoid URL encoding issues
+    path: `/v${parsed.major}-${parsed.minor}/`,
     released: new Date().toISOString(),
     status: isPrerelease ? 'prerelease' : 'stable',
     eol: null,

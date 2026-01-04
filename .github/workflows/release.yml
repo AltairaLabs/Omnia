@@ -181,7 +181,8 @@ jobs:
 
       - name: Create version snapshot
         run: |
-          VERSION="v${{ needs.parse-version.outputs.major }}.${{ needs.parse-version.outputs.minor }}"
+          # Use hyphen instead of dot to avoid URL encoding issues (v0-2 instead of v0.2)
+          VERSION="v${{ needs.parse-version.outputs.major }}-${{ needs.parse-version.outputs.minor }}"
           FULL_VERSION="${{ needs.parse-version.outputs.version }}"
           IS_PRERELEASE="${{ needs.parse-version.outputs.is_prerelease }}"
 

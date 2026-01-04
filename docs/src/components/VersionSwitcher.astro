@@ -19,13 +19,19 @@ const versions: Version[] = versionsData.versions || [];
 const currentPath = Astro.url.pathname;
 
 // Determine current version from URL path
-// URLs like /v0.2/tutorials/getting-started -> version is "0.2"
+// URLs like /v0-2/tutorials/getting-started -> version is "0.2"
 // URLs like /tutorials/getting-started -> version is "latest" (current dev)
-const pathMatch = currentPath.match(/^\/v(\d+\.\d+)\//);
-const currentVersion = pathMatch ? pathMatch[1] : 'latest';
+// Note: We use hyphen in URLs (v0-2) but dots in version display (0.2)
+const pathMatch = currentPath.match(/^\/v(\d+)-(\d+)\//);
+const currentVersion = pathMatch ? `${pathMatch[1]}.${pathMatch[2]}` : 'latest';
 
 // If no versions are published yet, don't render the switcher
 const hasVersions = versions.length > 0;
+
+// Convert version "0.2" to URL path format "v0-2"
+function versionToPath(version: string): string {
+  return `/v${version.replace('.', '-')}/`;
+}
 
 // Build version options
 const versionOptions = versions.map(v => ({
@@ -34,7 +40,7 @@ const versionOptions = versions.map(v => ({
   // Convert current path to equivalent path in target version
   targetPath: currentVersion === 'latest'
     ? v.path + currentPath.slice(1)
-    : currentPath.replace(`/v${currentVersion}/`, v.path)
+    : currentPath.replace(versionToPath(currentVersion), v.path)
 }));
 
 // Always add "Current (dev)" option for unversioned docs
@@ -47,7 +53,7 @@ const devOption = {
   isCurrent: currentVersion === 'latest',
   targetPath: currentVersion === 'latest'
     ? currentPath
-    : currentPath.replace(`/v${currentVersion}/`, '/')
+    : currentPath.replace(versionToPath(currentVersion), '/')
 };
 
 // Add dev option at the top
