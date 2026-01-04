@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { Sidebar } from "@/components/layout";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -31,7 +32,14 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          <div className="flex h-screen">
+            <Sidebar />
+            <main className="flex-1 overflow-auto bg-background">
+              {children}
+            </main>
+          </div>
+        </Providers>
       </body>
     </html>
   );
