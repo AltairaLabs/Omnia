@@ -132,30 +132,31 @@
 
       const currentVersion = getCurrentVersion();
 
+      // Determine the default version (latest stable, or latest prerelease if no stable)
+      const latestVersion = versions[0]; // versions are sorted newest first
+
       // Clear loading option
       select.innerHTML = '';
 
-      // Add "Current (dev)" option
-      const devOption = document.createElement('option');
-      devOption.value = buildTargetPath('/', currentVersion);
-      devOption.textContent = 'Current (dev)';
-      devOption.dataset.status = 'prerelease';
-      if (currentVersion === 'latest') {
-        devOption.selected = true;
-      }
-      select.appendChild(devOption);
-
-      // Add version options
+      // Add version options (latest first)
       for (const v of versions) {
         const option = document.createElement('option');
         option.value = buildTargetPath(v.path, currentVersion);
         option.textContent = v.label;
         option.dataset.status = v.status;
-        if (v.version === currentVersion) {
+        // Select if: user is on this version, OR user is on unversioned pages and this is latest
+        if (v.version === currentVersion || (currentVersion === 'latest' && v === latestVersion)) {
           option.selected = true;
         }
         select.appendChild(option);
       }
+
+      // Add "Current (dev)" option at the end
+      const devOption = document.createElement('option');
+      devOption.value = buildTargetPath('/', currentVersion);
+      devOption.textContent = 'Current (dev)';
+      devOption.dataset.status = 'prerelease';
+      select.appendChild(devOption);
 
       // Handle selection change
       select.addEventListener('change', (e) => {

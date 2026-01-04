@@ -185,15 +185,16 @@ jobs:
 
       - name: Create version snapshot
         run: |
-          # Use hyphen instead of dot to avoid URL encoding issues (v0-2 instead of v0.2)
-          VERSION="v${{ needs.parse-version.outputs.major }}-${{ needs.parse-version.outputs.minor }}"
+          # URL path uses hyphens (v0-2), display uses dots (v0.2)
+          VERSION_PATH="v${{ needs.parse-version.outputs.major }}-${{ needs.parse-version.outputs.minor }}"
+          VERSION_DISPLAY="v${{ needs.parse-version.outputs.major }}.${{ needs.parse-version.outputs.minor }}"
           FULL_VERSION="${{ needs.parse-version.outputs.version }}"
           IS_PRERELEASE="${{ needs.parse-version.outputs.is_prerelease }}"
 
-          echo "Creating documentation snapshot for $VERSION"
+          echo "Creating documentation snapshot for $VERSION_PATH (display: $VERSION_DISPLAY)"
 
           # Create versioned content directory
-          VERSION_DIR="docs/src/content/docs/${VERSION}"
+          VERSION_DIR="docs/src/content/docs/${VERSION_PATH}"
           mkdir -p "$VERSION_DIR"
 
           # Copy all doc categories to versioned directory
@@ -203,11 +204,11 @@ jobs:
             fi
           done
 
-          # Determine version label
+          # Determine version label for display (uses dots)
           if [[ "$IS_PRERELEASE" == "true" ]]; then
-            VERSION_LABEL="$VERSION (Pre-release)"
+            VERSION_LABEL="$VERSION_DISPLAY (Pre-release)"
           else
-            VERSION_LABEL="$VERSION"
+            VERSION_LABEL="$VERSION_DISPLAY"
           fi
 
           # Create index page for the versioned directory using printf
