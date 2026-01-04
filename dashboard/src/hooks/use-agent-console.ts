@@ -245,14 +245,12 @@ export function useAgentConsole({
     words.forEach((word, index) => {
       setTimeout(() => {
         currentContent += (index > 0 ? " " : "") + word;
-        setState((prev) => {
-          const messages = [...prev.messages];
-          const lastMessage = messages[messages.length - 1];
-          if (lastMessage?.id === messageId) {
-            lastMessage.content = currentContent;
-          }
-          return { ...prev, messages };
-        });
+        setState((prev) => ({
+          ...prev,
+          messages: prev.messages.map((msg) =>
+            msg.id === messageId ? { ...msg, content: currentContent } : msg
+          ),
+        }));
       }, 400 + index * 50);
     });
 
@@ -264,34 +262,44 @@ export function useAgentConsole({
       // Show tool call (pending)
       setTimeout(() => {
         setState((prev) => {
-          const messages = [...prev.messages];
-          const lastMessage = messages[messages.length - 1];
-          if (lastMessage?.id === messageId) {
-            const toolCall: ToolCallWithResult = {
-              id: toolId,
-              name: tc.name,
-              arguments: tc.arguments,
-              status: "pending",
-            };
-            lastMessage.toolCalls = [...(lastMessage.toolCalls || []), toolCall];
-          }
-          return { ...prev, messages };
+          return {
+            ...prev,
+            messages: prev.messages.map((msg) => {
+              if (msg.id !== messageId) return msg;
+              // Check if tool already exists (prevent duplicates)
+              if (msg.toolCalls?.some((t) => t.id === toolId)) return msg;
+              const toolCall: ToolCallWithResult = {
+                id: toolId,
+                name: tc.name,
+                arguments: tc.arguments,
+                status: "pending",
+              };
+              return {
+                ...msg,
+                toolCalls: [...(msg.toolCalls || []), toolCall],
+              };
+            }),
+          };
         });
       }, toolDelay + index * 700);
 
       // Show tool result (success) - update same tool call by ID
       setTimeout(() => {
         setState((prev) => {
-          const messages = [...prev.messages];
-          const lastMessage = messages[messages.length - 1];
-          if (lastMessage?.toolCalls) {
-            const toolCall = lastMessage.toolCalls.find((t) => t.id === toolId);
-            if (toolCall) {
-              toolCall.result = tc.result;
-              toolCall.status = "success";
-            }
-          }
-          return { ...prev, messages };
+          return {
+            ...prev,
+            messages: prev.messages.map((msg) => {
+              if (msg.id !== messageId || !msg.toolCalls) return msg;
+              return {
+                ...msg,
+                toolCalls: msg.toolCalls.map((t) =>
+                  t.id === toolId
+                    ? { ...t, result: tc.result, status: "success" as const }
+                    : t
+                ),
+              };
+            }),
+          };
         });
       }, toolDelay + index * 700 + 500); // 500ms after pending appears
     });
@@ -299,14 +307,12 @@ export function useAgentConsole({
     // Mark as done
     const doneDelay = toolDelay + mockResponse.toolCalls.length * 700 + 600;
     setTimeout(() => {
-      setState((prev) => {
-        const messages = [...prev.messages];
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage?.id === messageId) {
-          lastMessage.isStreaming = false;
-        }
-        return { ...prev, messages };
-      });
+      setState((prev) => ({
+        ...prev,
+        messages: prev.messages.map((msg) =>
+          msg.id === messageId ? { ...msg, isStreaming: false } : msg
+        ),
+      }));
     }, doneDelay);
   }, []);
 
