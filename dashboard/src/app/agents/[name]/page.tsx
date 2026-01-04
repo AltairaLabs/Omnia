@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { YamlBlock } from "@/components/ui/yaml-block";
 import { useAgent } from "@/hooks";
 
 interface AgentDetailPageProps {
@@ -167,8 +168,34 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
               </CardContent>
             </Card>
 
-            {/* Spec Summary Card */}
+            {/* Spec Summary Cards */}
             <div className="grid md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Framework</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Type</span>
+                    <span className="font-medium capitalize">{spec.framework?.type || "promptkit"}</span>
+                  </div>
+                  {spec.framework?.version && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Version</span>
+                      <span className="font-medium">{spec.framework.version}</span>
+                    </div>
+                  )}
+                  {spec.framework?.image && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Image</span>
+                      <span className="font-medium text-xs truncate max-w-[150px]" title={spec.framework.image}>
+                        {spec.framework.image}
+                      </span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader>
                   <CardTitle>Provider</CardTitle>
@@ -259,9 +286,7 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                 <CardDescription>Complete agent specification in YAML format</CardDescription>
               </CardHeader>
               <CardContent>
-                <pre className="bg-muted p-4 rounded-lg overflow-auto text-sm font-mono">
-                  {JSON.stringify(agent, null, 2)}
-                </pre>
+                <YamlBlock data={agent} className="max-h-[600px]" />
               </CardContent>
             </Card>
           </TabsContent>

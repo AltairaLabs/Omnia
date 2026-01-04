@@ -29,6 +29,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       },
     },
     spec: {
+      framework: { type: "promptkit", version: "0.4.0" },
       promptPackRef: { name: "support-prompts", version: "1.2.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       provider: { type: "claude", model: "claude-sonnet-4-20250514" },
@@ -97,6 +98,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       },
     },
     spec: {
+      framework: { type: "langchain", version: "0.3.0" },
       promptPackRef: { name: "analyst-prompts", version: "1.0.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       provider: { type: "openai", model: "gpt-4-turbo" },

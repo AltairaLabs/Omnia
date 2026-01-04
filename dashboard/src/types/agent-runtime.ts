@@ -9,6 +9,7 @@ export type HandlerMode = "echo" | "demo" | "runtime";
 export type SessionStoreType = "memory" | "redis" | "postgres";
 export type ProviderType = "auto" | "claude" | "openai" | "gemini";
 export type AutoscalerType = "hpa" | "keda";
+export type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
 
 // Nested types
 export interface PromptPackRef {
@@ -93,8 +94,15 @@ export interface ProviderRef {
   namespace?: string;
 }
 
+export interface FrameworkConfig {
+  type: FrameworkType;
+  version?: string;
+  image?: string;
+}
+
 // Spec
 export interface AgentRuntimeSpec {
+  framework?: FrameworkConfig;
   promptPackRef: PromptPackRef;
   facade: FacadeConfig;
   toolRegistryRef?: ToolRegistryRef;
