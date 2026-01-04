@@ -1,0 +1,21 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Omnia Logo for dark backgrounds -->
+  <!-- Central hexagon -->
+  <polygon points="16,4 26,10 26,22 16,28 6,22 6,10" stroke="#60A5FA" stroke-width="2" fill="none"/>
+  <!-- Central node - cyan accent -->
+  <circle cx="16" cy="16" r="4" fill="#22D3EE"/>
+  <!-- Vertex nodes -->
+  <circle cx="16" cy="4" r="2" fill="#60A5FA"/>
+  <circle cx="26" cy="10" r="2" fill="#60A5FA"/>
+  <circle cx="26" cy="22" r="2" fill="#60A5FA"/>
+  <circle cx="16" cy="28" r="2" fill="#60A5FA"/>
+  <circle cx="6" cy="22" r="2" fill="#60A5FA"/>
+  <circle cx="6" cy="10" r="2" fill="#60A5FA"/>
+  <!-- Connection lines to center -->
+  <line x1="16" y1="4" x2="16" y2="12" stroke="#60A5FA" stroke-width="1.5" opacity="0.6"/>
+  <line x1="26" y1="10" x2="20" y2="14" stroke="#60A5FA" stroke-width="1.5" opacity="0.6"/>
+  <line x1="26" y1="22" x2="20" y2="18" stroke="#60A5FA" stroke-width="1.5" opacity="0.6"/>
+  <line x1="16" y1="28" x2="16" y2="20" stroke="#60A5FA" stroke-width="1.5" opacity="0.6"/>
+  <line x1="6" y1="22" x2="12" y2="18" stroke="#60A5FA" stroke-width="1.5" opacity="0.6"/>
+  <line x1="6" y1="10" x2="12" y2="14" stroke="#60A5FA" stroke-width="1.5" opacity="0.6"/>
+</svg>
