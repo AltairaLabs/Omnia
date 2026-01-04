@@ -25,9 +25,11 @@ interface UseAgentConsoleReturn extends ConsoleState {
   clearMessages: () => void;
 }
 
-// Generate unique IDs
+// Generate unique IDs with counter to guarantee uniqueness
+let idCounter = 0;
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  idCounter += 1;
+  return `${Date.now()}-${idCounter}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 // Mock responses for demo mode
