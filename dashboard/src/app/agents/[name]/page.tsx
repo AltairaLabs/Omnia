@@ -3,9 +3,10 @@
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, MessageSquare } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatusBadge } from "@/components/agents";
+import { AgentConsole } from "@/components/console";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -94,6 +95,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
         <Tabs defaultValue="overview">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="console" className="gap-1.5">
+              <MessageSquare className="h-4 w-4" />
+              Console
+            </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
           </TabsList>
@@ -277,6 +282,13 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="console" className="mt-4">
+            <AgentConsole
+              agentName={metadata.name}
+              namespace={metadata.namespace || "default"}
+            />
           </TabsContent>
 
           <TabsContent value="config" className="mt-4">
