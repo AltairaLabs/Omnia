@@ -60,6 +60,9 @@ jobs:
         with:
           enablement: true
 
+      - name: Install D2
+        run: curl -fsSL https://d2lang.com/install.sh | sh -s --
+
       - name: Install dependencies
         working-directory: docs
         run: npm ci

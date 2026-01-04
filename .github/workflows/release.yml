@@ -172,6 +172,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: docs/package-lock.json
 
+      - name: Install D2
+        run: curl -fsSL https://d2lang.com/install.sh | sh -s --
+
       - name: Install dependencies
         run: cd docs && npm ci
 
