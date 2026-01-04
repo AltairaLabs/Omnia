@@ -72,9 +72,66 @@ cd "$REPO_ROOT"
 # Check for staged Go files
 STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
 
+# Check for staged dashboard files (TypeScript/JavaScript)
+STAGED_DASHBOARD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^dashboard/.*\.\(ts\|tsx\|js\|jsx\)$' || true)
+
+#
+# Dashboard (TypeScript) Checks
+#
+if [ -n "$STAGED_DASHBOARD_FILES" ]; then
+    print_info "Found $(echo "$STAGED_DASHBOARD_FILES" | wc -l | tr -d ' ') dashboard file(s) to check"
+
+    # Check if npm is available
+    if ! command -v npm &> /dev/null; then
+        print_warning "npm is not installed, skipping dashboard checks"
+    else
+        # Check if node_modules exists
+        if [ ! -d "$REPO_ROOT/dashboard/node_modules" ]; then
+            print_info "Installing dashboard dependencies..."
+            (cd "$REPO_ROOT/dashboard" && npm ci --silent)
+        fi
+
+        print_header "Dashboard: ESLint"
+        if (cd "$REPO_ROOT/dashboard" && npm run lint --silent 2>&1); then
+            print_success "ESLint passed"
+        else
+            print_error "ESLint found issues"
+            CHECKS_FAILED=1
+        fi
+
+        print_header "Dashboard: TypeScript"
+        if (cd "$REPO_ROOT/dashboard" && npm run typecheck --silent 2>&1); then
+            print_success "TypeScript check passed"
+        else
+            print_error "TypeScript check failed"
+            CHECKS_FAILED=1
+        fi
+    fi
+fi
+
+# Skip Go checks if no Go files staged
 if [ -z "$STAGED_GO_FILES" ]; then
-    print_info "No Go files staged for commit. Skipping checks."
-    exit 0
+    if [ -z "$STAGED_DASHBOARD_FILES" ]; then
+        print_info "No Go or dashboard files staged for commit. Skipping checks."
+        exit 0
+    fi
+    # Dashboard checks ran above, skip to summary
+    print_header "Summary"
+    if [ $CHECKS_FAILED -eq 0 ]; then
+        print_success "All pre-commit checks passed!"
+        echo ""
+        print_info "Proceeding with commit..."
+        exit 0
+    else
+        echo ""
+        print_error "Pre-commit checks failed!"
+        echo ""
+        print_info "Options:"
+        echo "  1. Fix the issues above and try again"
+        echo "  2. Use [skip-pre-commit] in commit message to bypass (not recommended)"
+        echo ""
+        exit 1
+    fi
 fi
 
 print_info "Found $(echo "$STAGED_GO_FILES" | wc -l | tr -d ' ') Go file(s) to check"
