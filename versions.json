@@ -1,18 +1,18 @@
 {
   "$schema": "./versions.schema.json",
   "latest": null,
-  "latestPrerelease": "0.2.0-alpha.3",
+  "latestPrerelease": "0.2.0-alpha.4",
   "versions": [
     {
       "version": "0.2",
-      "fullVersion": "0.2.0-alpha.3",
-      "label": "v0.2 (alpha.3)",
-      "path": "/v0.2/",
-      "released": "2026-01-04T13:40:57.755Z",
+      "fullVersion": "0.2.0-alpha.4",
+      "label": "v0.2 (alpha.4)",
+      "path": "/v0-2/",
+      "released": "2026-01-04T13:46:48.069Z",
       "status": "prerelease",
       "eol": null,
-      "helmChart": "oci://ghcr.io/altairalabs/charts/omnia:0.2.0-alpha.3",
-      "dockerImage": "ghcr.io/altairalabs/omnia:0.2.0-alpha.3"
+      "helmChart": "oci://ghcr.io/altairalabs/charts/omnia:0.2.0-alpha.4",
+      "dockerImage": "ghcr.io/altairalabs/omnia:0.2.0-alpha.4"
     }
   ]
 }
