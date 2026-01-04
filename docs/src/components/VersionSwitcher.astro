@@ -131,9 +131,14 @@
       }
 
       const currentVersion = getCurrentVersion();
-
-      // Determine the default version (latest stable, or latest prerelease if no stable)
       const latestVersion = versions[0]; // versions are sorted newest first
+
+      // If on unversioned (dev) docs, redirect to latest versioned docs
+      if (currentVersion === 'latest' && latestVersion) {
+        const targetPath = buildTargetPath(latestVersion.path, currentVersion);
+        window.location.href = targetPath;
+        return;
+      }
 
       // Clear loading option
       select.innerHTML = '';
@@ -144,8 +149,7 @@
         option.value = buildTargetPath(v.path, currentVersion);
         option.textContent = v.label;
         option.dataset.status = v.status;
-        // Select if: user is on this version, OR user is on unversioned pages and this is latest
-        if (v.version === currentVersion || (currentVersion === 'latest' && v === latestVersion)) {
+        if (v.version === currentVersion) {
           option.selected = true;
         }
         select.appendChild(option);
