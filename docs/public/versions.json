@@ -1,6 +1,18 @@
 {
   "$schema": "./versions.schema.json",
   "latest": null,
-  "latestPrerelease": null,
-  "versions": []
+  "latestPrerelease": "0.2.0-alpha.4",
+  "versions": [
+    {
+      "version": "0.2",
+      "fullVersion": "0.2.0-alpha.4",
+      "label": "v0.2 (alpha.4)",
+      "path": "/v0-2/",
+      "released": "2026-01-04T13:46:24.000Z",
+      "status": "prerelease",
+      "eol": null,
+      "helmChart": "oci://ghcr.io/altairalabs/charts/omnia:0.2.0-alpha.4",
+      "dockerImage": "ghcr.io/altairalabs/omnia:0.2.0-alpha.4"
+    }
+  ]
 }

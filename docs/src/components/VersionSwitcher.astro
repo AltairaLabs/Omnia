@@ -3,61 +3,8 @@
  * Version Switcher Component
  *
  * Displays a dropdown to switch between documentation versions.
- * Reads version metadata from /versions.json
+ * Fetches version metadata from /versions.json at runtime.
  */
-import versionsData from '../../versions.json';
-
-interface Version {
-  version: string;
-  fullVersion: string;
-  label: string;
-  path: string;
-  status: 'stable' | 'prerelease' | 'deprecated';
-}
-
-const versions: Version[] = versionsData.versions || [];
-const currentPath = Astro.url.pathname;
-
-// Determine current version from URL path
-// URLs like /v0-2/tutorials/getting-started -> version is "0.2"
-// URLs like /tutorials/getting-started -> version is "latest" (current dev)
-// Note: We use hyphen in URLs (v0-2) but dots in version display (0.2)
-const pathMatch = currentPath.match(/^\/v(\d+)-(\d+)\//);
-const currentVersion = pathMatch ? `${pathMatch[1]}.${pathMatch[2]}` : 'latest';
-
-// If no versions are published yet, don't render the switcher
-const hasVersions = versions.length > 0;
-
-// Convert version "0.2" to URL path format "v0-2"
-function versionToPath(version: string): string {
-  return `/v${version.replace('.', '-')}/`;
-}
-
-// Build version options
-const versionOptions = versions.map(v => ({
-  ...v,
-  isCurrent: v.version === currentVersion,
-  // Convert current path to equivalent path in target version
-  targetPath: currentVersion === 'latest'
-    ? v.path + currentPath.slice(1)
-    : currentPath.replace(versionToPath(currentVersion), v.path)
-}));
-
-// Always add "Current (dev)" option for unversioned docs
-const devOption = {
-  version: 'latest',
-  fullVersion: 'dev',
-  label: 'Current (dev)',
-  path: '/',
-  status: 'prerelease' as const,
-  isCurrent: currentVersion === 'latest',
-  targetPath: currentVersion === 'latest'
-    ? currentPath
-    : currentPath.replace(versionToPath(currentVersion), '/')
-};
-
-// Add dev option at the top
-versionOptions.unshift(devOption);
 ---
 
 <div class="version-switcher">
@@ -67,15 +14,7 @@ versionOptions.unshift(devOption);
     class="version-select"
     aria-label="Select documentation version"
   >
-    {versionOptions.map(v => (
-      <option
-        value={v.targetPath}
-        selected={v.isCurrent}
-        data-status={v.status}
-      >
-        {v.label}
-      </option>
-    ))}
+    <option value="">Loading...</option>
   </select>
 </div>
 
@@ -113,6 +52,10 @@ versionOptions.unshift(devOption);
     outline: none;
   }
 
+  .version-switcher.hidden {
+    display: none;
+  }
+
   .sr-only {
     position: absolute;
     width: 1px;
@@ -125,21 +68,108 @@ versionOptions.unshift(devOption);
     border: 0;
   }
 
-  /* Dark mode adjustments */
   :global([data-theme='dark']) .version-select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
   }
 </style>
 
 <script>
-  // Handle version selection
-  const select = document.getElementById('version-select') as HTMLSelectElement;
-  if (select) {
-    select.addEventListener('change', (e) => {
-      const target = e.target as HTMLSelectElement;
-      if (target.value) {
-        window.location.href = target.value;
-      }
-    });
+  interface Version {
+    version: string;
+    fullVersion: string;
+    label: string;
+    path: string;
+    status: 'stable' | 'prerelease' | 'deprecated';
   }
+
+  interface VersionsData {
+    latest: string | null;
+    latestPrerelease: string | null;
+    versions: Version[];
+  }
+
+  // Determine current version from URL path
+  // URLs like /v0-2/tutorials/getting-started -> version is "0.2"
+  function getCurrentVersion(): string {
+    const pathMatch = window.location.pathname.match(/^\/v(\d+)-(\d+)\//);
+    return pathMatch ? `${pathMatch[1]}.${pathMatch[2]}` : 'latest';
+  }
+
+  // Convert version "0.2" to URL path format "/v0-2/"
+  function versionToUrlPath(version: string): string {
+    return `/v${version.replace('.', '-')}/`;
+  }
+
+  // Build target path for a version
+  function buildTargetPath(targetPath: string, currentVersion: string): string {
+    const currentPath = window.location.pathname;
+    if (currentVersion === 'latest') {
+      return targetPath + currentPath.slice(1);
+    }
+    return currentPath.replace(versionToUrlPath(currentVersion), targetPath);
+  }
+
+  async function initVersionSwitcher() {
+    const container = document.querySelector('.version-switcher');
+    const select = document.getElementById('version-select') as HTMLSelectElement;
+    if (!select || !container) return;
+
+    try {
+      const response = await fetch('/versions.json');
+      if (!response.ok) {
+        container.classList.add('hidden');
+        return;
+      }
+
+      const data: VersionsData = await response.json();
+      const versions = data.versions || [];
+
+      // If no versions, hide the switcher
+      if (versions.length === 0) {
+        container.classList.add('hidden');
+        return;
+      }
+
+      const currentVersion = getCurrentVersion();
+
+      // Clear loading option
+      select.innerHTML = '';
+
+      // Add "Current (dev)" option
+      const devOption = document.createElement('option');
+      devOption.value = buildTargetPath('/', currentVersion);
+      devOption.textContent = 'Current (dev)';
+      devOption.dataset.status = 'prerelease';
+      if (currentVersion === 'latest') {
+        devOption.selected = true;
+      }
+      select.appendChild(devOption);
+
+      // Add version options
+      for (const v of versions) {
+        const option = document.createElement('option');
+        option.value = buildTargetPath(v.path, currentVersion);
+        option.textContent = v.label;
+        option.dataset.status = v.status;
+        if (v.version === currentVersion) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      }
+
+      // Handle selection change
+      select.addEventListener('change', (e) => {
+        const target = e.target as HTMLSelectElement;
+        if (target.value) {
+          window.location.href = target.value;
+        }
+      });
+    } catch (error) {
+      // On error, hide the switcher
+      container.classList.add('hidden');
+    }
+  }
+
+  // Run on page load
+  initVersionSwitcher();
 </script>
