@@ -198,65 +198,58 @@ jobs:
             fi
           done
 
-          # Create index page for the versioned directory
+          # Determine version label
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             VERSION_LABEL="$VERSION (Pre-release)"
-            BANNER_TYPE="caution"
-            BANNER_TEXT="This is pre-release documentation for version $FULL_VERSION. Features may change before the stable release."
           else
             VERSION_LABEL="$VERSION"
-            BANNER_TYPE="note"
-            BANNER_TEXT="You are viewing documentation for version $FULL_VERSION."
           fi
 
-          cat > "$VERSION_DIR/index.mdx" << 'INDEXEOF'
----
-title: Omnia Documentation
-description: Documentation for Omnia
-template: splash
-hero:
-  title: Omnia Documentation
-  tagline: Kubernetes operator for managing AI agent deployments
-  actions:
-    - text: Getting Started
-      link: ./tutorials/getting-started/
-      icon: right-arrow
-    - text: API Reference
-      link: ./reference/agentruntime/
-      icon: document
-      variant: minimal
----
-
-import { Card, CardGrid } from '@astrojs/starlight/components';
-
-## Documentation Sections
-
-<CardGrid>
-  <Card title="Tutorials" icon="rocket">
-    Step-by-step guides to get you started with Omnia.
-    [Start learning](./tutorials/getting-started/)
-  </Card>
-  <Card title="How-To Guides" icon="list-format">
-    Practical guides for common tasks and scenarios.
-    [Browse guides](./how-to/local-development/)
-  </Card>
-  <Card title="Reference" icon="document">
-    Technical reference for CRDs, APIs, and configuration.
-    [View reference](./reference/agentruntime/)
-  </Card>
-  <Card title="Concepts" icon="information">
-    Understand the architecture and design of Omnia.
-    [Learn more](./explanation/architecture/)
-  </Card>
-</CardGrid>
-INDEXEOF
-
-          # Update the index page with version-specific information using sed
-          sed -i "s|title: Omnia Documentation|title: Omnia $VERSION_LABEL|g" "$VERSION_DIR/index.mdx"
-          sed -i "s|description: Documentation for Omnia|description: Documentation for Omnia $FULL_VERSION|" "$VERSION_DIR/index.mdx"
+          # Create index page for the versioned directory using printf
+          printf '%s\n' "---" > "$VERSION_DIR/index.mdx"
+          printf '%s\n' "title: Omnia $VERSION_LABEL" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "description: Documentation for Omnia $FULL_VERSION" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "template: splash" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "hero:" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  title: Omnia $VERSION_LABEL" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  tagline: Kubernetes operator for managing AI agent deployments" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  actions:" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    - text: Getting Started" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "      link: ./tutorials/getting-started/" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "      icon: right-arrow" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    - text: API Reference" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "      link: ./reference/agentruntime/" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "      icon: document" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "      variant: minimal" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "---" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "import { Card, CardGrid } from '@astrojs/starlight/components';" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "## Documentation Sections" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "<CardGrid>" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  <Card title=\"Tutorials\" icon=\"rocket\">" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    Step-by-step guides to get you started with Omnia." >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    [Start learning](./tutorials/getting-started/)" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  </Card>" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  <Card title=\"How-To Guides\" icon=\"list-format\">" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    Practical guides for common tasks and scenarios." >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    [Browse guides](./how-to/local-development/)" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  </Card>" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  <Card title=\"Reference\" icon=\"document\">" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    Technical reference for CRDs, APIs, and configuration." >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    [View reference](./reference/agentruntime/)" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  </Card>" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  <Card title=\"Concepts\" icon=\"information\">" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    Understand the architecture and design of Omnia." >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "    [Learn more](./explanation/architecture/)" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "  </Card>" >> "$VERSION_DIR/index.mdx"
+          printf '%s\n' "</CardGrid>" >> "$VERSION_DIR/index.mdx"
 
           echo "Created version snapshot at $VERSION_DIR"
           ls -la "$VERSION_DIR"
+          echo "Index content:"
+          cat "$VERSION_DIR/index.mdx"
 
       - name: Update versions.json
         run: |
