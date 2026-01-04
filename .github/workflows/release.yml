@@ -187,16 +187,12 @@ jobs:
           mkdir -p "$VERSION_DIR"
 
           # Copy all doc categories to versioned directory
+          # Note: We don't copy index.mdx as it has relative asset paths that break in subdirs
           for category in tutorials how-to reference explanation; do
             if [ -d "docs/src/content/docs/${category}" ]; then
               cp -r "docs/src/content/docs/${category}" "$VERSION_DIR/"
             fi
           done
-
-          # Copy index if it exists
-          if [ -f "docs/src/content/docs/index.mdx" ]; then
-            cp "docs/src/content/docs/index.mdx" "$VERSION_DIR/"
-          fi
 
           echo "Created version snapshot at $VERSION_DIR"
           ls -la "$VERSION_DIR"

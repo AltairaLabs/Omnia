@@ -2,11 +2,13 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightThemeGalaxy from 'starlight-theme-galaxy';
+import d2 from 'astro-d2';
 
 // https://astro.build/config
 export default defineConfig({
   site: 'https://omnia.altairalabs.ai',
   integrations: [
+    d2(),
     starlight({
       plugins: [starlightThemeGalaxy()],
       title: 'Omnia',
