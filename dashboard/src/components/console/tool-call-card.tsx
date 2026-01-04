@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
 import { ChevronDown, ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ToolCallWithResult } from "@/types/websocket";
@@ -11,7 +11,21 @@ interface ToolCallCardProps {
 }
 
 export function ToolCallCard({ toolCall, className }: ToolCallCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Start expanded if already has result, otherwise collapsed
+  const [isExpanded, setIsExpanded] = useState(toolCall.status !== "pending");
+  const prevStatusRef = useRef(toolCall.status);
+
+  // Auto-expand when transitioning from pending to success/error
+  // Using useLayoutEffect to avoid visual flicker
+  useLayoutEffect(() => {
+    if (prevStatusRef.current === "pending" && toolCall.status !== "pending") {
+      // Use requestAnimationFrame to defer the state update
+      requestAnimationFrame(() => {
+        setIsExpanded(true);
+      });
+    }
+    prevStatusRef.current = toolCall.status;
+  }, [toolCall.status]);
 
   const statusIcon = {
     pending: <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />,

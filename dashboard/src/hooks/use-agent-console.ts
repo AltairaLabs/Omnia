@@ -257,14 +257,16 @@ export function useAgentConsole({
     // Add tool calls after content
     const toolDelay = 400 + words.length * 50 + 200;
     mockResponse.toolCalls.forEach((tc, index) => {
-      // Show tool call
+      const toolId = `tool-${generateId()}`;
+
+      // Show tool call (pending)
       setTimeout(() => {
         setState((prev) => {
           const messages = [...prev.messages];
           const lastMessage = messages[messages.length - 1];
           if (lastMessage?.id === messageId) {
             const toolCall: ToolCallWithResult = {
-              id: `tool-${generateId()}`,
+              id: toolId,
               name: tc.name,
               arguments: tc.arguments,
               status: "pending",
@@ -273,27 +275,27 @@ export function useAgentConsole({
           }
           return { ...prev, messages };
         });
-      }, toolDelay + index * 400);
+      }, toolDelay + index * 700);
 
-      // Show tool result
+      // Show tool result (success) - update same tool call by ID
       setTimeout(() => {
         setState((prev) => {
           const messages = [...prev.messages];
           const lastMessage = messages[messages.length - 1];
           if (lastMessage?.toolCalls) {
-            const lastTool = lastMessage.toolCalls[lastMessage.toolCalls.length - 1];
-            if (lastTool) {
-              lastTool.result = tc.result;
-              lastTool.status = "success";
+            const toolCall = lastMessage.toolCalls.find((t) => t.id === toolId);
+            if (toolCall) {
+              toolCall.result = tc.result;
+              toolCall.status = "success";
             }
           }
           return { ...prev, messages };
         });
-      }, toolDelay + index * 400 + 300);
+      }, toolDelay + index * 700 + 500); // 500ms after pending appears
     });
 
     // Mark as done
-    const doneDelay = toolDelay + mockResponse.toolCalls.length * 400 + 400;
+    const doneDelay = toolDelay + mockResponse.toolCalls.length * 700 + 600;
     setTimeout(() => {
       setState((prev) => {
         const messages = [...prev.messages];
