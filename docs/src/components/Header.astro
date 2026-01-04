@@ -2,16 +2,15 @@
 /**
  * Custom Header Component
  *
- * Extends Starlight's default header to include the version switcher.
- * This component wraps the original Starlight Header and adds version selection.
+ * Extends starlight-theme-galaxy's header to include the version switcher.
  */
 import type { Props } from '@astrojs/starlight/props';
-import Default from '@astrojs/starlight/components/Header.astro';
+import GalaxyHeader from 'starlight-theme-galaxy/overrides/GalaxyHeader.astro';
 import VersionSwitcher from './VersionSwitcher.astro';
 ---
 
 <div class="header-wrapper">
-  <Default {...Astro.props}><slot /></Default>
+  <GalaxyHeader {...Astro.props}><slot /></GalaxyHeader>
   <div class="version-switcher-container">
     <VersionSwitcher />
   </div>

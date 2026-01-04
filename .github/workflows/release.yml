@@ -204,6 +204,9 @@ jobs:
       - name: Update versions.json
         run: |
           node scripts/update-versions.js "${{ needs.parse-version.outputs.version }}" "${{ needs.parse-version.outputs.is_prerelease }}"
+          # Copy to public folder for serving
+          mkdir -p docs/public
+          cp docs/versions.json docs/public/
 
       - name: Build documentation
         run: cd docs && npm run build
