@@ -22,6 +22,11 @@ export default defineConfig({
       customCss: [
         './src/styles/custom.css',
       ],
+      // Custom components for version switching
+      components: {
+        Header: './src/components/Header.astro',
+        PageTitle: './src/components/PageTitle.astro',
+      },
       sidebar: [
         {
           label: 'Tutorials',

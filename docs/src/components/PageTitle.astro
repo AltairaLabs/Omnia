@@ -1,0 +1,13 @@
+---
+/**
+ * Custom PageTitle Component
+ *
+ * Extends Starlight's PageTitle to include a version banner for non-latest docs.
+ */
+import type { Props } from '@astrojs/starlight/props';
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+import VersionBanner from './VersionBanner.astro';
+---
+
+<VersionBanner />
+<Default {...Astro.props}><slot /></Default>

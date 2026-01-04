@@ -1,0 +1,285 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  CHART_REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  parse-version:
+    name: Parse Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
+      major: ${{ steps.parse.outputs.major }}
+      minor: ${{ steps.parse.outputs.minor }}
+      patch: ${{ steps.parse.outputs.patch }}
+      prerelease_tag: ${{ steps.parse.outputs.prerelease_tag }}
+    steps:
+      - name: Parse version from tag
+        id: parse
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Detect prerelease (contains hyphen followed by alpha/beta/rc)
+          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            # Extract prerelease tag (e.g., "alpha.1" from "0.2.0-alpha.1")
+            PRERELEASE_TAG="${VERSION#*-}"
+            echo "prerelease_tag=$PRERELEASE_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "prerelease_tag=" >> $GITHUB_OUTPUT
+          fi
+
+          # Extract semver components (strip prerelease suffix first)
+          BASE_VERSION="${VERSION%%-*}"
+          IFS='.' read -r major minor patch <<< "$BASE_VERSION"
+          echo "major=$major" >> $GITHUB_OUTPUT
+          echo "minor=$minor" >> $GITHUB_OUTPUT
+          echo "patch=$patch" >> $GITHUB_OUTPUT
+
+          echo "Parsed version: $VERSION"
+          echo "  Major: $major, Minor: $minor, Patch: $patch"
+          echo "  Is prerelease: $([[ "$VERSION" =~ -[a-zA-Z] ]] && echo true || echo false)"
+
+  docker-release:
+    name: Build & Push Docker Images
+    needs: parse-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: omnia
+            dockerfile: Dockerfile
+            context: .
+          - image: omnia-agent
+            dockerfile: Dockerfile.agent
+            context: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.parse-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.parse-version.outputs.version }},enable=${{ needs.parse-version.outputs.is_prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.parse-version.outputs.is_prerelease == 'false' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  helm-release:
+    name: Package & Push Helm Chart
+    needs: [parse-version, docker-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Update Chart.yaml versions
+        run: |
+          VERSION="${{ needs.parse-version.outputs.version }}"
+
+          # Update chart version and appVersion
+          yq eval -i ".version = \"$VERSION\"" charts/omnia/Chart.yaml
+          yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
+
+          echo "Updated Chart.yaml:"
+          cat charts/omnia/Chart.yaml
+
+      - name: Update dependencies
+        run: helm dependency update charts/omnia
+
+      - name: Lint chart
+        run: helm lint charts/omnia
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p dist
+          helm package charts/omnia --destination dist/
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push to GHCR OCI Registry
+        run: |
+          VERSION="${{ needs.parse-version.outputs.version }}"
+          helm push dist/omnia-${VERSION}.tgz oci://${{ env.CHART_REGISTRY }}
+
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: dist/omnia-*.tgz
+
+  docs-release:
+    name: Build & Deploy Documentation
+    needs: parse-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        run: cd docs && npm ci
+
+      - name: Create version snapshot
+        run: |
+          VERSION="v${{ needs.parse-version.outputs.major }}.${{ needs.parse-version.outputs.minor }}"
+          IS_PRERELEASE="${{ needs.parse-version.outputs.is_prerelease }}"
+
+          echo "Creating documentation snapshot for $VERSION"
+
+          # Create versioned content directory
+          VERSION_DIR="docs/src/content/docs/${VERSION}"
+          mkdir -p "$VERSION_DIR"
+
+          # Copy all doc categories to versioned directory
+          for category in tutorials how-to reference explanation; do
+            if [ -d "docs/src/content/docs/${category}" ]; then
+              cp -r "docs/src/content/docs/${category}" "$VERSION_DIR/"
+            fi
+          done
+
+          # Copy index if it exists
+          if [ -f "docs/src/content/docs/index.mdx" ]; then
+            cp "docs/src/content/docs/index.mdx" "$VERSION_DIR/"
+          fi
+
+          echo "Created version snapshot at $VERSION_DIR"
+          ls -la "$VERSION_DIR"
+
+      - name: Update versions.json
+        run: |
+          node scripts/update-versions.js "${{ needs.parse-version.outputs.version }}" "${{ needs.parse-version.outputs.is_prerelease }}"
+          # Copy to public folder for serving
+          mkdir -p docs/public
+          cp docs/versions.json docs/public/
+
+      - name: Build documentation
+        run: cd docs && npm run build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/dist
+          cname: omnia.altairalabs.ai
+
+  github-release:
+    name: Create GitHub Release
+    needs: [parse-version, docker-release, helm-release, docs-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Helm chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+          path: dist/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.parse-version.outputs.version }}"
+          IS_PRERELEASE="${{ needs.parse-version.outputs.is_prerelease }}"
+
+          cat << 'EOF' > release-notes.md
+          ## Installation
+
+          ### Helm (Recommended)
+
+          ```bash
+          helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+            --version ${{ needs.parse-version.outputs.version }} \
+            --namespace omnia-system \
+            --create-namespace
+          ```
+
+          ### Docker Images
+
+          - `ghcr.io/altairalabs/omnia:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-agent:${{ needs.parse-version.outputs.version }}`
+
+          ## Documentation
+
+          EOF
+
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            echo "- [Pre-release Documentation](https://omnia.altairalabs.ai)" >> release-notes.md
+          else
+            echo "- [v${{ needs.parse-version.outputs.major }}.${{ needs.parse-version.outputs.minor }} Documentation](https://omnia.altairalabs.ai)" >> release-notes.md
+          fi
+
+          echo "" >> release-notes.md
+          echo "## What's Changed" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "See full changelog below." >> release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ needs.parse-version.outputs.version }}
+          body_path: release-notes.md
+          prerelease: ${{ needs.parse-version.outputs.is_prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            dist/omnia-*.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

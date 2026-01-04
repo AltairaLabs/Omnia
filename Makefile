@@ -129,6 +129,52 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+##@ Release
+
+.PHONY: helm-lint
+helm-lint: ## Lint Helm chart
+	helm lint charts/omnia
+
+.PHONY: helm-template
+helm-template: ## Test Helm chart template rendering
+	helm template omnia charts/omnia --debug
+
+.PHONY: helm-package
+helm-package: ## Package Helm chart locally
+	helm dependency update charts/omnia
+	mkdir -p dist
+	helm package charts/omnia --destination dist/
+
+.PHONY: helm-push
+helm-push: helm-package ## Package and push Helm chart to GHCR (requires VERSION)
+ifndef VERSION
+	$(error VERSION is required. Usage: make helm-push VERSION=0.2.0)
+endif
+	@echo "Pushing omnia-$(VERSION).tgz to GHCR..."
+	helm push dist/omnia-$(VERSION).tgz oci://ghcr.io/altairalabs/charts
+
+.PHONY: release-dry-run
+release-dry-run: ## Dry run of release process (local validation)
+	@echo "==> Validating Chart.yaml"
+	@helm lint charts/omnia
+	@echo "==> Building Docker images"
+	@$(MAKE) docker-build
+	@echo "==> Packaging Helm chart"
+	@$(MAKE) helm-package
+	@echo "==> Building documentation"
+	@cd docs && npm ci && npm run build
+	@echo "Release dry run complete"
+
+.PHONY: version-bump
+version-bump: ## Update chart version (requires VERSION)
+ifndef VERSION
+	$(error VERSION is required. Usage: make version-bump VERSION=0.2.0)
+endif
+	@echo "Current version: $$(yq eval '.version' charts/omnia/Chart.yaml)"
+	@yq eval -i ".version = \"$(VERSION)\"" charts/omnia/Chart.yaml
+	@yq eval -i ".appVersion = \"$(VERSION)\"" charts/omnia/Chart.yaml
+	@echo "Updated to $(VERSION)"
+
 ##@ Documentation
 
 .PHONY: docs-install

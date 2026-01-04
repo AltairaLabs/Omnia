@@ -31,7 +31,7 @@ Omnia is a Kubernetes operator that makes deploying, scaling, and managing AI ag
 ### Install the Operator
 
 ```bash
-helm install omnia oci://ghcr.io/altairalabs/omnia \
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   --namespace omnia-system \
   --create-namespace
 ```

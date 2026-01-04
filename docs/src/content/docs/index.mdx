@@ -14,6 +14,28 @@ hero:
     - text: View on GitHub
       link: https://github.com/altairalabs/omnia
       icon: external
+head:
+  - tag: script
+    attrs:
+      type: module
+    content: |
+      // Redirect to latest stable version if available
+      (async () => {
+        try {
+          const res = await fetch('/versions.json');
+          if (!res.ok) return;
+          const data = await res.json();
+          // Only redirect if there's a stable version and we're at root
+          if (data.latest && window.location.pathname === '/') {
+            const latestVersion = data.versions?.find(v => v.fullVersion === data.latest);
+            if (latestVersion?.path && latestVersion.path !== '/') {
+              window.location.replace(latestVersion.path);
+            }
+          }
+        } catch (e) {
+          // Silently fail - stay on current page
+        }
+      })();
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';

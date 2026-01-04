@@ -1,0 +1,134 @@
+---
+/**
+ * Version Banner Component
+ *
+ * Displays a warning banner for non-latest documentation versions.
+ * Shows different messages for prerelease, deprecated, or older stable versions.
+ */
+import versionsData from '../../versions.json';
+
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+
+// Determine current version from URL
+const currentPath = Astro.url.pathname;
+const pathMatch = currentPath.match(/^\/v(\d+\.\d+)\//);
+const currentVersion = pathMatch ? pathMatch[1] : null;
+
+// Don't show banner on latest/unversioned docs
+if (!currentVersion) {
+  return null;
+}
+
+// Find version info
+const versionInfo = versionsData.versions.find(v => v.version === currentVersion);
+const latestStable = versionsData.latest;
+
+// Determine banner type
+let bannerType: 'prerelease' | 'outdated' | 'deprecated' | null = null;
+let bannerMessage = '';
+let latestUrl = '/';
+
+if (versionInfo) {
+  if (versionInfo.status === 'prerelease') {
+    bannerType = 'prerelease';
+    bannerMessage = `This is pre-release documentation for v${versionInfo.fullVersion}. Features may change before the stable release.`;
+  } else if (versionInfo.status === 'deprecated' || versionInfo.eol) {
+    bannerType = 'deprecated';
+    bannerMessage = `This version is deprecated and no longer maintained. Please upgrade to the latest version.`;
+  } else if (latestStable && versionInfo.fullVersion !== latestStable) {
+    bannerType = 'outdated';
+    bannerMessage = `You're viewing documentation for v${versionInfo.version}. The latest stable version is v${latestStable}.`;
+  }
+}
+
+// Don't render if no banner needed
+if (!bannerType) {
+  return null;
+}
+
+const bannerClasses = {
+  prerelease: 'banner-prerelease',
+  outdated: 'banner-outdated',
+  deprecated: 'banner-deprecated'
+};
+---
+
+{bannerType && (
+  <div class:list={['version-banner', bannerClasses[bannerType], className]}>
+    <div class="banner-content">
+      <span class="banner-icon" aria-hidden="true">
+        {bannerType === 'prerelease' && '🧪'}
+        {bannerType === 'outdated' && '📦'}
+        {bannerType === 'deprecated' && '⚠️'}
+      </span>
+      <span class="banner-message">{bannerMessage}</span>
+      {(bannerType === 'outdated' || bannerType === 'deprecated') && (
+        <a href={latestUrl} class="banner-link">
+          View latest →
+        </a>
+      )}
+    </div>
+  </div>
+)}
+
+<style>
+  .version-banner {
+    padding: 0.75rem 1rem;
+    font-size: var(--sl-text-sm);
+    line-height: 1.5;
+  }
+
+  .banner-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    max-width: var(--sl-content-width);
+    margin: 0 auto;
+  }
+
+  .banner-icon {
+    flex-shrink: 0;
+  }
+
+  .banner-message {
+    text-align: center;
+  }
+
+  .banner-link {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .banner-link:hover {
+    text-decoration-thickness: 2px;
+  }
+
+  /* Prerelease - blue/info */
+  .banner-prerelease {
+    background-color: var(--sl-color-blue-low);
+    color: var(--sl-color-blue-high);
+    border-bottom: 1px solid var(--sl-color-blue);
+  }
+
+  /* Outdated - yellow/warning */
+  .banner-outdated {
+    background-color: var(--sl-color-orange-low);
+    color: var(--sl-color-orange-high);
+    border-bottom: 1px solid var(--sl-color-orange);
+  }
+
+  /* Deprecated - red/error */
+  .banner-deprecated {
+    background-color: var(--sl-color-red-low);
+    color: var(--sl-color-red-high);
+    border-bottom: 1px solid var(--sl-color-red);
+  }
+</style>

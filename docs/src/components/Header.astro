@@ -1,0 +1,46 @@
+---
+/**
+ * Custom Header Component
+ *
+ * Extends starlight-theme-galaxy's header to include the version switcher.
+ */
+import type { Props } from '@astrojs/starlight/props';
+import GalaxyHeader from 'starlight-theme-galaxy/overrides/GalaxyHeader.astro';
+import VersionSwitcher from './VersionSwitcher.astro';
+---
+
+<div class="header-wrapper">
+  <GalaxyHeader {...Astro.props}><slot /></GalaxyHeader>
+  <div class="version-switcher-container">
+    <VersionSwitcher />
+  </div>
+</div>
+
+<style>
+  .header-wrapper {
+    display: contents;
+  }
+
+  .version-switcher-container {
+    position: fixed;
+    top: 0;
+    right: calc(var(--sl-nav-pad-x) + 3rem);
+    height: var(--sl-nav-height);
+    display: flex;
+    align-items: center;
+    z-index: var(--sl-z-index-navbar);
+  }
+
+  /* Adjust for mobile - hide on very small screens */
+  @media (max-width: 50rem) {
+    .version-switcher-container {
+      right: calc(var(--sl-nav-pad-x) + 5.5rem);
+    }
+  }
+
+  @media (max-width: 30rem) {
+    .version-switcher-container {
+      display: none;
+    }
+  }
+</style>
