@@ -337,6 +337,43 @@ type ProviderConfig struct {
 	Pricing *ProviderPricing `json:"pricing,omitempty"`
 }
 
+// FrameworkType defines which agent framework to use.
+// +kubebuilder:validation:Enum=promptkit;langchain;crewai;autogen;custom
+type FrameworkType string
+
+const (
+	// FrameworkTypePromptKit uses AltairaLabs' PromptKit framework.
+	FrameworkTypePromptKit FrameworkType = "promptkit"
+	// FrameworkTypeLangChain uses the LangChain framework.
+	FrameworkTypeLangChain FrameworkType = "langchain"
+	// FrameworkTypeCrewAI uses the CrewAI framework.
+	FrameworkTypeCrewAI FrameworkType = "crewai"
+	// FrameworkTypeAutoGen uses Microsoft's AutoGen framework.
+	FrameworkTypeAutoGen FrameworkType = "autogen"
+	// FrameworkTypeCustom uses a user-provided container image.
+	FrameworkTypeCustom FrameworkType = "custom"
+)
+
+// FrameworkConfig specifies which agent framework to use.
+// This enables Omnia's "no vendor lock-in" promise by supporting multiple frameworks.
+type FrameworkConfig struct {
+	// type specifies the agent framework to use.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default="promptkit"
+	Type FrameworkType `json:"type"`
+
+	// version specifies the framework version to use.
+	// If not specified, the latest supported version is used.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// image overrides the default container image for the framework.
+	// Required when type is "custom".
+	// For built-in frameworks, this allows using a custom build or private registry.
+	// +optional
+	Image string `json:"image,omitempty"`
+}
+
 // RuntimeConfig defines deployment-related settings.
 type RuntimeConfig struct {
 	// replicas is the desired number of agent runtime pods.
@@ -369,6 +406,12 @@ type RuntimeConfig struct {
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
 type AgentRuntimeSpec struct {
+	// framework specifies which agent framework to use.
+	// Supports PromptKit, LangChain, CrewAI, AutoGen, or a custom image.
+	// If not specified, defaults to PromptKit.
+	// +optional
+	Framework *FrameworkConfig `json:"framework,omitempty"`
+
 	// promptPackRef references the PromptPack containing agent prompts and configuration.
 	// +kubebuilder:validation:Required
 	PromptPackRef PromptPackRef `json:"promptPackRef"`

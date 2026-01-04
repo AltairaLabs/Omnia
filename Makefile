@@ -193,6 +193,41 @@ docs-dev: ## Run documentation site in development mode
 docs-serve: docs-install ## Build docs and serve locally (preview)
 	cd docs && npm run build && npm run preview
 
+##@ Dashboard
+
+DASHBOARD_IMG ?= omnia-dashboard:latest
+
+.PHONY: dashboard-install
+dashboard-install: ## Install dashboard dependencies
+	cd dashboard && npm ci
+
+.PHONY: dashboard-dev
+dashboard-dev: ## Run dashboard in development mode
+	cd dashboard && npm run dev
+
+.PHONY: dashboard-build
+dashboard-build: ## Build dashboard for production
+	cd dashboard && npm run build
+
+.PHONY: dashboard-lint
+dashboard-lint: ## Run ESLint on dashboard
+	cd dashboard && npm run lint
+
+.PHONY: dashboard-typecheck
+dashboard-typecheck: ## Run TypeScript type checking on dashboard
+	cd dashboard && npm run typecheck
+
+.PHONY: dashboard-check
+dashboard-check: dashboard-lint dashboard-typecheck ## Run all dashboard checks (lint + typecheck)
+
+.PHONY: docker-build-dashboard
+docker-build-dashboard: ## Build docker image for the dashboard
+	$(CONTAINER_TOOL) build -t ${DASHBOARD_IMG} ./dashboard
+
+.PHONY: generate-dashboard-types
+generate-dashboard-types: ## Generate TypeScript types from CRD schemas
+	node scripts/generate-dashboard-types.js
+
 ##@ Build
 
 .PHONY: build

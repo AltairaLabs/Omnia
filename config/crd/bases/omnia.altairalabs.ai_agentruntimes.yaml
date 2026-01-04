@@ -86,6 +86,36 @@ spec:
                 required:
                 - type
                 type: object
+              framework:
+                description: |-
+                  framework specifies which agent framework to use.
+                  Supports PromptKit, LangChain, CrewAI, AutoGen, or a custom image.
+                  If not specified, defaults to PromptKit.
+                properties:
+                  image:
+                    description: |-
+                      image overrides the default container image for the framework.
+                      Required when type is "custom".
+                      For built-in frameworks, this allows using a custom build or private registry.
+                    type: string
+                  type:
+                    default: promptkit
+                    description: type specifies the agent framework to use.
+                    enum:
+                    - promptkit
+                    - langchain
+                    - crewai
+                    - autogen
+                    - custom
+                    type: string
+                  version:
+                    description: |-
+                      version specifies the framework version to use.
+                      If not specified, the latest supported version is used.
+                    type: string
+                required:
+                - type
+                type: object
               promptPackRef:
                 description: promptPackRef references the PromptPack containing agent
                   prompts and configuration.
