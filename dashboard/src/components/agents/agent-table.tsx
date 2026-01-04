@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "./status-badge";
+import { FrameworkBadge } from "./framework-badge";
 import type { AgentRuntime } from "@/types";
 
 interface AgentTableProps {
@@ -40,9 +41,9 @@ export function AgentTable({ agents }: AgentTableProps) {
             <TableHead>Name</TableHead>
             <TableHead>Namespace</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Framework</TableHead>
             <TableHead>Replicas</TableHead>
             <TableHead>Provider</TableHead>
-            <TableHead>Model</TableHead>
             <TableHead>Age</TableHead>
           </TableRow>
         </TableHeader>
@@ -64,14 +65,14 @@ export function AgentTable({ agents }: AgentTableProps) {
                 <StatusBadge phase={agent.status?.phase} />
               </TableCell>
               <TableCell>
+                <FrameworkBadge framework={agent.spec.framework?.type} />
+              </TableCell>
+              <TableCell>
                 {agent.status?.replicas?.ready ?? 0}/
                 {agent.status?.replicas?.desired ?? agent.spec.runtime?.replicas ?? 1}
               </TableCell>
               <TableCell className="capitalize">
                 {agent.spec.provider?.type || "claude"}
-              </TableCell>
-              <TableCell className="max-w-[120px] truncate" title={agent.spec.provider?.model}>
-                {agent.spec.provider?.model?.split("-").slice(-2).join("-") || "sonnet-4"}
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatAge(agent.metadata.creationTimestamp)}

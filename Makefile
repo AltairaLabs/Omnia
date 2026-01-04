@@ -224,6 +224,10 @@ dashboard-check: dashboard-lint dashboard-typecheck ## Run all dashboard checks 
 docker-build-dashboard: ## Build docker image for the dashboard
 	$(CONTAINER_TOOL) build -t ${DASHBOARD_IMG} ./dashboard
 
+.PHONY: generate-dashboard-types
+generate-dashboard-types: ## Generate TypeScript types from CRD schemas
+	node scripts/generate-dashboard-types.js
+
 ##@ Build
 
 .PHONY: build

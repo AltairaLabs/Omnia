@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "./status-badge";
+import { FrameworkBadge } from "./framework-badge";
 import type { AgentRuntime } from "@/types";
 
 interface AgentCardProps {
@@ -23,7 +24,10 @@ export function AgentCard({ agent }: AgentCardProps) {
               </CardTitle>
               <CardDescription>{metadata.namespace}</CardDescription>
             </div>
-            <StatusBadge phase={status?.phase} />
+            <div className="flex flex-col items-end gap-1.5">
+              <StatusBadge phase={status?.phase} />
+              <FrameworkBadge framework={spec.framework?.type} />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
