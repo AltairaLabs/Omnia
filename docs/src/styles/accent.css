@@ -1,0 +1,12 @@
+/* Violet accent color theme */
+:root {
+  --sl-color-accent-low: #4c1d95;
+  --sl-color-accent: #8b5cf6;
+  --sl-color-accent-high: #c4b5fd;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #ede9fe;
+  --sl-color-accent: #7c3aed;
+  --sl-color-accent-high: #5b21b6;
+}

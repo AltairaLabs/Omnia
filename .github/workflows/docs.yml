@@ -1,17 +1,13 @@
 name: Deploy Documentation to GitHub Pages
 
+# Documentation is deployed automatically by release.yml on each release.
+# This workflow is for emergency manual deployments only.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docs/**'
-  # Note: releases are handled by release.yml which includes versioned docs
   workflow_dispatch:
     inputs:
       reason:
         description: 'Reason for manual deployment'
-        required: false
+        required: true
         type: string
 
 permissions:
@@ -28,17 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Log deployment trigger
-        env:
-          REASON: ${{ inputs.reason }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Manual deployment triggered"
-            if [ -n "$REASON" ]; then
-              echo "Reason: $REASON"
-            fi
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "Deploying documentation on push to main"
-          fi
+          echo "Manual deployment triggered"
+          echo "Reason: ${{ inputs.reason }}"
 
       - name: Checkout
         uses: actions/checkout@v4

@@ -13,6 +13,10 @@ export default defineConfig({
       plugins: [starlightThemeGalaxy()],
       title: 'Omnia',
       description: 'Kubernetes operator for managing AI agent deployments',
+      customCss: [
+        './src/styles/accent.css',
+        './src/styles/custom.css',
+      ],
       logo: {
         light: './src/assets/logo-light.svg',
         dark: './src/assets/logo-dark.svg',
@@ -20,9 +24,6 @@ export default defineConfig({
       },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/altairalabs/omnia' },
-      ],
-      customCss: [
-        './src/styles/custom.css',
       ],
       // Custom components for version switching
       components: {

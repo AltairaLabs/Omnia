@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
- * Updates docs/versions.json with a new release version.
+ * Updates docs/versions.json with the current release version.
  *
  * Usage: node scripts/update-versions.js <version> [is_prerelease]
  *
+ * The script sets `current` to the released version. Archived versions
+ * are managed separately when a new minor version is released.
+ *
  * Examples:
- *   node scripts/update-versions.js 0.2.0 false     # Stable release
+ *   node scripts/update-versions.js 0.2.0 false        # Stable release
  *   node scripts/update-versions.js 0.3.0-beta.1 true  # Pre-release
  */
 
@@ -54,57 +57,27 @@ function main() {
     process.exit(1);
   }
 
-  // Check if this minor version already exists
-  const existingIndex = data.versions.findIndex(
-    (v) => v.version === parsed.minorVersion
-  );
+  // Ensure the new structure exists
+  if (!('current' in data)) {
+    data = { current: null, archived: data.archived || [] };
+  }
 
-  const newEntry = {
+  // Build the label - show "Latest (v0.2)" for root deployment
+  const statusLabel = isPrerelease ? 'Pre-release' : 'Latest';
+  const label = `${statusLabel} (v${parsed.minorVersion})`;
+
+  // Update current to the new release
+  data.current = {
     version: parsed.minorVersion,
     fullVersion: parsed.full,
-    label: isPrerelease
-      ? `v${parsed.minorVersion} (${parsed.prerelease || 'Pre-release'})`
-      : `v${parsed.minorVersion}${!isPrerelease ? ' (Latest)' : ''}`,
-    // Versioned docs are at /v0-2/, unversioned (latest dev) at /
-    // Use hyphen instead of dot to avoid URL encoding issues
-    path: `/v${parsed.major}-${parsed.minor}/`,
+    label: label,
+    path: '/',  // Current is always deployed at root
     released: new Date().toISOString(),
     status: isPrerelease ? 'prerelease' : 'stable',
     eol: null,
     helmChart: `oci://ghcr.io/altairalabs/charts/omnia:${parsed.full}`,
     dockerImage: `ghcr.io/altairalabs/omnia:${parsed.full}`,
   };
-
-  if (existingIndex >= 0) {
-    // Update existing entry
-    data.versions[existingIndex] = newEntry;
-    console.log(`Updated existing entry for v${parsed.minorVersion}`);
-  } else {
-    // Add new entry at the beginning
-    data.versions.unshift(newEntry);
-    console.log(`Added new entry for v${parsed.minorVersion}`);
-  }
-
-  // Update latest pointers
-  if (isPrerelease) {
-    data.latestPrerelease = parsed.full;
-  } else {
-    data.latest = parsed.full;
-    // Update labels - remove "(Latest)" from other stable versions
-    data.versions.forEach((v) => {
-      if (v.status === 'stable' && v.version !== parsed.minorVersion) {
-        v.label = `v${v.version}`;
-      }
-    });
-  }
-
-  // Sort versions (newest first)
-  data.versions.sort((a, b) => {
-    const [aMajor, aMinor] = a.version.split('.').map(Number);
-    const [bMajor, bMinor] = b.version.split('.').map(Number);
-    if (bMajor !== aMajor) return bMajor - aMajor;
-    return bMinor - aMinor;
-  });
 
   // Write updated versions.json
   fs.writeFileSync(VERSIONS_FILE, JSON.stringify(data, null, 2) + '\n');

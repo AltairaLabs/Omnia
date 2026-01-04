@@ -3,7 +3,8 @@
  * Version Switcher Component
  *
  * Displays a dropdown to switch between documentation versions.
- * Fetches version metadata from /versions.json at runtime.
+ * - Local dev (no versions.json or current=null): shows "dev" only
+ * - Released docs: shows "Latest (vX.X)" + any archived versions
  */
 ---
 
@@ -52,10 +53,6 @@
     outline: none;
   }
 
-  .version-switcher.hidden {
-    display: none;
-  }
-
   .sr-only {
     position: absolute;
     width: 1px;
@@ -74,7 +71,7 @@
 </style>
 
 <script>
-  interface Version {
+  interface VersionEntry {
     version: string;
     fullVersion: string;
     label: string;
@@ -83,95 +80,72 @@
   }
 
   interface VersionsData {
-    latest: string | null;
-    latestPrerelease: string | null;
-    versions: Version[];
-  }
-
-  // Determine current version from URL path
-  // URLs like /v0-2/tutorials/getting-started -> version is "0.2"
-  function getCurrentVersion(): string {
-    const pathMatch = window.location.pathname.match(/^\/v(\d+)-(\d+)\//);
-    return pathMatch ? `${pathMatch[1]}.${pathMatch[2]}` : 'latest';
-  }
-
-  // Convert version "0.2" to URL path format "/v0-2/"
-  function versionToUrlPath(version: string): string {
-    return `/v${version.replace('.', '-')}/`;
-  }
-
-  // Build target path for a version
-  function buildTargetPath(targetPath: string, currentVersion: string): string {
-    const currentPath = window.location.pathname;
-    if (currentVersion === 'latest') {
-      return targetPath + currentPath.slice(1);
-    }
-    return currentPath.replace(versionToUrlPath(currentVersion), targetPath);
+    current: VersionEntry | null;
+    archived: VersionEntry[];
   }
 
   async function initVersionSwitcher() {
-    const container = document.querySelector('.version-switcher');
     const select = document.getElementById('version-select') as HTMLSelectElement;
-    if (!select || !container) return;
+    if (!select) return;
+
+    // Default to "dev" if versions.json unavailable or has no current version
+    const showDevOnly = () => {
+      select.innerHTML = '';
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'dev';
+      option.selected = true;
+      option.disabled = true;
+      select.appendChild(option);
+    };
 
     try {
       const response = await fetch('/versions.json');
       if (!response.ok) {
-        container.classList.add('hidden');
+        showDevOnly();
         return;
       }
 
       const data: VersionsData = await response.json();
-      const versions = data.versions || [];
 
-      // If no versions, hide the switcher
-      if (versions.length === 0) {
-        container.classList.add('hidden');
-        return;
-      }
-
-      const currentVersion = getCurrentVersion();
-      const latestVersion = versions[0]; // versions are sorted newest first
-
-      // If on unversioned (dev) docs, redirect to latest versioned docs
-      if (currentVersion === 'latest' && latestVersion) {
-        const targetPath = buildTargetPath(latestVersion.path, currentVersion);
-        window.location.href = targetPath;
+      // If no current version (local dev), show "dev" only
+      if (!data.current) {
+        showDevOnly();
         return;
       }
 
       // Clear loading option
       select.innerHTML = '';
 
-      // Add version options (latest first)
-      for (const v of versions) {
-        const option = document.createElement('option');
-        option.value = buildTargetPath(v.path, currentVersion);
-        option.textContent = v.label;
-        option.dataset.status = v.status;
-        if (v.version === currentVersion) {
-          option.selected = true;
+      // Add current version (at root)
+      const currentOption = document.createElement('option');
+      currentOption.value = '/';
+      currentOption.textContent = data.current.label;
+      currentOption.selected = true; // Current is always selected since we're at root
+      select.appendChild(currentOption);
+
+      // Add archived versions
+      if (data.archived && data.archived.length > 0) {
+        for (const v of data.archived) {
+          const option = document.createElement('option');
+          option.value = v.path;
+          option.textContent = v.label;
+          select.appendChild(option);
         }
-        select.appendChild(option);
       }
 
-      // Add "Current (dev)" option at the end
-      const devOption = document.createElement('option');
-      devOption.value = buildTargetPath('/', currentVersion);
-      devOption.textContent = 'Current (dev)';
-      devOption.dataset.status = 'prerelease';
-      select.appendChild(devOption);
-
-      // Handle selection change
+      // Handle selection change - navigate to selected version
       select.addEventListener('change', (e) => {
         const target = e.target as HTMLSelectElement;
-        if (target.value) {
-          window.location.href = target.value;
+        if (target.value && target.value !== '/') {
+          // Navigate to archived version, preserving current page path
+          const currentPath = window.location.pathname;
+          window.location.href = target.value + currentPath.slice(1);
         }
       });
-    } catch (error) {
-      // On error, hide the switcher
-      container.classList.add('hidden');
+    } catch {
+      // On error (e.g., local dev with no server), show "dev" only
+      showDevOnly();
     }
   }
 
