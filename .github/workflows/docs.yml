@@ -6,8 +6,7 @@ on:
       - main
     paths:
       - 'docs/**'
-  release:
-    types: [published]
+  # Note: releases are handled by release.yml which includes versioned docs
   workflow_dispatch:
     inputs:
       reason:
@@ -31,15 +30,12 @@ jobs:
       - name: Log deployment trigger
         env:
           REASON: ${{ inputs.reason }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Manual deployment triggered"
             if [ -n "$REASON" ]; then
               echo "Reason: $REASON"
             fi
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            echo "Deploying documentation for release: $RELEASE_TAG"
           elif [ "${{ github.event_name }}" = "push" ]; then
             echo "Deploying documentation on push to main"
           fi
