@@ -325,7 +325,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	server := newTestServer(t)
 	handler := server.Handler()
 
-	req := httptest.NewRequest("POST", "/api/v1/agents", nil)
+	req := httptest.NewRequest("DELETE", "/api/v1/agents", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

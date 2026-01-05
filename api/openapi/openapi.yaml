@@ -26,6 +26,8 @@ tags:
     description: Provider operations
   - name: stats
     description: Aggregated statistics
+  - name: namespaces
+    description: Kubernetes namespaces
 
 paths:
   /api/v1/agents:
@@ -48,6 +50,33 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AgentRuntime'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [agents]
+      summary: Create a new AgentRuntime
+      operationId: createAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRuntime'
+      responses:
+        '201':
+          description: Agent created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRuntime'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Agent already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -264,6 +293,23 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/namespaces:
+    get:
+      tags: [namespaces]
+      summary: List all namespaces
+      operationId: listNamespaces
+      responses:
+        '200':
+          description: List of namespace names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   responses:
     NotFound:
@@ -274,6 +320,12 @@ components:
             $ref: '#/components/schemas/Error'
     InternalError:
       description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Bad request - invalid input
       content:
         application/json:
           schema:
