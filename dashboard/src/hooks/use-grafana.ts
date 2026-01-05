@@ -99,6 +99,9 @@ export function useGrafana(): GrafanaConfig {
 /**
  * Builds a Grafana panel embed URL.
  *
+ * Uses /grafana/ subpath since Grafana is configured with serve_from_sub_path.
+ * The Next.js rewrite proxies /grafana/* to the actual Grafana service.
+ *
  * @param config - Grafana configuration
  * @param options - Panel options
  * @returns The embed URL or null if Grafana is not enabled
@@ -107,7 +110,7 @@ export function buildPanelUrl(
   config: GrafanaConfig,
   options: GrafanaPanelOptions
 ): string | null {
-  if (!config.enabled || !config.baseUrl) {
+  if (!config.enabled) {
     return null;
   }
 
@@ -121,30 +124,28 @@ export function buildPanelUrl(
     vars = {},
   } = options;
 
-  // Build the solo panel URL
-  const url = new URL(
-    `/d-solo/${dashboardUid}`,
-    config.baseUrl
-  );
-
-  // Add query parameters
-  url.searchParams.set("orgId", config.orgId.toString());
-  url.searchParams.set("panelId", panelId.toString());
-  url.searchParams.set("from", from);
-  url.searchParams.set("to", to);
-  url.searchParams.set("refresh", refresh);
-  url.searchParams.set("theme", theme);
+  // Build query params
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("panelId", panelId.toString());
+  params.set("from", from);
+  params.set("to", to);
+  params.set("refresh", refresh);
+  params.set("theme", theme);
 
   // Add template variables
   for (const [key, value] of Object.entries(vars)) {
-    url.searchParams.set(`var-${key}`, value);
+    params.set(`var-${key}`, value);
   }
 
-  return url.toString();
+  // Use relative /grafana/ path - Next.js rewrites this to the actual Grafana service
+  return `/grafana/d-solo/${dashboardUid}?${params.toString()}`;
 }
 
 /**
  * Builds a full Grafana dashboard URL.
+ *
+ * Uses /grafana/ subpath since Grafana is configured with serve_from_sub_path.
  *
  * @param config - Grafana configuration
  * @param dashboardUid - Dashboard UID
@@ -156,16 +157,17 @@ export function buildDashboardUrl(
   dashboardUid: string,
   vars: Record<string, string> = {}
 ): string | null {
-  if (!config.enabled || !config.baseUrl) {
+  if (!config.enabled) {
     return null;
   }
 
-  const url = new URL(`/d/${dashboardUid}`, config.baseUrl);
-  url.searchParams.set("orgId", config.orgId.toString());
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
 
   for (const [key, value] of Object.entries(vars)) {
-    url.searchParams.set(`var-${key}`, value);
+    params.set(`var-${key}`, value);
   }
 
-  return url.toString();
+  // Use relative /grafana/ path with slug (use uid as slug for provisioned dashboards)
+  return `/grafana/d/${dashboardUid}/_?${params.toString()}`;
 }
