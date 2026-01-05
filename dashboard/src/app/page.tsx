@@ -3,12 +3,14 @@
 import { Bot, FileText, Wrench, Activity, DollarSign, Coins } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatCard, RecentAgents, ActivityChart } from "@/components/dashboard";
-import { useStats } from "@/hooks";
+import { SystemOverviewPanels } from "@/components/grafana";
+import { useStats, useGrafana } from "@/hooks";
 import { getMockAggregatedUsage } from "@/lib/mock-data";
 import { calculateCost, formatCost, formatTokens } from "@/lib/pricing";
 
 export default function Home() {
   const { data: stats, isLoading } = useStats();
+  const grafana = useGrafana();
 
   // Get aggregated usage data for cost display
   const usage = getMockAggregatedUsage();
@@ -111,6 +113,9 @@ export default function Home() {
             loading={isLoading}
           />
         </div>
+
+        {/* Grafana Metrics (if enabled) */}
+        {grafana.enabled && <SystemOverviewPanels />}
 
         {/* Charts and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">

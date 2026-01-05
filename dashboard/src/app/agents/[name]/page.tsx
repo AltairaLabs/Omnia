@@ -3,14 +3,22 @@
 import { use, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare } from "lucide-react";
+import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare, Activity } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
 import { StatusBadge, ScaleControl } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { CostSummary, TokenUsageChart } from "@/components/cost";
+import {
+  AgentRequestsPanel,
+  AgentLatencyPanel,
+  AgentErrorRatePanel,
+  ActiveConnectionsPanel,
+  TokenUsagePanel,
+} from "@/components/grafana";
 import { getMockAgentUsage } from "@/lib/mock-data";
+import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
 import { scaleAgent } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +44,7 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   const queryClient = useQueryClient();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
+  const grafana = useGrafana();
 
   const handleScale = useCallback(async (replicas: number) => {
     await scaleAgent(namespace, name, replicas);
@@ -119,6 +128,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
             <TabsTrigger value="usage" className="gap-1.5">
               <BarChart3 className="h-4 w-4" />
               Usage
+            </TabsTrigger>
+            <TabsTrigger value="metrics" className="gap-1.5">
+              <Activity className="h-4 w-4" />
+              Metrics
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
@@ -401,6 +414,50 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                 </>
               );
             })()}
+          </TabsContent>
+
+          <TabsContent value="metrics" className="space-y-6 mt-4">
+            {/* View in Grafana button - only shown when Grafana is enabled */}
+            {grafana.enabled && (
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" asChild>
+                  <a
+                    href={buildDashboardUrl(grafana, GRAFANA_DASHBOARDS.AGENT_DETAIL, {
+                      agent: metadata.name,
+                      namespace: metadata.namespace || "default",
+                    }) || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    View Full Dashboard in Grafana
+                  </a>
+                </Button>
+              </div>
+            )}
+            <div className="grid md:grid-cols-2 gap-4">
+              <AgentRequestsPanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+              <AgentLatencyPanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+              <AgentErrorRatePanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+              <ActiveConnectionsPanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+            </div>
+            <TokenUsagePanel
+              agentName={metadata.name}
+              namespace={metadata.namespace || "default"}
+              height={300}
+            />
           </TabsContent>
 
           <TabsContent value="config" className="mt-4">
