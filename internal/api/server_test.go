@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +29,8 @@ func newTestServer(t *testing.T, objs ...client.Object) *Server {
 		WithObjects(objs...).
 		Build()
 
-	return NewServer(fakeClient, zap.New(zap.UseDevMode(true)))
+	// Pass nil for clientset since we're not testing logs functionality
+	return NewServer(fakeClient, nil, zap.New(zap.UseDevMode(true)))
 }
 
 func TestListAgents(t *testing.T) {
@@ -552,6 +555,163 @@ func TestGetToolRegistryMethodNotAllowed(t *testing.T) {
 	handler := server.Handler()
 
 	req := httptest.NewRequest("POST", "/api/v1/toolregistries/default/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestParseLogLine(t *testing.T) {
+	tests := []struct {
+		name          string
+		line          string
+		containerName string
+		wantLevel     string
+		wantMessage   string
+	}{
+		{
+			name:          "plain text log",
+			line:          "2026-01-05T12:00:00.000000000Z simple message",
+			containerName: "facade",
+			wantLevel:     "info",
+			wantMessage:   "simple message",
+		},
+		{
+			name:          "json zap log",
+			line:          `2026-01-05T12:00:00.000000000Z {"level":"info","ts":1767616635.642715,"caller":"main.go:195","msg":"health server starting"}`,
+			containerName: "runtime",
+			wantLevel:     "info",
+			wantMessage:   "[main.go:195] health server starting",
+		},
+		{
+			name:          "json error log",
+			line:          `2026-01-05T12:00:00.000000000Z {"level":"error","ts":1767616635.0,"caller":"server.go:50","msg":"connection failed","error":"timeout"}`,
+			containerName: "facade",
+			wantLevel:     "error",
+			wantMessage:   "[server.go:50] connection failed: timeout",
+		},
+		{
+			name:          "plain error log",
+			line:          "2026-01-05T12:00:00.000000000Z error: something went wrong",
+			containerName: "facade",
+			wantLevel:     "error",
+			wantMessage:   "error: something went wrong",
+		},
+		{
+			name:          "plain warning log",
+			line:          "2026-01-05T12:00:00.000000000Z warning: low memory",
+			containerName: "runtime",
+			wantLevel:     "warn",
+			wantMessage:   "warning: low memory",
+		},
+		{
+			name:          "plain debug log",
+			line:          "2026-01-05T12:00:00.000000000Z debug: processing request",
+			containerName: "runtime",
+			wantLevel:     "debug",
+			wantMessage:   "debug: processing request",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := parseLogLine(tt.line, tt.containerName)
+			assert.Equal(t, tt.wantLevel, entry.Level)
+			assert.Equal(t, tt.wantMessage, entry.Message)
+			assert.Equal(t, tt.containerName, entry.Container)
+		})
+	}
+}
+
+func TestSortLogsByTimestamp(t *testing.T) {
+	now := time.Now()
+	logs := []LogEntry{
+		{Timestamp: now.Add(-1 * time.Hour), Message: "oldest"},
+		{Timestamp: now, Message: "newest"},
+		{Timestamp: now.Add(-30 * time.Minute), Message: "middle"},
+	}
+
+	sortLogsByTimestamp(logs)
+
+	assert.Equal(t, "newest", logs[0].Message)
+	assert.Equal(t, "middle", logs[1].Message)
+	assert.Equal(t, "oldest", logs[2].Message)
+}
+
+func TestGetAgentLogsInvalidPath(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	// Test with only one path component (invalid)
+	req := httptest.NewRequest("GET", "/api/v1/agents/invalid", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestGetAgentLogsNoClientset(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	// Request logs endpoint - should fail because clientset is nil
+	req := httptest.NewRequest("GET", "/api/v1/agents/default/test-agent/logs", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Should return 500 error since clientset is nil
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestParseLogStream(t *testing.T) {
+	server := newTestServer(t)
+	input := `2026-01-05T12:00:00.000000000Z {"level":"info","ts":1767616635.0,"caller":"main.go:100","msg":"starting"}
+2026-01-05T12:00:01.000000000Z {"level":"error","ts":1767616636.0,"caller":"main.go:200","msg":"failed","error":"timeout"}
+2026-01-05T12:00:02.000000000Z plain log message`
+
+	reader := strings.NewReader(input)
+	logs := server.parseLogStream(reader, "test-container")
+
+	require.Len(t, logs, 3)
+
+	// First log
+	assert.Equal(t, "info", logs[0].Level)
+	assert.Equal(t, "[main.go:100] starting", logs[0].Message)
+	assert.Equal(t, "test-container", logs[0].Container)
+
+	// Second log (error with error field)
+	assert.Equal(t, "error", logs[1].Level)
+	assert.Equal(t, "[main.go:200] failed: timeout", logs[1].Message)
+
+	// Third log (plain text)
+	assert.Equal(t, "info", logs[2].Level)
+	assert.Equal(t, "plain log message", logs[2].Message)
+}
+
+func TestParseLogLineWithoutTimestamp(t *testing.T) {
+	// Test log line without timestamp prefix
+	entry := parseLogLine("plain message without timestamp", "facade")
+	assert.Equal(t, "info", entry.Level)
+	assert.Equal(t, "plain message without timestamp", entry.Message)
+	assert.Equal(t, "facade", entry.Container)
+}
+
+func TestParseLogLineJSONWithoutCaller(t *testing.T) {
+	// Test JSON log without caller field
+	line := `2026-01-05T12:00:00.000000000Z {"level":"warn","ts":1767616635.0,"msg":"warning message"}`
+	entry := parseLogLine(line, "runtime")
+	assert.Equal(t, "warn", entry.Level)
+	assert.Equal(t, "warning message", entry.Message)
+}
+
+func TestGetAgentLogsMethodNotAllowed(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("POST", "/api/v1/agents/default/test-agent/logs", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

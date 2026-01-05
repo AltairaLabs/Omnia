@@ -45,7 +45,8 @@ spec:
             - --leader-elect
             {{- end }}
             - --health-probe-bind-address=:{{ .Values.probes.port }}
-            - --agent-image={{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}
+            - --facade-image={{ .Values.facade.image.repository }}:{{ .Values.facade.image.tag | default .Chart.AppVersion }}
+            - --runtime-image={{ .Values.runtime.image.repository }}:{{ .Values.runtime.image.tag | default .Chart.AppVersion }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}

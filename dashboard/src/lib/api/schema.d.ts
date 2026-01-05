@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/{namespace}/{name}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get logs from an agent's pods */
+        get: operations["getAgentLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/promptpacks": {
         parameters: {
             query?: never;
@@ -146,6 +163,14 @@ export interface components {
     schemas: {
         Error: {
             error: string;
+        };
+        LogEntry: {
+            /** Format: date-time */
+            timestamp?: string;
+            /** @enum {string} */
+            level?: "info" | "warn" | "error" | "debug";
+            message?: string;
+            container?: string;
         };
         ObjectMeta: {
             name?: string;
@@ -413,6 +438,37 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getAgentLogs: {
+        parameters: {
+            query?: {
+                /** @description Number of lines to return from the end of logs */
+                tailLines?: number;
+                /** @description Return logs from the last N seconds */
+                sinceSeconds?: number;
+                /** @description Filter logs by container name */
+                container?: string;
+            };
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Log entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogEntry"][];
+                };
+            };
             500: components["responses"]["InternalError"];
         };
     };

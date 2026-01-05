@@ -32,6 +32,7 @@ export type ProviderStatus = components["schemas"]["ProviderStatus"];
 export type Stats = components["schemas"]["Stats"];
 export type Condition = components["schemas"]["Condition"];
 export type ObjectMeta = components["schemas"]["ObjectMeta"];
+export type LogEntry = components["schemas"]["LogEntry"];
 
 // Phase types for filtering
 export type AgentPhase = "Pending" | "Running" | "Failed";
@@ -233,6 +234,41 @@ export async function fetchStats(): Promise<Stats> {
     promptPacks: { total: 0, active: 0, canary: 0 },
     tools: { total: 0, available: 0, degraded: 0 },
   };
+}
+
+/**
+ * Fetch logs for an agent.
+ */
+export async function fetchAgentLogs(
+  namespace: string,
+  name: string,
+  options?: {
+    tailLines?: number;
+    sinceSeconds?: number;
+    container?: string;
+  }
+): Promise<LogEntry[]> {
+  if (isDemoMode) {
+    await simulateDelay();
+    return []; // No mock logs - the LogViewer will generate mock data
+  }
+
+  const { data, error } = await client.GET("/api/v1/agents/{namespace}/{name}/logs", {
+    params: {
+      path: { namespace, name },
+      query: {
+        tailLines: options?.tailLines,
+        sinceSeconds: options?.sinceSeconds,
+        container: options?.container,
+      },
+    },
+  });
+
+  if (error) {
+    throw new Error(`Failed to fetch logs: ${JSON.stringify(error)}`);
+  }
+
+  return data ?? [];
 }
 
 // Helper to simulate network delay in demo mode

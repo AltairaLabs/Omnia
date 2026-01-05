@@ -3,12 +3,19 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -16,15 +23,17 @@ import (
 
 // Server provides REST API endpoints for the Omnia dashboard.
 type Server struct {
-	client client.Client
-	log    logr.Logger
+	client    client.Client
+	clientset kubernetes.Interface
+	log       logr.Logger
 }
 
-// NewServer creates a new API server with the given cached client.
-func NewServer(c client.Client, log logr.Logger) *Server {
+// NewServer creates a new API server with the given cached client and clientset.
+func NewServer(c client.Client, clientset kubernetes.Interface, log logr.Logger) *Server {
 	return &Server{
-		client: c,
-		log:    log.WithName("api-server"),
+		client:    c,
+		clientset: clientset,
+		log:       log.WithName("api-server"),
 	}
 }
 
@@ -51,7 +60,7 @@ func (s *Server) Handler() http.Handler {
 
 	// AgentRuntime endpoints
 	mux.HandleFunc("/api/v1/agents", corsHandler(s.handleAgents))
-	mux.HandleFunc("/api/v1/agents/", corsHandler(s.handleAgent))
+	// Note: /api/v1/agents/ handled by handleAgentOrLogs below for both agent details and logs
 
 	// PromptPack endpoints
 	mux.HandleFunc("/api/v1/promptpacks", corsHandler(s.handlePromptPacks))
@@ -66,6 +75,9 @@ func (s *Server) Handler() http.Handler {
 
 	// Stats endpoint
 	mux.HandleFunc("/api/v1/stats", corsHandler(s.handleStats))
+
+	// Logs endpoint
+	mux.HandleFunc("/api/v1/agents/", corsHandler(s.handleAgentOrLogs))
 
 	return mux
 }
@@ -122,19 +134,28 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, agents.Items)
 }
 
-// handleAgent gets a specific AgentRuntime.
-func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
+// handleAgentOrLogs routes to agent details or logs based on path.
+func (s *Server) handleAgentOrLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	namespace, name, ok := parseNamespaceName(r.URL.Path, "/api/v1/agents")
-	if !ok {
+	// Check if this is a logs request: /api/v1/agents/{namespace}/{name}/logs
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/agents/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 3 && parts[2] == "logs" {
+		s.handleAgentLogs(w, r, parts[0], parts[1])
+		return
+	}
+
+	if len(parts) != 2 {
 		s.writeError(w, http.StatusBadRequest, "invalid path, expected /api/v1/agents/{namespace}/{name}")
 		return
 	}
 
+	namespace, name := parts[0], parts[1]
 	var agent omniav1alpha1.AgentRuntime
 	if err := s.client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &agent); err != nil {
 		if client.IgnoreNotFound(err) == nil {
@@ -147,6 +168,186 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, agent)
+}
+
+// LogEntry represents a single log entry.
+type LogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Level     string    `json:"level"`
+	Message   string    `json:"message"`
+	Container string    `json:"container,omitempty"`
+}
+
+// handleAgentLogs fetches logs from pods belonging to an agent.
+func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	// Check if clientset is available
+	if s.clientset == nil {
+		s.writeError(w, http.StatusInternalServerError, "logs endpoint not available")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Parse query parameters
+	tailLines := int64(100)
+	if t := r.URL.Query().Get("tailLines"); t != "" {
+		if parsed, err := strconv.ParseInt(t, 10, 64); err == nil && parsed > 0 {
+			tailLines = parsed
+		}
+	}
+
+	sinceSeconds := int64(3600) // Default: last hour
+	if s := r.URL.Query().Get("sinceSeconds"); s != "" {
+		if parsed, err := strconv.ParseInt(s, 10, 64); err == nil && parsed > 0 {
+			sinceSeconds = parsed
+		}
+	}
+
+	containerFilter := r.URL.Query().Get("container")
+
+	// Find pods for this agent using the instance label selector
+	labelSelector := "app.kubernetes.io/instance=" + name
+
+	pods, err := s.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		s.log.Error(err, "failed to list pods", "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, "failed to list pods")
+		return
+	}
+
+	var allLogs []LogEntry
+
+	for _, pod := range pods.Items {
+		for _, container := range pod.Spec.Containers {
+			// Filter by container if specified
+			if containerFilter != "" && container.Name != containerFilter {
+				continue
+			}
+
+			logOpts := &corev1.PodLogOptions{
+				Container:    container.Name,
+				TailLines:    &tailLines,
+				SinceSeconds: &sinceSeconds,
+				Timestamps:   true,
+			}
+
+			req := s.clientset.CoreV1().Pods(namespace).GetLogs(pod.Name, logOpts)
+			stream, err := req.Stream(ctx)
+			if err != nil {
+				s.log.V(1).Info("failed to get logs", "pod", pod.Name, "container", container.Name, "error", err)
+				continue
+			}
+
+			logs := s.parseLogStream(stream, container.Name)
+			_ = stream.Close()
+			allLogs = append(allLogs, logs...)
+		}
+	}
+
+	// Sort by timestamp (newest first)
+	sortLogsByTimestamp(allLogs)
+
+	s.writeJSON(w, http.StatusOK, allLogs)
+}
+
+// parseLogStream parses a log stream into LogEntry objects.
+func (s *Server) parseLogStream(stream io.Reader, containerName string) []LogEntry {
+	var entries []LogEntry
+	scanner := bufio.NewScanner(stream)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		entry := parseLogLine(line, containerName)
+		entries = append(entries, entry)
+	}
+
+	return entries
+}
+
+// JSONLogEntry represents a structured JSON log entry from zap logger.
+type JSONLogEntry struct {
+	Level  string  `json:"level"`
+	TS     float64 `json:"ts"`
+	Caller string  `json:"caller"`
+	Msg    string  `json:"msg"`
+	Logger string  `json:"logger,omitempty"`
+	Error  string  `json:"error,omitempty"`
+	// Additional fields are captured in the message
+}
+
+// parseLogLine parses a single log line (with timestamp prefix from kubectl logs --timestamps).
+func parseLogLine(line, containerName string) LogEntry {
+	entry := LogEntry{
+		Timestamp: time.Now(),
+		Level:     "info",
+		Message:   line,
+		Container: containerName,
+	}
+
+	// Try to parse timestamp prefix (format: 2006-01-02T15:04:05.000000000Z)
+	messageContent := line
+	if len(line) > 30 && line[4] == '-' && line[7] == '-' && line[10] == 'T' {
+		if ts, err := time.Parse(time.RFC3339Nano, line[:30]); err == nil {
+			entry.Timestamp = ts
+			messageContent = strings.TrimSpace(line[31:])
+		}
+	}
+
+	// Try to parse as JSON log (zap format)
+	if strings.HasPrefix(messageContent, "{") {
+		var jsonLog JSONLogEntry
+		if err := json.Unmarshal([]byte(messageContent), &jsonLog); err == nil {
+			// Extract level
+			if jsonLog.Level != "" {
+				entry.Level = jsonLog.Level
+			}
+
+			// Use timestamp from JSON if available (zap uses unix epoch with fractional seconds)
+			if jsonLog.TS > 0 {
+				sec := int64(jsonLog.TS)
+				nsec := int64((jsonLog.TS - float64(sec)) * 1e9)
+				entry.Timestamp = time.Unix(sec, nsec)
+			}
+
+			// Build a human-readable message
+			msg := jsonLog.Msg
+			if jsonLog.Error != "" {
+				msg = msg + ": " + jsonLog.Error
+			}
+			if jsonLog.Caller != "" {
+				msg = "[" + jsonLog.Caller + "] " + msg
+			}
+			entry.Message = msg
+			return entry
+		}
+	}
+
+	// Fallback: detect log level from message content
+	entry.Message = messageContent
+	msgLower := strings.ToLower(messageContent)
+	switch {
+	case strings.Contains(msgLower, "error"):
+		entry.Level = "error"
+	case strings.Contains(msgLower, "warn"):
+		entry.Level = "warn"
+	case strings.Contains(msgLower, "debug"):
+		entry.Level = "debug"
+	}
+
+	return entry
+}
+
+// sortLogsByTimestamp sorts logs by timestamp (newest first).
+func sortLogsByTimestamp(logs []LogEntry) {
+	for i := 0; i < len(logs); i++ {
+		for j := i + 1; j < len(logs); j++ {
+			if logs[i].Timestamp.Before(logs[j].Timestamp) {
+				logs[i], logs[j] = logs[j], logs[i]
+			}
+		}
+	}
 }
 
 // handlePromptPacks lists all PromptPacks.

@@ -27,6 +27,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -235,7 +236,13 @@ func main() {
 
 	// Start the REST API server for dashboard access
 	if apiAddr != "" && apiAddr != "0" {
-		apiServer := api.NewServer(mgr.GetClient(), ctrl.Log)
+		// Create a Kubernetes clientset for pod logs (not supported by controller-runtime client)
+		clientset, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+		if err != nil {
+			setupLog.Error(err, "unable to create Kubernetes clientset")
+			os.Exit(1)
+		}
+		apiServer := api.NewServer(mgr.GetClient(), clientset, ctrl.Log)
 		go func() {
 			if err := apiServer.Run(ctx, apiAddr); err != nil {
 				setupLog.Error(err, "problem running API server")

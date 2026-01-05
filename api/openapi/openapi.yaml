@@ -16,6 +16,8 @@ servers:
 tags:
   - name: agents
     description: AgentRuntime operations
+  - name: logs
+    description: Agent log operations
   - name: promptpacks
     description: PromptPack operations
   - name: toolregistries
@@ -74,6 +76,51 @@ paths:
                 $ref: '#/components/schemas/AgentRuntime'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/agents/{namespace}/{name}/logs:
+    get:
+      tags: [logs]
+      summary: Get logs from an agent's pods
+      operationId: getAgentLogs
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tailLines
+          in: query
+          description: Number of lines to return from the end of logs
+          schema:
+            type: integer
+            default: 100
+        - name: sinceSeconds
+          in: query
+          description: Return logs from the last N seconds
+          schema:
+            type: integer
+            default: 3600
+        - name: container
+          in: query
+          description: Filter logs by container name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogEntry'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -238,6 +285,20 @@ components:
       required: [error]
       properties:
         error:
+          type: string
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [info, warn, error, debug]
+        message:
+          type: string
+        container:
           type: string
 
     ObjectMeta:
