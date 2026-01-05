@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { usePromptPacks, useToolRegistries, useNamespaces } from "@/hooks";
+import { usePromptPacks, useToolRegistries, useNamespaces, useReadOnly } from "@/hooks";
 import { createAgent, isDemoMode } from "@/lib/api/client";
 import {
   ChevronLeft,
@@ -27,6 +27,7 @@ import {
   Loader2,
   Check,
   AlertCircle,
+  Lock,
 } from "lucide-react";
 
 interface DeployWizardProps {
@@ -125,6 +126,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const { isReadOnly, message: readOnlyMessage } = useReadOnly();
   const queryClient = useQueryClient();
   const { data: namespaces } = useNamespaces();
   // Filter PromptPacks by selected namespace (PromptPackRef has no namespace field)
@@ -716,6 +718,40 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
         return null;
     }
   };
+
+  // Show read-only message instead of wizard
+  if (isReadOnly) {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5 text-muted-foreground" />
+              Read-Only Mode
+            </DialogTitle>
+            <DialogDescription>
+              Deployments are disabled in this dashboard.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-6 text-center">
+            <div className="rounded-full bg-muted p-4 w-fit mx-auto mb-4">
+              <Lock className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+              {readOnlyMessage}
+            </p>
+          </div>
+
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="outline" onClick={handleClose}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>

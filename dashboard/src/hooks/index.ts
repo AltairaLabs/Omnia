@@ -5,4 +5,6 @@ export { useStats } from "./use-stats";
 export { useAgentConsole } from "./use-agent-console";
 export { useLogs } from "./use-logs";
 export { useNamespaces } from "./use-namespaces";
+export { useReadOnly } from "./use-read-only";
 export type { DashboardStats } from "./use-stats";
+export type { ReadOnlyConfig } from "./use-read-only";
