@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useEffect } from "react";
 import {
   ReactFlow,
   Controls,
@@ -34,18 +34,33 @@ export function TopologyGraph({
 }: TopologyGraphProps) {
   // Build the initial graph
   const initialGraph = useMemo(
-    () =>
-      buildTopologyGraph({
+    () => {
+      const graph = buildTopologyGraph({
         agents,
         promptPacks,
         toolRegistries,
         onNodeClick,
-      }),
+      });
+      console.log("Topology graph built:", {
+        agents: agents.length,
+        promptPacks: promptPacks.length,
+        toolRegistries: toolRegistries.length,
+        nodes: graph.nodes.length,
+        edges: graph.edges.length
+      });
+      return graph;
+    },
     [agents, promptPacks, toolRegistries, onNodeClick]
   );
 
-  const [nodes, , onNodesChange] = useNodesState(initialGraph.nodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialGraph.edges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialGraph.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
+
+  // Update nodes/edges when data changes
+  useEffect(() => {
+    setNodes(initialGraph.nodes);
+    setEdges(initialGraph.edges);
+  }, [initialGraph, setNodes, setEdges]);
 
   // Custom mini-map node color
   const nodeColor = useCallback((node: Node) => {

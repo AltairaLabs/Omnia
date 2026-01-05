@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
 import { TopologyGraph } from "@/components/topology";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent } from "@/components/ui/card";
 import { Bot, FileText, Package, Wrench } from "lucide-react";
 import { useAgents, usePromptPacks, useToolRegistries } from "@/hooks";
 
@@ -74,23 +73,21 @@ export default function TopologyPage() {
         </div>
 
         {/* Graph */}
-        <Card className="flex-1 min-h-[600px]">
-          <CardContent className="p-0 h-full">
-            {isLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <Skeleton className="w-full h-full" />
-              </div>
-            ) : (
-              <TopologyGraph
-                agents={agents || []}
-                promptPacks={promptPacks || []}
-                toolRegistries={toolRegistries || []}
-                onNodeClick={handleNodeClick}
-                className="h-full min-h-[600px]"
-              />
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex-1 min-h-[600px] border rounded-lg bg-card">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <Skeleton className="w-full h-full" />
+            </div>
+          ) : (
+            <TopologyGraph
+              agents={agents || []}
+              promptPacks={promptPacks || []}
+              toolRegistries={toolRegistries || []}
+              onNodeClick={handleNodeClick}
+              className="w-full h-[600px]"
+            />
+          )}
+        </div>
       </div>
     </div>
   );
