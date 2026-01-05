@@ -230,18 +230,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Setup signal handler once (can only be called once)
+	ctx := ctrl.SetupSignalHandler()
+
 	// Start the REST API server for dashboard access
 	if apiAddr != "" && apiAddr != "0" {
 		apiServer := api.NewServer(mgr.GetClient(), ctrl.Log)
 		go func() {
-			if err := apiServer.Run(ctrl.SetupSignalHandler(), apiAddr); err != nil {
+			if err := apiServer.Run(ctx, apiAddr); err != nil {
 				setupLog.Error(err, "problem running API server")
 			}
 		}()
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

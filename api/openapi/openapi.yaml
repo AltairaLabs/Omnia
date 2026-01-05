@@ -1,0 +1,606 @@
+openapi: 3.0.3
+info:
+  title: Omnia Dashboard API
+  description: REST API for the Omnia AI Agent Orchestration Platform dashboard
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8082
+    description: Local development
+  - url: http://omnia-controller-manager.omnia-system.svc.cluster.local:8082
+    description: In-cluster
+
+tags:
+  - name: agents
+    description: AgentRuntime operations
+  - name: promptpacks
+    description: PromptPack operations
+  - name: toolregistries
+    description: ToolRegistry operations
+  - name: providers
+    description: Provider operations
+  - name: stats
+    description: Aggregated statistics
+
+paths:
+  /api/v1/agents:
+    get:
+      tags: [agents]
+      summary: List all AgentRuntimes
+      operationId: listAgents
+      parameters:
+        - name: namespace
+          in: query
+          description: Filter by namespace
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentRuntime'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/agents/{namespace}/{name}:
+    get:
+      tags: [agents]
+      summary: Get a specific AgentRuntime
+      operationId: getAgent
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRuntime'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/promptpacks:
+    get:
+      tags: [promptpacks]
+      summary: List all PromptPacks
+      operationId: listPromptPacks
+      parameters:
+        - name: namespace
+          in: query
+          description: Filter by namespace
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of prompt packs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PromptPack'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/promptpacks/{namespace}/{name}:
+    get:
+      tags: [promptpacks]
+      summary: Get a specific PromptPack
+      operationId: getPromptPack
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PromptPack details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptPack'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/toolregistries:
+    get:
+      tags: [toolregistries]
+      summary: List all ToolRegistries
+      operationId: listToolRegistries
+      parameters:
+        - name: namespace
+          in: query
+          description: Filter by namespace
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of tool registries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolRegistry'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/toolregistries/{namespace}/{name}:
+    get:
+      tags: [toolregistries]
+      summary: Get a specific ToolRegistry
+      operationId: getToolRegistry
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ToolRegistry details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolRegistry'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/providers:
+    get:
+      tags: [providers]
+      summary: List all Providers
+      operationId: listProviders
+      parameters:
+        - name: namespace
+          in: query
+          description: Filter by namespace
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Provider'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/stats:
+    get:
+      tags: [stats]
+      summary: Get aggregated statistics
+      operationId: getStats
+      responses:
+        '200':
+          description: Aggregated statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    ObjectMeta:
+      type: object
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        uid:
+          type: string
+        resourceVersion:
+          type: string
+        creationTimestamp:
+          type: string
+          format: date-time
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+
+    AgentRuntime:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/AgentRuntimeSpec'
+        status:
+          $ref: '#/components/schemas/AgentRuntimeStatus'
+
+    AgentRuntimeSpec:
+      type: object
+      properties:
+        promptPackRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+        toolRegistryRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+        providerRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+        facade:
+          $ref: '#/components/schemas/FacadeConfig'
+        session:
+          $ref: '#/components/schemas/SessionConfig'
+        runtime:
+          $ref: '#/components/schemas/RuntimeConfig'
+
+    LocalObjectReference:
+      type: object
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+
+    FacadeConfig:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [websocket, grpc]
+        port:
+          type: integer
+        handler:
+          type: string
+
+    SessionConfig:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [memory, redis]
+        ttl:
+          type: string
+        storeRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+
+    RuntimeConfig:
+      type: object
+      properties:
+        replicas:
+          type: integer
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        autoscaling:
+          $ref: '#/components/schemas/AutoscalingConfig'
+
+    ResourceRequirements:
+      type: object
+      properties:
+        requests:
+          type: object
+          additionalProperties:
+            type: string
+        limits:
+          type: object
+          additionalProperties:
+            type: string
+
+    AutoscalingConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        type:
+          type: string
+          enum: [hpa, keda]
+        minReplicas:
+          type: integer
+        maxReplicas:
+          type: integer
+
+    AgentRuntimeStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Running, Failed]
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Condition'
+        readyReplicas:
+          type: integer
+        replicas:
+          type: integer
+
+    Condition:
+      type: object
+      properties:
+        type:
+          type: string
+        status:
+          type: string
+          enum: ['True', 'False', 'Unknown']
+        lastTransitionTime:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        message:
+          type: string
+
+    PromptPack:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/PromptPackSpec'
+        status:
+          $ref: '#/components/schemas/PromptPackStatus'
+
+    PromptPackSpec:
+      type: object
+      properties:
+        version:
+          type: string
+        source:
+          $ref: '#/components/schemas/PromptPackSource'
+        rollout:
+          $ref: '#/components/schemas/RolloutConfig'
+
+    PromptPackSource:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [configmap, git]
+        configMapRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+        gitRef:
+          $ref: '#/components/schemas/GitSource'
+
+    GitSource:
+      type: object
+      properties:
+        url:
+          type: string
+        ref:
+          type: string
+        path:
+          type: string
+
+    RolloutConfig:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [immediate, canary]
+        canaryWeight:
+          type: integer
+
+    PromptPackStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Active, Canary, Failed]
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Condition'
+        activeVersion:
+          type: string
+        canaryVersion:
+          type: string
+
+    ToolRegistry:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/ToolRegistrySpec'
+        status:
+          $ref: '#/components/schemas/ToolRegistryStatus'
+
+    ToolRegistrySpec:
+      type: object
+      properties:
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolDefinition'
+        selector:
+          $ref: '#/components/schemas/ServiceSelector'
+
+    ToolDefinition:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [http, grpc, mcp]
+        url:
+          type: string
+        inputSchema:
+          type: object
+          additionalProperties: true
+
+    ServiceSelector:
+      type: object
+      properties:
+        matchLabels:
+          type: object
+          additionalProperties:
+            type: string
+
+    ToolRegistryStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Ready, Degraded, Failed]
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Condition'
+        discoveredToolsCount:
+          type: integer
+        discoveredTools:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveredTool'
+
+    DiscoveredTool:
+      type: object
+      properties:
+        name:
+          type: string
+        endpoint:
+          type: string
+        status:
+          type: string
+          enum: [Available, Unavailable]
+
+    Provider:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/ProviderSpec'
+        status:
+          $ref: '#/components/schemas/ProviderStatus'
+
+    ProviderSpec:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [anthropic, openai, bedrock, ollama]
+        model:
+          type: string
+        secretRef:
+          $ref: '#/components/schemas/LocalObjectReference'
+        endpoint:
+          type: string
+
+    ProviderStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Ready, Failed]
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Condition'
+
+    Stats:
+      type: object
+      properties:
+        agents:
+          type: object
+          properties:
+            total:
+              type: integer
+            running:
+              type: integer
+            pending:
+              type: integer
+            failed:
+              type: integer
+        promptPacks:
+          type: object
+          properties:
+            total:
+              type: integer
+            active:
+              type: integer
+            canary:
+              type: integer
+        tools:
+          type: object
+          properties:
+            total:
+              type: integer
+            available:
+              type: integer
+            degraded:
+              type: integer
