@@ -11,10 +11,12 @@ import {
   Wrench,
   MessageSquare,
   Settings,
+  Network,
 } from "lucide-react";
 
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
+  { name: "Topology", href: "/topology", icon: Network },
   { name: "Agents", href: "/agents", icon: Bot },
   { name: "PromptPacks", href: "/promptpacks", icon: FileText },
   { name: "Tools", href: "/tools", icon: Wrench },
