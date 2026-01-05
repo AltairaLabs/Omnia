@@ -81,7 +81,7 @@ export function TopologyGraph({
   }, []);
 
   return (
-    <div className={className} style={{ width: "100%", height: "100%" }}>
+    <div style={{ width: "100%", height: "600px" }} className={className}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
