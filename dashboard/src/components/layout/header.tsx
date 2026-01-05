@@ -5,7 +5,7 @@ import { RefreshCw, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 interface HeaderProps {
-  title: string;
+  title: React.ReactNode;
   description?: string;
 }
 
