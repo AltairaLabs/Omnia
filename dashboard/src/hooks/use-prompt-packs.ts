@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { mockPromptPacks } from "@/lib/mock-data";
+import { fetchPromptPacks, fetchPromptPack } from "@/lib/api/client";
 import type { PromptPack, PromptPackPhase } from "@/types";
 
 interface UsePromptPacksOptions {
@@ -13,15 +13,10 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
   return useQuery({
     queryKey: ["promptPacks", options],
     queryFn: async (): Promise<PromptPack[]> => {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const response = await fetchPromptPacks(options.namespace);
+      let packs = response as unknown as PromptPack[];
 
-      let packs = [...mockPromptPacks];
-
-      if (options.namespace) {
-        packs = packs.filter((p) => p.metadata.namespace === options.namespace);
-      }
-
+      // Client-side filtering for phase
       if (options.phase) {
         packs = packs.filter((p) => p.status?.phase === options.phase);
       }
@@ -35,14 +30,8 @@ export function usePromptPack(name: string, namespace: string = "production") {
   return useQuery({
     queryKey: ["promptPack", namespace, name],
     queryFn: async (): Promise<PromptPack | null> => {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const pack = mockPromptPacks.find(
-        (p) => p.metadata.name === name && p.metadata.namespace === namespace
-      );
-
-      return pack || null;
+      const response = await fetchPromptPack(namespace, name);
+      return (response as unknown as PromptPack) || null;
     },
     enabled: !!name,
   });

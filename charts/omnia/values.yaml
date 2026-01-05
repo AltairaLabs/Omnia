@@ -110,12 +110,20 @@ crds:
   # -- Install CRDs with the chart
   install: true
 
-# Agent container configuration (used by AgentRuntime)
-agent:
+# Facade container configuration (used by AgentRuntime)
+facade:
   image:
-    # -- Agent image repository
-    repository: ghcr.io/altairalabs/omnia-agent
-    # -- Agent image tag (defaults to Chart appVersion)
+    # -- Facade image repository
+    repository: ghcr.io/altairalabs/omnia-facade
+    # -- Facade image tag (defaults to Chart appVersion)
+    tag: ""
+
+# Runtime container configuration (used by AgentRuntime)
+runtime:
+  image:
+    # -- Runtime image repository
+    repository: ghcr.io/altairalabs/omnia-runtime
+    # -- Runtime image tag (defaults to Chart appVersion)
     tag: ""
 
 # Observability configuration (for Omnia-specific templates)

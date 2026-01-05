@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { Play, Pause, Trash2, Download, Search, X } from "lucide-react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { Play, Pause, Trash2, Download, Search, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useLogs } from "@/hooks";
+import { isDemoMode } from "@/lib/api/client";
 
 export interface LogEntry {
   timestamp: Date;
@@ -93,8 +95,28 @@ export function LogViewer({
   containers = ["facade", "runtime"],
   className,
 }: LogViewerProps) {
-  // Use lazy initial state to generate logs once on mount
-  const [logs, setLogs] = useState<LogEntry[]>(() => generateInitialLogs(containers));
+  // Fetch real logs when not in demo mode
+  const { data: apiLogs, isLoading, refetch } = useLogs(namespace, agentName, {
+    tailLines: 500,
+    sinceSeconds: 3600,
+    refetchInterval: 5000,
+  });
+
+  // Convert API logs to LogEntry format with Date objects
+  const realLogs = useMemo(() => {
+    if (!apiLogs || apiLogs.length === 0) return [];
+    return apiLogs.map((log) => ({
+      timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
+      level: (log.level || "info") as LogEntry["level"],
+      message: log.message || "",
+      container: log.container,
+    }));
+  }, [apiLogs]);
+
+  // Use lazy initial state to generate logs once on mount (only for demo mode)
+  const [mockLogs, setMockLogs] = useState<LogEntry[]>(() =>
+    isDemoMode ? generateInitialLogs(containers) : []
+  );
   const [isStreaming, setIsStreaming] = useState(true);
   const [filter, setFilter] = useState("");
   const [selectedContainer, setSelectedContainer] = useState<string | "all">("all");
@@ -105,13 +127,18 @@ export function LogViewer({
   const scrollRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Start/stop mock log streaming
+  // Use real logs if available, otherwise use mock logs
+  const logs = realLogs.length > 0 ? realLogs : mockLogs;
+
+  // Start/stop mock log streaming (only in demo mode)
   useEffect(() => {
+    if (!isDemoMode) return;
+
     if (isStreaming) {
       // Stream new logs periodically
       intervalRef.current = setInterval(() => {
         const container = containers[Math.floor(Math.random() * containers.length)];
-        setLogs((prev) => [...prev.slice(-500), generateMockLog(container)]);
+        setMockLogs((prev) => [...prev.slice(-500), generateMockLog(container)]);
       }, Math.random() * 2000 + 500);
     }
 
@@ -156,8 +183,12 @@ export function LogViewer({
   }, []);
 
   const clearLogs = useCallback(() => {
-    setLogs([]);
-  }, []);
+    if (isDemoMode) {
+      setMockLogs([]);
+    }
+    // For real mode, refetch to get fresh logs
+    refetch();
+  }, [refetch]);
 
   const downloadLogs = useCallback(() => {
     const content = filteredLogs
@@ -188,24 +219,36 @@ export function LogViewer({
     <div className={cn("flex flex-col h-[600px] border rounded-lg", className)}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b bg-muted/30">
-        {/* Stream control */}
-        <Button
-          variant={isStreaming ? "default" : "outline"}
-          size="sm"
-          onClick={() => setIsStreaming(!isStreaming)}
-        >
-          {isStreaming ? (
-            <>
-              <Pause className="h-4 w-4 mr-1" />
-              Pause
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4 mr-1" />
-              Resume
-            </>
-          )}
-        </Button>
+        {/* Stream control - only show in demo mode */}
+        {isDemoMode ? (
+          <Button
+            variant={isStreaming ? "default" : "outline"}
+            size="sm"
+            onClick={() => setIsStreaming(!isStreaming)}
+          >
+            {isStreaming ? (
+              <>
+                <Pause className="h-4 w-4 mr-1" />
+                Pause
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-1" />
+                Resume
+              </>
+            )}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isLoading}
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-1", isLoading && "animate-spin")} />
+            Refresh
+          </Button>
+        )}
 
         {/* Container selector */}
         <div className="flex items-center gap-1">
@@ -336,7 +379,11 @@ export function LogViewer({
           {filteredLogs.length} / {logs.length} entries
         </span>
         <span>
-          {isStreaming ? "Streaming..." : "Paused"} • {agentName}.{namespace}
+          {isDemoMode ? (
+            isStreaming ? "Demo mode • Streaming..." : "Demo mode • Paused"
+          ) : (
+            isLoading ? "Loading..." : "Live logs • Auto-refresh 5s"
+          )} • {agentName}.{namespace}
         </span>
       </div>
     </div>

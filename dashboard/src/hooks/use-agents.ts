@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { mockAgentRuntimes } from "@/lib/mock-data";
+import { fetchAgents, fetchAgent } from "@/lib/api/client";
 import type { AgentRuntime, AgentRuntimePhase } from "@/types";
 
 interface UseAgentsOptions {
@@ -13,17 +13,11 @@ export function useAgents(options: UseAgentsOptions = {}) {
   return useQuery({
     queryKey: ["agents", options],
     queryFn: async (): Promise<AgentRuntime[]> => {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const response = await fetchAgents(options.namespace);
+      // Cast to local types (API response is compatible but types are generated separately)
+      let agents = response as unknown as AgentRuntime[];
 
-      let agents = [...mockAgentRuntimes];
-
-      if (options.namespace) {
-        agents = agents.filter(
-          (a) => a.metadata.namespace === options.namespace
-        );
-      }
-
+      // Client-side filtering for phase
       if (options.phase) {
         agents = agents.filter((a) => a.status?.phase === options.phase);
       }
@@ -37,14 +31,9 @@ export function useAgent(name: string, namespace: string = "production") {
   return useQuery({
     queryKey: ["agent", namespace, name],
     queryFn: async (): Promise<AgentRuntime | null> => {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      const agent = mockAgentRuntimes.find(
-        (a) => a.metadata.name === name && a.metadata.namespace === namespace
-      );
-
-      return agent || null;
+      const response = await fetchAgent(namespace, name);
+      // Cast to local type
+      return (response as unknown as AgentRuntime) || null;
     },
     enabled: !!name,
   });

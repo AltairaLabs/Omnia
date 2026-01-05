@@ -27,6 +27,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/api"
 	"github.com/altairalabs/omnia/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -61,6 +63,7 @@ func main() {
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
 	var probeAddr string
+	var apiAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var facadeImage string
@@ -73,6 +76,7 @@ func main() {
 	flag.StringVar(&runtimeImage, "runtime-image", "",
 		"The image to use for runtime containers. If not set, defaults to ghcr.io/altairalabs/omnia-runtime:latest")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -227,8 +231,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Setup signal handler once (can only be called once)
+	ctx := ctrl.SetupSignalHandler()
+
+	// Start the REST API server for dashboard access
+	if apiAddr != "" && apiAddr != "0" {
+		// Create a Kubernetes clientset for pod logs (not supported by controller-runtime client)
+		clientset, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+		if err != nil {
+			setupLog.Error(err, "unable to create Kubernetes clientset")
+			os.Exit(1)
+		}
+		apiServer := api.NewServer(mgr.GetClient(), clientset, ctrl.Log)
+		go func() {
+			if err := apiServer.Run(ctx, apiAddr); err != nil {
+				setupLog.Error(err, "problem running API server")
+			}
+		}()
+	}
+
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

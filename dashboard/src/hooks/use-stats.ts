@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { getMockStats } from "@/lib/mock-data";
+import { fetchStats } from "@/lib/api/client";
 
+// Stats type with required nested objects for dashboard display
 export interface DashboardStats {
   agents: {
     total: number;
@@ -29,9 +30,27 @@ export function useStats() {
   return useQuery({
     queryKey: ["stats"],
     queryFn: async (): Promise<DashboardStats> => {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      return getMockStats();
+      const stats = await fetchStats();
+      // Normalize stats with defaults and add sessions count
+      return {
+        agents: {
+          total: stats.agents?.total ?? 0,
+          running: stats.agents?.running ?? 0,
+          pending: stats.agents?.pending ?? 0,
+          failed: stats.agents?.failed ?? 0,
+        },
+        promptPacks: {
+          total: stats.promptPacks?.total ?? 0,
+          active: stats.promptPacks?.active ?? 0,
+          canary: stats.promptPacks?.canary ?? 0,
+        },
+        tools: {
+          total: stats.tools?.total ?? 0,
+          available: stats.tools?.available ?? 0,
+          degraded: stats.tools?.degraded ?? 0,
+        },
+        sessions: { active: 0 },
+      };
     },
     refetchInterval: 30000, // Refetch every 30 seconds
   });
