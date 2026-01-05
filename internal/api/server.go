@@ -76,6 +76,9 @@ func (s *Server) Handler() http.Handler {
 	// Stats endpoint
 	mux.HandleFunc("/api/v1/stats", corsHandler(s.handleStats))
 
+	// Namespaces endpoint
+	mux.HandleFunc("/api/v1/namespaces", corsHandler(s.handleNamespaces))
+
 	// Logs endpoint
 	mux.HandleFunc("/api/v1/agents/", corsHandler(s.handleAgentOrLogs))
 
@@ -107,13 +110,20 @@ func parseNamespaceName(path, prefix string) (namespace, name string, ok bool) {
 	return parts[0], parts[1], true
 }
 
-// handleAgents lists all AgentRuntimes.
+// handleAgents lists all AgentRuntimes or creates a new one.
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		s.listAgents(w, r)
+	case http.MethodPost:
+		s.createAgent(w, r)
+	default:
 		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
 	}
+}
 
+// listAgents lists all AgentRuntimes.
+func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 
 	var agents omniav1alpha1.AgentRuntimeList
@@ -132,6 +142,50 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, agents.Items)
+}
+
+// createAgent creates a new AgentRuntime.
+func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
+	var agent omniav1alpha1.AgentRuntime
+	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	// Validate required fields
+	if agent.Name == "" {
+		s.writeError(w, http.StatusBadRequest, "metadata.name is required")
+		return
+	}
+	if agent.Namespace == "" {
+		agent.Namespace = "default"
+	}
+	if agent.Spec.PromptPackRef.Name == "" {
+		s.writeError(w, http.StatusBadRequest, "spec.promptPackRef.name is required")
+		return
+	}
+
+	// Set API version and kind if not provided
+	if agent.APIVersion == "" {
+		agent.APIVersion = "omnia.altairalabs.ai/v1alpha1"
+	}
+	if agent.Kind == "" {
+		agent.Kind = "AgentRuntime"
+	}
+
+	// Create the agent
+	if err := s.client.Create(r.Context(), &agent); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			s.writeError(w, http.StatusConflict, "agent already exists")
+			return
+		}
+		s.log.Error(err, "failed to create agent", "namespace", agent.Namespace, "name", agent.Name)
+		s.writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
+		return
+	}
+
+	s.log.Info("created agent", "namespace", agent.Namespace, "name", agent.Name)
+	s.writeJSON(w, http.StatusCreated, agent)
 }
 
 // handleAgentOrLogs routes to agent details or logs based on path.
@@ -561,6 +615,34 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, stats)
+}
+
+// handleNamespaces returns a list of namespaces in the cluster.
+func (s *Server) handleNamespaces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if s.clientset == nil {
+		s.writeError(w, http.StatusInternalServerError, "namespaces endpoint not available")
+		return
+	}
+
+	namespaces, err := s.clientset.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{})
+	if err != nil {
+		s.log.Error(err, "failed to list namespaces")
+		s.writeError(w, http.StatusInternalServerError, "failed to list namespaces")
+		return
+	}
+
+	// Extract just the names
+	names := make([]string, 0, len(namespaces.Items))
+	for _, ns := range namespaces.Items {
+		names = append(names, ns.Name)
+	}
+
+	s.writeJSON(w, http.StatusOK, names)
 }
 
 // Run starts the API server. It blocks until the context is cancelled.

@@ -14,7 +14,8 @@ export interface paths {
         /** List all AgentRuntimes */
         get: operations["listAgents"];
         put?: never;
-        post?: never;
+        /** Create a new AgentRuntime */
+        post: operations["createAgent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -149,6 +150,23 @@ export interface paths {
         };
         /** Get aggregated statistics */
         get: operations["getStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/namespaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all namespaces */
+        get: operations["listNamespaces"];
         put?: never;
         post?: never;
         delete?: never;
@@ -384,6 +402,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Bad request - invalid input */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -411,6 +438,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRuntime"][];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRuntime"];
+            };
+        };
+        responses: {
+            /** @description Agent created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRuntime"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description Agent already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             500: components["responses"]["InternalError"];
@@ -610,6 +672,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Stats"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listNamespaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of namespace names */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
             500: components["responses"]["InternalError"];

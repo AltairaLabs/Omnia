@@ -237,6 +237,58 @@ export async function fetchStats(): Promise<Stats> {
 }
 
 /**
+ * Fetch all namespaces.
+ */
+export async function fetchNamespaces(): Promise<string[]> {
+  if (isDemoMode) {
+    await simulateDelay();
+    return ["default", "production", "staging", "demo"];
+  }
+
+  const { data, error } = await client.GET("/api/v1/namespaces");
+
+  if (error) {
+    throw new Error(`Failed to fetch namespaces: ${JSON.stringify(error)}`);
+  }
+
+  return data ?? [];
+}
+
+/**
+ * Create a new agent.
+ */
+export async function createAgent(spec: Record<string, unknown>): Promise<AgentRuntime> {
+  if (isDemoMode) {
+    await simulateDelay(500);
+    // Return a mock agent in demo mode
+    return {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "AgentRuntime",
+      metadata: spec.metadata as ObjectMeta,
+      spec: (spec.spec as AgentRuntimeSpec) || {},
+      status: {
+        phase: "Pending",
+      },
+    } as AgentRuntime;
+  }
+
+  const response = await fetch(`${OPERATOR_API_URL}/api/v1/agents`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(spec),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to create agent: ${errorText}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Fetch logs for an agent.
  */
 export async function fetchAgentLogs(
