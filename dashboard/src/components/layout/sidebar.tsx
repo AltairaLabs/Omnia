@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Settings,
   Network,
+  DollarSign,
 } from "lucide-react";
 
 const navigation = [
@@ -21,6 +22,7 @@ const navigation = [
   { name: "PromptPacks", href: "/promptpacks", icon: FileText },
   { name: "Tools", href: "/tools", icon: Wrench },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
+  { name: "Costs", href: "/costs", icon: DollarSign },
 ];
 
 const secondaryNavigation = [

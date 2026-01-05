@@ -4,6 +4,9 @@ import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
+import { CostSparkline } from "@/components/cost";
+import { getMockAgentUsage, mockCostAllocation } from "@/lib/mock-data";
+import { formatCost, calculateCost } from "@/lib/pricing";
 import type { AgentRuntime } from "@/types";
 
 interface AgentCardProps {
@@ -12,6 +15,25 @@ interface AgentCardProps {
 
 export function AgentCard({ agent }: AgentCardProps) {
   const { metadata, spec, status } = agent;
+
+  // Get usage data for sparkline
+  const usage = getMockAgentUsage(metadata.namespace || "default", metadata.name);
+  const sparklineData = usage?.timeSeries?.map((point) => ({
+    value: calculateCost(
+      usage.model,
+      point.inputTokens,
+      point.outputTokens
+    ),
+  })) || [];
+
+  // Get cost allocation for this agent
+  const costData = mockCostAllocation.find(
+    (c) => c.agent === metadata.name && c.namespace === metadata.namespace
+  );
+  const totalCost = costData?.totalCost || 0;
+
+  // Determine sparkline color based on provider
+  const sparklineColor = spec.provider?.type === "openai" ? "#8B5CF6" : "#3B82F6";
 
   return (
     <Link href={`/agents/${metadata.name}?namespace=${metadata.namespace}`}>
@@ -30,8 +52,18 @@ export function AgentCard({ agent }: AgentCardProps) {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-sm">
+        <CardContent className="space-y-3">
+          {/* Cost Sparkline */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Cost (24h)</span>
+              <span className="font-medium">{formatCost(totalCost)}</span>
+            </div>
+            <CostSparkline data={sparklineData} color={sparklineColor} height={28} />
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 gap-4 text-sm pt-1">
             <div>
               <p className="text-muted-foreground">Provider</p>
               <p className="font-medium capitalize">{spec.provider?.type || "claude"}</p>

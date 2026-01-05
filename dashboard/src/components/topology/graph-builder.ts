@@ -1,5 +1,6 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { AgentRuntime, PromptPack, ToolRegistry } from "@/types";
+import type { NotesMap } from "@/lib/notes-storage";
 
 interface GraphData {
   nodes: Node[];
@@ -11,6 +12,15 @@ interface BuildGraphOptions {
   promptPacks: PromptPack[];
   toolRegistries: ToolRegistry[];
   onNodeClick?: (type: string, name: string, namespace: string) => void;
+  notes?: NotesMap;
+  onNoteEdit?: (type: string, namespace: string, name: string) => void;
+  onNoteDelete?: (type: string, namespace: string, name: string) => void;
+}
+
+function getNoteForResource(notes: NotesMap | undefined, type: string, namespace: string, name: string): string | undefined {
+  if (!notes) return undefined;
+  const key = `${type}/${namespace}/${name}`;
+  return notes[key]?.note;
 }
 
 // Layout constants
@@ -24,6 +34,9 @@ export function buildTopologyGraph({
   promptPacks,
   toolRegistries,
   onNodeClick,
+  notes,
+  onNoteEdit,
+  onNoteDelete,
 }: BuildGraphOptions): GraphData {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -59,6 +72,9 @@ export function buildTopologyGraph({
         namespace: agent.metadata.namespace,
         phase: agent.status?.phase,
         onClick: () => onNodeClick?.("agent", agent.metadata.name, agent.metadata.namespace || "default"),
+        note: getNoteForResource(notes, "agent", agent.metadata.namespace || "default", agent.metadata.name),
+        onNoteEdit,
+        onNoteDelete,
       },
     });
 
@@ -125,6 +141,9 @@ export function buildTopologyGraph({
           version: pp.status?.activeVersion || pp.spec.version,
           phase: pp.status?.phase,
           onClick: () => onNodeClick?.("promptpack", pp.metadata.name, pp.metadata.namespace || "default"),
+          note: getNoteForResource(notes, "promptpack", pp.metadata.namespace || "default", pp.metadata.name),
+          onNoteEdit,
+          onNoteDelete,
         },
       });
 
@@ -164,6 +183,9 @@ export function buildTopologyGraph({
           toolCount: tr.status?.discoveredToolsCount,
           phase: tr.status?.phase,
           onClick: () => onNodeClick?.("tools", tr.metadata.name, tr.metadata.namespace || "default"),
+          note: getNoteForResource(notes, "toolregistry", tr.metadata.namespace || "default", tr.metadata.name),
+          onNoteEdit,
+          onNoteDelete,
         },
       });
 

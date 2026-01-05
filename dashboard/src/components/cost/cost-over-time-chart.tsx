@@ -11,47 +11,37 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { formatTokens } from "@/lib/pricing";
+import { formatCost } from "@/lib/pricing";
 
-interface TokenDataPoint {
+interface CostTimeSeriesPoint {
   timestamp: string;
-  inputTokens: number;
-  outputTokens: number;
-  requests?: number;
+  anthropic: number;
+  openai: number;
+  total: number;
 }
 
-interface TokenUsageChartProps {
-  data: TokenDataPoint[];
+interface CostOverTimeChartProps {
+  data: CostTimeSeriesPoint[];
   title?: string;
   description?: string;
-  showRequests?: boolean;
   height?: number;
 }
 
-export function TokenUsageChart({
+export function CostOverTimeChart({
   data,
-  title = "Token Usage",
-  description = "Input and output tokens over time",
-  showRequests = false,
-  height = 300,
-}: TokenUsageChartProps) {
+  title = "Cost Over Time",
+  description = "LLM costs by provider over the last 24 hours",
+  height = 350,
+}: CostOverTimeChartProps) {
   // Format data for chart
   const chartData = data.map((point) => ({
     time: new Date(point.timestamp).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     }),
-    "Input Tokens": point.inputTokens,
-    "Output Tokens": point.outputTokens,
-    ...(showRequests && { Requests: point.requests }),
+    Anthropic: point.anthropic,
+    OpenAI: point.openai,
   }));
-
-  // Custom tooltip formatter
-  const formatValue = (value: number | undefined, name: string | undefined) => {
-    if (value === undefined) return "";
-    if (name === "Requests") return value.toLocaleString();
-    return formatTokens(value);
-  };
 
   return (
     <Card>
@@ -64,12 +54,12 @@ export function TokenUsageChart({
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData}>
               <defs>
-                <linearGradient id="inputTokens" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
+                <linearGradient id="colorAnthropic" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4} />
                   <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="outputTokens" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3} />
+                <linearGradient id="colorOpenAI" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.4} />
                   <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0} />
                 </linearGradient>
               </defs>
@@ -87,7 +77,7 @@ export function TokenUsageChart({
                 tickLine={false}
                 axisLine={false}
                 className="text-muted-foreground"
-                tickFormatter={(value) => formatTokens(value)}
+                tickFormatter={(value) => formatCost(value)}
               />
               <Tooltip
                 contentStyle={{
@@ -97,7 +87,7 @@ export function TokenUsageChart({
                   fontSize: "12px",
                 }}
                 labelStyle={{ color: "hsl(var(--foreground))" }}
-                formatter={formatValue}
+                formatter={(value) => formatCost(value as number)}
               />
               <Legend
                 wrapperStyle={{ fontSize: "12px" }}
@@ -106,19 +96,21 @@ export function TokenUsageChart({
               />
               <Area
                 type="monotone"
-                dataKey="Input Tokens"
+                dataKey="Anthropic"
+                stackId="1"
                 stroke="#3B82F6"
                 strokeWidth={2}
                 fillOpacity={1}
-                fill="url(#inputTokens)"
+                fill="url(#colorAnthropic)"
               />
               <Area
                 type="monotone"
-                dataKey="Output Tokens"
+                dataKey="OpenAI"
+                stackId="1"
                 stroke="#8B5CF6"
                 strokeWidth={2}
                 fillOpacity={1}
-                fill="url(#outputTokens)"
+                fill="url(#colorOpenAI)"
               />
             </AreaChart>
           </ResponsiveContainer>

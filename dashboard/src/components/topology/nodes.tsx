@@ -2,11 +2,68 @@
 
 import { memo } from "react";
 import { Handle, Position, type Node } from "@xyflow/react";
-import { Bot, FileText, Wrench, Package, MessageSquare } from "lucide-react";
+import { Bot, FileText, Wrench, Package, MessageSquare, StickyNote, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Base node styles
 const baseNodeStyles = "px-4 py-3 rounded-lg border-2 shadow-sm min-w-[140px] cursor-pointer transition-all hover:shadow-md";
+
+// Post-it note component attached to nodes
+function PostItNote({
+  note,
+  onEdit,
+  onDelete
+}: {
+  note: string;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className="absolute -top-2 -right-2 translate-x-full max-w-[180px] z-10"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="relative bg-yellow-200 dark:bg-yellow-300 text-yellow-900 p-2 rounded shadow-md text-xs transform rotate-2 hover:rotate-0 transition-transform">
+        {/* Tape effect */}
+        <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-8 h-3 bg-yellow-100/80 dark:bg-yellow-200/80 rounded-sm" />
+
+        {/* Delete button */}
+        <button
+          className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-600 opacity-0 hover:opacity-100 transition-opacity"
+          onClick={onDelete}
+          style={{ opacity: 'var(--delete-opacity, 0)' }}
+        >
+          <X className="h-2.5 w-2.5" />
+        </button>
+
+        {/* Note content */}
+        <p
+          className="cursor-text leading-tight line-clamp-4 hover:line-clamp-none"
+          onClick={onEdit}
+          title="Click to edit"
+        >
+          {note}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Add note button
+function AddNoteButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      className="absolute -top-1 -right-1 w-5 h-5 bg-yellow-400 dark:bg-yellow-500 rounded-full flex items-center justify-center text-yellow-900 hover:scale-110 transition-transform opacity-0 group-hover:opacity-100 shadow-sm"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title="Add note"
+    >
+      <StickyNote className="h-3 w-3" />
+    </button>
+  );
+}
 
 // Type-based colors
 const typeColors = {
@@ -42,15 +99,22 @@ function StatusDot({ status }: { status?: string }) {
   );
 }
 
+// Note-related fields shared by nodes
+interface NoteFields {
+  note?: string;
+  onNoteEdit?: (type: string, namespace: string, name: string) => void;
+  onNoteDelete?: (type: string, namespace: string, name: string) => void;
+}
+
 // Node data types
-export interface AgentNodeData extends Record<string, unknown> {
+export interface AgentNodeData extends Record<string, unknown>, NoteFields {
   label: string;
   namespace: string;
   phase?: string;
   onClick?: () => void;
 }
 
-export interface PromptPackNodeData extends Record<string, unknown> {
+export interface PromptPackNodeData extends Record<string, unknown>, NoteFields {
   label: string;
   namespace: string;
   version?: string;
@@ -58,7 +122,7 @@ export interface PromptPackNodeData extends Record<string, unknown> {
   onClick?: () => void;
 }
 
-export interface ToolRegistryNodeData extends Record<string, unknown> {
+export interface ToolRegistryNodeData extends Record<string, unknown>, NoteFields {
   label: string;
   namespace: string;
   toolCount?: number;
@@ -93,20 +157,35 @@ interface CustomNodeProps<T extends Record<string, unknown>> {
 // Agent Node Component
 export const AgentNodeComponent = memo(({ data }: CustomNodeProps<AgentNodeData>) => {
   return (
-    <div
-      className={cn(baseNodeStyles, typeColors.agent)}
-      onClick={data.onClick}
-    >
-      <Handle type="target" position={Position.Left} className="!bg-blue-500" />
-      <div className="flex items-center gap-2">
-        <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-        <div className="flex flex-col flex-1">
-          <span className="font-medium text-sm">{data.label}</span>
-          <span className="text-xs text-muted-foreground">{data.namespace}</span>
+    <div className="relative group">
+      <div
+        className={cn(baseNodeStyles, typeColors.agent)}
+        onClick={data.onClick}
+      >
+        <Handle type="target" position={Position.Left} className="!bg-blue-500" />
+        <div className="flex items-center gap-2">
+          <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <div className="flex flex-col flex-1">
+            <span className="font-medium text-sm">{data.label}</span>
+            <span className="text-xs text-muted-foreground">{data.namespace}</span>
+          </div>
+          <StatusDot status={data.phase} />
         </div>
-        <StatusDot status={data.phase} />
+        <Handle type="source" position={Position.Right} className="!bg-blue-500" />
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-blue-500" />
+
+      {/* Post-it note or add button */}
+      {data.note ? (
+        <PostItNote
+          note={data.note}
+          onEdit={() => data.onNoteEdit?.("agent", data.namespace, data.label)}
+          onDelete={() => data.onNoteDelete?.("agent", data.namespace, data.label)}
+        />
+      ) : (
+        <AddNoteButton
+          onClick={() => data.onNoteEdit?.("agent", data.namespace, data.label)}
+        />
+      )}
     </div>
   );
 });
@@ -115,22 +194,37 @@ AgentNodeComponent.displayName = "AgentNodeComponent";
 // PromptPack Node Component
 export const PromptPackNodeComponent = memo(({ data }: CustomNodeProps<PromptPackNodeData>) => {
   return (
-    <div
-      className={cn(baseNodeStyles, typeColors.promptPack)}
-      onClick={data.onClick}
-    >
-      <Handle type="target" position={Position.Left} className="!bg-purple-500" />
-      <div className="flex items-center gap-2">
-        <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-        <div className="flex flex-col flex-1">
-          <span className="font-medium text-sm">{data.label}</span>
-          <span className="text-xs text-muted-foreground">
-            {data.version ? `v${data.version}` : data.namespace}
-          </span>
+    <div className="relative group">
+      <div
+        className={cn(baseNodeStyles, typeColors.promptPack)}
+        onClick={data.onClick}
+      >
+        <Handle type="target" position={Position.Left} className="!bg-purple-500" />
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+          <div className="flex flex-col flex-1">
+            <span className="font-medium text-sm">{data.label}</span>
+            <span className="text-xs text-muted-foreground">
+              {data.version ? `v${data.version}` : data.namespace}
+            </span>
+          </div>
+          <StatusDot status={data.phase} />
         </div>
-        <StatusDot status={data.phase} />
+        <Handle type="source" position={Position.Right} className="!bg-purple-500" />
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-purple-500" />
+
+      {/* Post-it note or add button */}
+      {data.note ? (
+        <PostItNote
+          note={data.note}
+          onEdit={() => data.onNoteEdit?.("promptpack", data.namespace, data.label)}
+          onDelete={() => data.onNoteDelete?.("promptpack", data.namespace, data.label)}
+        />
+      ) : (
+        <AddNoteButton
+          onClick={() => data.onNoteEdit?.("promptpack", data.namespace, data.label)}
+        />
+      )}
     </div>
   );
 });
@@ -139,22 +233,37 @@ PromptPackNodeComponent.displayName = "PromptPackNodeComponent";
 // ToolRegistry Node Component
 export const ToolRegistryNodeComponent = memo(({ data }: CustomNodeProps<ToolRegistryNodeData>) => {
   return (
-    <div
-      className={cn(baseNodeStyles, typeColors.toolRegistry)}
-      onClick={data.onClick}
-    >
-      <Handle type="target" position={Position.Left} className="!bg-orange-500" />
-      <div className="flex items-center gap-2">
-        <Package className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-        <div className="flex flex-col flex-1">
-          <span className="font-medium text-sm">{data.label}</span>
-          <span className="text-xs text-muted-foreground">
-            {data.toolCount !== undefined ? `${data.toolCount} tools` : data.namespace}
-          </span>
+    <div className="relative group">
+      <div
+        className={cn(baseNodeStyles, typeColors.toolRegistry)}
+        onClick={data.onClick}
+      >
+        <Handle type="target" position={Position.Left} className="!bg-orange-500" />
+        <div className="flex items-center gap-2">
+          <Package className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+          <div className="flex flex-col flex-1">
+            <span className="font-medium text-sm">{data.label}</span>
+            <span className="text-xs text-muted-foreground">
+              {data.toolCount !== undefined ? `${data.toolCount} tools` : data.namespace}
+            </span>
+          </div>
+          <StatusDot status={data.phase} />
         </div>
-        <StatusDot status={data.phase} />
+        <Handle type="source" position={Position.Right} className="!bg-orange-500" />
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-orange-500" />
+
+      {/* Post-it note or add button */}
+      {data.note ? (
+        <PostItNote
+          note={data.note}
+          onEdit={() => data.onNoteEdit?.("toolregistry", data.namespace, data.label)}
+          onDelete={() => data.onNoteDelete?.("toolregistry", data.namespace, data.label)}
+        />
+      ) : (
+        <AddNoteButton
+          onClick={() => data.onNoteEdit?.("toolregistry", data.namespace, data.label)}
+        />
+      )}
     </div>
   );
 });

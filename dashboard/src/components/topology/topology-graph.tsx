@@ -16,12 +16,16 @@ import "@xyflow/react/dist/style.css";
 import { nodeTypes } from "./nodes";
 import { buildTopologyGraph } from "./graph-builder";
 import type { AgentRuntime, PromptPack, ToolRegistry } from "@/types";
+import type { NotesMap } from "@/lib/notes-storage";
 
 interface TopologyGraphProps {
   agents: AgentRuntime[];
   promptPacks: PromptPack[];
   toolRegistries: ToolRegistry[];
   onNodeClick?: (type: string, name: string, namespace: string) => void;
+  notes?: NotesMap;
+  onNoteEdit?: (type: string, namespace: string, name: string) => void;
+  onNoteDelete?: (type: string, namespace: string, name: string) => void;
   className?: string;
 }
 
@@ -30,6 +34,9 @@ export function TopologyGraph({
   promptPacks,
   toolRegistries,
   onNodeClick,
+  notes,
+  onNoteEdit,
+  onNoteDelete,
   className,
 }: TopologyGraphProps) {
   // Build the initial graph
@@ -40,6 +47,9 @@ export function TopologyGraph({
         promptPacks,
         toolRegistries,
         onNodeClick,
+        notes,
+        onNoteEdit,
+        onNoteDelete,
       });
       console.log("Topology graph built:", {
         agents: agents.length,
@@ -50,7 +60,7 @@ export function TopologyGraph({
       });
       return graph;
     },
-    [agents, promptPacks, toolRegistries, onNodeClick]
+    [agents, promptPacks, toolRegistries, onNodeClick, notes, onNoteEdit, onNoteDelete]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialGraph.nodes);
