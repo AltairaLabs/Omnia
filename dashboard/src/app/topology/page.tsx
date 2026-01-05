@@ -49,7 +49,8 @@ export default function TopologyPage() {
 
       <div className="flex-1 p-6 space-y-4">
         {/* Legend */}
-        <div className="flex items-center gap-6 text-sm">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          {/* Resource types */}
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded bg-blue-500" />
             <Bot className="h-4 w-4 text-blue-600" />
@@ -69,6 +70,23 @@ export default function TopologyPage() {
             <div className="w-3 h-3 rounded bg-teal-500" />
             <Wrench className="h-4 w-4 text-teal-600" />
             <span className="text-muted-foreground">Tools ({totalTools})</span>
+          </div>
+
+          {/* Status indicators */}
+          <div className="border-l pl-6 flex items-center gap-4">
+            <span className="text-muted-foreground font-medium">Status:</span>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+              <span className="text-muted-foreground">Healthy</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+              <span className="text-muted-foreground">Pending</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+              <span className="text-muted-foreground">Failed</span>
+            </div>
           </div>
         </div>
 
