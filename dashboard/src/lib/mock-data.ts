@@ -36,7 +36,15 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       provider: { type: "claude", model: "claude-sonnet-4-20250514" },
       session: { type: "redis", ttl: "24h" },
-      runtime: { replicas: 3 },
+      runtime: {
+        replicas: 3,
+        autoscaling: {
+          enabled: true,
+          type: "keda",
+          minReplicas: 1,
+          maxReplicas: 10,
+        },
+      },
     },
     status: {
       phase: "Running",

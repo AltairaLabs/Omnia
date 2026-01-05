@@ -1,15 +1,17 @@
 "use client";
 
-import { use } from "react";
+import { use, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge } from "@/components/agents";
+import { StatusBadge, ScaleControl } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { CostSummary, TokenUsageChart } from "@/components/cost";
 import { getMockAgentUsage } from "@/lib/mock-data";
+import { scaleAgent } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -31,8 +33,16 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   const { name } = use(params);
   const searchParams = useSearchParams();
   const namespace = searchParams.get("namespace") || "production";
+  const queryClient = useQueryClient();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
+
+  const handleScale = useCallback(async (replicas: number) => {
+    await scaleAgent(namespace, name, replicas);
+    // Invalidate queries to refresh data
+    await queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
+    await queryClient.invalidateQueries({ queryKey: ["agents"] });
+  }, [namespace, name, queryClient]);
 
   if (isLoading) {
     return (
@@ -128,10 +138,15 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                     <StatusBadge phase={status?.phase} className="mt-1" />
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Replicas</p>
-                    <p className="text-lg font-semibold">
-                      {status?.replicas?.ready ?? 0}/{status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
-                    </p>
+                    <ScaleControl
+                      currentReplicas={status?.replicas?.ready ?? 0}
+                      desiredReplicas={status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
+                      minReplicas={spec.runtime?.autoscaling?.minReplicas ?? 0}
+                      maxReplicas={spec.runtime?.autoscaling?.maxReplicas ?? 10}
+                      autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
+                      autoscalingType={spec.runtime?.autoscaling?.type}
+                      onScale={handleScale}
+                    />
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Active Version</p>

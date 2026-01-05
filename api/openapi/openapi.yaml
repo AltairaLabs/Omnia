@@ -108,6 +108,42 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/agents/{namespace}/{name}/scale:
+    put:
+      tags: [agents]
+      summary: Scale an AgentRuntime
+      operationId: scaleAgent
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScaleRequest'
+      responses:
+        '200':
+          description: Agent scaled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRuntime'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/agents/{namespace}/{name}/logs:
     get:
       tags: [logs]
@@ -338,6 +374,16 @@ components:
       properties:
         error:
           type: string
+
+    ScaleRequest:
+      type: object
+      required: [replicas]
+      properties:
+        replicas:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Desired number of replicas
 
     LogEntry:
       type: object
