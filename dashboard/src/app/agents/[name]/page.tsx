@@ -3,11 +3,13 @@
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, FileText, MessageSquare } from "lucide-react";
+import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatusBadge } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
+import { CostSummary, TokenUsageChart } from "@/components/cost";
+import { getMockAgentUsage } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -103,6 +105,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
             <TabsTrigger value="logs" className="gap-1.5">
               <FileText className="h-4 w-4" />
               Logs
+            </TabsTrigger>
+            <TabsTrigger value="usage" className="gap-1.5">
+              <BarChart3 className="h-4 w-4" />
+              Usage
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
@@ -301,6 +307,85 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
               agentName={metadata.name}
               namespace={metadata.namespace || "default"}
             />
+          </TabsContent>
+
+          <TabsContent value="usage" className="space-y-6 mt-4">
+            {(() => {
+              const usage = getMockAgentUsage(
+                metadata.namespace || "default",
+                metadata.name || ""
+              );
+
+              if (!usage || usage.requestCount === 0) {
+                return (
+                  <Card>
+                    <CardContent className="py-12">
+                      <p className="text-muted-foreground text-center">
+                        No usage data available for this agent yet.
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              }
+
+              return (
+                <>
+                  <CostSummary
+                    inputTokens={usage.inputTokens}
+                    outputTokens={usage.outputTokens}
+                    cacheHits={usage.cacheHits}
+                    model={usage.model}
+                    period={usage.period}
+                  />
+
+                  <div className="grid lg:grid-cols-2 gap-6">
+                    <TokenUsageChart
+                      data={usage.timeSeries}
+                      title="Token Usage (24h)"
+                      description="Input and output tokens over the last 24 hours"
+                    />
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Performance</CardTitle>
+                        <CardDescription>Request metrics for this agent</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Total Requests</span>
+                          <span className="font-medium">{usage.requestCount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Error Count</span>
+                          <span className="font-medium text-destructive">
+                            {usage.errorCount.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Error Rate</span>
+                          <span className="font-medium">
+                            {((usage.errorCount / usage.requestCount) * 100).toFixed(2)}%
+                          </span>
+                        </div>
+                        <Separator />
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Avg Latency</span>
+                          <span className="font-medium">{usage.avgLatencyMs.toLocaleString()}ms</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Cache Hits</span>
+                          <span className="font-medium">
+                            {usage.cacheHits > 0
+                              ? `${((usage.cacheHits / usage.inputTokens) * 100).toFixed(1)}%`
+                              : "N/A"}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="config" className="mt-4">

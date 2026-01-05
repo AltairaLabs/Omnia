@@ -1124,6 +1124,160 @@ export function getMockSession(id: string): Session | undefined {
   return mockSessions.find((s) => s.id === id);
 }
 
+// Mock usage data per agent (for cost tracking)
+export interface AgentUsageData {
+  agentName: string;
+  agentNamespace: string;
+  model: string;
+  period: "24h" | "7d" | "30d";
+  inputTokens: number;
+  outputTokens: number;
+  cacheHits: number;
+  requestCount: number;
+  errorCount: number;
+  avgLatencyMs: number;
+  // Time series data for charts
+  timeSeries: {
+    timestamp: string;
+    inputTokens: number;
+    outputTokens: number;
+    requests: number;
+  }[];
+}
+
+// Generate time series data for the last N hours
+function generateTimeSeries(hours: number, baseInput: number, baseOutput: number) {
+  const series = [];
+  for (let i = hours; i > 0; i--) {
+    const variance = 0.5 + Math.random(); // 50% to 150% of base
+    series.push({
+      timestamp: hoursAgo(i),
+      inputTokens: Math.floor(baseInput * variance),
+      outputTokens: Math.floor(baseOutput * variance),
+      requests: Math.floor(10 + Math.random() * 50),
+    });
+  }
+  return series;
+}
+
+// Mock usage data for each agent
+export const mockAgentUsage: Record<string, AgentUsageData> = {
+  "production/customer-support": {
+    agentName: "customer-support",
+    agentNamespace: "production",
+    model: "claude-sonnet-4-20250514",
+    period: "24h",
+    inputTokens: 2_450_000,
+    outputTokens: 1_890_000,
+    cacheHits: 450_000,
+    requestCount: 3_247,
+    errorCount: 12,
+    avgLatencyMs: 890,
+    timeSeries: generateTimeSeries(24, 100_000, 78_000),
+  },
+  "production/code-assistant": {
+    agentName: "code-assistant",
+    agentNamespace: "production",
+    model: "claude-sonnet-4-20250514",
+    period: "24h",
+    inputTokens: 1_780_000,
+    outputTokens: 2_340_000,
+    cacheHits: 320_000,
+    requestCount: 1_892,
+    errorCount: 5,
+    avgLatencyMs: 1250,
+    timeSeries: generateTimeSeries(24, 74_000, 97_000),
+  },
+  "production/data-analyst": {
+    agentName: "data-analyst",
+    agentNamespace: "production",
+    model: "gpt-4-turbo",
+    period: "24h",
+    inputTokens: 890_000,
+    outputTokens: 1_120_000,
+    cacheHits: 0,
+    requestCount: 856,
+    errorCount: 23,
+    avgLatencyMs: 1450,
+    timeSeries: generateTimeSeries(24, 37_000, 46_000),
+  },
+  "production/onboarding-bot": {
+    agentName: "onboarding-bot",
+    agentNamespace: "production",
+    model: "claude-sonnet-4-20250514",
+    period: "24h",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHits: 0,
+    requestCount: 0,
+    errorCount: 0,
+    avgLatencyMs: 0,
+    timeSeries: [],
+  },
+  "production/sales-copilot": {
+    agentName: "sales-copilot",
+    agentNamespace: "production",
+    model: "gpt-4-turbo",
+    period: "24h",
+    inputTokens: 1_230_000,
+    outputTokens: 1_560_000,
+    cacheHits: 0,
+    requestCount: 1_124,
+    errorCount: 8,
+    avgLatencyMs: 980,
+    timeSeries: generateTimeSeries(24, 51_000, 65_000),
+  },
+  "staging/legacy-agent": {
+    agentName: "legacy-agent",
+    agentNamespace: "staging",
+    model: "gpt-3.5-turbo",
+    period: "24h",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHits: 0,
+    requestCount: 0,
+    errorCount: 47,
+    avgLatencyMs: 0,
+    timeSeries: [],
+  },
+};
+
+// Get usage data for a specific agent
+export function getMockAgentUsage(namespace: string, name: string): AgentUsageData | undefined {
+  return mockAgentUsage[`${namespace}/${name}`];
+}
+
+// Get aggregated usage stats for all agents
+export function getMockAggregatedUsage() {
+  const allUsage = Object.values(mockAgentUsage);
+
+  const totalInputTokens = allUsage.reduce((sum, u) => sum + u.inputTokens, 0);
+  const totalOutputTokens = allUsage.reduce((sum, u) => sum + u.outputTokens, 0);
+  const totalRequests = allUsage.reduce((sum, u) => sum + u.requestCount, 0);
+  const totalErrors = allUsage.reduce((sum, u) => sum + u.errorCount, 0);
+
+  // Group by model
+  const byModel: Record<string, { inputTokens: number; outputTokens: number; requests: number }> = {};
+  for (const usage of allUsage) {
+    if (!byModel[usage.model]) {
+      byModel[usage.model] = { inputTokens: 0, outputTokens: 0, requests: 0 };
+    }
+    byModel[usage.model].inputTokens += usage.inputTokens;
+    byModel[usage.model].outputTokens += usage.outputTokens;
+    byModel[usage.model].requests += usage.requestCount;
+  }
+
+  return {
+    totalInputTokens,
+    totalOutputTokens,
+    totalTokens: totalInputTokens + totalOutputTokens,
+    totalRequests,
+    totalErrors,
+    errorRate: totalRequests > 0 ? (totalErrors / totalRequests) * 100 : 0,
+    byModel,
+  };
+}
+
 // Summary stats
 export function getMockStats() {
   const agents = mockAgentRuntimes;

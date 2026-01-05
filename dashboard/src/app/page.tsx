@@ -1,12 +1,22 @@
 "use client";
 
-import { Bot, FileText, Wrench, Activity } from "lucide-react";
+import { Bot, FileText, Wrench, Activity, DollarSign, Coins } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatCard, RecentAgents, ActivityChart } from "@/components/dashboard";
 import { useStats } from "@/hooks";
+import { getMockAggregatedUsage } from "@/lib/mock-data";
+import { calculateCost, formatCost, formatTokens } from "@/lib/pricing";
 
 export default function Home() {
   const { data: stats, isLoading } = useStats();
+
+  // Get aggregated usage data for cost display
+  const usage = getMockAggregatedUsage();
+
+  // Calculate total estimated cost
+  const totalCost = Object.entries(usage.byModel).reduce((total, [model, data]) => {
+    return total + calculateCost(model, data.inputTokens, data.outputTokens);
+  }, 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -17,7 +27,7 @@ export default function Home() {
 
       <div className="flex-1 p-6 space-y-6">
         {/* Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <StatCard
             title="Total Agents"
             value={stats?.agents.total ?? 0}
@@ -68,6 +78,36 @@ export default function Home() {
             value={stats?.sessions.active.toLocaleString() ?? 0}
             description="+23% from last hour"
             icon={Activity}
+            loading={isLoading}
+          />
+
+          <StatCard
+            title="Est. Cost (24h)"
+            value={formatCost(totalCost)}
+            description={
+              <>
+                <span className="text-amber-600 dark:text-amber-400">
+                  {usage.totalRequests.toLocaleString()}
+                </span>{" "}
+                requests
+              </>
+            }
+            icon={DollarSign}
+            loading={isLoading}
+          />
+
+          <StatCard
+            title="Tokens (24h)"
+            value={formatTokens(usage.totalTokens)}
+            description={
+              <>
+                <span className="text-blue-600 dark:text-blue-400">
+                  {formatTokens(usage.totalInputTokens)}
+                </span>{" "}
+                in / {formatTokens(usage.totalOutputTokens)} out
+              </>
+            }
+            icon={Coins}
             loading={isLoading}
           />
         </div>
