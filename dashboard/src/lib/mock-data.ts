@@ -452,6 +452,231 @@ export const mockToolRegistries: ToolRegistry[] = [
       lastDiscoveryTime: hoursAgo(0.05),
     },
   },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ToolRegistry",
+    metadata: {
+      name: "mcp-tools",
+      namespace: "production",
+      creationTimestamp: daysAgo(5),
+      uid: "registry-003",
+    },
+    spec: {
+      handlers: [
+        {
+          name: "filesystem",
+          type: "mcp",
+          tool: {
+            name: "read_file",
+            description: "Read contents of a file from the filesystem",
+            inputSchema: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "Path to the file" },
+              },
+              required: ["path"],
+            },
+          },
+          mcpConfig: {
+            transport: "stdio",
+            command: "/usr/local/bin/mcp-filesystem",
+            args: ["--root", "/data"],
+          },
+        },
+        {
+          name: "web-search",
+          type: "mcp",
+          tool: {
+            name: "search_web",
+            description: "Search the web for information",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Search query" },
+                limit: { type: "number", description: "Max results", default: 10 },
+              },
+              required: ["query"],
+            },
+          },
+          mcpConfig: {
+            transport: "sse",
+            endpoint: "http://mcp-search:8080/sse",
+          },
+        },
+      ],
+    },
+    status: {
+      phase: "Ready",
+      discoveredToolsCount: 2,
+      discoveredTools: [
+        {
+          name: "read_file",
+          handlerName: "filesystem",
+          description: "Read contents of a file from the filesystem",
+          endpoint: "stdio:///usr/local/bin/mcp-filesystem",
+          status: "Available",
+          lastChecked: hoursAgo(0.2),
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the file" },
+            },
+            required: ["path"],
+          },
+        },
+        {
+          name: "search_web",
+          handlerName: "web-search",
+          description: "Search the web for information",
+          endpoint: "http://mcp-search:8080/sse",
+          status: "Available",
+          lastChecked: hoursAgo(0.2),
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query" },
+              limit: { type: "number", description: "Max results", default: 10 },
+            },
+            required: ["query"],
+          },
+        },
+      ],
+      lastDiscoveryTime: hoursAgo(0.2),
+    },
+  },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ToolRegistry",
+    metadata: {
+      name: "grpc-services",
+      namespace: "production",
+      creationTimestamp: daysAgo(21),
+      uid: "registry-004",
+    },
+    spec: {
+      handlers: [
+        {
+          name: "user-service",
+          type: "grpc",
+          tool: {
+            name: "get_user",
+            description: "Retrieve user information by ID",
+            inputSchema: {
+              type: "object",
+              properties: {
+                user_id: { type: "string", description: "User ID" },
+              },
+              required: ["user_id"],
+            },
+          },
+          grpcConfig: {
+            endpoint: "user-service.default.svc.cluster.local:9090",
+            tls: true,
+          },
+          timeout: "5s",
+          retries: 3,
+        },
+        {
+          name: "notification-service",
+          type: "grpc",
+          tool: {
+            name: "send_notification",
+            description: "Send a notification to a user",
+            inputSchema: {
+              type: "object",
+              properties: {
+                user_id: { type: "string" },
+                message: { type: "string" },
+                channel: { type: "string", enum: ["email", "sms", "push"] },
+              },
+              required: ["user_id", "message", "channel"],
+            },
+          },
+          grpcConfig: {
+            endpoint: "notification-service.default.svc.cluster.local:9090",
+            tls: true,
+          },
+          timeout: "10s",
+        },
+      ],
+    },
+    status: {
+      phase: "Ready",
+      discoveredToolsCount: 2,
+      discoveredTools: [
+        {
+          name: "get_user",
+          handlerName: "user-service",
+          description: "Retrieve user information by ID",
+          endpoint: "grpc://user-service.default.svc.cluster.local:9090",
+          status: "Available",
+          lastChecked: hoursAgo(0.15),
+          inputSchema: {
+            type: "object",
+            properties: {
+              user_id: { type: "string", description: "User ID" },
+            },
+            required: ["user_id"],
+          },
+        },
+        {
+          name: "send_notification",
+          handlerName: "notification-service",
+          description: "Send a notification to a user",
+          endpoint: "grpc://notification-service.default.svc.cluster.local:9090",
+          status: "Available",
+          lastChecked: hoursAgo(0.15),
+          inputSchema: {
+            type: "object",
+            properties: {
+              user_id: { type: "string" },
+              message: { type: "string" },
+              channel: { type: "string", enum: ["email", "sms", "push"] },
+            },
+            required: ["user_id", "message", "channel"],
+          },
+        },
+      ],
+      lastDiscoveryTime: hoursAgo(0.15),
+    },
+  },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ToolRegistry",
+    metadata: {
+      name: "openapi-services",
+      namespace: "staging",
+      creationTimestamp: daysAgo(2),
+      uid: "registry-005",
+    },
+    spec: {
+      handlers: [
+        {
+          name: "petstore-api",
+          type: "openapi",
+          openAPIConfig: {
+            specURL: "https://petstore.swagger.io/v2/swagger.json",
+            baseURL: "https://petstore.swagger.io/v2",
+            operationFilter: ["getPetById", "findPetsByStatus", "addPet"],
+          },
+        },
+      ],
+    },
+    status: {
+      phase: "Pending",
+      discoveredToolsCount: 0,
+      discoveredTools: [],
+      conditions: [
+        {
+          type: "Discovered",
+          status: "False",
+          lastTransitionTime: hoursAgo(0.5),
+          reason: "SpecFetchFailed",
+          message: "Failed to fetch OpenAPI spec: connection timeout",
+        },
+      ],
+    },
+  },
 ];
 
 // Summary stats
