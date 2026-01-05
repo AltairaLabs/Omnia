@@ -6,10 +6,11 @@ import { useTheme } from "next-themes";
 
 interface HeaderProps {
   title: React.ReactNode;
-  description?: string;
+  description?: React.ReactNode;
+  children?: React.ReactNode;
 }
 
-export function Header({ title, description }: HeaderProps) {
+export function Header({ title, description, children }: HeaderProps) {
   const { theme, setTheme } = useTheme();
 
   return (
@@ -17,10 +18,11 @@ export function Header({ title, description }: HeaderProps) {
       <div>
         <h1 className="text-xl font-semibold">{title}</h1>
         {description && (
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <div className="text-sm text-muted-foreground">{description}</div>
         )}
       </div>
       <div className="flex items-center gap-2">
+        {children}
         <Button variant="ghost" size="icon">
           <RefreshCw className="h-4 w-4" />
         </Button>

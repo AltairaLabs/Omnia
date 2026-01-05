@@ -4,6 +4,8 @@ import type {
   AgentRuntime,
   PromptPack,
   ToolRegistry,
+  Session,
+  SessionSummary,
 } from "@/types";
 
 // Helper to generate timestamps
@@ -678,6 +680,449 @@ export const mockToolRegistries: ToolRegistry[] = [
     },
   },
 ];
+
+// Helper for minutes ago
+const minutesAgo = (minutes: number) =>
+  new Date(Date.now() - minutes * 60 * 1000).toISOString();
+
+// Mock Sessions
+export const mockSessions: Session[] = [
+  {
+    id: "sess-001",
+    agentName: "customer-support",
+    agentNamespace: "production",
+    status: "completed",
+    startedAt: hoursAgo(2),
+    endedAt: hoursAgo(1.5),
+    messages: [
+      {
+        id: "msg-001-1",
+        role: "user",
+        content: "Hi, I need help with my recent order #12345. It hasn't arrived yet.",
+        timestamp: hoursAgo(2),
+      },
+      {
+        id: "msg-001-2",
+        role: "assistant",
+        content: "I'd be happy to help you track your order #12345. Let me look that up for you.",
+        timestamp: hoursAgo(1.98),
+        toolCalls: [
+          {
+            id: "tc-001-1",
+            name: "lookup_order",
+            arguments: { order_id: "12345" },
+            result: {
+              status: "shipped",
+              carrier: "FedEx",
+              tracking: "FX123456789",
+              estimated_delivery: "2026-01-07",
+            },
+            status: "success",
+            duration: 245,
+          },
+        ],
+        tokens: { output: 42 },
+      },
+      {
+        id: "msg-001-3",
+        role: "tool",
+        content: JSON.stringify({
+          status: "shipped",
+          carrier: "FedEx",
+          tracking: "FX123456789",
+          estimated_delivery: "2026-01-07",
+        }),
+        timestamp: hoursAgo(1.97),
+        toolCallId: "tc-001-1",
+      },
+      {
+        id: "msg-001-4",
+        role: "assistant",
+        content: "Great news! Your order #12345 has been shipped via FedEx. The tracking number is FX123456789 and it's estimated to arrive on January 7th, 2026. Would you like me to send you the tracking link?",
+        timestamp: hoursAgo(1.95),
+        tokens: { output: 58 },
+      },
+      {
+        id: "msg-001-5",
+        role: "user",
+        content: "Yes please, and can you also update my email address?",
+        timestamp: hoursAgo(1.8),
+        tokens: { input: 14 },
+      },
+      {
+        id: "msg-001-6",
+        role: "assistant",
+        content: "I'll send you the tracking link right away. For updating your email address, I'll need to verify your identity first. Could you please confirm the last 4 digits of the phone number on your account?",
+        timestamp: hoursAgo(1.78),
+        tokens: { output: 48 },
+      },
+      {
+        id: "msg-001-7",
+        role: "user",
+        content: "It's 5678",
+        timestamp: hoursAgo(1.7),
+        tokens: { input: 4 },
+      },
+      {
+        id: "msg-001-8",
+        role: "assistant",
+        content: "Thank you for verifying. What would you like your new email address to be?",
+        timestamp: hoursAgo(1.68),
+        tokens: { output: 18 },
+      },
+    ],
+    metrics: {
+      messageCount: 8,
+      toolCallCount: 1,
+      totalTokens: 312,
+      inputTokens: 78,
+      outputTokens: 234,
+      estimatedCost: 0.0047,
+      avgResponseTime: 890,
+    },
+  },
+  {
+    id: "sess-002",
+    agentName: "code-assistant",
+    agentNamespace: "production",
+    status: "active",
+    startedAt: minutesAgo(15),
+    messages: [
+      {
+        id: "msg-002-1",
+        role: "user",
+        content: "Can you help me write a TypeScript function to validate email addresses?",
+        timestamp: minutesAgo(15),
+        tokens: { input: 16 },
+      },
+      {
+        id: "msg-002-2",
+        role: "assistant",
+        content: "I'll help you create a robust email validation function in TypeScript. Here's a well-tested implementation:\n\n```typescript\nfunction isValidEmail(email: string): boolean {\n  const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n  return emailRegex.test(email);\n}\n```\n\nThis regex checks for:\n- At least one character before the @\n- At least one character between @ and .\n- At least one character after the final .\n- No whitespace anywhere\n\nWould you like me to add more comprehensive validation like checking for valid TLDs?",
+        timestamp: minutesAgo(14.5),
+        tokens: { output: 124 },
+      },
+      {
+        id: "msg-002-3",
+        role: "user",
+        content: "Yes, and can you also add a function to normalize the email to lowercase?",
+        timestamp: minutesAgo(10),
+        tokens: { input: 18 },
+      },
+      {
+        id: "msg-002-4",
+        role: "assistant",
+        content: "Here's an enhanced version with normalization and more comprehensive validation:\n\n```typescript\ninterface EmailValidationResult {\n  isValid: boolean;\n  normalized: string | null;\n  error?: string;\n}\n\nfunction validateAndNormalizeEmail(email: string): EmailValidationResult {\n  // Normalize: trim and lowercase\n  const normalized = email.trim().toLowerCase();\n  \n  // Check for empty input\n  if (!normalized) {\n    return { isValid: false, normalized: null, error: 'Email is required' };\n  }\n  \n  // Comprehensive regex for email validation\n  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;\n  \n  if (!emailRegex.test(normalized)) {\n    return { isValid: false, normalized: null, error: 'Invalid email format' };\n  }\n  \n  return { isValid: true, normalized };\n}\n```\n\nThis function returns an object with the validation status, normalized email, and any error message.",
+        timestamp: minutesAgo(9),
+        tokens: { output: 248 },
+      },
+    ],
+    metrics: {
+      messageCount: 4,
+      toolCallCount: 0,
+      totalTokens: 406,
+      inputTokens: 34,
+      outputTokens: 372,
+      estimatedCost: 0.0061,
+      avgResponseTime: 1250,
+    },
+  },
+  {
+    id: "sess-003",
+    agentName: "data-analyst",
+    agentNamespace: "production",
+    status: "completed",
+    startedAt: hoursAgo(5),
+    endedAt: hoursAgo(4.5),
+    messages: [
+      {
+        id: "msg-003-1",
+        role: "user",
+        content: "Show me the top 10 products by revenue this month",
+        timestamp: hoursAgo(5),
+        tokens: { input: 12 },
+      },
+      {
+        id: "msg-003-2",
+        role: "assistant",
+        content: "I'll query the sales data to find the top 10 products by revenue for this month.",
+        timestamp: hoursAgo(4.98),
+        toolCalls: [
+          {
+            id: "tc-003-1",
+            name: "execute_sql",
+            arguments: {
+              query: "SELECT product_name, SUM(revenue) as total_revenue FROM sales WHERE date >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY product_name ORDER BY total_revenue DESC LIMIT 10",
+            },
+            result: {
+              rows: [
+                { product_name: "Enterprise License", total_revenue: 125000 },
+                { product_name: "Pro Subscription", total_revenue: 89500 },
+                { product_name: "Team Package", total_revenue: 67800 },
+              ],
+            },
+            status: "success",
+            duration: 1250,
+          },
+        ],
+        tokens: { output: 28 },
+      },
+      {
+        id: "msg-003-3",
+        role: "tool",
+        content: JSON.stringify({
+          rows: [
+            { product_name: "Enterprise License", total_revenue: 125000 },
+            { product_name: "Pro Subscription", total_revenue: 89500 },
+            { product_name: "Team Package", total_revenue: 67800 },
+          ],
+        }),
+        timestamp: hoursAgo(4.95),
+        toolCallId: "tc-003-1",
+      },
+      {
+        id: "msg-003-4",
+        role: "assistant",
+        content: "Here are the top 10 products by revenue this month:\n\n| Rank | Product | Revenue |\n|------|---------|--------|\n| 1 | Enterprise License | $125,000 |\n| 2 | Pro Subscription | $89,500 |\n| 3 | Team Package | $67,800 |\n\nThe Enterprise License is leading with $125,000 in revenue. Would you like me to generate a chart or drill down into any specific product?",
+        timestamp: hoursAgo(4.93),
+        toolCalls: [
+          {
+            id: "tc-003-2",
+            name: "generate_chart",
+            arguments: {
+              type: "bar",
+              data: [
+                { label: "Enterprise License", value: 125000 },
+                { label: "Pro Subscription", value: 89500 },
+                { label: "Team Package", value: 67800 },
+              ],
+              title: "Top Products by Revenue",
+            },
+            result: { chart_url: "https://charts.example.com/abc123" },
+            status: "success",
+            duration: 890,
+          },
+        ],
+        tokens: { output: 112 },
+      },
+    ],
+    metrics: {
+      messageCount: 4,
+      toolCallCount: 2,
+      totalTokens: 245,
+      inputTokens: 12,
+      outputTokens: 233,
+      estimatedCost: 0.0037,
+      avgResponseTime: 1450,
+    },
+  },
+  {
+    id: "sess-004",
+    agentName: "customer-support",
+    agentNamespace: "production",
+    status: "error",
+    startedAt: hoursAgo(8),
+    endedAt: hoursAgo(7.9),
+    messages: [
+      {
+        id: "msg-004-1",
+        role: "user",
+        content: "I want to cancel my subscription immediately and get a full refund",
+        timestamp: hoursAgo(8),
+        tokens: { input: 14 },
+      },
+      {
+        id: "msg-004-2",
+        role: "assistant",
+        content: "I understand you'd like to cancel your subscription. Let me look up your account details.",
+        timestamp: hoursAgo(7.98),
+        toolCalls: [
+          {
+            id: "tc-004-1",
+            name: "lookup_subscription",
+            arguments: { user_id: "user-789" },
+            status: "error",
+            duration: 5000,
+          },
+        ],
+        tokens: { output: 22 },
+      },
+    ],
+    metadata: {
+      tags: ["escalation-needed", "refund-request"],
+    },
+    metrics: {
+      messageCount: 2,
+      toolCallCount: 1,
+      totalTokens: 36,
+      inputTokens: 14,
+      outputTokens: 22,
+      estimatedCost: 0.0005,
+      avgResponseTime: 5200,
+    },
+  },
+  {
+    id: "sess-005",
+    agentName: "sales-copilot",
+    agentNamespace: "production",
+    status: "completed",
+    startedAt: daysAgo(1),
+    endedAt: hoursAgo(23),
+    messages: [
+      {
+        id: "msg-005-1",
+        role: "user",
+        content: "Find me all enterprise leads from the tech sector that haven't been contacted in 30 days",
+        timestamp: daysAgo(1),
+        tokens: { input: 20 },
+      },
+      {
+        id: "msg-005-2",
+        role: "assistant",
+        content: "I'll search for enterprise leads in the tech sector with no recent contact.",
+        timestamp: hoursAgo(23.98),
+        toolCalls: [
+          {
+            id: "tc-005-1",
+            name: "search_contacts",
+            arguments: {
+              segment: "enterprise",
+              industry: "technology",
+              last_contact_before: "30d",
+            },
+            result: {
+              count: 15,
+              contacts: [
+                { name: "John Smith", company: "TechCorp", last_contact: "45 days ago" },
+                { name: "Jane Doe", company: "DataSystems", last_contact: "38 days ago" },
+              ],
+            },
+            status: "success",
+            duration: 2100,
+          },
+        ],
+        tokens: { output: 24 },
+      },
+      {
+        id: "msg-005-3",
+        role: "tool",
+        content: JSON.stringify({
+          count: 15,
+          contacts: [
+            { name: "John Smith", company: "TechCorp", last_contact: "45 days ago" },
+            { name: "Jane Doe", company: "DataSystems", last_contact: "38 days ago" },
+          ],
+        }),
+        timestamp: hoursAgo(23.95),
+        toolCallId: "tc-005-1",
+      },
+      {
+        id: "msg-005-4",
+        role: "assistant",
+        content: "I found 15 enterprise tech leads that haven't been contacted in over 30 days. Here are the top ones:\n\n1. **John Smith** - TechCorp (45 days)\n2. **Jane Doe** - DataSystems (38 days)\n\nWould you like me to schedule follow-up meetings with any of these contacts?",
+        timestamp: hoursAgo(23.9),
+        tokens: { output: 68 },
+      },
+      {
+        id: "msg-005-5",
+        role: "user",
+        content: "Yes, schedule meetings with both for next week",
+        timestamp: hoursAgo(23.5),
+        tokens: { input: 10 },
+      },
+      {
+        id: "msg-005-6",
+        role: "assistant",
+        content: "I'll schedule meetings with both contacts for next week.",
+        timestamp: hoursAgo(23.48),
+        toolCalls: [
+          {
+            id: "tc-005-2",
+            name: "schedule_meeting",
+            arguments: {
+              contact: "John Smith",
+              date: "2026-01-08",
+              time: "10:00",
+              duration: 30,
+            },
+            result: { meeting_id: "mtg-123", confirmed: true },
+            status: "success",
+            duration: 450,
+          },
+          {
+            id: "tc-005-3",
+            name: "schedule_meeting",
+            arguments: {
+              contact: "Jane Doe",
+              date: "2026-01-08",
+              time: "14:00",
+              duration: 30,
+            },
+            result: { meeting_id: "mtg-124", confirmed: true },
+            status: "success",
+            duration: 480,
+          },
+        ],
+        tokens: { output: 18 },
+      },
+    ],
+    metrics: {
+      messageCount: 6,
+      toolCallCount: 3,
+      totalTokens: 280,
+      inputTokens: 30,
+      outputTokens: 250,
+      estimatedCost: 0.0042,
+      avgResponseTime: 980,
+    },
+  },
+  {
+    id: "sess-006",
+    agentName: "code-assistant",
+    agentNamespace: "production",
+    status: "expired",
+    startedAt: daysAgo(3),
+    endedAt: daysAgo(3) + "T01:00:00.000Z",
+    messages: [
+      {
+        id: "msg-006-1",
+        role: "user",
+        content: "Help me debug this React component",
+        timestamp: daysAgo(3),
+        tokens: { input: 8 },
+      },
+    ],
+    metrics: {
+      messageCount: 1,
+      toolCallCount: 0,
+      totalTokens: 8,
+      inputTokens: 8,
+      outputTokens: 0,
+      estimatedCost: 0.0001,
+    },
+  },
+];
+
+// Get session summaries for list view
+export function getMockSessionSummaries(): SessionSummary[] {
+  return mockSessions.map((session) => ({
+    id: session.id,
+    agentName: session.agentName,
+    agentNamespace: session.agentNamespace,
+    status: session.status,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    messageCount: session.metrics.messageCount,
+    toolCallCount: session.metrics.toolCallCount,
+    totalTokens: session.metrics.totalTokens,
+    lastMessage: session.messages[session.messages.length - 1]?.content.slice(0, 100),
+  }));
+}
+
+// Get session by ID
+export function getMockSession(id: string): Session | undefined {
+  return mockSessions.find((s) => s.id === id);
+}
 
 // Summary stats
 export function getMockStats() {
