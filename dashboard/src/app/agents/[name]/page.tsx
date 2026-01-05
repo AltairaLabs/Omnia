@@ -3,10 +3,11 @@
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, MessageSquare } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, MessageSquare } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatusBadge } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
+import { LogViewer } from "@/components/logs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -98,6 +99,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
             <TabsTrigger value="console" className="gap-1.5">
               <MessageSquare className="h-4 w-4" />
               Console
+            </TabsTrigger>
+            <TabsTrigger value="logs" className="gap-1.5">
+              <FileText className="h-4 w-4" />
+              Logs
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
@@ -286,6 +291,13 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
 
           <TabsContent value="console" className="mt-4">
             <AgentConsole
+              agentName={metadata.name}
+              namespace={metadata.namespace || "default"}
+            />
+          </TabsContent>
+
+          <TabsContent value="logs" className="mt-4">
+            <LogViewer
               agentName={metadata.name}
               namespace={metadata.namespace || "default"}
             />
