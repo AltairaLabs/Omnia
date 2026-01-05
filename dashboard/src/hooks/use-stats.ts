@@ -1,25 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { getMockStats } from "@/lib/mock-data";
+import { fetchStats, type Stats } from "@/lib/api-client";
 
-export interface DashboardStats {
-  agents: {
-    total: number;
-    running: number;
-    pending: number;
-    failed: number;
-  };
-  promptPacks: {
-    total: number;
-    active: number;
-    canary: number;
-  };
-  tools: {
-    total: number;
-    available: number;
-    degraded: number;
-  };
+export interface DashboardStats extends Stats {
   sessions: {
     active: number;
   };
@@ -29,9 +13,12 @@ export function useStats() {
   return useQuery({
     queryKey: ["stats"],
     queryFn: async (): Promise<DashboardStats> => {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      return getMockStats();
+      const stats = await fetchStats();
+      // Add sessions count (not tracked by operator, would come from session store)
+      return {
+        ...stats,
+        sessions: { active: 0 }, // TODO: Get from session API when available
+      };
     },
     refetchInterval: 30000, // Refetch every 30 seconds
   });

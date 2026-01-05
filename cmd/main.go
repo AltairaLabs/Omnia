@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/api"
 	"github.com/altairalabs/omnia/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -61,6 +62,7 @@ func main() {
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
 	var probeAddr string
+	var apiAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var facadeImage string
@@ -73,6 +75,7 @@ func main() {
 	flag.StringVar(&runtimeImage, "runtime-image", "",
 		"The image to use for runtime containers. If not set, defaults to ghcr.io/altairalabs/omnia-runtime:latest")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -225,6 +228,16 @@ func main() {
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
+	}
+
+	// Start the REST API server for dashboard access
+	if apiAddr != "" && apiAddr != "0" {
+		apiServer := api.NewServer(mgr.GetClient(), ctrl.Log)
+		go func() {
+			if err := apiServer.Run(ctrl.SetupSignalHandler(), apiAddr); err != nil {
+				setupLog.Error(err, "problem running API server")
+			}
+		}()
 	}
 
 	setupLog.Info("starting manager")
