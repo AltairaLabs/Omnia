@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { LayoutGrid, List, Plus } from "lucide-react";
 import { Header } from "@/components/layout";
-import { AgentCard, AgentTable } from "@/components/agents";
+import { AgentCard, AgentTable, DeployWizard } from "@/components/agents";
 import { NamespaceFilter } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -18,6 +18,7 @@ export default function AgentsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const { data: agents, isLoading } = useAgents();
 
@@ -111,12 +112,15 @@ export default function AgentsPage() {
                 <List className="h-4 w-4" />
               </Button>
             </div>
-            <Button size="sm">
+            <Button size="sm" onClick={() => setWizardOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               New Agent
             </Button>
           </div>
         </div>
+
+        {/* Deploy Wizard */}
+        <DeployWizard open={wizardOpen} onOpenChange={setWizardOpen} />
 
         {/* Content */}
         {isLoading ? (
@@ -142,7 +146,7 @@ export default function AgentsPage() {
         {!isLoading && filteredAgents?.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-muted-foreground">No agents found</p>
-            <Button variant="outline" className="mt-4">
+            <Button variant="outline" className="mt-4" onClick={() => setWizardOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Create your first agent
             </Button>
