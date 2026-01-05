@@ -3,13 +3,20 @@
 import { use, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare } from "lucide-react";
+import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare, Activity } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
 import { StatusBadge, ScaleControl } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { CostSummary, TokenUsageChart } from "@/components/cost";
+import {
+  AgentRequestsPanel,
+  AgentLatencyPanel,
+  AgentErrorRatePanel,
+  ActiveConnectionsPanel,
+  TokenUsagePanel,
+} from "@/components/grafana";
 import { getMockAgentUsage } from "@/lib/mock-data";
 import { scaleAgent } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
@@ -119,6 +126,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
             <TabsTrigger value="usage" className="gap-1.5">
               <BarChart3 className="h-4 w-4" />
               Usage
+            </TabsTrigger>
+            <TabsTrigger value="metrics" className="gap-1.5">
+              <Activity className="h-4 w-4" />
+              Metrics
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
@@ -401,6 +412,32 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                 </>
               );
             })()}
+          </TabsContent>
+
+          <TabsContent value="metrics" className="space-y-6 mt-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <AgentRequestsPanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+              <AgentLatencyPanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+              <AgentErrorRatePanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+              <ActiveConnectionsPanel
+                agentName={metadata.name}
+                namespace={metadata.namespace || "default"}
+              />
+            </div>
+            <TokenUsagePanel
+              agentName={metadata.name}
+              namespace={metadata.namespace || "default"}
+              height={300}
+            />
           </TabsContent>
 
           <TabsContent value="config" className="mt-4">
