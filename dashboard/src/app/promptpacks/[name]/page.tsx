@@ -3,7 +3,7 @@
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Bot, GitBranch, Clock, FileCode } from "lucide-react";
+import { ArrowLeft, ExternalLink, Bot, GitBranch, Clock, FileCode, Wrench, MessageSquare, FileText, Shield, Variable } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatusBadge } from "@/components/agents";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,12 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { usePromptPack, useAgents } from "@/hooks";
 
 interface PromptPackDetailPageProps {
@@ -25,30 +31,158 @@ function formatDate(timestamp?: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
-// Mock prompt content for demo
-const MOCK_PROMPT_CONTENT = `# System Prompt
+// Mock PromptPack content following promptpack.org spec
+const MOCK_PROMPTPACK_CONTENT = {
+  id: "support-prompts",
+  name: "Customer Support Pack",
+  version: "1.2.0",
+  description: "Comprehensive prompt pack for customer support interactions",
+  template_engine: {
+    version: "1.1",
+    syntax: "handlebars",
+  },
+  prompts: [
+    {
+      id: "general-support",
+      name: "General Support",
+      version: "1.2.0",
+      system_template: `You are a helpful customer support agent for {{company_name}}.
 
-You are a helpful AI assistant specialized in customer support for our platform.
+Your role is to assist customers with their inquiries while maintaining a professional and friendly tone.
 
 ## Guidelines
+- Always greet the customer by name: {{user_name}}
+- Reference their account type ({{account_type}}) when relevant
+- Be concise but thorough in your responses
+- If you cannot help, escalate appropriately
 
-1. Always be polite and professional
-2. If you don't know something, say so honestly
-3. Provide clear, step-by-step instructions when helping users
+{{#if premium_support}}
+This customer has premium support - prioritize their requests.
+{{/if}}`,
+      variables: [
+        { name: "company_name", type: "string", required: true },
+        { name: "user_name", type: "string", required: true },
+        { name: "account_type", type: "enum", values: ["free", "pro", "enterprise"], required: true },
+        { name: "premium_support", type: "boolean", required: false },
+      ],
+      tools: ["search_knowledge_base", "create_ticket", "check_order_status"],
+      parameters: {
+        temperature: 0.7,
+        max_tokens: 1024,
+      },
+      validators: ["pii_detection", "profanity_filter"],
+    },
+    {
+      id: "technical-support",
+      name: "Technical Support",
+      version: "1.1.0",
+      system_template: `You are a technical support specialist for {{company_name}}.
 
-## Variables
+Help users troubleshoot technical issues with our products.
 
-- {{user_name}} - The customer's name
-- {{account_type}} - Their subscription tier (free/pro/enterprise)
-- {{context}} - Previous conversation context
+## Troubleshooting Approach
+1. Gather system information
+2. Reproduce the issue if possible
+3. Check known issues database
+4. Provide step-by-step solutions
 
-## Response Format
-
-Always structure your responses with:
-- A greeting using the customer's name
-- Clear explanation of the solution
-- Next steps or follow-up actions
-`;
+User's system: {{system_info}}
+Error code (if any): {{error_code}}`,
+      variables: [
+        { name: "company_name", type: "string", required: true },
+        { name: "system_info", type: "object", required: false },
+        { name: "error_code", type: "string", required: false },
+      ],
+      tools: ["search_knowledge_base", "check_system_status", "create_ticket"],
+      parameters: {
+        temperature: 0.3,
+        max_tokens: 2048,
+      },
+      validators: ["pii_detection"],
+    },
+  ],
+  tools: [
+    {
+      name: "search_knowledge_base",
+      description: "Search the internal knowledge base for relevant articles",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query" },
+          category: { type: "string", description: "Category filter" },
+          limit: { type: "number", description: "Max results", default: 5 },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "create_ticket",
+      description: "Create a support ticket for escalation",
+      parameters: {
+        type: "object",
+        properties: {
+          subject: { type: "string" },
+          description: { type: "string" },
+          priority: { type: "string", enum: ["low", "medium", "high", "urgent"] },
+          category: { type: "string" },
+        },
+        required: ["subject", "description", "priority"],
+      },
+    },
+    {
+      name: "check_order_status",
+      description: "Check the status of a customer order",
+      parameters: {
+        type: "object",
+        properties: {
+          order_id: { type: "string" },
+          email: { type: "string" },
+        },
+        required: ["order_id"],
+      },
+    },
+    {
+      name: "check_system_status",
+      description: "Check current system and service status",
+      parameters: {
+        type: "object",
+        properties: {
+          service: { type: "string", description: "Service name to check" },
+        },
+        required: [],
+      },
+    },
+  ],
+  fragments: {
+    brand_voice: `Always maintain our brand voice:
+- Friendly but professional
+- Empathetic and understanding
+- Solution-oriented
+- Clear and concise`,
+    escalation_notice: `If you cannot resolve this issue, please let the customer know you'll escalate to a specialist who will follow up within 24 hours.`,
+    privacy_reminder: `Remember: Never ask for or store sensitive information like passwords, full credit card numbers, or social security numbers.`,
+  },
+  validators: [
+    {
+      id: "pii_detection",
+      name: "PII Detection",
+      description: "Detects and redacts personally identifiable information",
+      config: {
+        detect: ["ssn", "credit_card", "phone", "email"],
+        action: "redact",
+      },
+    },
+    {
+      id: "profanity_filter",
+      name: "Profanity Filter",
+      description: "Filters inappropriate language from responses",
+      config: {
+        severity: "medium",
+        action: "block",
+      },
+    },
+  ],
+};
 
 export default function PromptPackDetailPage({ params }: PromptPackDetailPageProps) {
   const { name } = use(params);
@@ -235,21 +369,231 @@ export default function PromptPackDetailPage({ params }: PromptPackDetailPagePro
             </Card>
           </TabsContent>
 
-          <TabsContent value="content" className="mt-4">
+          <TabsContent value="content" className="space-y-4 mt-4">
+            {/* Metadata Card */}
             <Card>
-              <CardHeader>
-                <CardTitle>Prompt Template</CardTitle>
-                <CardDescription>
-                  Content from ConfigMap: {spec.source.configMapRef?.name}
-                </CardDescription>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Pack Metadata</CardTitle>
+                  <Badge variant="outline">v{MOCK_PROMPTPACK_CONTENT.version}</Badge>
+                </div>
+                <CardDescription>{MOCK_PROMPTPACK_CONTENT.description}</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="bg-muted rounded-lg p-4 font-mono text-sm whitespace-pre-wrap max-h-[500px] overflow-auto">
-                  {MOCK_PROMPT_CONTENT}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">ID</p>
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{MOCK_PROMPTPACK_CONTENT.id}</code>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Template Engine</p>
+                    <span className="font-medium">{MOCK_PROMPTPACK_CONTENT.template_engine.syntax} v{MOCK_PROMPTPACK_CONTENT.template_engine.version}</span>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Prompts</p>
+                    <span className="font-medium">{MOCK_PROMPTPACK_CONTENT.prompts.length}</span>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Tools</p>
+                    <span className="font-medium">{MOCK_PROMPTPACK_CONTENT.tools.length}</span>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-3">
-                  Variables are highlighted with {"{{variable}}"} syntax
-                </p>
+              </CardContent>
+            </Card>
+
+            {/* Prompts Section */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-base">Prompts ({MOCK_PROMPTPACK_CONTENT.prompts.length})</CardTitle>
+                </div>
+                <CardDescription>Specialized prompts for different scenarios</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <Accordion type="multiple" className="w-full">
+                  {MOCK_PROMPTPACK_CONTENT.prompts.map((prompt) => (
+                    <AccordionItem key={prompt.id} value={prompt.id}>
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium">{prompt.name}</span>
+                          <Badge variant="secondary" className="text-xs">v{prompt.version}</Badge>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="space-y-4">
+                        {/* System Template */}
+                        <div>
+                          <p className="text-sm font-medium mb-2">System Template</p>
+                          <div className="bg-muted rounded-lg p-3 font-mono text-xs whitespace-pre-wrap max-h-[200px] overflow-auto">
+                            {prompt.system_template}
+                          </div>
+                        </div>
+
+                        {/* Variables */}
+                        <div>
+                          <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                            <Variable className="h-4 w-4" />
+                            Variables ({prompt.variables.length})
+                          </p>
+                          <div className="grid gap-2">
+                            {prompt.variables.map((v) => (
+                              <div key={v.name} className="flex items-center gap-2 text-xs bg-muted/50 rounded px-2 py-1.5">
+                                <code className="text-primary font-medium">{`{{${v.name}}}`}</code>
+                                <Badge variant="outline" className="text-xs">{v.type}</Badge>
+                                {v.required && <Badge className="text-xs bg-red-500/15 text-red-600 border-red-500/20">required</Badge>}
+                                {"values" in v && (
+                                  <span className="text-muted-foreground">
+                                    [{(v.values as string[]).join(", ")}]
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Tools & Parameters */}
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                              <Wrench className="h-4 w-4" />
+                              Tools ({prompt.tools.length})
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {prompt.tools.map((tool) => (
+                                <Badge key={tool} variant="outline" className="text-xs">{tool}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium mb-2">Parameters</p>
+                            <div className="text-xs space-y-1">
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Temperature</span>
+                                <span className="font-mono">{prompt.parameters.temperature}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Max Tokens</span>
+                                <span className="font-mono">{prompt.parameters.max_tokens}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Validators */}
+                        <div>
+                          <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                            <Shield className="h-4 w-4" />
+                            Validators ({prompt.validators.length})
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {prompt.validators.map((v) => (
+                              <Badge key={v} variant="outline" className="text-xs border-green-500/30 text-green-600 dark:text-green-400">{v}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </CardContent>
+            </Card>
+
+            {/* Tools Section */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-base">Tools ({MOCK_PROMPTPACK_CONTENT.tools.length})</CardTitle>
+                </div>
+                <CardDescription>Shared tool definitions available to all prompts</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <Accordion type="multiple" className="w-full">
+                  {MOCK_PROMPTPACK_CONTENT.tools.map((tool) => (
+                    <AccordionItem key={tool.name} value={tool.name}>
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm font-medium">{tool.name}</code>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <p className="text-sm text-muted-foreground mb-3">{tool.description}</p>
+                        <div>
+                          <p className="text-sm font-medium mb-2">Parameters</p>
+                          <div className="bg-muted rounded-lg p-3 font-mono text-xs overflow-auto">
+                            <pre>{JSON.stringify(tool.parameters, null, 2)}</pre>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </CardContent>
+            </Card>
+
+            {/* Fragments Section */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-base">Fragments ({Object.keys(MOCK_PROMPTPACK_CONTENT.fragments).length})</CardTitle>
+                </div>
+                <CardDescription>Reusable text blocks shared across prompts</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <Accordion type="multiple" className="w-full">
+                  {Object.entries(MOCK_PROMPTPACK_CONTENT.fragments).map(([key, value]) => (
+                    <AccordionItem key={key} value={key}>
+                      <AccordionTrigger className="hover:no-underline">
+                        <code className="text-sm font-medium">{key}</code>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="bg-muted rounded-lg p-3 font-mono text-xs whitespace-pre-wrap">
+                          {value}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </CardContent>
+            </Card>
+
+            {/* Validators Section */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-base">Validators ({MOCK_PROMPTPACK_CONTENT.validators.length})</CardTitle>
+                </div>
+                <CardDescription>Safety guardrails and content filters</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {MOCK_PROMPTPACK_CONTENT.validators.map((validator) => (
+                    <div key={validator.id} className="border rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{validator.name}</span>
+                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{validator.id}</code>
+                        </div>
+                        <Badge variant="outline" className="text-xs">{validator.config.action}</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-2">{validator.description}</p>
+                      {"detect" in validator.config && (
+                        <div className="flex flex-wrap gap-1">
+                          {(validator.config.detect as string[]).map((item) => (
+                            <Badge key={item} variant="secondary" className="text-xs">{item}</Badge>
+                          ))}
+                        </div>
+                      )}
+                      {"severity" in validator.config && (
+                        <div className="text-xs text-muted-foreground">
+                          Severity: <span className="font-medium">{validator.config.severity as string}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
