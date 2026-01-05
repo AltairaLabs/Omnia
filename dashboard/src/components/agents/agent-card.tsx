@@ -1,12 +1,16 @@
 "use client";
 
+import { useCallback } from "react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
+import { ScaleControl } from "./scale-control";
 import { CostSparkline } from "@/components/cost";
 import { getMockAgentUsage, mockCostAllocation } from "@/lib/mock-data";
 import { formatCost, calculateCost } from "@/lib/pricing";
+import { scaleAgent } from "@/lib/api/client";
 import type { AgentRuntime } from "@/types";
 
 interface AgentCardProps {
@@ -15,6 +19,13 @@ interface AgentCardProps {
 
 export function AgentCard({ agent }: AgentCardProps) {
   const { metadata, spec, status } = agent;
+  const queryClient = useQueryClient();
+
+  const handleScale = useCallback(async (replicas: number) => {
+    await scaleAgent(metadata.namespace || "default", metadata.name, replicas);
+    // Invalidate queries to refresh data
+    await queryClient.invalidateQueries({ queryKey: ["agents"] });
+  }, [metadata.namespace, metadata.name, queryClient]);
 
   // Get usage data for sparkline
   const usage = getMockAgentUsage(metadata.namespace || "default", metadata.name);
@@ -74,11 +85,18 @@ export function AgentCard({ agent }: AgentCardProps) {
                 {spec.provider?.model?.split("-").slice(-2).join("-") || "sonnet-4"}
               </p>
             </div>
-            <div>
-              <p className="text-muted-foreground">Replicas</p>
-              <p className="font-medium">
-                {status?.replicas?.ready ?? 0}/{status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
-              </p>
+            <div onClick={(e) => e.preventDefault()}>
+              <p className="text-muted-foreground mb-1">Replicas</p>
+              <ScaleControl
+                currentReplicas={status?.replicas?.ready ?? 0}
+                desiredReplicas={status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
+                minReplicas={spec.runtime?.autoscaling?.minReplicas ?? 0}
+                maxReplicas={spec.runtime?.autoscaling?.maxReplicas ?? 10}
+                autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
+                autoscalingType={spec.runtime?.autoscaling?.type}
+                onScale={handleScale}
+                compact
+              />
             </div>
             <div>
               <p className="text-muted-foreground">Facade</p>

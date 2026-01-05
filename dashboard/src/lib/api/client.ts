@@ -323,6 +323,44 @@ export async function fetchAgentLogs(
   return data ?? [];
 }
 
+/**
+ * Scale an agent to a specific number of replicas.
+ */
+export async function scaleAgent(
+  namespace: string,
+  name: string,
+  replicas: number
+): Promise<AgentRuntime> {
+  if (isDemoMode) {
+    await simulateDelay(500);
+    // Find and update mock agent
+    const agent = mockAgentRuntimes.find(
+      (a) => a.metadata.namespace === namespace && a.metadata.name === name
+    );
+    if (agent) {
+      // Update mock data (this won't persist across refreshes)
+      if (agent.spec.runtime) {
+        agent.spec.runtime.replicas = replicas;
+      }
+      if (agent.status?.replicas) {
+        agent.status.replicas.desired = replicas;
+      }
+    }
+    return agent as unknown as AgentRuntime;
+  }
+
+  const { data, error } = await client.PUT("/api/v1/agents/{namespace}/{name}/scale", {
+    params: { path: { namespace, name } },
+    body: { replicas },
+  });
+
+  if (error) {
+    throw new Error(`Failed to scale agent: ${JSON.stringify(error)}`);
+  }
+
+  return data as AgentRuntime;
+}
+
 // Helper to simulate network delay in demo mode
 function simulateDelay(ms = 100): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
