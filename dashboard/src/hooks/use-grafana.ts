@@ -34,35 +34,52 @@ export interface GrafanaPanelOptions {
   vars?: Record<string, string>;
 }
 
-// Pre-defined dashboard UIDs (these should match provisioned dashboards)
+// Pre-defined dashboard UIDs (must match provisioned dashboards in Helm chart)
 export const GRAFANA_DASHBOARDS = {
-  AGENT_OVERVIEW: "omnia-agent-overview",
-  TOKEN_USAGE: "omnia-token-usage",
-  SESSION_METRICS: "omnia-sessions",
-  SYSTEM_OVERVIEW: "omnia-system",
+  /** System-wide overview: requests, latency, costs, tokens */
+  OVERVIEW: "omnia-overview",
+  /** Cost analysis: by model, agent, trends */
+  COSTS: "omnia-costs",
+  /** Per-agent detail with template variables */
+  AGENT_DETAIL: "omnia-agent-detail",
+  /** Logs explorer (Loki) */
+  LOGS: "omnia-logs",
 } as const;
 
-// Pre-defined panel IDs within dashboards
-export const GRAFANA_PANELS = {
-  // Agent Overview dashboard
-  REQUESTS_PER_SECOND: 1,
-  LATENCY_HISTOGRAM: 2,
+// Panel IDs within the Overview dashboard
+export const OVERVIEW_PANELS = {
+  REQUESTS_PER_SEC: 1,
+  P95_LATENCY: 2,
+  COST_24H: 3,
+  TOKENS_PER_MIN: 4,
+  REQUEST_RATE_BY_AGENT: 5,
+  GENERATION_LATENCY: 6,
+  TOKEN_USAGE_BY_AGENT: 7,
+  TOOL_CALLS_BY_AGENT: 8,
+} as const;
+
+// Panel IDs within the Agent Detail dashboard
+export const AGENT_DETAIL_PANELS = {
+  REQUESTS_PER_SEC: 1,
+  P95_LATENCY: 2,
   ERROR_RATE: 3,
   ACTIVE_CONNECTIONS: 4,
-  // Token Usage dashboard
-  TOKEN_USAGE_OVER_TIME: 1,
-  INPUT_VS_OUTPUT: 2,
-  COST_OVER_TIME: 3,
-  CACHE_HIT_RATE: 4,
-  // Session Metrics dashboard
-  ACTIVE_SESSIONS: 1,
-  SESSION_DURATION: 2,
-  MESSAGES_PER_SESSION: 3,
-  // System Overview dashboard
-  TOTAL_REQUESTS: 1,
-  TOTAL_AGENTS: 2,
-  SYSTEM_LATENCY: 3,
-  SYSTEM_ERRORS: 4,
+  REQUEST_RATE: 5,
+  LATENCY_DISTRIBUTION: 6,
+  TOKEN_USAGE: 7,
+  TOOL_CALLS: 8,
+  RECENT_LOGS: 9,
+  RECENT_TRACES: 10,
+} as const;
+
+// Panel IDs within the Costs dashboard
+export const COSTS_PANELS = {
+  COST_BY_MODEL: 1,
+  COST_BY_AGENT: 2,
+  TOTAL_COST_7D: 3,
+  HOURLY_COST_TREND: 4,
+  INPUT_TOKENS_BY_MODEL: 5,
+  OUTPUT_TOKENS_BY_MODEL: 6,
 } as const;
 
 /**

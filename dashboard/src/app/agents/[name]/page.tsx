@@ -18,6 +18,7 @@ import {
   TokenUsagePanel,
 } from "@/components/grafana";
 import { getMockAgentUsage } from "@/lib/mock-data";
+import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
 import { scaleAgent } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +44,7 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   const queryClient = useQueryClient();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
+  const grafana = useGrafana();
 
   const handleScale = useCallback(async (replicas: number) => {
     await scaleAgent(namespace, name, replicas);
@@ -415,6 +417,24 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
           </TabsContent>
 
           <TabsContent value="metrics" className="space-y-6 mt-4">
+            {/* View in Grafana button - only shown when Grafana is enabled */}
+            {grafana.enabled && (
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" asChild>
+                  <a
+                    href={buildDashboardUrl(grafana, GRAFANA_DASHBOARDS.AGENT_DETAIL, {
+                      agent: metadata.name,
+                      namespace: metadata.namespace || "default",
+                    }) || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    View Full Dashboard in Grafana
+                  </a>
+                </Button>
+              </div>
+            )}
             <div className="grid md:grid-cols-2 gap-4">
               <AgentRequestsPanel
                 agentName={metadata.name}

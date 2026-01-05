@@ -10,7 +10,8 @@ import {
   buildPanelUrl,
   buildDashboardUrl,
   GRAFANA_DASHBOARDS,
-  GRAFANA_PANELS,
+  OVERVIEW_PANELS,
+  AGENT_DETAIL_PANELS,
 } from "@/hooks";
 import type { GrafanaPanelOptions } from "@/hooks";
 import { cn } from "@/lib/utils";
@@ -183,8 +184,8 @@ export function AgentRequestsPanel({
     <GrafanaPanel
       title="Requests / sec"
       description="Request rate over time"
-      dashboardUid={GRAFANA_DASHBOARDS.AGENT_OVERVIEW}
-      panelId={GRAFANA_PANELS.REQUESTS_PER_SECOND}
+      dashboardUid={GRAFANA_DASHBOARDS.AGENT_DETAIL}
+      panelId={AGENT_DETAIL_PANELS.REQUESTS_PER_SEC}
       vars={{ agent: agentName, namespace }}
       className={className}
     />
@@ -207,8 +208,8 @@ export function AgentLatencyPanel({
     <GrafanaPanel
       title="Latency"
       description="Response time distribution"
-      dashboardUid={GRAFANA_DASHBOARDS.AGENT_OVERVIEW}
-      panelId={GRAFANA_PANELS.LATENCY_HISTOGRAM}
+      dashboardUid={GRAFANA_DASHBOARDS.AGENT_DETAIL}
+      panelId={AGENT_DETAIL_PANELS.P95_LATENCY}
       vars={{ agent: agentName, namespace }}
       className={className}
     />
@@ -231,8 +232,8 @@ export function AgentErrorRatePanel({
     <GrafanaPanel
       title="Error Rate"
       description="Errors over time"
-      dashboardUid={GRAFANA_DASHBOARDS.AGENT_OVERVIEW}
-      panelId={GRAFANA_PANELS.ERROR_RATE}
+      dashboardUid={GRAFANA_DASHBOARDS.AGENT_DETAIL}
+      panelId={AGENT_DETAIL_PANELS.ERROR_RATE}
       vars={{ agent: agentName, namespace }}
       className={className}
     />
@@ -257,8 +258,8 @@ export function TokenUsagePanel({
     <GrafanaPanel
       title="Token Usage"
       description="Input and output tokens over time"
-      dashboardUid={GRAFANA_DASHBOARDS.TOKEN_USAGE}
-      panelId={GRAFANA_PANELS.TOKEN_USAGE_OVER_TIME}
+      dashboardUid={GRAFANA_DASHBOARDS.AGENT_DETAIL}
+      panelId={AGENT_DETAIL_PANELS.TOKEN_USAGE}
       vars={{ agent: agentName, namespace }}
       height={height}
       className={className}
@@ -282,8 +283,8 @@ export function ActiveConnectionsPanel({
     <GrafanaPanel
       title="Active Connections"
       description="Current WebSocket/gRPC connections"
-      dashboardUid={GRAFANA_DASHBOARDS.AGENT_OVERVIEW}
-      panelId={GRAFANA_PANELS.ACTIVE_CONNECTIONS}
+      dashboardUid={GRAFANA_DASHBOARDS.AGENT_DETAIL}
+      panelId={AGENT_DETAIL_PANELS.ACTIVE_CONNECTIONS}
       vars={{ agent: agentName, namespace }}
       className={className}
     />
@@ -315,6 +316,7 @@ export function GrafanaPanelSkeleton({
 
 /**
  * System-wide overview panels for the main dashboard.
+ * Uses the omnia-overview dashboard panels.
  */
 export function SystemOverviewPanels({ className }: { className?: string }) {
   const grafana = useGrafana();
@@ -336,31 +338,31 @@ export function SystemOverviewPanels({ className }: { className?: string }) {
   return (
     <div className={cn("grid md:grid-cols-2 lg:grid-cols-4 gap-4", className)}>
       <GrafanaPanel
-        title="Total Requests"
-        description="Requests across all agents"
-        dashboardUid={GRAFANA_DASHBOARDS.SYSTEM_OVERVIEW}
-        panelId={GRAFANA_PANELS.TOTAL_REQUESTS}
+        title="Requests/sec"
+        description="Request rate across all agents"
+        dashboardUid={GRAFANA_DASHBOARDS.OVERVIEW}
+        panelId={OVERVIEW_PANELS.REQUESTS_PER_SEC}
         height={150}
       />
       <GrafanaPanel
-        title="Active Agents"
-        description="Running agent instances"
-        dashboardUid={GRAFANA_DASHBOARDS.SYSTEM_OVERVIEW}
-        panelId={GRAFANA_PANELS.TOTAL_AGENTS}
+        title="P95 Latency"
+        description="95th percentile response time"
+        dashboardUid={GRAFANA_DASHBOARDS.OVERVIEW}
+        panelId={OVERVIEW_PANELS.P95_LATENCY}
         height={150}
       />
       <GrafanaPanel
-        title="Avg Latency"
-        description="System-wide response time"
-        dashboardUid={GRAFANA_DASHBOARDS.SYSTEM_OVERVIEW}
-        panelId={GRAFANA_PANELS.SYSTEM_LATENCY}
+        title="Cost (24h)"
+        description="Estimated LLM costs"
+        dashboardUid={GRAFANA_DASHBOARDS.OVERVIEW}
+        panelId={OVERVIEW_PANELS.COST_24H}
         height={150}
       />
       <GrafanaPanel
-        title="Error Rate"
-        description="System-wide errors"
-        dashboardUid={GRAFANA_DASHBOARDS.SYSTEM_OVERVIEW}
-        panelId={GRAFANA_PANELS.SYSTEM_ERRORS}
+        title="Tokens/min"
+        description="Token throughput"
+        dashboardUid={GRAFANA_DASHBOARDS.OVERVIEW}
+        panelId={OVERVIEW_PANELS.TOKENS_PER_MIN}
         height={150}
       />
     </div>
