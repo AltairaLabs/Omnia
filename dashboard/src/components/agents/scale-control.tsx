@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Minus, Plus, Loader2, Zap } from "lucide-react";
+import { Minus, Plus, Loader2, Zap, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useReadOnly } from "@/hooks";
 
 interface ScaleControlProps {
   currentReplicas: number;
@@ -44,6 +45,7 @@ export function ScaleControl({
   className,
   compact = false,
 }: ScaleControlProps) {
+  const { isReadOnly, message: readOnlyMessage } = useReadOnly();
   const [isScaling, setIsScaling] = useState(false);
   const [pendingScale, setPendingScale] = useState<number | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -111,8 +113,8 @@ export function ScaleControl({
   }, []);
 
   const displayReplicas = pendingScale ?? desiredReplicas;
-  const canScaleDown = displayReplicas > minReplicas && !isScaling;
-  const canScaleUp = displayReplicas < maxReplicas && !isScaling;
+  const canScaleDown = displayReplicas > minReplicas && !isScaling && !isReadOnly;
+  const canScaleUp = displayReplicas < maxReplicas && !isScaling && !isReadOnly;
 
   if (compact) {
     return (
@@ -134,33 +136,51 @@ export function ScaleControl({
             </Tooltip>
           )}
 
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => handleScale(displayReplicas - 1)}
-            disabled={!canScaleDown}
-          >
-            <Minus className="h-3 w-3" />
-          </Button>
+          {isReadOnly ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <Lock className="h-3 w-3" />
+                  <span className="min-w-[3rem] text-center text-sm font-medium">
+                    {currentReplicas}/{displayReplicas}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p className="text-sm">{readOnlyMessage}</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => handleScale(displayReplicas - 1)}
+                disabled={!canScaleDown}
+              >
+                <Minus className="h-3 w-3" />
+              </Button>
 
-          <span className="min-w-[3rem] text-center text-sm font-medium">
-            {isScaling ? (
-              <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-            ) : (
-              `${currentReplicas}/${displayReplicas}`
-            )}
-          </span>
+              <span className="min-w-[3rem] text-center text-sm font-medium">
+                {isScaling ? (
+                  <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                ) : (
+                  `${currentReplicas}/${displayReplicas}`
+                )}
+              </span>
 
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => handleScale(displayReplicas + 1)}
-            disabled={!canScaleUp}
-          >
-            <Plus className="h-3 w-3" />
-          </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => handleScale(displayReplicas + 1)}
+                disabled={!canScaleUp}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            </>
+          )}
 
           <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
             <AlertDialogContent>
@@ -211,6 +231,19 @@ export function ScaleControl({
                 </TooltipContent>
               </Tooltip>
             )}
+            {isReadOnly && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    <Lock className="h-3 w-3" />
+                    <span className="text-xs font-medium">Read Only</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p className="text-sm">{readOnlyMessage}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
           <div className="text-lg font-semibold">
             {isScaling ? (
@@ -227,28 +260,58 @@ export function ScaleControl({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            onClick={() => handleScale(displayReplicas - 1)}
-            disabled={!canScaleDown}
-          >
-            <Minus className="h-4 w-4 mr-1" />
-            Scale Down
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            onClick={() => handleScale(displayReplicas + 1)}
-            disabled={!canScaleUp}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Scale Up
-          </Button>
-        </div>
+        {isReadOnly ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 opacity-50"
+                  disabled
+                >
+                  <Minus className="h-4 w-4 mr-1" />
+                  Scale Down
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 opacity-50"
+                  disabled
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Scale Up
+                </Button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <p className="text-sm">{readOnlyMessage}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => handleScale(displayReplicas - 1)}
+              disabled={!canScaleDown}
+            >
+              <Minus className="h-4 w-4 mr-1" />
+              Scale Down
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => handleScale(displayReplicas + 1)}
+              disabled={!canScaleUp}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Scale Up
+            </Button>
+          </div>
+        )}
 
         {autoscalingEnabled && (
           <p className="text-xs text-muted-foreground">
