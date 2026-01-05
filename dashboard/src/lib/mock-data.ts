@@ -1124,6 +1124,412 @@ export function getMockSession(id: string): Session | undefined {
   return mockSessions.find((s) => s.id === id);
 }
 
+// Mock usage data per agent (for cost tracking)
+export interface AgentUsageData {
+  agentName: string;
+  agentNamespace: string;
+  model: string;
+  period: "24h" | "7d" | "30d";
+  inputTokens: number;
+  outputTokens: number;
+  cacheHits: number;
+  requestCount: number;
+  errorCount: number;
+  avgLatencyMs: number;
+  // Time series data for charts
+  timeSeries: {
+    timestamp: string;
+    inputTokens: number;
+    outputTokens: number;
+    requests: number;
+  }[];
+}
+
+// Generate time series data for the last N hours
+function generateTimeSeries(hours: number, baseInput: number, baseOutput: number) {
+  const series = [];
+  for (let i = hours; i > 0; i--) {
+    const variance = 0.5 + Math.random(); // 50% to 150% of base
+    series.push({
+      timestamp: hoursAgo(i),
+      inputTokens: Math.floor(baseInput * variance),
+      outputTokens: Math.floor(baseOutput * variance),
+      requests: Math.floor(10 + Math.random() * 50),
+    });
+  }
+  return series;
+}
+
+// Mock usage data for each agent
+export const mockAgentUsage: Record<string, AgentUsageData> = {
+  "production/customer-support": {
+    agentName: "customer-support",
+    agentNamespace: "production",
+    model: "claude-sonnet-4-20250514",
+    period: "24h",
+    inputTokens: 2_450_000,
+    outputTokens: 1_890_000,
+    cacheHits: 450_000,
+    requestCount: 3_247,
+    errorCount: 12,
+    avgLatencyMs: 890,
+    timeSeries: generateTimeSeries(24, 100_000, 78_000),
+  },
+  "production/code-assistant": {
+    agentName: "code-assistant",
+    agentNamespace: "production",
+    model: "claude-sonnet-4-20250514",
+    period: "24h",
+    inputTokens: 1_780_000,
+    outputTokens: 2_340_000,
+    cacheHits: 320_000,
+    requestCount: 1_892,
+    errorCount: 5,
+    avgLatencyMs: 1250,
+    timeSeries: generateTimeSeries(24, 74_000, 97_000),
+  },
+  "production/data-analyst": {
+    agentName: "data-analyst",
+    agentNamespace: "production",
+    model: "gpt-4-turbo",
+    period: "24h",
+    inputTokens: 890_000,
+    outputTokens: 1_120_000,
+    cacheHits: 0,
+    requestCount: 856,
+    errorCount: 23,
+    avgLatencyMs: 1450,
+    timeSeries: generateTimeSeries(24, 37_000, 46_000),
+  },
+  "production/onboarding-bot": {
+    agentName: "onboarding-bot",
+    agentNamespace: "production",
+    model: "claude-sonnet-4-20250514",
+    period: "24h",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHits: 0,
+    requestCount: 0,
+    errorCount: 0,
+    avgLatencyMs: 0,
+    timeSeries: [],
+  },
+  "production/sales-copilot": {
+    agentName: "sales-copilot",
+    agentNamespace: "production",
+    model: "gpt-4-turbo",
+    period: "24h",
+    inputTokens: 1_230_000,
+    outputTokens: 1_560_000,
+    cacheHits: 0,
+    requestCount: 1_124,
+    errorCount: 8,
+    avgLatencyMs: 980,
+    timeSeries: generateTimeSeries(24, 51_000, 65_000),
+  },
+  "staging/legacy-agent": {
+    agentName: "legacy-agent",
+    agentNamespace: "staging",
+    model: "gpt-3.5-turbo",
+    period: "24h",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHits: 0,
+    requestCount: 0,
+    errorCount: 47,
+    avgLatencyMs: 0,
+    timeSeries: [],
+  },
+};
+
+// Get usage data for a specific agent
+export function getMockAgentUsage(namespace: string, name: string): AgentUsageData | undefined {
+  return mockAgentUsage[`${namespace}/${name}`];
+}
+
+// Get aggregated usage stats for all agents
+export function getMockAggregatedUsage() {
+  const allUsage = Object.values(mockAgentUsage);
+
+  const totalInputTokens = allUsage.reduce((sum, u) => sum + u.inputTokens, 0);
+  const totalOutputTokens = allUsage.reduce((sum, u) => sum + u.outputTokens, 0);
+  const totalRequests = allUsage.reduce((sum, u) => sum + u.requestCount, 0);
+  const totalErrors = allUsage.reduce((sum, u) => sum + u.errorCount, 0);
+
+  // Group by model
+  const byModel: Record<string, { inputTokens: number; outputTokens: number; requests: number }> = {};
+  for (const usage of allUsage) {
+    if (!byModel[usage.model]) {
+      byModel[usage.model] = { inputTokens: 0, outputTokens: 0, requests: 0 };
+    }
+    byModel[usage.model].inputTokens += usage.inputTokens;
+    byModel[usage.model].outputTokens += usage.outputTokens;
+    byModel[usage.model].requests += usage.requestCount;
+  }
+
+  return {
+    totalInputTokens,
+    totalOutputTokens,
+    totalTokens: totalInputTokens + totalOutputTokens,
+    totalRequests,
+    totalErrors,
+    errorRate: totalRequests > 0 ? (totalErrors / totalRequests) * 100 : 0,
+    byModel,
+  };
+}
+
+// ============================================================================
+// Cost Allocation Data (for /costs page)
+// ============================================================================
+
+export interface CostAllocationItem {
+  agent: string;
+  namespace: string;
+  provider: "anthropic" | "openai";
+  model: string;
+  team?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheHits: number;
+  requests: number;
+  inputCost: number;
+  outputCost: number;
+  cacheSavings: number;
+  totalCost: number;
+}
+
+export interface CostTimeSeriesPoint {
+  timestamp: string;
+  anthropic: number;
+  openai: number;
+  total: number;
+}
+
+// Detailed cost allocation per agent (derived from mockAgentUsage with pricing applied)
+export const mockCostAllocation: CostAllocationItem[] = [
+  {
+    agent: "customer-support",
+    namespace: "production",
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    team: "support",
+    inputTokens: 2_450_000,
+    outputTokens: 1_890_000,
+    cacheHits: 450_000,
+    requests: 3_247,
+    inputCost: 7.35, // $3/1M * 2.45M
+    outputCost: 28.35, // $15/1M * 1.89M
+    cacheSavings: 1.22, // ($3 - $0.30)/1M * 0.45M
+    totalCost: 35.70,
+  },
+  {
+    agent: "code-assistant",
+    namespace: "production",
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    team: "engineering",
+    inputTokens: 1_780_000,
+    outputTokens: 2_340_000,
+    cacheHits: 320_000,
+    requests: 1_892,
+    inputCost: 5.34,
+    outputCost: 35.10,
+    cacheSavings: 0.86,
+    totalCost: 40.44,
+  },
+  {
+    agent: "data-analyst",
+    namespace: "production",
+    provider: "openai",
+    model: "gpt-4-turbo",
+    team: "data",
+    inputTokens: 890_000,
+    outputTokens: 1_120_000,
+    cacheHits: 0,
+    requests: 856,
+    inputCost: 8.90, // $10/1M
+    outputCost: 33.60, // $30/1M
+    cacheSavings: 0,
+    totalCost: 42.50,
+  },
+  {
+    agent: "sales-copilot",
+    namespace: "production",
+    provider: "openai",
+    model: "gpt-4-turbo",
+    team: "sales",
+    inputTokens: 1_230_000,
+    outputTokens: 1_560_000,
+    cacheHits: 0,
+    requests: 1_124,
+    inputCost: 12.30,
+    outputCost: 46.80,
+    cacheSavings: 0,
+    totalCost: 59.10,
+  },
+  {
+    agent: "onboarding-bot",
+    namespace: "production",
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    team: "hr",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHits: 0,
+    requests: 0,
+    inputCost: 0,
+    outputCost: 0,
+    cacheSavings: 0,
+    totalCost: 0,
+  },
+  {
+    agent: "legacy-agent",
+    namespace: "staging",
+    provider: "openai",
+    model: "gpt-3.5-turbo",
+    team: "platform",
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHits: 0,
+    requests: 0,
+    inputCost: 0,
+    outputCost: 0,
+    cacheSavings: 0,
+    totalCost: 0,
+  },
+];
+
+// Generate cost time series for the last 24 hours
+function generateCostTimeSeries(hours: number): CostTimeSeriesPoint[] {
+  const series: CostTimeSeriesPoint[] = [];
+  for (let i = hours; i > 0; i--) {
+    const hourVariance = 0.7 + Math.random() * 0.6; // 70% to 130%
+    const anthropic = 3.2 * hourVariance; // ~$3.2/hour base for Anthropic
+    const openai = 4.2 * hourVariance; // ~$4.2/hour base for OpenAI
+    series.push({
+      timestamp: hoursAgo(i),
+      anthropic: Number(anthropic.toFixed(2)),
+      openai: Number(openai.toFixed(2)),
+      total: Number((anthropic + openai).toFixed(2)),
+    });
+  }
+  return series;
+}
+
+export const mockCostTimeSeries = generateCostTimeSeries(24);
+
+// Aggregate cost data by different dimensions
+export function getMockCostByProvider() {
+  const byProvider: Record<string, { cost: number; requests: number; tokens: number }> = {
+    anthropic: { cost: 0, requests: 0, tokens: 0 },
+    openai: { cost: 0, requests: 0, tokens: 0 },
+  };
+
+  for (const item of mockCostAllocation) {
+    byProvider[item.provider].cost += item.totalCost;
+    byProvider[item.provider].requests += item.requests;
+    byProvider[item.provider].tokens += item.inputTokens + item.outputTokens;
+  }
+
+  return Object.entries(byProvider).map(([provider, data]) => ({
+    name: provider === "anthropic" ? "Anthropic" : "OpenAI",
+    provider,
+    ...data,
+  }));
+}
+
+export function getMockCostByModel() {
+  const byModel: Record<string, { cost: number; requests: number; tokens: number; provider: string }> = {};
+
+  for (const item of mockCostAllocation) {
+    if (!byModel[item.model]) {
+      byModel[item.model] = { cost: 0, requests: 0, tokens: 0, provider: item.provider };
+    }
+    byModel[item.model].cost += item.totalCost;
+    byModel[item.model].requests += item.requests;
+    byModel[item.model].tokens += item.inputTokens + item.outputTokens;
+  }
+
+  return Object.entries(byModel)
+    .map(([model, data]) => ({
+      model,
+      displayName: getModelDisplayName(model),
+      ...data,
+    }))
+    .sort((a, b) => b.cost - a.cost);
+}
+
+function getModelDisplayName(model: string): string {
+  const names: Record<string, string> = {
+    "claude-sonnet-4-20250514": "Claude Sonnet 4",
+    "gpt-4-turbo": "GPT-4 Turbo",
+    "gpt-3.5-turbo": "GPT-3.5 Turbo",
+    "claude-opus-4-20250514": "Claude Opus 4",
+  };
+  return names[model] || model;
+}
+
+export function getMockCostByTeam() {
+  const byTeam: Record<string, { cost: number; requests: number; agents: string[] }> = {};
+
+  for (const item of mockCostAllocation) {
+    const team = item.team || "unassigned";
+    if (!byTeam[team]) {
+      byTeam[team] = { cost: 0, requests: 0, agents: [] };
+    }
+    byTeam[team].cost += item.totalCost;
+    byTeam[team].requests += item.requests;
+    if (!byTeam[team].agents.includes(item.agent)) {
+      byTeam[team].agents.push(item.agent);
+    }
+  }
+
+  return Object.entries(byTeam)
+    .map(([team, data]) => ({
+      team,
+      ...data,
+      agentCount: data.agents.length,
+    }))
+    .sort((a, b) => b.cost - a.cost);
+}
+
+export function getMockCostSummary() {
+  const totalCost = mockCostAllocation.reduce((sum, item) => sum + item.totalCost, 0);
+  const totalInputCost = mockCostAllocation.reduce((sum, item) => sum + item.inputCost, 0);
+  const totalOutputCost = mockCostAllocation.reduce((sum, item) => sum + item.outputCost, 0);
+  const totalCacheSavings = mockCostAllocation.reduce((sum, item) => sum + item.cacheSavings, 0);
+  const totalRequests = mockCostAllocation.reduce((sum, item) => sum + item.requests, 0);
+  const totalTokens = mockCostAllocation.reduce(
+    (sum, item) => sum + item.inputTokens + item.outputTokens,
+    0
+  );
+
+  // Calculate costs by provider
+  const byProvider = getMockCostByProvider();
+  const anthropicCost = byProvider.find((p) => p.provider === "anthropic")?.cost || 0;
+  const openaiCost = byProvider.find((p) => p.provider === "openai")?.cost || 0;
+
+  // Calculate projected monthly cost (24h * 30 days)
+  const projectedMonthlyCost = totalCost * 30;
+
+  return {
+    totalCost,
+    totalInputCost,
+    totalOutputCost,
+    totalCacheSavings,
+    totalRequests,
+    totalTokens,
+    anthropicCost,
+    openaiCost,
+    projectedMonthlyCost,
+    // Percentage breakdowns
+    anthropicPercent: totalCost > 0 ? (anthropicCost / totalCost) * 100 : 0,
+    openaiPercent: totalCost > 0 ? (openaiCost / totalCost) * 100 : 0,
+    inputPercent: totalCost > 0 ? (totalInputCost / (totalInputCost + totalOutputCost)) * 100 : 0,
+    outputPercent: totalCost > 0 ? (totalOutputCost / (totalInputCost + totalOutputCost)) * 100 : 0,
+  };
+}
+
 // Summary stats
 export function getMockStats() {
   const agents = mockAgentRuntimes;

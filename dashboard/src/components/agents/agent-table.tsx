@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/table";
 import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
+import { CostBadge } from "@/components/cost";
+import { getMockAgentUsage } from "@/lib/mock-data";
 import type { AgentRuntime } from "@/types";
 
 interface AgentTableProps {
@@ -44,6 +46,7 @@ export function AgentTable({ agents }: AgentTableProps) {
             <TableHead>Framework</TableHead>
             <TableHead>Replicas</TableHead>
             <TableHead>Provider</TableHead>
+            <TableHead>Cost (24h)</TableHead>
             <TableHead>Age</TableHead>
           </TableRow>
         </TableHeader>
@@ -73,6 +76,22 @@ export function AgentTable({ agents }: AgentTableProps) {
               </TableCell>
               <TableCell className="capitalize">
                 {agent.spec.provider?.type || "claude"}
+              </TableCell>
+              <TableCell>
+                {(() => {
+                  const usage = getMockAgentUsage(
+                    agent.metadata.namespace || "default",
+                    agent.metadata.name || ""
+                  );
+                  if (!usage) return <span className="text-muted-foreground">-</span>;
+                  return (
+                    <CostBadge
+                      inputTokens={usage.inputTokens}
+                      outputTokens={usage.outputTokens}
+                      model={usage.model}
+                    />
+                  );
+                })()}
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatAge(agent.metadata.creationTimestamp)}
