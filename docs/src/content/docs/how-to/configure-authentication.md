@@ -1,10 +1,17 @@
 ---
-title: "Configure Authentication"
+title: "Configure Agent Authentication"
 description: "Secure agent endpoints with JWT authentication"
 sidebar:
   order: 5
 ---
 
+
+This guide covers securing **agent endpoints** with JWT authentication using Istio. For dashboard authentication, see:
+
+- [Configure Dashboard Authentication](/how-to/configure-dashboard-auth/) - Set up user authentication
+- [Authentication Architecture](/explanation/authentication/) - Understand the full auth model
+
+---
 
 Omnia supports JWT-based authentication for agent endpoints using Istio's RequestAuthentication. This allows you to integrate with any OIDC provider (Auth0, Okta, Keycloak, Google, etc.).
 

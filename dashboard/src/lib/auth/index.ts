@@ -2,6 +2,7 @@
  * Authentication module for Omnia Dashboard.
  *
  * Supports:
+ * - OAuth/OIDC authentication (direct integration with identity providers)
  * - Proxy authentication (header-based, for OAuth2 Proxy, Authelia, etc.)
  * - API key authentication (for programmatic access)
  * - Anonymous access (for development or public dashboards)
@@ -24,10 +25,11 @@ export * from "./api-guard";
 
 import { getAuthConfig } from "./config";
 import { createAnonymousUser, type User } from "./types";
-import { getCurrentUser, saveUserToSession } from "./session";
+import { getCurrentUser, saveUserToSession, getSession } from "./session";
 import { getUserFromProxyHeaders } from "./proxy";
 import { userHasPermission, type PermissionType } from "./permissions";
 import { authenticateApiKey, isApiKeyAuthEnabled } from "./api-keys";
+import { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } from "./oauth";
 
 /**
  * Get the current authenticated user.
@@ -79,8 +81,73 @@ export async function getUser(): Promise<User> {
     return createAnonymousUser("viewer");
   }
 
+  // OAuth mode - check session
+  if (config.mode === "oauth") {
+    const sessionUser = await getCurrentUser();
+
+    if (sessionUser && sessionUser.provider === "oauth") {
+      // Check if token needs refresh
+      const session = await getSession();
+      if (session.oauth && shouldRefreshToken(session.oauth.expiresAt)) {
+        await tryRefreshToken(session, config);
+      }
+      return sessionUser;
+    }
+
+    // No authenticated user - return anonymous
+    // Middleware will handle redirect to login page
+    return createAnonymousUser("viewer");
+  }
+
   // Fallback to anonymous
   return createAnonymousUser(config.anonymous.role);
+}
+
+/**
+ * Check if token should be refreshed.
+ * Returns true if token expires in less than 5 minutes.
+ */
+function shouldRefreshToken(expiresAt?: number): boolean {
+  if (!expiresAt) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return expiresAt - now < 300; // 5 minutes
+}
+
+/**
+ * Try to refresh the access token.
+ * Updates session on success, ignores errors (will re-auth on API call failure).
+ */
+async function tryRefreshToken(
+  session: Awaited<ReturnType<typeof getSession>>,
+  config: ReturnType<typeof getAuthConfig>
+): Promise<void> {
+  if (!session.oauth?.refreshToken) return;
+
+  try {
+    const tokens = await refreshAccessToken(session.oauth.refreshToken);
+
+    // Update tokens in session
+    session.oauth = {
+      ...session.oauth,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token || session.oauth.refreshToken,
+      idToken: tokens.id_token || session.oauth.idToken,
+      expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : session.oauth.expiresAt,
+    };
+
+    // Update user from new claims if available
+    if (tokens.id_token) {
+      const claims = extractClaims(tokens);
+      if (validateClaims(claims)) {
+        session.user = mapClaimsToUser(claims, config);
+      }
+    }
+
+    await session.save();
+  } catch (error) {
+    // Log but don't throw - let the API call fail and trigger re-auth
+    console.warn("Token refresh failed:", error);
+  }
 }
 
 /**

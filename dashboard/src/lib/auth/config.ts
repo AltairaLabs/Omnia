@@ -3,10 +3,18 @@
  *
  * Supports multiple auth modes:
  * - proxy: Header-based auth from reverse proxy (OAuth2 Proxy, Authelia, etc.)
+ * - oauth: Direct OAuth/OIDC integration with identity providers
  * - anonymous: No authentication required
  */
 
-export type AuthMode = "proxy" | "anonymous";
+import { readFileSync } from "fs";
+import type { OAuthConfig, OAuthProviderType, ClaimMapping } from "./oauth/types";
+import { DEFAULT_CLAIM_MAPPING, DEFAULT_SCOPES } from "./oauth/types";
+
+// Re-export OAuth types for convenience
+export type { OAuthConfig, OAuthProviderType, ClaimMapping };
+
+export type AuthMode = "proxy" | "oauth" | "anonymous";
 
 export type UserRole = "admin" | "editor" | "viewer";
 
@@ -26,6 +34,8 @@ export interface AuthConfig {
     /** Auto-create users on first login */
     autoSignup: boolean;
   };
+  /** OAuth/OIDC configuration */
+  oauth: OAuthConfig;
   /** Role mapping from groups */
   roleMapping: {
     admin: string[];
@@ -45,6 +55,8 @@ export interface AuthConfig {
     /** Role for anonymous users */
     role: UserRole;
   };
+  /** Base URL for callbacks */
+  baseUrl: string;
 }
 
 /**
@@ -62,6 +74,19 @@ export function getAuthConfig(): AuthConfig {
       headerDisplayName: process.env.OMNIA_AUTH_PROXY_HEADER_DISPLAY_NAME || "X-Forwarded-Preferred-Username",
       autoSignup: process.env.OMNIA_AUTH_PROXY_AUTO_SIGNUP !== "false",
     },
+    oauth: {
+      provider: (process.env.OMNIA_OAUTH_PROVIDER || "generic") as OAuthProviderType,
+      clientId: process.env.OMNIA_OAUTH_CLIENT_ID || "",
+      clientSecret: getOAuthClientSecret(),
+      issuerUrl: process.env.OMNIA_OAUTH_ISSUER_URL,
+      scopes: parseList(process.env.OMNIA_OAUTH_SCOPES, DEFAULT_SCOPES),
+      claims: {
+        username: process.env.OMNIA_OAUTH_CLAIM_USERNAME || DEFAULT_CLAIM_MAPPING.username,
+        email: process.env.OMNIA_OAUTH_CLAIM_EMAIL || DEFAULT_CLAIM_MAPPING.email,
+        displayName: process.env.OMNIA_OAUTH_CLAIM_DISPLAY_NAME || DEFAULT_CLAIM_MAPPING.displayName,
+        groups: process.env.OMNIA_OAUTH_CLAIM_GROUPS || DEFAULT_CLAIM_MAPPING.groups,
+      },
+    },
     roleMapping: {
       admin: parseGroups(process.env.OMNIA_AUTH_ROLE_ADMIN_GROUPS),
       editor: parseGroups(process.env.OMNIA_AUTH_ROLE_EDITOR_GROUPS),
@@ -74,6 +99,7 @@ export function getAuthConfig(): AuthConfig {
     anonymous: {
       role: (process.env.OMNIA_AUTH_ANONYMOUS_ROLE || "viewer") as UserRole,
     },
+    baseUrl: process.env.OMNIA_BASE_URL || "http://localhost:3000",
   };
 }
 
@@ -83,6 +109,37 @@ export function getAuthConfig(): AuthConfig {
 function parseGroups(value: string | undefined): string[] {
   if (!value) return [];
   return value.split(",").map((g) => g.trim()).filter(Boolean);
+}
+
+/**
+ * Parse comma-separated list with default.
+ */
+function parseList(value: string | undefined, defaultValue: string[]): string[] {
+  if (!value) return defaultValue;
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Get OAuth client secret from environment or file.
+ * Supports reading from K8s mounted secret file.
+ */
+function getOAuthClientSecret(): string {
+  // Direct environment variable
+  if (process.env.OMNIA_OAUTH_CLIENT_SECRET) {
+    return process.env.OMNIA_OAUTH_CLIENT_SECRET;
+  }
+
+  // File-mounted secret (K8s Secret)
+  const secretPath = process.env.OMNIA_OAUTH_CLIENT_SECRET_FILE;
+  if (secretPath) {
+    try {
+      return readFileSync(secretPath, "utf-8").trim();
+    } catch {
+      console.error(`Failed to read OAuth secret from ${secretPath}`);
+    }
+  }
+
+  return "";
 }
 
 /**

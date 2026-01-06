@@ -2,6 +2,7 @@
  * Next.js middleware for authentication.
  *
  * Handles:
+ * - OAuth session validation
  * - Proxy header validation
  * - Session refresh
  * - Protected route enforcement
@@ -15,6 +16,10 @@ import type { NextRequest } from "next/server";
  */
 const PUBLIC_ROUTES = [
   "/api/health",
+  "/api/auth/login",
+  "/api/auth/callback",
+  "/api/auth/logout",
+  "/login",
   "/_next",
   "/favicon.ico",
 ];
@@ -57,6 +62,27 @@ export function middleware(request: NextRequest) {
           { status: 401 }
         );
       }
+    }
+  }
+
+  // OAuth mode - check for session cookie
+  if (authMode === "oauth") {
+    const cookieName = process.env.OMNIA_SESSION_COOKIE_NAME || "omnia_session";
+    const sessionCookie = request.cookies.get(cookieName);
+
+    if (!sessionCookie) {
+      // For page routes, redirect to login
+      if (!pathname.startsWith("/api/")) {
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("returnTo", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+
+      // For API routes, return 401
+      return NextResponse.json(
+        { error: "Authentication required", loginRequired: true },
+        { status: 401 }
+      );
     }
   }
 
