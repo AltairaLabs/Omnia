@@ -3,15 +3,21 @@
  */
 
 import type { UserRole } from "./config";
+import type { OAuthTokens, PKCEData } from "./oauth/types";
 
 // Re-export for convenience
 export type { UserRole };
 
 /**
+ * Authentication provider types.
+ */
+export type AuthProvider = "proxy" | "anonymous" | "oauth";
+
+/**
  * Authenticated user information.
  */
 export interface User {
-  /** Unique identifier (username from proxy header) */
+  /** Unique identifier (sub claim or username) */
   id: string;
   /** Username */
   username: string;
@@ -19,12 +25,12 @@ export interface User {
   email?: string;
   /** Display name (optional) */
   displayName?: string;
-  /** User's groups from proxy */
+  /** User's groups from identity provider */
   groups: string[];
   /** Resolved role based on group mapping */
   role: UserRole;
   /** Authentication provider */
-  provider: "proxy" | "anonymous";
+  provider: AuthProvider;
 }
 
 /**
@@ -35,6 +41,10 @@ export interface SessionData {
   user?: User;
   /** Session creation timestamp */
   createdAt?: number;
+  /** OAuth tokens (when using OAuth mode) */
+  oauth?: OAuthTokens;
+  /** PKCE data during OAuth flow */
+  pkce?: PKCEData;
 }
 
 /**
