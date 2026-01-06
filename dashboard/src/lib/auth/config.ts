@@ -4,6 +4,7 @@
  * Supports multiple auth modes:
  * - proxy: Header-based auth from reverse proxy (OAuth2 Proxy, Authelia, etc.)
  * - oauth: Direct OAuth/OIDC integration with identity providers
+ * - builtin: Local user database with username/password
  * - anonymous: No authentication required
  */
 
@@ -14,7 +15,7 @@ import { DEFAULT_CLAIM_MAPPING, DEFAULT_SCOPES } from "./oauth/types";
 // Re-export OAuth types for convenience
 export type { OAuthConfig, OAuthProviderType, ClaimMapping };
 
-export type AuthMode = "proxy" | "oauth" | "anonymous";
+export type AuthMode = "proxy" | "oauth" | "builtin" | "anonymous";
 
 export type UserRole = "admin" | "editor" | "viewer";
 

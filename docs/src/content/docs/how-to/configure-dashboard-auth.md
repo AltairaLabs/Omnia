@@ -12,7 +12,8 @@ This guide covers configuring authentication for the Omnia dashboard. Choose the
 |------|----------|------------|
 | [Anonymous](#anonymous-mode) | Development, demos | Minimal |
 | [Proxy](#proxy-mode) | Existing OAuth2 Proxy setup | Low |
-| [OAuth](#oauth-mode) | Standalone deployments | Medium |
+| [OAuth](#oauth-mode) | Standalone deployments with IdP | Medium |
+| [Builtin](#builtin-mode) | Small teams without IdP | Medium |
 
 For agent endpoint authentication (JWT/Istio), see [Configure Agent Authentication](/how-to/configure-authentication/).
 
@@ -298,6 +299,145 @@ OMNIA_AUTH_ROLE_ADMIN_GROUPS=omnia-admins
 OMNIA_AUTH_ROLE_EDITOR_GROUPS=omnia-editors
 ```
 
+## Builtin Mode
+
+Self-contained authentication with a local user database. No external identity provider required.
+
+### How It Works
+
+1. Users register or are seeded by admin
+2. Credentials stored in SQLite (default) or PostgreSQL
+3. Passwords hashed with bcrypt (12 rounds)
+4. Sessions managed via encrypted cookies
+
+### Enable Builtin Mode
+
+```bash
+OMNIA_AUTH_MODE=builtin
+```
+
+### Storage Backend
+
+#### SQLite (Default)
+
+Zero-configuration, perfect for single-instance deployments:
+
+```bash
+OMNIA_BUILTIN_STORE_TYPE=sqlite
+OMNIA_BUILTIN_SQLITE_PATH=./data/omnia-users.db
+```
+
+:::tip
+SQLite is the default. No additional configuration needed for basic setups.
+:::
+
+#### PostgreSQL
+
+For multi-instance production deployments:
+
+```bash
+OMNIA_BUILTIN_STORE_TYPE=postgresql
+OMNIA_BUILTIN_POSTGRES_URL=postgresql://user:password@localhost:5432/omnia
+```
+
+### Initial Admin User
+
+On first run, an admin user is automatically created:
+
+```bash
+OMNIA_BUILTIN_ADMIN_USERNAME=admin
+OMNIA_BUILTIN_ADMIN_EMAIL=admin@example.com
+OMNIA_BUILTIN_ADMIN_PASSWORD=changeme123
+```
+
+:::caution
+Change the default admin password immediately after first login!
+:::
+
+### User Registration
+
+Control whether new users can sign up:
+
+```bash
+# Allow public signup (default: false)
+OMNIA_BUILTIN_ALLOW_SIGNUP=true
+
+# Require email verification (default: false)
+OMNIA_BUILTIN_VERIFY_EMAIL=true
+```
+
+### Password Policy
+
+Configure password requirements:
+
+```bash
+# Minimum password length (default: 8)
+OMNIA_BUILTIN_MIN_PASSWORD_LENGTH=12
+```
+
+### Account Security
+
+Protect against brute force attacks:
+
+```bash
+# Failed attempts before lockout (default: 5)
+OMNIA_BUILTIN_MAX_FAILED_ATTEMPTS=5
+
+# Lockout duration in seconds (default: 900 = 15 minutes)
+OMNIA_BUILTIN_LOCKOUT_DURATION=900
+```
+
+### Password Reset
+
+Configure password reset tokens:
+
+```bash
+# Token expiration in seconds (default: 3600 = 1 hour)
+OMNIA_BUILTIN_RESET_TOKEN_EXPIRATION=3600
+```
+
+:::note
+Password reset emails require an email service to be configured. Without it, reset tokens are logged to the console (development only).
+:::
+
+### Email Verification
+
+For deployments requiring verified emails:
+
+```bash
+OMNIA_BUILTIN_VERIFY_EMAIL=true
+
+# Token expiration in seconds (default: 86400 = 24 hours)
+OMNIA_BUILTIN_VERIFICATION_TOKEN_EXPIRATION=86400
+```
+
+### Kubernetes Example
+
+```yaml
+# values.yaml
+dashboard:
+  env:
+    OMNIA_AUTH_MODE: builtin
+    OMNIA_BUILTIN_STORE_TYPE: postgresql
+    OMNIA_BUILTIN_ALLOW_SIGNUP: "false"
+
+  envFrom:
+    - secretRef:
+        name: dashboard-builtin-secret
+```
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard-builtin-secret
+type: Opaque
+stringData:
+  OMNIA_SESSION_SECRET: "your-32-char-secret-here"
+  OMNIA_BUILTIN_POSTGRES_URL: "postgresql://user:pass@postgres:5432/omnia"
+  OMNIA_BUILTIN_ADMIN_PASSWORD: "initial-admin-password"
+```
+
 ## Session Configuration
 
 Configure session behavior for all modes:
@@ -457,6 +597,36 @@ env:
 2. Header names match configuration
 3. No intermediate proxy stripping headers
 4. Test with: `curl -v` to see headers
+
+### Builtin Login Fails
+
+**Symptom:** Correct credentials rejected
+
+**Check:**
+1. User exists in database
+2. Account not locked (check failed login count)
+3. Email verified (if `OMNIA_BUILTIN_VERIFY_EMAIL=true`)
+4. Database file/connection accessible
+
+### Account Locked Out
+
+**Symptom:** Login fails with "Account locked"
+
+**Fix:**
+1. Wait for lockout duration (default: 15 minutes)
+2. Or manually reset in database:
+   ```sql
+   UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE email = 'user@example.com';
+   ```
+
+### Password Reset Not Working
+
+**Symptom:** No reset email received
+
+**Check:**
+1. Email service configured (or check console logs for token)
+2. Token not expired (`OMNIA_BUILTIN_RESET_TOKEN_EXPIRATION`)
+3. User exists with that email
 
 ## Next Steps
 

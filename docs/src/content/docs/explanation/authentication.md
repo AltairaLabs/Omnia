@@ -38,6 +38,7 @@ The dashboard is a web UI for managing Omnia resources. It supports multiple aut
 | **Anonymous** | Development, demos | None |
 | **Proxy** | Behind OAuth2 Proxy, Authelia, etc. | Delegated |
 | **OAuth** | Direct IdP integration | Full |
+| **Builtin** | Local user database | Full |
 | **API Keys** | Programmatic access | Token-based |
 
 ### Agent Authentication
@@ -134,6 +135,48 @@ sequenceDiagram
 - Azure AD / Entra ID
 - Okta
 
+### Builtin Mode
+
+Self-contained authentication with a local user database. No external identity provider required.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant D as Dashboard
+    participant DB as User Database
+
+    U->>D: Login (username + password)
+    D->>DB: Verify credentials
+    DB-->>D: User record + password hash
+    D->>D: Verify bcrypt hash
+    D->>D: Create session
+    D-->>U: Dashboard UI
+```
+
+**When to use:**
+- Small teams without an identity provider
+- Air-gapped environments
+- Quick proof-of-concept deployments
+- Development and testing
+
+**Features:**
+- Username/email + password login
+- User signup (configurable)
+- Password reset via email tokens
+- Email verification (optional)
+- Account lockout after failed attempts
+- Admin user seeding on first run
+
+**Storage backends:**
+- **SQLite** (default) - Zero dependencies, single file
+- **PostgreSQL** - For multi-instance production deployments
+
+**Security:**
+- Bcrypt password hashing (12 rounds)
+- Secure token generation (SHA-256)
+- Account lockout protection
+- Encrypted session cookies
+
 ### API Key Mode
 
 API keys provide programmatic access to the dashboard API without browser-based authentication.
@@ -172,6 +215,7 @@ graph LR
         A[Anonymous]
         P[Proxy Headers]
         O[OAuth Claims]
+        B[Builtin Users]
         K[API Key]
     end
 
@@ -185,6 +229,7 @@ graph LR
     A --> Viewer
     P --> G
     O --> G
+    B --> |Direct Role| R
     K --> |Inherits| G
 ```
 
