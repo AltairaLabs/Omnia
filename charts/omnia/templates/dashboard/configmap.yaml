@@ -1,0 +1,102 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.dashboard.fullname" . }}
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+data:
+  # Operator API URL
+  {{- if .Values.dashboard.operatorApiUrl }}
+  NEXT_PUBLIC_OPERATOR_API_URL: {{ .Values.dashboard.operatorApiUrl | quote }}
+  {{- else }}
+  NEXT_PUBLIC_OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-controller-manager:8082"
+  {{- end }}
+
+  # Mode settings
+  NEXT_PUBLIC_DEMO_MODE: {{ .Values.dashboard.demoMode | quote }}
+  NEXT_PUBLIC_READ_ONLY_MODE: {{ .Values.dashboard.readOnlyMode | quote }}
+  {{- if .Values.dashboard.readOnlyMessage }}
+  NEXT_PUBLIC_READ_ONLY_MESSAGE: {{ .Values.dashboard.readOnlyMessage | quote }}
+  {{- end }}
+
+  # Grafana integration
+  {{- if .Values.dashboard.grafana.url }}
+  NEXT_PUBLIC_GRAFANA_URL: {{ .Values.dashboard.grafana.url | quote }}
+  {{- else if .Values.grafana.enabled }}
+  NEXT_PUBLIC_GRAFANA_URL: "http://{{ .Release.Name }}-grafana:80"
+  {{- end }}
+  NEXT_PUBLIC_GRAFANA_PATH: {{ .Values.dashboard.grafana.path | quote }}
+  NEXT_PUBLIC_GRAFANA_ORG_ID: {{ .Values.dashboard.grafana.orgId | quote }}
+
+  # Authentication mode
+  OMNIA_AUTH_MODE: {{ .Values.dashboard.auth.mode | quote }}
+  OMNIA_SESSION_COOKIE_NAME: {{ .Values.dashboard.auth.cookieName | quote }}
+  OMNIA_SESSION_TTL: {{ .Values.dashboard.auth.ttl | quote }}
+  OMNIA_AUTH_ANONYMOUS_ROLE: {{ .Values.dashboard.auth.anonymousRole | quote }}
+
+  # Role mapping
+  {{- if .Values.dashboard.auth.roleMapping.adminGroups }}
+  OMNIA_AUTH_ROLE_ADMIN_GROUPS: {{ .Values.dashboard.auth.roleMapping.adminGroups | join "," | quote }}
+  {{- end }}
+  {{- if .Values.dashboard.auth.roleMapping.editorGroups }}
+  OMNIA_AUTH_ROLE_EDITOR_GROUPS: {{ .Values.dashboard.auth.roleMapping.editorGroups | join "," | quote }}
+  {{- end }}
+
+  # Base URL for OAuth callbacks
+  {{- if .Values.dashboard.ingress.enabled }}
+  {{- $scheme := "http" }}
+  {{- if .Values.dashboard.ingress.tls }}
+  {{- $scheme = "https" }}
+  {{- end }}
+  OMNIA_BASE_URL: "{{ $scheme }}://{{ .Values.dashboard.ingress.host }}"
+  {{- end }}
+
+  # Proxy mode settings
+  {{- if eq .Values.dashboard.auth.mode "proxy" }}
+  OMNIA_AUTH_PROXY_HEADER_USER: {{ .Values.dashboard.proxy.headerUser | quote }}
+  OMNIA_AUTH_PROXY_HEADER_EMAIL: {{ .Values.dashboard.proxy.headerEmail | quote }}
+  OMNIA_AUTH_PROXY_HEADER_GROUPS: {{ .Values.dashboard.proxy.headerGroups | quote }}
+  OMNIA_AUTH_PROXY_HEADER_DISPLAY_NAME: {{ .Values.dashboard.proxy.headerDisplayName | quote }}
+  OMNIA_AUTH_PROXY_AUTO_SIGNUP: {{ .Values.dashboard.proxy.autoSignup | quote }}
+  {{- end }}
+
+  # OAuth mode settings
+  {{- if eq .Values.dashboard.auth.mode "oauth" }}
+  OMNIA_OAUTH_PROVIDER: {{ .Values.dashboard.oauth.provider | quote }}
+  {{- if .Values.dashboard.oauth.issuerUrl }}
+  OMNIA_OAUTH_ISSUER_URL: {{ .Values.dashboard.oauth.issuerUrl | quote }}
+  {{- end }}
+  OMNIA_OAUTH_SCOPES: {{ .Values.dashboard.oauth.scopes | quote }}
+  {{- if .Values.dashboard.oauth.azureTenantId }}
+  OMNIA_OAUTH_AZURE_TENANT_ID: {{ .Values.dashboard.oauth.azureTenantId | quote }}
+  {{- end }}
+  {{- if .Values.dashboard.oauth.oktaDomain }}
+  OMNIA_OAUTH_OKTA_DOMAIN: {{ .Values.dashboard.oauth.oktaDomain | quote }}
+  {{- end }}
+  OMNIA_OAUTH_CLAIM_USERNAME: {{ .Values.dashboard.oauth.claims.username | quote }}
+  OMNIA_OAUTH_CLAIM_EMAIL: {{ .Values.dashboard.oauth.claims.email | quote }}
+  OMNIA_OAUTH_CLAIM_DISPLAY_NAME: {{ .Values.dashboard.oauth.claims.displayName | quote }}
+  OMNIA_OAUTH_CLAIM_GROUPS: {{ .Values.dashboard.oauth.claims.groups | quote }}
+  {{- end }}
+
+  # Builtin mode settings
+  {{- if eq .Values.dashboard.auth.mode "builtin" }}
+  OMNIA_BUILTIN_STORE_TYPE: {{ .Values.dashboard.builtin.storeType | quote }}
+  {{- if eq .Values.dashboard.builtin.storeType "sqlite" }}
+  OMNIA_BUILTIN_SQLITE_PATH: {{ .Values.dashboard.builtin.sqlitePath | quote }}
+  {{- end }}
+  OMNIA_BUILTIN_ALLOW_SIGNUP: {{ .Values.dashboard.builtin.allowSignup | quote }}
+  OMNIA_BUILTIN_VERIFY_EMAIL: {{ .Values.dashboard.builtin.verifyEmail | quote }}
+  OMNIA_BUILTIN_MIN_PASSWORD_LENGTH: {{ .Values.dashboard.builtin.minPasswordLength | quote }}
+  OMNIA_BUILTIN_MAX_FAILED_ATTEMPTS: {{ .Values.dashboard.builtin.maxFailedAttempts | quote }}
+  OMNIA_BUILTIN_LOCKOUT_DURATION: {{ .Values.dashboard.builtin.lockoutDuration | quote }}
+  OMNIA_BUILTIN_ADMIN_USERNAME: {{ .Values.dashboard.builtin.admin.username | quote }}
+  OMNIA_BUILTIN_ADMIN_EMAIL: {{ .Values.dashboard.builtin.admin.email | quote }}
+  {{- end }}
+
+  # API keys
+  OMNIA_AUTH_API_KEYS_ENABLED: {{ .Values.dashboard.apiKeys.enabled | quote }}
+  OMNIA_AUTH_API_KEYS_MAX_PER_USER: {{ .Values.dashboard.apiKeys.maxPerUser | quote }}
+  OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION: {{ .Values.dashboard.apiKeys.defaultExpiration | quote }}
+{{- end }}

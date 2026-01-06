@@ -1,0 +1,17 @@
+{{- if and .Values.dashboard.enabled .Values.dashboard.persistence.enabled (not .Values.dashboard.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "omnia.dashboard.fullname" . }}-data
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.dashboard.persistence.accessModes | nindent 4 }}
+  {{- if .Values.dashboard.persistence.storageClass }}
+  storageClassName: {{ .Values.dashboard.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.dashboard.persistence.size | quote }}
+{{- end }}

@@ -69,3 +69,50 @@ Manager image
 {{- $tag := default .Chart.AppVersion .Values.image.tag }}
 {{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
+
+{{/*
+Dashboard fullname
+*/}}
+{{- define "omnia.dashboard.fullname" -}}
+{{- printf "%s-dashboard" (include "omnia.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Dashboard labels
+*/}}
+{{- define "omnia.dashboard.labels" -}}
+helm.sh/chart: {{ include "omnia.chart" . }}
+{{ include "omnia.dashboard.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Dashboard selector labels
+*/}}
+{{- define "omnia.dashboard.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "omnia.name" . }}-dashboard
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: dashboard
+{{- end }}
+
+{{/*
+Dashboard image
+*/}}
+{{- define "omnia.dashboard.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.dashboard.image.tag }}
+{{- printf "%s:%s" .Values.dashboard.image.repository $tag }}
+{{- end }}
+
+{{/*
+Dashboard service account name
+*/}}
+{{- define "omnia.dashboard.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "omnia.dashboard.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}

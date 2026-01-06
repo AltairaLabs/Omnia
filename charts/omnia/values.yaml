@@ -110,6 +110,211 @@ crds:
   # -- Install CRDs with the chart
   install: true
 
+# ============================================================================
+# Dashboard Configuration
+# Web UI for managing Omnia agents and resources
+# ============================================================================
+
+dashboard:
+  # -- Enable dashboard deployment
+  enabled: true
+
+  image:
+    # -- Dashboard image repository
+    repository: ghcr.io/altairalabs/omnia-dashboard
+    # -- Dashboard image pull policy
+    pullPolicy: IfNotPresent
+    # -- Dashboard image tag (defaults to Chart appVersion)
+    tag: ""
+
+  # -- Number of dashboard replicas
+  replicaCount: 1
+
+  # -- Dashboard service configuration
+  service:
+    # -- Service type (ClusterIP, NodePort, LoadBalancer)
+    type: ClusterIP
+    # -- Service port
+    port: 3000
+
+  # -- Dashboard ingress configuration
+  ingress:
+    # -- Enable ingress
+    enabled: false
+    # -- Ingress class name
+    className: ""
+    # -- Ingress annotations
+    annotations: {}
+    # -- Ingress host
+    host: dashboard.example.com
+    # -- TLS configuration
+    tls: []
+    #  - secretName: dashboard-tls
+    #    hosts:
+    #      - dashboard.example.com
+
+  # -- Dashboard resource limits and requests
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # -- Dashboard pod annotations
+  podAnnotations: {}
+
+  # -- Dashboard node selector
+  nodeSelector: {}
+
+  # -- Dashboard tolerations
+  tolerations: []
+
+  # -- Dashboard affinity rules
+  affinity: {}
+
+  # -- Authentication configuration
+  auth:
+    # -- Authentication mode: anonymous, proxy, oauth, or builtin
+    mode: anonymous
+    # -- Session secret (required for non-anonymous modes)
+    # Generate with: openssl rand -base64 32
+    sessionSecret: ""
+    # -- Use existing secret for session secret
+    # Secret must contain OMNIA_SESSION_SECRET key
+    existingSessionSecret: ""
+    # -- Session cookie name
+    cookieName: omnia_session
+    # -- Session TTL in seconds (default: 24 hours)
+    ttl: 86400
+    # -- Default role for anonymous users
+    anonymousRole: viewer
+    # -- Role mapping from groups
+    roleMapping:
+      # -- Groups that get admin role
+      adminGroups: []
+      # -- Groups that get editor role
+      editorGroups: []
+
+  # -- Proxy authentication settings (when auth.mode=proxy)
+  proxy:
+    # -- Header containing username
+    headerUser: X-Forwarded-User
+    # -- Header containing email
+    headerEmail: X-Forwarded-Email
+    # -- Header containing groups
+    headerGroups: X-Forwarded-Groups
+    # -- Header containing display name
+    headerDisplayName: X-Forwarded-Preferred-Username
+    # -- Auto-create users on first login
+    autoSignup: true
+
+  # -- OAuth settings (when auth.mode=oauth)
+  oauth:
+    # -- OAuth provider: generic, google, github, azure, okta
+    provider: generic
+    # -- OAuth client ID
+    clientId: ""
+    # -- OAuth client secret
+    clientSecret: ""
+    # -- Use existing secret for OAuth credentials
+    # Secret must contain OMNIA_OAUTH_CLIENT_ID and OMNIA_OAUTH_CLIENT_SECRET keys
+    existingSecret: ""
+    # -- OIDC issuer URL (required for generic provider)
+    issuerUrl: ""
+    # -- OAuth scopes (comma-separated)
+    scopes: "openid,profile,email"
+    # -- Azure AD tenant ID (for azure provider)
+    azureTenantId: ""
+    # -- Okta domain (for okta provider)
+    oktaDomain: ""
+    # -- Claim mapping
+    claims:
+      username: preferred_username
+      email: email
+      displayName: name
+      groups: groups
+
+  # -- Builtin authentication settings (when auth.mode=builtin)
+  builtin:
+    # -- Storage backend: sqlite or postgresql
+    storeType: sqlite
+    # -- SQLite database path (for sqlite store)
+    sqlitePath: /data/omnia-users.db
+    # -- PostgreSQL connection URL (for postgresql store)
+    # Use existingSecret for production
+    postgresUrl: ""
+    # -- Use existing secret for PostgreSQL URL
+    # Secret must contain OMNIA_BUILTIN_POSTGRES_URL key
+    existingPostgresSecret: ""
+    # -- Allow public signup
+    allowSignup: false
+    # -- Require email verification
+    verifyEmail: false
+    # -- Minimum password length
+    minPasswordLength: 8
+    # -- Max failed login attempts before lockout
+    maxFailedAttempts: 5
+    # -- Lockout duration in seconds
+    lockoutDuration: 900
+    # -- Initial admin user (created on first run)
+    admin:
+      # -- Admin username
+      username: admin
+      # -- Admin email
+      email: admin@example.com
+      # -- Admin password (use existingSecret for production)
+      password: ""
+      # -- Use existing secret for admin password
+      # Secret must contain OMNIA_BUILTIN_ADMIN_PASSWORD key
+      existingSecret: ""
+
+  # -- API keys configuration
+  apiKeys:
+    # -- Enable API key authentication
+    enabled: true
+    # -- Maximum keys per user
+    maxPerUser: 10
+    # -- Default expiration in days (0 = never)
+    defaultExpiration: 90
+
+  # -- Operator API URL (for dashboard to communicate with operator)
+  # Defaults to in-cluster service URL
+  operatorApiUrl: ""
+
+  # -- Enable demo mode (uses mock data)
+  demoMode: false
+
+  # -- Enable read-only mode (disables mutations)
+  readOnlyMode: false
+
+  # -- Custom read-only message
+  readOnlyMessage: ""
+
+  # -- Grafana integration
+  grafana:
+    # -- Grafana URL for embedded metrics
+    url: ""
+    # -- Grafana subpath
+    path: /grafana/
+    # -- Grafana organization ID
+    orgId: 1
+
+  # -- Persistent volume for builtin auth SQLite database
+  persistence:
+    # -- Enable persistence (required for builtin auth with SQLite)
+    enabled: false
+    # -- Storage class
+    storageClass: ""
+    # -- Access modes
+    accessModes:
+      - ReadWriteOnce
+    # -- Volume size
+    size: 1Gi
+    # -- Existing PVC to use
+    existingClaim: ""
+
 # Facade container configuration (used by AgentRuntime)
 facade:
   image:
