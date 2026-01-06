@@ -3,6 +3,7 @@
  *
  * Supports:
  * - Proxy authentication (header-based, for OAuth2 Proxy, Authelia, etc.)
+ * - API key authentication (for programmatic access)
  * - Anonymous access (for development or public dashboards)
  *
  * Usage:
@@ -26,20 +27,30 @@ import { createAnonymousUser, type User } from "./types";
 import { getCurrentUser, saveUserToSession } from "./session";
 import { getUserFromProxyHeaders } from "./proxy";
 import { userHasPermission, type PermissionType } from "./permissions";
+import { authenticateApiKey, isApiKeyAuthEnabled } from "./api-keys";
 
 /**
  * Get the current authenticated user.
  *
- * This is the main entry point for authentication. It:
- * 1. Checks for existing session
- * 2. If proxy mode, validates/refreshes from headers
- * 3. Falls back to anonymous if configured
+ * This is the main entry point for authentication. It checks in order:
+ * 1. API key in headers (if enabled)
+ * 2. Proxy headers (if proxy mode)
+ * 3. Existing session
+ * 4. Falls back to anonymous if configured
  *
  * @returns The current user (never null - returns anonymous user if allowed)
  * @throws Error if authentication is required but not present
  */
 export async function getUser(): Promise<User> {
   const config = getAuthConfig();
+
+  // Check for API key authentication first (works in any mode)
+  if (isApiKeyAuthEnabled()) {
+    const apiKeyUser = await authenticateApiKey();
+    if (apiKeyUser) {
+      return apiKeyUser;
+    }
+  }
 
   // Anonymous mode - return anonymous user
   if (config.mode === "anonymous") {
