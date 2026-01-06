@@ -19,7 +19,16 @@ const PUBLIC_ROUTES = [
   "/api/auth/login",
   "/api/auth/callback",
   "/api/auth/logout",
+  "/api/auth/builtin/login",
+  "/api/auth/builtin/signup",
+  "/api/auth/builtin/forgot-password",
+  "/api/auth/builtin/reset-password",
+  "/api/auth/builtin/verify-email",
   "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
   "/_next",
   "/favicon.ico",
 ];
@@ -65,8 +74,8 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // OAuth mode - check for session cookie
-  if (authMode === "oauth") {
+  // OAuth and builtin modes - check for session cookie
+  if (authMode === "oauth" || authMode === "builtin") {
     const cookieName = process.env.OMNIA_SESSION_COOKIE_NAME || "omnia_session";
     const sessionCookie = request.cookies.get(cookieName);
 

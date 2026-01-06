@@ -11,7 +11,7 @@ export type { UserRole };
 /**
  * Authentication provider types.
  */
-export type AuthProvider = "proxy" | "anonymous" | "oauth";
+export type AuthProvider = "proxy" | "anonymous" | "oauth" | "builtin";
 
 /**
  * Authenticated user information.
