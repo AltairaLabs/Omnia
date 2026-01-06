@@ -6,11 +6,11 @@ metadata:
   labels:
     {{- include "omnia.dashboard.labels" . | nindent 4 }}
 data:
-  # Operator API URL
+  # Operator API URL (server-side for proxy)
   {{- if .Values.dashboard.operatorApiUrl }}
-  NEXT_PUBLIC_OPERATOR_API_URL: {{ .Values.dashboard.operatorApiUrl | quote }}
+  OPERATOR_API_URL: {{ .Values.dashboard.operatorApiUrl | quote }}
   {{- else if .Values.api.enabled }}
-  NEXT_PUBLIC_OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}"
+  OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}"
   {{- end }}
 
   # Mode settings

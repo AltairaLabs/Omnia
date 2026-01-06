@@ -8,12 +8,16 @@ import createClient from "openapi-fetch";
 import type { paths, components } from "./schema";
 
 // Environment configuration
-const OPERATOR_API_URL =
-  process.env.NEXT_PUBLIC_OPERATOR_API_URL || "http://localhost:8082";
 export const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
-// Create typed API client
-const client = createClient<paths>({ baseUrl: OPERATOR_API_URL });
+// Use the server-side proxy for API calls.
+// This allows the dashboard to work when deployed in-cluster without
+// exposing the operator API externally. The proxy at /api/operator
+// forwards requests to the actual operator service.
+const API_BASE_URL = "/api/operator";
+
+// Create typed API client using the proxy
+const client = createClient<paths>({ baseUrl: API_BASE_URL });
 
 // Re-export component types for convenience
 export type AgentRuntime = components["schemas"]["AgentRuntime"];
@@ -272,7 +276,7 @@ export async function createAgent(spec: Record<string, unknown>): Promise<AgentR
     } as AgentRuntime;
   }
 
-  const response = await fetch(`${OPERATOR_API_URL}/api/v1/agents`, {
+  const response = await fetch(`${API_BASE_URL}/v1/agents`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
