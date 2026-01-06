@@ -9,8 +9,8 @@ data:
   # Operator API URL
   {{- if .Values.dashboard.operatorApiUrl }}
   NEXT_PUBLIC_OPERATOR_API_URL: {{ .Values.dashboard.operatorApiUrl | quote }}
-  {{- else }}
-  NEXT_PUBLIC_OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-controller-manager:8082"
+  {{- else if .Values.api.enabled }}
+  NEXT_PUBLIC_OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}"
   {{- end }}
 
   # Mode settings

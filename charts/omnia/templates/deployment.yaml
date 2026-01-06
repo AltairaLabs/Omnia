@@ -55,7 +55,15 @@ spec:
             - --metrics-secure=false
             {{- end }}
             {{- end }}
+            {{- if .Values.api.enabled }}
+            - --api-bind-address=:{{ .Values.api.port }}
+            {{- end }}
           ports:
+            {{- if .Values.api.enabled }}
+            - name: api
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

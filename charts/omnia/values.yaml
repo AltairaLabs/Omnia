@@ -100,6 +100,13 @@ webhook:
   # -- Port for webhooks
   port: 9443
 
+# REST API configuration (for dashboard access)
+api:
+  # -- Enable REST API server
+  enabled: true
+  # -- Port for REST API
+  port: 8082
+
 # RBAC configuration
 rbac:
   # -- Create RBAC resources
