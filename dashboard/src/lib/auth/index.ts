@@ -18,11 +18,14 @@ export * from "./config";
 export * from "./types";
 export * from "./session";
 export * from "./proxy";
+export * from "./permissions";
+export * from "./api-guard";
 
 import { getAuthConfig } from "./config";
 import { createAnonymousUser, type User } from "./types";
 import { getCurrentUser, saveUserToSession } from "./session";
 import { getUserFromProxyHeaders } from "./proxy";
+import { userHasPermission, type PermissionType } from "./permissions";
 
 /**
  * Get the current authenticated user.
@@ -96,6 +99,30 @@ export async function requireRole(role: "admin" | "editor" | "viewer"): Promise<
   const roleHierarchy = { admin: 3, editor: 2, viewer: 1 };
   if (roleHierarchy[user.role] < roleHierarchy[role]) {
     throw new Error(`Insufficient permissions: requires ${role}`);
+  }
+  return user;
+}
+
+/**
+ * Require specific permission - throws if user lacks permission.
+ */
+export async function requirePermission(permission: PermissionType): Promise<User> {
+  const user = await getUser();
+  if (!userHasPermission(user, permission)) {
+    throw new Error(`Insufficient permissions: requires ${permission}`);
+  }
+  return user;
+}
+
+/**
+ * Require all specified permissions - throws if user lacks any.
+ */
+export async function requireAllPermissions(permissions: PermissionType[]): Promise<User> {
+  const user = await getUser();
+  for (const permission of permissions) {
+    if (!userHasPermission(user, permission)) {
+      throw new Error(`Insufficient permissions: requires ${permission}`);
+    }
   }
   return user;
 }

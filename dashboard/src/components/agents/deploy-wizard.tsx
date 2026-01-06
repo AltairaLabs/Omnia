@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { usePromptPacks, useToolRegistries, useNamespaces, useReadOnly } from "@/hooks";
+import { usePromptPacks, useToolRegistries, useNamespaces, useReadOnly, usePermissions, Permission } from "@/hooks";
 import { createAgent, isDemoMode } from "@/lib/api/client";
 import {
   ChevronLeft,
@@ -127,6 +127,14 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
   const [success, setSuccess] = useState(false);
 
   const { isReadOnly, message: readOnlyMessage } = useReadOnly();
+  const { can } = usePermissions();
+  const canDeploy = can(Permission.AGENTS_DEPLOY);
+  const isDisabled = isReadOnly || !canDeploy;
+  const disabledMessage = isReadOnly
+    ? readOnlyMessage
+    : !canDeploy
+      ? "You don't have permission to deploy agents"
+      : "";
   const queryClient = useQueryClient();
   const { data: namespaces } = useNamespaces();
   // Filter PromptPacks by selected namespace (PromptPackRef has no namespace field)
@@ -719,18 +727,20 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
     }
   };
 
-  // Show read-only message instead of wizard
-  if (isReadOnly) {
+  // Show message if deployments are disabled (read-only or no permission)
+  if (isDisabled) {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-muted-foreground" />
-              Read-Only Mode
+              {isReadOnly ? "Read-Only Mode" : "Permission Denied"}
             </DialogTitle>
             <DialogDescription>
-              Deployments are disabled in this dashboard.
+              {isReadOnly
+                ? "Deployments are disabled in this dashboard."
+                : "You don't have permission to deploy agents."}
             </DialogDescription>
           </DialogHeader>
 
@@ -739,7 +749,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
               <Lock className="h-8 w-8 text-muted-foreground" />
             </div>
             <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-              {readOnlyMessage}
+              {disabledMessage}
             </p>
           </div>
 

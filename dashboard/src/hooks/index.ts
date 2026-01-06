@@ -7,6 +7,7 @@ export { useLogs } from "./use-logs";
 export { useNamespaces } from "./use-namespaces";
 export { useReadOnly } from "./use-read-only";
 export { useAuth, AuthProvider } from "./use-auth";
+export { usePermissions, Permission, Permissions } from "./use-permissions";
 export {
   useGrafana,
   buildPanelUrl,
