@@ -20,7 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useReadOnly } from "@/hooks";
+import { useReadOnly, usePermissions, Permission } from "@/hooks";
 
 interface ScaleControlProps {
   currentReplicas: number;
@@ -46,6 +46,14 @@ export function ScaleControl({
   compact = false,
 }: ScaleControlProps) {
   const { isReadOnly, message: readOnlyMessage } = useReadOnly();
+  const { can } = usePermissions();
+  const canScale = can(Permission.AGENTS_SCALE);
+  const isDisabled = isReadOnly || !canScale;
+  const disabledMessage = isReadOnly
+    ? readOnlyMessage
+    : !canScale
+      ? "You don't have permission to scale agents"
+      : "";
   const [isScaling, setIsScaling] = useState(false);
   const [pendingScale, setPendingScale] = useState<number | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -113,8 +121,8 @@ export function ScaleControl({
   }, []);
 
   const displayReplicas = pendingScale ?? desiredReplicas;
-  const canScaleDown = displayReplicas > minReplicas && !isScaling && !isReadOnly;
-  const canScaleUp = displayReplicas < maxReplicas && !isScaling && !isReadOnly;
+  const canScaleDown = displayReplicas > minReplicas && !isScaling && !isDisabled;
+  const canScaleUp = displayReplicas < maxReplicas && !isScaling && !isDisabled;
 
   if (compact) {
     return (
@@ -136,7 +144,7 @@ export function ScaleControl({
             </Tooltip>
           )}
 
-          {isReadOnly ? (
+          {isDisabled ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1 text-muted-foreground">
@@ -147,7 +155,7 @@ export function ScaleControl({
                 </div>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p className="text-sm">{readOnlyMessage}</p>
+                <p className="text-sm">{disabledMessage}</p>
               </TooltipContent>
             </Tooltip>
           ) : (
@@ -231,16 +239,18 @@ export function ScaleControl({
                 </TooltipContent>
               </Tooltip>
             )}
-            {isReadOnly && (
+            {isDisabled && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                     <Lock className="h-3 w-3" />
-                    <span className="text-xs font-medium">Read Only</span>
+                    <span className="text-xs font-medium">
+                      {isReadOnly ? "Read Only" : "No Permission"}
+                    </span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">
-                  <p className="text-sm">{readOnlyMessage}</p>
+                  <p className="text-sm">{disabledMessage}</p>
                 </TooltipContent>
               </Tooltip>
             )}
@@ -260,7 +270,7 @@ export function ScaleControl({
           </div>
         </div>
 
-        {isReadOnly ? (
+        {isDisabled ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2">
@@ -285,7 +295,7 @@ export function ScaleControl({
               </div>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              <p className="text-sm">{readOnlyMessage}</p>
+              <p className="text-sm">{disabledMessage}</p>
             </TooltipContent>
           </Tooltip>
         ) : (
