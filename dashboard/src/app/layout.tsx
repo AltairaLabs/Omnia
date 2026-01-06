@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { AuthWrapper } from "@/components/auth-wrapper";
 import { Sidebar, ReadOnlyBanner } from "@/components/layout";
 
 const inter = Inter({
@@ -33,15 +34,17 @@ export default function RootLayout({
         className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <Providers>
-          <div className="flex h-screen">
-            <Sidebar />
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <ReadOnlyBanner />
-              <main className="flex-1 overflow-auto bg-background">
-                {children}
-              </main>
+          <AuthWrapper>
+            <div className="flex h-screen">
+              <Sidebar />
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <ReadOnlyBanner />
+                <main className="flex-1 overflow-auto bg-background">
+                  {children}
+                </main>
+              </div>
             </div>
-          </div>
+          </AuthWrapper>
         </Providers>
       </body>
     </html>
