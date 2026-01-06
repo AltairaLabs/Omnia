@@ -6,6 +6,7 @@
  *
  * Environment variables:
  * - NEXT_PUBLIC_GRAFANA_URL: Base URL of Grafana instance (e.g., http://grafana:3000)
+ * - NEXT_PUBLIC_GRAFANA_PATH: Subpath on the remote server (default: /grafana/)
  * - NEXT_PUBLIC_GRAFANA_ORG_ID: Grafana organization ID (default: 1)
  */
 
@@ -14,6 +15,8 @@ export interface GrafanaConfig {
   enabled: boolean;
   /** Base URL of the Grafana instance */
   baseUrl: string | null;
+  /** Subpath where Grafana is served on the remote server (e.g., /grafana/, /monitoring/) */
+  remotePath: string;
   /** Organization ID for multi-org setups */
   orgId: number;
 }
@@ -83,15 +86,33 @@ export const COSTS_PANELS = {
 } as const;
 
 /**
+ * Normalize a path to ensure it starts and ends with /.
+ */
+function normalizePath(path: string): string {
+  let normalized = path.trim();
+  if (!normalized.startsWith("/")) {
+    normalized = "/" + normalized;
+  }
+  if (!normalized.endsWith("/")) {
+    normalized = normalized + "/";
+  }
+  return normalized;
+}
+
+/**
  * Returns Grafana configuration from environment variables.
  */
 export function useGrafana(): GrafanaConfig {
   const baseUrl = process.env.NEXT_PUBLIC_GRAFANA_URL || null;
+  const remotePath = normalizePath(
+    process.env.NEXT_PUBLIC_GRAFANA_PATH || "/grafana/"
+  );
   const orgId = parseInt(process.env.NEXT_PUBLIC_GRAFANA_ORG_ID || "1", 10);
 
   return {
     enabled: !!baseUrl,
     baseUrl,
+    remotePath,
     orgId,
   };
 }

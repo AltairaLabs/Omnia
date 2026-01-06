@@ -6,6 +6,7 @@ export { useAgentConsole } from "./use-agent-console";
 export { useLogs } from "./use-logs";
 export { useNamespaces } from "./use-namespaces";
 export { useReadOnly } from "./use-read-only";
+export { useAuth, AuthProvider } from "./use-auth";
 export {
   useGrafana,
   buildPanelUrl,
