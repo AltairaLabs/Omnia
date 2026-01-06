@@ -13,6 +13,21 @@ import { getGrafanaAuthHeaders } from "@/lib/auth/proxy";
 const GRAFANA_URL = process.env.NEXT_PUBLIC_GRAFANA_URL;
 
 /**
+ * Get the remote Grafana path, normalized to start and end with /.
+ * Defaults to /grafana/ if not configured.
+ */
+function getGrafanaRemotePath(): string {
+  let path = (process.env.NEXT_PUBLIC_GRAFANA_PATH || "/grafana/").trim();
+  if (!path.startsWith("/")) {
+    path = "/" + path;
+  }
+  if (!path.endsWith("/")) {
+    path = path + "/";
+  }
+  return path;
+}
+
+/**
  * Proxy all HTTP methods to Grafana.
  */
 async function proxyToGrafana(
@@ -27,7 +42,8 @@ async function proxyToGrafana(
   }
 
   const { path } = await params;
-  const grafanaPath = `/grafana/${path.join("/")}`;
+  const remotePath = getGrafanaRemotePath();
+  const grafanaPath = `${remotePath}${path.join("/")}`;
   const url = new URL(grafanaPath, GRAFANA_URL);
 
   // Forward query parameters
