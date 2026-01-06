@@ -14,7 +14,7 @@ This document provides a complete reference for all dashboard authentication con
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OMNIA_AUTH_MODE` | Authentication mode: `anonymous`, `proxy`, or `oauth` | `anonymous` |
+| `OMNIA_AUTH_MODE` | Authentication mode: `anonymous`, `proxy`, `oauth`, or `builtin` | `anonymous` |
 | `OMNIA_BASE_URL` | Base URL for OAuth callbacks (required for OAuth mode) | - |
 
 ### Session Configuration
@@ -81,6 +81,24 @@ This document provides a complete reference for all dashboard authentication con
 | `OMNIA_AUTH_API_KEYS_ENABLED` | Enable API key authentication | `true` |
 | `OMNIA_AUTH_API_KEYS_MAX_PER_USER` | Maximum keys per user | `10` |
 | `OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION` | Default expiration in days (0 = never) | `90` |
+
+### Builtin Mode Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OMNIA_BUILTIN_STORE_TYPE` | Storage backend: `sqlite` or `postgresql` | `sqlite` |
+| `OMNIA_BUILTIN_SQLITE_PATH` | SQLite database file path | `./data/omnia-users.db` |
+| `OMNIA_BUILTIN_POSTGRES_URL` | PostgreSQL connection URL | - |
+| `OMNIA_BUILTIN_ALLOW_SIGNUP` | Allow public user registration | `false` |
+| `OMNIA_BUILTIN_VERIFY_EMAIL` | Require email verification | `false` |
+| `OMNIA_BUILTIN_MIN_PASSWORD_LENGTH` | Minimum password length | `8` |
+| `OMNIA_BUILTIN_MAX_FAILED_ATTEMPTS` | Failed logins before lockout | `5` |
+| `OMNIA_BUILTIN_LOCKOUT_DURATION` | Lockout duration in seconds | `900` |
+| `OMNIA_BUILTIN_RESET_TOKEN_EXPIRATION` | Password reset token TTL (seconds) | `3600` |
+| `OMNIA_BUILTIN_VERIFICATION_TOKEN_EXPIRATION` | Email verification token TTL (seconds) | `86400` |
+| `OMNIA_BUILTIN_ADMIN_USERNAME` | Initial admin username | `admin` |
+| `OMNIA_BUILTIN_ADMIN_EMAIL` | Initial admin email | `admin@example.com` |
+| `OMNIA_BUILTIN_ADMIN_PASSWORD` | Initial admin password | - |
 
 ## OAuth Providers
 
@@ -248,6 +266,121 @@ DELETE /api/settings/api-keys/:id
 
 Manage API keys for the current user.
 
+### Builtin Authentication
+
+#### Login
+
+```
+POST /api/auth/builtin/login
+```
+
+Authenticate with username/email and password.
+
+**Request:**
+```json
+{
+  "username": "user@example.com",
+  "password": "secret123"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "user": {
+    "id": "user-123",
+    "username": "jdoe",
+    "email": "jdoe@example.com",
+    "role": "editor"
+  }
+}
+```
+
+**Errors:**
+- `invalid_credentials` - Wrong username/password
+- `account_locked` - Too many failed attempts
+- `email_not_verified` - Email verification required
+
+#### Signup
+
+```
+POST /api/auth/builtin/signup
+```
+
+Register a new user (if `OMNIA_BUILTIN_ALLOW_SIGNUP=true`).
+
+**Request:**
+```json
+{
+  "username": "jdoe",
+  "email": "jdoe@example.com",
+  "password": "secret123",
+  "displayName": "John Doe"
+}
+```
+
+**Errors:**
+- `signup_disabled` - Public registration disabled
+- `email_exists` - Email already registered
+- `username_exists` - Username taken
+- `password_too_short` - Below minimum length
+
+#### Forgot Password
+
+```
+POST /api/auth/builtin/forgot-password
+```
+
+Request a password reset token.
+
+**Request:**
+```json
+{
+  "email": "jdoe@example.com"
+}
+```
+
+**Response:** Always returns success (prevents email enumeration).
+
+#### Reset Password
+
+```
+POST /api/auth/builtin/reset-password
+```
+
+Set new password using reset token.
+
+**Request:**
+```json
+{
+  "token": "reset-token-from-email",
+  "password": "newpassword123"
+}
+```
+
+**Errors:**
+- `invalid_token` - Token invalid or expired
+- `password_too_short` - Below minimum length
+
+#### Verify Email
+
+```
+POST /api/auth/builtin/verify-email
+```
+
+Verify email address using verification token.
+
+**Request:**
+```json
+{
+  "token": "verification-token-from-email"
+}
+```
+
+**Errors:**
+- `invalid_token` - Token invalid or expired
+
 ## Session Data Structure
 
 The session cookie contains encrypted JSON:
@@ -261,7 +394,7 @@ interface SessionData {
     displayName?: string;
     groups: string[];
     role: "admin" | "editor" | "viewer";
-    provider: "anonymous" | "proxy" | "oauth" | "api-key";
+    provider: "anonymous" | "proxy" | "oauth" | "builtin" | "api-key";
   };
   createdAt?: number;
   oauth?: {
