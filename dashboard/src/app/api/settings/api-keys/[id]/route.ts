@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { Permission, userHasPermission } from "@/lib/auth/permissions";
-import { getApiKeyStore, isApiKeyAuthEnabled } from "@/lib/auth/api-keys";
+import { getApiKeyStore, getApiKeyConfig, isApiKeyAuthEnabled } from "@/lib/auth/api-keys";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -23,6 +23,19 @@ export async function DELETE(
   if (!isApiKeyAuthEnabled()) {
     return NextResponse.json(
       { error: "API key authentication is disabled" },
+      { status: 403 }
+    );
+  }
+
+  // Check if key deletion is allowed (not allowed in file-based mode)
+  const config = getApiKeyConfig();
+  if (!config.allowCreate) {
+    return NextResponse.json(
+      {
+        error: "API key deletion is not available in this mode",
+        message:
+          "Keys are managed via Kubernetes Secret. Contact your administrator to revoke keys.",
+      },
       { status: 403 }
     );
   }

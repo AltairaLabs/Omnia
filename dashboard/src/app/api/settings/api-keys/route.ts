@@ -35,14 +35,17 @@ export async function GET() {
     );
   }
 
+  const config = getApiKeyConfig();
   const store = getApiKeyStore();
   const keys = await store.listByUser(user.id);
 
   return NextResponse.json({
     keys,
     config: {
-      maxKeysPerUser: getApiKeyConfig().maxKeysPerUser,
-      defaultExpirationDays: getApiKeyConfig().defaultExpirationDays,
+      storeType: config.storeType,
+      allowCreate: config.allowCreate,
+      maxKeysPerUser: config.maxKeysPerUser,
+      defaultExpirationDays: config.defaultExpirationDays,
     },
   });
 }
@@ -54,6 +57,19 @@ export async function POST(request: NextRequest) {
   if (!isApiKeyAuthEnabled()) {
     return NextResponse.json(
       { error: "API key authentication is disabled" },
+      { status: 403 }
+    );
+  }
+
+  // Check if key creation is allowed (not allowed in file-based mode)
+  const config = getApiKeyConfig();
+  if (!config.allowCreate) {
+    return NextResponse.json(
+      {
+        error: "API key creation is not available in this mode",
+        message:
+          "Keys are managed via Kubernetes Secret. Contact your administrator to provision keys.",
+      },
       { status: 403 }
     );
   }
@@ -89,7 +105,6 @@ export async function POST(request: NextRequest) {
   }
 
   // Check max keys limit
-  const config = getApiKeyConfig();
   const store = getApiKeyStore();
   const existingKeys = await store.listByUser(user.id);
 

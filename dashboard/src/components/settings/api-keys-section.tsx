@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Key, Plus, Trash2, Copy, Check, AlertCircle, Clock } from "lucide-react";
+import { Key, Plus, Trash2, Copy, Check, AlertCircle, Clock, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -69,6 +69,8 @@ interface NewApiKey extends ApiKeyInfo {
 interface ApiKeysResponse {
   keys: ApiKeyInfo[];
   config: {
+    storeType: "memory" | "file";
+    allowCreate: boolean;
     maxKeysPerUser: number;
     defaultExpirationDays: number;
   };
@@ -132,6 +134,10 @@ export function ApiKeysSection() {
     enabled: can(Permission.API_KEYS_VIEW_OWN),
   });
 
+  const allowCreate = data?.config.allowCreate ?? true;
+  const canCreateDelete = canManageKeys && allowCreate;
+  const isFileMode = data?.config.storeType === "file";
+
   const createMutation = useMutation({
     mutationFn: createApiKey,
     onSuccess: (response) => {
@@ -183,7 +189,7 @@ export function ApiKeysSection() {
                 Create and manage API keys for programmatic access to the dashboard.
               </CardDescription>
             </div>
-            {canManageKeys && (
+            {canCreateDelete && (
               <Button onClick={() => setShowCreateDialog(true)} size="sm">
                 <Plus className="h-4 w-4 mr-2" />
                 Create Key
@@ -192,6 +198,21 @@ export function ApiKeysSection() {
           </div>
         </CardHeader>
         <CardContent>
+          {isFileMode && (
+            <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
+              <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <p className="font-medium text-blue-600 dark:text-blue-400">
+                  Keys managed via Kubernetes Secret
+                </p>
+                <p className="text-muted-foreground mt-1">
+                  API keys are provisioned by your administrator via GitOps. Contact
+                  your administrator to create or revoke keys.
+                </p>
+              </div>
+            </div>
+          )}
+
           {isLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
@@ -206,9 +227,14 @@ export function ApiKeysSection() {
             <div className="text-center py-8 text-muted-foreground">
               <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No API keys yet</p>
-              {canManageKeys && (
+              {canCreateDelete && (
                 <p className="text-sm mt-1">
                   Create one to access the API programmatically
+                </p>
+              )}
+              {isFileMode && (
+                <p className="text-sm mt-1">
+                  Contact your administrator to provision API keys
                 </p>
               )}
             </div>
@@ -222,7 +248,7 @@ export function ApiKeysSection() {
                   <TableHead>Created</TableHead>
                   <TableHead>Last Used</TableHead>
                   <TableHead>Expires</TableHead>
-                  {canManageKeys && <TableHead className="w-[50px]" />}
+                  {canCreateDelete && <TableHead className="w-[50px]" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -263,7 +289,7 @@ export function ApiKeysSection() {
                         <span className="text-sm text-muted-foreground">Never</span>
                       )}
                     </TableCell>
-                    {canManageKeys && (
+                    {canCreateDelete && (
                       <TableCell>
                         <Button
                           variant="ghost"
