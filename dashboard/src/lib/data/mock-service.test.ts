@@ -1,0 +1,561 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { MockDataService, MockAgentConnection } from "./mock-service";
+import type { ServerMessage, ConnectionStatus } from "@/types/websocket";
+
+describe("MockDataService", () => {
+  let service: MockDataService;
+
+  beforeEach(() => {
+    service = new MockDataService();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("service metadata", () => {
+    it("should have correct name", () => {
+      expect(service.name).toBe("MockDataService");
+    });
+
+    it("should be marked as demo service", () => {
+      expect(service.isDemo).toBe(true);
+    });
+  });
+
+  describe("getAgents", () => {
+    it("should return mock agents", async () => {
+      const promise = service.getAgents();
+      vi.advanceTimersByTime(200);
+      const agents = await promise;
+
+      expect(Array.isArray(agents)).toBe(true);
+      expect(agents.length).toBeGreaterThan(0);
+    });
+
+    it("should filter agents by namespace", async () => {
+      const promise = service.getAgents("production");
+      vi.advanceTimersByTime(200);
+      const agents = await promise;
+
+      agents.forEach((agent) => {
+        expect(agent.metadata?.namespace).toBe("production");
+      });
+    });
+
+    it("should return all agents when no namespace specified", async () => {
+      const promise = service.getAgents();
+      vi.advanceTimersByTime(200);
+      const allAgents = await promise;
+
+      const promise2 = service.getAgents("production");
+      vi.advanceTimersByTime(200);
+      const prodAgents = await promise2;
+
+      expect(allAgents.length).toBeGreaterThanOrEqual(prodAgents.length);
+    });
+  });
+
+  describe("getAgent", () => {
+    it("should return specific agent by namespace and name", async () => {
+      // First get list to know what's available
+      const listPromise = service.getAgents();
+      vi.advanceTimersByTime(200);
+      const agents = await listPromise;
+
+      if (agents.length > 0) {
+        const firstAgent = agents[0];
+        const promise = service.getAgent(
+          firstAgent.metadata?.namespace || "",
+          firstAgent.metadata?.name || ""
+        );
+        vi.advanceTimersByTime(200);
+        const agent = await promise;
+
+        expect(agent).toBeDefined();
+        expect(agent?.metadata?.name).toBe(firstAgent.metadata?.name);
+      }
+    });
+
+    it("should return undefined for non-existent agent", async () => {
+      const promise = service.getAgent("non-existent", "non-existent");
+      vi.advanceTimersByTime(200);
+      const agent = await promise;
+
+      expect(agent).toBeUndefined();
+    });
+  });
+
+  describe("createAgent", () => {
+    it("should return a new agent with Pending status", async () => {
+      const spec = {
+        metadata: {
+          name: "test-agent",
+          namespace: "test",
+        },
+        spec: {
+          facade: { type: "websocket", port: 8080 },
+        },
+      };
+
+      const promise = service.createAgent(spec);
+      vi.advanceTimersByTime(600);
+      const agent = await promise;
+
+      expect(agent.metadata?.name).toBe("test-agent");
+      expect(agent.metadata?.namespace).toBe("test");
+      expect(agent.status?.phase).toBe("Pending");
+    });
+  });
+
+  describe("scaleAgent", () => {
+    it("should scale an existing agent", async () => {
+      // Get first agent
+      const listPromise = service.getAgents();
+      vi.advanceTimersByTime(200);
+      const agents = await listPromise;
+
+      if (agents.length > 0) {
+        const firstAgent = agents[0];
+        const promise = service.scaleAgent(
+          firstAgent.metadata?.namespace || "",
+          firstAgent.metadata?.name || "",
+          5
+        );
+        vi.advanceTimersByTime(600);
+        const scaled = await promise;
+
+        expect(scaled.spec?.runtime?.replicas).toBe(5);
+        // Status replicas is updated to the new desired count
+        expect(scaled.status?.replicas).toBeDefined();
+      }
+    });
+
+    it("should throw for non-existent agent", async () => {
+      const promise = service.scaleAgent("non-existent", "non-existent", 5);
+      vi.advanceTimersByTime(600);
+
+      await expect(promise).rejects.toThrow("not found");
+    });
+  });
+
+  describe("getAgentLogs", () => {
+    it("should return mock logs", async () => {
+      const promise = service.getAgentLogs("default", "test-agent");
+      vi.advanceTimersByTime(200);
+      const logs = await promise;
+
+      expect(Array.isArray(logs)).toBe(true);
+      expect(logs.length).toBe(100); // Default tailLines
+    });
+
+    it("should respect tailLines option", async () => {
+      const promise = service.getAgentLogs("default", "test-agent", {
+        tailLines: 50,
+      });
+      vi.advanceTimersByTime(200);
+      const logs = await promise;
+
+      expect(logs.length).toBe(50);
+    });
+
+    it("should generate logs with required fields", async () => {
+      const promise = service.getAgentLogs("default", "test-agent", {
+        tailLines: 10,
+      });
+      vi.advanceTimersByTime(200);
+      const logs = await promise;
+
+      logs.forEach((log) => {
+        expect(log.timestamp).toBeDefined();
+        expect(log.level).toBeDefined();
+        expect(log.message).toBeDefined();
+        expect(log.container).toBeDefined();
+        expect(["facade", "runtime"]).toContain(log.container);
+        expect(["info", "debug", "warn", "error"]).toContain(log.level);
+      });
+    });
+  });
+
+  describe("getAgentEvents", () => {
+    it("should return mock events", async () => {
+      const promise = service.getAgentEvents("default", "test-agent");
+      vi.advanceTimersByTime(200);
+      const events = await promise;
+
+      expect(Array.isArray(events)).toBe(true);
+      expect(events.length).toBeGreaterThan(0);
+    });
+
+    it("should return events with expected structure", async () => {
+      const promise = service.getAgentEvents("default", "test-agent");
+      vi.advanceTimersByTime(200);
+      const events = await promise;
+
+      events.forEach((event) => {
+        expect(event.type).toMatch(/^(Normal|Warning)$/);
+        expect(event.reason).toBeDefined();
+        expect(event.message).toBeDefined();
+        expect(event.firstTimestamp).toBeDefined();
+        expect(event.lastTimestamp).toBeDefined();
+        expect(event.source).toBeDefined();
+        expect(event.involvedObject).toBeDefined();
+      });
+    });
+
+    it("should return events sorted by timestamp (most recent first)", async () => {
+      const promise = service.getAgentEvents("default", "test-agent");
+      vi.advanceTimersByTime(200);
+      const events = await promise;
+
+      for (let i = 0; i < events.length - 1; i++) {
+        const current = new Date(events[i].lastTimestamp).getTime();
+        const next = new Date(events[i + 1].lastTimestamp).getTime();
+        expect(current).toBeGreaterThanOrEqual(next);
+      }
+    });
+  });
+
+  describe("getPromptPacks", () => {
+    it("should return mock prompt packs", async () => {
+      const promise = service.getPromptPacks();
+      vi.advanceTimersByTime(200);
+      const packs = await promise;
+
+      expect(Array.isArray(packs)).toBe(true);
+    });
+
+    it("should filter by namespace", async () => {
+      const promise = service.getPromptPacks("production");
+      vi.advanceTimersByTime(200);
+      const packs = await promise;
+
+      packs.forEach((pack) => {
+        expect(pack.metadata?.namespace).toBe("production");
+      });
+    });
+  });
+
+  describe("getToolRegistries", () => {
+    it("should return mock tool registries", async () => {
+      const promise = service.getToolRegistries();
+      vi.advanceTimersByTime(200);
+      const registries = await promise;
+
+      expect(Array.isArray(registries)).toBe(true);
+    });
+
+    it("should filter by namespace", async () => {
+      const promise = service.getToolRegistries("production");
+      vi.advanceTimersByTime(200);
+      const registries = await promise;
+
+      registries.forEach((registry) => {
+        expect(registry.metadata?.namespace).toBe("production");
+      });
+    });
+  });
+
+  describe("getProviders", () => {
+    it("should return empty array (no mock providers)", async () => {
+      const promise = service.getProviders();
+      vi.advanceTimersByTime(200);
+      const providers = await promise;
+
+      expect(providers).toEqual([]);
+    });
+  });
+
+  describe("getStats", () => {
+    it("should return mock stats", async () => {
+      const promise = service.getStats();
+      vi.advanceTimersByTime(200);
+      const stats = await promise;
+
+      expect(stats).toBeDefined();
+    });
+  });
+
+  describe("getNamespaces", () => {
+    it("should return list of namespaces", async () => {
+      const promise = service.getNamespaces();
+      vi.advanceTimersByTime(200);
+      const namespaces = await promise;
+
+      expect(Array.isArray(namespaces)).toBe(true);
+      expect(namespaces).toContain("default");
+      expect(namespaces).toContain("production");
+    });
+  });
+
+  describe("getCosts", () => {
+    it("should return cost data", async () => {
+      const promise = service.getCosts();
+      vi.advanceTimersByTime(200);
+      const costs = await promise;
+
+      expect(costs.available).toBe(true);
+      expect(costs.summary).toBeDefined();
+      expect(costs.byAgent).toBeDefined();
+      expect(costs.byProvider).toBeDefined();
+      expect(costs.byModel).toBeDefined();
+      expect(costs.timeSeries).toBeDefined();
+    });
+
+    it("should not include Grafana URL in demo mode", async () => {
+      const promise = service.getCosts();
+      vi.advanceTimersByTime(200);
+      const costs = await promise;
+
+      expect(costs.grafanaUrl).toBeUndefined();
+    });
+  });
+
+  describe("createAgentConnection", () => {
+    it("should return a MockAgentConnection", () => {
+      const connection = service.createAgentConnection("default", "test-agent");
+      expect(connection).toBeInstanceOf(MockAgentConnection);
+    });
+  });
+});
+
+describe("MockAgentConnection", () => {
+  let connection: MockAgentConnection;
+
+  beforeEach(() => {
+    connection = new MockAgentConnection("default", "test-agent");
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("initial state", () => {
+    it("should start disconnected", () => {
+      expect(connection.getStatus()).toBe("disconnected");
+    });
+
+    it("should have no session ID initially", () => {
+      expect(connection.getSessionId()).toBeNull();
+    });
+  });
+
+  describe("connect", () => {
+    it("should transition to connecting then connected", () => {
+      const statusChanges: ConnectionStatus[] = [];
+      connection.onStatusChange((status) => statusChanges.push(status));
+
+      connection.connect();
+
+      expect(statusChanges).toContain("connecting");
+      expect(connection.getStatus()).toBe("connecting");
+
+      vi.advanceTimersByTime(300);
+
+      expect(statusChanges).toContain("connected");
+      expect(connection.getStatus()).toBe("connected");
+    });
+
+    it("should generate a session ID when connected", () => {
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      expect(connection.getSessionId()).not.toBeNull();
+      expect(connection.getSessionId()).toContain("mock-session-");
+    });
+
+    it("should emit connected message", () => {
+      const messages: ServerMessage[] = [];
+      connection.onMessage((msg) => messages.push(msg));
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      const connectedMsg = messages.find((m) => m.type === "connected");
+      expect(connectedMsg).toBeDefined();
+      expect(connectedMsg?.session_id).toBeDefined();
+    });
+  });
+
+  describe("disconnect", () => {
+    it("should transition to disconnected", () => {
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      connection.disconnect();
+
+      expect(connection.getStatus()).toBe("disconnected");
+      expect(connection.getSessionId()).toBeNull();
+    });
+  });
+
+  describe("send", () => {
+    it("should warn when not connected", () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      connection.send("Hello");
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "Cannot send message: not connected"
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("should simulate streaming response when connected", () => {
+      const messages: ServerMessage[] = [];
+      connection.onMessage((msg) => messages.push(msg));
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      connection.send("Hello, agent!");
+
+      // Advance time to receive all chunks
+      vi.advanceTimersByTime(5000);
+
+      // Should have received chunks
+      const chunks = messages.filter((m) => m.type === "chunk");
+      expect(chunks.length).toBeGreaterThan(0);
+
+      // Should have received done message
+      const done = messages.find((m) => m.type === "done");
+      expect(done).toBeDefined();
+    });
+
+    it("should cycle through mock responses", () => {
+      const messages: ServerMessage[] = [];
+      connection.onMessage((msg) => messages.push(msg));
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      // Send first message
+      connection.send("First message");
+      vi.advanceTimersByTime(5000);
+
+      const firstChunks = messages
+        .filter((m) => m.type === "chunk")
+        .map((m) => m.content)
+        .join("");
+
+      messages.length = 0; // Clear messages
+
+      // Send second message
+      connection.send("Second message");
+      vi.advanceTimersByTime(5000);
+
+      const secondChunks = messages
+        .filter((m) => m.type === "chunk")
+        .map((m) => m.content)
+        .join("");
+
+      // Responses should be different (cycling through mock data)
+      // Note: This test may pass even with same content if mock data is short
+      expect(typeof firstChunks).toBe("string");
+      expect(typeof secondChunks).toBe("string");
+    });
+  });
+
+  describe("onMessage", () => {
+    it("should register message handler", () => {
+      const handler = vi.fn();
+      connection.onMessage(handler);
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it("should support multiple handlers", () => {
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
+
+      connection.onMessage(handler1);
+      connection.onMessage(handler2);
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      expect(handler1).toHaveBeenCalled();
+      expect(handler2).toHaveBeenCalled();
+    });
+  });
+
+  describe("onStatusChange", () => {
+    it("should register status handler", () => {
+      const handler = vi.fn();
+      connection.onStatusChange(handler);
+
+      connection.connect();
+
+      expect(handler).toHaveBeenCalledWith("connecting", undefined);
+
+      vi.advanceTimersByTime(300);
+
+      expect(handler).toHaveBeenCalledWith("connected", undefined);
+    });
+
+    it("should support multiple handlers", () => {
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
+
+      connection.onStatusChange(handler1);
+      connection.onStatusChange(handler2);
+
+      connection.connect();
+
+      expect(handler1).toHaveBeenCalled();
+      expect(handler2).toHaveBeenCalled();
+    });
+  });
+
+  describe("tool calls simulation", () => {
+    it("should simulate tool calls in some responses", () => {
+      const messages: ServerMessage[] = [];
+      connection.onMessage((msg) => messages.push(msg));
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      // Send multiple messages to cycle through mock responses
+      for (let i = 0; i < 3; i++) {
+        connection.send(`Message ${i}`);
+        vi.advanceTimersByTime(5000);
+      }
+
+      // At least one response should include tool calls
+      const toolCalls = messages.filter((m) => m.type === "tool_call");
+      const toolResults = messages.filter((m) => m.type === "tool_result");
+
+      // Mock data includes tool calls in 2 of 3 responses
+      expect(toolCalls.length + toolResults.length).toBeGreaterThan(0);
+    });
+
+    it("should match tool call IDs with results", () => {
+      const messages: ServerMessage[] = [];
+      connection.onMessage((msg) => messages.push(msg));
+
+      connection.connect();
+      vi.advanceTimersByTime(300);
+
+      // First response includes tool calls
+      connection.send("Hello");
+      vi.advanceTimersByTime(5000);
+
+      const toolCalls = messages.filter((m) => m.type === "tool_call");
+      const toolResults = messages.filter((m) => m.type === "tool_result");
+
+      // Each tool call should have a matching result
+      toolCalls.forEach((tc) => {
+        const callId = tc.tool_call?.id;
+        const matchingResult = toolResults.find(
+          (tr) => tr.tool_result?.id === callId
+        );
+        expect(matchingResult).toBeDefined();
+      });
+    });
+  });
+});

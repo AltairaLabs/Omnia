@@ -20,7 +20,7 @@
  *   node scripts/generate-api-key.mjs --user=system --name="Monitoring" --role=viewer --expires=0
  */
 
-import { randomBytes, createHash } from "crypto";
+import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 
 const API_KEY_PREFIX = "omnia_sk_";
