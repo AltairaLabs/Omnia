@@ -272,15 +272,13 @@ export function NotesPanel({ resources, selectedNamespaces }: NotesPanelProps) {
                           </div>
                         </div>
                       ) : (
-                        <p
-                          className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
-                          role="button"
-                          tabIndex={0}
+                        <button
+                          type="button"
+                          className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors text-left w-full bg-transparent border-none p-0"
                           onClick={() => startEditing(key, note.note)}
-                          onKeyDown={(e) => e.key === "Enter" && startEditing(key, note.note)}
                         >
                           {note.note}
-                        </p>
+                        </button>
                       )}
 
                       <p className="text-xs text-muted-foreground">

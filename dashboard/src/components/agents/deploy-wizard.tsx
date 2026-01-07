@@ -335,28 +335,24 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
               className="grid grid-cols-1 gap-2"
             >
               {FRAMEWORKS.map((fw) => (
-                <div
+                <label
                   key={fw.value}
-                  role="radio"
-                  aria-checked={formData.framework === fw.value}
-                  tabIndex={0}
+                  htmlFor={fw.value}
                   className={cn(
                     "flex items-center space-x-3 rounded-lg border p-3 cursor-pointer transition-colors",
                     formData.framework === fw.value
                       ? "border-primary bg-primary/5"
                       : "hover:bg-muted/50"
                   )}
-                  onClick={() => updateField("framework", fw.value)}
-                  onKeyDown={(e) => e.key === "Enter" && updateField("framework", fw.value)}
                 >
                   <RadioGroupItem value={fw.value} id={fw.value} />
                   <div className="flex-1">
-                    <Label htmlFor={fw.value} className="cursor-pointer font-medium">
+                    <span className="cursor-pointer font-medium">
                       {fw.label}
-                    </Label>
+                    </span>
                     <p className="text-xs text-muted-foreground">{fw.description}</p>
                   </div>
-                </div>
+                </label>
               ))}
             </RadioGroup>
 

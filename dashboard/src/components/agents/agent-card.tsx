@@ -87,9 +87,7 @@ export function AgentCard({ agent }: AgentCardProps) {
               </p>
             </div>
             <div
-              role="group"
               onClick={(e) => e.preventDefault()}
-              onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
             >
               <p className="text-muted-foreground mb-1">Replicas</p>
               <ScaleControl
