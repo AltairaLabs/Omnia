@@ -1,0 +1,72 @@
+# Development values for Omnia Helm chart
+#
+# Used by Tilt for local development. Optimized for fast iteration:
+# - Reduced resource requests
+# - Disabled observability stack (Prometheus, Grafana, Loki)
+# - Development-friendly settings
+
+# Operator settings
+image:
+  pullPolicy: Never  # Use locally built images
+replicaCount: 1
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Dashboard settings
+dashboard:
+  enabled: true
+  image:
+    pullPolicy: Never
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi    # Next.js dev mode with Turbopack needs lots of memory
+    requests:
+      cpu: 200m
+      memory: 1Gi
+  # Relaxed security for dev (Next.js needs to write .next/)
+  podSecurityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+  # Development auth settings
+  auth:
+    mode: anonymous
+    anonymousRole: admin  # Full access for development
+
+# Disable read-only filesystem for dev (Next.js needs to write .next/)
+securityContext:
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# API settings
+api:
+  enabled: true
+  port: 8082
+
+# Disable observability stack for faster startup
+prometheus:
+  enabled: false
+
+grafana:
+  enabled: false
+
+loki:
+  enabled: false
+
+tempo:
+  enabled: false
+
+# Disable gateways for dev (use port-forward instead)
+gateway:
+  enabled: false
+
+internalGateway:
+  enabled: false

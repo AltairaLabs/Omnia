@@ -1,0 +1,210 @@
+/**
+ * Data service types and interface.
+ *
+ * This abstraction allows swapping between mock data (for demos)
+ * and real operator API data (for production) without changing
+ * the consuming code.
+ */
+
+import type { components } from "../api/schema";
+
+// Re-export schema types for convenience
+export type AgentRuntime = components["schemas"]["AgentRuntime"];
+export type AgentRuntimeSpec = components["schemas"]["AgentRuntimeSpec"];
+export type AgentRuntimeStatus = components["schemas"]["AgentRuntimeStatus"];
+export type PromptPack = components["schemas"]["PromptPack"];
+export type PromptPackSpec = components["schemas"]["PromptPackSpec"];
+export type PromptPackStatus = components["schemas"]["PromptPackStatus"];
+export type ToolRegistry = components["schemas"]["ToolRegistry"];
+export type ToolRegistrySpec = components["schemas"]["ToolRegistrySpec"];
+export type ToolRegistryStatus = components["schemas"]["ToolRegistryStatus"];
+export type DiscoveredTool = components["schemas"]["DiscoveredTool"];
+export type Provider = components["schemas"]["Provider"];
+export type ProviderSpec = components["schemas"]["ProviderSpec"];
+export type ProviderStatus = components["schemas"]["ProviderStatus"];
+export type Stats = components["schemas"]["Stats"];
+export type Condition = components["schemas"]["Condition"];
+export type ObjectMeta = components["schemas"]["ObjectMeta"];
+export type LogEntry = components["schemas"]["LogEntry"];
+
+// Phase types for filtering
+export type AgentPhase = "Pending" | "Running" | "Failed";
+export type PromptPackPhase = "Pending" | "Active" | "Canary" | "Failed";
+export type ToolRegistryPhase = "Pending" | "Ready" | "Degraded" | "Failed";
+export type ProviderPhase = "Pending" | "Ready" | "Failed";
+
+/**
+ * Kubernetes Event (simplified for dashboard display).
+ */
+export interface K8sEvent {
+  /** Event type: Normal or Warning */
+  type: "Normal" | "Warning";
+  /** Short reason string (e.g., "Scheduled", "Pulled", "Created") */
+  reason: string;
+  /** Human-readable message */
+  message: string;
+  /** First time the event occurred */
+  firstTimestamp: string;
+  /** Last time the event occurred */
+  lastTimestamp: string;
+  /** Number of times this event has occurred */
+  count: number;
+  /** Source component that generated the event */
+  source: {
+    component?: string;
+    host?: string;
+  };
+  /** The object this event is about */
+  involvedObject: {
+    kind: string;
+    name: string;
+    namespace?: string;
+  };
+}
+
+/**
+ * Cost allocation item for per-agent cost tracking.
+ */
+export interface CostAllocationItem {
+  agent: string;
+  namespace: string;
+  provider: "anthropic" | "openai" | string;
+  model: string;
+  team?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheHits: number;
+  requests: number;
+  inputCost: number;
+  outputCost: number;
+  cacheSavings: number;
+  totalCost: number;
+}
+
+/**
+ * Cost time series data point.
+ */
+export interface CostTimeSeriesPoint {
+  timestamp: string;
+  anthropic: number;
+  openai: number;
+  total: number;
+}
+
+/**
+ * Cost summary with totals and breakdowns.
+ */
+export interface CostSummary {
+  totalCost: number;
+  totalInputCost: number;
+  totalOutputCost: number;
+  totalCacheSavings: number;
+  totalRequests: number;
+  totalTokens: number;
+  anthropicCost: number;
+  openaiCost: number;
+  projectedMonthlyCost: number;
+  anthropicPercent: number;
+  openaiPercent: number;
+  inputPercent: number;
+  outputPercent: number;
+}
+
+/**
+ * Provider cost breakdown.
+ */
+export interface ProviderCost {
+  name: string;
+  provider: string;
+  cost: number;
+  requests: number;
+  tokens: number;
+}
+
+/**
+ * Model cost breakdown.
+ */
+export interface ModelCost {
+  model: string;
+  displayName: string;
+  provider: string;
+  cost: number;
+  requests: number;
+  tokens: number;
+}
+
+/**
+ * Complete cost data response.
+ */
+export interface CostData {
+  /** Whether cost data is available (Prometheus is configured) */
+  available: boolean;
+  /** Reason for unavailability */
+  reason?: string;
+  /** Cost summary with totals */
+  summary: CostSummary;
+  /** Per-agent cost breakdown */
+  byAgent: CostAllocationItem[];
+  /** Per-provider cost breakdown */
+  byProvider: ProviderCost[];
+  /** Per-model cost breakdown */
+  byModel: ModelCost[];
+  /** Time series data for charts */
+  timeSeries: CostTimeSeriesPoint[];
+  /** URL to Grafana dashboard for detailed analysis */
+  grafanaUrl?: string;
+}
+
+/**
+ * Options for fetching costs.
+ */
+export interface CostOptions {
+  namespace?: string;
+}
+
+/**
+ * Options for fetching logs.
+ */
+export interface LogOptions {
+  tailLines?: number;
+  sinceSeconds?: number;
+  container?: string;
+}
+
+/**
+ * Data service interface.
+ * Implementations provide either mock data or real API data.
+ */
+export interface DataService {
+  /** Service name for debugging */
+  readonly name: string;
+
+  /** Whether this is a mock/demo service */
+  readonly isDemo: boolean;
+
+  // Agents
+  getAgents(namespace?: string): Promise<AgentRuntime[]>;
+  getAgent(namespace: string, name: string): Promise<AgentRuntime | undefined>;
+  createAgent(spec: Record<string, unknown>): Promise<AgentRuntime>;
+  scaleAgent(namespace: string, name: string, replicas: number): Promise<AgentRuntime>;
+  getAgentLogs(namespace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
+  getAgentEvents(namespace: string, name: string): Promise<K8sEvent[]>;
+
+  // PromptPacks
+  getPromptPacks(namespace?: string): Promise<PromptPack[]>;
+  getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined>;
+
+  // ToolRegistries
+  getToolRegistries(namespace?: string): Promise<ToolRegistry[]>;
+  getToolRegistry(namespace: string, name: string): Promise<ToolRegistry | undefined>;
+
+  // Providers
+  getProviders(namespace?: string): Promise<Provider[]>;
+
+  // Stats & Namespaces
+  getStats(): Promise<Stats>;
+  getNamespaces(): Promise<string[]>;
+
+  // Costs
+  getCosts(options?: CostOptions): Promise<CostData>;
+}

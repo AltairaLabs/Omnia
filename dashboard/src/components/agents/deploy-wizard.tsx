@@ -19,7 +19,7 @@ import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { usePromptPacks, useToolRegistries, useNamespaces, useReadOnly, usePermissions, Permission } from "@/hooks";
-import { createAgent, isDemoMode } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 import {
   ChevronLeft,
   ChevronRight,
@@ -136,6 +136,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
       ? "You don't have permission to deploy agents"
       : "";
   const queryClient = useQueryClient();
+  const dataService = useDataService();
   const { data: namespaces } = useNamespaces();
   // Filter PromptPacks by selected namespace (PromptPackRef has no namespace field)
   const { data: promptPacks } = usePromptPacks({ namespace: formData.namespace });
@@ -254,14 +255,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
 
     try {
       const agentSpec = generateYaml();
-
-      if (isDemoMode) {
-        // Simulate API call in demo mode
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      } else {
-        await createAgent(agentSpec);
-      }
-
+      await dataService.createAgent(agentSpec);
       setSuccess(true);
       queryClient.invalidateQueries({ queryKey: ["agents"] });
 

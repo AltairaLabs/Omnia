@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "kubectl-mcp": {
+      "command": "node",
+      "args": ["/Users/chaholl/repos/altairalabs/tools/kubectl-mcp/dist/index.js"],
+      "env": {}
+    }
+  }
+}

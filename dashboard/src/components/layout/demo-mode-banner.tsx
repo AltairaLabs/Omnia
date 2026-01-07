@@ -1,14 +1,17 @@
 "use client";
 
 import { FlaskConical } from "lucide-react";
-import { isDemoMode } from "@/lib/api/client";
+import { useDemoMode } from "@/hooks/use-runtime-config";
 
 /**
  * Banner displayed at the top of the page when the dashboard is in demo mode.
- * Only renders when NEXT_PUBLIC_DEMO_MODE=true.
+ * Only renders when NEXT_PUBLIC_DEMO_MODE=true (read at runtime).
  */
 export function DemoModeBanner() {
-  if (!isDemoMode) {
+  const { isDemoMode, loading } = useDemoMode();
+
+  // Don't show anything while loading or if not in demo mode
+  if (loading || !isDemoMode) {
     return null;
   }
 

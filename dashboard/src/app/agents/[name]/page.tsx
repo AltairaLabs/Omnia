@@ -6,20 +6,12 @@ import Link from "next/link";
 import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare, Activity } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge, ScaleControl } from "@/components/agents";
+import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { CostSummary, TokenUsageChart } from "@/components/cost";
-import {
-  AgentRequestsPanel,
-  AgentLatencyPanel,
-  AgentErrorRatePanel,
-  ActiveConnectionsPanel,
-  TokenUsagePanel,
-} from "@/components/grafana";
 import { getMockAgentUsage } from "@/lib/mock-data";
-import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
-import { scaleAgent } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,16 +34,16 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   const searchParams = useSearchParams();
   const namespace = searchParams.get("namespace") || "production";
   const queryClient = useQueryClient();
+  const dataService = useDataService();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
-  const grafana = useGrafana();
 
   const handleScale = useCallback(async (replicas: number) => {
-    await scaleAgent(namespace, name, replicas);
+    await dataService.scaleAgent(namespace, name, replicas);
     // Invalidate queries to refresh data
     await queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
-  }, [namespace, name, queryClient]);
+  }, [namespace, name, queryClient, dataService]);
 
   if (isLoading) {
     return (
@@ -416,47 +408,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
             })()}
           </TabsContent>
 
-          <TabsContent value="metrics" className="space-y-6 mt-4">
-            {/* View in Grafana button - only shown when Grafana is enabled */}
-            {grafana.enabled && (
-              <div className="flex justify-end">
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href={buildDashboardUrl(grafana, GRAFANA_DASHBOARDS.AGENT_DETAIL, {
-                      agent: metadata.name,
-                      namespace: metadata.namespace || "default",
-                    }) || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View Full Dashboard in Grafana
-                  </a>
-                </Button>
-              </div>
-            )}
-            <div className="grid md:grid-cols-2 gap-4">
-              <AgentRequestsPanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-              <AgentLatencyPanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-              <AgentErrorRatePanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-              <ActiveConnectionsPanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-            </div>
-            <TokenUsagePanel
+          <TabsContent value="metrics" className="mt-4">
+            <AgentMetricsPanel
               agentName={metadata.name}
               namespace={metadata.namespace || "default"}
-              height={300}
             />
           </TabsContent>
 
@@ -473,17 +428,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
           </TabsContent>
 
           <TabsContent value="events" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Events</CardTitle>
-                <CardDescription>Kubernetes events for this agent</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground text-center py-8">
-                  Event streaming will be available with K8s integration
-                </p>
-              </CardContent>
-            </Card>
+            <EventsPanel
+              agentName={metadata.name}
+              namespace={metadata.namespace || "default"}
+            />
           </TabsContent>
         </Tabs>
       </div>

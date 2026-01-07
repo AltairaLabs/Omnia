@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Play, Pause, Trash2, Download, Search, X, RefreshCw } from "lucide-react";
+import { Download, Search, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useLogs } from "@/hooks";
-import { isDemoMode } from "@/lib/api/client";
+import { useLogs, useDemoMode } from "@/hooks";
 
 export interface LogEntry {
   timestamp: Date;
@@ -22,45 +21,6 @@ interface LogViewerProps {
   namespace: string;
   containers?: string[];
   className?: string;
-}
-
-// Mock log messages for demo
-const MOCK_LOG_TEMPLATES = [
-  { level: "info", message: "Server started on port 8080" },
-  { level: "info", message: "WebSocket connection established" },
-  { level: "info", message: "Session created: sess_{id}" },
-  { level: "debug", message: "Processing message from client" },
-  { level: "info", message: "LLM request sent to provider" },
-  { level: "debug", message: "Tokens used - input: {input}, output: {output}" },
-  { level: "info", message: "Tool call: {tool}({args})" },
-  { level: "info", message: "Tool response received in {ms}ms" },
-  { level: "info", message: "Response streamed to client" },
-  { level: "warn", message: "High latency detected: {ms}ms" },
-  { level: "error", message: "Connection timeout after 30s" },
-  { level: "info", message: "Session ended: sess_{id}" },
-  { level: "debug", message: "Cleanup completed for session" },
-  { level: "info", message: "Health check passed" },
-  { level: "warn", message: "Memory usage at 75%" },
-] as const;
-
-const TOOL_NAMES = ["search_database", "get_user_info", "send_email", "fetch_data"];
-
-function generateMockLog(container: string): LogEntry {
-  const template = MOCK_LOG_TEMPLATES[Math.floor(Math.random() * MOCK_LOG_TEMPLATES.length)];
-  const message = template.message
-    .replace("{id}", Math.random().toString(36).slice(2, 10))
-    .replace("{input}", String(Math.floor(Math.random() * 2000) + 500))
-    .replace("{output}", String(Math.floor(Math.random() * 1000) + 100))
-    .replace("{ms}", String(Math.floor(Math.random() * 2000) + 100))
-    .replace("{tool}", TOOL_NAMES[Math.floor(Math.random() * TOOL_NAMES.length)])
-    .replace("{args}", '{"query": "test"}');
-
-  return {
-    timestamp: new Date(),
-    level: template.level,
-    message,
-    container,
-  };
 }
 
 const levelColors = {
@@ -77,33 +37,22 @@ const levelBadgeColors = {
   debug: "bg-gray-500/15 text-gray-700 dark:text-gray-400 border-gray-500/20",
 };
 
-// Helper to generate initial logs
-function generateInitialLogs(containers: string[]): LogEntry[] {
-  const initialLogs: LogEntry[] = [];
-  for (let i = 0; i < 20; i++) {
-    const container = containers[Math.floor(Math.random() * containers.length)];
-    const log = generateMockLog(container);
-    log.timestamp = new Date(Date.now() - (20 - i) * 1000);
-    initialLogs.push(log);
-  }
-  return initialLogs;
-}
-
 export function LogViewer({
   agentName,
   namespace,
   containers = ["facade", "runtime"],
   className,
 }: LogViewerProps) {
-  // Fetch real logs when not in demo mode
+  const { isDemoMode } = useDemoMode();
+
+  // Fetch logs via DataService (works in both demo and live modes)
   const { data: apiLogs, isLoading, refetch } = useLogs(namespace, agentName, {
     tailLines: 500,
     sinceSeconds: 3600,
-    refetchInterval: 5000,
   });
 
   // Convert API logs to LogEntry format with Date objects
-  const realLogs = useMemo(() => {
+  const logs = useMemo(() => {
     if (!apiLogs || apiLogs.length === 0) return [];
     return apiLogs.map((log) => ({
       timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
@@ -113,11 +62,6 @@ export function LogViewer({
     }));
   }, [apiLogs]);
 
-  // Use lazy initial state to generate logs once on mount (only for demo mode)
-  const [mockLogs, setMockLogs] = useState<LogEntry[]>(() =>
-    isDemoMode ? generateInitialLogs(containers) : []
-  );
-  const [isStreaming, setIsStreaming] = useState(true);
   const [filter, setFilter] = useState("");
   const [selectedContainer, setSelectedContainer] = useState<string | "all">("all");
   const [selectedLevels, setSelectedLevels] = useState<Set<string>>(
@@ -125,38 +69,15 @@ export function LogViewer({
   );
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Use real logs if available, otherwise use mock logs
-  const logs = realLogs.length > 0 ? realLogs : mockLogs;
-
-  // Start/stop mock log streaming (only in demo mode)
-  useEffect(() => {
-    if (!isDemoMode) return;
-
-    if (isStreaming) {
-      // Stream new logs periodically
-      intervalRef.current = setInterval(() => {
-        const container = containers[Math.floor(Math.random() * containers.length)];
-        setMockLogs((prev) => [...prev.slice(-500), generateMockLog(container)]);
-      }, Math.random() * 2000 + 500);
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [isStreaming, containers]);
-
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [logs, autoScroll]);
 
-  // Filter logs
+  // Filter logs based on user selections
   const filteredLogs = logs.filter((log) => {
     if (selectedContainer !== "all" && log.container !== selectedContainer) {
       return false;
@@ -181,14 +102,6 @@ export function LogViewer({
       return next;
     });
   }, []);
-
-  const clearLogs = useCallback(() => {
-    if (isDemoMode) {
-      setMockLogs([]);
-    }
-    // For real mode, refetch to get fresh logs
-    refetch();
-  }, [refetch]);
 
   const downloadLogs = useCallback(() => {
     const content = filteredLogs
@@ -219,36 +132,16 @@ export function LogViewer({
     <div className={cn("flex flex-col h-[600px] border rounded-lg", className)}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b bg-muted/30">
-        {/* Stream control - only show in demo mode */}
-        {isDemoMode ? (
-          <Button
-            variant={isStreaming ? "default" : "outline"}
-            size="sm"
-            onClick={() => setIsStreaming(!isStreaming)}
-          >
-            {isStreaming ? (
-              <>
-                <Pause className="h-4 w-4 mr-1" />
-                Pause
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-1" />
-                Resume
-              </>
-            )}
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            <RefreshCw className={cn("h-4 w-4 mr-1", isLoading && "animate-spin")} />
-            Refresh
-          </Button>
-        )}
+        {/* Refresh button */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetch()}
+          disabled={isLoading}
+        >
+          <RefreshCw className={cn("h-4 w-4 mr-1", isLoading && "animate-spin")} />
+          Refresh
+        </Button>
 
         {/* Container selector */}
         <div className="flex items-center gap-1">
@@ -318,9 +211,6 @@ export function LogViewer({
           <Button variant="ghost" size="sm" onClick={downloadLogs} title="Download logs">
             <Download className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={clearLogs} title="Clear logs">
-            <Trash2 className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
@@ -342,7 +232,11 @@ export function LogViewer({
         onMouseLeave={() => setAutoScroll(true)}
       >
         <div className="p-2">
-          {filteredLogs.length === 0 ? (
+          {isLoading && logs.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-muted-foreground">
+              Loading logs...
+            </div>
+          ) : filteredLogs.length === 0 ? (
             <div className="flex items-center justify-center h-32 text-muted-foreground">
               {logs.length === 0 ? "No logs yet..." : "No logs match the current filters"}
             </div>
@@ -380,9 +274,9 @@ export function LogViewer({
         </span>
         <span>
           {isDemoMode ? (
-            isStreaming ? "Demo mode • Streaming..." : "Demo mode • Paused"
+            "Demo data"
           ) : (
-            isLoading ? "Loading..." : "Live logs • Auto-refresh 5s"
+            isLoading ? "Loading..." : "Live logs"
           )} • {agentName}.{namespace}
         </span>
       </div>

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -62,6 +63,11 @@ type Server struct {
 
 	// Tracing
 	tracingProvider *tracing.Provider
+
+	// Metrics
+	metrics      *Metrics
+	providerType string
+	model        string
 }
 
 // ServerOption configures the server.
@@ -137,6 +143,21 @@ func WithToolsConfig(path string) ServerOption {
 func WithTracingProvider(provider *tracing.Provider) ServerOption {
 	return func(s *Server) {
 		s.tracingProvider = provider
+	}
+}
+
+// WithMetrics sets the Prometheus metrics collector for the server.
+func WithMetrics(metrics *Metrics) ServerOption {
+	return func(s *Server) {
+		s.metrics = metrics
+	}
+}
+
+// WithProviderInfo sets the provider type and model for metrics labels.
+func WithProviderInfo(providerType, model string) ServerOption {
+	return func(s *Server) {
+		s.providerType = providerType
+		s.model = model
 	}
 }
 
@@ -266,6 +287,7 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	// Send the message using PromptKit SDK
 	resp, err := conv.Send(ctx, content)
 	if err != nil {
+		// Event bus will record the failure metric via EventProviderCallFailed
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
@@ -303,6 +325,9 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 			tracing.AddConversationMetrics(span, len(content), len(responseText))
 			tracing.SetSuccess(span)
 		}
+
+		// Note: Prometheus metrics are now recorded via event bus subscriptions
+		// (EventProviderCallCompleted/EventProviderCallFailed)
 	}
 
 	// Send done message
@@ -382,6 +407,9 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 			// Continue without tools - don't fail the conversation
 		}
 	}
+
+	// Subscribe to event bus metrics for observability
+	s.subscribeToEventBusMetrics(sessionID, conv)
 
 	s.conversations[sessionID] = conv
 	return conv, nil
@@ -486,4 +514,107 @@ func (s *Server) Close() error {
 	}
 
 	return nil
+}
+
+// subscribeToEventBusMetrics subscribes to PromptKit event bus events to capture metrics.
+// This allows us to observe fine-grained metrics emitted during conversation execution.
+func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversation) {
+	eventBus := conv.EventBus()
+	if eventBus == nil {
+		return
+	}
+
+	// Subscribe to provider call completed events to record Prometheus metrics
+	eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {
+		data, ok := e.Data.(*events.ProviderCallCompletedData)
+		if !ok {
+			return
+		}
+
+		// Record metrics to Prometheus
+		if s.metrics != nil {
+			s.metrics.RecordRequest(
+				data.Provider,
+				data.Model,
+				data.InputTokens,
+				data.OutputTokens,
+				data.CachedTokens,
+				data.Cost,
+				data.Duration.Seconds(),
+				true, // success (this event only fires on success)
+			)
+		}
+
+		s.log.V(1).Info("event: provider call completed",
+			"sessionID", sessionID,
+			"provider", data.Provider,
+			"model", data.Model,
+			"inputTokens", data.InputTokens,
+			"outputTokens", data.OutputTokens,
+			"cachedTokens", data.CachedTokens,
+			"cost", data.Cost,
+			"finishReason", data.FinishReason,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
+
+	// Subscribe to provider call failed events to record failures
+	eventBus.Subscribe(events.EventProviderCallFailed, func(e *events.Event) {
+		data, ok := e.Data.(*events.ProviderCallFailedData)
+		if !ok {
+			return
+		}
+
+		// Record failed request metric
+		if s.metrics != nil {
+			s.metrics.RecordRequest(
+				data.Provider,
+				data.Model,
+				0, 0, 0, 0,
+				data.Duration.Seconds(),
+				false, // failure
+			)
+		}
+
+		s.log.V(1).Info("event: provider call failed",
+			"sessionID", sessionID,
+			"provider", data.Provider,
+			"model", data.Model,
+			"error", data.Error,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
+
+	// Subscribe to pipeline completed events for overall visibility
+	eventBus.Subscribe(events.EventPipelineCompleted, func(e *events.Event) {
+		data, ok := e.Data.(*events.PipelineCompletedData)
+		if !ok {
+			return
+		}
+		s.log.V(0).Info("event: pipeline completed",
+			"sessionID", sessionID,
+			"provider", s.providerType,
+			"model", s.model,
+			"totalInputTokens", data.InputTokens,
+			"totalOutputTokens", data.OutputTokens,
+			"totalCost", data.TotalCost,
+			"messageCount", data.MessageCount,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
+
+	// Subscribe to tool call completed events (tool metrics)
+	eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
+		data, ok := e.Data.(*events.ToolCallCompletedData)
+		if !ok {
+			return
+		}
+		s.log.V(1).Info("event: tool call completed",
+			"sessionID", sessionID,
+			"toolName", data.ToolName,
+			"callID", data.CallID,
+			"status", data.Status,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
 }

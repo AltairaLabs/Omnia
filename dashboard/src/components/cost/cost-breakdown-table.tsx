@@ -11,7 +11,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCost, formatTokens } from "@/lib/pricing";
-import type { CostAllocationItem } from "@/lib/mock-data";
+import type { CostAllocationItem } from "@/lib/data/types";
 
 interface CostBreakdownTableProps {
   data: CostAllocationItem[];

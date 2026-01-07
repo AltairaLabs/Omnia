@@ -3,17 +3,19 @@
  * Types are generated from the OpenAPI spec at api/openapi/openapi.yaml.
  *
  * Run `npm run generate:api` to regenerate types after changing the spec.
+ *
+ * All requests go through the server-side proxy at /api/operator which:
+ * - Forwards requests to the operator API in production
+ * - Returns mock data when NEXT_PUBLIC_DEMO_MODE=true (read at runtime)
  */
 import createClient from "openapi-fetch";
 import type { paths, components } from "./schema";
-
-// Environment configuration
-export const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 // Use the server-side proxy for API calls.
 // This allows the dashboard to work when deployed in-cluster without
 // exposing the operator API externally. The proxy at /api/operator
 // forwards requests to the actual operator service.
+// In demo mode, the proxy returns mock data instead.
 const API_BASE_URL = "/api/operator";
 
 // Create typed API client using the proxy
@@ -44,23 +46,10 @@ export type PromptPackPhase = "Pending" | "Active" | "Canary" | "Failed";
 export type ToolRegistryPhase = "Pending" | "Ready" | "Degraded" | "Failed";
 export type ProviderPhase = "Pending" | "Ready" | "Failed";
 
-// Mock data for demo mode
-import {
-  mockAgentRuntimes,
-  mockPromptPacks,
-  mockToolRegistries,
-  getMockStats,
-} from "../mock-data";
-
 /**
  * Fetch all agents, optionally filtered by namespace.
  */
 export async function fetchAgents(namespace?: string): Promise<AgentRuntime[]> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return mockAgentRuntimes as unknown as AgentRuntime[];
-  }
-
   const { data, error } = await client.GET("/api/v1/agents", {
     params: { query: namespace ? { namespace } : {} },
   });
@@ -79,14 +68,6 @@ export async function fetchAgent(
   namespace: string,
   name: string
 ): Promise<AgentRuntime | undefined> {
-  if (isDemoMode) {
-    await simulateDelay();
-    const agent = mockAgentRuntimes.find(
-      (a) => a.metadata.namespace === namespace && a.metadata.name === name
-    );
-    return agent as unknown as AgentRuntime | undefined;
-  }
-
   const { data, error } = await client.GET("/api/v1/agents/{namespace}/{name}", {
     params: { path: { namespace, name } },
   });
@@ -106,11 +87,6 @@ export async function fetchAgent(
  * Fetch all prompt packs, optionally filtered by namespace.
  */
 export async function fetchPromptPacks(namespace?: string): Promise<PromptPack[]> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return mockPromptPacks as PromptPack[];
-  }
-
   const { data, error } = await client.GET("/api/v1/promptpacks", {
     params: { query: namespace ? { namespace } : {} },
   });
@@ -129,13 +105,6 @@ export async function fetchPromptPack(
   namespace: string,
   name: string
 ): Promise<PromptPack | undefined> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return mockPromptPacks.find(
-      (p) => p.metadata?.namespace === namespace && p.metadata?.name === name
-    ) as PromptPack | undefined;
-  }
-
   const { data, error } = await client.GET("/api/v1/promptpacks/{namespace}/{name}", {
     params: { path: { namespace, name } },
   });
@@ -154,11 +123,6 @@ export async function fetchPromptPack(
  * Fetch all tool registries, optionally filtered by namespace.
  */
 export async function fetchToolRegistries(namespace?: string): Promise<ToolRegistry[]> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return mockToolRegistries as ToolRegistry[];
-  }
-
   const { data, error } = await client.GET("/api/v1/toolregistries", {
     params: { query: namespace ? { namespace } : {} },
   });
@@ -177,13 +141,6 @@ export async function fetchToolRegistry(
   namespace: string,
   name: string
 ): Promise<ToolRegistry | undefined> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return mockToolRegistries.find(
-      (r) => r.metadata?.namespace === namespace && r.metadata?.name === name
-    ) as ToolRegistry | undefined;
-  }
-
   const { data, error } = await client.GET("/api/v1/toolregistries/{namespace}/{name}", {
     params: { path: { namespace, name } },
   });
@@ -202,11 +159,6 @@ export async function fetchToolRegistry(
  * Fetch all providers, optionally filtered by namespace.
  */
 export async function fetchProviders(namespace?: string): Promise<Provider[]> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return []; // No mock providers
-  }
-
   const { data, error } = await client.GET("/api/v1/providers", {
     params: { query: namespace ? { namespace } : {} },
   });
@@ -222,11 +174,6 @@ export async function fetchProviders(namespace?: string): Promise<Provider[]> {
  * Fetch aggregated statistics.
  */
 export async function fetchStats(): Promise<Stats> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return getMockStats() as unknown as Stats;
-  }
-
   const { data, error } = await client.GET("/api/v1/stats");
 
   if (error) {
@@ -244,11 +191,6 @@ export async function fetchStats(): Promise<Stats> {
  * Fetch all namespaces.
  */
 export async function fetchNamespaces(): Promise<string[]> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return ["default", "production", "staging", "demo"];
-  }
-
   const { data, error } = await client.GET("/api/v1/namespaces");
 
   if (error) {
@@ -262,20 +204,6 @@ export async function fetchNamespaces(): Promise<string[]> {
  * Create a new agent.
  */
 export async function createAgent(spec: Record<string, unknown>): Promise<AgentRuntime> {
-  if (isDemoMode) {
-    await simulateDelay(500);
-    // Return a mock agent in demo mode
-    return {
-      apiVersion: "omnia.altairalabs.ai/v1alpha1",
-      kind: "AgentRuntime",
-      metadata: spec.metadata as ObjectMeta,
-      spec: (spec.spec as AgentRuntimeSpec) || {},
-      status: {
-        phase: "Pending",
-      },
-    } as AgentRuntime;
-  }
-
   const response = await fetch(`${API_BASE_URL}/v1/agents`, {
     method: "POST",
     headers: {
@@ -304,11 +232,6 @@ export async function fetchAgentLogs(
     container?: string;
   }
 ): Promise<LogEntry[]> {
-  if (isDemoMode) {
-    await simulateDelay();
-    return []; // No mock logs - the LogViewer will generate mock data
-  }
-
   const { data, error } = await client.GET("/api/v1/agents/{namespace}/{name}/logs", {
     params: {
       path: { namespace, name },
@@ -335,24 +258,6 @@ export async function scaleAgent(
   name: string,
   replicas: number
 ): Promise<AgentRuntime> {
-  if (isDemoMode) {
-    await simulateDelay(500);
-    // Find and update mock agent
-    const agent = mockAgentRuntimes.find(
-      (a) => a.metadata.namespace === namespace && a.metadata.name === name
-    );
-    if (agent) {
-      // Update mock data (this won't persist across refreshes)
-      if (agent.spec.runtime) {
-        agent.spec.runtime.replicas = replicas;
-      }
-      if (agent.status?.replicas) {
-        agent.status.replicas.desired = replicas;
-      }
-    }
-    return agent as unknown as AgentRuntime;
-  }
-
   const { data, error } = await client.PUT("/api/v1/agents/{namespace}/{name}/scale", {
     params: { path: { namespace, name } },
     body: { replicas },
@@ -363,9 +268,4 @@ export async function scaleAgent(
   }
 
   return data as AgentRuntime;
-}
-
-// Helper to simulate network delay in demo mode
-function simulateDelay(ms = 100): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

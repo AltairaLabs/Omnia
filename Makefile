@@ -224,8 +224,12 @@ dashboard-check: dashboard-lint dashboard-typecheck ## Run all dashboard checks 
 docker-build-dashboard: ## Build docker image for the dashboard
 	$(CONTAINER_TOOL) build -t ${DASHBOARD_IMG} ./dashboard
 
+.PHONY: sync-chart-crds
+sync-chart-crds: manifests ## Sync CRDs from config/crd/bases to charts/omnia/crds
+	cp config/crd/bases/*.yaml charts/omnia/crds/
+
 .PHONY: generate-dashboard-types
-generate-dashboard-types: ## Generate TypeScript types from CRD schemas
+generate-dashboard-types: sync-chart-crds ## Generate TypeScript types from CRD schemas
 	node scripts/generate-dashboard-types.js
 
 ##@ Build

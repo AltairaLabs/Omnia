@@ -5,8 +5,7 @@ sidebar:
   order: 1
 ---
 
-
-This guide walks you through setting up a local development environment for testing Omnia.
+This guide walks you through setting up a local development environment for Omnia.
 
 ## Prerequisites
 
@@ -17,13 +16,99 @@ Install the required tools:
 - **kubectl**: [Install kubectl](https://kubernetes.io/docs/tasks/tools/)
 - **kind**: [Install kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - **Helm**: [Install Helm](https://helm.sh/docs/intro/install/)
+- **Tilt**: [Install Tilt](https://docs.tilt.dev/install.html) (recommended for development)
+- **Node.js 20+**: [Download Node.js](https://nodejs.org/) (for dashboard development)
 
-## Create a Local Cluster
+## Quick Start with Tilt (Recommended)
+
+Tilt provides hot-reload development with automatic file syncing. Changes to dashboard source files are reflected instantly without rebuilding Docker images.
+
+### 1. Create a Local Cluster
+
+```bash
+kind create cluster --name omnia-dev
+```
+
+### 2. Start Tilt
+
+```bash
+tilt up
+```
+
+This will:
+- Build the operator and dashboard images
+- Deploy them to your local cluster via Helm
+- Set up port forwards automatically
+- Watch for file changes and sync them instantly
+
+### 3. Access the Services
+
+- **Dashboard**: http://localhost:3000
+- **Operator API**: http://localhost:8082
+
+### 4. Develop with Hot Reload
+
+Edit files in `dashboard/src/` - changes sync instantly and Next.js hot-reloads. No Docker rebuilds needed!
+
+For Go operator changes, Tilt rebuilds the image automatically (Go doesn't support hot reload).
+
+### 5. View Logs
+
+Press `s` in the Tilt UI to stream logs, or visit http://localhost:10350 for the web UI.
+
+### 6. Stop Development
+
+```bash
+tilt down
+```
+
+## How Tilt Works
+
+The `Tiltfile` at the project root configures:
+
+1. **Dashboard hot-reload**: Uses `live_update` to sync source files directly into the running container. The Next.js dev server detects changes and hot-reloads.
+
+2. **Operator rebuild**: Watches Go source files and rebuilds the image when they change.
+
+3. **Helm deployment**: Deploys the chart with development-specific values from `charts/omnia/values-dev.yaml`.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Your Editor                                                │
+│  ┌─────────────────┐     ┌─────────────────┐               │
+│  │ dashboard/src/  │     │ internal/       │               │
+│  │ (TypeScript)    │     │ (Go)            │               │
+│  └────────┬────────┘     └────────┬────────┘               │
+│           │                       │                         │
+└───────────┼───────────────────────┼─────────────────────────┘
+            │                       │
+            │ live_update           │ docker_build
+            │ (instant sync)        │ (rebuild image)
+            ▼                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Kubernetes Cluster (kind)                                  │
+│  ┌─────────────────┐     ┌─────────────────┐               │
+│  │ Dashboard Pod   │     │ Operator Pod    │               │
+│  │ (npm run dev)   │────▶│ (controller)    │               │
+│  │ :3000           │     │ :8082           │               │
+│  └─────────────────┘     └─────────────────┘               │
+└─────────────────────────────────────────────────────────────┘
+            │                       │
+            │ port-forward          │ port-forward
+            ▼                       ▼
+     localhost:3000          localhost:8082
+```
+
+## Manual Setup (Without Tilt)
+
+If you prefer not to use Tilt, you can set up manually:
+
+### Create a Local Cluster
 
 Create a kind cluster with port forwarding:
 
 ```bash
-cat <<EOF | kind create cluster --config=-
+cat <<EOF | kind create cluster --name omnia-dev --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -35,15 +120,36 @@ nodes:
 EOF
 ```
 
-Verify the cluster is running:
+### Build and Load Images
 
 ```bash
-kubectl cluster-info
+# Build operator
+make docker-build IMG=omnia-operator:dev
+
+# Build dashboard
+docker build -t omnia-dashboard:dev ./dashboard
+
+# Load into kind
+kind load docker-image omnia-operator:dev --name omnia-dev
+kind load docker-image omnia-dashboard:dev --name omnia-dev
+```
+
+### Install with Helm
+
+```bash
+helm install omnia charts/omnia -n omnia-system --create-namespace \
+  --set image.repository=omnia-operator \
+  --set image.tag=dev \
+  --set image.pullPolicy=Never \
+  --set dashboard.enabled=true \
+  --set dashboard.image.repository=omnia-dashboard \
+  --set dashboard.image.tag=dev \
+  --set dashboard.image.pullPolicy=Never
 ```
 
 ## Deploy Redis (Optional)
 
-If you need session persistence, deploy Redis:
+For session persistence testing:
 
 ```bash
 kubectl create namespace redis
@@ -53,42 +159,9 @@ helm install redis bitnami/redis -n redis \
   --set architecture=standalone
 ```
 
-## Build and Load Images
-
-Build the operator and agent images:
-
-```bash
-make docker-build IMG=omnia-operator:dev
-
-docker build -t omnia-agent:dev -f Dockerfile.agent .
-
-kind load docker-image omnia-operator:dev
-kind load docker-image omnia-agent:dev
-```
-
-## Install the Operator
-
-Deploy using Helm with local images:
-
-```bash
-helm install omnia charts/omnia -n omnia-system --create-namespace \
-  --set image.repository=omnia-operator \
-  --set image.tag=dev \
-  --set image.pullPolicy=Never
-```
-
-## Verify Installation
-
-Check the operator is running:
-
-```bash
-kubectl get pods -n omnia-system
-kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia -f
-```
-
 ## Deploy Test Resources
 
-Apply sample manifests:
+Apply sample manifests to create test agents:
 
 ```bash
 kubectl apply -f config/samples/
@@ -96,7 +169,7 @@ kubectl apply -f config/samples/
 
 ## Using Demo Mode for Testing
 
-For local development without LLM costs, use the `demo` or `echo` handler modes:
+For local development without LLM API costs, use the `demo` or `echo` handler:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -115,51 +188,36 @@ spec:
 
 The demo handler provides:
 - Streaming responses that simulate real LLM output
-- Simulated tool calls for password and weather queries
+- Simulated tool calls for testing
 - No API key required
-
-This is useful for:
-- UI/frontend development
-- Integration testing
-- Demos and screenshots
-- Validating WebSocket connectivity
-
-## Connect to an Agent
-
-Forward the agent port:
-
-```bash
-kubectl port-forward svc/sample-agent 8080:8080
-```
-
-Test with websocat:
-
-```bash
-websocat ws://localhost:8080?agent=sample-agent
-```
 
 ## Troubleshooting
 
+### Tilt not detecting file changes
+
+Ensure you're editing files in the correct directory. Check the Tilt UI for sync status.
+
+### Dashboard not hot-reloading
+
+The dashboard runs `npm run dev` which uses Next.js Fast Refresh. Check the browser console for errors.
+
 ### Operator not starting
 
-Check logs:
-
 ```bash
-kubectl logs -n omnia-system deployment/omnia-operator
+kubectl logs -n omnia-system deployment/omnia-controller-manager
 ```
 
-### Agent pods failing
+### Image not found / ImagePullBackOff
 
-Check events:
+Ensure `image.pullPolicy=Never` is set and the image was loaded into kind:
 
 ```bash
-kubectl describe agentruntime <name>
-kubectl describe pod -l app.kubernetes.io/instance=<name>
+kind load docker-image <image>:<tag> --name omnia-dev
 ```
 
 ### WebSocket connection refused
 
-Ensure the service is ready:
+Ensure the agent service is ready:
 
 ```bash
 kubectl get endpoints <agent-name>

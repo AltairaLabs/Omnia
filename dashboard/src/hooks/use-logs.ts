@@ -1,5 +1,7 @@
+"use client";
+
 import { useQuery } from "@tanstack/react-query";
-import { fetchAgentLogs, isDemoMode } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 
 export interface UseLogsOptions {
   tailLines?: number;
@@ -8,23 +10,30 @@ export interface UseLogsOptions {
   refetchInterval?: number;
 }
 
+/**
+ * Hook to fetch logs for an agent.
+ *
+ * In demo mode: MockDataService returns generated mock logs.
+ * In live mode: OperatorApiService fetches real logs from K8s pods.
+ */
 export function useLogs(
   namespace: string,
   name: string,
   options: UseLogsOptions = {}
 ) {
+  const service = useDataService();
+
   return useQuery({
-    queryKey: ["logs", namespace, name, options],
+    queryKey: ["logs", namespace, name, options, service.name],
     queryFn: async () => {
-      const logs = await fetchAgentLogs(namespace, name, {
+      const logs = await service.getAgentLogs(namespace, name, {
         tailLines: options.tailLines || 200,
         sinceSeconds: options.sinceSeconds || 3600,
         container: options.container,
       });
       return logs;
     },
-    refetchInterval: options.refetchInterval || 5000, // Poll every 5 seconds by default
-    // In demo mode, don't refetch (the LogViewer generates mock data)
-    enabled: !isDemoMode,
+    // In demo mode, refetch less frequently since logs are generated
+    refetchInterval: service.isDemo ? 2000 : (options.refetchInterval || 5000),
   });
 }

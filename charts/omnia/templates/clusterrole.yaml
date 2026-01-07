@@ -6,6 +6,15 @@ metadata:
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
 rules:
+  # Namespaces for dashboard namespace selector
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
   # Core resources for reading and managing configs and secrets
   - apiGroups:
       - ""
@@ -29,6 +38,15 @@ rules:
     verbs:
       - get
       - list
+  # Events for dashboard events panel
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+      - watch
   # Services for agent facade
   - apiGroups:
       - ""

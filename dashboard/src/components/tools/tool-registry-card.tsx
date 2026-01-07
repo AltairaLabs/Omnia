@@ -57,8 +57,9 @@ export function ToolRegistryCard({ registry }: ToolRegistryCardProps) {
   const availableCount = tools.filter((t) => t.status === "Available").length;
   const totalCount = status?.discoveredToolsCount || 0;
 
-  // Get unique handler types
-  const handlerTypes = [...new Set(spec.handlers.map((h) => h.type))];
+  // Get unique handler types (handle missing handlers gracefully)
+  const handlers = spec.handlers || [];
+  const handlerTypes = [...new Set(handlers.map((h) => h.type))];
 
   return (
     <Link
@@ -119,7 +120,7 @@ export function ToolRegistryCard({ registry }: ToolRegistryCardProps) {
 
           {/* Last discovery time */}
           <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
-            <span>{spec.handlers.length} handlers</span>
+            <span>{handlers.length} handlers</span>
             <div className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               <span>Discovered {formatRelativeTime(status?.lastDiscoveryTime)}</span>

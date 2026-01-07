@@ -10,7 +10,7 @@ import { ScaleControl } from "./scale-control";
 import { CostSparkline } from "@/components/cost";
 import { getMockAgentUsage, mockCostAllocation } from "@/lib/mock-data";
 import { formatCost, calculateCost } from "@/lib/pricing";
-import { scaleAgent } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 import type { AgentRuntime } from "@/types";
 
 interface AgentCardProps {
@@ -20,12 +20,13 @@ interface AgentCardProps {
 export function AgentCard({ agent }: AgentCardProps) {
   const { metadata, spec, status } = agent;
   const queryClient = useQueryClient();
+  const dataService = useDataService();
 
   const handleScale = useCallback(async (replicas: number) => {
-    await scaleAgent(metadata.namespace || "default", metadata.name, replicas);
+    await dataService.scaleAgent(metadata.namespace || "default", metadata.name, replicas);
     // Invalidate queries to refresh data
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
-  }, [metadata.namespace, metadata.name, queryClient]);
+  }, [metadata.namespace, metadata.name, queryClient, dataService]);
 
   // Get usage data for sparkline
   const usage = getMockAgentUsage(metadata.namespace || "default", metadata.name);

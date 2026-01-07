@@ -5,8 +5,12 @@
  * allowing the dashboard to work when deployed in-cluster without
  * exposing the operator API externally.
  *
- * The browser calls: /api/operator/v1/agents
+ * The browser calls: /api/operator/api/v1/agents
  * This proxies to: http://operator-service:8082/api/v1/agents
+ *
+ * Note: Demo mode is handled by the DataService layer.
+ * When demo mode is enabled, MockDataService is used and this
+ * proxy is never called.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,8 +32,8 @@ async function proxyRequest(
   const { path } = await context.params;
   const pathString = path.join("/");
 
-  // Build the target URL
-  const targetUrl = new URL(`/api/${pathString}`, OPERATOR_API_URL);
+  // Build the target URL - pathString already includes 'api/v1/...'
+  const targetUrl = new URL(`/${pathString}`, OPERATOR_API_URL);
 
   // Forward query parameters
   request.nextUrl.searchParams.forEach((value, key) => {

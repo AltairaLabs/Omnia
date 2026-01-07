@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   AreaChart,
   Area,
@@ -12,6 +13,7 @@ import {
   Legend,
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
+import { ExternalLink } from "lucide-react";
 
 interface CostTimeSeriesPoint {
   timestamp: string;
@@ -25,6 +27,7 @@ interface CostOverTimeChartProps {
   title?: string;
   description?: string;
   height?: number;
+  grafanaUrl?: string;
 }
 
 export function CostOverTimeChart({
@@ -32,6 +35,7 @@ export function CostOverTimeChart({
   title = "Cost Over Time",
   description = "LLM costs by provider over the last 24 hours",
   height = 350,
+  grafanaUrl,
 }: CostOverTimeChartProps) {
   // Format data for chart
   const chartData = data.map((point) => ({
@@ -46,8 +50,20 @@ export function CostOverTimeChart({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          {grafanaUrl && (
+            <Button variant="ghost" size="sm" asChild>
+              <a href={grafanaUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                View in Grafana
+              </a>
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <div style={{ height }}>

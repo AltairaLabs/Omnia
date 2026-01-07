@@ -1,0 +1,27 @@
+# Development Dockerfile for hot-reload with Tilt
+#
+# This runs the Next.js dev server instead of a production build,
+# enabling hot module replacement when source files change.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies first for better caching
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Next.js dev server port
+EXPOSE 3000
+
+# Environment for development
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME="0.0.0.0"
+
+# Entrypoint ensures .next exists before starting dev server
+# (Tilt sync can remove it)
+CMD ["sh", "-c", "rm -rf .next && mkdir -p .next && npm run dev"]

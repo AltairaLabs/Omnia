@@ -13,14 +13,13 @@ data:
   OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}"
   {{- end }}
 
-  # Mode settings
-  NEXT_PUBLIC_DEMO_MODE: {{ .Values.dashboard.demoMode | quote }}
+  # Mode settings (demo mode defaults to false, not exposed in config)
   NEXT_PUBLIC_READ_ONLY_MODE: {{ .Values.dashboard.readOnlyMode | quote }}
   {{- if .Values.dashboard.readOnlyMessage }}
   NEXT_PUBLIC_READ_ONLY_MESSAGE: {{ .Values.dashboard.readOnlyMessage | quote }}
   {{- end }}
 
-  # Grafana integration
+  # Grafana integration (direct browser access, no proxy)
   {{- if .Values.dashboard.grafana.url }}
   NEXT_PUBLIC_GRAFANA_URL: {{ .Values.dashboard.grafana.url | quote }}
   {{- else if .Values.grafana.enabled }}
@@ -28,6 +27,13 @@ data:
   {{- end }}
   NEXT_PUBLIC_GRAFANA_PATH: {{ .Values.dashboard.grafana.path | quote }}
   NEXT_PUBLIC_GRAFANA_ORG_ID: {{ .Values.dashboard.grafana.orgId | quote }}
+
+  # Prometheus integration (for cost metrics)
+  {{- if .Values.dashboard.prometheus.url }}
+  PROMETHEUS_URL: {{ .Values.dashboard.prometheus.url | quote }}
+  {{- else if .Values.prometheus.enabled }}
+  PROMETHEUS_URL: "http://{{ .Release.Name }}-prometheus-server:80"
+  {{- end }}
 
   # Authentication mode
   OMNIA_AUTH_MODE: {{ .Values.dashboard.auth.mode | quote }}

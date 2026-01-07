@@ -290,23 +290,28 @@ dashboard:
   # Defaults to in-cluster service URL
   operatorApiUrl: ""
 
-  # -- Enable demo mode (uses mock data)
-  demoMode: false
-
   # -- Enable read-only mode (disables mutations)
   readOnlyMode: false
 
   # -- Custom read-only message
   readOnlyMessage: ""
 
-  # -- Grafana integration
+  # -- Grafana integration (direct browser access)
   grafana:
-    # -- Grafana URL for embedded metrics
+    # -- Grafana URL for embedded metrics (must be browser-accessible)
+    # For local dev: http://localhost:3001
+    # For production: use ingress URL
     url: ""
-    # -- Grafana subpath
+    # -- Grafana subpath (must match Grafana's serve_from_sub_path setting)
     path: /grafana/
     # -- Grafana organization ID
     orgId: 1
+
+  # -- Prometheus integration (for cost metrics)
+  prometheus:
+    # -- Prometheus URL for cost queries
+    # Defaults to in-cluster Prometheus service when prometheus.enabled=true
+    url: ""
 
   # -- Persistent volume for builtin auth SQLite database
   persistence:

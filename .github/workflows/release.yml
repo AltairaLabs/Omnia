@@ -71,8 +71,11 @@ jobs:
           - image: omnia
             dockerfile: Dockerfile
             context: .
-          - image: omnia-agent
+          - image: omnia-facade
             dockerfile: Dockerfile.agent
+            context: .
+          - image: omnia-runtime
+            dockerfile: Dockerfile.runtime
             context: .
     steps:
       - name: Checkout
@@ -353,8 +356,9 @@ jobs:
 
           ### Docker Images
 
-          - `ghcr.io/altairalabs/omnia:${{ needs.parse-version.outputs.version }}`
-          - `ghcr.io/altairalabs/omnia-agent:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia:${{ needs.parse-version.outputs.version }}` (operator)
+          - `ghcr.io/altairalabs/omnia-facade:${{ needs.parse-version.outputs.version }}` (agent facade)
+          - `ghcr.io/altairalabs/omnia-runtime:${{ needs.parse-version.outputs.version }}` (agent runtime)
 
           ## Documentation
 
