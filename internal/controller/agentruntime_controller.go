@@ -47,7 +47,7 @@ const (
 	// RuntimeContainerName is the name of the runtime container in the pod.
 	RuntimeContainerName = "runtime"
 	// DefaultFacadeImage is the default image for the facade container.
-	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-agent:latest"
+	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-facade:latest"
 	// DefaultRuntimeImage is the default image for the runtime container.
 	DefaultRuntimeImage = "ghcr.io/altairalabs/omnia-runtime:latest"
 	// DefaultFacadePort is the default port for the WebSocket facade.

@@ -46,7 +46,7 @@ var (
 	projectImage = "example.com/omnia:v0.0.1"
 
 	// facadeImage is the name of the facade image used by AgentRuntime
-	facadeImage = "example.com/omnia-agent:v0.0.1"
+	facadeImage = "example.com/omnia-facade:v0.0.1"
 
 	// runtimeImage is the name of the runtime image used by AgentRuntime
 	runtimeImage = "example.com/omnia-runtime:v0.0.1"

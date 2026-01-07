@@ -151,12 +151,12 @@ Build the operator and agent images locally:
 # Build the operator image
 make docker-build IMG=omnia:dev
 
-# Build the agent image
-docker build -t omnia-agent:dev -f Dockerfile.agent .
+# Build the facade image
+docker build -t omnia-facade:dev -f Dockerfile.agent .
 
 # Load images into kind
 kind load docker-image omnia:dev --name omnia-dev
-kind load docker-image omnia-agent:dev --name omnia-dev
+kind load docker-image omnia-facade:dev --name omnia-dev
 ```
 
 ## Deploy the Operator
@@ -178,8 +178,8 @@ helm install omnia ./charts/omnia \
   --set image.repository=omnia \
   --set image.tag=dev \
   --set image.pullPolicy=Never \
-  --set agent.image.repository=omnia-agent \
-  --set agent.image.tag=dev
+  --set facade.image.repository=omnia-facade \
+  --set facade.image.tag=dev
 ```
 
 Verify the operator is running:

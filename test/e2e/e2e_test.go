@@ -54,7 +54,7 @@ const metricsRoleBindingName = "omnia-metrics-binding"
 
 // agentImage is the agent container image used by AgentRuntime
 const (
-	facadeImageRef  = "example.com/omnia-agent:v0.0.1"
+	facadeImageRef  = "example.com/omnia-facade:v0.0.1"
 	runtimeImageRef = "example.com/omnia-runtime:v0.0.1"
 )
 

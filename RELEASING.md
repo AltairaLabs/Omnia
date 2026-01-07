@@ -88,7 +88,8 @@ Images are pushed to GHCR:
 
 ```
 ghcr.io/altairalabs/omnia:<version>
-ghcr.io/altairalabs/omnia-agent:<version>
+ghcr.io/altairalabs/omnia-facade:<version>
+ghcr.io/altairalabs/omnia-runtime:<version>
 ```
 
 For stable releases, additional tags are created:

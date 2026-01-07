@@ -64,13 +64,13 @@ cmd_setup() {
     # Build images
     log "Building images..."
     make docker-build IMG=example.com/omnia:dev
-    docker build -t example.com/omnia-agent:dev -f Dockerfile.agent .
+    docker build -t example.com/omnia-facade:dev -f Dockerfile.agent .
     docker build -t example.com/omnia-runtime:dev -f Dockerfile.runtime .
 
     # Load into Kind
     log "Loading images into Kind..."
     kind load docker-image example.com/omnia:dev --name "$CLUSTER_NAME"
-    kind load docker-image example.com/omnia-agent:dev --name "$CLUSTER_NAME"
+    kind load docker-image example.com/omnia-facade:dev --name "$CLUSTER_NAME"
     kind load docker-image example.com/omnia-runtime:dev --name "$CLUSTER_NAME"
 
     # Install CRDs and deploy operator
@@ -82,7 +82,7 @@ cmd_setup() {
 
     # Patch with dev images
     kubectl patch deployment omnia-controller-manager -n "$OPERATOR_NS" --type=json -p '[
-        {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=example.com/omnia-agent:dev"},
+        {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=example.com/omnia-facade:dev"},
         {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--runtime-image=example.com/omnia-runtime:dev"}
     ]'
 
@@ -435,11 +435,11 @@ cmd_rebuild() {
     log "Rebuilding and reloading images..."
 
     make docker-build IMG=example.com/omnia:dev
-    docker build -t example.com/omnia-agent:dev -f Dockerfile.agent .
+    docker build -t example.com/omnia-facade:dev -f Dockerfile.agent .
     docker build -t example.com/omnia-runtime:dev -f Dockerfile.runtime .
 
     kind load docker-image example.com/omnia:dev --name "$CLUSTER_NAME"
-    kind load docker-image example.com/omnia-agent:dev --name "$CLUSTER_NAME"
+    kind load docker-image example.com/omnia-facade:dev --name "$CLUSTER_NAME"
     kind load docker-image example.com/omnia-runtime:dev --name "$CLUSTER_NAME"
 
     log "Restarting operator..."

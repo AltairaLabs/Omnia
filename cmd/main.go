@@ -72,7 +72,7 @@ func main() {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&facadeImage, "facade-image", "",
-		"The image to use for facade containers. If not set, defaults to ghcr.io/altairalabs/omnia-agent:latest")
+		"The image to use for facade containers. If not set, defaults to ghcr.io/altairalabs/omnia-facade:latest")
 	flag.StringVar(&runtimeImage, "runtime-image", "",
 		"The image to use for runtime containers. If not set, defaults to ghcr.io/altairalabs/omnia-runtime:latest")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")

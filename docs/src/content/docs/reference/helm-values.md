@@ -132,12 +132,12 @@ crds:
   install: true
 ```
 
-## Agent Configuration
+## Facade Configuration
 
 ```yaml
-agent:
+facade:
   image:
-    repository: ghcr.io/altairalabs/omnia-agent
+    repository: ghcr.io/altairalabs/omnia-facade
     tag: ""  # Defaults to Chart appVersion
 ```
 
