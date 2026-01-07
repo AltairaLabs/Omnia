@@ -368,6 +368,13 @@ jobs:
       run: npm run test:coverage
       working-directory: dashboard
 
+    - name: Fix coverage paths for SonarCloud
+      run: |
+        # lcov.info has paths like "src/lib/file.ts" but SonarCloud needs "dashboard/src/lib/file.ts"
+        sed -i 's|^SF:src/|SF:dashboard/src/|g' dashboard/coverage/lcov.info
+        echo "Fixed lcov.info paths:"
+        head -5 dashboard/coverage/lcov.info
+
     - name: Build
       run: npm run build
       working-directory: dashboard
