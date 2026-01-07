@@ -337,6 +337,9 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
               {FRAMEWORKS.map((fw) => (
                 <div
                   key={fw.value}
+                  role="radio"
+                  aria-checked={formData.framework === fw.value}
+                  tabIndex={0}
                   className={cn(
                     "flex items-center space-x-3 rounded-lg border p-3 cursor-pointer transition-colors",
                     formData.framework === fw.value
@@ -344,6 +347,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
                       : "hover:bg-muted/50"
                   )}
                   onClick={() => updateField("framework", fw.value)}
+                  onKeyDown={(e) => e.key === "Enter" && updateField("framework", fw.value)}
                 >
                   <RadioGroupItem value={fw.value} id={fw.value} />
                   <div className="flex-1">

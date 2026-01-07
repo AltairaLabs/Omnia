@@ -86,7 +86,11 @@ export function AgentCard({ agent }: AgentCardProps) {
                 {spec.provider?.model?.split("-").slice(-2).join("-") || "sonnet-4"}
               </p>
             </div>
-            <div onClick={(e) => e.preventDefault()}>
+            <div
+              role="group"
+              onClick={(e) => e.preventDefault()}
+              onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+            >
               <p className="text-muted-foreground mb-1">Replicas</p>
               <ScaleControl
                 currentReplicas={status?.replicas?.ready ?? 0}

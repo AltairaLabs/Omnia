@@ -21,7 +21,9 @@ function PostItNote({
   return (
     <div
       className="absolute -top-2 -right-2 translate-x-full max-w-[180px] z-10"
+      role="presentation"
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
     >
       <div className="relative bg-yellow-200 dark:bg-yellow-300 text-yellow-900 p-2 rounded shadow-md text-xs transform rotate-2 hover:rotate-0 transition-transform">
         {/* Tape effect */}
@@ -39,7 +41,10 @@ function PostItNote({
         {/* Note content */}
         <p
           className="cursor-text leading-tight line-clamp-4 hover:line-clamp-none"
+          role="button"
+          tabIndex={0}
           onClick={onEdit}
+          onKeyDown={(e) => e.key === "Enter" && onEdit()}
           title="Click to edit"
         >
           {note}
@@ -160,7 +165,10 @@ export const AgentNodeComponent = memo(({ data }: CustomNodeProps<AgentNodeData>
     <div className="relative group">
       <div
         className={cn(baseNodeStyles, typeColors.agent)}
+        role="button"
+        tabIndex={0}
         onClick={data.onClick}
+        onKeyDown={(e) => e.key === "Enter" && data.onClick?.()}
       >
         <Handle type="target" position={Position.Left} className="!bg-blue-500" />
         <div className="flex items-center gap-2">
@@ -197,7 +205,10 @@ export const PromptPackNodeComponent = memo(({ data }: CustomNodeProps<PromptPac
     <div className="relative group">
       <div
         className={cn(baseNodeStyles, typeColors.promptPack)}
+        role="button"
+        tabIndex={0}
         onClick={data.onClick}
+        onKeyDown={(e) => e.key === "Enter" && data.onClick?.()}
       >
         <Handle type="target" position={Position.Left} className="!bg-purple-500" />
         <div className="flex items-center gap-2">
@@ -236,7 +247,10 @@ export const ToolRegistryNodeComponent = memo(({ data }: CustomNodeProps<ToolReg
     <div className="relative group">
       <div
         className={cn(baseNodeStyles, typeColors.toolRegistry)}
+        role="button"
+        tabIndex={0}
         onClick={data.onClick}
+        onKeyDown={(e) => e.key === "Enter" && data.onClick?.()}
       >
         <Handle type="target" position={Position.Left} className="!bg-orange-500" />
         <div className="flex items-center gap-2">
@@ -274,7 +288,10 @@ export const ToolNodeComponent = memo(({ data }: CustomNodeProps<ToolNodeData>) 
   return (
     <div
       className={cn(baseNodeStyles, typeColors.tool)}
+      role="button"
+      tabIndex={0}
       onClick={data.onClick}
+      onKeyDown={(e) => e.key === "Enter" && data.onClick?.()}
     >
       <Handle type="target" position={Position.Left} className="!bg-teal-500" />
       <div className="flex items-center gap-2">
@@ -297,7 +314,10 @@ export const PromptNodeComponent = memo(({ data }: CustomNodeProps<PromptNodeDat
   return (
     <div
       className={cn(baseNodeStyles, typeColors.prompt)}
+      role="button"
+      tabIndex={0}
       onClick={data.onClick}
+      onKeyDown={(e) => e.key === "Enter" && data.onClick?.()}
     >
       <Handle type="target" position={Position.Left} className="!bg-violet-500" />
       <div className="flex items-center gap-2">

@@ -62,7 +62,7 @@ export function BuiltinLoginForm({
       // Redirect to returnTo or home
       router.push(returnTo || "/");
       router.refresh();
-    } catch (err) {
+    } catch {
       setError("An error occurred. Please try again.");
       setIsLoading(false);
     }

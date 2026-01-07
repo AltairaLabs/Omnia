@@ -55,7 +55,7 @@ export default function TopologyPage() {
     toolRegistries?.forEach((t) => {
       if (t.metadata.namespace) namespaces.add(t.metadata.namespace);
     });
-    return [...namespaces].sort();
+    return [...namespaces].sort((a, b) => a.localeCompare(b));
   }, [agents, promptPacks, toolRegistries]);
 
   const handleNamespaceChange = useCallback((namespaces: string[]) => {
