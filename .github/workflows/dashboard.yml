@@ -84,21 +84,14 @@ jobs:
       - name: Run tests
         run: npm run test:junit
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
+      - name: Publish Test Results
+        uses: mikepenz/action-junit-report@v5
         if: always()
         with:
-          name: dashboard-test-results
-          path: dashboard/test-results.xml
-
-      - name: Publish test results
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: Dashboard Tests
-          path: dashboard/test-results.xml
-          reporter: java-junit
-          fail-on-error: true
+          report_paths: 'dashboard/test-results.xml'
+          check_name: 'Dashboard Test Results'
+          detailed_summary: true
+          include_passed: true
 
   build:
     name: Build
