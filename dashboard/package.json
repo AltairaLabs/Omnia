@@ -12,6 +12,7 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:junit": "vitest run --reporter=junit --outputFile=test-results.xml",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "generate:api": "openapi-typescript ../api/openapi/openapi.yaml -o src/lib/api/schema.d.ts",

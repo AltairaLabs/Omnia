@@ -88,6 +88,13 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 	# Exclude e2e tests, internal/runtime and cmd/runtime (require local PromptKit dependency)
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e | grep -v /internal/runtime | grep -v /cmd/runtime) -coverprofile cover.out
 
+.PHONY: test-junit
+test-junit: manifests generate fmt vet setup-envtest gotestsum ## Run tests with JUnit XML output.
+	# Exclude e2e tests, internal/runtime and cmd/runtime (require local PromptKit dependency)
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		$(GOTESTSUM) --junitfile test-results.xml --format testdox -- \
+		$$(go list ./... | grep -v /e2e | grep -v /internal/runtime | grep -v /cmd/runtime) -coverprofile cover.out
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
@@ -111,6 +118,11 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
+	$(MAKE) cleanup-test-e2e
+
+.PHONY: test-e2e-junit
+test-e2e-junit: setup-test-e2e manifests generate fmt vet ## Run e2e tests with JUnit XML output.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.junit-report=e2e-results.xml -timeout 20m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
@@ -332,12 +344,14 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 PROTOC ?= protoc
 PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
+GOTESTSUM ?= $(LOCALBIN)/gotestsum
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.1
 CONTROLLER_TOOLS_VERSION ?= v0.19.0
 PROTOC_GEN_GO_VERSION ?= v1.36.6
 PROTOC_GEN_GO_GRPC_VERSION ?= v1.5.1
+GOTESTSUM_VERSION ?= v1.12.0
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -387,6 +401,11 @@ $(PROTOC_GEN_GO): $(LOCALBIN)
 protoc-gen-go-grpc: $(PROTOC_GEN_GO_GRPC) ## Download protoc-gen-go-grpc locally if necessary.
 $(PROTOC_GEN_GO_GRPC): $(LOCALBIN)
 	$(call go-install-tool,$(PROTOC_GEN_GO_GRPC),google.golang.org/grpc/cmd/protoc-gen-go-grpc,$(PROTOC_GEN_GO_GRPC_VERSION))
+
+.PHONY: gotestsum
+gotestsum: $(GOTESTSUM) ## Download gotestsum locally if necessary.
+$(GOTESTSUM): $(LOCALBIN)
+	$(call go-install-tool,$(GOTESTSUM),gotest.tools/gotestsum,$(GOTESTSUM_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

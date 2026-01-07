@@ -32,6 +32,10 @@ on:
       - 'hack/**'
       - '.github/workflows/test-e2e.yml'
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   test-e2e:
     name: Run on Ubuntu
@@ -57,4 +61,20 @@ jobs:
       - name: Running Test e2e
         run: |
           # Skip go mod tidy - may fail on local replace directives for PromptKit
-          make test-e2e
+          make test-e2e-junit
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: e2e-results.xml
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: E2E Tests
+          path: e2e-results.xml
+          reporter: java-junit
+          fail-on-error: true
