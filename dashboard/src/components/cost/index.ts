@@ -6,3 +6,4 @@ export { CostByModelChart } from "./cost-by-model-chart";
 export { CostOverTimeChart } from "./cost-over-time-chart";
 export { CostBreakdownTable } from "./cost-breakdown-table";
 export { CostSparkline } from "./cost-sparkline";
+export { CostUnavailable, CostUnavailableBanner } from "./cost-unavailable";

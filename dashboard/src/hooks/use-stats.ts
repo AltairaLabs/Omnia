@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { fetchStats } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 
 // Stats type with required nested objects for dashboard display
 export interface DashboardStats {
@@ -27,10 +27,12 @@ export interface DashboardStats {
 }
 
 export function useStats() {
+  const service = useDataService();
+
   return useQuery({
-    queryKey: ["stats"],
+    queryKey: ["stats", service.name],
     queryFn: async (): Promise<DashboardStats> => {
-      const stats = await fetchStats();
+      const stats = await service.getStats();
       // Normalize stats with defaults and add sessions count
       return {
         agents: {

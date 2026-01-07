@@ -2,23 +2,17 @@
 
 import { Bot, FileText, Wrench, Activity, DollarSign, Coins } from "lucide-react";
 import { Header } from "@/components/layout";
-import { StatCard, RecentAgents, ActivityChart } from "@/components/dashboard";
-import { SystemOverviewPanels } from "@/components/grafana";
-import { useStats, useGrafana } from "@/hooks";
-import { getMockAggregatedUsage } from "@/lib/mock-data";
-import { calculateCost, formatCost, formatTokens } from "@/lib/pricing";
+import { StatCard, RecentAgents, ActivityChart, SystemMetrics } from "@/components/dashboard";
+import { useStats, useCosts } from "@/hooks";
+import { formatCost, formatTokens } from "@/lib/pricing";
 
 export default function Home() {
-  const { data: stats, isLoading } = useStats();
-  const grafana = useGrafana();
+  const { data: stats, isLoading: statsLoading } = useStats();
+  const { data: costs, isLoading: costsLoading } = useCosts();
 
-  // Get aggregated usage data for cost display
-  const usage = getMockAggregatedUsage();
-
-  // Calculate total estimated cost
-  const totalCost = Object.entries(usage.byModel).reduce((total, [model, data]) => {
-    return total + calculateCost(model, data.inputTokens, data.outputTokens);
-  }, 0);
+  // Check if cost data is available
+  const costsAvailable = costs?.available ?? false;
+  const summary = costs?.summary;
 
   return (
     <div className="flex flex-col h-full">
@@ -42,7 +36,7 @@ export default function Home() {
               </>
             }
             icon={Bot}
-            loading={isLoading}
+            loading={statsLoading}
           />
 
           <StatCard
@@ -57,7 +51,7 @@ export default function Home() {
               </>
             }
             icon={FileText}
-            loading={isLoading}
+            loading={statsLoading}
           />
 
           <StatCard
@@ -72,7 +66,7 @@ export default function Home() {
               </>
             }
             icon={Wrench}
-            loading={isLoading}
+            loading={statsLoading}
           />
 
           <StatCard
@@ -80,42 +74,50 @@ export default function Home() {
             value={stats?.sessions.active.toLocaleString() ?? 0}
             description="+23% from last hour"
             icon={Activity}
-            loading={isLoading}
+            loading={statsLoading}
           />
 
           <StatCard
             title="Est. Cost (24h)"
-            value={formatCost(totalCost)}
+            value={costsAvailable ? formatCost(summary?.totalCost ?? 0) : "--"}
             description={
-              <>
-                <span className="text-amber-600 dark:text-amber-400">
-                  {usage.totalRequests.toLocaleString()}
-                </span>{" "}
-                requests
-              </>
+              costsAvailable ? (
+                <>
+                  <span className="text-amber-600 dark:text-amber-400">
+                    {(summary?.totalRequests ?? 0).toLocaleString()}
+                  </span>{" "}
+                  requests
+                </>
+              ) : (
+                "Prometheus not configured"
+              )
             }
             icon={DollarSign}
-            loading={isLoading}
+            loading={costsLoading}
           />
 
           <StatCard
             title="Tokens (24h)"
-            value={formatTokens(usage.totalTokens)}
+            value={costsAvailable ? formatTokens(summary?.totalTokens ?? 0) : "--"}
             description={
-              <>
-                <span className="text-blue-600 dark:text-blue-400">
-                  {formatTokens(usage.totalInputTokens)}
-                </span>{" "}
-                in / {formatTokens(usage.totalOutputTokens)} out
-              </>
+              costsAvailable ? (
+                <>
+                  <span className="text-blue-600 dark:text-blue-400">
+                    {(summary?.inputPercent ?? 0).toFixed(0)}%
+                  </span>{" "}
+                  in / {(summary?.outputPercent ?? 0).toFixed(0)}% out
+                </>
+              ) : (
+                "Prometheus not configured"
+              )
             }
             icon={Coins}
-            loading={isLoading}
+            loading={costsLoading}
           />
         </div>
 
-        {/* Grafana Metrics (if enabled) */}
-        {grafana.enabled && <SystemOverviewPanels />}
+        {/* Live Metrics from Prometheus */}
+        <SystemMetrics />
 
         {/* Charts and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">

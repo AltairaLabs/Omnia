@@ -589,7 +589,7 @@ func TestParseLogLine(t *testing.T) {
 			line:          `2026-01-05T12:00:00.000000000Z {"level":"error","ts":1767616635.0,"caller":"server.go:50","msg":"connection failed","error":"timeout"}`,
 			containerName: "facade",
 			wantLevel:     "error",
-			wantMessage:   "[server.go:50] connection failed: timeout",
+			wantMessage:   "[server.go:50] connection failed error: timeout",
 		},
 		{
 			name:          "plain error log",
@@ -611,6 +611,20 @@ func TestParseLogLine(t *testing.T) {
 			containerName: "runtime",
 			wantLevel:     "debug",
 			wantMessage:   "debug: processing request",
+		},
+		{
+			name:          "json log with logger name",
+			line:          `2026-01-05T12:00:00.000000000Z {"level":"info","ts":1767616635.0,"logger":"websocket-server","caller":"server.go:188","msg":"new connection","agent":"test-agent","namespace":"default"}`,
+			containerName: "facade",
+			wantLevel:     "info",
+			wantMessage:   "[websocket-server] [server.go:188] new connection (agent=test-agent, namespace=default)",
+		},
+		{
+			name:          "json log with shorter timestamp",
+			line:          `2026-01-05T12:00:00.123Z {"level":"info","ts":1767616635.0,"msg":"short timestamp test"}`,
+			containerName: "facade",
+			wantLevel:     "info",
+			wantMessage:   "short timestamp test",
 		},
 	}
 
@@ -684,7 +698,7 @@ func TestParseLogStream(t *testing.T) {
 
 	// Second log (error with error field)
 	assert.Equal(t, "error", logs[1].Level)
-	assert.Equal(t, "[main.go:200] failed: timeout", logs[1].Message)
+	assert.Equal(t, "[main.go:200] failed error: timeout", logs[1].Message)
 
 	// Third log (plain text)
 	assert.Equal(t, "info", logs[2].Level)

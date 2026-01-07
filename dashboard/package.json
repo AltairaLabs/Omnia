@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node server.js",
+    "dev:next": "next dev --turbopack",
     "build": "next build",
-    "start": "next start",
+    "start": "node server.js",
+    "start:next": "next start",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:junit": "vitest run --reporter=junit --outputFile=test-results.xml",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "generate:api": "openapi-typescript ../api/openapi/openapi.yaml -o src/lib/api/schema.d.ts",
@@ -56,6 +59,7 @@
     "react-hook-form": "^7.70.0",
     "recharts": "^3.6.0",
     "tailwind-merge": "^3.4.0",
+    "ws": "^8.18.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {

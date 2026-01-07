@@ -142,6 +142,8 @@ export default function ToolDetailPage({ params }: PageProps) {
   const tools = status?.discoveredTools || [];
   const availableCount = tools.filter((t) => t.status === "Available").length;
   const totalCount = status?.discoveredToolsCount || 0;
+  // Handle missing handlers gracefully (for data compatibility)
+  const handlers = spec.handlers || [];
 
   return (
     <div className="flex flex-col h-full">
@@ -166,7 +168,7 @@ export default function ToolDetailPage({ params }: PageProps) {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="tools">Tools ({totalCount})</TabsTrigger>
-            <TabsTrigger value="handlers">Handlers ({spec.handlers.length})</TabsTrigger>
+            <TabsTrigger value="handlers">Handlers ({handlers.length})</TabsTrigger>
             <TabsTrigger value="usage">Usage ({usedByAgents?.length || 0})</TabsTrigger>
             <TabsTrigger value="config">Config</TabsTrigger>
           </TabsList>
@@ -217,15 +219,15 @@ export default function ToolDetailPage({ params }: PageProps) {
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Total Handlers</span>
-                    <span className="text-sm font-medium">{spec.handlers.length}</span>
+                    <span className="text-sm font-medium">{handlers.length}</span>
                   </div>
                   <Separator />
                   <div className="space-y-2">
                     <span className="text-sm text-muted-foreground">Handler Types</span>
                     <div className="flex flex-wrap gap-2">
-                      {[...new Set(spec.handlers.map((h) => h.type))].map((type) => {
+                      {[...new Set(handlers.map((h) => h.type))].map((type) => {
                         const Icon = getHandlerTypeIcon(type);
-                        const count = spec.handlers.filter((h) => h.type === type).length;
+                        const count = handlers.filter((h) => h.type === type).length;
                         return (
                           <Badge key={type} variant="outline" className="gap-1.5">
                             <Icon className="h-3 w-3" />
@@ -356,7 +358,7 @@ export default function ToolDetailPage({ params }: PageProps) {
               </CardHeader>
               <CardContent>
                 <Accordion type="multiple" className="w-full">
-                  {spec.handlers.map((handler, idx) => {
+                  {handlers.map((handler, idx) => {
                     const Icon = getHandlerTypeIcon(handler.type);
                     return (
                       <AccordionItem key={idx} value={`handler-${idx}`}>

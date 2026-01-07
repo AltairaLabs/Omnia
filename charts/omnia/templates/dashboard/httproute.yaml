@@ -1,0 +1,26 @@
+{{- if and .Values.dashboard.enabled .Values.internalGateway.enabled }}
+{{- $fullName := include "omnia.fullname" . }}
+{{- $gatewayName := printf "%s-%s" $fullName .Values.internalGateway.name }}
+---
+# HTTPRoute for Dashboard via Internal Gateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "omnia.dashboard.fullname" . }}-route
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.dashboard.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $gatewayName }}
+      namespace: {{ .Release.Namespace }}
+  rules:
+    # Dashboard routes at root path
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "omnia.dashboard.fullname" . }}
+          port: 3000
+{{- end }}

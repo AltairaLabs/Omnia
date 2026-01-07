@@ -1,0 +1,88 @@
+Omnia has been installed successfully!
+
+{{- if .Values.dashboard.enabled }}
+
+=== Dashboard ===
+
+The Omnia dashboard is deployed and available.
+
+{{- if .Values.dashboard.ingress.enabled }}
+
+Access the dashboard at:
+{{- if .Values.dashboard.ingress.tls }}
+  https://{{ .Values.dashboard.ingress.host }}
+{{- else }}
+  http://{{ .Values.dashboard.ingress.host }}
+{{- end }}
+
+{{- else }}
+
+To access the dashboard, run:
+
+  kubectl port-forward svc/{{ include "omnia.dashboard.fullname" . }} {{ .Values.dashboard.service.port }}:{{ .Values.dashboard.service.port }} -n {{ .Release.Namespace }}
+
+Then open http://localhost:{{ .Values.dashboard.service.port }} in your browser.
+
+{{- end }}
+
+Authentication mode: {{ .Values.dashboard.auth.mode }}
+{{- if eq .Values.dashboard.auth.mode "builtin" }}
+
+Default admin credentials (change immediately!):
+  Username: {{ .Values.dashboard.builtin.admin.username }}
+  Email: {{ .Values.dashboard.builtin.admin.email }}
+{{- if .Values.dashboard.builtin.admin.password }}
+  Password: (set via values)
+{{- else if .Values.dashboard.builtin.admin.existingSecret }}
+  Password: (from secret {{ .Values.dashboard.builtin.admin.existingSecret }})
+{{- else }}
+  Password: (not set - check pod logs for generated password)
+{{- end }}
+{{- end }}
+
+{{- end }}
+
+=== Operator ===
+
+The Omnia operator is running and watching for:
+  - AgentRuntimes
+  - PromptPacks
+  - ToolRegistries
+  - Providers
+
+To verify the operator is running:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "omnia.name" . }}
+
+To deploy your first agent, create an AgentRuntime resource:
+
+  kubectl apply -f - <<EOF
+  apiVersion: omnia.altairalabs.ai/v1alpha1
+  kind: AgentRuntime
+  metadata:
+    name: my-agent
+  spec:
+    promptPackRef:
+      name: my-promptpack
+    facade:
+      type: websocket
+      port: 8080
+  EOF
+
+{{- if .Values.grafana.enabled }}
+
+=== Observability ===
+
+Grafana is enabled. Access dashboards at:
+{{- if .Values.internalGateway.enabled }}
+  http://<gateway-ip>:{{ .Values.internalGateway.port }}{{ .Values.internalGateway.grafana.path }}
+{{- else }}
+  kubectl port-forward svc/{{ .Release.Name }}-grafana 3000:80 -n {{ .Release.Namespace }}
+  Then open http://localhost:3000
+{{- end }}
+
+Default credentials: admin / {{ .Values.grafana.adminPassword }}
+
+{{- end }}
+
+For more information, visit: https://omnia.altairalabs.ai/docs

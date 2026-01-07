@@ -1,25 +1,17 @@
 "use client";
 
 import { use, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare, Activity } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge, ScaleControl } from "@/components/agents";
+import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { CostSummary, TokenUsageChart } from "@/components/cost";
-import {
-  AgentRequestsPanel,
-  AgentLatencyPanel,
-  AgentErrorRatePanel,
-  ActiveConnectionsPanel,
-  TokenUsagePanel,
-} from "@/components/grafana";
 import { getMockAgentUsage } from "@/lib/mock-data";
-import { useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
-import { scaleAgent } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -40,18 +32,27 @@ function formatDate(timestamp?: string): string {
 export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   const { name } = use(params);
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const namespace = searchParams.get("namespace") || "production";
+  const currentTab = searchParams.get("tab") || "overview";
   const queryClient = useQueryClient();
+  const dataService = useDataService();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
-  const grafana = useGrafana();
+
+  const handleTabChange = useCallback((tab: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, router, pathname]);
 
   const handleScale = useCallback(async (replicas: number) => {
-    await scaleAgent(namespace, name, replicas);
+    await dataService.scaleAgent(namespace, name, replicas);
     // Invalidate queries to refresh data
     await queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
-  }, [namespace, name, queryClient]);
+  }, [namespace, name, queryClient, dataService]);
 
   if (isLoading) {
     return (
@@ -114,7 +115,7 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview">
+        <Tabs value={currentTab} onValueChange={handleTabChange}>
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="console" className="gap-1.5">
@@ -180,32 +181,38 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                     <Separator className="my-4" />
                     <div>
                       <p className="text-sm font-medium mb-2">Conditions</p>
-                      <div className="space-y-2">
-                        {status.conditions.map((condition, index) => (
-                          <div
-                            key={index}
-                            className="flex items-start gap-4 text-sm"
-                          >
-                            <span
-                              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                condition.status === "True"
-                                  ? "bg-green-500/15 text-green-700 dark:text-green-400"
-                                  : "bg-red-500/15 text-red-700 dark:text-red-400"
-                              }`}
-                            >
-                              {condition.type}
-                            </span>
-                            <div className="flex-1">
-                              <p className="font-medium">{condition.reason}</p>
-                              {condition.message && (
-                                <p className="text-muted-foreground">
-                                  {condition.message}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-muted-foreground border-b">
+                            <th className="pb-2 font-medium">Type</th>
+                            <th className="pb-2 font-medium">Reason</th>
+                            <th className="pb-2 font-medium">Message</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {status.conditions.map((condition, index) => (
+                            <tr key={index} className="border-b last:border-0">
+                              <td className="py-2 pr-4">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    condition.status === "True"
+                                      ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                                      : "bg-red-500/15 text-red-700 dark:text-red-400"
+                                  }`}
+                                >
+                                  {condition.type}
+                                </span>
+                              </td>
+                              <td className="py-2 pr-4 font-medium">
+                                {condition.reason}
+                              </td>
+                              <td className="py-2 text-muted-foreground">
+                                {condition.message || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </>
                 )}
@@ -416,47 +423,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
             })()}
           </TabsContent>
 
-          <TabsContent value="metrics" className="space-y-6 mt-4">
-            {/* View in Grafana button - only shown when Grafana is enabled */}
-            {grafana.enabled && (
-              <div className="flex justify-end">
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href={buildDashboardUrl(grafana, GRAFANA_DASHBOARDS.AGENT_DETAIL, {
-                      agent: metadata.name,
-                      namespace: metadata.namespace || "default",
-                    }) || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View Full Dashboard in Grafana
-                  </a>
-                </Button>
-              </div>
-            )}
-            <div className="grid md:grid-cols-2 gap-4">
-              <AgentRequestsPanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-              <AgentLatencyPanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-              <AgentErrorRatePanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-              <ActiveConnectionsPanel
-                agentName={metadata.name}
-                namespace={metadata.namespace || "default"}
-              />
-            </div>
-            <TokenUsagePanel
+          <TabsContent value="metrics" className="mt-4">
+            <AgentMetricsPanel
               agentName={metadata.name}
               namespace={metadata.namespace || "default"}
-              height={300}
             />
           </TabsContent>
 
@@ -473,17 +443,10 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
           </TabsContent>
 
           <TabsContent value="events" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Events</CardTitle>
-                <CardDescription>Kubernetes events for this agent</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground text-center py-8">
-                  Event streaming will be available with K8s integration
-                </p>
-              </CardContent>
-            </Card>
+            <EventsPanel
+              agentName={metadata.name}
+              namespace={metadata.namespace || "default"}
+            />
           </TabsContent>
         </Tabs>
       </div>

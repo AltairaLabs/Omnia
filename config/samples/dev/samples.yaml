@@ -1,0 +1,184 @@
+---
+# Namespace for sample resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-agents
+---
+# ConfigMap for PromptPack
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-prompts
+  namespace: dev-agents
+data:
+  system.txt: |
+    You are a helpful AI assistant for demo purposes.
+    Be concise and friendly in your responses.
+  config.yaml: |
+    model: gpt-4
+    temperature: 0.7
+---
+# PromptPack
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-prompts
+  namespace: dev-agents
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+---
+# ToolRegistry with HTTP handlers
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: demo-tools
+  namespace: dev-agents
+spec:
+  handlers:
+  - name: weather
+    type: http
+    httpConfig:
+      endpoint: "https://api.weather.example.com/v1/current"
+      method: GET
+    tool:
+      name: get_weather
+      description: Get current weather for a location
+      inputSchema:
+        type: object
+        properties:
+          location:
+            type: string
+            description: City name or coordinates
+        required: [location]
+    timeout: "10s"
+  - name: calculator
+    type: http
+    httpConfig:
+      endpoint: "https://api.calculator.example.com/v1/compute"
+      method: POST
+    tool:
+      name: calculate
+      description: Perform mathematical calculations
+      inputSchema:
+        type: object
+        properties:
+          expression:
+            type: string
+            description: Mathematical expression to evaluate
+        required: [expression]
+    timeout: "5s"
+---
+# Provider secret (dummy for dev)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-provider
+  namespace: dev-agents
+type: Opaque
+stringData:
+  api-key: "dev-api-key-not-real"
+---
+# AgentRuntime with demo handler
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: demo-agent
+  namespace: dev-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: demo-prompts
+  toolRegistryRef:
+    name: demo-tools
+  facade:
+    type: websocket
+    port: 8080
+    handler: demo
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+  provider:
+    secretRef:
+      name: llm-provider
+---
+# Runtime agent with mock provider - uses real PromptKit runtime
+# but with simulated LLM responses (no real API calls)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: runtime-agent
+  namespace: dev-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: demo-prompts
+  toolRegistryRef:
+    name: demo-tools
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+  provider:
+    secretRef:
+      name: llm-provider
+---
+# Echo agent for simple testing
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: echo-agent
+  namespace: dev-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: demo-prompts
+  facade:
+    type: websocket
+    port: 8080
+    handler: echo
+  session:
+    type: memory
+    ttl: "30m"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "25m"
+        memory: "32Mi"
+      limits:
+        cpu: "100m"
+        memory: "64Mi"
+  provider:
+    secretRef:
+      name: llm-provider

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { fetchPromptPacks, fetchPromptPack } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 import type { PromptPack, PromptPackPhase } from "@/types";
 
 interface UsePromptPacksOptions {
@@ -10,10 +10,12 @@ interface UsePromptPacksOptions {
 }
 
 export function usePromptPacks(options: UsePromptPacksOptions = {}) {
+  const service = useDataService();
+
   return useQuery({
-    queryKey: ["promptPacks", options],
+    queryKey: ["promptPacks", options, service.name],
     queryFn: async (): Promise<PromptPack[]> => {
-      const response = await fetchPromptPacks(options.namespace);
+      const response = await service.getPromptPacks(options.namespace);
       let packs = response as unknown as PromptPack[];
 
       // Client-side filtering for phase
@@ -27,10 +29,12 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
 }
 
 export function usePromptPack(name: string, namespace: string = "production") {
+  const service = useDataService();
+
   return useQuery({
-    queryKey: ["promptPack", namespace, name],
+    queryKey: ["promptPack", namespace, name, service.name],
     queryFn: async (): Promise<PromptPack | null> => {
-      const response = await fetchPromptPack(namespace, name);
+      const response = await service.getPromptPack(namespace, name);
       return (response as unknown as PromptPack) || null;
     },
     enabled: !!name,

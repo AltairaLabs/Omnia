@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { fetchAgents, fetchAgent } from "@/lib/api/client";
+import { useDataService } from "@/lib/data";
 import type { AgentRuntime, AgentRuntimePhase } from "@/types";
 
 interface UseAgentsOptions {
@@ -10,11 +10,12 @@ interface UseAgentsOptions {
 }
 
 export function useAgents(options: UseAgentsOptions = {}) {
+  const service = useDataService();
+
   return useQuery({
-    queryKey: ["agents", options],
+    queryKey: ["agents", options, service.name],
     queryFn: async (): Promise<AgentRuntime[]> => {
-      const response = await fetchAgents(options.namespace);
-      // Cast to local types (API response is compatible but types are generated separately)
+      const response = await service.getAgents(options.namespace);
       let agents = response as unknown as AgentRuntime[];
 
       // Client-side filtering for phase
@@ -28,11 +29,12 @@ export function useAgents(options: UseAgentsOptions = {}) {
 }
 
 export function useAgent(name: string, namespace: string = "production") {
+  const service = useDataService();
+
   return useQuery({
-    queryKey: ["agent", namespace, name],
+    queryKey: ["agent", namespace, name, service.name],
     queryFn: async (): Promise<AgentRuntime | null> => {
-      const response = await fetchAgent(namespace, name);
-      // Cast to local type
+      const response = await service.getAgent(namespace, name);
       return (response as unknown as AgentRuntime) || null;
     },
     enabled: !!name,

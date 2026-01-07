@@ -1,21 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type {
-  ClientMessage,
   ConsoleMessage,
   ConsoleState,
   ServerMessage,
   ToolCallWithResult,
 } from "@/types/websocket";
+import { useDataService, type AgentConnection } from "@/lib/data";
+import { useConsoleStore } from "./use-console-store";
 
 interface UseAgentConsoleOptions {
   agentName: string;
   namespace: string;
-  /** Enable mock mode for demos without a real agent */
-  mockMode?: boolean;
-  /** WebSocket URL override (defaults to agent service URL) */
-  wsUrl?: string;
 }
 
 interface UseAgentConsoleReturn extends ConsoleState {
@@ -32,412 +29,244 @@ function generateId(): string {
   return `${Date.now()}-${idCounter}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-// Mock responses for demo mode
-const MOCK_RESPONSES = [
-  {
-    content: "I'd be happy to help you with that! Let me look into it.",
-    toolCalls: [
-      {
-        name: "search_database",
-        arguments: { query: "user request" },
-        result: { found: true, records: 3 },
-      },
-    ],
-  },
-  {
-    content: "Based on my analysis, here's what I found:\n\n1. Your account is in good standing\n2. No recent issues detected\n3. All services are operational\n\nIs there anything specific you'd like me to help you with?",
-    toolCalls: [],
-  },
-  {
-    content: "Let me check that for you using our tools.",
-    toolCalls: [
-      {
-        name: "get_user_info",
-        arguments: { user_id: "demo-user" },
-        result: { name: "Demo User", plan: "premium", created: "2024-01-15" },
-      },
-      {
-        name: "check_permissions",
-        arguments: { user_id: "demo-user", resource: "settings" },
-        result: { allowed: true, roles: ["admin", "user"] },
-      },
-    ],
-  },
-];
-
+/**
+ * Hook for managing agent console WebSocket connections.
+ *
+ * Uses the DataService abstraction to handle both demo mode (mock)
+ * and production mode (real WebSocket) connections transparently.
+ *
+ * State is persisted in a store so it survives component unmounts.
+ */
 export function useAgentConsole({
   agentName,
   namespace,
-  mockMode = false,
-  wsUrl,
 }: UseAgentConsoleOptions): UseAgentConsoleReturn {
-  const [state, setState] = useState<ConsoleState>({
-    sessionId: null,
-    status: "disconnected",
-    messages: [],
-    error: null,
-  });
+  const service = useDataService();
+  const connectionRef = useRef<AgentConnection | null>(null);
+  const handlersRegistered = useRef(false);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const mockIndexRef = useRef(0);
+  // Use persistent store for state
+  const store = useConsoleStore(namespace, agentName);
+  const {
+    sessionId,
+    status,
+    messages,
+    error,
+    addMessage,
+    updateLastMessage,
+    setStatus,
+    setSessionId,
+    clearMessages: storeClearMessages,
+  } = store;
 
-  // Build WebSocket URL
-  const getWebSocketUrl = useCallback(() => {
-    if (wsUrl) return wsUrl;
-    // In a real deployment, this would be the agent's service URL
-    // For now, use a relative URL that would be proxied
-    const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}/api/agents/${namespace}/${agentName}/ws`;
-  }, [agentName, namespace, wsUrl]);
+  // Use refs to access current values in callbacks without dependencies
+  const statusRef = useRef(status);
+  const messagesRef = useRef(messages);
 
-  // Handle incoming WebSocket messages
-  const handleMessage = useCallback((event: MessageEvent) => {
-    try {
-      const message: ServerMessage = JSON.parse(event.data);
+  // Keep refs in sync
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
-      switch (message.type) {
-        case "connected":
-          setState((prev) => ({
-            ...prev,
-            sessionId: message.session_id || null,
-            status: "connected",
-          }));
-          break;
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
-        case "chunk":
-          // Append chunk to current streaming message
-          setState((prev) => {
-            const messages = [...prev.messages];
-            const lastMessage = messages[messages.length - 1];
-
-            if (lastMessage?.isStreaming && lastMessage.role === "assistant") {
-              lastMessage.content += message.content || "";
-            } else {
-              // Create new streaming message
-              messages.push({
-                id: generateId(),
-                role: "assistant",
-                content: message.content || "",
-                timestamp: new Date(message.timestamp),
-                isStreaming: true,
-                toolCalls: [],
-              });
-            }
-
-            return { ...prev, messages };
-          });
-          break;
-
-        case "done":
-          // Mark message as complete
-          setState((prev) => {
-            const messages = [...prev.messages];
-            const lastMessage = messages[messages.length - 1];
-
-            if (lastMessage?.isStreaming) {
-              lastMessage.isStreaming = false;
-              if (message.content) {
-                lastMessage.content = message.content;
-              }
-            }
-
-            return { ...prev, messages };
-          });
-          break;
-
-        case "tool_call":
-          // Add tool call to current message
-          if (message.tool_call) {
-            setState((prev) => {
-              const messages = [...prev.messages];
-              const lastMessage = messages[messages.length - 1];
-
-              if (lastMessage?.role === "assistant") {
-                const toolCall: ToolCallWithResult = {
-                  id: message.tool_call!.id,
-                  name: message.tool_call!.name,
-                  arguments: message.tool_call!.arguments,
-                  status: "pending",
-                };
-                lastMessage.toolCalls = [...(lastMessage.toolCalls || []), toolCall];
-              }
-
-              return { ...prev, messages };
-            });
-          }
-          break;
-
-        case "tool_result":
-          // Update tool call with result
-          if (message.tool_result) {
-            setState((prev) => {
-              const messages = [...prev.messages];
-              const lastMessage = messages[messages.length - 1];
-
-              if (lastMessage?.toolCalls) {
-                const toolCall = lastMessage.toolCalls.find(
-                  (tc) => tc.id === message.tool_result!.id
-                );
-                if (toolCall) {
-                  toolCall.result = message.tool_result!.result;
-                  toolCall.error = message.tool_result!.error;
-                  toolCall.status = message.tool_result!.error ? "error" : "success";
-                }
-              }
-
-              return { ...prev, messages };
-            });
-          }
-          break;
-
-        case "error":
-          setState((prev) => ({
-            ...prev,
-            error: message.error?.message || "Unknown error",
-            status: "error",
-          }));
-          break;
-      }
-    } catch {
-      console.error("Failed to parse WebSocket message:", event.data);
-    }
-  }, []);
-
-  // Mock message simulation
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const simulateMockResponse = useCallback((_userMessage: string) => {
-    const mockResponse = MOCK_RESPONSES[mockIndexRef.current % MOCK_RESPONSES.length];
-    mockIndexRef.current++;
-
-    // Simulate connection delay
-    setTimeout(() => {
-      setState((prev) => ({
-        ...prev,
-        sessionId: prev.sessionId || `mock-session-${generateId()}`,
-        status: "connected",
-      }));
-    }, 100);
-
-    // Simulate streaming response
-    const words = mockResponse.content.split(" ");
-    let currentContent = "";
-    const messageId = generateId();
-
-    // Add initial empty assistant message
-    setTimeout(() => {
-      setState((prev) => ({
-        ...prev,
-        messages: [
-          ...prev.messages,
-          {
-            id: messageId,
-            role: "assistant",
-            content: "",
+  // Handle incoming messages from the connection - stable callback
+  const handleMessage = useCallback((message: ServerMessage) => {
+    switch (message.type) {
+      case "connected":
+        setSessionId(message.session_id || null);
+        // Add system message with session details
+        if (message.session_id) {
+          addMessage({
+            id: generateId(),
+            role: "system",
+            content: `Session started: ${message.session_id}`,
             timestamp: new Date(),
+          });
+        }
+        break;
+
+      case "chunk":
+        // Check if we need to append to existing streaming message or create new
+        const currentMessages = messagesRef.current;
+        const lastMsg = currentMessages[currentMessages.length - 1];
+        if (lastMsg?.isStreaming && lastMsg.role === "assistant") {
+          updateLastMessage((msg) => ({
+            ...msg,
+            content: msg.content + (message.content || ""),
+          }));
+        } else {
+          // Create new streaming message
+          addMessage({
+            id: generateId(),
+            role: "assistant",
+            content: message.content || "",
+            timestamp: new Date(message.timestamp),
             isStreaming: true,
             toolCalls: [],
-          },
-        ],
-      }));
-    }, 300);
+          });
+        }
+        break;
 
-    // Stream words one by one
-    words.forEach((word, index) => {
-      setTimeout(() => {
-        currentContent += (index > 0 ? " " : "") + word;
-        setState((prev) => ({
-          ...prev,
-          messages: prev.messages.map((msg) =>
-            msg.id === messageId ? { ...msg, content: currentContent } : msg
-          ),
+      case "done":
+        // Mark message as complete
+        updateLastMessage((msg) => ({
+          ...msg,
+          isStreaming: false,
+          content: message.content || msg.content,
         }));
-      }, 400 + index * 50);
-    });
+        break;
 
-    // Add tool calls after content
-    const toolDelay = 400 + words.length * 50 + 200;
-    mockResponse.toolCalls.forEach((tc, index) => {
-      const toolId = `tool-${generateId()}`;
+      case "tool_call":
+        // Add tool call to current message
+        if (message.tool_call) {
+          updateLastMessage((msg) => {
+            const toolCall: ToolCallWithResult = {
+              id: message.tool_call!.id,
+              name: message.tool_call!.name,
+              arguments: message.tool_call!.arguments,
+              status: "pending",
+            };
+            return {
+              ...msg,
+              toolCalls: [...(msg.toolCalls || []), toolCall],
+            };
+          });
+        }
+        break;
 
-      // Show tool call (pending)
-      setTimeout(() => {
-        setState((prev) => {
-          return {
-            ...prev,
-            messages: prev.messages.map((msg) => {
-              if (msg.id !== messageId) return msg;
-              // Check if tool already exists (prevent duplicates)
-              if (msg.toolCalls?.some((t) => t.id === toolId)) return msg;
-              const toolCall: ToolCallWithResult = {
-                id: toolId,
-                name: tc.name,
-                arguments: tc.arguments,
-                status: "pending",
-              };
-              return {
-                ...msg,
-                toolCalls: [...(msg.toolCalls || []), toolCall],
-              };
-            }),
-          };
-        });
-      }, toolDelay + index * 700);
+      case "tool_result":
+        // Update tool call with result
+        if (message.tool_result) {
+          updateLastMessage((msg) => {
+            const toolCalls = msg.toolCalls?.map((tc) => {
+              if (tc.id === message.tool_result!.id) {
+                return {
+                  ...tc,
+                  result: message.tool_result!.result,
+                  error: message.tool_result!.error,
+                  status: message.tool_result!.error ? "error" as const : "success" as const,
+                };
+              }
+              return tc;
+            });
+            return { ...msg, toolCalls };
+          });
+        }
+        break;
 
-      // Show tool result (success) - update same tool call by ID
-      setTimeout(() => {
-        setState((prev) => {
-          return {
-            ...prev,
-            messages: prev.messages.map((msg) => {
-              if (msg.id !== messageId || !msg.toolCalls) return msg;
-              return {
-                ...msg,
-                toolCalls: msg.toolCalls.map((t) =>
-                  t.id === toolId
-                    ? { ...t, result: tc.result, status: "success" as const }
-                    : t
-                ),
-              };
-            }),
-          };
-        });
-      }, toolDelay + index * 700 + 500); // 500ms after pending appears
-    });
-
-    // Mark as done
-    const doneDelay = toolDelay + mockResponse.toolCalls.length * 700 + 600;
-    setTimeout(() => {
-      setState((prev) => ({
-        ...prev,
-        messages: prev.messages.map((msg) =>
-          msg.id === messageId ? { ...msg, isStreaming: false } : msg
-        ),
-      }));
-    }, doneDelay);
-  }, []);
-
-  // Connect to WebSocket
-  const connect = useCallback(() => {
-    if (mockMode) {
-      setState((prev) => ({
-        ...prev,
-        status: "connected",
-        sessionId: `mock-session-${generateId()}`,
-        error: null,
-      }));
-      return;
+      case "error":
+        // Handle error messages from the proxy or agent
+        const errorMsg = message.error?.message || "Unknown error";
+        const errorCode = message.error?.code || "UNKNOWN";
+        console.error(`[useAgentConsole] Error from server: [${errorCode}] ${errorMsg}`);
+        setStatus("error", errorMsg);
+        break;
     }
+  }, [addMessage, updateLastMessage, setSessionId, setStatus]);
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
-    }
+  // Handle status changes from the connection - stable callback
+  const handleStatusChange = useCallback((newStatus: ConsoleState["status"], statusError?: string) => {
+    const currentStatus = statusRef.current;
 
-    setState((prev) => ({ ...prev, status: "connecting", error: null }));
-
-    try {
-      const ws = new WebSocket(getWebSocketUrl());
-
-      ws.onopen = () => {
-        setState((prev) => ({ ...prev, status: "connected" }));
-      };
-
-      ws.onmessage = handleMessage;
-
-      ws.onerror = () => {
-        setState((prev) => ({
-          ...prev,
-          status: "error",
-          error: "WebSocket connection error",
-        }));
-      };
-
-      ws.onclose = () => {
-        setState((prev) => ({ ...prev, status: "disconnected" }));
-        wsRef.current = null;
-      };
-
-      wsRef.current = ws;
-    } catch (err) {
-      setState((prev) => ({
-        ...prev,
-        status: "error",
-        error: err instanceof Error ? err.message : "Failed to connect",
-      }));
-    }
-  }, [mockMode, getWebSocketUrl, handleMessage]);
-
-  // Disconnect from WebSocket
-  const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    setState((prev) => ({ ...prev, status: "disconnected" }));
-  }, []);
-
-  // Send a message
-  const sendMessage = useCallback(
-    (content: string) => {
-      if (!content.trim()) return;
-
-      // Add user message to state
-      const userMessage: ConsoleMessage = {
+    // Add system message for status changes
+    if (newStatus === "connected" && currentStatus !== "connected") {
+      addMessage({
         id: generateId(),
-        role: "user",
-        content: content.trim(),
+        role: "system",
+        content: "Connected to agent",
         timestamp: new Date(),
-      };
+      });
+    } else if (newStatus === "disconnected" && currentStatus === "connected") {
+      addMessage({
+        id: generateId(),
+        role: "system",
+        content: "Disconnected from agent",
+        timestamp: new Date(),
+      });
+    } else if (newStatus === "error" && currentStatus !== "error") {
+      // Only add error message if we weren't already in error state
+      addMessage({
+        id: generateId(),
+        role: "system",
+        content: statusError || "Connection error",
+        timestamp: new Date(),
+      });
+    }
 
-      setState((prev) => ({
-        ...prev,
-        messages: [...prev.messages, userMessage],
-      }));
+    setStatus(newStatus, statusError || null);
+  }, [addMessage, setStatus]);
 
-      if (mockMode) {
-        simulateMockResponse(content);
-        return;
-      }
+  // Connect to the agent
+  const connect = useCallback(() => {
+    // Create a new connection if we don't have one
+    if (!connectionRef.current) {
+      connectionRef.current = service.createAgentConnection(namespace, agentName);
+    }
 
-      if (wsRef.current?.readyState !== WebSocket.OPEN) {
-        setState((prev) => ({
-          ...prev,
-          error: "Not connected to agent",
-        }));
-        return;
-      }
+    // Only register handlers once
+    if (!handlersRegistered.current) {
+      connectionRef.current.onMessage(handleMessage);
+      connectionRef.current.onStatusChange(handleStatusChange);
+      handlersRegistered.current = true;
+    }
 
-      const clientMessage: ClientMessage = {
-        type: "message",
-        session_id: state.sessionId || undefined,
-        content: content.trim(),
-      };
+    connectionRef.current.connect();
+  }, [service, namespace, agentName, handleMessage, handleStatusChange]);
 
-      wsRef.current.send(JSON.stringify(clientMessage));
-    },
-    [mockMode, state.sessionId, simulateMockResponse]
-  );
+  // Disconnect from the agent
+  const disconnect = useCallback(() => {
+    if (connectionRef.current) {
+      connectionRef.current.disconnect();
+    }
+  }, []);
 
-  // Clear messages
+  // Send a message to the agent
+  const sendMessage = useCallback((content: string) => {
+    if (!content.trim()) return;
+
+    // Add user message to state
+    const userMessage: ConsoleMessage = {
+      id: generateId(),
+      role: "user",
+      content: content.trim(),
+      timestamp: new Date(),
+    };
+
+    addMessage(userMessage);
+
+    // Send to connection
+    if (connectionRef.current) {
+      connectionRef.current.send(content.trim());
+    } else {
+      setStatus("error", "Not connected to agent");
+    }
+  }, [addMessage, setStatus]);
+
+  // Clear messages and reset session
   const clearMessages = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      messages: [],
-      sessionId: mockMode ? `mock-session-${generateId()}` : null,
-    }));
-    mockIndexRef.current = 0;
-  }, [mockMode]);
+    storeClearMessages();
+  }, [storeClearMessages]);
 
-  // Cleanup on unmount
+  // Cleanup connection on unmount (but NOT the messages)
   useEffect(() => {
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
+      // Only cleanup the connection, not the messages
+      if (connectionRef.current) {
+        connectionRef.current.disconnect();
+        connectionRef.current = null;
+        handlersRegistered.current = false;
       }
     };
-  }, []);
+  }, [namespace, agentName]);
 
   return {
-    ...state,
+    sessionId,
+    status,
+    messages,
+    error,
     sendMessage,
     connect,
     disconnect,

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -35,6 +36,8 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -62,6 +65,11 @@ type Server struct {
 
 	// Tracing
 	tracingProvider *tracing.Provider
+
+	// Metrics
+	metrics      *Metrics
+	providerType string
+	model        string
 }
 
 // ServerOption configures the server.
@@ -137,6 +145,21 @@ func WithToolsConfig(path string) ServerOption {
 func WithTracingProvider(provider *tracing.Provider) ServerOption {
 	return func(s *Server) {
 		s.tracingProvider = provider
+	}
+}
+
+// WithMetrics sets the Prometheus metrics collector for the server.
+func WithMetrics(metrics *Metrics) ServerOption {
+	return func(s *Server) {
+		s.metrics = metrics
+	}
+}
+
+// WithProviderInfo sets the provider type and model for metrics labels.
+func WithProviderInfo(providerType, model string) ServerOption {
+	return func(s *Server) {
+		s.providerType = providerType
+		s.model = model
 	}
 }
 
@@ -246,6 +269,10 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	sessionID := msg.GetSessionId()
 	content := msg.GetContent()
 
+	// Enrich context with session ID
+	ctx = logctx.WithSessionID(ctx, sessionID)
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	// Start conversation span if tracing is enabled
 	if s.tracingProvider != nil {
 		var span trace.Span
@@ -253,12 +280,10 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 		defer span.End()
 	}
 
-	s.log.V(1).Info("processing message",
-		"sessionID", sessionID,
-		"contentLength", len(content))
+	log.V(1).Info("processing message", "contentLength", len(content))
 
 	// Get or create conversation for this session
-	conv, err := s.getOrCreateConversation(sessionID)
+	conv, err := s.getOrCreateConversation(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get conversation: %w", err)
 	}
@@ -266,6 +291,7 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	// Send the message using PromptKit SDK
 	resp, err := conv.Send(ctx, content)
 	if err != nil {
+		// Event bus will record the failure metric via EventProviderCallFailed
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
@@ -303,6 +329,9 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 			tracing.AddConversationMetrics(span, len(content), len(responseText))
 			tracing.SetSuccess(span)
 		}
+
+		// Note: Prometheus metrics are now recorded via event bus subscriptions
+		// (EventProviderCallCompleted/EventProviderCallFailed)
 	}
 
 	// Send done message
@@ -321,7 +350,9 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 }
 
 // getOrCreateConversation gets an existing conversation or creates a new one.
-func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, error) {
+func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) (*sdk.Conversation, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	s.conversationMu.RLock()
 	conv, exists := s.conversations[sessionID]
 	s.conversationMu.RUnlock()
@@ -346,7 +377,7 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 
 	// Add mock provider if enabled
 	if s.mockProvider {
-		s.log.Info("using mock provider for conversation", "sessionID", sessionID)
+		log.Info("using mock provider for conversation")
 		var provider *mock.Provider
 		if s.mockConfigPath != "" {
 			// Use file-based mock repository
@@ -366,30 +397,33 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 	conv, err := sdk.Resume(sessionID, s.packPath, s.promptName, opts...)
 	if err != nil {
 		// If resume fails (conversation not found), create new
-		s.log.V(1).Info("creating new conversation", "sessionID", sessionID)
+		log.V(1).Info("creating new conversation")
 		conv, err = sdk.Open(s.packPath, s.promptName, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open pack: %w", err)
 		}
 	} else {
-		s.log.V(1).Info("resumed existing conversation", "sessionID", sessionID)
+		log.V(1).Info("resumed existing conversation")
 	}
 
 	// Register tools with the conversation if available
 	if s.toolsInitialized && s.toolExecutor != nil {
-		if err := s.registerToolsWithConversation(conv); err != nil {
-			s.log.Error(err, "failed to register tools with conversation", "sessionID", sessionID)
+		if err := s.registerToolsWithConversation(ctx, conv); err != nil {
+			log.Error(err, "failed to register tools with conversation")
 			// Continue without tools - don't fail the conversation
 		}
 	}
+
+	// Subscribe to event bus metrics for observability
+	s.subscribeToEventBusMetrics(sessionID, conv)
 
 	s.conversations[sessionID] = conv
 	return conv, nil
 }
 
 // registerToolsWithConversation registers all available tools with a conversation.
-func (s *Server) registerToolsWithConversation(conv *sdk.Conversation) error {
-	ctx := context.Background()
+func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Conversation) error {
+	log := logctx.LoggerWithContext(s.log, ctx)
 
 	// Get all tool descriptors from the executor
 	descriptors, err := s.toolExecutor.ListTools(ctx)
@@ -400,20 +434,24 @@ func (s *Server) registerToolsWithConversation(conv *sdk.Conversation) error {
 	// Register each tool with the conversation using a context-aware handler
 	for _, desc := range descriptors {
 		toolName := desc.Name
-		s.log.V(1).Info("registering tool with conversation", "tool", toolName)
+		log.V(1).Info("registering tool with conversation", "tool", toolName)
 
-		// Create a closure that captures the executor and descriptor
-		conv.OnToolCtx(toolName, func(ctx context.Context, args map[string]any) (any, error) {
-			return s.executeToolForConversation(ctx, toolName, args)
+		// Create a closure that captures the executor, descriptor, and context info
+		conv.OnToolCtx(toolName, func(toolCtx context.Context, args map[string]any) (any, error) {
+			// Enrich with tool name
+			toolCtx = logctx.WithTool(toolCtx, toolName)
+			return s.executeToolForConversation(toolCtx, toolName, args)
 		})
 	}
 
-	s.log.Info("registered tools with conversation", "count", len(descriptors))
+	log.Info("registered tools with conversation", "count", len(descriptors))
 	return nil
 }
 
 // executeToolForConversation executes a tool call for a conversation.
 func (s *Server) executeToolForConversation(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	// Start tool span if tracing is enabled
 	var span trace.Span
 	if s.tracingProvider != nil {
@@ -421,7 +459,7 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 		defer span.End()
 	}
 
-	s.log.V(1).Info("executing tool for conversation", "tool", toolName)
+	log.V(1).Info("executing tool for conversation")
 
 	// Call the tool through the manager
 	result, err := s.toolManager.Call(ctx, toolName, args)
@@ -486,4 +524,106 @@ func (s *Server) Close() error {
 	}
 
 	return nil
+}
+
+// subscribeToEventBusMetrics subscribes to PromptKit event bus events to capture metrics.
+// This allows us to observe fine-grained metrics emitted during conversation execution.
+func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversation) {
+	eventBus := conv.EventBus()
+	if eventBus == nil {
+		return
+	}
+
+	// Subscribe to provider call completed events to record Prometheus metrics
+	eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {
+		data, ok := e.Data.(*events.ProviderCallCompletedData)
+		if !ok {
+			return
+		}
+
+		// Record metrics to Prometheus
+		if s.metrics != nil {
+			s.metrics.RecordRequest(metrics.LLMRequestMetrics{
+				Provider:        data.Provider,
+				Model:           data.Model,
+				InputTokens:     data.InputTokens,
+				OutputTokens:    data.OutputTokens,
+				CacheHits:       data.CachedTokens,
+				CostUSD:         data.Cost,
+				DurationSeconds: data.Duration.Seconds(),
+				Success:         true,
+			})
+		}
+
+		s.log.V(1).Info("event: provider call completed",
+			"sessionID", sessionID,
+			"provider", data.Provider,
+			"model", data.Model,
+			"inputTokens", data.InputTokens,
+			"outputTokens", data.OutputTokens,
+			"cachedTokens", data.CachedTokens,
+			"cost", data.Cost,
+			"finishReason", data.FinishReason,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
+
+	// Subscribe to provider call failed events to record failures
+	eventBus.Subscribe(events.EventProviderCallFailed, func(e *events.Event) {
+		data, ok := e.Data.(*events.ProviderCallFailedData)
+		if !ok {
+			return
+		}
+
+		// Record failed request metric
+		if s.metrics != nil {
+			s.metrics.RecordRequest(metrics.LLMRequestMetrics{
+				Provider:        data.Provider,
+				Model:           data.Model,
+				DurationSeconds: data.Duration.Seconds(),
+				Success:         false,
+			})
+		}
+
+		s.log.V(1).Info("event: provider call failed",
+			"sessionID", sessionID,
+			"provider", data.Provider,
+			"model", data.Model,
+			"error", data.Error,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
+
+	// Subscribe to pipeline completed events for overall visibility
+	eventBus.Subscribe(events.EventPipelineCompleted, func(e *events.Event) {
+		data, ok := e.Data.(*events.PipelineCompletedData)
+		if !ok {
+			return
+		}
+		s.log.V(0).Info("event: pipeline completed",
+			"sessionID", sessionID,
+			"provider", s.providerType,
+			"model", s.model,
+			"totalInputTokens", data.InputTokens,
+			"totalOutputTokens", data.OutputTokens,
+			"totalCost", data.TotalCost,
+			"messageCount", data.MessageCount,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
+
+	// Subscribe to tool call completed events (tool metrics)
+	eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
+		data, ok := e.Data.(*events.ToolCallCompletedData)
+		if !ok {
+			return
+		}
+		s.log.V(1).Info("event: tool call completed",
+			"sessionID", sessionID,
+			"toolName", data.ToolName,
+			"callID", data.CallID,
+			"status", data.Status,
+			"durationMs", data.Duration.Milliseconds(),
+		)
+	})
 }

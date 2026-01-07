@@ -24,9 +24,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
 // ServerConfig contains configuration for the WebSocket server.
@@ -185,13 +187,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record connection metrics
 	s.metrics.ConnectionOpened()
 
-	s.log.Info("new connection", "agent", agentName, "namespace", namespace)
+	// Create enriched context with connection info
+	connCtx := logctx.WithAgent(context.Background(), agentName)
+	connCtx = logctx.WithNamespace(connCtx, namespace)
+	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
+
+	log := logctx.LoggerWithContext(s.log, connCtx)
+	log.Info("new connection")
 
 	// Handle connection in goroutine
-	go s.handleConnection(c)
+	go s.handleConnection(connCtx, c)
 }
 
-func (s *Server) handleConnection(c *Connection) {
+func (s *Server) handleConnection(ctx context.Context, c *Connection) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	defer func() {
 		s.mu.Lock()
 		delete(s.connections, c.conn)
@@ -205,14 +215,14 @@ func (s *Server) handleConnection(c *Connection) {
 		s.metrics.ConnectionClosed()
 
 		if err := c.conn.Close(); err != nil {
-			s.log.Error(err, "error closing connection")
+			log.Error(err, "error closing connection")
 		}
 	}()
 
 	// Configure connection
 	c.conn.SetReadLimit(s.config.MaxMessageSize)
 	if err := c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout)); err != nil {
-		s.log.Error(err, "failed to set read deadline")
+		log.Error(err, "failed to set read deadline")
 		return
 	}
 	c.conn.SetPongHandler(func(string) error {
@@ -223,14 +233,14 @@ func (s *Server) handleConnection(c *Connection) {
 	pingTicker := time.NewTicker(s.config.PingInterval)
 	defer pingTicker.Stop()
 
-	// Handle ping in separate goroutine
-	ctx, cancel := context.WithCancel(context.Background())
+	// Handle ping in separate goroutine with cancellable context
+	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-connCtx.Done():
 				return
 			case <-pingTicker.C:
 				c.mu.Lock()
@@ -255,8 +265,14 @@ func (s *Server) handleConnection(c *Connection) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				s.log.Error(err, "unexpected close error")
+			// Only log truly unexpected close errors (not normal closure, going away, or no status)
+			if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseNoStatusReceived,
+				websocket.CloseAbnormalClosure,
+			) {
+				log.Error(err, "unexpected close error")
 			}
 			return
 		}
@@ -267,7 +283,7 @@ func (s *Server) handleConnection(c *Connection) {
 		// Parse message
 		var clientMsg ClientMessage
 		if err := json.Unmarshal(message, &clientMsg); err != nil {
-			s.log.Error(err, "failed to unmarshal message", "raw", string(message))
+			log.Error(err, "failed to unmarshal message", "raw", string(message))
 			s.sendError(c, "", ErrorCodeInvalidMessage, "invalid message format")
 			continue
 		}
@@ -276,13 +292,13 @@ func (s *Server) handleConnection(c *Connection) {
 		s.metrics.RequestStarted()
 		startTime := time.Now()
 
-		err = s.processMessage(ctx, c, &clientMsg)
+		err = s.processMessage(connCtx, c, &clientMsg, log)
 
 		duration := time.Since(startTime).Seconds()
 		status := "success"
 		if err != nil {
 			status = "error"
-			s.log.Error(err, "error processing message")
+			log.Error(err, "error processing message")
 		}
 		handlerName := "none"
 		if s.handler != nil {
@@ -292,13 +308,17 @@ func (s *Server) handleConnection(c *Connection) {
 	}
 }
 
-func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage) error {
+func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
 	// Get or create session
-	sessionID, err := s.ensureSession(ctx, c, msg.SessionID)
+	sessionID, err := s.ensureSession(ctx, c, msg.SessionID, log)
 	if err != nil {
 		s.sendError(c, msg.SessionID, ErrorCodeInternalError, "failed to create session")
 		return err
 	}
+
+	// Enrich context with session ID
+	ctx = logctx.WithSessionID(ctx, sessionID)
+	log = logctx.LoggerWithContext(s.log, ctx)
 
 	// Update connection's session ID
 	c.mu.Lock()
@@ -319,7 +339,7 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		Metadata:  msg.Metadata,
 		Timestamp: time.Now(),
 	}); err != nil {
-		s.log.Error(err, "failed to store user message")
+		log.Error(err, "failed to store user message")
 	}
 
 	// Create response writer
@@ -345,19 +365,19 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	return nil
 }
 
-func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID string) (string, error) {
+func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID string, log logr.Logger) (string, error) {
 	if sessionID != "" {
 		// Try to resume existing session
 		sess, err := s.sessionStore.GetSession(ctx, sessionID)
 		if err == nil {
 			// Refresh TTL
 			if err := s.sessionStore.RefreshTTL(ctx, sessionID, s.config.SessionTTL); err != nil {
-				s.log.Error(err, "failed to refresh session TTL")
+				log.Error(err, "failed to refresh session TTL")
 			}
 			return sess.ID, nil
 		}
 		// Session not found or expired, create new one
-		s.log.Info("session not found, creating new", "requested_id", sessionID)
+		log.Info("session not found, creating new", "requested_id", sessionID)
 	}
 
 	// Create new session

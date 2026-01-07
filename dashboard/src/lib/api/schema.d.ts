@@ -282,6 +282,8 @@ export interface components {
             conditions?: components["schemas"]["Condition"][];
             readyReplicas?: number;
             replicas?: number;
+            /** @description Internal Kubernetes service endpoint for agent facade (e.g., my-agent.default.svc.cluster.local:8080) */
+            serviceEndpoint?: string;
         };
         Condition: {
             type?: string;

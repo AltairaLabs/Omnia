@@ -85,6 +85,11 @@ type FacadeConfig struct {
 	// +kubebuilder:default="runtime"
 	// +optional
 	Handler *HandlerMode `json:"handler,omitempty"`
+
+	// image overrides the default facade container image.
+	// Use this to specify a custom facade image or private registry.
+	// +optional
+	Image string `json:"image,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.
@@ -483,6 +488,12 @@ type AgentRuntimeStatus struct {
 	// activeVersion is the currently deployed PromptPack version.
 	// +optional
 	ActiveVersion *string `json:"activeVersion,omitempty"`
+
+	// serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
+	// Format: {name}.{namespace}.svc.cluster.local:{port}
+	// This can be used by dashboard or other services to connect to the agent.
+	// +optional
+	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
 
 	// conditions represent the current state of the AgentRuntime resource.
 	// +listType=map

@@ -47,9 +47,9 @@ const (
 	// RuntimeContainerName is the name of the runtime container in the pod.
 	RuntimeContainerName = "runtime"
 	// DefaultFacadeImage is the default image for the facade container.
-	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-agent:latest"
-	// DefaultRuntimeImage is the default image for the runtime container.
-	DefaultRuntimeImage = "ghcr.io/altairalabs/omnia-runtime:latest"
+	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-facade:latest"
+	// DefaultFrameworkImage is the default image for the framework container.
+	DefaultFrameworkImage = "ghcr.io/altairalabs/omnia-runtime:latest"
 	// DefaultFacadePort is the default port for the WebSocket facade.
 	DefaultFacadePort = 8080
 	// DefaultFacadeHealthPort is the health port for the facade container.
@@ -394,9 +394,9 @@ const (
 // AgentRuntimeReconciler reconciles a AgentRuntime object
 type AgentRuntimeReconciler struct {
 	client.Client
-	Scheme       *runtime.Scheme
-	FacadeImage  string
-	RuntimeImage string
+	Scheme         *runtime.Scheme
+	FacadeImage    string
+	FrameworkImage string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -753,8 +753,13 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 	promptPack *omniav1alpha1.PromptPack,
 	facadePort int32,
 ) corev1.Container {
-	facadeImage := r.FacadeImage
-	if facadeImage == "" {
+	// Check for CRD image override first, then operator default, then hardcoded default
+	facadeImage := ""
+	if agentRuntime.Spec.Facade.Image != "" {
+		facadeImage = agentRuntime.Spec.Facade.Image
+	} else if r.FacadeImage != "" {
+		facadeImage = r.FacadeImage
+	} else {
 		facadeImage = DefaultFacadeImage
 	}
 
@@ -807,14 +812,19 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	provider *omniav1alpha1.Provider,
 ) corev1.Container {
-	runtimeImage := r.RuntimeImage
-	if runtimeImage == "" {
-		runtimeImage = DefaultRuntimeImage
+	// Check for CRD image override first, then operator default, then hardcoded default
+	frameworkImage := ""
+	if agentRuntime.Spec.Framework != nil && agentRuntime.Spec.Framework.Image != "" {
+		frameworkImage = agentRuntime.Spec.Framework.Image
+	} else if r.FrameworkImage != "" {
+		frameworkImage = r.FrameworkImage
+	} else {
+		frameworkImage = DefaultFrameworkImage
 	}
 
 	container := corev1.Container{
 		Name:            RuntimeContainerName,
-		Image:           runtimeImage,
+		Image:           frameworkImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports: []corev1.ContainerPort{
 			{
@@ -1329,6 +1339,11 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		},
 	}
 
+	port := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		port = *agentRuntime.Spec.Facade.Port
+	}
+
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		// Set owner reference
 		if err := controllerutil.SetControllerReference(agentRuntime, service, r.Scheme); err != nil {
@@ -1340,11 +1355,6 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 			"app.kubernetes.io/instance":     agentRuntime.Name,
 			"app.kubernetes.io/managed-by":   "omnia-operator",
 			"omnia.altairalabs.ai/component": "agent",
-		}
-
-		port := int32(DefaultFacadePort)
-		if agentRuntime.Spec.Facade.Port != nil {
-			port = *agentRuntime.Spec.Facade.Port
 		}
 
 		// Prometheus scrape annotations on Service (not pod, as Istio overrides pod annotations)
@@ -1376,7 +1386,11 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		return err
 	}
 
-	log.Info("Service reconciled", "result", result)
+	// Set the service endpoint in status for dashboard/client connections
+	agentRuntime.Status.ServiceEndpoint = fmt.Sprintf("%s.%s.svc.cluster.local:%d",
+		agentRuntime.Name, agentRuntime.Namespace, port)
+
+	log.Info("Service reconciled", "result", result, "endpoint", agentRuntime.Status.ServiceEndpoint)
 	return nil
 }
 

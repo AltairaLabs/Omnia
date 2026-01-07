@@ -46,7 +46,7 @@ spec:
             {{- end }}
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             - --facade-image={{ .Values.facade.image.repository }}:{{ .Values.facade.image.tag | default .Chart.AppVersion }}
-            - --runtime-image={{ .Values.runtime.image.repository }}:{{ .Values.runtime.image.tag | default .Chart.AppVersion }}
+            - --framework-image={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}
@@ -55,7 +55,15 @@ spec:
             - --metrics-secure=false
             {{- end }}
             {{- end }}
+            {{- if .Values.api.enabled }}
+            - --api-bind-address=:{{ .Values.api.port }}
+            {{- end }}
           ports:
+            {{- if .Values.api.enabled }}
+            - name: api
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

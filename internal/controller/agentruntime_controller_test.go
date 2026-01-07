@@ -61,10 +61,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Namespace: "default",
 			}
 			reconciler = &AgentRuntimeReconciler{
-				Client:       k8sClient,
-				Scheme:       k8sClient.Scheme(),
-				FacadeImage:  "test-facade:v1.0.0",
-				RuntimeImage: "test-runtime:v1.0.0",
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				FacadeImage:    "test-facade:v1.0.0",
+				FrameworkImage: "test-runtime:v1.0.0",
 			}
 		})
 
@@ -875,7 +875,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(result).To(Equal(reconcile.Result{}))
 		})
 
-		It("should use default images when FacadeImage and RuntimeImage are not set", func() {
+		It("should use default images when FacadeImage and FrameworkImage are not set", func() {
 			By("creating a PromptPack")
 			promptPack := &omniav1alpha1.PromptPack{
 				ObjectMeta: metav1.ObjectMeta{
@@ -898,7 +898,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			defaultReconciler := &AgentRuntimeReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
-				// FacadeImage and RuntimeImage not set - should use defaults
+				// FacadeImage and FrameworkImage not set - should use defaults
 			}
 
 			agentRuntime := &omniav1alpha1.AgentRuntime{
@@ -946,7 +946,171 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(facadeContainer).NotTo(BeNil())
 			Expect(runtimeContainer).NotTo(BeNil())
 			Expect(facadeContainer.Image).To(Equal(DefaultFacadeImage))
-			Expect(runtimeContainer.Image).To(Equal(DefaultRuntimeImage))
+			Expect(runtimeContainer.Image).To(Equal(DefaultFrameworkImage))
+		})
+
+		It("should use CRD image overrides when specified", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with CRD image overrides")
+			customFacadeImage := "my-registry.io/custom-facade:v1.0.0"
+			customRuntimeImage := "my-registry.io/custom-runtime:v2.0.0"
+
+			// Reconciler has operator-level defaults set
+			reconcilerWithDefaults := &AgentRuntimeReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				FacadeImage:    "operator-default-facade:latest",
+				FrameworkImage: "operator-default-runtime:latest",
+			}
+
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type:  omniav1alpha1.FacadeTypeWebSocket,
+						Image: customFacadeImage, // CRD override
+					},
+					Framework: &omniav1alpha1.FrameworkConfig{
+						Type:  omniav1alpha1.FrameworkTypeCustom,
+						Image: customRuntimeImage, // CRD override
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconcilerWithDefaults.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconcilerWithDefaults.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying the Deployment uses CRD image overrides, not operator defaults")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			// Find containers by name
+			var facadeContainer, runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				switch c.Name {
+				case FacadeContainerName:
+					facadeContainer = c
+				case RuntimeContainerName:
+					runtimeContainer = c
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil())
+			Expect(runtimeContainer).NotTo(BeNil())
+			Expect(facadeContainer.Image).To(Equal(customFacadeImage), "Facade should use CRD override")
+			Expect(runtimeContainer.Image).To(Equal(customRuntimeImage), "Runtime should use CRD override")
+		})
+
+		It("should allow partial CRD image overrides (facade only)", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with only facade image override")
+			customFacadeImage := "my-registry.io/partial-facade:v3.0.0"
+			operatorRuntimeImage := "operator-runtime:latest"
+
+			reconcilerWithDefaults := &AgentRuntimeReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				FacadeImage:    "operator-facade:latest",
+				FrameworkImage: operatorRuntimeImage,
+			}
+
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type:  omniav1alpha1.FacadeTypeWebSocket,
+						Image: customFacadeImage, // Only facade is overridden
+					},
+					// Framework.Image is NOT set - should fall back to operator default
+					Provider: &omniav1alpha1.ProviderConfig{
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconcilerWithDefaults.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconcilerWithDefaults.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying the Deployment uses mixed images")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			// Find containers by name
+			var facadeContainer, runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				switch c.Name {
+				case FacadeContainerName:
+					facadeContainer = c
+				case RuntimeContainerName:
+					runtimeContainer = c
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil())
+			Expect(runtimeContainer).NotTo(BeNil())
+			Expect(facadeContainer.Image).To(Equal(customFacadeImage), "Facade should use CRD override")
+			Expect(runtimeContainer.Image).To(Equal(operatorRuntimeImage), "Runtime should use operator default")
 		})
 
 		It("should set correct labels on Deployment and Service", func() {
@@ -2007,10 +2171,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Namespace: "default",
 			}
 			reconciler = &AgentRuntimeReconciler{
-				Client:       k8sClient,
-				Scheme:       k8sClient.Scheme(),
-				FacadeImage:  "test-facade:latest",
-				RuntimeImage: "test-runtime:latest",
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				FacadeImage:    "test-facade:latest",
+				FrameworkImage: "test-runtime:latest",
 			}
 		})
 
@@ -2405,8 +2569,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 		BeforeEach(func() {
 			reconciler = &AgentRuntimeReconciler{
-				FacadeImage:  "test-facade:v1.0.0",
-				RuntimeImage: "test-runtime:v1.0.0",
+				FacadeImage:    "test-facade:v1.0.0",
+				FrameworkImage: "test-runtime:v1.0.0",
 			}
 		})
 
@@ -2520,8 +2684,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 		BeforeEach(func() {
 			reconciler = &AgentRuntimeReconciler{
-				FacadeImage:  "test-facade:v1.0.0",
-				RuntimeImage: "test-runtime:v1.0.0",
+				FacadeImage:    "test-facade:v1.0.0",
+				FrameworkImage: "test-runtime:v1.0.0",
 			}
 		})
 

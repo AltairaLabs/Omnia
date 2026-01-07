@@ -28,6 +28,15 @@ on:
       - 'test/**'
       - '.github/workflows/test.yml'
 
+permissions:
+  contents: read
+  checks: write
+
+# Cancel in-progress runs when a new commit is pushed to the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Run on Ubuntu
@@ -44,4 +53,13 @@ jobs:
       - name: Running Tests
         run: |
           # Skip go mod tidy - may fail on local replace directives for PromptKit
-          make test
+          make test-junit
+
+      - name: Publish Test Results
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          report_paths: 'test-results.xml'
+          check_name: 'Unit Test Results'
+          detailed_summary: true
+          include_passed: true

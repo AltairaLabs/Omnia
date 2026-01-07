@@ -252,18 +252,37 @@ func createHandler(cfg *agent.Config, log interface {
 		log.Info("using echo handler mode")
 		return agent.NewEchoHandler(), nil
 	case agent.HandlerModeDemo:
-		log.Info("using demo handler mode")
-		return agent.NewDemoHandler(), nil
+		log.Info("using demo handler mode with LLM metrics")
+		return agent.NewDemoHandlerWithMetrics(cfg.AgentName, cfg.Namespace), nil
 	case agent.HandlerModeRuntime:
 		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
-		client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
-			Address:     cfg.RuntimeAddress,
-			DialTimeout: 30 * time.Second,
-		})
+
+		// Retry connection with exponential backoff (runtime container may still be starting)
+		var client *facade.RuntimeClient
+		var err error
+		maxRetries := 10
+		backoff := 500 * time.Millisecond
+
+		for i := 0; i < maxRetries; i++ {
+			client, err = facade.NewRuntimeClient(facade.RuntimeClientConfig{
+				Address:     cfg.RuntimeAddress,
+				DialTimeout: 5 * time.Second,
+			})
+			if err == nil {
+				log.Info("connected to runtime", "address", cfg.RuntimeAddress, "attempt", i+1)
+				break
+			}
+
+			log.Info("waiting for runtime to be ready", "address", cfg.RuntimeAddress, "attempt", i+1, "error", err.Error())
+			time.Sleep(backoff)
+			backoff = min(backoff*2, 5*time.Second) // Cap at 5 seconds
+		}
+
 		if err != nil {
-			log.Error(err, "failed to connect to runtime, falling back to nil handler")
+			log.Error(err, "failed to connect to runtime after retries, falling back to nil handler")
 			return nil, nil
 		}
+
 		handler := agent.NewRuntimeHandler(client)
 		cleanup := func() {
 			if err := client.Close(); err != nil {

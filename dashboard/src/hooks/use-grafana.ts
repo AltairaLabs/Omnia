@@ -120,8 +120,8 @@ export function useGrafana(): GrafanaConfig {
 /**
  * Builds a Grafana panel embed URL.
  *
- * Uses /grafana/ subpath since Grafana is configured with serve_from_sub_path.
- * The Next.js rewrite proxies /grafana/* to the actual Grafana service.
+ * Uses the configured NEXT_PUBLIC_GRAFANA_URL directly for iframe embedding.
+ * No proxy needed when Grafana has anonymous auth enabled.
  *
  * @param config - Grafana configuration
  * @param options - Panel options
@@ -131,7 +131,7 @@ export function buildPanelUrl(
   config: GrafanaConfig,
   options: GrafanaPanelOptions
 ): string | null {
-  if (!config.enabled) {
+  if (!config.enabled || !config.baseUrl) {
     return null;
   }
 
@@ -159,14 +159,16 @@ export function buildPanelUrl(
     params.set(`var-${key}`, value);
   }
 
-  // Use relative /grafana/ path - Next.js rewrites this to the actual Grafana service
-  return `/grafana/d-solo/${dashboardUid}?${params.toString()}`;
+  // Build absolute URL directly to Grafana (no proxy)
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/d-solo/${dashboardUid}?${params.toString()}`;
 }
 
 /**
  * Builds a full Grafana dashboard URL.
  *
- * Uses /grafana/ subpath since Grafana is configured with serve_from_sub_path.
+ * Uses the configured NEXT_PUBLIC_GRAFANA_URL directly.
  *
  * @param config - Grafana configuration
  * @param dashboardUid - Dashboard UID
@@ -178,7 +180,7 @@ export function buildDashboardUrl(
   dashboardUid: string,
   vars: Record<string, string> = {}
 ): string | null {
-  if (!config.enabled) {
+  if (!config.enabled || !config.baseUrl) {
     return null;
   }
 
@@ -189,6 +191,8 @@ export function buildDashboardUrl(
     params.set(`var-${key}`, value);
   }
 
-  // Use relative /grafana/ path with slug (use uid as slug for provisioned dashboards)
-  return `/grafana/d/${dashboardUid}/_?${params.toString()}`;
+  // Build absolute URL directly to Grafana (no proxy)
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/d/${dashboardUid}/_?${params.toString()}`;
 }

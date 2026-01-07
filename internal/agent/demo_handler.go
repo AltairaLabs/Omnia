@@ -22,15 +22,68 @@ import (
 	"time"
 
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
+
+// Simulated pricing (per 1M tokens)
+const (
+	demoProvider         = "anthropic"
+	demoModel            = "claude-sonnet-4"
+	demoInputPricePer1M  = 3.00  // $3 per 1M input tokens
+	demoOutputPricePer1M = 15.00 // $15 per 1M output tokens
+)
+
+// demoDurationBuckets are histogram buckets for demo mode (shorter than production).
+var demoDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60}
+
+// newDemoLLMMetrics creates LLM metrics for demo mode using the shared metrics package.
+func newDemoLLMMetrics(agentName, namespace string) *metrics.LLMMetrics {
+	return metrics.NewLLMMetrics(metrics.LLMMetricsConfig{
+		AgentName:       agentName,
+		Namespace:       namespace,
+		DurationBuckets: demoDurationBuckets,
+	})
+}
+
+// recordDemoRequest records metrics for a simulated LLM request.
+func recordDemoRequest(m *metrics.LLMMetrics, inputTokens, outputTokens int, durationSeconds float64) {
+	// Calculate cost
+	inputCost := (float64(inputTokens) / 1_000_000) * demoInputPricePer1M
+	outputCost := (float64(outputTokens) / 1_000_000) * demoOutputPricePer1M
+
+	m.RecordRequest(metrics.LLMRequestMetrics{
+		Provider:        demoProvider,
+		Model:           demoModel,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		CacheHits:       0,
+		CostUSD:         inputCost + outputCost,
+		DurationSeconds: durationSeconds,
+		Success:         true,
+	})
+}
+
+// estimateTokens estimates token count from text (roughly 4 chars per token).
+func estimateTokens(text string) int {
+	return len(text) / 4
+}
 
 // DemoHandler provides canned responses with streaming simulation.
 // Useful for demos and screenshots.
-type DemoHandler struct{}
+type DemoHandler struct {
+	metrics *metrics.LLMMetrics
+}
 
 // NewDemoHandler creates a new DemoHandler.
 func NewDemoHandler() *DemoHandler {
 	return &DemoHandler{}
+}
+
+// NewDemoHandlerWithMetrics creates a DemoHandler with LLM metrics.
+func NewDemoHandlerWithMetrics(agentName, namespace string) *DemoHandler {
+	return &DemoHandler{
+		metrics: newDemoLLMMetrics(agentName, namespace),
+	}
 }
 
 // Name returns the handler name for metrics.
@@ -46,30 +99,40 @@ func (h *DemoHandler) HandleMessage(
 	writer facade.ResponseWriter,
 ) error {
 	content := strings.ToLower(msg.Content)
+	startTime := time.Now()
 
 	// Simulate thinking delay
 	time.Sleep(200 * time.Millisecond)
 
+	var response string
+	var err error
+
 	// Password reset flow - demonstrates tool calls
 	if strings.Contains(content, "password") {
-		return h.handlePasswordReset(ctx, sessionID, writer)
+		response, err = h.handlePasswordReset(ctx, sessionID, writer)
+	} else if strings.Contains(content, "weather") {
+		// Weather query - demonstrates tool calls
+		response, err = h.handleWeatherQuery(ctx, sessionID, writer)
+	} else if strings.Contains(content, "help") || strings.Contains(content, "hello") || strings.Contains(content, "hi") {
+		// Help/greeting - demonstrates streaming
+		response, err = h.handleGreeting(ctx, sessionID, writer)
+	} else {
+		// Default response
+		response, err = h.handleDefault(ctx, sessionID, msg.Content, writer)
 	}
 
-	// Weather query - demonstrates tool calls
-	if strings.Contains(content, "weather") {
-		return h.handleWeatherQuery(ctx, sessionID, writer)
+	// Record metrics if enabled
+	if h.metrics != nil {
+		inputTokens := estimateTokens(msg.Content)
+		outputTokens := estimateTokens(response)
+		duration := time.Since(startTime).Seconds()
+		recordDemoRequest(h.metrics, inputTokens, outputTokens, duration)
 	}
 
-	// Help/greeting - demonstrates streaming
-	if strings.Contains(content, "help") || strings.Contains(content, "hello") || strings.Contains(content, "hi") {
-		return h.handleGreeting(ctx, sessionID, writer)
-	}
-
-	// Default response
-	return h.handleDefault(ctx, sessionID, msg.Content, writer)
+	return err
 }
 
-func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, writer facade.ResponseWriter) error {
+func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, writer facade.ResponseWriter) (string, error) {
 	// Stream initial response
 	chunks := []string{
 		"I can help you ",
@@ -77,10 +140,12 @@ func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, w
 		"Let me look up ",
 		"your account...",
 	}
+	var fullResponse string
 	for _, chunk := range chunks {
 		if err := writer.WriteChunk(chunk); err != nil {
-			return err
+			return "", err
 		}
+		fullResponse += chunk
 		time.Sleep(80 * time.Millisecond)
 	}
 
@@ -92,7 +157,7 @@ func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, w
 			"session_id": sessionID,
 		},
 	}); err != nil {
-		return err
+		return "", err
 	}
 	time.Sleep(400 * time.Millisecond)
 
@@ -105,7 +170,7 @@ func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, w
 			"account_type": "premium",
 		},
 	}); err != nil {
-		return err
+		return "", err
 	}
 
 	// Final response
@@ -121,20 +186,23 @@ Great news! I found your account. Here's how to reset your password:
 
 The reset link will expire in 24 hours. Let me know if you need any other help!`
 
-	return writer.WriteDone(finalResponse)
+	fullResponse += finalResponse
+	return fullResponse, writer.WriteDone(finalResponse)
 }
 
-func (h *DemoHandler) handleWeatherQuery(_ context.Context, _ string, writer facade.ResponseWriter) error {
+func (h *DemoHandler) handleWeatherQuery(_ context.Context, _ string, writer facade.ResponseWriter) (string, error) {
 	// Stream initial response
-	if err := writer.WriteChunk("Checking the weather for you"); err != nil {
-		return err
+	fullResponse := "Checking the weather for you"
+	if err := writer.WriteChunk(fullResponse); err != nil {
+		return "", err
 	}
 	time.Sleep(100 * time.Millisecond)
 
 	for i := 0; i < 3; i++ {
 		if err := writer.WriteChunk("."); err != nil {
-			return err
+			return "", err
 		}
+		fullResponse += "."
 		time.Sleep(150 * time.Millisecond)
 	}
 
@@ -146,7 +214,7 @@ func (h *DemoHandler) handleWeatherQuery(_ context.Context, _ string, writer fac
 			"location": "Denver, CO",
 		},
 	}); err != nil {
-		return err
+		return "", err
 	}
 	time.Sleep(500 * time.Millisecond)
 
@@ -160,7 +228,7 @@ func (h *DemoHandler) handleWeatherQuery(_ context.Context, _ string, writer fac
 			"wind":        "5 mph NW",
 		},
 	}); err != nil {
-		return err
+		return "", err
 	}
 
 	finalResponse := `
@@ -174,10 +242,11 @@ Here's the current weather in Denver, CO:
 
 It's a beautiful day! Perfect for outdoor activities.`
 
-	return writer.WriteDone(finalResponse)
+	fullResponse += finalResponse
+	return fullResponse, writer.WriteDone(finalResponse)
 }
 
-func (h *DemoHandler) handleGreeting(_ context.Context, _ string, writer facade.ResponseWriter) error {
+func (h *DemoHandler) handleGreeting(_ context.Context, _ string, writer facade.ResponseWriter) (string, error) {
 	response := `Hello! I'm the Omnia demo agent. I can help you with:
 
 • **Password resets** - Just ask "How do I reset my password?"
@@ -193,19 +262,19 @@ How can I help you today?`
 	for i, word := range words {
 		if i > 0 {
 			if err := writer.WriteChunk(" "); err != nil {
-				return err
+				return "", err
 			}
 		}
 		if err := writer.WriteChunk(word); err != nil {
-			return err
+			return "", err
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
 
-	return writer.WriteDone("")
+	return response, writer.WriteDone("")
 }
 
-func (h *DemoHandler) handleDefault(_ context.Context, _ string, input string, writer facade.ResponseWriter) error {
+func (h *DemoHandler) handleDefault(_ context.Context, _ string, input string, writer facade.ResponseWriter) (string, error) {
 	response := "I understand you're asking about: \"" + input + "\"\n\n"
 	response += "In demo mode, I have limited responses. Try asking about:\n"
 	response += "• Password resets\n"
@@ -218,14 +287,14 @@ func (h *DemoHandler) handleDefault(_ context.Context, _ string, input string, w
 	for i, word := range words {
 		if i > 0 {
 			if err := writer.WriteChunk(" "); err != nil {
-				return err
+				return "", err
 			}
 		}
 		if err := writer.WriteChunk(word); err != nil {
-			return err
+			return "", err
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 
-	return writer.WriteDone("")
+	return response, writer.WriteDone("")
 }
