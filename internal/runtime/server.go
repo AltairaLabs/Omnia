@@ -36,6 +36,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -267,6 +268,10 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	sessionID := msg.GetSessionId()
 	content := msg.GetContent()
 
+	// Enrich context with session ID
+	ctx = logctx.WithSessionID(ctx, sessionID)
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	// Start conversation span if tracing is enabled
 	if s.tracingProvider != nil {
 		var span trace.Span
@@ -274,12 +279,10 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 		defer span.End()
 	}
 
-	s.log.V(1).Info("processing message",
-		"sessionID", sessionID,
-		"contentLength", len(content))
+	log.V(1).Info("processing message", "contentLength", len(content))
 
 	// Get or create conversation for this session
-	conv, err := s.getOrCreateConversation(sessionID)
+	conv, err := s.getOrCreateConversation(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get conversation: %w", err)
 	}
@@ -346,7 +349,9 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 }
 
 // getOrCreateConversation gets an existing conversation or creates a new one.
-func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, error) {
+func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) (*sdk.Conversation, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	s.conversationMu.RLock()
 	conv, exists := s.conversations[sessionID]
 	s.conversationMu.RUnlock()
@@ -371,7 +376,7 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 
 	// Add mock provider if enabled
 	if s.mockProvider {
-		s.log.Info("using mock provider for conversation", "sessionID", sessionID)
+		log.Info("using mock provider for conversation")
 		var provider *mock.Provider
 		if s.mockConfigPath != "" {
 			// Use file-based mock repository
@@ -391,19 +396,19 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 	conv, err := sdk.Resume(sessionID, s.packPath, s.promptName, opts...)
 	if err != nil {
 		// If resume fails (conversation not found), create new
-		s.log.V(1).Info("creating new conversation", "sessionID", sessionID)
+		log.V(1).Info("creating new conversation")
 		conv, err = sdk.Open(s.packPath, s.promptName, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open pack: %w", err)
 		}
 	} else {
-		s.log.V(1).Info("resumed existing conversation", "sessionID", sessionID)
+		log.V(1).Info("resumed existing conversation")
 	}
 
 	// Register tools with the conversation if available
 	if s.toolsInitialized && s.toolExecutor != nil {
-		if err := s.registerToolsWithConversation(conv); err != nil {
-			s.log.Error(err, "failed to register tools with conversation", "sessionID", sessionID)
+		if err := s.registerToolsWithConversation(ctx, conv); err != nil {
+			log.Error(err, "failed to register tools with conversation")
 			// Continue without tools - don't fail the conversation
 		}
 	}
@@ -416,8 +421,8 @@ func (s *Server) getOrCreateConversation(sessionID string) (*sdk.Conversation, e
 }
 
 // registerToolsWithConversation registers all available tools with a conversation.
-func (s *Server) registerToolsWithConversation(conv *sdk.Conversation) error {
-	ctx := context.Background()
+func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Conversation) error {
+	log := logctx.LoggerWithContext(s.log, ctx)
 
 	// Get all tool descriptors from the executor
 	descriptors, err := s.toolExecutor.ListTools(ctx)
@@ -428,20 +433,24 @@ func (s *Server) registerToolsWithConversation(conv *sdk.Conversation) error {
 	// Register each tool with the conversation using a context-aware handler
 	for _, desc := range descriptors {
 		toolName := desc.Name
-		s.log.V(1).Info("registering tool with conversation", "tool", toolName)
+		log.V(1).Info("registering tool with conversation", "tool", toolName)
 
-		// Create a closure that captures the executor and descriptor
-		conv.OnToolCtx(toolName, func(ctx context.Context, args map[string]any) (any, error) {
-			return s.executeToolForConversation(ctx, toolName, args)
+		// Create a closure that captures the executor, descriptor, and context info
+		conv.OnToolCtx(toolName, func(toolCtx context.Context, args map[string]any) (any, error) {
+			// Enrich with tool name
+			toolCtx = logctx.WithTool(toolCtx, toolName)
+			return s.executeToolForConversation(toolCtx, toolName, args)
 		})
 	}
 
-	s.log.Info("registered tools with conversation", "count", len(descriptors))
+	log.Info("registered tools with conversation", "count", len(descriptors))
 	return nil
 }
 
 // executeToolForConversation executes a tool call for a conversation.
 func (s *Server) executeToolForConversation(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
 	// Start tool span if tracing is enabled
 	var span trace.Span
 	if s.tracingProvider != nil {
@@ -449,7 +458,7 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 		defer span.End()
 	}
 
-	s.log.V(1).Info("executing tool for conversation", "tool", toolName)
+	log.V(1).Info("executing tool for conversation")
 
 	// Call the tool through the manager
 	result, err := s.toolManager.Call(ctx, toolName, args)

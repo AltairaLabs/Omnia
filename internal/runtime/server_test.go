@@ -357,7 +357,7 @@ func TestServer_GetOrCreateConversation_InvalidPack(t *testing.T) {
 	)
 
 	// Try to get conversation with invalid pack path
-	_, err := server.getOrCreateConversation("test-session")
+	_, err := server.getOrCreateConversation(context.Background(), "test-session")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to open pack")
 }
@@ -394,12 +394,12 @@ func TestServer_GetOrCreateConversation_Success(t *testing.T) {
 	)
 
 	// First call - creates conversation
-	conv1, err := server.getOrCreateConversation("session-1")
+	conv1, err := server.getOrCreateConversation(context.Background(), "session-1")
 	require.NoError(t, err)
 	require.NotNil(t, conv1)
 
 	// Second call - returns existing
-	conv2, err := server.getOrCreateConversation("session-1")
+	conv2, err := server.getOrCreateConversation(context.Background(), "session-1")
 	require.NoError(t, err)
 	assert.Equal(t, conv1, conv2) // Same pointer
 }
@@ -446,7 +446,7 @@ func TestServer_GetOrCreateConversation_MockConfigPath(t *testing.T) {
 	)
 
 	// Should create conversation with mock config
-	conv, err := server.getOrCreateConversation("session-1")
+	conv, err := server.getOrCreateConversation(context.Background(), "session-1")
 	require.NoError(t, err)
 	require.NotNil(t, conv)
 }
@@ -484,7 +484,7 @@ func TestServer_GetOrCreateConversation_InvalidMockConfig(t *testing.T) {
 	)
 
 	// Should fail due to invalid mock config path
-	_, err = server.getOrCreateConversation("session-1")
+	_, err = server.getOrCreateConversation(context.Background(), "session-1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load mock config")
 }
