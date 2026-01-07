@@ -83,7 +83,7 @@ cmd_setup() {
     # Patch with dev images
     kubectl patch deployment omnia-controller-manager -n "$OPERATOR_NS" --type=json -p '[
         {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=example.com/omnia-facade:dev"},
-        {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--runtime-image=example.com/omnia-runtime:dev"}
+        {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--framework-image=example.com/omnia-runtime:dev"}
     ]'
 
     kubectl rollout status deployment/omnia-controller-manager -n "$OPERATOR_NS" --timeout=60s

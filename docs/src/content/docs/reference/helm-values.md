@@ -141,10 +141,12 @@ facade:
     tag: ""  # Defaults to Chart appVersion
 ```
 
-## Runtime Configuration
+## Framework Configuration
+
+The framework image is used for the agent runtime container. This naming aligns with the CRD's `spec.framework` field.
 
 ```yaml
-runtime:
+framework:
   image:
     repository: ghcr.io/altairalabs/omnia-runtime
     tag: ""  # Defaults to Chart appVersion

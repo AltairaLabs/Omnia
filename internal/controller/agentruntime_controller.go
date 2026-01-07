@@ -48,8 +48,8 @@ const (
 	RuntimeContainerName = "runtime"
 	// DefaultFacadeImage is the default image for the facade container.
 	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-facade:latest"
-	// DefaultRuntimeImage is the default image for the runtime container.
-	DefaultRuntimeImage = "ghcr.io/altairalabs/omnia-runtime:latest"
+	// DefaultFrameworkImage is the default image for the framework container.
+	DefaultFrameworkImage = "ghcr.io/altairalabs/omnia-runtime:latest"
 	// DefaultFacadePort is the default port for the WebSocket facade.
 	DefaultFacadePort = 8080
 	// DefaultFacadeHealthPort is the health port for the facade container.
@@ -394,9 +394,9 @@ const (
 // AgentRuntimeReconciler reconciles a AgentRuntime object
 type AgentRuntimeReconciler struct {
 	client.Client
-	Scheme       *runtime.Scheme
-	FacadeImage  string
-	RuntimeImage string
+	Scheme         *runtime.Scheme
+	FacadeImage    string
+	FrameworkImage string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -813,18 +813,18 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	provider *omniav1alpha1.Provider,
 ) corev1.Container {
 	// Check for CRD image override first, then operator default, then hardcoded default
-	runtimeImage := ""
+	frameworkImage := ""
 	if agentRuntime.Spec.Framework != nil && agentRuntime.Spec.Framework.Image != "" {
-		runtimeImage = agentRuntime.Spec.Framework.Image
-	} else if r.RuntimeImage != "" {
-		runtimeImage = r.RuntimeImage
+		frameworkImage = agentRuntime.Spec.Framework.Image
+	} else if r.FrameworkImage != "" {
+		frameworkImage = r.FrameworkImage
 	} else {
-		runtimeImage = DefaultRuntimeImage
+		frameworkImage = DefaultFrameworkImage
 	}
 
 	container := corev1.Container{
 		Name:            RuntimeContainerName,
-		Image:           runtimeImage,
+		Image:           frameworkImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports: []corev1.ContainerPort{
 			{

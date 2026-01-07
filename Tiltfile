@@ -122,11 +122,11 @@ helm_set = [
     'dashboard.image.repository=omnia-dashboard-dev',
     'dashboard.image.tag=latest',
     'dashboard.image.pullPolicy=Never',
-    # Use dev images for agent containers (facade + runtime)
+    # Use dev images for agent containers (facade + framework)
     'facade.image.repository=omnia-facade-dev',
     'facade.image.tag=latest',
-    'runtime.image.repository=omnia-runtime-dev',
-    'runtime.image.tag=latest',
+    'framework.image.repository=omnia-runtime-dev',
+    'framework.image.tag=latest',
     # Enable dashboard
     'dashboard.enabled=true',
 ]
@@ -220,7 +220,7 @@ local_resource(
     resource_deps=['omnia-controller-manager'],
 )
 
-# Restart agent pods when facade/runtime images are rebuilt
+# Restart agent pods when facade/framework images are rebuilt
 # Since AgentRuntime deployments are created by the operator (not Tilt),
 # we need to manually trigger a rollout when the source changes
 local_resource(

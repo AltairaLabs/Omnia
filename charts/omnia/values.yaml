@@ -335,12 +335,13 @@ facade:
     # -- Facade image tag (defaults to Chart appVersion)
     tag: ""
 
-# Runtime container configuration (used by AgentRuntime)
-runtime:
+# Framework container configuration (used by AgentRuntime)
+# This aligns with the CRD's spec.framework field
+framework:
   image:
-    # -- Runtime image repository
+    # -- Framework (runtime) image repository
     repository: ghcr.io/altairalabs/omnia-runtime
-    # -- Runtime image tag (defaults to Chart appVersion)
+    # -- Framework image tag (defaults to Chart appVersion)
     tag: ""
 
 # Observability configuration (for Omnia-specific templates)

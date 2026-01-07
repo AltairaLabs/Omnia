@@ -86,12 +86,12 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
-		By("patching the controller-manager to use the test facade and runtime images")
+		By("patching the controller-manager to use the test facade and framework images")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=json",
-			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--runtime-image=%s"}]`, facadeImageRef, runtimeImageRef))
+			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--framework-image=%s"}]`, facadeImageRef, runtimeImageRef))
 		_, err = utils.Run(patchCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with facade and runtime images")
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with facade and framework images")
 
 		By("waiting for controller-manager rollout to complete")
 		rolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
@@ -510,7 +510,7 @@ spec:
 			Expect(err).NotTo(HaveOccurred(), "Failed to create Redis credentials secret")
 
 			By("creating the AgentRuntime with mock provider annotation")
-			// Note: The agent image is configured on the operator via --facade-image/--runtime-image flags,
+			// Note: The agent image is configured on the operator via --facade-image/--framework-image flags,
 			// not in the CRD spec. The operator was patched in BeforeAll to use the test images.
 			// The mock provider annotation enables mock mode for E2E testing without real API keys.
 			agentRuntimeManifest := `
@@ -1267,7 +1267,7 @@ spec:
 			Expect(facadeImageOutput).NotTo(Equal(facadeImageRef),
 				"Should NOT use operator's --facade-image flag value")
 			Expect(runtimeImageOutput).NotTo(Equal(runtimeImageRef),
-				"Should NOT use operator's --runtime-image flag value")
+				"Should NOT use operator's --framework-image flag value")
 
 			By("cleaning up image override test agent")
 			cmd = exec.Command("kubectl", "delete", "agentruntime", "image-override-agent",
@@ -1335,7 +1335,7 @@ spec:
 			runtimeImageOutput, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(runtimeImageOutput).To(Equal(runtimeImageRef),
-				"Runtime container should use operator's --runtime-image flag value")
+				"Runtime container should use operator's --framework-image flag value")
 
 			By("cleaning up default image test agent")
 			cmd = exec.Command("kubectl", "delete", "agentruntime", "default-image-agent",
