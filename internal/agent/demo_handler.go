@@ -21,22 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
-
-// DemoLLMMetrics holds LLM metrics for the demo handler.
-// These simulate what a real LLM provider would emit.
-type DemoLLMMetrics struct {
-	InputTokensTotal  *prometheus.CounterVec
-	OutputTokensTotal *prometheus.CounterVec
-	CacheHitsTotal    *prometheus.CounterVec
-	RequestsTotal     *prometheus.CounterVec
-	CostUSDTotal      *prometheus.CounterVec
-	RequestDuration   *prometheus.HistogramVec
-}
 
 // Simulated pricing (per 1M tokens)
 const (
@@ -46,65 +33,34 @@ const (
 	demoOutputPricePer1M = 15.00 // $15 per 1M output tokens
 )
 
-// NewDemoLLMMetrics creates LLM metrics for demo mode.
-func NewDemoLLMMetrics(agentName, namespace string) *DemoLLMMetrics {
-	labels := prometheus.Labels{
-		"agent":     agentName,
-		"namespace": namespace,
-	}
+// demoDurationBuckets are histogram buckets for demo mode (shorter than production).
+var demoDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60}
 
-	return &DemoLLMMetrics{
-		InputTokensTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name:        "omnia_llm_input_tokens_total",
-			Help:        "Total number of input tokens sent to LLMs",
-			ConstLabels: labels,
-		}, []string{"provider", "model"}),
-
-		OutputTokensTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name:        "omnia_llm_output_tokens_total",
-			Help:        "Total number of output tokens received from LLMs",
-			ConstLabels: labels,
-		}, []string{"provider", "model"}),
-
-		CacheHitsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name:        "omnia_llm_cache_hits_total",
-			Help:        "Total number of prompt cache hits",
-			ConstLabels: labels,
-		}, []string{"provider", "model"}),
-
-		RequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name:        "omnia_llm_requests_total",
-			Help:        "Total number of LLM requests",
-			ConstLabels: labels,
-		}, []string{"provider", "model", "status"}),
-
-		CostUSDTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name:        "omnia_llm_cost_usd_total",
-			Help:        "Total estimated cost in USD",
-			ConstLabels: labels,
-		}, []string{"provider", "model"}),
-
-		RequestDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:        "omnia_llm_request_duration_seconds",
-			Help:        "LLM request duration in seconds",
-			ConstLabels: labels,
-			Buckets:     []float64{0.5, 1, 2, 5, 10, 30, 60},
-		}, []string{"provider", "model"}),
-	}
+// newDemoLLMMetrics creates LLM metrics for demo mode using the shared metrics package.
+func newDemoLLMMetrics(agentName, namespace string) *metrics.LLMMetrics {
+	return metrics.NewLLMMetrics(metrics.LLMMetricsConfig{
+		AgentName:       agentName,
+		Namespace:       namespace,
+		DurationBuckets: demoDurationBuckets,
+	})
 }
 
-// Record records metrics for a simulated LLM request.
-func (m *DemoLLMMetrics) Record(inputTokens, outputTokens int, durationSeconds float64) {
-	m.InputTokensTotal.WithLabelValues(demoProvider, demoModel).Add(float64(inputTokens))
-	m.OutputTokensTotal.WithLabelValues(demoProvider, demoModel).Add(float64(outputTokens))
-	m.RequestsTotal.WithLabelValues(demoProvider, demoModel, "success").Inc()
-
+// recordDemoRequest records metrics for a simulated LLM request.
+func recordDemoRequest(m *metrics.LLMMetrics, inputTokens, outputTokens int, durationSeconds float64) {
 	// Calculate cost
 	inputCost := (float64(inputTokens) / 1_000_000) * demoInputPricePer1M
 	outputCost := (float64(outputTokens) / 1_000_000) * demoOutputPricePer1M
-	m.CostUSDTotal.WithLabelValues(demoProvider, demoModel).Add(inputCost + outputCost)
 
-	m.RequestDuration.WithLabelValues(demoProvider, demoModel).Observe(durationSeconds)
+	m.RecordRequest(metrics.LLMRequestMetrics{
+		Provider:        demoProvider,
+		Model:           demoModel,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		CacheHits:       0,
+		CostUSD:         inputCost + outputCost,
+		DurationSeconds: durationSeconds,
+		Success:         true,
+	})
 }
 
 // estimateTokens estimates token count from text (roughly 4 chars per token).
@@ -115,7 +71,7 @@ func estimateTokens(text string) int {
 // DemoHandler provides canned responses with streaming simulation.
 // Useful for demos and screenshots.
 type DemoHandler struct {
-	metrics *DemoLLMMetrics
+	metrics *metrics.LLMMetrics
 }
 
 // NewDemoHandler creates a new DemoHandler.
@@ -126,7 +82,7 @@ func NewDemoHandler() *DemoHandler {
 // NewDemoHandlerWithMetrics creates a DemoHandler with LLM metrics.
 func NewDemoHandlerWithMetrics(agentName, namespace string) *DemoHandler {
 	return &DemoHandler{
-		metrics: NewDemoLLMMetrics(agentName, namespace),
+		metrics: newDemoLLMMetrics(agentName, namespace),
 	}
 }
 
@@ -170,7 +126,7 @@ func (h *DemoHandler) HandleMessage(
 		inputTokens := estimateTokens(msg.Content)
 		outputTokens := estimateTokens(response)
 		duration := time.Since(startTime).Seconds()
-		h.metrics.Record(inputTokens, outputTokens, duration)
+		recordDemoRequest(h.metrics, inputTokens, outputTokens, duration)
 	}
 
 	return err

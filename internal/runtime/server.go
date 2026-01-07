@@ -37,6 +37,7 @@ import (
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/runtime/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -542,16 +543,16 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 		// Record metrics to Prometheus
 		if s.metrics != nil {
-			s.metrics.RecordRequest(
-				data.Provider,
-				data.Model,
-				data.InputTokens,
-				data.OutputTokens,
-				data.CachedTokens,
-				data.Cost,
-				data.Duration.Seconds(),
-				true, // success (this event only fires on success)
-			)
+			s.metrics.RecordRequest(metrics.LLMRequestMetrics{
+				Provider:        data.Provider,
+				Model:           data.Model,
+				InputTokens:     data.InputTokens,
+				OutputTokens:    data.OutputTokens,
+				CacheHits:       data.CachedTokens,
+				CostUSD:         data.Cost,
+				DurationSeconds: data.Duration.Seconds(),
+				Success:         true,
+			})
 		}
 
 		s.log.V(1).Info("event: provider call completed",
@@ -576,13 +577,12 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 		// Record failed request metric
 		if s.metrics != nil {
-			s.metrics.RecordRequest(
-				data.Provider,
-				data.Model,
-				0, 0, 0, 0,
-				data.Duration.Seconds(),
-				false, // failure
-			)
+			s.metrics.RecordRequest(metrics.LLMRequestMetrics{
+				Provider:        data.Provider,
+				Model:           data.Model,
+				DurationSeconds: data.Duration.Seconds(),
+				Success:         false,
+			})
 		}
 
 		s.log.V(1).Info("event: provider call failed",
