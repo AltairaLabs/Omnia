@@ -120,6 +120,16 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-e2e-manager
+test-e2e-manager: setup-test-e2e manifests generate fmt vet ## Run only Manager-labeled e2e tests.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter=manager -timeout 20m
+	$(MAKE) cleanup-test-e2e
+
+.PHONY: test-e2e-crds
+test-e2e-crds: setup-test-e2e manifests generate fmt vet ## Run only CRDs-labeled e2e tests.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter=crds -timeout 20m
+	$(MAKE) cleanup-test-e2e
+
 .PHONY: test-e2e-junit
 test-e2e-junit: setup-test-e2e manifests generate fmt vet ## Run e2e tests with JUnit XML output.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
@@ -247,6 +257,14 @@ sync-chart-crds: manifests ## Sync CRDs from config/crd/bases to charts/omnia/cr
 .PHONY: generate-dashboard-types
 generate-dashboard-types: sync-chart-crds ## Generate TypeScript types from CRD schemas
 	node scripts/generate-dashboard-types.js
+
+.PHONY: generate-dashboard-api
+generate-dashboard-api: ## Generate TypeScript API client from OpenAPI spec
+	cd dashboard && npm run generate:api
+
+.PHONY: generate-all
+generate-all: manifests generate generate-proto sync-chart-crds generate-dashboard-types generate-dashboard-api ## Run all code generation
+	@echo "All code generation complete."
 
 ##@ Build
 

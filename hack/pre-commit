@@ -344,22 +344,59 @@ fi
 #
 # 6. Generate manifests check (kubebuilder specific)
 #
-print_header "Checking Generated Manifests"
+print_header "Checking Generated Code"
 
-# Run generate and check for changes
+# Run Go codegen (manifests + DeepCopy)
 make generate manifests 2>/dev/null
 
-MANIFEST_CHANGES=$(git diff --name-only config/ api/ 2>/dev/null || true)
-if [ -n "$MANIFEST_CHANGES" ]; then
-    print_error "Generated manifests are out of date:"
-    for file in $MANIFEST_CHANGES; do
+GO_CHANGES=$(git diff --name-only config/ api/ 2>/dev/null || true)
+if [ -n "$GO_CHANGES" ]; then
+    print_error "Generated Go files are out of date:"
+    for file in $GO_CHANGES; do
         echo "  - $file"
     done
     echo ""
     print_info "Run 'make generate manifests' and commit the changes"
     CHECKS_FAILED=1
 else
-    print_success "Generated manifests are up to date"
+    print_success "Go manifests are up to date"
+fi
+
+# Sync CRDs to Helm chart
+make sync-chart-crds 2>/dev/null
+
+HELM_CHANGES=$(git diff --name-only charts/omnia/crds/ 2>/dev/null || true)
+if [ -n "$HELM_CHANGES" ]; then
+    print_error "Helm chart CRDs are out of date:"
+    for file in $HELM_CHANGES; do
+        echo "  - $file"
+    done
+    echo ""
+    print_info "Run 'make sync-chart-crds' and commit the changes"
+    CHECKS_FAILED=1
+else
+    print_success "Helm chart CRDs are up to date"
+fi
+
+# Check dashboard types if dashboard files were changed or CRDs changed
+if [ -n "$STAGED_DASHBOARD_FILES" ] || [ -n "$GO_CHANGES" ]; then
+    # Generate TypeScript types from CRDs
+    if command -v node &> /dev/null && [ -d "$REPO_ROOT/dashboard/node_modules" ]; then
+        make generate-dashboard-types 2>/dev/null
+
+        TS_TYPE_CHANGES=$(git diff --name-only dashboard/src/types/generated/ 2>/dev/null || true)
+        if [ -n "$TS_TYPE_CHANGES" ]; then
+            print_error "Dashboard TypeScript types are out of date:"
+            for file in $TS_TYPE_CHANGES; do
+                echo "  - $file"
+            done
+            echo ""
+            print_info "Run 'make generate-dashboard-types' and commit the changes"
+            CHECKS_FAILED=1
+        else
+            print_success "Dashboard TypeScript types are up to date"
+        fi
+    fi
 fi
 
 #

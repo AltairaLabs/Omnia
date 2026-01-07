@@ -11,6 +11,9 @@ export interface AgentRuntimeSpec {
      * "demo" provides streaming responses with simulated tool calls (for demos).
      * "runtime" uses the runtime framework in the container (default, for production). */
     handler?: "echo" | "demo" | "runtime";
+    /** image overrides the default facade container image.
+     * Use this to specify a custom facade image or private registry. */
+    image?: string;
     /** port is the port number for the facade service. */
     port?: number;
     /** type specifies the facade protocol type. */
@@ -714,6 +717,10 @@ export interface AgentRuntimeStatus {
     /** ready is the number of ready replicas. */
     ready: number;
   };
+  /** serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
+   * Format: {name}.{namespace}.svc.cluster.local:{port}
+   * This can be used by dashboard or other services to connect to the agent. */
+  serviceEndpoint?: string;
 }
 
 export interface AgentRuntime {
