@@ -27,18 +27,24 @@ export function createDataService(isDemoMode: boolean): DataService {
 
 interface DataServiceProviderProps {
   children: React.ReactNode;
+  /** Optional service instance to use (primarily for testing) */
+  initialService?: DataService;
 }
 
 /**
  * Provider component that supplies the DataService to the component tree.
  * Automatically selects MockDataService or OperatorApiService based on config.
  */
-export function DataServiceProvider({ children }: DataServiceProviderProps) {
+export function DataServiceProvider({ children, initialService }: DataServiceProviderProps) {
   const { config } = useRuntimeConfig();
 
   const service = useMemo(() => {
+    // Use provided service if given (for testing), otherwise create based on config
+    if (initialService) {
+      return initialService;
+    }
     return createDataService(config.demoMode);
-  }, [config.demoMode]);
+  }, [config.demoMode, initialService]);
 
   return (
     <DataServiceContext.Provider value={service}>

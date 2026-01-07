@@ -7,6 +7,10 @@
  */
 
 import type { components } from "../api/schema";
+import type {
+  ServerMessage,
+  ConnectionStatus,
+} from "@/types/websocket";
 
 // Re-export schema types for convenience
 export type AgentRuntime = components["schemas"]["AgentRuntime"];
@@ -207,4 +211,35 @@ export interface DataService {
 
   // Costs
   getCosts(options?: CostOptions): Promise<CostData>;
+
+  // Agent WebSocket connections
+  createAgentConnection(namespace: string, name: string): AgentConnection;
+}
+
+/**
+ * Agent WebSocket connection interface.
+ * Provides a unified interface for communicating with agents
+ * whether in demo mode (mock) or production (real WebSocket).
+ */
+export interface AgentConnection {
+  /** Connect to the agent */
+  connect(): void;
+
+  /** Disconnect from the agent */
+  disconnect(): void;
+
+  /** Send a message to the agent */
+  send(content: string, sessionId?: string): void;
+
+  /** Register a handler for incoming messages */
+  onMessage(handler: (message: ServerMessage) => void): void;
+
+  /** Register a handler for connection status changes */
+  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): void;
+
+  /** Get current connection status */
+  getStatus(): ConnectionStatus;
+
+  /** Get current session ID (if connected) */
+  getSessionId(): string | null;
 }

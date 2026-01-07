@@ -17,9 +17,14 @@ import type {
   CostData,
   CostOptions,
   K8sEvent,
+  AgentConnection,
+  CostAllocationItem,
 } from "./types";
 
-import type { CostAllocationItem } from "./types";
+import type {
+  ServerMessage,
+  ConnectionStatus,
+} from "@/types/websocket";
 
 import {
   mockAgentRuntimes,
@@ -36,6 +41,185 @@ import {
 // Simulate network delay for realistic demo experience
 function delay(ms = 100): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Generate unique IDs
+let idCounter = 0;
+function generateId(): string {
+  idCounter += 1;
+  return `${Date.now()}-${idCounter}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// Mock responses for demo mode
+const MOCK_RESPONSES = [
+  {
+    content: "I'd be happy to help you with that! Let me look into it.",
+    toolCalls: [
+      {
+        name: "search_database",
+        arguments: { query: "user request" },
+        result: { found: true, records: 3 },
+      },
+    ],
+  },
+  {
+    content: "Based on my analysis, here's what I found:\n\n1. Your account is in good standing\n2. No recent issues detected\n3. All services are operational\n\nIs there anything specific you'd like me to help you with?",
+    toolCalls: [],
+  },
+  {
+    content: "Let me check that for you using our tools.",
+    toolCalls: [
+      {
+        name: "get_user_info",
+        arguments: { user_id: "demo-user" },
+        result: { name: "Demo User", plan: "premium", created: "2024-01-15" },
+      },
+      {
+        name: "check_permissions",
+        arguments: { user_id: "demo-user", resource: "settings" },
+        result: { allowed: true, roles: ["admin", "user"] },
+      },
+    ],
+  },
+];
+
+/**
+ * Mock agent connection for demo mode.
+ * Simulates WebSocket communication with streaming responses.
+ */
+export class MockAgentConnection implements AgentConnection {
+  private status: ConnectionStatus = "disconnected";
+  private sessionId: string | null = null;
+  private messageHandlers: Array<(message: ServerMessage) => void> = [];
+  private statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
+  private mockIndex = 0;
+
+  constructor(
+    private namespace: string,
+    private agentName: string
+  ) {}
+
+  connect(): void {
+    this.setStatus("connecting");
+
+    // Simulate connection delay
+    setTimeout(() => {
+      this.sessionId = `mock-session-${generateId()}`;
+      this.setStatus("connected");
+
+      // Send connected message
+      this.emitMessage({
+        type: "connected",
+        session_id: this.sessionId,
+        timestamp: new Date().toISOString(),
+      });
+    }, 200);
+  }
+
+  disconnect(): void {
+    this.sessionId = null;
+    this.setStatus("disconnected");
+  }
+
+  send(content: string): void {
+    if (this.status !== "connected") {
+      console.warn("Cannot send message: not connected");
+      return;
+    }
+
+    // Simulate response
+    this.simulateResponse(content);
+  }
+
+  onMessage(handler: (message: ServerMessage) => void): void {
+    this.messageHandlers.push(handler);
+  }
+
+  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): void {
+    this.statusHandlers.push(handler);
+  }
+
+  getStatus(): ConnectionStatus {
+    return this.status;
+  }
+
+  getSessionId(): string | null {
+    return this.sessionId;
+  }
+
+  private setStatus(status: ConnectionStatus, error?: string): void {
+    this.status = status;
+    this.statusHandlers.forEach((h) => h(status, error));
+  }
+
+  private emitMessage(message: ServerMessage): void {
+    this.messageHandlers.forEach((h) => h(message));
+  }
+
+  private simulateResponse(_userMessage: string): void {
+    const mockResponse = MOCK_RESPONSES[this.mockIndex % MOCK_RESPONSES.length];
+    this.mockIndex++;
+
+    // Simulate streaming response - send content word by word
+    const words = mockResponse.content.split(" ");
+    let charIndex = 0;
+
+    // Start streaming chunks
+    words.forEach((word, index) => {
+      setTimeout(() => {
+        this.emitMessage({
+          type: "chunk",
+          session_id: this.sessionId || undefined,
+          content: (index > 0 ? " " : "") + word,
+          timestamp: new Date().toISOString(),
+        });
+        charIndex += word.length + 1;
+      }, 100 + index * 50);
+    });
+
+    // Send tool calls after content
+    const toolDelay = 100 + words.length * 50 + 200;
+    mockResponse.toolCalls.forEach((tc, index) => {
+      const toolId = `tool-${generateId()}`;
+
+      // Tool call (pending)
+      setTimeout(() => {
+        this.emitMessage({
+          type: "tool_call",
+          session_id: this.sessionId || undefined,
+          tool_call: {
+            id: toolId,
+            name: tc.name,
+            arguments: tc.arguments,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }, toolDelay + index * 700);
+
+      // Tool result (success)
+      setTimeout(() => {
+        this.emitMessage({
+          type: "tool_result",
+          session_id: this.sessionId || undefined,
+          tool_result: {
+            id: toolId,
+            result: tc.result,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }, toolDelay + index * 700 + 400);
+    });
+
+    // Send done message
+    const doneDelay = toolDelay + mockResponse.toolCalls.length * 700 + 500;
+    setTimeout(() => {
+      this.emitMessage({
+        type: "done",
+        session_id: this.sessionId || undefined,
+        timestamp: new Date().toISOString(),
+      });
+    }, doneDelay);
+  }
 }
 
 // Mock log message templates
@@ -319,5 +503,9 @@ export class MockDataService implements DataService {
       timeSeries: mockCostTimeSeries,
       grafanaUrl: undefined, // No Grafana in demo mode
     };
+  }
+
+  createAgentConnection(namespace: string, name: string): AgentConnection {
+    return new MockAgentConnection(namespace, name);
   }
 }

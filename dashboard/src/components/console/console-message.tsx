@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Bot, Loader2 } from "lucide-react";
+import { User, Bot, Loader2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToolCallCard } from "./tool-call-card";
 import type { ConsoleMessage as ConsoleMessageType } from "@/types/websocket";
@@ -18,6 +18,23 @@ export function ConsoleMessage({ message, className }: ConsoleMessageProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
 
+  // System messages render as centered dividers
+  if (isSystem) {
+    return (
+      <div className={cn("flex items-center justify-center gap-2 py-2", className)}>
+        <div className="h-px flex-1 bg-border" />
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground px-2">
+          <Info className="h-3 w-3" />
+          <span>{message.content}</span>
+          <span className="text-muted-foreground/60">
+            {formatTime(message.timestamp)}
+          </span>
+        </div>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -32,8 +49,6 @@ export function ConsoleMessage({ message, className }: ConsoleMessageProps) {
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
           isUser
             ? "bg-primary text-primary-foreground"
-            : isSystem
-            ? "bg-muted text-muted-foreground"
             : "bg-secondary text-secondary-foreground"
         )}
       >
@@ -56,8 +71,6 @@ export function ConsoleMessage({ message, className }: ConsoleMessageProps) {
             "rounded-lg px-4 py-2",
             isUser
               ? "bg-primary text-primary-foreground"
-              : isSystem
-              ? "bg-muted text-muted-foreground"
               : "bg-secondary text-secondary-foreground"
           )}
         >

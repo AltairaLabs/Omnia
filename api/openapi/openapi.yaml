@@ -531,6 +531,9 @@ components:
           type: integer
         replicas:
           type: integer
+        serviceEndpoint:
+          type: string
+          description: Internal Kubernetes service endpoint for agent facade (e.g., my-agent.default.svc.cluster.local:8080)
 
     Condition:
       type: object

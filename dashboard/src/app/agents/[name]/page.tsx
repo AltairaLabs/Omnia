@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, BarChart3, ExternalLink, FileText, MessageSquare, Activity } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -32,11 +32,20 @@ function formatDate(timestamp?: string): string {
 export default function AgentDetailPage({ params }: AgentDetailPageProps) {
   const { name } = use(params);
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const namespace = searchParams.get("namespace") || "production";
+  const currentTab = searchParams.get("tab") || "overview";
   const queryClient = useQueryClient();
   const dataService = useDataService();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
+
+  const handleTabChange = useCallback((tab: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", tab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, router, pathname]);
 
   const handleScale = useCallback(async (replicas: number) => {
     await dataService.scaleAgent(namespace, name, replicas);
@@ -106,7 +115,7 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview">
+        <Tabs value={currentTab} onValueChange={handleTabChange}>
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="console" className="gap-1.5">

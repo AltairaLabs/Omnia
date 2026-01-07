@@ -34,7 +34,6 @@ export function AgentConsole({ agentName, namespace, className }: AgentConsolePr
   } = useAgentConsole({
     agentName,
     namespace,
-    mockMode: true, // TODO: Make configurable via env
   });
 
   // Auto-connect on mount

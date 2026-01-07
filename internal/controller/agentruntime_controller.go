@@ -1329,6 +1329,11 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		},
 	}
 
+	port := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		port = *agentRuntime.Spec.Facade.Port
+	}
+
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		// Set owner reference
 		if err := controllerutil.SetControllerReference(agentRuntime, service, r.Scheme); err != nil {
@@ -1340,11 +1345,6 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 			"app.kubernetes.io/instance":     agentRuntime.Name,
 			"app.kubernetes.io/managed-by":   "omnia-operator",
 			"omnia.altairalabs.ai/component": "agent",
-		}
-
-		port := int32(DefaultFacadePort)
-		if agentRuntime.Spec.Facade.Port != nil {
-			port = *agentRuntime.Spec.Facade.Port
 		}
 
 		// Prometheus scrape annotations on Service (not pod, as Istio overrides pod annotations)
@@ -1376,7 +1376,11 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		return err
 	}
 
-	log.Info("Service reconciled", "result", result)
+	// Set the service endpoint in status for dashboard/client connections
+	agentRuntime.Status.ServiceEndpoint = fmt.Sprintf("%s.%s.svc.cluster.local:%d",
+		agentRuntime.Name, agentRuntime.Namespace, port)
+
+	log.Info("Service reconciled", "result", result, "endpoint", agentRuntime.Status.ServiceEndpoint)
 	return nil
 }
 

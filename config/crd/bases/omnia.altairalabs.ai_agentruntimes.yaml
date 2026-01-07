@@ -1544,6 +1544,12 @@ spec:
                 - desired
                 - ready
                 type: object
+              serviceEndpoint:
+                description: |-
+                  serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
+                  Format: {name}.{namespace}.svc.cluster.local:{port}
+                  This can be used by dashboard or other services to connect to the agent.
+                type: string
             type: object
         required:
         - spec

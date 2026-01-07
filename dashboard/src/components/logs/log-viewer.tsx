@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useLogs, useDemoMode } from "@/hooks";
 
@@ -21,7 +28,10 @@ interface LogViewerProps {
   namespace: string;
   containers?: string[];
   className?: string;
+  defaultTailLines?: number;
 }
+
+const TAIL_LINE_OPTIONS = [50, 100, 200, 500, 1000];
 
 const levelColors = {
   info: "text-blue-600 dark:text-blue-400",
@@ -42,12 +52,14 @@ export function LogViewer({
   namespace,
   containers = ["facade", "runtime"],
   className,
+  defaultTailLines = 100,
 }: LogViewerProps) {
   const { isDemoMode } = useDemoMode();
+  const [tailLines, setTailLines] = useState(defaultTailLines);
 
   // Fetch logs via DataService (works in both demo and live modes)
   const { data: apiLogs, isLoading, refetch } = useLogs(namespace, agentName, {
-    tailLines: 500,
+    tailLines,
     sinceSeconds: 3600,
   });
 
@@ -142,6 +154,23 @@ export function LogViewer({
           <RefreshCw className={cn("h-4 w-4 mr-1", isLoading && "animate-spin")} />
           Refresh
         </Button>
+
+        {/* Tail lines selector */}
+        <Select
+          value={String(tailLines)}
+          onValueChange={(v) => setTailLines(Number(v))}
+        >
+          <SelectTrigger className="w-[100px] h-8">
+            <SelectValue placeholder="Lines" />
+          </SelectTrigger>
+          <SelectContent>
+            {TAIL_LINE_OPTIONS.map((n) => (
+              <SelectItem key={n} value={String(n)}>
+                {n} lines
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Container selector */}
         <div className="flex items-center gap-1">

@@ -116,7 +116,7 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
+		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--timeout=60s")
 		_, _ = utils.Run(cmd)
 	})
 
@@ -365,11 +365,11 @@ spec:
 
 		AfterAll(func() {
 			By("cleaning up test agents namespace")
-			cmd := exec.Command("kubectl", "delete", "ns", agentsNamespace, "--ignore-not-found")
+			cmd := exec.Command("kubectl", "delete", "ns", agentsNamespace, "--ignore-not-found", "--timeout=60s")
 			_, _ = utils.Run(cmd)
 
 			By("cleaning up cache namespace")
-			cmd = exec.Command("kubectl", "delete", "ns", cacheNamespace, "--ignore-not-found")
+			cmd = exec.Command("kubectl", "delete", "ns", cacheNamespace, "--ignore-not-found", "--timeout=60s")
 			_, _ = utils.Run(cmd)
 		})
 

@@ -23,8 +23,8 @@
  */
 
 export * from "./types";
-export { MockDataService } from "./mock-service";
+export { MockDataService, MockAgentConnection } from "./mock-service";
 export { OperatorApiService } from "./operator-service";
 export { PrometheusService } from "./prometheus-service";
-export { LiveDataService } from "./live-service";
+export { LiveDataService, LiveAgentConnection } from "./live-service";
 export { DataServiceProvider, useDataService, createDataService } from "./provider";
