@@ -328,13 +328,20 @@ func (s *Server) parseLogStream(stream io.Reader, containerName string) []LogEnt
 
 // JSONLogEntry represents a structured JSON log entry from zap logger.
 type JSONLogEntry struct {
-	Level  string  `json:"level"`
-	TS     float64 `json:"ts"`
-	Caller string  `json:"caller"`
-	Msg    string  `json:"msg"`
-	Logger string  `json:"logger,omitempty"`
-	Error  string  `json:"error,omitempty"`
-	// Additional fields are captured in the message
+	Level      string  `json:"level"`
+	TS         float64 `json:"ts"`
+	Caller     string  `json:"caller"`
+	Msg        string  `json:"msg"`
+	Logger     string  `json:"logger,omitempty"`
+	Error      string  `json:"error,omitempty"`
+	Stacktrace string  `json:"stacktrace,omitempty"`
+	// Common additional fields
+	Agent     string `json:"agent,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Addr      string `json:"addr,omitempty"`
+	Address   string `json:"address,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // parseLogLine parses a single log line (with timestamp prefix from kubectl logs --timestamps).
@@ -346,12 +353,18 @@ func parseLogLine(line, containerName string) LogEntry {
 		Container: containerName,
 	}
 
-	// Try to parse timestamp prefix (format: 2006-01-02T15:04:05.000000000Z)
+	// Try to parse timestamp prefix (format: 2006-01-02T15:04:05.123456789Z <message>)
+	// The timestamp length varies based on nanosecond precision, so find the space separator
 	messageContent := line
-	if len(line) > 30 && line[4] == '-' && line[7] == '-' && line[10] == 'T' {
-		if ts, err := time.Parse(time.RFC3339Nano, line[:30]); err == nil {
-			entry.Timestamp = ts
-			messageContent = strings.TrimSpace(line[31:])
+	if len(line) > 20 && line[4] == '-' && line[7] == '-' && line[10] == 'T' {
+		// Find the space that separates timestamp from log content
+		spaceIdx := strings.Index(line, " ")
+		if spaceIdx > 20 && spaceIdx < 40 {
+			// Parse the timestamp portion
+			if ts, err := time.Parse(time.RFC3339Nano, line[:spaceIdx]); err == nil {
+				entry.Timestamp = ts
+				messageContent = strings.TrimSpace(line[spaceIdx+1:])
+			}
 		}
 	}
 
@@ -361,7 +374,7 @@ func parseLogLine(line, containerName string) LogEntry {
 		if err := json.Unmarshal([]byte(messageContent), &jsonLog); err == nil {
 			// Extract level
 			if jsonLog.Level != "" {
-				entry.Level = jsonLog.Level
+				entry.Level = strings.ToLower(jsonLog.Level)
 			}
 
 			// Use timestamp from JSON if available (zap uses unix epoch with fractional seconds)
@@ -371,15 +384,49 @@ func parseLogLine(line, containerName string) LogEntry {
 				entry.Timestamp = time.Unix(sec, nsec)
 			}
 
-			// Build a human-readable message
-			msg := jsonLog.Msg
-			if jsonLog.Error != "" {
-				msg = msg + ": " + jsonLog.Error
+			// Build a human-readable message with all relevant context
+			var msgParts []string
+
+			// Add logger name if present
+			if jsonLog.Logger != "" {
+				msgParts = append(msgParts, "["+jsonLog.Logger+"]")
 			}
+
+			// Add caller if present
 			if jsonLog.Caller != "" {
-				msg = "[" + jsonLog.Caller + "] " + msg
+				msgParts = append(msgParts, "["+jsonLog.Caller+"]")
 			}
-			entry.Message = msg
+
+			// Add main message
+			msgParts = append(msgParts, jsonLog.Msg)
+
+			// Add context fields
+			var contextParts []string
+			if jsonLog.Agent != "" {
+				contextParts = append(contextParts, "agent="+jsonLog.Agent)
+			}
+			if jsonLog.Namespace != "" {
+				contextParts = append(contextParts, "namespace="+jsonLog.Namespace)
+			}
+			if jsonLog.Addr != "" {
+				contextParts = append(contextParts, "addr="+jsonLog.Addr)
+			}
+			if jsonLog.Address != "" {
+				contextParts = append(contextParts, "address="+jsonLog.Address)
+			}
+			if jsonLog.SessionID != "" {
+				contextParts = append(contextParts, "session_id="+jsonLog.SessionID)
+			}
+			if len(contextParts) > 0 {
+				msgParts = append(msgParts, "("+strings.Join(contextParts, ", ")+")")
+			}
+
+			// Add error if present
+			if jsonLog.Error != "" {
+				msgParts = append(msgParts, "error: "+jsonLog.Error)
+			}
+
+			entry.Message = strings.Join(msgParts, " ")
 			return entry
 		}
 	}
