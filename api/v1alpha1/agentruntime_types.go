@@ -85,6 +85,11 @@ type FacadeConfig struct {
 	// +kubebuilder:default="runtime"
 	// +optional
 	Handler *HandlerMode `json:"handler,omitempty"`
+
+	// image overrides the default facade container image.
+	// Use this to specify a custom facade image or private registry.
+	// +optional
+	Image string `json:"image,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.

@@ -77,6 +77,15 @@ export function useAgentConsole({
     switch (message.type) {
       case "connected":
         setSessionId(message.session_id || null);
+        // Add system message with session details
+        if (message.session_id) {
+          addMessage({
+            id: generateId(),
+            role: "system",
+            content: `Session started: ${message.session_id}`,
+            timestamp: new Date(),
+          });
+        }
         break;
 
       case "chunk":

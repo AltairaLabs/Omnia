@@ -181,32 +181,38 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                     <Separator className="my-4" />
                     <div>
                       <p className="text-sm font-medium mb-2">Conditions</p>
-                      <div className="space-y-2">
-                        {status.conditions.map((condition, index) => (
-                          <div
-                            key={index}
-                            className="flex items-start gap-4 text-sm"
-                          >
-                            <span
-                              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                condition.status === "True"
-                                  ? "bg-green-500/15 text-green-700 dark:text-green-400"
-                                  : "bg-red-500/15 text-red-700 dark:text-red-400"
-                              }`}
-                            >
-                              {condition.type}
-                            </span>
-                            <div className="flex-1">
-                              <p className="font-medium">{condition.reason}</p>
-                              {condition.message && (
-                                <p className="text-muted-foreground">
-                                  {condition.message}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-muted-foreground border-b">
+                            <th className="pb-2 font-medium">Type</th>
+                            <th className="pb-2 font-medium">Reason</th>
+                            <th className="pb-2 font-medium">Message</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {status.conditions.map((condition, index) => (
+                            <tr key={index} className="border-b last:border-0">
+                              <td className="py-2 pr-4">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    condition.status === "True"
+                                      ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                                      : "bg-red-500/15 text-red-700 dark:text-red-400"
+                                  }`}
+                                >
+                                  {condition.type}
+                                </span>
+                              </td>
+                              <td className="py-2 pr-4 font-medium">
+                                {condition.reason}
+                              </td>
+                              <td className="py-2 text-muted-foreground">
+                                {condition.message || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </>
                 )}

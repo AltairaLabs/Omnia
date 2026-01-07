@@ -53,9 +53,20 @@ export class LiveAgentConnection implements AgentConnection {
     this.setStatus("connecting");
 
     try {
-      // Connect to the dashboard's WebSocket proxy
+      // Connect to the WebSocket proxy server
+      // In production, WS_PROXY_URL is configured; in dev, proxy runs on port 3002
       const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/api/agents/${this.namespace}/${this.agentName}/ws`;
+      const wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
+
+      let wsUrl: string;
+      if (wsProxyUrl) {
+        // Production: use configured proxy URL
+        wsUrl = `${wsProxyUrl}/api/agents/${this.namespace}/${this.agentName}/ws`;
+      } else {
+        // Development: WebSocket proxy on port 3002
+        const wsHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+        wsUrl = `${protocol}//${wsHost}:3002/api/agents/${this.namespace}/${this.agentName}/ws`;
+      }
 
       this.ws = new WebSocket(wsUrl);
 
@@ -63,9 +74,17 @@ export class LiveAgentConnection implements AgentConnection {
         this.setStatus("connected");
       };
 
-      this.ws.onmessage = (event) => {
+      this.ws.onmessage = async (event) => {
         try {
-          const message: ServerMessage = JSON.parse(event.data);
+          // Handle both string and Blob data
+          let data: string;
+          if (event.data instanceof Blob) {
+            data = await event.data.text();
+          } else {
+            data = event.data;
+          }
+
+          const message: ServerMessage = JSON.parse(data);
 
           // Track session ID from connected message
           if (message.type === "connected" && message.session_id) {
@@ -78,9 +97,10 @@ export class LiveAgentConnection implements AgentConnection {
         }
       };
 
-      this.ws.onerror = (event) => {
-        console.error("[LiveAgentConnection] WebSocket error:", event);
-        this.setStatus("error", "WebSocket connection error");
+      this.ws.onerror = () => {
+        // WebSocket errors don't expose details for security reasons
+        console.warn("[LiveAgentConnection] WebSocket connection failed");
+        this.setStatus("error", "WebSocket connection failed");
       };
 
       this.ws.onclose = (event) => {

@@ -118,7 +118,41 @@ spec:
     secretRef:
       name: llm-provider
 ---
-# Second agent for variety
+# Runtime agent with mock provider - uses real PromptKit runtime
+# but with simulated LLM responses (no real API calls)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: runtime-agent
+  namespace: dev-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: demo-prompts
+  toolRegistryRef:
+    name: demo-tools
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+  provider:
+    secretRef:
+      name: llm-provider
+---
+# Echo agent for simple testing
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:

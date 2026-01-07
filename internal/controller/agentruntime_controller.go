@@ -753,8 +753,13 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 	promptPack *omniav1alpha1.PromptPack,
 	facadePort int32,
 ) corev1.Container {
-	facadeImage := r.FacadeImage
-	if facadeImage == "" {
+	// Check for CRD image override first, then operator default, then hardcoded default
+	facadeImage := ""
+	if agentRuntime.Spec.Facade.Image != "" {
+		facadeImage = agentRuntime.Spec.Facade.Image
+	} else if r.FacadeImage != "" {
+		facadeImage = r.FacadeImage
+	} else {
 		facadeImage = DefaultFacadeImage
 	}
 
@@ -807,8 +812,13 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	provider *omniav1alpha1.Provider,
 ) corev1.Container {
-	runtimeImage := r.RuntimeImage
-	if runtimeImage == "" {
+	// Check for CRD image override first, then operator default, then hardcoded default
+	runtimeImage := ""
+	if agentRuntime.Spec.Framework != nil && agentRuntime.Spec.Framework.Image != "" {
+		runtimeImage = agentRuntime.Spec.Framework.Image
+	} else if r.RuntimeImage != "" {
+		runtimeImage = r.RuntimeImage
+	} else {
 		runtimeImage = DefaultRuntimeImage
 	}
 

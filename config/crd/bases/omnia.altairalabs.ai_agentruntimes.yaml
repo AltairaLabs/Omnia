@@ -69,6 +69,11 @@ spec:
                     - demo
                     - runtime
                     type: string
+                  image:
+                    description: |-
+                      image overrides the default facade container image.
+                      Use this to specify a custom facade image or private registry.
+                    type: string
                   port:
                     default: 8080
                     description: port is the port number for the facade service.

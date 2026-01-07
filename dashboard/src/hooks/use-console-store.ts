@@ -19,15 +19,15 @@ interface StoredConsoleState extends ConsoleState {
 const consoleStates = new Map<ConsoleKey, StoredConsoleState>();
 const listeners = new Set<() => void>();
 
+// Cache for snapshot references to prevent useSyncExternalStore infinite loop
+// The snapshot function must return a cached value when state hasn't changed
+const snapshotCache = new Map<ConsoleKey, StoredConsoleState>();
+
 function getKey(namespace: string, agentName: string): ConsoleKey {
   return `${namespace}/${agentName}`;
 }
 
-function getState(key: ConsoleKey): StoredConsoleState {
-  const existing = consoleStates.get(key);
-  if (existing) return existing;
-
-  // Return default state
+function createDefaultState(): StoredConsoleState {
   return {
     sessionId: null,
     status: "disconnected",
@@ -37,6 +37,19 @@ function getState(key: ConsoleKey): StoredConsoleState {
   };
 }
 
+function getState(key: ConsoleKey): StoredConsoleState {
+  const existing = consoleStates.get(key);
+  if (existing) return existing;
+
+  // Return cached default state to satisfy useSyncExternalStore's caching requirement
+  let cached = snapshotCache.get(key);
+  if (!cached) {
+    cached = createDefaultState();
+    snapshotCache.set(key, cached);
+  }
+  return cached;
+}
+
 function setState(key: ConsoleKey, state: Partial<StoredConsoleState>): void {
   const existing = getState(key);
   consoleStates.set(key, {
@@ -44,6 +57,8 @@ function setState(key: ConsoleKey, state: Partial<StoredConsoleState>): void {
     ...state,
     lastActivity: new Date(),
   });
+  // Clear the default state cache since we now have real state
+  snapshotCache.delete(key);
   // Notify all subscribers
   listeners.forEach((listener) => listener());
 }

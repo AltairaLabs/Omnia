@@ -1192,6 +1192,229 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 
+		It("should use CRD image overrides instead of operator defaults", func() {
+			By("creating an AgentRuntime with custom facade and runtime images")
+			// Use distinct image references to verify they're used instead of operator defaults
+			customFacadeImage := "custom-facade-test:v1.0.0"
+			customRuntimeImage := "custom-runtime-test:v1.0.0"
+
+			imageOverrideAgentManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: image-override-agent
+  namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: test-prompts
+  facade:
+    type: websocket
+    port: 8080
+    image: %s
+  framework:
+    type: custom
+    image: %s
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+  provider:
+    secretRef:
+      name: test-provider
+`, customFacadeImage, customRuntimeImage)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(imageOverrideAgentManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create AgentRuntime with image overrides")
+
+			By("waiting for the deployment to be created")
+			verifyDeploymentCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment", "image-override-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("image-override-agent"))
+			}
+			Eventually(verifyDeploymentCreated, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying the facade container uses the custom image")
+			cmd = exec.Command("kubectl", "get", "deployment", "image-override-agent",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='facade')].image}")
+			facadeImageOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(facadeImageOutput).To(Equal(customFacadeImage),
+				"Facade container should use CRD image override, not operator default")
+
+			By("verifying the runtime container uses the custom image")
+			cmd = exec.Command("kubectl", "get", "deployment", "image-override-agent",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='runtime')].image}")
+			runtimeImageOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(runtimeImageOutput).To(Equal(customRuntimeImage),
+				"Runtime container should use CRD image override, not operator default")
+
+			By("verifying neither container uses the operator default images")
+			Expect(facadeImageOutput).NotTo(Equal(facadeImageRef),
+				"Should NOT use operator's --facade-image flag value")
+			Expect(runtimeImageOutput).NotTo(Equal(runtimeImageRef),
+				"Should NOT use operator's --runtime-image flag value")
+
+			By("cleaning up image override test agent")
+			cmd = exec.Command("kubectl", "delete", "agentruntime", "image-override-agent",
+				"-n", agentsNamespace, "--ignore-not-found", "--timeout=60s")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should use operator defaults when CRD does not specify images", func() {
+			By("creating an AgentRuntime without image overrides")
+			noOverrideAgentManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: default-image-agent
+  namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: test-prompts
+  facade:
+    type: websocket
+    port: 8080
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+  provider:
+    secretRef:
+      name: test-provider
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(noOverrideAgentManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create AgentRuntime without image overrides")
+
+			By("waiting for the deployment to be created")
+			verifyDeploymentCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment", "default-image-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("default-image-agent"))
+			}
+			Eventually(verifyDeploymentCreated, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying the facade container uses the operator default image")
+			cmd = exec.Command("kubectl", "get", "deployment", "default-image-agent",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='facade')].image}")
+			facadeImageOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(facadeImageOutput).To(Equal(facadeImageRef),
+				"Facade container should use operator's --facade-image flag value")
+
+			By("verifying the runtime container uses the operator default image")
+			cmd = exec.Command("kubectl", "get", "deployment", "default-image-agent",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='runtime')].image}")
+			runtimeImageOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(runtimeImageOutput).To(Equal(runtimeImageRef),
+				"Runtime container should use operator's --runtime-image flag value")
+
+			By("cleaning up default image test agent")
+			cmd = exec.Command("kubectl", "delete", "agentruntime", "default-image-agent",
+				"-n", agentsNamespace, "--ignore-not-found", "--timeout=60s")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should allow partial image overrides (facade only)", func() {
+			By("creating an AgentRuntime with only facade image override")
+			customFacadeImage := "partial-facade-test:v2.0.0"
+
+			partialOverrideManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: partial-override-agent
+  namespace: test-agents
+  annotations:
+    omnia.altairalabs.ai/mock-provider: "true"
+spec:
+  promptPackRef:
+    name: test-prompts
+  facade:
+    type: websocket
+    port: 8080
+    image: %s
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+  provider:
+    secretRef:
+      name: test-provider
+`, customFacadeImage)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(partialOverrideManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create AgentRuntime with partial image override")
+
+			By("waiting for the deployment to be created")
+			verifyDeploymentCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "deployment", "partial-override-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("partial-override-agent"))
+			}
+			Eventually(verifyDeploymentCreated, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("verifying the facade container uses the custom image")
+			cmd = exec.Command("kubectl", "get", "deployment", "partial-override-agent",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='facade')].image}")
+			facadeImageOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(facadeImageOutput).To(Equal(customFacadeImage),
+				"Facade should use CRD override")
+
+			By("verifying the runtime container uses the operator default (not overridden)")
+			cmd = exec.Command("kubectl", "get", "deployment", "partial-override-agent",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.spec.template.spec.containers[?(@.name=='runtime')].image}")
+			runtimeImageOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(runtimeImageOutput).To(Equal(runtimeImageRef),
+				"Runtime should fall back to operator default when not overridden")
+
+			By("cleaning up partial override test agent")
+			cmd = exec.Command("kubectl", "delete", "agentruntime", "partial-override-agent",
+				"-n", agentsNamespace, "--ignore-not-found", "--timeout=60s")
+			_, _ = utils.Run(cmd)
+		})
+
 		It("should handle tool calls via demo handler", func() {
 			By("creating an AgentRuntime with demo handler for tool call testing")
 			// The demo handler simulates tool calls for weather and password queries

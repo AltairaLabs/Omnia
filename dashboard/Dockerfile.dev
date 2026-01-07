@@ -14,8 +14,8 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Next.js dev server port
-EXPOSE 3000
+# Next.js dev server port and WebSocket proxy port
+EXPOSE 3000 3002
 
 # Environment for development
 ENV NODE_ENV=development

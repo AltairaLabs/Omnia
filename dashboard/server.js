@@ -22,6 +22,8 @@ const { WebSocket, WebSocketServer } = require("ws");
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
 const port = parseInt(process.env.PORT || "3000", 10);
+// WebSocket proxy runs on separate port to avoid interfering with Next.js HMR
+const wsProxyPort = parseInt(process.env.WS_PROXY_PORT || "3002", 10);
 
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
@@ -95,6 +97,7 @@ function sendError(clientSocket, message, code = "CONNECTION_ERROR") {
 function proxyWebSocket(clientSocket, namespace, name) {
   const upstreamUrl = getAgentWsUrl(namespace, name);
   console.log(`[WS Proxy] Connecting to upstream: ${upstreamUrl}`);
+  console.log(`[WS Proxy] SERVICE_DOMAIN=${SERVICE_DOMAIN}, DEFAULT_FACADE_PORT=${DEFAULT_FACADE_PORT}`);
 
   let upstream = null;
   let upstreamConnected = false;
@@ -139,7 +142,13 @@ function proxyWebSocket(clientSocket, namespace, name) {
 
     upstream.on("error", (err) => {
       clearTimeout(connectionTimeout);
-      console.error(`[WS Proxy] Upstream error for ${namespace}/${name}:`, err.message);
+      console.error(`[WS Proxy] Upstream error for ${namespace}/${name}:`);
+      console.error(`[WS Proxy]   message: ${err.message}`);
+      console.error(`[WS Proxy]   code: ${err.code}`);
+      console.error(`[WS Proxy]   errno: ${err.errno}`);
+      console.error(`[WS Proxy]   syscall: ${err.syscall}`);
+      console.error(`[WS Proxy]   address: ${err.address}`);
+      console.error(`[WS Proxy]   port: ${err.port}`);
 
       // Provide more helpful error messages based on error type
       let errorMessage = `Failed to connect to agent ${name}`;
@@ -198,7 +207,7 @@ function proxyWebSocket(clientSocket, namespace, name) {
 }
 
 app.prepare().then(() => {
-  // Create HTTP server
+  // Create main HTTP server for Next.js (no WebSocket handling - let HMR work)
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url, true);
@@ -210,7 +219,12 @@ app.prepare().then(() => {
     }
   });
 
-  // Create WebSocket server (no server attached - we'll handle upgrades manually)
+  // Create separate WebSocket proxy server on different port
+  const wsServer = createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("WebSocket proxy server. Connect via WebSocket to /api/agents/{namespace}/{name}/ws");
+  });
+
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (ws, req) => {
@@ -225,30 +239,32 @@ app.prepare().then(() => {
     }
   });
 
-  // Handle WebSocket upgrade requests
-  server.on("upgrade", (req, socket, head) => {
+  // Handle WebSocket upgrades on the proxy server
+  wsServer.on("upgrade", (req, socket, head) => {
     const { pathname } = parse(req.url);
+    console.log(`[WS Upgrade] Received upgrade request for: ${pathname}`);
     const agent = parseAgentWsPath(pathname);
 
     if (agent) {
-      console.log(`[WS Upgrade] Agent connection: ${agent.namespace}/${agent.name}`);
+      console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });
-    } else if (pathname.startsWith("/_next/")) {
-      // Let Next.js handle its own WebSocket paths (HMR, etc.)
-      // In dev mode, Next.js manages HMR internally - just ignore these
-      // The connection will be handled by Next.js's internal dev server
     } else {
-      // Unknown WebSocket path - reject it
       console.log(`[WS Upgrade] Rejecting unknown path: ${pathname}`);
       socket.destroy();
     }
   });
 
+  // Start both servers
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
-    console.log(`> WebSocket proxy enabled for /api/agents/{namespace}/{name}/ws`);
+    console.log(`> Environment: NODE_ENV=${process.env.NODE_ENV}`);
+  });
+
+  wsServer.listen(wsProxyPort, hostname, () => {
+    console.log(`> WebSocket proxy on ws://${hostname}:${wsProxyPort}`);
+    console.log(`> Connect to /api/agents/{namespace}/{name}/ws`);
     console.log(`> Service domain: ${SERVICE_DOMAIN}`);
   });
 });

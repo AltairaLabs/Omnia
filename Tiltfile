@@ -188,7 +188,10 @@ k8s_resource(
 k8s_resource(
     'omnia-dashboard',
     labels=['dashboard'],
-    port_forwards=['3000:3000'],  # Dashboard UI
+    port_forwards=[
+        '3000:3000',  # Dashboard UI
+        '3002:3002',  # WebSocket proxy for agent connections
+    ],
 )
 
 if ENABLE_OBSERVABILITY:
@@ -215,6 +218,25 @@ local_resource(
     deps=['config/samples/dev'],
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],
+)
+
+# Restart agent pods when facade/runtime images are rebuilt
+# Since AgentRuntime deployments are created by the operator (not Tilt),
+# we need to manually trigger a rollout when the source changes
+local_resource(
+    'restart-agents',
+    cmd='kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true',
+    deps=[
+        './cmd/agent',
+        './internal/agent',
+        './internal/facade',
+        './internal/session',
+        './cmd/runtime',
+        './internal/runtime',
+    ],
+    labels=['agents'],
+    resource_deps=['sample-resources'],
+    auto_init=False,  # Don't run on initial tilt up
 )
 
 # ============================================================================
