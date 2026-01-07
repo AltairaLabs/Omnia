@@ -647,7 +647,29 @@ data:
 				g.Expect(output).To(ContainSubstring("true"))
 				g.Expect(strings.Count(output, "true")).To(Equal(2), "Expected 2 containers to be ready")
 			}
-			Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			err := Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			if err != nil {
+				// Dump debug info on failure
+				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Container readiness failed ===\n")
+				descCmd := exec.Command("kubectl", "describe", "pods",
+					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent")
+				descOutput, _ := utils.Run(descCmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Pod describe:\n%s\n", descOutput)
+
+				facadeLogsCmd := exec.Command("kubectl", "logs",
+					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent",
+					"-c", "facade", "--tail=50")
+				facadeLogs, _ := utils.Run(facadeLogsCmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Facade logs:\n%s\n", facadeLogs)
+
+				runtimeLogsCmd := exec.Command("kubectl", "logs",
+					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent",
+					"-c", "runtime", "--tail=50")
+				runtimeLogs, _ := utils.Run(runtimeLogsCmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Runtime logs:\n%s\n", runtimeLogs)
+
+				Fail("Container readiness check failed - see debug output above")
+			}
 
 			By("verifying the pod has facade and runtime containers")
 			cmd := exec.Command("kubectl", "get", "pods",
