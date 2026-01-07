@@ -90,6 +90,37 @@ stringData:
 
 > **Note**: If both `providerRef` and `provider` are specified, `providerRef` takes precedence.
 
+### `framework`
+
+Agent framework configuration. Specifies which runtime framework the agent uses.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `framework.type` | string | promptkit | No |
+| `framework.version` | string | - | No |
+| `framework.image` | string | - | No |
+
+```yaml
+spec:
+  framework:
+    type: promptkit
+    version: "1.0.0"  # Optional version pinning
+    image: myregistry.io/omnia-runtime:v1.0.0  # Optional image override
+```
+
+#### Framework Types
+
+| Type | Description |
+|------|-------------|
+| `promptkit` | Default framework using PromptKit (recommended) |
+| `custom` | Custom framework (requires `image` field) |
+
+#### Image Override
+
+The `framework.image` field allows you to override the default runtime container image. This is:
+- **Required** when using `type: custom`
+- **Optional** for built-in frameworks when you need a private registry or custom build
+
 ### `facade`
 
 WebSocket facade configuration.
@@ -99,6 +130,7 @@ WebSocket facade configuration.
 | `facade.type` | string | websocket | Yes |
 | `facade.port` | integer | 8080 | No |
 | `facade.handler` | string | runtime | No |
+| `facade.image` | string | - | No |
 
 ```yaml
 spec:
@@ -106,6 +138,7 @@ spec:
     type: websocket
     port: 8080
     handler: runtime
+    image: myregistry.io/omnia-facade:v1.0.0  # Optional override
 ```
 
 #### Handler Modes
@@ -115,6 +148,13 @@ spec:
 | `runtime` | Production mode using the runtime framework | Yes |
 | `demo` | Demo mode with simulated streaming responses | No |
 | `echo` | Simple echo handler for testing connectivity | No |
+
+#### Image Override
+
+The `facade.image` field allows you to override the default facade container image. Use this when:
+- Using a private container registry
+- Running a custom build of the facade
+- Pinning to a specific version different from the operator default
 
 ### `toolRegistryRef`
 

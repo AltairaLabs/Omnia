@@ -141,6 +141,114 @@ facade:
     tag: ""  # Defaults to Chart appVersion
 ```
 
+## Runtime Configuration
+
+```yaml
+runtime:
+  image:
+    repository: ghcr.io/altairalabs/omnia-runtime
+    tag: ""  # Defaults to Chart appVersion
+```
+
+## Dashboard Configuration
+
+The Omnia Dashboard provides a web UI for monitoring and managing agents.
+
+### Basic Settings
+
+```yaml
+dashboard:
+  enabled: true
+
+  image:
+    repository: ghcr.io/altairalabs/omnia-dashboard
+    pullPolicy: IfNotPresent
+    tag: ""  # Defaults to Chart appVersion
+
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+```
+
+### Ingress
+
+```yaml
+dashboard:
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    host: dashboard.example.com
+    tls:
+      - secretName: dashboard-tls
+        hosts:
+          - dashboard.example.com
+```
+
+### Authentication
+
+```yaml
+dashboard:
+  auth:
+    # Mode: anonymous, proxy, oauth, or builtin
+    mode: anonymous
+
+    # Session configuration (required for non-anonymous modes)
+    sessionSecret: ""  # Generate with: openssl rand -base64 32
+    existingSessionSecret: ""  # Use existing secret
+    cookieName: omnia_session
+    ttl: 86400  # 24 hours
+
+    # Role mapping
+    anonymousRole: viewer
+    roleMapping:
+      adminGroups: []
+      editorGroups: []
+```
+
+#### Proxy Authentication
+
+For use with external authentication proxies (e.g., oauth2-proxy):
+
+```yaml
+dashboard:
+  auth:
+    mode: proxy
+  proxy:
+    headerUser: X-Forwarded-User
+    headerEmail: X-Forwarded-Email
+    headerGroups: X-Forwarded-Groups
+```
+
+#### OAuth Authentication
+
+For direct OAuth/OIDC integration:
+
+```yaml
+dashboard:
+  auth:
+    mode: oauth
+  oauth:
+    issuer: https://your-tenant.auth0.com/
+    clientId: your-client-id
+    clientSecret: your-client-secret  # Or use existingSecret
+    scopes:
+      - openid
+      - email
+      - profile
+    groupsClaim: groups
+```
+
 ## Observability Stack
 
 All observability components are optional and disabled by default.

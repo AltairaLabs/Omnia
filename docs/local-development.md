@@ -145,18 +145,22 @@ kubectl get svc -n cache
 
 ## Build and Load Images
 
-Build the operator and agent images locally:
+Build the operator, facade, and runtime images locally:
 
 ```bash
 # Build the operator image
 make docker-build IMG=omnia:dev
 
 # Build the facade image
-docker build -t omnia-facade:dev -f Dockerfile.agent .
+docker build -t omnia-facade:dev -f Dockerfile.facade .
+
+# Build the runtime image
+docker build -t omnia-runtime:dev -f Dockerfile.runtime .
 
 # Load images into kind
 kind load docker-image omnia:dev --name omnia-dev
 kind load docker-image omnia-facade:dev --name omnia-dev
+kind load docker-image omnia-runtime:dev --name omnia-dev
 ```
 
 ## Deploy the Operator
