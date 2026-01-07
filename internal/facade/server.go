@@ -255,7 +255,13 @@ func (s *Server) handleConnection(c *Connection) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			// Only log truly unexpected close errors (not normal closure, going away, or no status)
+			if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseNoStatusReceived,
+				websocket.CloseAbnormalClosure,
+			) {
 				s.log.Error(err, "unexpected close error")
 			}
 			return

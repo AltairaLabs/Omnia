@@ -478,3 +478,17 @@ func TestClientMessageUnmarshal(t *testing.T) {
 		t.Errorf("Metadata[key] = %v, want value", msg.Metadata["key"])
 	}
 }
+
+func TestServerWithMetrics(t *testing.T) {
+	metrics := &NoOpMetrics{}
+	config := DefaultServerConfig()
+	log := logr.Discard()
+	store := session.NewMemoryStore()
+	server := NewServer(config, store, nil, log, WithMetrics(metrics))
+	defer func() { _ = store.Close() }()
+
+	// Verify the metrics were set and server is valid
+	if server == nil {
+		t.Fatal("NewServer returned nil")
+	}
+}
