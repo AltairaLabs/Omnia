@@ -76,3 +76,20 @@ jobs:
           check_name: 'E2E Test Results'
           detailed_summary: true
           include_passed: true
+
+      - name: Generate Timing Summary
+        if: always()
+        run: |
+          if [ -f e2e-results.xml ]; then
+            echo "## ⏱️ E2E Test Timing" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Extract test names and times from JUnit XML
+            echo "| Test | Duration |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
+            grep -oP 'name="[^"]*"[^>]*time="[^"]*"' e2e-results.xml | \
+              sed 's/name="\([^"]*\)".*time="\([^"]*\)"/| \1 | \2s |/' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # Total time
+            TOTAL=$(grep -oP 'time="[^"]*"' e2e-results.xml | head -1 | grep -oP '[0-9.]+')
+            echo "**Total Duration: ${TOTAL}s**" >> $GITHUB_STEP_SUMMARY
+          fi

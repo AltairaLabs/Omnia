@@ -122,7 +122,11 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 
 .PHONY: test-e2e-junit
 test-e2e-junit: setup-test-e2e manifests generate fmt vet ## Run e2e tests with JUnit XML output.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.junit-report=e2e-results.xml -timeout 20m
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+		-ginkgo.junit-report=e2e-results.xml \
+		-ginkgo.show-node-events \
+		-ginkgo.poll-progress-after=30s \
+		-timeout 20m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
