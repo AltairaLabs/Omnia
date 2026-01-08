@@ -140,74 +140,122 @@ func LoadConfig() (*Config, error) {
 		SessionTTL:        defaultSessionTTL,
 	}
 
-	// Parse tracing sample rate
-	if rate := os.Getenv(envTracingSampleRate); rate != "" {
-		r, err := strconv.ParseFloat(rate, 64)
-		if err != nil {
-			return nil, fmt.Errorf(errFmtInvalidEnvVar, envTracingSampleRate, err)
-		}
-		if r < 0 || r > 1 {
-			return nil, fmt.Errorf("invalid %s: must be between 0.0 and 1.0", envTracingSampleRate)
-		}
-		cfg.TracingSampleRate = r
+	if err := cfg.parseEnvironmentOverrides(); err != nil {
+		return nil, err
 	}
 
-	// Parse ports
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// parseEnvironmentOverrides parses optional environment variable overrides.
+func (cfg *Config) parseEnvironmentOverrides() error {
+	if err := cfg.parseTracingSampleRate(); err != nil {
+		return err
+	}
+	if err := cfg.parsePorts(); err != nil {
+		return err
+	}
+	return cfg.parseSessionTTL()
+}
+
+// parseTracingSampleRate parses the tracing sample rate from environment.
+func (cfg *Config) parseTracingSampleRate() error {
+	rate := os.Getenv(envTracingSampleRate)
+	if rate == "" {
+		return nil
+	}
+	r, err := strconv.ParseFloat(rate, 64)
+	if err != nil {
+		return fmt.Errorf(errFmtInvalidEnvVar, envTracingSampleRate, err)
+	}
+	if r < 0 || r > 1 {
+		return fmt.Errorf("invalid %s: must be between 0.0 and 1.0", envTracingSampleRate)
+	}
+	cfg.TracingSampleRate = r
+	return nil
+}
+
+// parsePorts parses GRPC and health port overrides.
+func (cfg *Config) parsePorts() error {
 	if port := os.Getenv(envGRPCPort); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
-			return nil, fmt.Errorf(errFmtInvalidEnvVar, envGRPCPort, err)
+			return fmt.Errorf(errFmtInvalidEnvVar, envGRPCPort, err)
 		}
 		cfg.GRPCPort = p
 	}
-
 	if port := os.Getenv(envHealthPort); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
-			return nil, fmt.Errorf(errFmtInvalidEnvVar, envHealthPort, err)
+			return fmt.Errorf(errFmtInvalidEnvVar, envHealthPort, err)
 		}
 		cfg.HealthPort = p
 	}
+	return nil
+}
 
-	// Parse session TTL
-	if ttl := os.Getenv(envSessionTTL); ttl != "" {
-		d, err := time.ParseDuration(ttl)
-		if err != nil {
-			return nil, fmt.Errorf(errFmtInvalidEnvVar, envSessionTTL, err)
-		}
-		cfg.SessionTTL = d
+// parseSessionTTL parses the session TTL from environment.
+func (cfg *Config) parseSessionTTL() error {
+	ttl := os.Getenv(envSessionTTL)
+	if ttl == "" {
+		return nil
 	}
+	d, err := time.ParseDuration(ttl)
+	if err != nil {
+		return fmt.Errorf(errFmtInvalidEnvVar, envSessionTTL, err)
+	}
+	cfg.SessionTTL = d
+	return nil
+}
 
-	// Validate required fields
+// validate validates the configuration.
+func (cfg *Config) validate() error {
+	if err := cfg.validateRequiredFields(); err != nil {
+		return err
+	}
+	if err := cfg.validateSessionConfig(); err != nil {
+		return err
+	}
+	return cfg.validateProviderType()
+}
+
+// validateRequiredFields checks that required fields are set.
+func (cfg *Config) validateRequiredFields() error {
 	if cfg.AgentName == "" {
-		return nil, fmt.Errorf("%s is required", envAgentName)
+		return fmt.Errorf("%s is required", envAgentName)
 	}
 	if cfg.Namespace == "" {
-		return nil, fmt.Errorf("%s is required", envNamespace)
+		return fmt.Errorf("%s is required", envNamespace)
 	}
+	return nil
+}
 
-	// Validate session type
+// validateSessionConfig validates session configuration.
+func (cfg *Config) validateSessionConfig() error {
 	switch cfg.SessionType {
 	case SessionTypeMemory, SessionTypeRedis:
 		// Valid
 	default:
-		return nil, fmt.Errorf("invalid %s: must be 'memory' or 'redis'", envSessionType)
+		return fmt.Errorf("invalid %s: must be 'memory' or 'redis'", envSessionType)
 	}
-
-	// Validate Redis URL if using Redis
 	if cfg.SessionType == SessionTypeRedis && cfg.SessionURL == "" {
-		return nil, fmt.Errorf("%s is required when using Redis sessions", envSessionURL)
+		return fmt.Errorf("%s is required when using Redis sessions", envSessionURL)
 	}
+	return nil
+}
 
-	// Validate provider type
+// validateProviderType validates the provider type.
+func (cfg *Config) validateProviderType() error {
 	switch cfg.ProviderType {
 	case ProviderTypeAuto, ProviderTypeClaude, ProviderTypeOpenAI, ProviderTypeGemini:
-		// Valid
+		return nil
 	default:
-		return nil, fmt.Errorf("invalid %s: must be 'auto', 'claude', 'openai', or 'gemini'", envProviderType)
+		return fmt.Errorf("invalid %s: must be 'auto', 'claude', 'openai', or 'gemini'", envProviderType)
 	}
-
-	return cfg, nil
 }
 
 func getEnvOrDefault(key, defaultValue string) string {

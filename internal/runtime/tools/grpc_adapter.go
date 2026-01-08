@@ -103,22 +103,39 @@ func (a *GRPCAdapter) Connect(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Build dial options
-	opts := []grpc.DialOption{}
-
-	if a.config.TLS {
-		tlsConfig, err := a.buildTLSConfig()
-		if err != nil {
-			return fmt.Errorf("failed to build TLS config: %w", err)
-		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
-		a.log.Info("connecting with TLS", "endpoint", a.config.Endpoint)
-	} else {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		a.log.Info("connecting without TLS", "endpoint", a.config.Endpoint)
+	opts, err := a.buildDialOptions()
+	if err != nil {
+		return err
 	}
 
-	// Connect with timeout
+	if err := a.establishConnection(ctx, opts); err != nil {
+		return err
+	}
+
+	a.tools = make(map[string]*toolsv1.ToolInfo)
+	a.initializeTools(ctx)
+
+	a.log.Info("connected to gRPC server", "toolCount", len(a.tools))
+	return nil
+}
+
+// buildDialOptions builds gRPC dial options including TLS configuration.
+func (a *GRPCAdapter) buildDialOptions() ([]grpc.DialOption, error) {
+	if !a.config.TLS {
+		a.log.Info("connecting without TLS", "endpoint", a.config.Endpoint)
+		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
+	}
+
+	tlsConfig, err := a.buildTLSConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build TLS config: %w", err)
+	}
+	a.log.Info("connecting with TLS", "endpoint", a.config.Endpoint)
+	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))}, nil
+}
+
+// establishConnection establishes the gRPC connection.
+func (a *GRPCAdapter) establishConnection(ctx context.Context, opts []grpc.DialOption) error {
 	ctx, cancel := context.WithTimeout(ctx, a.config.Timeout)
 	defer cancel()
 
@@ -128,42 +145,45 @@ func (a *GRPCAdapter) Connect(ctx context.Context) error {
 	}
 	a.conn = conn
 	a.client = toolsv1.NewToolServiceClient(conn)
+	return nil
+}
 
-	// Initialize tool map
-	a.tools = make(map[string]*toolsv1.ToolInfo)
-
-	// If tool definition is provided in config, use it instead of discovery
+// initializeTools initializes the tool map from config or discovery.
+func (a *GRPCAdapter) initializeTools(ctx context.Context) {
 	if a.config.ToolName != "" {
-		inputSchemaJSON := ""
-		if a.config.ToolInputSchema != nil {
-			schemaBytes, err := json.Marshal(a.config.ToolInputSchema)
-			if err == nil {
-				inputSchemaJSON = string(schemaBytes)
-			}
-		}
+		a.registerConfiguredTool()
+		return
+	}
+	a.discoverTools(ctx)
+}
 
-		a.tools[a.config.ToolName] = &toolsv1.ToolInfo{
-			Name:        a.config.ToolName,
-			Description: a.config.ToolDescription,
-			InputSchema: inputSchemaJSON,
-		}
-		a.log.Info("using configured tool definition", "tool", a.config.ToolName)
-	} else {
-		// Discover available tools via ListTools
-		resp, err := a.client.ListTools(ctx, &toolsv1.ListToolsRequest{})
-		if err != nil {
-			// ListTools is optional - some servers may not implement it
-			a.log.V(1).Info("ListTools not available, tools will be discovered on first call", "error", err)
-		} else {
-			for _, tool := range resp.Tools {
-				a.tools[tool.Name] = tool
-				a.log.V(1).Info("discovered tool", "name", tool.Name, "description", tool.Description)
-			}
+// registerConfiguredTool registers a tool from the adapter configuration.
+func (a *GRPCAdapter) registerConfiguredTool() {
+	inputSchemaJSON := ""
+	if a.config.ToolInputSchema != nil {
+		if schemaBytes, err := json.Marshal(a.config.ToolInputSchema); err == nil {
+			inputSchemaJSON = string(schemaBytes)
 		}
 	}
+	a.tools[a.config.ToolName] = &toolsv1.ToolInfo{
+		Name:        a.config.ToolName,
+		Description: a.config.ToolDescription,
+		InputSchema: inputSchemaJSON,
+	}
+	a.log.Info("using configured tool definition", "tool", a.config.ToolName)
+}
 
-	a.log.Info("connected to gRPC server", "toolCount", len(a.tools))
-	return nil
+// discoverTools discovers available tools via ListTools RPC.
+func (a *GRPCAdapter) discoverTools(ctx context.Context) {
+	resp, err := a.client.ListTools(ctx, &toolsv1.ListToolsRequest{})
+	if err != nil {
+		a.log.V(1).Info("ListTools not available, tools will be discovered on first call", "error", err)
+		return
+	}
+	for _, tool := range resp.Tools {
+		a.tools[tool.Name] = tool
+		a.log.V(1).Info("discovered tool", "name", tool.Name, "description", tool.Description)
+	}
 }
 
 // buildTLSConfig builds the TLS configuration.

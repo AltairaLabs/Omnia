@@ -59,7 +59,7 @@ const typeLabels = {
 
 export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPanelProps>) {
   const [notes, setNotes] = useState<NotesMap>(() => {
-    if (typeof globalThis.window === "undefined") return {};
+    if (globalThis.window === undefined) return {};
     return loadNotes();
   });
   const [isAdding, setIsAdding] = useState(false);

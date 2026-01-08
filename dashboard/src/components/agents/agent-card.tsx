@@ -87,7 +87,6 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
               </p>
             </div>
             <div
-              role="presentation"
               onClick={(e) => e.preventDefault()}
             >
               <p className="text-muted-foreground mb-1">Replicas</p>

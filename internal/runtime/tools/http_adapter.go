@@ -218,19 +218,34 @@ func (a *HTTPAdapter) Call(ctx context.Context, name string, args map[string]any
 
 // buildRequest creates an HTTP request with the configured options.
 func (a *HTTPAdapter) buildRequest(ctx context.Context, args map[string]any) (*http.Request, error) {
-	var reqBody io.Reader
+	method := strings.ToUpper(a.config.Method)
+	endpoint, reqBody, err := a.prepareRequestData(method, args)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	a.setHeaders(req, reqBody != nil)
+	if err := a.setAuth(req); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+// prepareRequestData prepares the endpoint URL and request body based on HTTP method.
+func (a *HTTPAdapter) prepareRequestData(method string, args map[string]any) (string, io.Reader, error) {
 	endpoint := a.config.Endpoint
 
-	method := strings.ToUpper(a.config.Method)
-
 	// For GET/DELETE, encode args as query parameters
-	// For POST/PUT/PATCH, encode args as JSON body
-	switch method {
-	case http.MethodGet, http.MethodDelete:
+	if method == http.MethodGet || method == http.MethodDelete {
 		if len(args) > 0 {
 			u, err := url.Parse(endpoint)
 			if err != nil {
-				return nil, err
+				return "", nil, err
 			}
 			q := u.Query()
 			for k, v := range args {
@@ -239,38 +254,28 @@ func (a *HTTPAdapter) buildRequest(ctx context.Context, args map[string]any) (*h
 			u.RawQuery = q.Encode()
 			endpoint = u.String()
 		}
-	default:
-		// POST, PUT, PATCH - encode as JSON body
-		if args != nil {
-			jsonBody, err := json.Marshal(args)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal arguments: %w", err)
-			}
-			reqBody = bytes.NewReader(jsonBody)
-		}
+		return endpoint, nil, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, reqBody)
+	// POST, PUT, PATCH - encode as JSON body
+	if args == nil {
+		return endpoint, nil, nil
+	}
+	jsonBody, err := json.Marshal(args)
 	if err != nil {
-		return nil, err
+		return "", nil, fmt.Errorf("failed to marshal arguments: %w", err)
 	}
+	return endpoint, bytes.NewReader(jsonBody), nil
+}
 
-	// Set Content-Type for requests with body
-	if reqBody != nil {
+// setHeaders sets Content-Type and custom headers on the request.
+func (a *HTTPAdapter) setHeaders(req *http.Request, hasBody bool) {
+	if hasBody {
 		req.Header.Set("Content-Type", a.config.ContentType)
 	}
-
-	// Set custom headers
 	for k, v := range a.config.Headers {
 		req.Header.Set(k, v)
 	}
-
-	// Set authentication
-	if err := a.setAuth(req); err != nil {
-		return nil, err
-	}
-
-	return req, nil
 }
 
 // setAuth sets the authentication header on the request.

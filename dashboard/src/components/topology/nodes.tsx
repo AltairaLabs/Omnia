@@ -20,7 +20,6 @@ function PostItNote({
 }>) {
   return (
     <div
-      role="presentation"
       className="absolute -top-2 -right-2 translate-x-full max-w-[180px] z-10"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}

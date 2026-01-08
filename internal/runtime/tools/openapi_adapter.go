@@ -255,50 +255,58 @@ func (a *OpenAPIAdapter) parseOperations(spec map[string]any) ([]*OpenAPIOperati
 	}
 
 	var operations []*OpenAPIOperation
-
 	for path, pathItem := range paths {
 		pathObj, ok := pathItem.(map[string]any)
 		if !ok {
 			continue
 		}
+		ops := a.parsePathOperations(path, pathObj)
+		operations = append(operations, ops...)
+	}
+	return operations, nil
+}
 
-		// Check each HTTP method
-		for _, method := range []string{"get", "post", "put", "patch", "delete"} {
-			opObj, ok := pathObj[method].(map[string]any)
-			if !ok {
-				continue
-			}
-
-			operationID, _ := opObj["operationId"].(string)
-			if operationID == "" {
-				// Generate operationId from method + path if not provided
-				operationID = a.generateOperationID(method, path)
-			}
-
-			op := &OpenAPIOperation{
-				OperationID: operationID,
-				Method:      strings.ToUpper(method),
-				Path:        path,
-			}
-
-			if summary, ok := opObj["summary"].(string); ok {
-				op.Summary = summary
-			}
-			if desc, ok := opObj["description"].(string); ok {
-				op.Description = desc
-			}
-
-			// Parse parameters
-			op.Parameters = a.parseParameters(opObj, pathObj)
-
-			// Parse request body (OpenAPI 3.x)
-			op.RequestBody = a.parseRequestBody(opObj)
-
+// parsePathOperations extracts operations for a single path.
+func (a *OpenAPIAdapter) parsePathOperations(path string, pathObj map[string]any) []*OpenAPIOperation {
+	var operations []*OpenAPIOperation
+	for _, method := range []string{"get", "post", "put", "patch", "delete"} {
+		op := a.parseMethodOperation(method, path, pathObj)
+		if op != nil {
 			operations = append(operations, op)
 		}
 	}
+	return operations
+}
 
-	return operations, nil
+// parseMethodOperation extracts a single operation for a method.
+func (a *OpenAPIAdapter) parseMethodOperation(method, path string, pathObj map[string]any) *OpenAPIOperation {
+	opObj, ok := pathObj[method].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	operationID, _ := opObj["operationId"].(string)
+	if operationID == "" {
+		operationID = a.generateOperationID(method, path)
+	}
+
+	op := &OpenAPIOperation{
+		OperationID: operationID,
+		Method:      strings.ToUpper(method),
+		Path:        path,
+	}
+
+	if summary, ok := opObj["summary"].(string); ok {
+		op.Summary = summary
+	}
+	if desc, ok := opObj["description"].(string); ok {
+		op.Description = desc
+	}
+
+	op.Parameters = a.parseParameters(opObj, pathObj)
+	op.RequestBody = a.parseRequestBody(opObj)
+
+	return op
 }
 
 // generateOperationID generates an operationId from method and path.
@@ -314,38 +322,52 @@ func (a *OpenAPIAdapter) generateOperationID(method, path string) string {
 // parseParameters extracts parameters from an operation.
 func (a *OpenAPIAdapter) parseParameters(opObj, pathObj map[string]any) []OpenAPIParameter {
 	var params []OpenAPIParameter
-
 	// Collect parameters from path level and operation level
 	for _, source := range []map[string]any{pathObj, opObj} {
-		if paramList, ok := source["parameters"].([]any); ok {
-			for _, p := range paramList {
-				param, ok := p.(map[string]any)
-				if !ok {
-					continue
-				}
+		params = append(params, a.parseParameterList(source)...)
+	}
+	return params
+}
 
-				op := OpenAPIParameter{
-					Name: param["name"].(string),
-				}
-				if in, ok := param["in"].(string); ok {
-					op.In = in
-				}
-				if req, ok := param["required"].(bool); ok {
-					op.Required = req
-				}
-				if desc, ok := param["description"].(string); ok {
-					op.Description = desc
-				}
-				if schema, ok := param["schema"].(map[string]any); ok {
-					op.Schema = schema
-				}
-
-				params = append(params, op)
-			}
+// parseParameterList extracts parameters from a parameter list in a source object.
+func (a *OpenAPIAdapter) parseParameterList(source map[string]any) []OpenAPIParameter {
+	paramList, ok := source["parameters"].([]any)
+	if !ok {
+		return nil
+	}
+	var params []OpenAPIParameter
+	for _, p := range paramList {
+		if param := a.parseSingleParameter(p); param != nil {
+			params = append(params, *param)
 		}
 	}
-
 	return params
+}
+
+// parseSingleParameter parses a single parameter definition.
+func (a *OpenAPIAdapter) parseSingleParameter(p any) *OpenAPIParameter {
+	param, ok := p.(map[string]any)
+	if !ok {
+		return nil
+	}
+	name, _ := param["name"].(string)
+	if name == "" {
+		return nil
+	}
+	op := &OpenAPIParameter{Name: name}
+	if in, ok := param["in"].(string); ok {
+		op.In = in
+	}
+	if req, ok := param["required"].(bool); ok {
+		op.Required = req
+	}
+	if desc, ok := param["description"].(string); ok {
+		op.Description = desc
+	}
+	if schema, ok := param["schema"].(map[string]any); ok {
+		op.Schema = schema
+	}
+	return op
 }
 
 // parseRequestBody extracts the request body schema from an operation.
@@ -397,42 +419,18 @@ func (a *OpenAPIAdapter) buildInputSchema(op *OpenAPIOperation) map[string]any {
 
 	// Add parameters
 	for _, param := range op.Parameters {
-		schema := param.Schema
-		if schema == nil {
-			schema = map[string]any{"type": "string"}
-		}
-
-		// Add description to schema
-		if param.Description != "" {
-			schemaCopy := make(map[string]any)
-			for k, v := range schema {
-				schemaCopy[k] = v
-			}
-			schemaCopy["description"] = param.Description
-			schema = schemaCopy
-		}
-
-		properties[param.Name] = schema
+		properties[param.Name] = a.buildParameterSchema(param)
 		if param.Required {
 			required = append(required, param.Name)
 		}
 	}
 
 	// Add request body properties
-	if op.RequestBody != nil && op.RequestBody.Schema != nil {
-		if bodyProps, ok := op.RequestBody.Schema["properties"].(map[string]any); ok {
-			for name, schema := range bodyProps {
-				properties[name] = schema
-			}
-		}
-		if bodyRequired, ok := op.RequestBody.Schema["required"].([]any); ok {
-			for _, r := range bodyRequired {
-				if name, ok := r.(string); ok {
-					required = append(required, name)
-				}
-			}
-		}
+	bodyProps, bodyReq := a.extractRequestBodySchema(op.RequestBody)
+	for name, schema := range bodyProps {
+		properties[name] = schema
 	}
+	required = append(required, bodyReq...)
 
 	result := map[string]any{
 		"type":       "object",
@@ -441,8 +439,42 @@ func (a *OpenAPIAdapter) buildInputSchema(op *OpenAPIOperation) map[string]any {
 	if len(required) > 0 {
 		result["required"] = required
 	}
-
 	return result
+}
+
+// buildParameterSchema builds a schema for a single parameter.
+func (a *OpenAPIAdapter) buildParameterSchema(param OpenAPIParameter) map[string]any {
+	schema := param.Schema
+	if schema == nil {
+		schema = map[string]any{"type": "string"}
+	}
+	if param.Description == "" {
+		return schema
+	}
+	// Add description to schema copy
+	schemaCopy := make(map[string]any)
+	for k, v := range schema {
+		schemaCopy[k] = v
+	}
+	schemaCopy["description"] = param.Description
+	return schemaCopy
+}
+
+// extractRequestBodySchema extracts properties and required fields from request body.
+func (a *OpenAPIAdapter) extractRequestBodySchema(reqBody *OpenAPIRequestBody) (map[string]any, []string) {
+	if reqBody == nil || reqBody.Schema == nil {
+		return nil, nil
+	}
+	var required []string
+	bodyProps, _ := reqBody.Schema["properties"].(map[string]any)
+	if bodyRequired, ok := reqBody.Schema["required"].([]any); ok {
+		for _, r := range bodyRequired {
+			if name, ok := r.(string); ok {
+				required = append(required, name)
+			}
+		}
+	}
+	return bodyProps, required
 }
 
 // ListTools returns available tools from this adapter.
@@ -513,59 +545,21 @@ func (a *OpenAPIAdapter) Call(ctx context.Context, name string, args map[string]
 	}, nil
 }
 
+// requestParams holds categorized parameters for building a request.
+type requestParams struct {
+	path    string
+	query   url.Values
+	headers map[string]string
+	body    map[string]any
+}
+
 // buildRequest creates an HTTP request for an operation.
 func (a *OpenAPIAdapter) buildRequest(ctx context.Context, op *OpenAPIOperation, args map[string]any) (*http.Request, error) {
-	// Build URL with path parameters substituted
-	path := op.Path
-	queryParams := url.Values{}
-	bodyParams := make(map[string]any)
-	headerParams := make(map[string]string)
-
-	// Categorize parameters
-	for _, param := range op.Parameters {
-		value, exists := args[param.Name]
-		if !exists {
-			continue
-		}
-
-		switch param.In {
-		case "path":
-			path = strings.ReplaceAll(path, "{"+param.Name+"}", fmt.Sprintf("%v", value))
-		case "query":
-			queryParams.Set(param.Name, fmt.Sprintf("%v", value))
-		case "header":
-			headerParams[param.Name] = fmt.Sprintf("%v", value)
-		}
-	}
-
-	// Remaining args go to request body (for POST/PUT/PATCH)
-	for name, value := range args {
-		isParam := false
-		for _, param := range op.Parameters {
-			if param.Name == name {
-				isParam = true
-				break
-			}
-		}
-		if !isParam {
-			bodyParams[name] = value
-		}
-	}
-
-	// Build full URL
-	fullURL := a.baseURL + path
-	if len(queryParams) > 0 {
-		fullURL += "?" + queryParams.Encode()
-	}
-
-	// Build request body
-	var reqBody io.Reader
-	if len(bodyParams) > 0 && (op.Method == "POST" || op.Method == "PUT" || op.Method == "PATCH") {
-		jsonBody, err := json.Marshal(bodyParams)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal body: %w", err)
-		}
-		reqBody = bytes.NewReader(jsonBody)
+	params := a.categorizeArgs(op, args)
+	fullURL := a.buildRequestURL(params)
+	reqBody, err := a.buildRequestBody(op.Method, params.body)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, op.Method, fullURL, reqBody)
@@ -573,28 +567,84 @@ func (a *OpenAPIAdapter) buildRequest(ctx context.Context, op *OpenAPIOperation,
 		return nil, err
 	}
 
-	// Set headers
-	if reqBody != nil {
-		req.Header.Set("Content-Type", contentTypeJSON)
-	}
-	req.Header.Set("Accept", contentTypeJSON)
-
-	// Custom headers from config
-	for k, v := range a.config.Headers {
-		req.Header.Set(k, v)
-	}
-
-	// Parameter headers
-	for k, v := range headerParams {
-		req.Header.Set(k, v)
-	}
-
-	// Authentication
+	a.setRequestHeaders(req, reqBody != nil, params.headers)
 	if err := a.setAuth(req); err != nil {
 		return nil, err
 	}
-
 	return req, nil
+}
+
+// categorizeArgs categorizes arguments into path, query, header, and body params.
+func (a *OpenAPIAdapter) categorizeArgs(op *OpenAPIOperation, args map[string]any) requestParams {
+	params := requestParams{
+		path:    op.Path,
+		query:   url.Values{},
+		headers: make(map[string]string),
+		body:    make(map[string]any),
+	}
+
+	paramNames := make(map[string]bool)
+	for _, param := range op.Parameters {
+		paramNames[param.Name] = true
+		value, exists := args[param.Name]
+		if !exists {
+			continue
+		}
+		switch param.In {
+		case "path":
+			params.path = strings.ReplaceAll(params.path, "{"+param.Name+"}", fmt.Sprintf("%v", value))
+		case "query":
+			params.query.Set(param.Name, fmt.Sprintf("%v", value))
+		case "header":
+			params.headers[param.Name] = fmt.Sprintf("%v", value)
+		}
+	}
+
+	// Remaining args go to request body
+	for name, value := range args {
+		if !paramNames[name] {
+			params.body[name] = value
+		}
+	}
+	return params
+}
+
+// buildRequestURL builds the full URL from base URL and params.
+func (a *OpenAPIAdapter) buildRequestURL(params requestParams) string {
+	fullURL := a.baseURL + params.path
+	if len(params.query) > 0 {
+		fullURL += "?" + params.query.Encode()
+	}
+	return fullURL
+}
+
+// buildRequestBody builds the request body for methods that support it.
+func (a *OpenAPIAdapter) buildRequestBody(method string, bodyParams map[string]any) (io.Reader, error) {
+	if len(bodyParams) == 0 {
+		return nil, nil
+	}
+	if method != "POST" && method != "PUT" && method != "PATCH" {
+		return nil, nil
+	}
+	jsonBody, err := json.Marshal(bodyParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal body: %w", err)
+	}
+	return bytes.NewReader(jsonBody), nil
+}
+
+// setRequestHeaders sets standard and custom headers on the request.
+func (a *OpenAPIAdapter) setRequestHeaders(req *http.Request, hasBody bool, paramHeaders map[string]string) {
+	if hasBody {
+		req.Header.Set("Content-Type", contentTypeJSON)
+	}
+	req.Header.Set("Accept", contentTypeJSON)
+	for k, v := range a.config.Headers {
+		req.Header.Set(k, v)
+	}
+	for k, v := range paramHeaders {
+		req.Header.Set(k, v)
+	}
 }
 
 // setAuth sets authentication headers on a request.
