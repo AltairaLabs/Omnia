@@ -49,7 +49,7 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
 
   return (
     <Link href={`/agents/${metadata.name}?namespace=${metadata.namespace}`}>
-      <Card className="transition-colors hover:bg-muted/50">
+      <Card className="transition-colors hover:bg-muted/50" data-testid="agent-card">
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between">
             <div className="space-y-1">

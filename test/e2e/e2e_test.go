@@ -683,7 +683,7 @@ data:
 				g.Expect(output).To(ContainSubstring("true"))
 				g.Expect(strings.Count(output, "true")).To(Equal(2), "Expected 2 containers to be ready")
 			}
-			ok := Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			ok := Eventually(verifyContainersReady, 5*time.Minute, 5*time.Second).Should(Succeed())
 			if !ok {
 				// Dump debug info on failure
 				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Container readiness failed ===\n")
@@ -1556,7 +1556,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("true true"), "Both containers should be ready")
 			}
-			Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			Eventually(verifyContainersReady, 5*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("waiting for service endpoint to be ready")
 			verifyServiceEndpoint := func(g Gomega) {

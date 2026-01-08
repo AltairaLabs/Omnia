@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 // URL patterns (simple patterns to avoid slow regex)
 const urlPatterns = {
   agents: /agents$/,
-  promptPacks: /prompt-packs$/,
+  promptPacks: /promptpacks$/,
   tools: /tools$/,
 };
 
@@ -33,7 +33,7 @@ test.describe('Navigation', () => {
   });
 
   test('should navigate to prompt packs page', async ({ page }) => {
-    await page.click('[data-testid="nav-prompt-packs"], [href="/prompt-packs"]');
+    await page.click('[data-testid="nav-promptpacks"], [href="/promptpacks"]');
     await expect(page).toHaveURL(urlPatterns.promptPacks);
   });
 
@@ -65,7 +65,7 @@ test.describe('Navigation', () => {
     const sidebar = page.locator('[data-testid="sidebar"], nav');
 
     await expect(sidebar.locator('text=Agents')).toBeVisible();
-    await expect(sidebar.locator('text=Prompt Packs, text=PromptPacks').first()).toBeVisible();
+    await expect(sidebar.locator('text=PromptPacks')).toBeVisible();
     await expect(sidebar.locator('text=Tools')).toBeVisible();
   });
 });

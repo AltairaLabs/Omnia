@@ -33,7 +33,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="flex h-full w-64 flex-col border-r border-border bg-card">
+    <div className="flex h-full w-64 flex-col border-r border-border bg-card" data-testid="sidebar">
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-border px-6">
         <Image

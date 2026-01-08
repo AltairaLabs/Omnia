@@ -65,7 +65,7 @@ export function ToolRegistryCard({ registry }: Readonly<ToolRegistryCardProps>) 
     <Link
       href={`/tools/${metadata.name}?namespace=${metadata.namespace}`}
     >
-      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
+      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full" data-testid="toolregistry-card">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">

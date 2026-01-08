@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
  */
 
 // URLs
-const PROMPT_PACKS_URL = '/prompt-packs';
+const PROMPT_PACKS_URL = '/promptpacks';
 
 // Common selectors
 const SELECTORS = {
@@ -15,7 +15,7 @@ const SELECTORS = {
 };
 
 // URL patterns (simple patterns to avoid slow regex)
-const promptPackDetailUrlPattern = /prompt-packs\/[^/]+$/;
+const promptPackDetailUrlPattern = /promptpacks\/[^/]+$/;
 
 test.describe('Prompt Packs Page', () => {
   test.beforeEach(async ({ page }) => {
