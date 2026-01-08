@@ -4,6 +4,7 @@
 resources:
 - bases/omnia.altairalabs.ai_agentruntimes.yaml
 - bases/omnia.altairalabs.ai_promptpacks.yaml
+- bases/omnia.altairalabs.ai_providers.yaml
 - bases/omnia.altairalabs.ai_toolregistries.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
