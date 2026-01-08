@@ -26,7 +26,7 @@ export default function TopologyPage() {
 
   // Notes state - initialize from localStorage
   const [notes, setNotes] = useState<NotesMap>(() => {
-    if (typeof window === "undefined") return {};
+    if (typeof globalThis.window === "undefined") return {};
     return loadNotes();
   });
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);

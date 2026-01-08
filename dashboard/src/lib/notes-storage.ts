@@ -18,7 +18,7 @@ function getResourceKey(type: string, namespace: string, name: string): string {
 }
 
 export function loadNotes(): NotesMap {
-  if (typeof window === "undefined") return {};
+  if (typeof globalThis.window === "undefined") return {};
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored ? JSON.parse(stored) : {};
@@ -28,7 +28,7 @@ export function loadNotes(): NotesMap {
 }
 
 export function saveNotes(notes: NotesMap): void {
-  if (typeof window === "undefined") return;
+  if (typeof globalThis.window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
   } catch (e) {

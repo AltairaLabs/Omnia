@@ -42,25 +42,25 @@ type ServerMetrics interface {
 type NoOpMetrics struct{}
 
 // ConnectionOpened is a no-op - metrics are disabled.
-func (n *NoOpMetrics) ConnectionOpened() {}
+func (n *NoOpMetrics) ConnectionOpened() { /* no-op: null object pattern */ }
 
 // ConnectionClosed is a no-op - metrics are disabled.
-func (n *NoOpMetrics) ConnectionClosed() {}
+func (n *NoOpMetrics) ConnectionClosed() { /* no-op: null object pattern */ }
 
 // SessionCreated is a no-op - metrics are disabled.
-func (n *NoOpMetrics) SessionCreated() {}
+func (n *NoOpMetrics) SessionCreated() { /* no-op: null object pattern */ }
 
 // SessionClosed is a no-op - metrics are disabled.
-func (n *NoOpMetrics) SessionClosed() {}
+func (n *NoOpMetrics) SessionClosed() { /* no-op: null object pattern */ }
 
 // RequestStarted is a no-op - metrics are disabled.
-func (n *NoOpMetrics) RequestStarted() {}
+func (n *NoOpMetrics) RequestStarted() { /* no-op: null object pattern */ }
 
 // RequestCompleted is a no-op - metrics are disabled.
-func (n *NoOpMetrics) RequestCompleted(string, float64, string) {}
+func (n *NoOpMetrics) RequestCompleted(string, float64, string) { /* no-op: null object pattern */ }
 
 // MessageReceived is a no-op - metrics are disabled.
-func (n *NoOpMetrics) MessageReceived() {}
+func (n *NoOpMetrics) MessageReceived() { /* no-op: null object pattern */ }
 
 // MessageSent is a no-op - metrics are disabled.
-func (n *NoOpMetrics) MessageSent() {}
+func (n *NoOpMetrics) MessageSent() { /* no-op: null object pattern */ }

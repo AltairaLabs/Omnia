@@ -61,7 +61,7 @@ export const MODEL_PRICING: ModelPricing[] = [
     model: "gpt-4o-mini",
     displayName: "GPT-4o Mini",
     inputPer1M: 0.15,
-    outputPer1M: 0.60,
+    outputPer1M: 0.6,
   },
   {
     provider: "openai",

@@ -1,7 +1,7 @@
 // Auto-generated from omnia.altairalabs.ai_providers.yaml
 // Do not edit manually - run 'make generate-dashboard-types' to regenerate
 
-import type { ObjectMeta, Condition } from "../common";
+import type { ObjectMeta } from "../common";
 
 export interface ProviderSpec {
   /** baseURL overrides the provider's default API endpoint.

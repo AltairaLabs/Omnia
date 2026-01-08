@@ -93,6 +93,10 @@ const (
 	PromptPackMountPath = "/etc/omnia/pack"
 	// MockProviderAnnotation enables mock provider for testing.
 	MockProviderAnnotation = "omnia.altairalabs.ai/mock-provider"
+	// healthzPath is the path for health probes.
+	healthzPath = "/healthz"
+	// toolsConfigVolumeName is the name of the tools config volume.
+	toolsConfigVolumeName = "tools-config"
 )
 
 // Helper functions for creating pointers
@@ -855,7 +859,7 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/healthz",
+					Path: healthzPath,
 					Port: intstr.FromInt32(DefaultFacadeHealthPort),
 				},
 			},
@@ -905,7 +909,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/healthz",
+					Path: healthzPath,
 					Port: intstr.FromInt32(DefaultRuntimeHealthPort),
 				},
 			},
@@ -915,7 +919,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/healthz",
+					Path: healthzPath,
 					Port: intstr.FromInt32(DefaultRuntimeHealthPort),
 				},
 			},
@@ -1106,7 +1110,7 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 	// Mount tools ConfigMap if ToolRegistry is present
 	if toolRegistry != nil {
 		volumes = append(volumes, corev1.Volume{
-			Name: "tools-config",
+			Name: toolsConfigVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
@@ -1140,7 +1144,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 	// Mount tools ConfigMap if ToolRegistry is present
 	if toolRegistry != nil {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "tools-config",
+			Name:      toolsConfigVolumeName,
 			MountPath: ToolsMountPath,
 			ReadOnly:  true,
 		})
@@ -1246,7 +1250,7 @@ func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
 			labelAppName:      labelValueOmniaAgent,
 			labelAppInstance:  agentRuntime.Name,
 			labelAppManagedBy: labelValueOmniaOperator,
-			labelOmniaComp:    "tools-config",
+			labelOmniaComp:    toolsConfigVolumeName,
 		}
 
 		configMap.Labels = labels

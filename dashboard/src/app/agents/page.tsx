@@ -21,8 +21,8 @@ function renderLoadingSkeleton(viewMode: ViewMode) {
   if (viewMode === "cards") {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={`skeleton-${i}`} className="h-[180px] rounded-lg" />
+        {["sk-1", "sk-2", "sk-3", "sk-4", "sk-5", "sk-6"].map((id) => (
+          <Skeleton key={id} className="h-[180px] rounded-lg" />
         ))}
       </div>
     );

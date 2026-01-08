@@ -144,7 +144,7 @@ export function LogViewer({
   }, [apiLogs]);
 
   const [filter, setFilter] = useState("");
-  const [selectedContainer, setSelectedContainer] = useState<string | "all">("all");
+  const [selectedContainer, setSelectedContainer] = useState<string>("all");
   const [selectedLevels, setSelectedLevels] = useState<Set<string>>(
     new Set(["info", "warn", "error", "debug"])
   );

@@ -237,7 +237,7 @@ let store: FileApiKeyStore | null = null;
  * Get the singleton file store instance.
  */
 export function getFileApiKeyStore(filePath: string): FileApiKeyStore {
-  if (!store || store["filePath"] !== filePath) {
+  if (store?.["filePath"] !== filePath) {
     store?.stopWatching();
     store = new FileApiKeyStore(filePath);
   }

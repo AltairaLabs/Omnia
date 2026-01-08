@@ -43,6 +43,9 @@ const (
 	SpanKindLLM = "llm"
 	// SpanKindTool indicates a tool execution span.
 	SpanKindTool = "tool"
+
+	// attrSpanKind is the attribute key for omnia span kind.
+	attrSpanKind = "omnia.span_kind"
 )
 
 // Config holds tracing configuration.
@@ -168,7 +171,7 @@ func (p *Provider) StartConversationSpan(ctx context.Context, sessionID string) 
 	ctx, span := p.tracer.Start(ctx, "conversation.turn",
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
-			attribute.String("omnia.span_kind", SpanKindConversation),
+			attribute.String(attrSpanKind, SpanKindConversation),
 			attribute.String("omnia.session_id", sessionID),
 		),
 	)
@@ -180,7 +183,7 @@ func (p *Provider) StartLLMSpan(ctx context.Context, model string) (context.Cont
 	ctx, span := p.tracer.Start(ctx, "llm.call",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String("omnia.span_kind", SpanKindLLM),
+			attribute.String(attrSpanKind, SpanKindLLM),
 			attribute.String("llm.model", model),
 		),
 	)
@@ -192,7 +195,7 @@ func (p *Provider) StartToolSpan(ctx context.Context, toolName string) (context.
 	ctx, span := p.tracer.Start(ctx, fmt.Sprintf("tool.%s", toolName),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String("omnia.span_kind", SpanKindTool),
+			attribute.String(attrSpanKind, SpanKindTool),
 			attribute.String("tool.name", toolName),
 		),
 	)

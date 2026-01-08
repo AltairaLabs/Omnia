@@ -103,7 +103,7 @@ export async function getUserStore(): Promise<UserStore> {
 
   // Ensure data directory exists for SQLite
   if (config.storeType === "sqlite" && config.sqlitePath) {
-    const { mkdirSync } = await import("fs");
+    const { mkdirSync } = await import("node:fs");
     const dir = path.dirname(config.sqlitePath);
     mkdirSync(dir, { recursive: true });
   }

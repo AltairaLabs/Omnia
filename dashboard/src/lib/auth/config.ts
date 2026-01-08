@@ -14,11 +14,10 @@ import {
   DEFAULT_SCOPES,
   type OAuthConfig,
   type OAuthProviderType,
-  type ClaimMapping,
 } from "./oauth/types";
 
 // Re-export OAuth types for convenience
-export type { OAuthConfig, OAuthProviderType, ClaimMapping };
+export type { OAuthConfig, OAuthProviderType, ClaimMapping } from "./oauth/types";
 
 export type AuthMode = "proxy" | "oauth" | "builtin" | "anonymous";
 

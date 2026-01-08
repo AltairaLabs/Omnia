@@ -25,8 +25,8 @@ export function RecentAgents() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={`skeleton-${i}`} className="flex items-center gap-4">
+            {["sk-1", "sk-2", "sk-3", "sk-4", "sk-5"].map((id) => (
+              <div key={id} className="flex items-center gap-4">
                 <Skeleton className="h-10 w-10 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-32" />

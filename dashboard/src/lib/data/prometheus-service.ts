@@ -9,7 +9,6 @@ import {
   queryPrometheusRange,
   isPrometheusAvailable,
   matrixToTimeSeries,
-  type PrometheusVectorResult,
 } from "../prometheus";
 import { getModelPricing } from "../pricing";
 import type {
@@ -152,7 +151,7 @@ export class PrometheusService {
     field: keyof Pick<CostAllocationItem, "inputTokens" | "outputTokens" | "cacheHits" | "requests" | "totalCost">
   ): void {
     if (result.status !== "success" || !result.data?.result) return;
-    for (const item of result.data.result as PrometheusVectorResult[]) {
+    for (const item of result.data.result) {
       const agent = this.getOrCreateAgent(agentMap, item.metric);
       agent[field] = Number.parseFloat(item.value[1]) || 0;
     }

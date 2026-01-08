@@ -21,7 +21,7 @@ import {
 } from "@/lib/auth/permissions";
 
 // Re-export Permission for convenience
-export { Permission };
+export { Permission } from "@/lib/auth/permissions";
 
 interface UsePermissionsReturn {
   /** Check if user has a specific permission */

@@ -116,7 +116,7 @@ function processCrd(crdPath, resourceName) {
     `// Auto-generated from ${path.basename(crdPath)}`,
     `// Do not edit manually - run 'make generate-dashboard-types' to regenerate`,
     '',
-    `import type { ObjectMeta, Condition } from "../common";`,
+    `import type { ObjectMeta } from "../common";`,
     '',
   ];
 

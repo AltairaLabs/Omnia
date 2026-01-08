@@ -6,7 +6,7 @@ import type { UserRole } from "./config";
 import type { OAuthTokens, PKCEData } from "./oauth/types";
 
 // Re-export for convenience
-export type { UserRole };
+export type { UserRole } from "./config";
 
 /**
  * Authentication provider types.

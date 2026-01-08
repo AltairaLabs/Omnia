@@ -1,7 +1,7 @@
 // Auto-generated from omnia.altairalabs.ai_toolregistries.yaml
 // Do not edit manually - run 'make generate-dashboard-types' to regenerate
 
-import type { ObjectMeta, Condition } from "../common";
+import type { ObjectMeta } from "../common";
 
 export interface ToolRegistrySpec {
   /** handlers defines the list of tool handlers in this registry.

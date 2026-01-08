@@ -39,6 +39,8 @@ import (
 const (
 	ProviderConditionTypeCredentialsValid = "CredentialsValid"
 	ProviderConditionTypeSecretFound      = "SecretFound"
+	// secretKeyAPIKey is the common secret key name for API keys.
+	secretKeyAPIKey = "api-key"
 )
 
 // ProviderReconciler reconciles a Provider object
@@ -160,13 +162,13 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 func getExpectedKeysForProvider(providerType omniav1alpha1.ProviderType) []string {
 	switch providerType {
 	case omniav1alpha1.ProviderTypeClaude:
-		return []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "api-key"}
+		return []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", secretKeyAPIKey}
 	case omniav1alpha1.ProviderTypeOpenAI:
-		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", "api-key"}
+		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", secretKeyAPIKey}
 	case omniav1alpha1.ProviderTypeGemini:
-		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "api-key"}
+		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", secretKeyAPIKey}
 	default:
-		return []string{"api-key", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
+		return []string{secretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
 	}
 }
 

@@ -25,8 +25,8 @@ function LoadingSkeleton() {
       />
       <div className="flex-1 p-6 space-y-6 overflow-auto">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={`skeleton-${i}`} className="h-32" />
+          {["sk-1", "sk-2", "sk-3", "sk-4"].map((id) => (
+            <Skeleton key={id} className="h-32" />
           ))}
         </div>
         <Skeleton className="h-80" />

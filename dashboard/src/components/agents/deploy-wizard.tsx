@@ -339,7 +339,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
               <Input
                 id="name"
                 value={formData.name}
-                onChange={(e) => updateField("name", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+                onChange={(e) => updateField("name", e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-"))}
                 placeholder="my-agent"
               />
               <p className="text-xs text-muted-foreground">

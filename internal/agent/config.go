@@ -54,6 +54,9 @@ const (
 	DefaultPromptPackMountPath = "/etc/promptpack"
 )
 
+// Error format strings.
+const errFmtInvalidEnv = "invalid %s: %w"
+
 // FacadeType represents the type of facade to use.
 type FacadeType string
 
@@ -159,14 +162,14 @@ func LoadFromEnv() (*Config, error) {
 	// Parse facade port
 	facadePort, err := getEnvAsInt(EnvFacadePort, DefaultFacadePort)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s: %w", EnvFacadePort, err)
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvFacadePort, err)
 	}
 	cfg.FacadePort = facadePort
 
 	// Parse health port
 	healthPort, err := getEnvAsInt(EnvHealthPort, DefaultHealthPort)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s: %w", EnvHealthPort, err)
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvHealthPort, err)
 	}
 	cfg.HealthPort = healthPort
 
@@ -177,7 +180,7 @@ func LoadFromEnv() (*Config, error) {
 	// Parse session TTL
 	sessionTTL, err := getEnvAsDuration(EnvSessionTTL, DefaultSessionTTL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s: %w", EnvSessionTTL, err)
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvSessionTTL, err)
 	}
 	cfg.SessionTTL = sessionTTL
 

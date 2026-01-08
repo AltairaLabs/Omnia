@@ -31,6 +31,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const (
+	// contentTypeJSON is the MIME type for JSON content.
+	contentTypeJSON = "application/json"
+)
+
 // OpenAPIAdapterConfig contains configuration for the OpenAPI adapter.
 type OpenAPIAdapterConfig struct {
 	// Name is the adapter's unique name.
@@ -360,7 +365,7 @@ func (a *OpenAPIAdapter) parseRequestBody(opObj map[string]any) *OpenAPIRequestB
 
 	// Extract schema from content.application/json.schema
 	if content, ok := reqBody["content"].(map[string]any); ok {
-		if jsonContent, ok := content["application/json"].(map[string]any); ok {
+		if jsonContent, ok := content[contentTypeJSON].(map[string]any); ok {
 			if schema, ok := jsonContent["schema"].(map[string]any); ok {
 				rb.Schema = schema
 			}
@@ -570,9 +575,9 @@ func (a *OpenAPIAdapter) buildRequest(ctx context.Context, op *OpenAPIOperation,
 
 	// Set headers
 	if reqBody != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentTypeJSON)
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", contentTypeJSON)
 
 	// Custom headers from config
 	for k, v := range a.config.Headers {

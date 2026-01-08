@@ -20,6 +20,7 @@ function PostItNote({
 }>) {
   return (
     <div
+      role="presentation"
       className="absolute -top-2 -right-2 translate-x-full max-w-[180px] z-10"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
@@ -249,7 +250,7 @@ export const ToolRegistryNodeComponent = memo(({ data }: Readonly<CustomNodeProp
           <div className="flex flex-col flex-1">
             <span className="font-medium text-sm">{data.label}</span>
             <span className="text-xs text-muted-foreground">
-              {data.toolCount !== undefined ? `${data.toolCount} tools` : data.namespace}
+              {data.toolCount === undefined ? data.namespace : `${data.toolCount} tools`}
             </span>
           </div>
           <StatusDot status={data.phase} />

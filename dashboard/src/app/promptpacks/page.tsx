@@ -103,8 +103,8 @@ export default function PromptPacksPage() {
         {/* Content */}
         {isLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={`skeleton-${i}`} className="h-[200px] rounded-lg" />
+            {["sk-1", "sk-2", "sk-3", "sk-4"].map((id) => (
+              <Skeleton key={id} className="h-[200px] rounded-lg" />
             ))}
           </div>
         ) : (
