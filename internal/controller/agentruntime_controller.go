@@ -145,86 +145,85 @@ func buildSessionEnvVars(session *omniav1alpha1.SessionConfig, urlEnvName string
 }
 
 // buildProviderEnvVars creates environment variables for LLM provider configuration.
-func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVar {
-	var envVars []corev1.EnvVar
+// providerKeyMapping maps provider types to their expected API key env var names.
+// This is a package-level variable to avoid duplication across functions.
+var providerKeyMapping = map[omniav1alpha1.ProviderType][]string{
+	omniav1alpha1.ProviderTypeClaude: {"ANTHROPIC_API_KEY", "CLAUDE_API_KEY"},
+	omniav1alpha1.ProviderTypeOpenAI: {"OPENAI_API_KEY", "OPENAI_TOKEN"},
+	omniav1alpha1.ProviderTypeGemini: {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+}
 
-	// Default to auto-detection if provider not specified
-	providerType := omniav1alpha1.ProviderTypeAuto
-	if provider != nil && provider.Type != "" {
-		providerType = provider.Type
-	}
+// providerEnvConfig holds common provider configuration for building environment variables.
+type providerEnvConfig struct {
+	Type        omniav1alpha1.ProviderType
+	Model       string
+	BaseURL     string
+	Temperature *string
+	TopP        *string
+	MaxTokens   *int32
+	InputCost   *string
+	OutputCost  *string
+	CachedCost  *string
+}
 
+// addProviderEnvVars adds provider configuration environment variables to the slice.
+func addProviderEnvVars(envVars []corev1.EnvVar, cfg providerEnvConfig) []corev1.EnvVar {
 	envVars = append(envVars, corev1.EnvVar{
 		Name:  "OMNIA_PROVIDER_TYPE",
-		Value: string(providerType),
+		Value: string(cfg.Type),
 	})
+	if cfg.Model != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_MODEL", Value: cfg.Model})
+	}
+	if cfg.BaseURL != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_BASE_URL", Value: cfg.BaseURL})
+	}
+	if cfg.Temperature != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_TEMPERATURE", Value: *cfg.Temperature})
+	}
+	if cfg.TopP != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_TOP_P", Value: *cfg.TopP})
+	}
+	if cfg.MaxTokens != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_MAX_TOKENS", Value: fmt.Sprintf("%d", *cfg.MaxTokens)})
+	}
+	if cfg.InputCost != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_INPUT_COST", Value: *cfg.InputCost})
+	}
+	if cfg.OutputCost != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_OUTPUT_COST", Value: *cfg.OutputCost})
+	}
+	if cfg.CachedCost != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_CACHED_COST", Value: *cfg.CachedCost})
+	}
+	return envVars
+}
 
-	// Add model if specified
-	if provider != nil && provider.Model != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_PROVIDER_MODEL",
-			Value: provider.Model,
-		})
+func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVar {
+	cfg := providerEnvConfig{Type: omniav1alpha1.ProviderTypeAuto}
+	if provider != nil {
+		if provider.Type != "" {
+			cfg.Type = provider.Type
+		}
+		cfg.Model = provider.Model
+		cfg.BaseURL = provider.BaseURL
+		if provider.Config != nil {
+			cfg.Temperature = provider.Config.Temperature
+			cfg.TopP = provider.Config.TopP
+			cfg.MaxTokens = provider.Config.MaxTokens
+		}
+		if provider.Pricing != nil {
+			cfg.InputCost = provider.Pricing.InputCostPer1K
+			cfg.OutputCost = provider.Pricing.OutputCostPer1K
+			cfg.CachedCost = provider.Pricing.CachedCostPer1K
+		}
 	}
 
-	// Add base URL if specified
-	if provider != nil && provider.BaseURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_PROVIDER_BASE_URL",
-			Value: provider.BaseURL,
-		})
-	}
-
-	// Add provider config (temperature, topP, maxTokens)
-	if provider != nil && provider.Config != nil {
-		if provider.Config.Temperature != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_TEMPERATURE",
-				Value: *provider.Config.Temperature,
-			})
-		}
-		if provider.Config.TopP != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_TOP_P",
-				Value: *provider.Config.TopP,
-			})
-		}
-		if provider.Config.MaxTokens != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_MAX_TOKENS",
-				Value: fmt.Sprintf("%d", *provider.Config.MaxTokens),
-			})
-		}
-	}
-
-	// Add pricing config
-	if provider != nil && provider.Pricing != nil {
-		if provider.Pricing.InputCostPer1K != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_INPUT_COST",
-				Value: *provider.Pricing.InputCostPer1K,
-			})
-		}
-		if provider.Pricing.OutputCostPer1K != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_OUTPUT_COST",
-				Value: *provider.Pricing.OutputCostPer1K,
-			})
-		}
-		if provider.Pricing.CachedCostPer1K != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_CACHED_COST",
-				Value: *provider.Pricing.CachedCostPer1K,
-			})
-		}
-	}
+	envVars := addProviderEnvVars(nil, cfg)
 
 	// Add API key from secret
-	// Determine which secret and key to use based on provider type
 	if provider != nil && provider.SecretRef != nil {
-		// User specified a secret - inject all keys from it as env vars
-		// The secret should contain the appropriate key (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
-		envVars = append(envVars, buildSecretEnvVars(provider.SecretRef, providerType)...)
+		envVars = append(envVars, buildSecretEnvVars(provider.SecretRef, cfg.Type)...)
 	}
 
 	return envVars
@@ -235,58 +234,36 @@ func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVa
 func buildSecretEnvVars(secretRef *corev1.LocalObjectReference, providerType omniav1alpha1.ProviderType) []corev1.EnvVar {
 	var envVars []corev1.EnvVar
 
-	// Map of provider types to their expected API key env var names
-	providerKeyNames := map[omniav1alpha1.ProviderType][]string{
-		omniav1alpha1.ProviderTypeClaude: {"ANTHROPIC_API_KEY", "CLAUDE_API_KEY"},
-		omniav1alpha1.ProviderTypeOpenAI: {"OPENAI_API_KEY", "OPENAI_TOKEN"},
-		omniav1alpha1.ProviderTypeGemini: {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-	}
-
 	// For explicit provider type, try to inject the primary key
-	if keyNames, ok := providerKeyNames[providerType]; ok && len(keyNames) > 0 {
-		// Try to get the primary key name from the secret
-		envVars = append(envVars, corev1.EnvVar{
-			Name: keyNames[0],
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: *secretRef,
-					Key:                  keyNames[0],
-					Optional:             boolPtr(true), // Optional in case user uses different key
-				},
-			},
-		})
-		// Also try "api-key" as a fallback
-		envVars = append(envVars, corev1.EnvVar{
-			Name: keyNames[0],
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: *secretRef,
-					Key:                  "api-key",
-					Optional:             boolPtr(true),
-				},
-			},
-		})
+	if keyNames, ok := providerKeyMapping[providerType]; ok && len(keyNames) > 0 {
+		envVars = append(envVars, buildSecretKeyEnvVar(secretRef, keyNames[0], keyNames[0]))
+		envVars = append(envVars, buildSecretKeyEnvVar(secretRef, keyNames[0], "api-key"))
 	}
 
 	// For auto-detection, inject all possible API key env vars
 	if providerType == omniav1alpha1.ProviderTypeAuto {
-		for _, keyNames := range providerKeyNames {
+		for _, keyNames := range providerKeyMapping {
 			if len(keyNames) > 0 {
-				envVars = append(envVars, corev1.EnvVar{
-					Name: keyNames[0],
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: *secretRef,
-							Key:                  keyNames[0],
-							Optional:             boolPtr(true),
-						},
-					},
-				})
+				envVars = append(envVars, buildSecretKeyEnvVar(secretRef, keyNames[0], keyNames[0]))
 			}
 		}
 	}
 
 	return envVars
+}
+
+// buildSecretKeyEnvVar creates a single environment variable from a secret key.
+func buildSecretKeyEnvVar(secretRef *corev1.LocalObjectReference, envName, secretKey string) corev1.EnvVar {
+	return corev1.EnvVar{
+		Name: envName,
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: *secretRef,
+				Key:                  secretKey,
+				Optional:             boolPtr(true),
+			},
+		},
+	}
 }
 
 func boolPtr(b bool) *bool {
@@ -296,82 +273,29 @@ func boolPtr(b bool) *bool {
 // buildProviderEnvVarsFromCRD creates environment variables from a Provider CRD.
 // This is used when an AgentRuntime references a Provider resource.
 func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvVar {
-	var envVars []corev1.EnvVar
-
-	// Provider type
-	envVars = append(envVars, corev1.EnvVar{
-		Name:  "OMNIA_PROVIDER_TYPE",
-		Value: string(provider.Spec.Type),
-	})
-
-	// Model
-	if provider.Spec.Model != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_PROVIDER_MODEL",
-			Value: provider.Spec.Model,
-		})
+	cfg := providerEnvConfig{
+		Type:    provider.Spec.Type,
+		Model:   provider.Spec.Model,
+		BaseURL: provider.Spec.BaseURL,
 	}
-
-	// Base URL
-	if provider.Spec.BaseURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_PROVIDER_BASE_URL",
-			Value: provider.Spec.BaseURL,
-		})
-	}
-
-	// Provider defaults (temperature, topP, maxTokens)
 	if provider.Spec.Defaults != nil {
-		if provider.Spec.Defaults.Temperature != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_TEMPERATURE",
-				Value: *provider.Spec.Defaults.Temperature,
-			})
-		}
-		if provider.Spec.Defaults.TopP != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_TOP_P",
-				Value: *provider.Spec.Defaults.TopP,
-			})
-		}
-		if provider.Spec.Defaults.MaxTokens != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_MAX_TOKENS",
-				Value: fmt.Sprintf("%d", *provider.Spec.Defaults.MaxTokens),
-			})
-		}
+		cfg.Temperature = provider.Spec.Defaults.Temperature
+		cfg.TopP = provider.Spec.Defaults.TopP
+		cfg.MaxTokens = provider.Spec.Defaults.MaxTokens
+	}
+	if provider.Spec.Pricing != nil {
+		cfg.InputCost = provider.Spec.Pricing.InputCostPer1K
+		cfg.OutputCost = provider.Spec.Pricing.OutputCostPer1K
+		cfg.CachedCost = provider.Spec.Pricing.CachedCostPer1K
 	}
 
-	// Pricing
-	if provider.Spec.Pricing != nil {
-		if provider.Spec.Pricing.InputCostPer1K != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_INPUT_COST",
-				Value: *provider.Spec.Pricing.InputCostPer1K,
-			})
-		}
-		if provider.Spec.Pricing.OutputCostPer1K != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_OUTPUT_COST",
-				Value: *provider.Spec.Pricing.OutputCostPer1K,
-			})
-		}
-		if provider.Spec.Pricing.CachedCostPer1K != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_PROVIDER_CACHED_COST",
-				Value: *provider.Spec.Pricing.CachedCostPer1K,
-			})
-		}
-	}
+	envVars := addProviderEnvVars(nil, cfg)
 
 	// API key from secret
-	// Use the specific key if provided, otherwise use provider-appropriate keys
 	secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
 	if provider.Spec.SecretRef.Key != nil {
-		// User specified a specific key to use
 		envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *provider.Spec.SecretRef.Key)...)
 	} else {
-		// Use provider-appropriate keys
 		envVars = append(envVars, buildSecretEnvVars(&secretRef, provider.Spec.Type)...)
 	}
 
@@ -380,32 +304,13 @@ func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvV
 
 // buildSecretEnvVarsWithKey creates environment variables from a secret using a specific key.
 func buildSecretEnvVarsWithKey(secretRef *corev1.LocalObjectReference, providerType omniav1alpha1.ProviderType, key string) []corev1.EnvVar {
-	var envVars []corev1.EnvVar
-
-	// Map of provider types to their expected API key env var names
-	providerKeyNames := map[omniav1alpha1.ProviderType]string{
-		omniav1alpha1.ProviderTypeClaude: "ANTHROPIC_API_KEY",
-		omniav1alpha1.ProviderTypeOpenAI: "OPENAI_API_KEY",
-		omniav1alpha1.ProviderTypeGemini: "GEMINI_API_KEY",
-	}
-
 	// Get the target env var name for this provider type
 	envVarName := "ANTHROPIC_API_KEY" // Default
-	if name, ok := providerKeyNames[providerType]; ok {
-		envVarName = name
+	if keyNames, ok := providerKeyMapping[providerType]; ok && len(keyNames) > 0 {
+		envVarName = keyNames[0]
 	}
 
-	envVars = append(envVars, corev1.EnvVar{
-		Name: envVarName,
-		ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: *secretRef,
-				Key:                  key,
-			},
-		},
-	})
-
-	return envVars
+	return []corev1.EnvVar{buildSecretKeyEnvVar(secretRef, envVarName, key)}
 }
 
 // Condition types for AgentRuntime

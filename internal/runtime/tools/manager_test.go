@@ -492,3 +492,428 @@ func TestManager_LoadFromHandlers_Timeout(t *testing.T) {
 		t.Errorf("expected 1 adapter, got %d", adapterCount)
 	}
 }
+
+func TestManager_LoadFromHandlers_UnknownType(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name: "unknown-handler",
+				Type: "unknown-type",
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Unknown types should be skipped
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters for unknown type, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromConfig_NonExistentFile(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	err := m.LoadFromConfig("/nonexistent/path/config.yaml")
+	if err == nil {
+		t.Fatal("expected error for non-existent config file")
+	}
+}
+
+func TestManager_LoadFromToolConfig_LegacyGRPC(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Tools: []ToolEntry{
+			{
+				Name: "grpc-tool",
+				Type: ToolTypeGRPC,
+				GRPCConfig: &GRPCCfg{
+					Endpoint: "localhost:50051",
+				},
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	_, hasAdapter := m.adapters["grpc-tool"]
+	m.mu.RUnlock()
+
+	if !hasAdapter {
+		t.Error("expected grpc-tool adapter to be registered")
+	}
+}
+
+func TestManager_LoadFromToolConfig_LegacyOpenAPI(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Tools: []ToolEntry{
+			{
+				Name: "openapi-tool",
+				Type: ToolTypeOpenAPI,
+				OpenAPIConfig: &OpenAPICfg{
+					SpecURL: "http://example.com/openapi.json",
+				},
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	_, hasAdapter := m.adapters["openapi-tool"]
+	m.mu.RUnlock()
+
+	if !hasAdapter {
+		t.Error("expected openapi-tool adapter to be registered")
+	}
+}
+
+func TestManager_LoadFromToolConfig_SkipMissingGRPCConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Tools: []ToolEntry{
+			{
+				Name: "grpc-no-config",
+				Type: ToolTypeGRPC,
+				// GRPCConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromToolConfig_SkipMissingHTTPConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Tools: []ToolEntry{
+			{
+				Name: "http-no-config",
+				Type: ToolTypeHTTP,
+				// HTTPConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromToolConfig_SkipMissingOpenAPIConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Tools: []ToolEntry{
+			{
+				Name: "openapi-no-config",
+				Type: ToolTypeOpenAPI,
+				// OpenAPIConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromToolConfig_UnknownLegacyType(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Tools: []ToolEntry{
+			{
+				Name: "unknown-tool",
+				Type: "unknown",
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters for unknown type, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_GRPCWithToolDef(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name: "grpc-handler",
+				Type: ToolTypeGRPC,
+				Tool: &ToolDefCfg{
+					Name:        "grpc_tool",
+					Description: "A gRPC tool",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				GRPCConfig: &GRPCCfg{
+					Endpoint: "localhost:50051",
+					TLS:      true,
+				},
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	_, hasAdapter := m.adapters["grpc-handler"]
+	m.mu.RUnlock()
+
+	if !hasAdapter {
+		t.Error("expected grpc-handler adapter to be registered")
+	}
+}
+
+func TestManager_LoadFromHandlers_InvalidTimeout(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name:    "http-invalid-timeout",
+				Type:    ToolTypeHTTP,
+				Timeout: "not-a-duration",
+				Tool: &ToolDefCfg{
+					Name:        "test_tool",
+					Description: "Test",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				HTTPConfig: &HTTPCfg{
+					Endpoint: "http://example.com",
+				},
+			},
+		},
+	}
+
+	// Should not error, just use default timeout
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 1 {
+		t.Errorf("expected 1 adapter, got %d", adapterCount)
+	}
+}
+
+func TestExtractInputSchema(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    any
+		expected map[string]any
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "valid map",
+			input:    map[string]any{"type": "object"},
+			expected: map[string]any{"type": "object"},
+		},
+		{
+			name:     "invalid type",
+			input:    "not a map",
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractInputSchema(tt.input)
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("expected nil, got %v", result)
+				}
+			} else if result == nil {
+				t.Error("expected non-nil result")
+			}
+		})
+	}
+}
+
+func TestManager_LoadFromHandlers_SkipMissingMCPConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name: "mcp-no-config",
+				Type: ToolTypeMCP,
+				// MCPConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_SkipMissingOpenAPIConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name: "openapi-no-config",
+				Type: ToolTypeOpenAPI,
+				// OpenAPIConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_SkipMissingHTTPConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name: "http-no-config",
+				Type: ToolTypeHTTP,
+				Tool: &ToolDefCfg{
+					Name:        "test",
+					Description: "Test",
+				},
+				// HTTPConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}
+
+func TestManager_LoadFromHandlers_SkipMissingGRPCConfig(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	config := &ToolConfig{
+		Handlers: []HandlerEntry{
+			{
+				Name: "grpc-no-config",
+				Type: ToolTypeGRPC,
+				Tool: &ToolDefCfg{
+					Name:        "test",
+					Description: "Test",
+				},
+				// GRPCConfig is nil
+			},
+		},
+	}
+
+	err := m.LoadFromToolConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	m.mu.RLock()
+	adapterCount := len(m.adapters)
+	m.mu.RUnlock()
+
+	if adapterCount != 0 {
+		t.Errorf("expected 0 adapters, got %d", adapterCount)
+	}
+}

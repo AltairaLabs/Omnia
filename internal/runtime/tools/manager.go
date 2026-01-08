@@ -280,7 +280,7 @@ func (m *Manager) loadLegacyGRPCTool(tool ToolEntry, timeout time.Duration) erro
 		m.log.Info("skipping gRPC tool without config", "tool", tool.Name)
 		return nil
 	}
-	return m.registerGRPCAdapterLegacy(tool.Name, tool.GRPCConfig, timeout)
+	return m.registerGRPCAdapter(tool.Name, tool.GRPCConfig, nil, timeout)
 }
 
 // loadLegacyHTTPTool processes a legacy HTTP tool entry.
@@ -289,7 +289,7 @@ func (m *Manager) loadLegacyHTTPTool(tool ToolEntry, timeout time.Duration) erro
 		m.log.Info("skipping HTTP tool without config", "tool", tool.Name)
 		return nil
 	}
-	return m.registerHTTPAdapterLegacy(tool.Name, tool.HTTPConfig, timeout)
+	return m.registerHTTPAdapter(tool.Name, tool.HTTPConfig, nil, timeout)
 }
 
 // loadLegacyOpenAPITool processes a legacy OpenAPI tool entry.
@@ -363,51 +363,8 @@ func (m *Manager) registerOpenAPIAdapter(name string, config *OpenAPICfg, timeou
 }
 
 // registerHTTPAdapter creates and registers an HTTP adapter from handler config.
+// If tool is nil, the adapter is created without tool definition (legacy mode).
 func (m *Manager) registerHTTPAdapter(name string, config *HTTPCfg, tool *ToolDefCfg, timeout time.Duration) error {
-	adapterConfig := HTTPAdapterConfig{
-		Name:            name,
-		Endpoint:        config.Endpoint,
-		Method:          config.Method,
-		Headers:         config.Headers,
-		ContentType:     config.ContentType,
-		AuthType:        config.AuthType,
-		AuthToken:       config.AuthToken,
-		Timeout:         timeout,
-		ToolName:        tool.Name,
-		ToolDescription: tool.Description,
-		ToolInputSchema: extractInputSchema(tool.InputSchema),
-	}
-	adapter := NewHTTPAdapter(adapterConfig, m.log)
-	if err := m.RegisterAdapter(adapter); err != nil {
-		return fmt.Errorf("failed to register HTTP adapter %q: %w", name, err)
-	}
-	return nil
-}
-
-// registerGRPCAdapter creates and registers a gRPC adapter from handler config.
-func (m *Manager) registerGRPCAdapter(name string, config *GRPCCfg, tool *ToolDefCfg, timeout time.Duration) error {
-	adapterConfig := GRPCAdapterConfig{
-		Name:                  name,
-		Endpoint:              config.Endpoint,
-		TLS:                   config.TLS,
-		TLSCertPath:           config.TLSCertPath,
-		TLSKeyPath:            config.TLSKeyPath,
-		TLSCAPath:             config.TLSCAPath,
-		TLSInsecureSkipVerify: config.TLSInsecureSkipVerify,
-		Timeout:               timeout,
-		ToolName:              tool.Name,
-		ToolDescription:       tool.Description,
-		ToolInputSchema:       extractInputSchema(tool.InputSchema),
-	}
-	adapter := NewGRPCAdapter(adapterConfig, m.log)
-	if err := m.RegisterAdapter(adapter); err != nil {
-		return fmt.Errorf("failed to register gRPC adapter %q: %w", name, err)
-	}
-	return nil
-}
-
-// registerHTTPAdapterLegacy creates and registers an HTTP adapter from legacy tool config.
-func (m *Manager) registerHTTPAdapterLegacy(name string, config *HTTPCfg, timeout time.Duration) error {
 	adapterConfig := HTTPAdapterConfig{
 		Name:        name,
 		Endpoint:    config.Endpoint,
@@ -418,6 +375,11 @@ func (m *Manager) registerHTTPAdapterLegacy(name string, config *HTTPCfg, timeou
 		AuthToken:   config.AuthToken,
 		Timeout:     timeout,
 	}
+	if tool != nil {
+		adapterConfig.ToolName = tool.Name
+		adapterConfig.ToolDescription = tool.Description
+		adapterConfig.ToolInputSchema = extractInputSchema(tool.InputSchema)
+	}
 	adapter := NewHTTPAdapter(adapterConfig, m.log)
 	if err := m.RegisterAdapter(adapter); err != nil {
 		return fmt.Errorf("failed to register HTTP adapter %q: %w", name, err)
@@ -425,8 +387,9 @@ func (m *Manager) registerHTTPAdapterLegacy(name string, config *HTTPCfg, timeou
 	return nil
 }
 
-// registerGRPCAdapterLegacy creates and registers a gRPC adapter from legacy tool config.
-func (m *Manager) registerGRPCAdapterLegacy(name string, config *GRPCCfg, timeout time.Duration) error {
+// registerGRPCAdapter creates and registers a gRPC adapter from handler config.
+// If tool is nil, the adapter is created without tool definition (legacy mode).
+func (m *Manager) registerGRPCAdapter(name string, config *GRPCCfg, tool *ToolDefCfg, timeout time.Duration) error {
 	adapterConfig := GRPCAdapterConfig{
 		Name:                  name,
 		Endpoint:              config.Endpoint,
@@ -436,6 +399,11 @@ func (m *Manager) registerGRPCAdapterLegacy(name string, config *GRPCCfg, timeou
 		TLSCAPath:             config.TLSCAPath,
 		TLSInsecureSkipVerify: config.TLSInsecureSkipVerify,
 		Timeout:               timeout,
+	}
+	if tool != nil {
+		adapterConfig.ToolName = tool.Name
+		adapterConfig.ToolDescription = tool.Description
+		adapterConfig.ToolInputSchema = extractInputSchema(tool.InputSchema)
 	}
 	adapter := NewGRPCAdapter(adapterConfig, m.log)
 	if err := m.RegisterAdapter(adapter); err != nil {
