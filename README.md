@@ -47,9 +47,9 @@ metadata:
   name: my-prompts
 data:
   # Compiled PromptPack JSON (use `packc` to compile from YAML source)
-  promptpack.json: |
+  pack.json: |
     {
-      "$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "my-assistant",
       "name": "My Assistant",
       "version": "1.0.0",

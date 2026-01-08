@@ -5,19 +5,35 @@ kind: Namespace
 metadata:
   name: dev-agents
 ---
-# ConfigMap for PromptPack
+# ConfigMap for PromptPack (must contain pack.json)
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: demo-prompts
   namespace: dev-agents
 data:
-  system.txt: |
-    You are a helpful AI assistant for demo purposes.
-    Be concise and friendly in your responses.
-  config.yaml: |
-    model: gpt-4
-    temperature: 0.7
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-prompts",
+      "name": "Demo Prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Default",
+          "version": "1.0.0",
+          "system_template": "You are a helpful AI assistant for demo purposes. Be concise and friendly in your responses.",
+          "parameters": {
+            "temperature": 0.7
+          }
+        }
+      }
+    }
 ---
 # PromptPack
 apiVersion: omnia.altairalabs.ai/v1alpha1

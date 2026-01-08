@@ -210,9 +210,9 @@ kind: ConfigMap
 metadata:
   name: demo-prompts
 data:
-  promptpack.json: |
+  pack.json: |
     {
-      "\$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "\$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "demo-assistant",
       "name": "Demo Assistant",
       "version": "1.0.0",

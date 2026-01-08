@@ -8,6 +8,8 @@ sidebar:
 
 The PromptPack custom resource defines a versioned collection of prompts for AI agents. The ConfigMap it references must contain a valid [PromptPack](https://promptpack.org/docs/spec/schema-reference) - a structured JSON/YAML format for packaging multi-prompt conversational systems.
 
+The controller validates the `pack.json` content against the [published PromptPack JSON Schema](https://promptpack.org/schema/latest/promptpack.schema.json) to ensure conformance before activating the prompts.
+
 ## API Version
 
 ```yaml
@@ -21,17 +23,19 @@ kind: PromptPack
 
 Source of the compiled PromptPack content.
 
-| Field | Type | Required |
-|-------|------|----------|
-| `source.configMapRef.name` | string | Yes |
-| `source.configMapRef.key` | string | Yes |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source.type` | string | Yes | Source type: `configmap` |
+| `source.configMapRef.name` | string | Yes | Name of the ConfigMap |
+
+The ConfigMap must contain a `pack.json` key with valid PromptPack JSON content.
 
 ```yaml
 spec:
   source:
+    type: configmap
     configMapRef:
-      name: my-prompts
-      key: promptpack.json  # Key containing the compiled PromptPack
+      name: my-prompts  # ConfigMap must have pack.json key
 ```
 
 ### `rollout`
@@ -80,12 +84,28 @@ The canary version during rollout (if applicable).
 
 | Type | Description |
 |------|-------------|
-| `SourceValid` | ConfigMap exists and has valid content |
+| `SourceValid` | ConfigMap exists and contains `pack.json` key |
+| `SchemaValid` | `pack.json` content conforms to the PromptPack schema |
 | `AgentsNotified` | Referencing agents have been notified |
+
+The controller performs two-phase validation:
+
+1. **Source Validation** - Verifies the ConfigMap exists and contains the `pack.json` key
+2. **Schema Validation** - Validates the JSON content against the [published PromptPack schema](https://promptpack.org/schema/latest/promptpack.schema.json)
+
+If either validation fails, Kubernetes events are emitted with detailed error messages:
+
+```bash
+# View validation events
+kubectl describe promptpack my-prompts
+
+# Events:
+#   Warning  SchemaValidationFailed  pack.json validation failed: (root): id is required
+```
 
 ## ConfigMap Format
 
-The referenced ConfigMap must contain a compiled PromptPack following the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference):
+The referenced ConfigMap must contain a `pack.json` key with a compiled PromptPack following the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference):
 
 ```yaml
 apiVersion: v1
@@ -93,7 +113,7 @@ kind: ConfigMap
 metadata:
   name: my-prompts
 data:
-  promptpack.json: |
+  pack.json: |
     {
       "id": "customer-service",
       "name": "Customer Service Assistant",
@@ -195,12 +215,13 @@ metadata:
   name: customer-service
   namespace: agents
 spec:
+  version: "2.0.0"
   source:
+    type: configmap
     configMapRef:
       name: cs-prompts-v2
-      key: promptpack.json
   rollout:
-    strategy: canary
+    type: canary
     canary:
       weight: 25
 ```
@@ -210,14 +231,22 @@ Status after deployment:
 ```yaml
 status:
   phase: Canary
-  activeVersion: "abc123"
-  canaryVersion: "def456"
+  activeVersion: "1.0.0"
+  canaryVersion: "2.0.0"
+  canaryWeight: 25
   conditions:
     - type: SourceValid
       status: "True"
+      reason: SourceValid
+      message: "Source configuration is valid"
+    - type: SchemaValid
+      status: "True"
+      reason: SchemaValid
+      message: "pack.json content is valid"
     - type: AgentsNotified
       status: "True"
-      message: "Notified 3 AgentRuntimes"
+      reason: AgentsNotified
+      message: "Notified 3 AgentRuntime(s)"
 ```
 
 ## Authoring PromptPacks
@@ -262,5 +291,11 @@ metadata:
 Compile with [packc](https://promptpack.org):
 
 ```bash
-packc compile customer-service.promptpack.yaml -o promptpack.json
+packc compile customer-service.promptpack.yaml -o pack.json
+```
+
+Then create a ConfigMap:
+
+```bash
+kubectl create configmap my-prompts --from-file=pack.json
 ```
