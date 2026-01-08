@@ -16,6 +16,7 @@ import {
   createContext,
   useContext,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -71,15 +72,18 @@ export function AuthProvider({ children, user }: Readonly<AuthProviderProps>) {
     router.refresh();
   }, [router]);
 
-  const value: AuthContextValue = {
-    user,
-    isAuthenticated: user.provider !== "anonymous",
-    role: user.role,
-    hasRole,
-    canWrite: hasRole("editor"),
-    canAdmin: hasRole("admin"),
-    logout,
-  };
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      isAuthenticated: user.provider !== "anonymous",
+      role: user.role,
+      hasRole,
+      canWrite: hasRole("editor"),
+      canAdmin: hasRole("admin"),
+      logout,
+    }),
+    [user, hasRole, logout]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

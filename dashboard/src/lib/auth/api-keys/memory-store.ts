@@ -42,7 +42,7 @@ function generateId(): string {
  * In-memory API key store.
  */
 export class MemoryApiKeyStore implements ApiKeyStore {
-  private keys: Map<string, ApiKey> = new Map();
+  private readonly keys: Map<string, ApiKey> = new Map();
 
   async create(
     userId: string,
