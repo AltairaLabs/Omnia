@@ -70,11 +70,9 @@ jobs:
       run: |
         echo "Running tests with coverage and race detection..."
         mkdir -p test-results
-        # Exclude:
-        # - internal/controller: requires envtest (runs in separate job)
-        # - internal/runtime: requires local PromptKit dependency (not published yet)
-        # - cmd/runtime: requires local PromptKit dependency (not published yet)
-        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/controller | grep -v /internal/runtime | grep -v /cmd/runtime)
+        # Exclude internal/*: all internal packages run in envtest job with proper K8s environment
+        # This job runs: api, cmd (entry points), pkg
+        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/)
         echo "Coverage report generated: coverage.out"
 
     - name: Publish Test Results
@@ -326,8 +324,8 @@ jobs:
     - name: Run internal package tests
       run: |
         export KUBEBUILDER_ASSETS=$(setup-envtest use -p path --bin-dir ${{ github.workspace }}/bin/k8s)
-        # Exclude internal/runtime - requires local PromptKit dependency (not published yet)
-        go test -v $(go list ./internal/... | grep -v /internal/runtime) -coverprofile=internal-coverage.out
+        # Run all internal package tests (PromptKit v1.1.6 is published)
+        go test -v ./internal/... -coverprofile=internal-coverage.out
 
     - name: Upload internal coverage
       uses: actions/upload-artifact@v6
