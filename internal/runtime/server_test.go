@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -620,4 +621,203 @@ func TestServer_Close_WithTracingProvider(t *testing.T) {
 	// Close should shutdown tracing provider
 	err = server.Close()
 	assert.NoError(t, err)
+}
+
+func TestServer_Converse_WithTracingProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {
+			"version": "v1",
+			"syntax": "{{variable}}"
+		},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "You are a test assistant."
+			}
+		}
+	}`
+	err := writeTestFile(t, packPath, packContent)
+	require.NoError(t, err)
+
+	// Create a disabled tracing provider (no-op)
+	provider, err := tracing.NewProvider(context.Background(), tracing.Config{
+		Enabled: false,
+	})
+	require.NoError(t, err)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithTracingProvider(provider),
+	)
+	defer func() { _ = server.Close() }()
+
+	// Send a message - should process with tracing enabled
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "test-session-tracing", Content: "Hello with tracing"},
+	})
+
+	err = server.Converse(stream)
+	assert.Error(t, err) // Stream ends after message
+
+	// Should have sent responses
+	assert.NotEmpty(t, stream.sentMessages)
+}
+
+func TestServer_Converse_WithProviderInfo(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {
+			"version": "v1",
+			"syntax": "{{variable}}"
+		},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "You are a test assistant."
+			}
+		}
+	}`
+	err := writeTestFile(t, packPath, packContent)
+	require.NoError(t, err)
+
+	// Test with provider info set (metrics skipped to avoid registration issues)
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithProviderInfo("mock", "mock-model"),
+	)
+	defer func() { _ = server.Close() }()
+
+	// Verify provider info is set
+	assert.Equal(t, "mock", server.providerType)
+	assert.Equal(t, "mock-model", server.model)
+
+	// Send a message - should process normally
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "test-session-provider", Content: "Hello with provider info"},
+	})
+
+	err = server.Converse(stream)
+	assert.Error(t, err) // Stream ends after message
+
+	// Should have sent responses
+	assert.NotEmpty(t, stream.sentMessages)
+}
+
+func TestServer_Converse_MultipleSessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {
+			"version": "v1",
+			"syntax": "{{variable}}"
+		},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "You are a test assistant."
+			}
+		}
+	}`
+	err := writeTestFile(t, packPath, packContent)
+	require.NoError(t, err)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+	)
+	defer func() { _ = server.Close() }()
+
+	// Test multiple different sessions
+	for i := 0; i < 3; i++ {
+		sessionID := fmt.Sprintf("session-%d", i)
+		stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+			{SessionId: sessionID, Content: fmt.Sprintf("Hello from session %d", i)},
+		})
+
+		err = server.Converse(stream)
+		assert.Error(t, err) // Stream ends after message
+		assert.NotEmpty(t, stream.sentMessages)
+	}
+
+	// Verify all sessions are tracked
+	assert.Len(t, server.conversations, 3)
+}
+
+func TestServer_Converse_ResumeSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {
+			"version": "v1",
+			"syntax": "{{variable}}"
+		},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "You are a test assistant."
+			}
+		}
+	}`
+	err := writeTestFile(t, packPath, packContent)
+	require.NoError(t, err)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+	)
+	defer func() { _ = server.Close() }()
+
+	sessionID := "resume-session"
+
+	// First message creates the session
+	stream1 := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: sessionID, Content: "First message"},
+	})
+	_ = server.Converse(stream1)
+
+	// Second message reuses the same session
+	stream2 := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: sessionID, Content: "Second message"},
+	})
+	_ = server.Converse(stream2)
+
+	// Should still only have one conversation for this session
+	assert.Len(t, server.conversations, 1)
 }
