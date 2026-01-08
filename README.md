@@ -77,7 +77,7 @@ spec:
       name: my-prompts
 ```
 
-> **Tip**: Use [packc](https://promptpack.org) to compile PromptPacks from YAML source files with validation.
+> **Tip**: Use [packc](https://promptkit.altairalabs.ai/packc/reference/) to compile PromptPacks from YAML source files with validation.
 
 2. Create a Provider for LLM credentials:
 

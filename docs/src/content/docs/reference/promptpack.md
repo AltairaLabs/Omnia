@@ -288,10 +288,10 @@ metadata:
   language: en
 ```
 
-Compile with [packc](https://promptpack.org):
+Compile with [packc](https://promptkit.altairalabs.ai/packc/reference/):
 
 ```bash
-packc compile customer-service.promptpack.yaml -o pack.json
+packc compile --config arena.yaml --output pack.json --id customer-service
 ```
 
 Then create a ConfigMap:

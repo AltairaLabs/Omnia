@@ -18,7 +18,7 @@ spec:
     type: immediate
 ---
 # ConfigMap containing the compiled PromptPack JSON
-# Use `packc compile prompts.yaml -o pack.json` to generate this
+# Use `packc compile --config arena.yaml --output pack.json --id customer-support` to generate this
 apiVersion: v1
 kind: ConfigMap
 metadata:

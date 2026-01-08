@@ -107,9 +107,9 @@ Verify the PromptPack is ready:
 kubectl get promptpack assistant-pack
 ```
 
-> **Tip**: Author PromptPacks in YAML and compile them to JSON using [packc](https://promptpack.org) for validation and optimization:
+> **Tip**: Author PromptPacks in YAML and compile them to JSON using [packc](https://promptkit.altairalabs.ai/packc/reference/) for validation and optimization:
 > ```bash
-> packc compile prompts.yaml -o pack.json
+> packc compile --config arena.yaml --output pack.json --id assistant
 > kubectl create configmap assistant-prompts --from-file=pack.json
 > ```
 

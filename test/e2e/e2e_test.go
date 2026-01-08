@@ -445,6 +445,14 @@ spec:
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("True"))
+
+			By("verifying the SchemaValid condition is True")
+			cmd = exec.Command("kubectl", "get", "promptpack", "test-prompts",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.status.conditions[?(@.type=='SchemaValid')].status}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("True"))
 		})
 
 		It("should create and validate a ToolRegistry", func() {
