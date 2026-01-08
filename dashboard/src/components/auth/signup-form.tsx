@@ -100,7 +100,7 @@ export function SignupForm({
       setSuccess(true);
       router.push(returnTo || "/");
       router.refresh();
-    } catch (err) {
+    } catch {
       setError("An error occurred. Please try again.");
       setIsLoading(false);
     }

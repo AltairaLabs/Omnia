@@ -12,7 +12,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   queryPrometheus,
   queryPrometheusRange,
-  extractScalar,
   isPrometheusAvailable,
   type PrometheusVectorResult,
   type PrometheusMatrixResult,

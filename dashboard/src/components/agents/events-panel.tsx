@@ -33,7 +33,7 @@ function formatRelativeTime(timestamp: string): string {
 /**
  * Format a timestamp to a readable date/time string.
  */
-function formatTimestamp(timestamp: string): string {
+function _formatTimestamp(timestamp: string): string {
   return new Date(timestamp).toLocaleString();
 }
 

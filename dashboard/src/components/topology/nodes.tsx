@@ -22,6 +22,7 @@ function PostItNote({
     <div
       className="absolute -top-2 -right-2 translate-x-full max-w-[180px] z-10"
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
     >
       <div className="relative bg-yellow-200 dark:bg-yellow-300 text-yellow-900 p-2 rounded shadow-md text-xs transform rotate-2 hover:rotate-0 transition-transform">
         {/* Tape effect */}
@@ -36,14 +37,15 @@ function PostItNote({
           <X className="h-2.5 w-2.5" />
         </button>
 
-        {/* Note content */}
-        <p
-          className="cursor-text leading-tight line-clamp-4 hover:line-clamp-none"
+        {/* Note content - using button for semantic HTML */}
+        <button
+          type="button"
+          className="cursor-text leading-tight line-clamp-4 hover:line-clamp-none text-left w-full bg-transparent border-none p-0 font-inherit text-inherit"
           onClick={onEdit}
           title="Click to edit"
         >
           {note}
-        </p>
+        </button>
       </div>
     </div>
   );
@@ -158,11 +160,12 @@ interface CustomNodeProps<T extends Record<string, unknown>> {
 export const AgentNodeComponent = memo(({ data }: CustomNodeProps<AgentNodeData>) => {
   return (
     <div className="relative group">
-      <div
+      <Handle type="target" position={Position.Left} className="!bg-blue-500" />
+      <button
+        type="button"
         className={cn(baseNodeStyles, typeColors.agent)}
         onClick={data.onClick}
       >
-        <Handle type="target" position={Position.Left} className="!bg-blue-500" />
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           <div className="flex flex-col flex-1">
@@ -171,8 +174,8 @@ export const AgentNodeComponent = memo(({ data }: CustomNodeProps<AgentNodeData>
           </div>
           <StatusDot status={data.phase} />
         </div>
-        <Handle type="source" position={Position.Right} className="!bg-blue-500" />
-      </div>
+      </button>
+      <Handle type="source" position={Position.Right} className="!bg-blue-500" />
 
       {/* Post-it note or add button */}
       {data.note ? (
@@ -195,11 +198,12 @@ AgentNodeComponent.displayName = "AgentNodeComponent";
 export const PromptPackNodeComponent = memo(({ data }: CustomNodeProps<PromptPackNodeData>) => {
   return (
     <div className="relative group">
-      <div
+      <Handle type="target" position={Position.Left} className="!bg-purple-500" />
+      <button
+        type="button"
         className={cn(baseNodeStyles, typeColors.promptPack)}
         onClick={data.onClick}
       >
-        <Handle type="target" position={Position.Left} className="!bg-purple-500" />
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
           <div className="flex flex-col flex-1">
@@ -210,8 +214,8 @@ export const PromptPackNodeComponent = memo(({ data }: CustomNodeProps<PromptPac
           </div>
           <StatusDot status={data.phase} />
         </div>
-        <Handle type="source" position={Position.Right} className="!bg-purple-500" />
-      </div>
+      </button>
+      <Handle type="source" position={Position.Right} className="!bg-purple-500" />
 
       {/* Post-it note or add button */}
       {data.note ? (
@@ -234,11 +238,12 @@ PromptPackNodeComponent.displayName = "PromptPackNodeComponent";
 export const ToolRegistryNodeComponent = memo(({ data }: CustomNodeProps<ToolRegistryNodeData>) => {
   return (
     <div className="relative group">
-      <div
+      <Handle type="target" position={Position.Left} className="!bg-orange-500" />
+      <button
+        type="button"
         className={cn(baseNodeStyles, typeColors.toolRegistry)}
         onClick={data.onClick}
       >
-        <Handle type="target" position={Position.Left} className="!bg-orange-500" />
         <div className="flex items-center gap-2">
           <Package className="h-4 w-4 text-orange-600 dark:text-orange-400" />
           <div className="flex flex-col flex-1">
@@ -249,8 +254,8 @@ export const ToolRegistryNodeComponent = memo(({ data }: CustomNodeProps<ToolReg
           </div>
           <StatusDot status={data.phase} />
         </div>
-        <Handle type="source" position={Position.Right} className="!bg-orange-500" />
-      </div>
+      </button>
+      <Handle type="source" position={Position.Right} className="!bg-orange-500" />
 
       {/* Post-it note or add button */}
       {data.note ? (
@@ -272,21 +277,24 @@ ToolRegistryNodeComponent.displayName = "ToolRegistryNodeComponent";
 // Tool Node Component
 export const ToolNodeComponent = memo(({ data }: CustomNodeProps<ToolNodeData>) => {
   return (
-    <div
-      className={cn(baseNodeStyles, typeColors.tool)}
-      onClick={data.onClick}
-    >
+    <div className="relative">
       <Handle type="target" position={Position.Left} className="!bg-teal-500" />
-      <div className="flex items-center gap-2">
-        <Wrench className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-        <div className="flex flex-col flex-1">
-          <span className="font-medium text-sm">{data.label}</span>
-          {data.handlerType && (
-            <span className="text-xs text-muted-foreground">{data.handlerType}</span>
-          )}
+      <button
+        type="button"
+        className={cn(baseNodeStyles, typeColors.tool)}
+        onClick={data.onClick}
+      >
+        <div className="flex items-center gap-2">
+          <Wrench className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+          <div className="flex flex-col flex-1">
+            <span className="font-medium text-sm">{data.label}</span>
+            {data.handlerType && (
+              <span className="text-xs text-muted-foreground">{data.handlerType}</span>
+            )}
+          </div>
+          <StatusDot status={data.status} />
         </div>
-        <StatusDot status={data.status} />
-      </div>
+      </button>
     </div>
   );
 });
@@ -295,15 +303,18 @@ ToolNodeComponent.displayName = "ToolNodeComponent";
 // Prompt Node Component (individual prompts within a PromptPack)
 export const PromptNodeComponent = memo(({ data }: CustomNodeProps<PromptNodeData>) => {
   return (
-    <div
-      className={cn(baseNodeStyles, typeColors.prompt)}
-      onClick={data.onClick}
-    >
+    <div className="relative">
       <Handle type="target" position={Position.Left} className="!bg-violet-500" />
-      <div className="flex items-center gap-2">
-        <MessageSquare className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-        <span className="font-medium text-sm">{data.label}</span>
-      </div>
+      <button
+        type="button"
+        className={cn(baseNodeStyles, typeColors.prompt)}
+        onClick={data.onClick}
+      >
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+          <span className="font-medium text-sm">{data.label}</span>
+        </div>
+      </button>
       <Handle type="source" position={Position.Right} className="!bg-violet-500" />
     </div>
   );

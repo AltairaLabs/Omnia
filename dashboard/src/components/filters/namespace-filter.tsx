@@ -27,7 +27,7 @@ export function NamespaceFilter({
 }: NamespaceFilterProps) {
   // Sort namespaces alphabetically
   const sortedNamespaces = useMemo(
-    () => [...namespaces].sort(),
+    () => [...namespaces].sort((a, b) => a.localeCompare(b)),
     [namespaces]
   );
 
