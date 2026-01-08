@@ -75,6 +75,10 @@ generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto 
 		api/proto/tools/v1/tools.proto
 	@echo "Proto generation complete."
 
+.PHONY: update-schema
+update-schema: ## Fetch latest PromptPack schema for embedded fallback.
+	@./hack/update-schema.sh
+
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...

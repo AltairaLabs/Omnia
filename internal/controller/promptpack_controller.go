@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -33,18 +34,29 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/schema"
 )
 
 // PromptPack condition types
 const (
 	PromptPackConditionTypeSourceValid    = "SourceValid"
+	PromptPackConditionTypeSchemaValid    = "SchemaValid"
 	PromptPackConditionTypeAgentsNotified = "AgentsNotified"
+)
+
+// Event reasons for PromptPack
+const (
+	EventReasonSourceValidationFailed = "SourceValidationFailed"
+	EventReasonSchemaValidationFailed = "SchemaValidationFailed"
+	EventReasonValidationSucceeded    = "ValidationSucceeded"
 )
 
 // PromptPackReconciler reconciles a PromptPack object
 type PromptPackReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme          *runtime.Scheme
+	SchemaValidator *schema.SchemaValidator
+	Recorder        record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=promptpacks,verbs=get;list;watch;create;update;patch;delete
@@ -52,6 +64,7 @@ type PromptPackReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=promptpacks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -75,11 +88,18 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		promptPack.Status.Phase = omniav1alpha1.PromptPackPhasePending
 	}
 
-	// Validate the source configuration
-	if err := r.validateSource(ctx, promptPack); err != nil {
+	// Step 1: Validate the source configuration (ConfigMap exists, has pack.json)
+	packJSON, err := r.validateSource(ctx, promptPack)
+	if err != nil {
 		r.setCondition(promptPack, PromptPackConditionTypeSourceValid, metav1.ConditionFalse,
 			"SourceValidationFailed", err.Error())
+		// Clear schema condition when source is invalid
+		r.setCondition(promptPack, PromptPackConditionTypeSchemaValid, metav1.ConditionUnknown,
+			"SourceInvalid", "Cannot validate schema: source is invalid")
 		promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseFailed
+		if r.Recorder != nil {
+			r.Recorder.Event(promptPack, corev1.EventTypeWarning, EventReasonSourceValidationFailed, err.Error())
+		}
 		if statusErr := r.Status().Update(ctx, promptPack); statusErr != nil {
 			log.Error(statusErr, "Failed to update status")
 		}
@@ -87,6 +107,22 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	r.setCondition(promptPack, PromptPackConditionTypeSourceValid, metav1.ConditionTrue,
 		"SourceValid", "Source configuration is valid")
+
+	// Step 2: Validate pack.json content against the PromptPack schema
+	if err := r.validateSchema(promptPack, packJSON); err != nil {
+		r.setCondition(promptPack, PromptPackConditionTypeSchemaValid, metav1.ConditionFalse,
+			"SchemaValidationFailed", err.Error())
+		promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseFailed
+		if r.Recorder != nil {
+			r.Recorder.Event(promptPack, corev1.EventTypeWarning, EventReasonSchemaValidationFailed, err.Error())
+		}
+		if statusErr := r.Status().Update(ctx, promptPack); statusErr != nil {
+			log.Error(statusErr, "Failed to update status")
+		}
+		return ctrl.Result{}, err
+	}
+	r.setCondition(promptPack, PromptPackConditionTypeSchemaValid, metav1.ConditionTrue,
+		"SchemaValid", "pack.json content is valid")
 
 	// Find all AgentRuntimes referencing this PromptPack
 	referencingRuntimes, err := r.findReferencingAgentRuntimes(ctx, promptPack)
@@ -120,20 +156,22 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-// validateSource validates the source configuration for the PromptPack.
-func (r *PromptPackReconciler) validateSource(ctx context.Context, promptPack *omniav1alpha1.PromptPack) error {
+// validateSource validates the source configuration and returns the pack.json content.
+// Returns the pack.json content as a string for subsequent schema validation.
+func (r *PromptPackReconciler) validateSource(ctx context.Context, promptPack *omniav1alpha1.PromptPack) (string, error) {
 	switch promptPack.Spec.Source.Type {
 	case omniav1alpha1.PromptPackSourceTypeConfigMap:
 		return r.validateConfigMapSource(ctx, promptPack)
 	default:
-		return fmt.Errorf("unsupported source type: %s", promptPack.Spec.Source.Type)
+		return "", fmt.Errorf("unsupported source type: %s", promptPack.Spec.Source.Type)
 	}
 }
 
-// validateConfigMapSource validates that the referenced ConfigMap exists.
-func (r *PromptPackReconciler) validateConfigMapSource(ctx context.Context, promptPack *omniav1alpha1.PromptPack) error {
+// validateConfigMapSource validates that the referenced ConfigMap exists and contains pack.json.
+// Returns the pack.json content for subsequent schema validation.
+func (r *PromptPackReconciler) validateConfigMapSource(ctx context.Context, promptPack *omniav1alpha1.PromptPack) (string, error) {
 	if promptPack.Spec.Source.ConfigMapRef == nil {
-		return fmt.Errorf("configMapRef is required when source type is configmap")
+		return "", fmt.Errorf("configMapRef is required when source type is configmap")
 	}
 
 	configMap := &corev1.ConfigMap{}
@@ -144,14 +182,34 @@ func (r *PromptPackReconciler) validateConfigMapSource(ctx context.Context, prom
 
 	if err := r.Get(ctx, key, configMap); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("ConfigMap %q not found in namespace %q", key.Name, key.Namespace)
+			return "", fmt.Errorf("ConfigMap %q not found in namespace %q", key.Name, key.Namespace)
 		}
-		return fmt.Errorf("failed to get ConfigMap %q: %w", key.Name, err)
+		return "", fmt.Errorf("failed to get ConfigMap %q: %w", key.Name, err)
 	}
 
 	// Validate that the ConfigMap has at least some data
 	if len(configMap.Data) == 0 && len(configMap.BinaryData) == 0 {
-		return fmt.Errorf("ConfigMap %q is empty", key.Name)
+		return "", fmt.Errorf("ConfigMap %q is empty", key.Name)
+	}
+
+	// Check for pack.json file
+	packJSON, ok := configMap.Data["pack.json"]
+	if !ok {
+		return "", fmt.Errorf("ConfigMap %q does not contain required 'pack.json' key", key.Name)
+	}
+
+	return packJSON, nil
+}
+
+// validateSchema validates the pack.json content against the published PromptPack schema.
+func (r *PromptPackReconciler) validateSchema(_ *omniav1alpha1.PromptPack, packJSON string) error {
+	if r.SchemaValidator == nil {
+		// No validator configured, skip schema validation
+		return nil
+	}
+
+	if err := r.SchemaValidator.Validate([]byte(packJSON)); err != nil {
+		return fmt.Errorf("invalid pack.json: %w", err)
 	}
 
 	return nil
