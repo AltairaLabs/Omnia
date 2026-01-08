@@ -623,3 +623,277 @@ func TestMessageRoleConstants(t *testing.T) {
 		}
 	}
 }
+
+func TestMemoryStoreGetMessagesNotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	_, err := store.GetMessages(ctx, "non-existent")
+	if err != ErrSessionNotFound {
+		t.Errorf("GetMessages error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreGetMessagesInvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	_, err := store.GetMessages(ctx, "")
+	if err != ErrInvalidSessionID {
+		t.Errorf("GetMessages error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreSetStateNotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.SetState(ctx, "non-existent", "key", "value")
+	if err != ErrSessionNotFound {
+		t.Errorf("SetState error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreSetStateInvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.SetState(ctx, "", "key", "value")
+	if err != ErrInvalidSessionID {
+		t.Errorf("SetState error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreGetStateSessionNotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	_, err := store.GetState(ctx, "non-existent", "key")
+	if err != ErrSessionNotFound {
+		t.Errorf("GetState error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreGetStateInvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	_, err := store.GetState(ctx, "", "key")
+	if err != ErrInvalidSessionID {
+		t.Errorf("GetState error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreRefreshTTLNotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.RefreshTTL(ctx, "non-existent", time.Hour)
+	if err != ErrSessionNotFound {
+		t.Errorf("RefreshTTL error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreRefreshTTLInvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.RefreshTTL(ctx, "", time.Hour)
+	if err != ErrInvalidSessionID {
+		t.Errorf("RefreshTTL error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreDeleteSessionInvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.DeleteSession(ctx, "")
+	if err != ErrInvalidSessionID {
+		t.Errorf("DeleteSession error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreAppendMessageInvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.AppendMessage(ctx, "", Message{Role: RoleUser, Content: "test"})
+	if err != ErrInvalidSessionID {
+		t.Errorf("AppendMessage error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreAppendMessageExpiredSession(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+		TTL:       1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	err = store.AppendMessage(ctx, session.ID, Message{Role: RoleUser, Content: "test"})
+	if err != ErrSessionExpired {
+		t.Errorf("AppendMessage error = %v, want %v", err, ErrSessionExpired)
+	}
+}
+
+func TestMemoryStoreGetMessagesExpiredSession(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+		TTL:       1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = store.GetMessages(ctx, session.ID)
+	if err != ErrSessionExpired {
+		t.Errorf("GetMessages error = %v, want %v", err, ErrSessionExpired)
+	}
+}
+
+func TestMemoryStoreSetStateExpiredSession(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+		TTL:       1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	err = store.SetState(ctx, session.ID, "key", "value")
+	if err != ErrSessionExpired {
+		t.Errorf("SetState error = %v, want %v", err, ErrSessionExpired)
+	}
+}
+
+func TestMemoryStoreGetStateExpiredSession(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+		TTL:       1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = store.GetState(ctx, session.ID, "key")
+	if err != ErrSessionExpired {
+		t.Errorf("GetState error = %v, want %v", err, ErrSessionExpired)
+	}
+}
+
+func TestMemoryStoreRefreshTTLExpiredSession(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+		TTL:       1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	// RefreshTTL can revive expired sessions - this is intentional behavior
+	err = store.RefreshTTL(ctx, session.ID, time.Hour)
+	if err != nil {
+		t.Errorf("RefreshTTL error = %v, want nil (reviving expired session)", err)
+	}
+
+	// Now the session should be accessible again
+	_, err = store.GetSession(ctx, session.ID)
+	if err != nil {
+		t.Errorf("GetSession after refresh error = %v, want nil", err)
+	}
+}
+
+func TestMemoryStoreCopySessionWithMessages(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName:    testAgentName,
+		Namespace:    testNamespace,
+		InitialState: map[string]string{"key": "value"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	// Add messages
+	_ = store.AppendMessage(ctx, session.ID, Message{Role: RoleUser, Content: "msg1"})
+	_ = store.AppendMessage(ctx, session.ID, Message{Role: RoleAssistant, Content: "msg2"})
+
+	// Get session (which copies it)
+	retrieved, err := store.GetSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	// Verify messages are copied
+	if len(retrieved.Messages) != 2 {
+		t.Errorf("Messages length = %d, want 2", len(retrieved.Messages))
+	}
+
+	// Verify state is copied
+	if retrieved.State["key"] != "value" {
+		t.Errorf("State[key] = %v, want value", retrieved.State["key"])
+	}
+
+	// Modify the copy and ensure original is not affected
+	retrieved.Messages = append(retrieved.Messages, Message{Role: RoleUser, Content: "msg3"})
+	retrieved.State["key2"] = "value2"
+
+	original, _ := store.GetSession(ctx, session.ID)
+	if len(original.Messages) != 2 {
+		t.Errorf("Original messages affected by copy modification")
+	}
+	if _, exists := original.State["key2"]; exists {
+		t.Errorf("Original state affected by copy modification")
+	}
+}

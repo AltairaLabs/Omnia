@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/altairalabs/omnia/internal/runtime/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -75,6 +76,39 @@ func TestServer_Close(t *testing.T) {
 }
 
 func TestServerOptions(t *testing.T) {
+	t.Run("WithToolsConfig", func(t *testing.T) {
+		server := NewServer(
+			WithToolsConfig("/path/to/tools.yaml"),
+		)
+		assert.Equal(t, "/path/to/tools.yaml", server.toolsConfigPath)
+	})
+
+	t.Run("WithTracingProvider", func(t *testing.T) {
+		// Passing nil is valid for testing
+		server := NewServer(
+			WithTracingProvider(nil),
+		)
+		assert.Nil(t, server.tracingProvider)
+	})
+
+	t.Run("WithMetrics", func(t *testing.T) {
+		// Create metrics and set them
+		metrics := NewMetrics("test-agent", "test-ns")
+		server := NewServer(
+			WithMetrics(metrics),
+		)
+		assert.NotNil(t, server.metrics)
+		assert.Equal(t, metrics, server.metrics)
+	})
+
+	t.Run("WithProviderInfo", func(t *testing.T) {
+		server := NewServer(
+			WithProviderInfo("anthropic", "claude-3-opus"),
+		)
+		assert.Equal(t, "anthropic", server.providerType)
+		assert.Equal(t, "claude-3-opus", server.model)
+	})
+
 	t.Run("WithStateStore", func(t *testing.T) {
 		// Create a mock state store (just test the option sets the field)
 		server := NewServer(
@@ -499,4 +533,91 @@ func writeTestFile(t *testing.T, path, content string) error {
 	defer f.Close()
 	_, err = f.WriteString(content)
 	return err
+}
+
+func TestNewMetrics(t *testing.T) {
+	metrics := NewMetrics("test-agent", "test-namespace")
+	require.NotNil(t, metrics)
+}
+
+func TestServer_InitializeTools_NoConfig(t *testing.T) {
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		// No tools config path set
+	)
+
+	err := server.InitializeTools(context.Background())
+	assert.NoError(t, err)
+	assert.False(t, server.toolsInitialized)
+}
+
+func TestServer_InitializeTools_InvalidConfig(t *testing.T) {
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithToolsConfig("/nonexistent/tools.yaml"),
+	)
+
+	err := server.InitializeTools(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load tools config")
+}
+
+func TestServer_InitializeTools_ValidConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolsPath := tmpDir + "/tools.yaml"
+
+	// Create a minimal valid tools config (empty handlers list)
+	toolsConfig := `handlers: []
+`
+	err := writeTestFile(t, toolsPath, toolsConfig)
+	require.NoError(t, err)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithToolsConfig(toolsPath),
+	)
+
+	err = server.InitializeTools(context.Background())
+	assert.NoError(t, err)
+	assert.True(t, server.toolsInitialized)
+}
+
+func TestServer_Close_WithToolManager(t *testing.T) {
+	tmpDir := t.TempDir()
+	toolsPath := tmpDir + "/tools.yaml"
+
+	toolsConfig := `handlers: []
+`
+	err := writeTestFile(t, toolsPath, toolsConfig)
+	require.NoError(t, err)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithToolsConfig(toolsPath),
+	)
+
+	// Initialize tools
+	err = server.InitializeTools(context.Background())
+	require.NoError(t, err)
+
+	// Close should work
+	err = server.Close()
+	assert.NoError(t, err)
+}
+
+func TestServer_Close_WithTracingProvider(t *testing.T) {
+	// Create a disabled tracing provider (no-op)
+	provider, err := tracing.NewProvider(context.Background(), tracing.Config{
+		Enabled: false,
+	})
+	require.NoError(t, err)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithTracingProvider(provider),
+	)
+
+	// Close should shutdown tracing provider
+	err = server.Close()
+	assert.NoError(t, err)
 }
