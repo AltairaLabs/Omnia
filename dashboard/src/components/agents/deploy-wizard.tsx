@@ -119,6 +119,56 @@ const PROVIDERS: { value: ProviderType; label: string; models: string[] }[] = [
   { value: "gemini", label: "Google Gemini", models: ["gemini-2.0-flash", "gemini-1.5-pro"] },
 ];
 
+/**
+ * Get the disabled message based on read-only and permission status.
+ */
+function getDisabledMessage(
+  isReadOnly: boolean,
+  canDeploy: boolean,
+  readOnlyMessage: string
+): string {
+  if (isReadOnly) return readOnlyMessage;
+  if (!canDeploy) return "You don't have permission to deploy agents";
+  return "";
+}
+
+/**
+ * Get step indicator class based on current step.
+ */
+function getStepIndicatorClassName(stepIndex: number, currentStep: number): string {
+  if (stepIndex < currentStep) return "bg-primary text-primary-foreground";
+  if (stepIndex === currentStep) return "border-2 border-primary";
+  return "border border-muted-foreground/30";
+}
+
+/**
+ * Render deploy button content based on state.
+ */
+function renderDeployButtonContent(isSubmitting: boolean, success: boolean) {
+  if (isSubmitting) {
+    return (
+      <>
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        Deploying...
+      </>
+    );
+  }
+  if (success) {
+    return (
+      <>
+        <Check className="h-4 w-4 mr-2" />
+        Deployed
+      </>
+    );
+  }
+  return (
+    <>
+      <Rocket className="h-4 w-4 mr-2" />
+      Deploy Agent
+    </>
+  );
+}
+
 export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<WizardFormData>(INITIAL_FORM_DATA);
@@ -130,11 +180,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
   const { can } = usePermissions();
   const canDeploy = can(Permission.AGENTS_DEPLOY);
   const isDisabled = isReadOnly || !canDeploy;
-  const disabledMessage = isReadOnly
-    ? readOnlyMessage
-    : !canDeploy
-      ? "You don't have permission to deploy agents"
-      : "";
+  const disabledMessage = getDisabledMessage(isReadOnly, canDeploy, readOnlyMessage);
   const queryClient = useQueryClient();
   const dataService = useDataService();
   const { data: namespaces } = useNamespaces();
@@ -783,11 +829,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
               <div
                 className={cn(
                   "w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium",
-                  i < step
-                    ? "bg-primary text-primary-foreground"
-                    : i === step
-                    ? "border-2 border-primary"
-                    : "border border-muted-foreground/30"
+                  getStepIndicatorClassName(i, step)
                 )}
               >
                 {i < step ? <Check className="h-3 w-3" /> : i + 1}
@@ -823,22 +865,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
               onClick={handleSubmit}
               disabled={isSubmitting || success}
             >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deploying...
-                </>
-              ) : success ? (
-                <>
-                  <Check className="h-4 w-4 mr-2" />
-                  Deployed
-                </>
-              ) : (
-                <>
-                  <Rocket className="h-4 w-4 mr-2" />
-                  Deploy Agent
-                </>
-              )}
+              {renderDeployButtonContent(isSubmitting, success)}
             </Button>
           )}
         </div>

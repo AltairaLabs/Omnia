@@ -93,6 +93,55 @@ function EventRow({ event }: { event: K8sEvent }) {
 }
 
 /**
+ * Render events panel content based on loading/error/data state.
+ */
+function renderEventsPanelContent(
+  isLoading: boolean,
+  error: Error | null,
+  events: K8sEvent[] | undefined
+) {
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-24 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+        <p>Failed to load events</p>
+        <p className="text-xs mt-1">{String(error)}</p>
+      </div>
+    );
+  }
+
+  if (!events || events.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+        <p>No recent events</p>
+        <p className="text-xs mt-1">
+          Events will appear here when they occur
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {events.map((event) => (
+        <EventRow key={`${event.involvedObject.kind}-${event.involvedObject.name}-${event.reason}-${event.lastTimestamp}`} event={event} />
+      ))}
+    </div>
+  );
+}
+
+/**
  * Events panel showing Kubernetes events for an agent.
  */
 export function EventsPanel({ agentName, namespace }: EventsPanelProps) {
@@ -125,33 +174,7 @@ export function EventsPanel({ agentName, namespace }: EventsPanelProps) {
         </div>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-24 w-full" />
-            ))}
-          </div>
-        ) : error ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p>Failed to load events</p>
-            <p className="text-xs mt-1">{String(error)}</p>
-          </div>
-        ) : !events || events.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p>No recent events</p>
-            <p className="text-xs mt-1">
-              Events will appear here when they occur
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {events.map((event) => (
-              <EventRow key={`${event.involvedObject.kind}-${event.involvedObject.name}-${event.reason}-${event.lastTimestamp}`} event={event} />
-            ))}
-          </div>
-        )}
+        {renderEventsPanelContent(isLoading, error, events)}
       </CardContent>
     </Card>
   );

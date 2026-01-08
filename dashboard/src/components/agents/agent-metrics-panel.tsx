@@ -32,6 +32,91 @@ interface MetricCardProps {
 }
 
 /**
+ * Render metric card content based on loading/availability state.
+ */
+function renderMetricCardContent(
+  loading: boolean | undefined,
+  available: boolean,
+  metric: AgentMetric,
+  title: string,
+  color: string
+) {
+  const hasData = metric.series.length > 0;
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-20" />
+        <Skeleton className="h-[80px] w-full" />
+      </div>
+    );
+  }
+
+  if (!available) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[108px] text-muted-foreground">
+        <BarChart3 className="h-6 w-6 mb-1 opacity-50" />
+        <span className="text-xs">No data</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="text-2xl font-bold tracking-tight">
+        {metric.display}
+        {metric.unit && metric.unit !== "%" && (
+          <span className="text-sm font-normal text-muted-foreground ml-1">
+            {metric.unit}
+          </span>
+        )}
+      </div>
+      <div className="h-[80px] mt-2">
+        {hasData ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={metric.series}>
+              <defs>
+                <linearGradient id={`gradient-${title}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={color} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                }}
+                formatter={(value) => {
+                  const num = typeof value === "number" ? value : 0;
+                  if (metric.unit === "%") {
+                    return [`${(num * 100).toFixed(2)}%`, ""];
+                  }
+                  return [`${num.toFixed(2)} ${metric.unit}`, ""];
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke={color}
+                strokeWidth={2}
+                fillOpacity={1}
+                fill={`url(#gradient-${title})`}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+            No time series data
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
  * Individual metric card with sparkline.
  */
 function MetricCard({
@@ -43,8 +128,6 @@ function MetricCard({
   color,
   available = true,
 }: MetricCardProps) {
-  const hasData = metric.series.length > 0;
-
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -55,71 +138,84 @@ function MetricCard({
         <CardDescription className="text-xs">{description}</CardDescription>
       </CardHeader>
       <CardContent className="pb-3">
-        {loading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-[80px] w-full" />
-          </div>
-        ) : !available ? (
-          <div className="flex flex-col items-center justify-center h-[108px] text-muted-foreground">
-            <BarChart3 className="h-6 w-6 mb-1 opacity-50" />
-            <span className="text-xs">No data</span>
-          </div>
-        ) : (
-          <>
-            <div className="text-2xl font-bold tracking-tight">
-              {metric.display}
-              {metric.unit && metric.unit !== "%" && (
-                <span className="text-sm font-normal text-muted-foreground ml-1">
-                  {metric.unit}
-                </span>
-              )}
-            </div>
-            <div className="h-[80px] mt-2">
-              {hasData ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={metric.series}>
-                    <defs>
-                      <linearGradient id={`gradient-${title}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={color} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                      }}
-                      formatter={(value) => {
-                        const num = typeof value === "number" ? value : 0;
-                        if (metric.unit === "%") {
-                          return [`${(num * 100).toFixed(2)}%`, ""];
-                        }
-                        return [`${num.toFixed(2)} ${metric.unit}`, ""];
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="value"
-                      stroke={color}
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill={`url(#gradient-${title})`}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                  No time series data
-                </div>
-              )}
-            </div>
-          </>
-        )}
+        {renderMetricCardContent(loading, available, metric, title, color)}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Render token usage chart content based on loading/availability state.
+ */
+function renderTokenUsageContent(
+  loading: boolean | undefined,
+  available: boolean | undefined,
+  data: TokenUsagePoint[]
+) {
+  if (loading) {
+    return <Skeleton className="h-[250px] w-full" />;
+  }
+
+  if (!available || data.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground">
+        <BarChart3 className="h-8 w-8 mb-2 opacity-50" />
+        <span className="text-sm">No token usage data</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-[250px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+          <XAxis
+            dataKey="time"
+            tick={{ fontSize: 12 }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            tick={{ fontSize: 12 }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(value) => {
+              if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
+              return value.toString();
+            }}
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "hsl(var(--card))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: "8px",
+            }}
+            formatter={(value) => {
+              const num = typeof value === "number" ? value : 0;
+              return [num.toLocaleString(), ""];
+            }}
+          />
+          <Legend />
+          <Line
+            type="monotone"
+            dataKey="input"
+            name="Input"
+            stroke="hsl(var(--primary))"
+            strokeWidth={2}
+            dot={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="output"
+            name="Output"
+            stroke="hsl(142, 76%, 36%)"
+            strokeWidth={2}
+            dot={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -142,65 +238,7 @@ function TokenUsageChartPanel({
         <CardDescription>Input and output tokens over time</CardDescription>
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <Skeleton className="h-[250px] w-full" />
-        ) : !available || data.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground">
-            <BarChart3 className="h-8 w-8 mb-2 opacity-50" />
-            <span className="text-sm">No token usage data</span>
-          </div>
-        ) : (
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  dataKey="time"
-                  tick={{ fontSize: 12 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 12 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => {
-                    if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
-                    return value.toString();
-                  }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                  formatter={(value) => {
-                    const num = typeof value === "number" ? value : 0;
-                    return [num.toLocaleString(), ""];
-                  }}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="input"
-                  name="Input"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="output"
-                  name="Output"
-                  stroke="hsl(142, 76%, 36%)"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+        {renderTokenUsageContent(loading, available, data)}
       </CardContent>
     </Card>
   );

@@ -27,6 +27,96 @@ interface MetricCardProps {
 /**
  * Individual metric card with sparkline chart.
  */
+/** Renders the metric card content based on loading/available state */
+function MetricCardContent({
+  loading,
+  available,
+  metric,
+  title,
+  color,
+}: {
+  loading: boolean;
+  available: boolean;
+  metric: SystemMetric;
+  title: string;
+  color: string;
+}) {
+  const hasData = metric.series.length > 0;
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-20" />
+        <Skeleton className="h-[60px] w-full" />
+      </div>
+    );
+  }
+
+  if (!available) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[88px] text-muted-foreground">
+        <BarChart3 className="h-6 w-6 mb-1 opacity-50" />
+        <span className="text-xs">No data</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="text-2xl font-bold tracking-tight">
+        {metric.display}
+        <span className="text-sm font-normal text-muted-foreground ml-1">
+          {metric.unit !== "$" && metric.unit}
+        </span>
+      </div>
+      <div className="h-[60px] mt-2">
+        {hasData ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={metric.series}>
+              <defs>
+                <linearGradient id={`gradient-${title}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={color} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                }}
+                labelStyle={{ color: "hsl(var(--foreground))" }}
+                formatter={(value) => {
+                  const num = typeof value === "number" ? value : 0;
+                  return [
+                    metric.unit === "$"
+                      ? `$${num.toFixed(2)}`
+                      : `${num.toFixed(2)} ${metric.unit}`,
+                    "",
+                  ];
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke={color}
+                strokeWidth={2}
+                fillOpacity={1}
+                fill={`url(#gradient-${title})`}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+            No time series data
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function MetricCard({
   title,
   description,
@@ -36,8 +126,6 @@ function MetricCard({
   color,
   available = true,
 }: MetricCardProps) {
-  const hasData = metric.series.length > 0;
-
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -50,70 +138,13 @@ function MetricCard({
         <CardDescription className="text-xs">{description}</CardDescription>
       </CardHeader>
       <CardContent className="pb-2">
-        {loading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-[60px] w-full" />
-          </div>
-        ) : !available ? (
-          <div className="flex flex-col items-center justify-center h-[88px] text-muted-foreground">
-            <BarChart3 className="h-6 w-6 mb-1 opacity-50" />
-            <span className="text-xs">No data</span>
-          </div>
-        ) : (
-          <>
-            <div className="text-2xl font-bold tracking-tight">
-              {metric.display}
-              <span className="text-sm font-normal text-muted-foreground ml-1">
-                {metric.unit !== "$" && metric.unit}
-              </span>
-            </div>
-            <div className="h-[60px] mt-2">
-              {hasData ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={metric.series}>
-                    <defs>
-                      <linearGradient id={`gradient-${title}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={color} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                      }}
-                      labelStyle={{ color: "hsl(var(--foreground))" }}
-                      formatter={(value) => {
-                        const num = typeof value === "number" ? value : 0;
-                        return [
-                          metric.unit === "$"
-                            ? `$${num.toFixed(2)}`
-                            : `${num.toFixed(2)} ${metric.unit}`,
-                          "",
-                        ];
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="value"
-                      stroke={color}
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill={`url(#gradient-${title})`}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                  No time series data
-                </div>
-              )}
-            </div>
-          </>
-        )}
+        <MetricCardContent
+          loading={loading ?? false}
+          available={available}
+          metric={metric}
+          title={title}
+          color={color}
+        />
       </CardContent>
     </Card>
   );

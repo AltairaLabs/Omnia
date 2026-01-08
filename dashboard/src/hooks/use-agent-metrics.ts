@@ -77,15 +77,18 @@ function generateMockMetrics(agentName: string): AgentMetrics {
     const time = new Date(now.getTime() - i * 5 * 60 * 1000);
     const timeStr = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+    const seriesValue = Math.random() * 10 + 5; // NOSONAR - mock data (5-15 req/s)
     series.push({
       time: timeStr,
-      value: Math.random() * 10 + 5, // 5-15 req/s
+      value: seriesValue,
     });
 
+    const inputTokens = Math.floor(Math.random() * 5000) + 2000; // NOSONAR - mock data
+    const outputTokens = Math.floor(Math.random() * 2000) + 500; // NOSONAR - mock data
     tokenUsage.push({
       time: timeStr,
-      input: Math.floor(Math.random() * 5000) + 2000,
-      output: Math.floor(Math.random() * 2000) + 500,
+      input: inputTokens,
+      output: outputTokens,
     });
   }
 
@@ -96,31 +99,36 @@ function generateMockMetrics(agentName: string): AgentMetrics {
   const baseErrorRate = (seed % 5) / 100;
   const baseConnections = (seed % 20) + 5;
 
+  const reqRateCurrent = baseReqRate + Math.random() * 2; // NOSONAR - mock data
+  const reqRateDisplay = baseReqRate + Math.random() * 2; // NOSONAR - mock data
+  const latencyCurrent = baseLatency + Math.random() * 20; // NOSONAR - mock data
+  const latencyDisplay = baseLatency + Math.random() * 20; // NOSONAR - mock data
+
   return {
     available: true,
     isDemo: true,
     requestsPerSec: {
-      current: baseReqRate + Math.random() * 2,
-      display: `${(baseReqRate + Math.random() * 2).toFixed(1)}`,
-      series: series.map((s) => ({ ...s, value: baseReqRate + Math.random() * 5 })),
+      current: reqRateCurrent,
+      display: `${reqRateDisplay.toFixed(1)}`,
+      series: series.map((s) => ({ ...s, value: baseReqRate + Math.random() * 5 })), // NOSONAR
       unit: "req/s",
     },
     p95Latency: {
-      current: baseLatency + Math.random() * 20,
-      display: `${Math.round(baseLatency + Math.random() * 20)}`,
-      series: series.map((s) => ({ ...s, value: baseLatency + Math.random() * 30 })),
+      current: latencyCurrent,
+      display: `${Math.round(latencyDisplay)}`,
+      series: series.map((s) => ({ ...s, value: baseLatency + Math.random() * 30 })), // NOSONAR
       unit: "ms",
     },
     errorRate: {
       current: baseErrorRate,
       display: `${(baseErrorRate * 100).toFixed(2)}%`,
-      series: series.map((s) => ({ ...s, value: baseErrorRate + Math.random() * 0.01 })),
+      series: series.map((s) => ({ ...s, value: baseErrorRate + Math.random() * 0.01 })), // NOSONAR
       unit: "%",
     },
     activeConnections: {
       current: baseConnections,
       display: `${baseConnections}`,
-      series: series.map((s) => ({ ...s, value: baseConnections + Math.floor(Math.random() * 5) })),
+      series: series.map((s) => ({ ...s, value: baseConnections + Math.floor(Math.random() * 5) })), // NOSONAR
       unit: "",
     },
     tokenUsage,
@@ -184,38 +192,40 @@ function matrixToSeries(
     }));
 }
 
+type MetricsPrometheusResult = { status: string; data?: { result: PrometheusMatrixResult[] } };
+type TokenEntry = { input: number; output: number };
+
+/**
+ * Process token metrics from Prometheus result.
+ */
+function processTokenResult(
+  result: MetricsPrometheusResult,
+  timeMap: Map<number, TokenEntry>,
+  field: "input" | "output"
+): void {
+  if (result.status !== "success" || !result.data?.result) return;
+
+  for (const series of result.data.result) {
+    for (const [ts, val] of series.values || []) {
+      if (!timeMap.has(ts)) {
+        timeMap.set(ts, { input: 0, output: 0 });
+      }
+      timeMap.get(ts)![field] += parseFloat(val) || 0;
+    }
+  }
+}
+
 /**
  * Convert Prometheus range results to token usage points.
  */
 function matrixToTokenUsage(
-  inputResult: { status: string; data?: { result: PrometheusMatrixResult[] } },
-  outputResult: { status: string; data?: { result: PrometheusMatrixResult[] } }
+  inputResult: MetricsPrometheusResult,
+  outputResult: MetricsPrometheusResult
 ): TokenUsagePoint[] {
-  const timeMap = new Map<number, { input: number; output: number }>();
+  const timeMap = new Map<number, TokenEntry>();
 
-  // Process input tokens
-  if (inputResult.status === "success" && inputResult.data?.result) {
-    for (const series of inputResult.data.result) {
-      for (const [ts, val] of series.values || []) {
-        if (!timeMap.has(ts)) {
-          timeMap.set(ts, { input: 0, output: 0 });
-        }
-        timeMap.get(ts)!.input += parseFloat(val) || 0;
-      }
-    }
-  }
-
-  // Process output tokens
-  if (outputResult.status === "success" && outputResult.data?.result) {
-    for (const series of outputResult.data.result) {
-      for (const [ts, val] of series.values || []) {
-        if (!timeMap.has(ts)) {
-          timeMap.set(ts, { input: 0, output: 0 });
-        }
-        timeMap.get(ts)!.output += parseFloat(val) || 0;
-      }
-    }
-  }
+  processTokenResult(inputResult, timeMap, "input");
+  processTokenResult(outputResult, timeMap, "output");
 
   return Array.from(timeMap.entries())
     .sort(([a], [b]) => a - b)

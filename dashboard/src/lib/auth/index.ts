@@ -23,13 +23,57 @@ export * from "./proxy";
 export * from "./permissions";
 export * from "./api-guard";
 
-import { getAuthConfig } from "./config";
+import { getAuthConfig, type AuthConfig } from "./config";
 import { createAnonymousUser, type User } from "./types";
 import { getCurrentUser, saveUserToSession, getSession } from "./session";
 import { getUserFromProxyHeaders } from "./proxy";
 import { userHasPermission, type PermissionType } from "./permissions";
 import { authenticateApiKey, isApiKeyAuthEnabled } from "./api-keys";
 import { refreshAccessToken, extractClaims, mapClaimsToUser, validateClaims } from "./oauth";
+
+/**
+ * Handle proxy mode authentication.
+ */
+async function handleProxyAuth(): Promise<User> {
+  // Try to get user from proxy headers
+  const proxyUser = await getUserFromProxyHeaders();
+
+  if (proxyUser) {
+    // Update session with latest user info
+    await saveUserToSession(proxyUser);
+    return proxyUser;
+  }
+
+  // Check existing session (for cases where headers aren't forwarded on every request)
+  const sessionUser = await getCurrentUser();
+  if (sessionUser) {
+    return sessionUser;
+  }
+
+  // No authentication - return anonymous with viewer role
+  // This allows the proxy to handle the redirect to login
+  return createAnonymousUser("viewer");
+}
+
+/**
+ * Handle OAuth mode authentication.
+ */
+async function handleOAuthAuth(config: AuthConfig): Promise<User> {
+  const sessionUser = await getCurrentUser();
+
+  if (sessionUser && sessionUser.provider === "oauth") {
+    // Check if token needs refresh
+    const session = await getSession();
+    if (session.oauth && shouldRefreshToken(session.oauth.expiresAt)) {
+      await tryRefreshToken(session, config);
+    }
+    return sessionUser;
+  }
+
+  // No authenticated user - return anonymous
+  // Middleware will handle redirect to login page
+  return createAnonymousUser("viewer");
+}
 
 /**
  * Get the current authenticated user.
@@ -54,53 +98,17 @@ export async function getUser(): Promise<User> {
     }
   }
 
-  // Anonymous mode - return anonymous user
-  if (config.mode === "anonymous") {
-    return createAnonymousUser(config.anonymous.role);
+  // Handle authentication based on mode
+  switch (config.mode) {
+    case "anonymous":
+      return createAnonymousUser(config.anonymous.role);
+    case "proxy":
+      return handleProxyAuth();
+    case "oauth":
+      return handleOAuthAuth(config);
+    default:
+      return createAnonymousUser(config.anonymous.role);
   }
-
-  // Proxy mode - check headers
-  if (config.mode === "proxy") {
-    // Try to get user from proxy headers
-    const proxyUser = await getUserFromProxyHeaders();
-
-    if (proxyUser) {
-      // Update session with latest user info
-      await saveUserToSession(proxyUser);
-      return proxyUser;
-    }
-
-    // Check existing session (for cases where headers aren't forwarded on every request)
-    const sessionUser = await getCurrentUser();
-    if (sessionUser) {
-      return sessionUser;
-    }
-
-    // No authentication - return anonymous with viewer role
-    // This allows the proxy to handle the redirect to login
-    return createAnonymousUser("viewer");
-  }
-
-  // OAuth mode - check session
-  if (config.mode === "oauth") {
-    const sessionUser = await getCurrentUser();
-
-    if (sessionUser && sessionUser.provider === "oauth") {
-      // Check if token needs refresh
-      const session = await getSession();
-      if (session.oauth && shouldRefreshToken(session.oauth.expiresAt)) {
-        await tryRefreshToken(session, config);
-      }
-      return sessionUser;
-    }
-
-    // No authenticated user - return anonymous
-    // Middleware will handle redirect to login page
-    return createAnonymousUser("viewer");
-  }
-
-  // Fallback to anonymous
-  return createAnonymousUser(config.anonymous.role);
 }
 
 /**

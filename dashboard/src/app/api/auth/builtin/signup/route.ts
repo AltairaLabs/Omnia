@@ -132,9 +132,9 @@ export async function POST(request: NextRequest) {
       );
       await store.createEmailVerificationToken(user.id, hash, expiresAt);
 
-      // TODO: Send verification email
+      // NOTE: Email sending not yet implemented
       // For now, log the token (in production, this would be sent via email)
-      console.log(
+      console.warn(
         `Email verification token for ${email}: ${token} (expires: ${expiresAt.toISOString()})`
       );
 

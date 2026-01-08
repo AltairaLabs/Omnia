@@ -104,7 +104,7 @@ export class LiveAgentConnection implements AgentConnection {
       };
 
       this.ws.onclose = (event) => {
-        console.log("[LiveAgentConnection] WebSocket closed:", event.code, event.reason);
+        console.warn("[LiveAgentConnection] WebSocket closed:", event.code, event.reason);
         this.ws = null;
         this.sessionId = null;
         // If we got a close code indicating an error, preserve error status

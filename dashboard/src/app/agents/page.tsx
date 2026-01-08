@@ -14,6 +14,22 @@ import type { AgentRuntimePhase } from "@/types";
 type ViewMode = "cards" | "table";
 type FilterPhase = "all" | AgentRuntimePhase;
 
+/**
+ * Render loading skeleton based on view mode.
+ */
+function renderLoadingSkeleton(viewMode: ViewMode) {
+  if (viewMode === "cards") {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {[...Array(6)].map((_, i) => (
+          <Skeleton key={i} className="h-[180px] rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+  return <Skeleton className="h-[400px] rounded-lg" />;
+}
+
 export default function AgentsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
@@ -123,23 +139,15 @@ export default function AgentsPage() {
         <DeployWizard open={wizardOpen} onOpenChange={setWizardOpen} />
 
         {/* Content */}
-        {isLoading ? (
-          viewMode === "cards" ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {[...Array(6)].map((_, i) => (
-                <Skeleton key={i} className="h-[180px] rounded-lg" />
-              ))}
-            </div>
-          ) : (
-            <Skeleton className="h-[400px] rounded-lg" />
-          )
-        ) : viewMode === "cards" ? (
+        {isLoading && renderLoadingSkeleton(viewMode)}
+        {!isLoading && viewMode === "cards" && (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filteredAgents?.map((agent) => (
               <AgentCard key={agent.metadata.uid} agent={agent} />
             ))}
           </div>
-        ) : (
+        )}
+        {!isLoading && viewMode !== "cards" && (
           <AgentTable agents={filteredAgents ?? []} />
         )}
 

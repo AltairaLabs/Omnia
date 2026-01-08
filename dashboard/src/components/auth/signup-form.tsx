@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/card";
 import { AlertCircle, CheckCircle2, Loader2, UserPlus } from "lucide-react";
 
+const BORDER_DESTRUCTIVE = "border-destructive";
+
 interface SignupFormProps {
   error?: string;
   errorMessage?: string;
@@ -177,7 +179,7 @@ export function SignupForm({
               disabled={isLoading}
               autoComplete="username"
               autoFocus
-              className={fieldError === "username" ? "border-destructive" : ""}
+              className={fieldError === "username" ? BORDER_DESTRUCTIVE : ""}
             />
           </div>
 
@@ -192,7 +194,7 @@ export function SignupForm({
               required
               disabled={isLoading}
               autoComplete="email"
-              className={fieldError === "email" ? "border-destructive" : ""}
+              className={fieldError === "email" ? BORDER_DESTRUCTIVE : ""}
             />
           </div>
 
@@ -221,7 +223,7 @@ export function SignupForm({
               disabled={isLoading}
               autoComplete="new-password"
               minLength={minPasswordLength}
-              className={fieldError === "password" ? "border-destructive" : ""}
+              className={fieldError === "password" ? BORDER_DESTRUCTIVE : ""}
             />
             <p className="text-xs text-muted-foreground">
               Must be at least {minPasswordLength} characters
@@ -239,7 +241,7 @@ export function SignupForm({
               required
               disabled={isLoading}
               autoComplete="new-password"
-              className={fieldError === "confirmPassword" ? "border-destructive" : ""}
+              className={fieldError === "confirmPassword" ? BORDER_DESTRUCTIVE : ""}
             />
           </div>
         </CardContent>

@@ -116,6 +116,33 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
+/**
+ * Get avatar background class based on message role.
+ */
+function getAvatarClassName(isUser: boolean, isAssistant: boolean): string {
+  if (isUser) return "bg-primary text-primary-foreground";
+  if (isAssistant) return "bg-blue-500 text-white";
+  return "bg-gray-500 text-white";
+}
+
+/**
+ * Get icon component based on message role.
+ */
+function getMessageIcon(isUser: boolean, isAssistant: boolean) {
+  if (isUser) return <User className="h-4 w-4" />;
+  if (isAssistant) return <Bot className="h-4 w-4" />;
+  return <MessageSquare className="h-4 w-4" />;
+}
+
+/**
+ * Get bubble background class based on message role.
+ */
+function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
+  if (isUser) return "bg-primary text-primary-foreground";
+  if (isSystem) return "bg-muted border";
+  return "bg-muted";
+}
+
 function MessageBubble({ message, showTimestamp }: { message: Message; showTimestamp?: boolean }) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -131,31 +158,17 @@ function MessageBubble({ message, showTimestamp }: { message: Message; showTimes
       <div
         className={cn(
           "flex items-center justify-center h-8 w-8 rounded-full shrink-0",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : isAssistant
-            ? "bg-blue-500 text-white"
-            : "bg-gray-500 text-white"
+          getAvatarClassName(isUser, isAssistant)
         )}
       >
-        {isUser ? (
-          <User className="h-4 w-4" />
-        ) : isAssistant ? (
-          <Bot className="h-4 w-4" />
-        ) : (
-          <MessageSquare className="h-4 w-4" />
-        )}
+        {getMessageIcon(isUser, isAssistant)}
       </div>
 
       <div className={cn("flex flex-col max-w-[80%]", isUser ? "items-end" : "items-start")}>
         <div
           className={cn(
             "rounded-lg px-4 py-2",
-            isUser
-              ? "bg-primary text-primary-foreground"
-              : isSystem
-              ? "bg-muted border"
-              : "bg-muted"
+            getBubbleClassName(isUser, isSystem)
           )}
         >
           <div className="whitespace-pre-wrap text-sm">{message.content}</div>

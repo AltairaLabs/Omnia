@@ -399,7 +399,9 @@ export class SQLiteUserStore implements UserStore {
     };
   }
 
-  private rowToPasswordResetToken(row: PasswordResetTokenRow): PasswordResetToken {
+  private rowToToken<T extends PasswordResetToken | EmailVerificationToken>(
+    row: PasswordResetTokenRow | EmailVerificationTokenRow
+  ): T {
     return {
       id: row.id,
       userId: row.user_id,
@@ -407,20 +409,17 @@ export class SQLiteUserStore implements UserStore {
       expiresAt: new Date(row.expires_at),
       usedAt: row.used_at ? new Date(row.used_at) : undefined,
       createdAt: new Date(row.created_at),
-    };
+    } as T;
+  }
+
+  private rowToPasswordResetToken(row: PasswordResetTokenRow): PasswordResetToken {
+    return this.rowToToken<PasswordResetToken>(row);
   }
 
   private rowToEmailVerificationToken(
     row: EmailVerificationTokenRow
   ): EmailVerificationToken {
-    return {
-      id: row.id,
-      userId: row.user_id,
-      tokenHash: row.token_hash,
-      expiresAt: new Date(row.expires_at),
-      usedAt: row.used_at ? new Date(row.used_at) : undefined,
-      createdAt: new Date(row.created_at),
-    };
+    return this.rowToToken<EmailVerificationToken>(row);
   }
 }
 

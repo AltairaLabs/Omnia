@@ -47,6 +47,75 @@ const levelBadgeColors = {
   debug: "bg-gray-500/15 text-gray-700 dark:text-gray-400 border-gray-500/20",
 };
 
+/** Get the empty state message based on logs state */
+function getEmptyStateMessage(logsLength: number): string {
+  if (logsLength === 0) return "No logs yet...";
+  return "No logs match the current filters";
+}
+
+/** Get the status text based on demo mode and loading state */
+function getStatusText(isDemoMode: boolean, isLoading: boolean): string {
+  if (isDemoMode) return "Demo data";
+  if (isLoading) return "Loading...";
+  return "Live logs";
+}
+
+/** Renders the log content area based on loading/data state */
+function LogContent({
+  isLoading,
+  logs,
+  filteredLogs,
+  formatTimestamp,
+}: {
+  isLoading: boolean;
+  logs: LogEntry[];
+  filteredLogs: LogEntry[];
+  formatTimestamp: (date: Date) => string;
+}) {
+  if (isLoading && logs.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-32 text-muted-foreground">
+        Loading logs...
+      </div>
+    );
+  }
+
+  if (filteredLogs.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-32 text-muted-foreground">
+        {getEmptyStateMessage(logs.length)}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {filteredLogs.map((log) => (
+        <div
+          key={`${log.timestamp.getTime()}-${log.level}-${log.container}-${log.message.slice(0, 50)}`}
+          className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
+        >
+          <span className="text-muted-foreground shrink-0">
+            {formatTimestamp(log.timestamp)}
+          </span>
+          <span
+            className={cn(
+              "shrink-0 w-12 uppercase font-medium",
+              levelColors[log.level]
+            )}
+          >
+            {log.level}
+          </span>
+          <span className="text-muted-foreground shrink-0 w-16">
+            [{log.container}]
+          </span>
+          <span className="break-all">{log.message}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function LogViewer({
   agentName,
   namespace,
@@ -261,38 +330,12 @@ export function LogViewer({
         onMouseLeave={() => setAutoScroll(true)}
       >
         <div className="p-2">
-          {isLoading && logs.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-muted-foreground">
-              Loading logs...
-            </div>
-          ) : filteredLogs.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-muted-foreground">
-              {logs.length === 0 ? "No logs yet..." : "No logs match the current filters"}
-            </div>
-          ) : (
-            filteredLogs.map((log) => (
-              <div
-                key={`${log.timestamp.getTime()}-${log.level}-${log.container}-${log.message.slice(0, 50)}`}
-                className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
-              >
-                <span className="text-muted-foreground shrink-0">
-                  {formatTimestamp(log.timestamp)}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 w-12 uppercase font-medium",
-                    levelColors[log.level]
-                  )}
-                >
-                  {log.level}
-                </span>
-                <span className="text-muted-foreground shrink-0 w-16">
-                  [{log.container}]
-                </span>
-                <span className="break-all">{log.message}</span>
-              </div>
-            ))
-          )}
+          <LogContent
+            isLoading={isLoading}
+            logs={logs}
+            filteredLogs={filteredLogs}
+            formatTimestamp={formatTimestamp}
+          />
         </div>
       </ScrollArea>
 
@@ -302,11 +345,7 @@ export function LogViewer({
           {filteredLogs.length} / {logs.length} entries
         </span>
         <span>
-          {isDemoMode ? (
-            "Demo data"
-          ) : (
-            isLoading ? "Loading..." : "Live logs"
-          )} • {agentName}.{namespace}
+          {getStatusText(isDemoMode, isLoading)} • {agentName}.{namespace}
         </span>
       </div>
     </div>

@@ -14,6 +14,8 @@ import { DollarSign, TrendingUp, Coins, PiggyBank, Loader2 } from "lucide-react"
 import { useCosts } from "@/hooks";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const NO_DATA_AVAILABLE = "No data available";
+
 function LoadingSkeleton() {
   return (
     <div className="flex flex-col h-full">
@@ -93,7 +95,7 @@ export default function CostsPage() {
                   / {formatCost(summary.openaiCost)} OpenAI
                 </>
               ) : (
-                "No data available"
+                NO_DATA_AVAILABLE
               )
             }
             icon={DollarSign}
@@ -102,7 +104,7 @@ export default function CostsPage() {
           <StatCard
             title="Projected Monthly"
             value={available ? formatCost(summary.projectedMonthlyCost) : "--"}
-            description={available ? "Based on current 24h usage" : "No data available"}
+            description={available ? "Based on current 24h usage" : NO_DATA_AVAILABLE}
             icon={TrendingUp}
           />
 
@@ -118,7 +120,7 @@ export default function CostsPage() {
                   / {summary.outputPercent.toFixed(0)}% output
                 </>
               ) : (
-                "No data available"
+                NO_DATA_AVAILABLE
               )
             }
             icon={Coins}
@@ -127,7 +129,7 @@ export default function CostsPage() {
           <StatCard
             title="Cache Savings"
             value={available ? formatCost(summary.totalCacheSavings) : "--"}
-            description={available ? "Saved via prompt caching" : "No data available"}
+            description={available ? "Saved via prompt caching" : NO_DATA_AVAILABLE}
             icon={PiggyBank}
           />
         </div>

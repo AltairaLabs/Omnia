@@ -60,16 +60,13 @@ export function middleware(request: NextRequest) {
     const headerName = process.env.OMNIA_AUTH_PROXY_HEADER_USER || "X-Forwarded-User";
     const username = request.headers.get(headerName);
 
-    // If no user header, the proxy should redirect to login
-    // We just continue and let the app handle showing appropriate UI
-    if (!username) {
-      // For API routes, return 401
-      if (pathname.startsWith("/api/") && !pathname.startsWith("/api/health")) {
-        return NextResponse.json(
-          { error: "Authentication required" },
-          { status: 401 }
-        );
-      }
+    // If no user header for API routes (except health), return 401
+    // For non-API routes, continue and let the app handle showing appropriate UI
+    if (!username && pathname.startsWith("/api/") && !pathname.startsWith("/api/health")) {
+      return NextResponse.json(
+        { error: "Authentication required" },
+        { status: 401 }
+      );
     }
   }
 

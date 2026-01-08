@@ -133,7 +133,7 @@ async function seedAdminUser(
     return;
   }
 
-  console.log("Seeding initial admin user...");
+  console.warn("Seeding initial admin user...");
 
   await store.createUser({
     username: config.adminUsername,
@@ -143,8 +143,8 @@ async function seedAdminUser(
     emailVerified: true,
   });
 
-  console.log(`Admin user '${config.adminUsername}' created successfully.`);
-  console.log("IMPORTANT: Change the admin password after first login!");
+  console.warn(`Admin user '${config.adminUsername}' created successfully.`);
+  console.warn("IMPORTANT: Change the admin password after first login!");
 }
 
 /**

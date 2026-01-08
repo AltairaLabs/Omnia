@@ -51,13 +51,6 @@ export function TopologyGraph({
         onNoteEdit,
         onNoteDelete,
       });
-      console.log("Topology graph built:", {
-        agents: agents.length,
-        promptPacks: promptPacks.length,
-        toolRegistries: toolRegistries.length,
-        nodes: graph.nodes.length,
-        edges: graph.edges.length
-      });
       return graph;
     },
     [agents, promptPacks, toolRegistries, onNodeClick, notes, onNoteEdit, onNoteDelete]

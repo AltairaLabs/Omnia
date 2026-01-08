@@ -72,9 +72,9 @@ export async function POST(request: NextRequest) {
 
     await store.createPasswordResetToken(user.id, hash, expiresAt);
 
-    // TODO: Send password reset email
+    // NOTE: Email sending not yet implemented
     // For now, log the token (in production, this would be sent via email)
-    console.log(
+    console.warn(
       `Password reset token for ${email}: ${token} (expires: ${expiresAt.toISOString()})`
     );
 

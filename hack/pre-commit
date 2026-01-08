@@ -106,6 +106,32 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
             print_error "TypeScript check failed"
             CHECKS_FAILED=1
         fi
+
+        print_header "Dashboard: Tests with Coverage"
+        # Run tests with coverage
+        DASHBOARD_TEST_OUTPUT=$(cd "$REPO_ROOT/dashboard" && npm run test:coverage --silent 2>&1) || true
+        DASHBOARD_TEST_EXIT=$?
+
+        if [ $DASHBOARD_TEST_EXIT -ne 0 ]; then
+            print_error "Dashboard tests failed"
+            echo "$DASHBOARD_TEST_OUTPUT" | grep -E "(FAIL|Error:|✕)" | head -20
+            CHECKS_FAILED=1
+        else
+            # Extract coverage percentage from Jest output
+            DASHBOARD_COVERAGE=$(echo "$DASHBOARD_TEST_OUTPUT" | grep "All files" | awk '{print $4}' | tr -d '%')
+            if [ -n "$DASHBOARD_COVERAGE" ]; then
+                DASHBOARD_THRESHOLD=80
+                COV_OK=$(echo "$DASHBOARD_COVERAGE $DASHBOARD_THRESHOLD" | awk '{if ($1 >= $2) print "1"; else print "0"}')
+                if [ "$COV_OK" = "1" ]; then
+                    print_success "Dashboard tests passed (coverage: ${DASHBOARD_COVERAGE}%)"
+                else
+                    print_error "Dashboard coverage ${DASHBOARD_COVERAGE}% below threshold ${DASHBOARD_THRESHOLD}%"
+                    CHECKS_FAILED=1
+                fi
+            else
+                print_success "Dashboard tests passed"
+            fi
+        fi
     fi
 fi
 

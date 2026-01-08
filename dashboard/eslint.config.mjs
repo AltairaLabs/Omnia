@@ -21,13 +21,15 @@ const eslintConfig = defineConfig([
     "src/types/generated/**",
     // Generated API schema (openapi-typescript output)
     "src/lib/api/schema.d.ts",
+    // shadcn UI components - vendor code
+    "src/components/ui/**",
   ]),
   // Custom stricter rules
   {
     rules: {
-      // TypeScript strict rules - using warn to allow gradual adoption
+      // TypeScript strict rules
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/no-explicit-any": "warn",
@@ -36,29 +38,30 @@ const eslintConfig = defineConfig([
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
 
-      // Code quality rules - using warn to allow gradual adoption
-      "no-console": ["warn", { allow: ["warn", "error"] }],
+      // Code quality rules
+      "no-console": ["error", { allow: ["warn", "error"] }],
       "no-debugger": "error",
-      "no-duplicate-imports": "warn",
-      "no-unused-expressions": "warn",
-      "prefer-const": "warn",
-      eqeqeq: ["warn", "always", { null: "ignore" }],
+      "no-duplicate-imports": "error",
+      "no-unused-expressions": "error",
+      "prefer-const": "error",
+      eqeqeq: ["error", "always", { null: "ignore" }],
 
       // Import organization (if plugin available)
       "import/no-duplicates": "off", // Handled by no-duplicate-imports
 
-      // SonarJS rules - align with SonarCloud
-      "sonarjs/cognitive-complexity": ["warn", 15],
-      "sonarjs/no-duplicate-string": ["warn", { threshold: 3 }],
-      "sonarjs/no-identical-functions": "warn",
-      "sonarjs/no-collapsible-if": "warn",
-      "sonarjs/no-redundant-jump": "warn",
-      "sonarjs/no-small-switch": "warn",
-      "sonarjs/prefer-single-boolean-return": "warn",
-      "sonarjs/no-nested-template-literals": "warn",
+      // SonarJS rules - match SonarCloud defaults
+      "sonarjs/cognitive-complexity": ["error", 15],
+      "sonarjs/no-duplicate-string": ["error", { threshold: 3 }],
+      "sonarjs/no-identical-functions": "error",
+      "sonarjs/no-collapsible-if": "error",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "error",
+      "sonarjs/prefer-single-boolean-return": "error",
+      "sonarjs/no-nested-template-literals": "error",
+      "sonarjs/no-nested-conditional": "error",
     },
   },
-  // Test file overrides - more relaxed rules
+  // Test files - relaxed rules
   {
     files: ["**/*.test.ts", "**/*.test.tsx", "**/test/**"],
     rules: {
@@ -66,33 +69,27 @@ const eslintConfig = defineConfig([
       "no-console": "off",
       "sonarjs/no-duplicate-string": "off",
       "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-nested-functions": "off",
+      "sonarjs/no-redundant-boolean": "off",
+      "sonarjs/pseudo-random": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/use-type-alias": "off",
     },
   },
-  // Scripts and server files - allow console
-  {
-    files: ["scripts/**", "server.js"],
-    rules: {
-      "no-console": "off",
-    },
-  },
-  // Mock data files - relaxed rules for test fixtures
+  // Mock data files - test fixtures
   {
     files: ["**/mock-data.ts", "**/mock-service.ts"],
     rules: {
       "sonarjs/no-duplicate-string": "off",
-      "sonarjs/pseudo-random": "off", // Mock data uses Math.random for demo values
-      "sonarjs/no-clear-text-protocols": "off", // Mock URLs don't need HTTPS
+      "sonarjs/pseudo-random": "off",
+      "sonarjs/no-clear-text-protocols": "off",
     },
   },
-  // Test files - additional relaxed rules
+  // Scripts
   {
-    files: ["**/*.test.ts", "**/*.test.tsx"],
+    files: ["scripts/**", "server.js"],
     rules: {
-      "sonarjs/no-nested-functions": "off", // Jest describe/it nesting is fine
-      "sonarjs/no-redundant-boolean": "off", // Test assertions may use explicit booleans
-      "sonarjs/pseudo-random": "off", // Test data can use Math.random
-      "sonarjs/no-identical-functions": "off", // Test helpers may be similar
-      "sonarjs/use-type-alias": "off", // Inline types are fine in tests
+      "no-console": "off",
     },
   },
   // API route handlers - allow console for debugging

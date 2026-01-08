@@ -34,6 +34,149 @@ interface ScaleControlProps {
   compact?: boolean;
 }
 
+interface ConfirmAction {
+  replicas: number;
+  type: "scale-down" | "scale-to-zero";
+}
+
+/** Helper to compute the disabled message */
+function getDisabledMessage(isReadOnly: boolean, readOnlyMessage: string, canScale: boolean): string {
+  if (isReadOnly) return readOnlyMessage;
+  if (!canScale) return "You don't have permission to scale agents";
+  return "";
+}
+
+/** Autoscaling indicator tooltip */
+function AutoscalingIndicator({
+  type,
+  minReplicas,
+  maxReplicas,
+  compact,
+}: {
+  type?: string;
+  minReplicas: number;
+  maxReplicas: number;
+  compact: boolean;
+}) {
+  if (compact) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="mr-1">
+            <Zap className="h-3.5 w-3.5 text-yellow-500" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Autoscaling enabled ({type?.toUpperCase()})</p>
+          <p className="text-xs text-muted-foreground">Range: {minReplicas} - {maxReplicas}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
+          <Zap className="h-3 w-3" />
+          <span className="text-xs font-medium">{type?.toUpperCase()}</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>Autoscaling is enabled</p>
+        <p className="text-xs text-muted-foreground">Range: {minReplicas} - {maxReplicas} replicas</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Get the dialog title based on action type and compact mode */
+function getDialogTitle(isScaleToZero: boolean, compact: boolean): string {
+  if (isScaleToZero) return "Scale to Zero?";
+  if (compact) return "Scale Down?";
+  return "Confirm Scale Down";
+}
+
+/** Get the dialog description based on action type and compact mode */
+function getDialogDescription(
+  isScaleToZero: boolean,
+  compact: boolean,
+  desiredReplicas: number,
+  targetReplicas: number | undefined
+): React.ReactNode {
+  if (isScaleToZero && compact) {
+    return "This will stop all instances of the agent. The agent will not be able to process requests until scaled back up.";
+  }
+  if (isScaleToZero) {
+    return (
+      <>
+        This will stop all instances of the agent. The agent will not be
+        able to process any requests until scaled back up.
+        <br /><br />
+        Are you sure you want to continue?
+      </>
+    );
+  }
+  if (compact) {
+    return `This will reduce the agent from ${desiredReplicas} to ${targetReplicas} replica(s).`;
+  }
+  return (
+    <>
+      This will reduce the number of replicas from{" "}
+      <strong>{desiredReplicas}</strong> to{" "}
+      <strong>{targetReplicas}</strong>.
+      <br /><br />
+      This may affect the agent&apos;s ability to handle traffic.
+    </>
+  );
+}
+
+/** Confirmation dialog for scale actions */
+function ScaleConfirmDialog({
+  open,
+  onOpenChange,
+  confirmAction,
+  desiredReplicas,
+  onConfirm,
+  onCancel,
+  compact,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  confirmAction: ConfirmAction | null;
+  desiredReplicas: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+  compact: boolean;
+}) {
+  const isScaleToZero = confirmAction?.type === "scale-to-zero";
+  const title = getDialogTitle(isScaleToZero, compact);
+  const buttonLabel = isScaleToZero ? "Scale to Zero" : "Scale Down";
+  const description = getDialogDescription(isScaleToZero, compact, desiredReplicas, confirmAction?.replicas);
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {description}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className={isScaleToZero && !compact ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}
+          >
+            {buttonLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function ScaleControl({
   currentReplicas,
   desiredReplicas,
@@ -49,70 +192,50 @@ export function ScaleControl({
   const { can } = usePermissions();
   const canScale = can(Permission.AGENTS_SCALE);
   const isDisabled = isReadOnly || !canScale;
-  const disabledMessage = isReadOnly
-    ? readOnlyMessage
-    : !canScale
-      ? "You don't have permission to scale agents"
-      : "";
+  const disabledMessage = getDisabledMessage(isReadOnly, readOnlyMessage, canScale);
+
   const [isScaling, setIsScaling] = useState(false);
   const [pendingScale, setPendingScale] = useState<number | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{
-    replicas: number;
-    type: "scale-down" | "scale-to-zero";
-  } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
-  const handleScale = useCallback(
-    async (newReplicas: number) => {
-      // Clamp to valid range
-      const clampedReplicas = Math.max(minReplicas, Math.min(maxReplicas, newReplicas));
+  const executeScale = useCallback(async (replicas: number) => {
+    setIsScaling(true);
+    setPendingScale(replicas);
+    try {
+      await onScale(replicas);
+    } finally {
+      setIsScaling(false);
+      setPendingScale(null);
+    }
+  }, [onScale]);
 
-      // Check if we need confirmation
-      if (clampedReplicas === 0 && desiredReplicas > 0) {
-        setConfirmAction({ replicas: 0, type: "scale-to-zero" });
-        setShowConfirmDialog(true);
-        return;
-      }
+  const handleScale = useCallback(async (newReplicas: number) => {
+    const clampedReplicas = Math.max(minReplicas, Math.min(maxReplicas, newReplicas));
 
-      if (clampedReplicas < desiredReplicas && clampedReplicas > 0) {
-        setConfirmAction({ replicas: clampedReplicas, type: "scale-down" });
-        setShowConfirmDialog(true);
-        return;
-      }
+    // Scale to zero needs confirmation
+    if (clampedReplicas === 0 && desiredReplicas > 0) {
+      setConfirmAction({ replicas: 0, type: "scale-to-zero" });
+      setShowConfirmDialog(true);
+      return;
+    }
 
-      // Execute scale directly for scale up
-      setIsScaling(true);
-      setPendingScale(clampedReplicas);
-      try {
-        await onScale(clampedReplicas);
-      } finally {
-        setIsScaling(false);
-        setPendingScale(null);
-      }
-    },
-    [desiredReplicas, minReplicas, maxReplicas, onScale]
-  );
+    // Scale down needs confirmation
+    if (clampedReplicas < desiredReplicas && clampedReplicas > 0) {
+      setConfirmAction({ replicas: clampedReplicas, type: "scale-down" });
+      setShowConfirmDialog(true);
+      return;
+    }
 
-  const executeScale = useCallback(
-    async (replicas: number) => {
-      setIsScaling(true);
-      setPendingScale(replicas);
-      try {
-        await onScale(replicas);
-      } finally {
-        setIsScaling(false);
-        setPendingScale(null);
-      }
-    },
-    [onScale]
-  );
+    // Scale up executes directly
+    await executeScale(clampedReplicas);
+  }, [desiredReplicas, minReplicas, maxReplicas, executeScale]);
 
   const confirmScale = useCallback(async () => {
-    if (confirmAction) {
-      setShowConfirmDialog(false);
-      await executeScale(confirmAction.replicas);
-      setConfirmAction(null);
-    }
+    if (!confirmAction) return;
+    setShowConfirmDialog(false);
+    await executeScale(confirmAction.replicas);
+    setConfirmAction(null);
   }, [confirmAction, executeScale]);
 
   const cancelConfirm = useCallback(() => {
@@ -123,25 +246,15 @@ export function ScaleControl({
   const displayReplicas = pendingScale ?? desiredReplicas;
   const canScaleDown = displayReplicas > minReplicas && !isScaling && !isDisabled;
   const canScaleUp = displayReplicas < maxReplicas && !isScaling && !isDisabled;
+  const replicaDisplay = `${currentReplicas}/${displayReplicas}`;
 
+  // Compact view
   if (compact) {
     return (
       <TooltipProvider>
         <div className={cn("flex items-center gap-1", className)}>
           {autoscalingEnabled && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="mr-1">
-                  <Zap className="h-3.5 w-3.5 text-yellow-500" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Autoscaling enabled ({autoscalingType?.toUpperCase()})</p>
-                <p className="text-xs text-muted-foreground">
-                  Range: {minReplicas} - {maxReplicas}
-                </p>
-              </TooltipContent>
-            </Tooltip>
+            <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact />
           )}
 
           {isDisabled ? (
@@ -149,9 +262,7 @@ export function ScaleControl({
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Lock className="h-3 w-3" />
-                  <span className="min-w-[3rem] text-center text-sm font-medium">
-                    {currentReplicas}/{displayReplicas}
-                  </span>
+                  <span className="min-w-[3rem] text-center text-sm font-medium">{replicaDisplay}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -160,63 +271,33 @@ export function ScaleControl({
             </Tooltip>
           ) : (
             <>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => handleScale(displayReplicas - 1)}
-                disabled={!canScaleDown}
-              >
+              <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => handleScale(displayReplicas - 1)} disabled={!canScaleDown}>
                 <Minus className="h-3 w-3" />
               </Button>
-
               <span className="min-w-[3rem] text-center text-sm font-medium">
-                {isScaling ? (
-                  <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                ) : (
-                  `${currentReplicas}/${displayReplicas}`
-                )}
+                {isScaling ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : replicaDisplay}
               </span>
-
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => handleScale(displayReplicas + 1)}
-                disabled={!canScaleUp}
-              >
+              <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => handleScale(displayReplicas + 1)} disabled={!canScaleUp}>
                 <Plus className="h-3 w-3" />
               </Button>
             </>
           )}
 
-          <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {confirmAction?.type === "scale-to-zero"
-                    ? "Scale to Zero?"
-                    : "Scale Down?"}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {confirmAction?.type === "scale-to-zero"
-                    ? "This will stop all instances of the agent. The agent will not be able to process requests until scaled back up."
-                    : `This will reduce the agent from ${desiredReplicas} to ${confirmAction?.replicas} replica(s).`}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel onClick={cancelConfirm}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={confirmScale}>
-                  {confirmAction?.type === "scale-to-zero" ? "Scale to Zero" : "Scale Down"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <ScaleConfirmDialog
+            open={showConfirmDialog}
+            onOpenChange={setShowConfirmDialog}
+            confirmAction={confirmAction}
+            desiredReplicas={desiredReplicas}
+            onConfirm={confirmScale}
+            onCancel={cancelConfirm}
+            compact
+          />
         </div>
       </TooltipProvider>
     );
   }
 
+  // Full view
   return (
     <TooltipProvider>
       <div className={cn("flex flex-col gap-2", className)}>
@@ -224,29 +305,14 @@ export function ScaleControl({
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Replicas</span>
             {autoscalingEnabled && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
-                    <Zap className="h-3 w-3" />
-                    <span className="text-xs font-medium">{autoscalingType?.toUpperCase()}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Autoscaling is enabled</p>
-                  <p className="text-xs text-muted-foreground">
-                    Range: {minReplicas} - {maxReplicas} replicas
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+              <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact={false} />
             )}
             {isDisabled && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                     <Lock className="h-3 w-3" />
-                    <span className="text-xs font-medium">
-                      {isReadOnly ? "Read Only" : "No Permission"}
-                    </span>
+                    <span className="text-xs font-medium">{isReadOnly ? "Read Only" : "No Permission"}</span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">
@@ -262,10 +328,7 @@ export function ScaleControl({
                 <span className="text-muted-foreground">{pendingScale}</span>
               </div>
             ) : (
-              <span>
-                {currentReplicas}
-                <span className="text-muted-foreground">/{displayReplicas}</span>
-              </span>
+              <span>{currentReplicas}<span className="text-muted-foreground">/{displayReplicas}</span></span>
             )}
           </div>
         </div>
@@ -274,23 +337,11 @@ export function ScaleControl({
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 opacity-50"
-                  disabled
-                >
-                  <Minus className="h-4 w-4 mr-1" />
-                  Scale Down
+                <Button variant="outline" size="sm" className="flex-1 opacity-50" disabled>
+                  <Minus className="h-4 w-4 mr-1" />Scale Down
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 opacity-50"
-                  disabled
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Scale Up
+                <Button variant="outline" size="sm" className="flex-1 opacity-50" disabled>
+                  <Plus className="h-4 w-4 mr-1" />Scale Up
                 </Button>
               </div>
             </TooltipTrigger>
@@ -300,79 +351,28 @@ export function ScaleControl({
           </Tooltip>
         ) : (
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={() => handleScale(displayReplicas - 1)}
-              disabled={!canScaleDown}
-            >
-              <Minus className="h-4 w-4 mr-1" />
-              Scale Down
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => handleScale(displayReplicas - 1)} disabled={!canScaleDown}>
+              <Minus className="h-4 w-4 mr-1" />Scale Down
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={() => handleScale(displayReplicas + 1)}
-              disabled={!canScaleUp}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Scale Up
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => handleScale(displayReplicas + 1)} disabled={!canScaleUp}>
+              <Plus className="h-4 w-4 mr-1" />Scale Up
             </Button>
           </div>
         )}
 
         {autoscalingEnabled && (
-          <p className="text-xs text-muted-foreground">
-            Manual scaling will be overridden by autoscaler
-          </p>
+          <p className="text-xs text-muted-foreground">Manual scaling will be overridden by autoscaler</p>
         )}
 
-        <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {confirmAction?.type === "scale-to-zero"
-                  ? "Scale to Zero?"
-                  : "Confirm Scale Down"}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {confirmAction?.type === "scale-to-zero" ? (
-                  <>
-                    This will stop all instances of the agent. The agent will not be
-                    able to process any requests until scaled back up.
-                    <br />
-                    <br />
-                    Are you sure you want to continue?
-                  </>
-                ) : (
-                  <>
-                    This will reduce the number of replicas from{" "}
-                    <strong>{desiredReplicas}</strong> to{" "}
-                    <strong>{confirmAction?.replicas}</strong>.
-                    <br />
-                    <br />
-                    This may affect the agent&apos;s ability to handle traffic.
-                  </>
-                )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={cancelConfirm}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={confirmScale}
-                className={
-                  confirmAction?.type === "scale-to-zero"
-                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    : ""
-                }
-              >
-                {confirmAction?.type === "scale-to-zero" ? "Scale to Zero" : "Scale Down"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ScaleConfirmDialog
+          open={showConfirmDialog}
+          onOpenChange={setShowConfirmDialog}
+          confirmAction={confirmAction}
+          desiredReplicas={desiredReplicas}
+          onConfirm={confirmScale}
+          onCancel={cancelConfirm}
+          compact={false}
+        />
       </div>
     </TooltipProvider>
   );

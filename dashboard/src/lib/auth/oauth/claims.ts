@@ -144,8 +144,5 @@ function resolveRoleFromGroups(
  */
 export function validateClaims(claims: Claims): boolean {
   // Must have sub (subject) claim
-  if (!claims.sub || typeof claims.sub !== "string") {
-    return false;
-  }
-  return true;
+  return Boolean(claims.sub && typeof claims.sub === "string");
 }

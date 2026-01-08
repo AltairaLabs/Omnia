@@ -111,7 +111,7 @@ export class FileApiKeyStore implements ApiKeyStore {
         this.keys.set(key.id, key);
       }
 
-      console.log(`Loaded ${this.keys.size} API keys from ${this.filePath}`);
+      console.warn(`Loaded ${this.keys.size} API keys from ${this.filePath}`);
     } catch (error) {
       console.error(`Failed to load API keys from ${this.filePath}:`, error);
     }
@@ -124,7 +124,7 @@ export class FileApiKeyStore implements ApiKeyStore {
     watchFile(this.filePath, { interval: 5000 }, (curr, prev) => {
       if (curr.mtimeMs !== prev.mtimeMs && curr.mtimeMs !== this.lastModified) {
         this.lastModified = curr.mtimeMs;
-        console.log("API keys file changed, reloading...");
+        console.warn("API keys file changed, reloading...");
         this.loadKeys();
       }
     });

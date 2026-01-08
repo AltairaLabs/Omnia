@@ -28,10 +28,12 @@ function generateMockActivityData(): ActivityDataPoint[] {
 
   for (let i = 23; i >= 0; i--) {
     const time = new Date(now.getTime() - i * 60 * 60 * 1000);
+    const requests = Math.floor(Math.random() * 500) + 200; // NOSONAR - mock data
+    const sessions = Math.floor(Math.random() * 100) + 50; // NOSONAR - mock data
     data.push({
       time: time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      requests: Math.floor(Math.random() * 500) + 200,
-      sessions: Math.floor(Math.random() * 100) + 50,
+      requests,
+      sessions,
     });
   }
 
@@ -48,43 +50,44 @@ function getMockActivityData(): ActivityDataPoint[] {
   return cachedMockData;
 }
 
+type PrometheusResult = { status: string; data?: { result: PrometheusMatrixResult[] } };
+type ActivityEntry = { requests: number; sessions: number };
+
+/**
+ * Process a Prometheus result and update the time map.
+ */
+function processPrometheusResult(
+  result: PrometheusResult,
+  timeMap: Map<number, ActivityEntry>,
+  field: "requests" | "sessions",
+  aggregator: "sum" | "max"
+): void {
+  if (result.status !== "success" || !result.data?.result) return;
+
+  for (const series of result.data.result) {
+    for (const [ts, val] of series.values || []) {
+      if (!timeMap.has(ts)) {
+        timeMap.set(ts, { requests: 0, sessions: 0 });
+      }
+      const entry = timeMap.get(ts)!;
+      const value = parseFloat(val) || 0;
+      entry[field] = aggregator === "sum" ? entry[field] + value : Math.max(entry[field], value);
+    }
+  }
+}
+
 /**
  * Convert Prometheus range result to ActivityDataPoint array.
  */
 function matrixToActivityData(
-  requestsResult: { status: string; data?: { result: PrometheusMatrixResult[] } },
-  sessionsResult: { status: string; data?: { result: PrometheusMatrixResult[] } }
+  requestsResult: PrometheusResult,
+  sessionsResult: PrometheusResult
 ): ActivityDataPoint[] {
-  // Collect all timestamps
-  const timeMap = new Map<number, { requests: number; sessions: number }>();
+  const timeMap = new Map<number, ActivityEntry>();
 
-  // Process requests
-  if (requestsResult.status === "success" && requestsResult.data?.result) {
-    for (const series of requestsResult.data.result) {
-      for (const [ts, val] of series.values || []) {
-        if (!timeMap.has(ts)) {
-          timeMap.set(ts, { requests: 0, sessions: 0 });
-        }
-        timeMap.get(ts)!.requests += parseFloat(val) || 0;
-      }
-    }
-  }
+  processPrometheusResult(requestsResult, timeMap, "requests", "sum");
+  processPrometheusResult(sessionsResult, timeMap, "sessions", "max");
 
-  // Process sessions (active connections)
-  if (sessionsResult.status === "success" && sessionsResult.data?.result) {
-    for (const series of sessionsResult.data.result) {
-      for (const [ts, val] of series.values || []) {
-        if (!timeMap.has(ts)) {
-          timeMap.set(ts, { requests: 0, sessions: 0 });
-        }
-        // Take max for sessions (it's a gauge, not a counter)
-        const current = timeMap.get(ts)!;
-        current.sessions = Math.max(current.sessions, parseFloat(val) || 0);
-      }
-    }
-  }
-
-  // Convert to array sorted by timestamp
   return Array.from(timeMap.entries())
     .sort(([a], [b]) => a - b)
     .map(([ts, data]) => ({

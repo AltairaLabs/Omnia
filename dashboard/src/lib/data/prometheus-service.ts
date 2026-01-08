@@ -145,6 +145,48 @@ export class PrometheusService {
     }
   }
 
+  /**
+   * Process a single Prometheus result and update agent entries.
+   */
+  private processAgentResult(
+    result: Awaited<ReturnType<typeof queryPrometheus>>,
+    agentMap: Map<string, CostAllocationItem>,
+    field: keyof Pick<CostAllocationItem, "inputTokens" | "outputTokens" | "cacheHits" | "requests" | "totalCost">
+  ): void {
+    if (result.status !== "success" || !result.data?.result) return;
+    for (const item of result.data.result as PrometheusVectorResult[]) {
+      const agent = this.getOrCreateAgent(agentMap, item.metric);
+      agent[field] = parseFloat(item.value[1]) || 0;
+    }
+  }
+
+  /**
+   * Get or create an agent entry in the map.
+   */
+  private getOrCreateAgent(
+    agentMap: Map<string, CostAllocationItem>,
+    metric: Record<string, string>
+  ): CostAllocationItem {
+    const key = `${metric.namespace}/${metric.agent}/${metric.model}`;
+    if (!agentMap.has(key)) {
+      agentMap.set(key, {
+        agent: metric.agent || "unknown",
+        namespace: metric.namespace || "default",
+        provider: metric.provider || "unknown",
+        model: metric.model || "unknown",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheHits: 0,
+        requests: 0,
+        inputCost: 0,
+        outputCost: 0,
+        cacheSavings: 0,
+        totalCost: 0,
+      });
+    }
+    return agentMap.get(key)!;
+  }
+
   private buildAgentCosts(
     inputTokensResult: Awaited<ReturnType<typeof queryPrometheus>>,
     outputTokensResult: Awaited<ReturnType<typeof queryPrometheus>>,
@@ -152,70 +194,13 @@ export class PrometheusService {
     requestsResult: Awaited<ReturnType<typeof queryPrometheus>>,
     costResult: Awaited<ReturnType<typeof queryPrometheus>>
   ): CostAllocationItem[] {
-    const items: CostAllocationItem[] = [];
     const agentMap = new Map<string, CostAllocationItem>();
 
-    // Helper to get or create agent entry
-    const getAgent = (metric: Record<string, string>): CostAllocationItem => {
-      const key = `${metric.namespace}/${metric.agent}/${metric.model}`;
-      if (!agentMap.has(key)) {
-        agentMap.set(key, {
-          agent: metric.agent || "unknown",
-          namespace: metric.namespace || "default",
-          provider: metric.provider || "unknown",
-          model: metric.model || "unknown",
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheHits: 0,
-          requests: 0,
-          inputCost: 0,
-          outputCost: 0,
-          cacheSavings: 0,
-          totalCost: 0,
-        });
-      }
-      return agentMap.get(key)!;
-    };
-
-    // Process input tokens
-    if (inputTokensResult.status === "success" && inputTokensResult.data?.result) {
-      for (const item of inputTokensResult.data.result as PrometheusVectorResult[]) {
-        const agent = getAgent(item.metric);
-        agent.inputTokens = parseFloat(item.value[1]) || 0;
-      }
-    }
-
-    // Process output tokens
-    if (outputTokensResult.status === "success" && outputTokensResult.data?.result) {
-      for (const item of outputTokensResult.data.result as PrometheusVectorResult[]) {
-        const agent = getAgent(item.metric);
-        agent.outputTokens = parseFloat(item.value[1]) || 0;
-      }
-    }
-
-    // Process cache hits
-    if (cacheHitsResult.status === "success" && cacheHitsResult.data?.result) {
-      for (const item of cacheHitsResult.data.result as PrometheusVectorResult[]) {
-        const agent = getAgent(item.metric);
-        agent.cacheHits = parseFloat(item.value[1]) || 0;
-      }
-    }
-
-    // Process requests
-    if (requestsResult.status === "success" && requestsResult.data?.result) {
-      for (const item of requestsResult.data.result as PrometheusVectorResult[]) {
-        const agent = getAgent(item.metric);
-        agent.requests = parseFloat(item.value[1]) || 0;
-      }
-    }
-
-    // Process costs and calculate breakdowns
-    if (costResult.status === "success" && costResult.data?.result) {
-      for (const item of costResult.data.result as PrometheusVectorResult[]) {
-        const agent = getAgent(item.metric);
-        agent.totalCost = parseFloat(item.value[1]) || 0;
-      }
-    }
+    this.processAgentResult(inputTokensResult, agentMap, "inputTokens");
+    this.processAgentResult(outputTokensResult, agentMap, "outputTokens");
+    this.processAgentResult(cacheHitsResult, agentMap, "cacheHits");
+    this.processAgentResult(requestsResult, agentMap, "requests");
+    this.processAgentResult(costResult, agentMap, "totalCost");
 
     // Calculate input/output costs using pricing
     for (const agent of agentMap.values()) {
@@ -228,10 +213,9 @@ export class PrometheusService {
             (agent.cacheHits / 1_000_000) * (pricing.inputPer1M - pricing.cachePer1M);
         }
       }
-      items.push(agent);
     }
 
-    return items.sort((a, b) => b.totalCost - a.totalCost);
+    return Array.from(agentMap.values()).sort((a, b) => b.totalCost - a.totalCost);
   }
 
   private buildSummary(byAgent: CostAllocationItem[]): CostSummary {

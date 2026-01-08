@@ -26,7 +26,7 @@ interface UseAgentConsoleReturn extends ConsoleState {
 let idCounter = 0;
 function generateId(): string {
   idCounter += 1;
-  return `${Date.now()}-${idCounter}-${Math.random().toString(36).slice(2, 7)}`;
+  return `${Date.now()}-${idCounter}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /**
