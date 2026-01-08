@@ -146,6 +146,8 @@ type LLMMetricsRecorder interface {
 // NoOpLLMMetrics is a no-op implementation for when metrics are disabled.
 type NoOpLLMMetrics struct{}
 
-// RecordRequest is a no-op.
-func (n *NoOpLLMMetrics) RecordRequest(req LLMRequestMetrics) {
+// RecordRequest is a no-op implementation that intentionally does nothing.
+// This is used when metrics collection is disabled.
+func (n *NoOpLLMMetrics) RecordRequest(_ LLMRequestMetrics) {
+	// Intentionally empty: no-op implementation for when metrics are disabled
 }

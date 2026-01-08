@@ -31,13 +31,6 @@ function formatRelativeTime(timestamp: string): string {
 }
 
 /**
- * Format a timestamp to a readable date/time string.
- */
-function _formatTimestamp(timestamp: string): string {
-  return new Date(timestamp).toLocaleString();
-}
-
-/**
  * Single event row component.
  */
 function EventRow({ event }: { event: K8sEvent }) {
@@ -154,8 +147,8 @@ export function EventsPanel({ agentName, namespace }: EventsPanelProps) {
           </div>
         ) : (
           <div className="space-y-3">
-            {events.map((event, index) => (
-              <EventRow key={`${event.reason}-${event.lastTimestamp}-${index}`} event={event} />
+            {events.map((event) => (
+              <EventRow key={`${event.involvedObject.kind}-${event.involvedObject.name}-${event.reason}-${event.lastTimestamp}`} event={event} />
             ))}
           </div>
         )}

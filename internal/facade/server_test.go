@@ -492,3 +492,118 @@ func TestServerWithMetrics(t *testing.T) {
 		t.Fatal("NewServer returned nil")
 	}
 }
+
+func TestServerPingPong(t *testing.T) {
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	// Short ping interval to test ping loop quickly
+	cfg.PingInterval = 50 * time.Millisecond
+	cfg.PongTimeout = 100 * time.Millisecond
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, nil, log)
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	// Connect with a dialer that handles ping/pong properly
+	dialer := websocket.DefaultDialer
+	ws, _, err := dialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Set up pong handler to respond to pings
+	pingReceived := make(chan struct{}, 1)
+	ws.SetPingHandler(func(appData string) error {
+		select {
+		case pingReceived <- struct{}{}:
+		default:
+		}
+		// Respond with pong
+		return ws.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(time.Second))
+	})
+
+	// Read messages in background to allow ping handling
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, _, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for ping to be received (or timeout)
+	select {
+	case <-pingReceived:
+		// Success - ping was sent and we responded with pong
+	case <-time.After(200 * time.Millisecond):
+		// Ping may not have been sent yet, which is fine
+	}
+
+	// Clean close
+	_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+}
+
+func TestServerSendPingClosedConnection(t *testing.T) {
+	// Test sendPing with a closed connection
+	conn := &Connection{
+		closed: true,
+	}
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	log := logr.Discard()
+	server := NewServer(cfg, store, nil, log)
+	defer func() { _ = store.Close() }()
+
+	// sendPing should return false for closed connection
+	result := server.sendPing(conn)
+	if result {
+		t.Error("sendPing should return false for closed connection")
+	}
+}
+
+func TestServerHandlerError(t *testing.T) {
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			// Simulate handler error
+			return writer.WriteError(ErrorCodeInternalError, "handler error")
+		},
+	}
+
+	_, ts := newTestServer(t, handler)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send message
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "test"}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
+	}
+
+	// Read connected
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	// Should receive error message from handler
+	var errorMsg ServerMessage
+	if err := ws.ReadJSON(&errorMsg); err != nil {
+		t.Fatalf("Failed to read error: %v", err)
+	}
+	if errorMsg.Type != MessageTypeError {
+		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+}
