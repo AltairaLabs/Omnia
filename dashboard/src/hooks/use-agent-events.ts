@@ -6,9 +6,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useDataService, type K8sEvent } from "@/lib/data";
+import { useDataService } from "@/lib/data";
 
-export type { K8sEvent };
+export type { K8sEvent } from "@/lib/data";
 
 /**
  * Hook to fetch K8s events for a specific agent.

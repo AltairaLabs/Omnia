@@ -49,9 +49,7 @@ export class PrometheusService {
    * Check if Prometheus is available.
    */
   async checkAvailability(): Promise<boolean> {
-    if (this.available === null) {
-      this.available = await isPrometheusAvailable();
-    }
+    this.available ??= await isPrometheusAvailable();
     return this.available;
   }
 

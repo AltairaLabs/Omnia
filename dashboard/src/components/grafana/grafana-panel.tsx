@@ -130,6 +130,7 @@ export function GrafanaPanel({
           )}
           <iframe
             src={panelUrl || ""}
+            title={`Grafana panel: ${title}`}
             width="100%"
             height={height}
             frameBorder="0"

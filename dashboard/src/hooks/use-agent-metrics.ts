@@ -93,7 +93,7 @@ function generateMockMetrics(agentName: string): AgentMetrics {
   }
 
   // Seed randomness based on agent name for consistent demo data
-  const seed = agentName.split("").reduce((a, b) => a + b.charCodeAt(0), 0);
+  const seed = agentName.split("").reduce((a, b) => a + (b.codePointAt(0) ?? 0), 0);
   const baseReqRate = (seed % 10) + 5;
   const baseLatency = (seed % 50) + 100;
   const baseErrorRate = (seed % 5) / 100;

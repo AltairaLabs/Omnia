@@ -72,7 +72,7 @@ export interface K8sEvent {
 export interface CostAllocationItem {
   agent: string;
   namespace: string;
-  provider: "anthropic" | "openai" | string;
+  provider: string;
   model: string;
   team?: string;
   inputTokens: number;

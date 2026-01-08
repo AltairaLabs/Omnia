@@ -1123,7 +1123,7 @@ export function getMockSessionSummaries(): SessionSummary[] {
     messageCount: session.metrics.messageCount,
     toolCallCount: session.metrics.toolCallCount,
     totalTokens: session.metrics.totalTokens,
-    lastMessage: session.messages[session.messages.length - 1]?.content.slice(0, 100),
+    lastMessage: session.messages.at(-1)?.content.slice(0, 100),
   }));
 }
 
@@ -1328,7 +1328,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     inputCost: 7.35, // $3/1M * 2.45M
     outputCost: 28.35, // $15/1M * 1.89M
     cacheSavings: 1.22, // ($3 - $0.30)/1M * 0.45M
-    totalCost: 35.70,
+    totalCost: 35.7,
   },
   {
     agent: "code-assistant",
@@ -1341,7 +1341,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     cacheHits: 320_000,
     requests: 1_892,
     inputCost: 5.34,
-    outputCost: 35.10,
+    outputCost: 35.1,
     cacheSavings: 0.86,
     totalCost: 40.44,
   },
@@ -1355,10 +1355,10 @@ export const mockCostAllocation: CostAllocationItem[] = [
     outputTokens: 1_120_000,
     cacheHits: 0,
     requests: 856,
-    inputCost: 8.90, // $10/1M
-    outputCost: 33.60, // $30/1M
+    inputCost: 8.9, // $10/1M
+    outputCost: 33.6, // $30/1M
     cacheSavings: 0,
-    totalCost: 42.50,
+    totalCost: 42.5,
   },
   {
     agent: "sales-copilot",
@@ -1370,10 +1370,10 @@ export const mockCostAllocation: CostAllocationItem[] = [
     outputTokens: 1_560_000,
     cacheHits: 0,
     requests: 1_124,
-    inputCost: 12.30,
-    outputCost: 46.80,
+    inputCost: 12.3,
+    outputCost: 46.8,
     cacheSavings: 0,
-    totalCost: 59.10,
+    totalCost: 59.1,
   },
   {
     agent: "onboarding-bot",

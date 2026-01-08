@@ -44,9 +44,7 @@ function generateMockActivityData(): ActivityDataPoint[] {
 let cachedMockData: ActivityDataPoint[] | null = null;
 
 function getMockActivityData(): ActivityDataPoint[] {
-  if (!cachedMockData) {
-    cachedMockData = generateMockActivityData();
-  }
+  cachedMockData ??= generateMockActivityData();
   return cachedMockData;
 }
 

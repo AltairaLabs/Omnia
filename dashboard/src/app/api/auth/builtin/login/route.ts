@@ -53,10 +53,7 @@ export async function POST(request: NextRequest) {
     const config = getBuiltinConfig();
 
     // Find user by email or username
-    let user = await store.getUserByEmail(identity);
-    if (!user) {
-      user = await store.getUserByUsername(identity);
-    }
+    const user = await store.getUserByEmail(identity) ?? await store.getUserByUsername(identity);
 
     if (!user) {
       // Don't reveal whether user exists

@@ -30,7 +30,6 @@ import type { ApiKeyStore, ApiKey } from "./types";
 import { getMemoryApiKeyStore } from "./memory-store";
 import { getFileApiKeyStore } from "./file-store";
 import type { User } from "../types";
-import type { UserRole } from "../config";
 
 /**
  * Store type for API keys.
@@ -169,7 +168,7 @@ function createUserFromApiKey(apiKey: ApiKey): User {
     id: apiKey.userId,
     username: `apikey:${apiKey.name}`,
     groups: [],
-    role: apiKey.role as UserRole,
+    role: apiKey.role,
     provider: "proxy", // Treat API keys like proxy auth
   };
 }

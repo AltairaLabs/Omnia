@@ -101,7 +101,10 @@ export function useConsoleStore(namespace: string, agentName: string) {
       if (current.messages.length === 0) return;
 
       const messages = [...current.messages];
-      messages[messages.length - 1] = updater(messages[messages.length - 1]);
+      const lastMessage = messages.at(-1);
+      if (lastMessage) {
+        messages[messages.length - 1] = updater(lastMessage);
+      }
       setState(key, { messages });
     },
     [key]
