@@ -1,0 +1,2 @@
+# This directory contains auto-generated screenshots from the dashboard
+# Run: npx playwright test e2e/screenshots/capture.spec.ts
