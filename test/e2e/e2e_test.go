@@ -374,6 +374,8 @@ spec:
 
 		It("should create and validate a PromptPack", func() {
 			By("creating a ConfigMap for the PromptPack")
+			// The ConfigMap must contain pack.json in PromptKit format
+			// This is the format expected by the runtime container
 			configMapManifest := `
 apiVersion: v1
 kind: ConfigMap
@@ -381,11 +383,24 @@ metadata:
   name: test-prompts
   namespace: test-agents
 data:
-  system.txt: |
-    You are a test assistant for E2E testing.
-  config.yaml: |
-    model: gpt-4
-    temperature: 0.7
+  pack.json: |
+    {
+      "id": "test-prompts",
+      "name": "test-prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.0",
+          "system_template": "You are a test assistant for E2E testing."
+        }
+      }
+    }
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(configMapManifest)
@@ -603,6 +618,7 @@ spec:
 			Expect(err).NotTo(HaveOccurred())
 
 			By("updating the PromptPack ConfigMap")
+			// Update pack.json with a modified system template
 			configMapUpdate := `
 apiVersion: v1
 kind: ConfigMap
@@ -610,11 +626,24 @@ metadata:
   name: test-prompts
   namespace: test-agents
 data:
-  system.txt: |
-    You are an UPDATED test assistant for E2E testing.
-  config.yaml: |
-    model: gpt-4
-    temperature: 0.8
+  pack.json: |
+    {
+      "id": "test-prompts",
+      "name": "test-prompts",
+      "version": "1.0.1",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.1",
+          "system_template": "You are an UPDATED test assistant for E2E testing."
+        }
+      }
+    }
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(configMapUpdate)
