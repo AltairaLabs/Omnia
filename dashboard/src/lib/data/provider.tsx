@@ -35,7 +35,7 @@ interface DataServiceProviderProps {
  * Provider component that supplies the DataService to the component tree.
  * Automatically selects MockDataService or OperatorApiService based on config.
  */
-export function DataServiceProvider({ children, initialService }: DataServiceProviderProps) {
+export function DataServiceProvider({ children, initialService }: Readonly<DataServiceProviderProps>) {
   const { config } = useRuntimeConfig();
 
   const service = useMemo(() => {

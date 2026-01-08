@@ -29,7 +29,7 @@ function formatDate(timestamp?: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
-export default function AgentDetailPage({ params }: AgentDetailPageProps) {
+export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProps>) {
   const { name } = use(params);
   const searchParams = useSearchParams();
   const router = useRouter();

@@ -18,7 +18,7 @@ interface ResetPasswordPageProps {
 
 export default async function ResetPasswordPage({
   searchParams,
-}: ResetPasswordPageProps) {
+}: Readonly<ResetPasswordPageProps>) {
   const config = getAuthConfig();
   const params = await searchParams;
 

@@ -61,7 +61,7 @@ async function handleProxyAuth(): Promise<User> {
 async function handleOAuthAuth(config: AuthConfig): Promise<User> {
   const sessionUser = await getCurrentUser();
 
-  if (sessionUser && sessionUser.provider === "oauth") {
+  if (sessionUser?.provider === "oauth") {
     // Check if token needs refresh
     const session = await getSession();
     if (session.oauth && shouldRefreshToken(session.oauth.expiresAt)) {

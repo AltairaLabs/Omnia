@@ -14,7 +14,7 @@ describe("pricing utilities", () => {
       expect(pricing).not.toBeNull();
       expect(pricing?.provider).toBe("openai");
       expect(pricing?.inputPer1M).toBe(2.5);
-      expect(pricing?.outputPer1M).toBe(10.0);
+      expect(pricing?.outputPer1M).toBe(10);
     });
 
     it("should return pricing for partial model match", () => {
@@ -132,7 +132,7 @@ describe("pricing utilities", () => {
     });
 
     it("should format regular costs with 2 decimal places", () => {
-      expect(formatCost(1.0)).toBe("$1.00");
+      expect(formatCost(1)).toBe("$1.00");
       expect(formatCost(10.5)).toBe("$10.50");
       expect(formatCost(100.99)).toBe("$100.99");
     });

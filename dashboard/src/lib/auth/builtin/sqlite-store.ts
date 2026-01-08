@@ -164,8 +164,7 @@ export class SQLiteUserStore implements UserStore {
     }
 
     updates.push("updated_at = ?");
-    values.push(new Date().toISOString());
-    values.push(id);
+    values.push(new Date().toISOString(), id);
 
     const stmt = this.db.prepare(
       `UPDATE users SET ${updates.join(", ")} WHERE id = ?`
@@ -193,8 +192,8 @@ export class SQLiteUserStore implements UserStore {
     offset?: number;
     search?: string;
   }): Promise<{ users: StoredUser[]; total: number }> {
-    const limit = options?.limit || 50;
-    const offset = options?.offset || 0;
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
     const search = options?.search;
 
     let query = "SELECT * FROM users";

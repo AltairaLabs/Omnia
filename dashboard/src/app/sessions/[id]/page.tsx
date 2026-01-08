@@ -42,7 +42,7 @@ function getStatusBadge(status: Session["status"]) {
   return <Badge variant={variant}>{label}</Badge>;
 }
 
-function ToolCallBadge({ status }: { status: ToolCall["status"] }) {
+function ToolCallBadge({ status }: Readonly<{ status: ToolCall["status"] }>) {
   switch (status) {
     case "success":
       return (
@@ -68,7 +68,7 @@ function ToolCallBadge({ status }: { status: ToolCall["status"] }) {
   }
 }
 
-function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+function ToolCallCard({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -143,7 +143,7 @@ function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
   return "bg-muted";
 }
 
-function MessageBubble({ message, showTimestamp }: { message: Message; showTimestamp?: boolean }) {
+function MessageBubble({ message, showTimestamp }: Readonly<{ message: Message; showTimestamp?: boolean }>) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isTool = message.role === "tool";
@@ -198,9 +198,9 @@ function MessageBubble({ message, showTimestamp }: { message: Message; showTimes
 
 export default function SessionDetailPage({
   params,
-}: {
+}: Readonly<{
   params: Promise<{ id: string }>;
-}) {
+}>) {
   const { id } = use(params);
   const router = useRouter();
   const session = getMockSession(id);
@@ -250,22 +250,23 @@ export default function SessionDetailPage({
       session.messages.forEach((msg) => {
         if (msg.role === "tool") return;
         const roleLabel = msg.role.charAt(0).toUpperCase() + msg.role.slice(1);
-        lines.push(`### ${roleLabel}`);
-        lines.push("");
-        lines.push(msg.content);
-        lines.push("");
+        lines.push(`### ${roleLabel}`, "", msg.content, "");
 
         if (msg.toolCalls) {
           msg.toolCalls.forEach((tc) => {
-            lines.push(`**Tool Call:** \`${tc.name}\``);
-            lines.push("```json");
-            lines.push(JSON.stringify(tc.arguments, null, 2));
-            lines.push("```");
+            lines.push(
+              `**Tool Call:** \`${tc.name}\``,
+              "```json",
+              JSON.stringify(tc.arguments, null, 2),
+              "```"
+            );
             if (tc.result) {
-              lines.push("**Result:**");
-              lines.push("```json");
-              lines.push(JSON.stringify(tc.result, null, 2));
-              lines.push("```");
+              lines.push(
+                "**Result:**",
+                "```json",
+                JSON.stringify(tc.result, null, 2),
+                "```"
+              );
             }
             lines.push("");
           });

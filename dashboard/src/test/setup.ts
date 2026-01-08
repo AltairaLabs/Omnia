@@ -1,8 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
-// Mock window.matchMedia
-Object.defineProperty(window, "matchMedia", {
+// Mock matchMedia
+Object.defineProperty(globalThis, "matchMedia", {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
     matches: false,

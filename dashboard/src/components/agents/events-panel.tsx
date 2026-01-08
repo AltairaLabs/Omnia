@@ -103,8 +103,8 @@ function renderEventsPanelContent(
   if (isLoading) {
     return (
       <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-24 w-full" />
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={`skeleton-${i}`} className="h-24 w-full" />
         ))}
       </div>
     );

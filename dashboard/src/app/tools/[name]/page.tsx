@@ -69,7 +69,7 @@ function getHandlerTypeIcon(type: string) {
   }
 }
 
-function ToolStatusIcon({ status }: { status: DiscoveredTool["status"] }) {
+function ToolStatusIcon({ status }: Readonly<{ status: DiscoveredTool["status"] }>) {
   switch (status) {
     case "Available":
       return <CheckCircle className="h-4 w-4 text-green-500" />;
@@ -89,7 +89,7 @@ function getEndpointFromHandler(handler: HandlerDefinition): string {
   return "N/A";
 }
 
-export default function ToolDetailPage({ params }: PageProps) {
+export default function ToolDetailPage({ params }: Readonly<PageProps>) {
   const { name } = use(params);
   const searchParams = useSearchParams();
   const namespace = searchParams.get("namespace") || "production";

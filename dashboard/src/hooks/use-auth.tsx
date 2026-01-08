@@ -51,7 +51,7 @@ interface AuthProviderProps {
  * Auth provider - wrap your app with this to provide auth context.
  * The user should be fetched on the server and passed as a prop.
  */
-export function AuthProvider({ children, user }: AuthProviderProps) {
+export function AuthProvider({ children, user }: Readonly<AuthProviderProps>) {
   const router = useRouter();
 
   const hasRole = useCallback(

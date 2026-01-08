@@ -184,7 +184,7 @@ Error code (if any): {{error_code}}`,
   ],
 };
 
-export default function PromptPackDetailPage({ params }: PromptPackDetailPageProps) {
+export default function PromptPackDetailPage({ params }: Readonly<PromptPackDetailPageProps>) {
   const { name } = use(params);
   const searchParams = useSearchParams();
   const namespace = searchParams.get("namespace") || "production";

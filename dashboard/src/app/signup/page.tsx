@@ -18,7 +18,7 @@ interface SignupPageProps {
   }>;
 }
 
-export default async function SignupPage({ searchParams }: SignupPageProps) {
+export default async function SignupPage({ searchParams }: Readonly<SignupPageProps>) {
   const config = getAuthConfig();
   const params = await searchParams;
 
@@ -35,7 +35,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
 
   // If already authenticated, redirect to returnTo or home
   const user = await getCurrentUser();
-  if (user && user.provider === "builtin") {
+  if (user?.provider === "builtin") {
     redirect(params.returnTo || "/");
   }
 

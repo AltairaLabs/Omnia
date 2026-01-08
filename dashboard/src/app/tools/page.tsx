@@ -109,7 +109,7 @@ export default function ToolsPage() {
         {/* Content */}
         {isLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[...new Array(4)].map((_, i) => (
+            {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={`skeleton-${i}`} className="h-[220px] rounded-lg" />
             ))}
           </div>

@@ -16,14 +16,13 @@
 import { type ReactNode } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  Permission,
   type PermissionType,
   roleHasPermission,
 } from "@/lib/auth/permissions";
 import type { UserRole } from "@/lib/auth/types";
 
 // Re-export Permission for convenience
-export { Permission };
+export { Permission } from "@/lib/auth/permissions";
 
 interface PermissionGateProps {
   /** Required permission(s) */

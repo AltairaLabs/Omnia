@@ -8,7 +8,7 @@ interface AuthWrapperProps {
 /**
  * Server component that fetches the current user and provides it to client components.
  */
-export async function AuthWrapper({ children }: AuthWrapperProps) {
+export async function AuthWrapper({ children }: Readonly<AuthWrapperProps>) {
   const user = await getUser();
 
   return <AuthProvider user={user}>{children}</AuthProvider>;

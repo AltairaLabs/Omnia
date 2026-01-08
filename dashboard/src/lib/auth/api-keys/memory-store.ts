@@ -121,7 +121,7 @@ export class MemoryApiKeyStore implements ApiKeyStore {
     const key = this.keys.get(keyId);
 
     // Only delete if the key belongs to the user
-    if (key && key.userId === userId) {
+    if (key?.userId === userId) {
       this.keys.delete(keyId);
       return true;
     }

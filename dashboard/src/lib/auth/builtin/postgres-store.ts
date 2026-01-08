@@ -179,8 +179,7 @@ export class PostgresUserStore implements UserStore {
     }
 
     updates.push(`updated_at = $${paramIndex++}`);
-    values.push(new Date().toISOString());
-    values.push(id);
+    values.push(new Date().toISOString(), id);
 
     // NOSONAR - Dynamic query uses parameterized placeholders ($1, $2, etc.) for safety
     const result = await this.pool.query(
@@ -211,8 +210,8 @@ export class PostgresUserStore implements UserStore {
     offset?: number;
     search?: string;
   }): Promise<{ users: StoredUser[]; total: number }> {
-    const limit = options?.limit || 50;
-    const offset = options?.offset || 0;
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
     const search = options?.search;
 
     let query = "SELECT * FROM users";
