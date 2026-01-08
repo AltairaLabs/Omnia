@@ -427,6 +427,9 @@ jobs:
     - name: Build dashboard
       run: npm run build
       working-directory: dashboard
+      env:
+        # NEXT_PUBLIC_* vars must be set at build time for client components
+        NEXT_PUBLIC_DEMO_MODE: 'true'
 
     - name: Run E2E tests
       run: |

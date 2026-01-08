@@ -8,10 +8,12 @@ interface RuntimeConfig {
   readOnlyMessage: string;
 }
 
+// Use NEXT_PUBLIC_DEMO_MODE as build-time default to avoid flash of wrong service
+// The API route will provide the runtime value if different
 const defaultConfig: RuntimeConfig = {
-  demoMode: false,
-  readOnlyMode: false,
-  readOnlyMessage: "This dashboard is in read-only mode",
+  demoMode: process.env.NEXT_PUBLIC_DEMO_MODE === "true",
+  readOnlyMode: process.env.NEXT_PUBLIC_READ_ONLY_MODE === "true",
+  readOnlyMessage: process.env.NEXT_PUBLIC_READ_ONLY_MESSAGE || "This dashboard is in read-only mode",
 };
 
 let cachedConfig: RuntimeConfig | null = null;
