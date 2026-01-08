@@ -52,18 +52,15 @@ setup: ## Set up development environment (install git hooks)
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="{./api/...,./cmd/agent/...,./internal/agent/...,./internal/controller/...,./internal/facade/...,./internal/session/...}" output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="{./api/...,./cmd/agent/...,./internal/agent/...,./internal/controller/...,./internal/facade/...,./internal/session/...}"
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
-	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
-	go fmt $$(go list ./... | grep -v /internal/runtime | grep -v /cmd/runtime)
+	go fmt ./...
 
 .PHONY: generate-proto
 generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto files.
@@ -80,20 +77,19 @@ generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto 
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	# Exclude internal/runtime and cmd/runtime (require local PromptKit dependency)
-	go vet $$(go list ./... | grep -v /internal/runtime | grep -v /cmd/runtime)
+	go vet ./...
 
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
-	# Exclude e2e tests, internal/runtime and cmd/runtime (require local PromptKit dependency)
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e | grep -v /internal/runtime | grep -v /cmd/runtime) -coverprofile cover.out
+	# Exclude e2e tests (require Kind cluster)
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: test-junit
 test-junit: manifests generate fmt vet setup-envtest gotestsum ## Run tests with JUnit XML output.
-	# Exclude e2e tests, internal/runtime and cmd/runtime (require local PromptKit dependency)
+	# Exclude e2e tests (require Kind cluster)
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		$(GOTESTSUM) --junitfile test-results.xml --format testdox -- \
-		$$(go list ./... | grep -v /e2e | grep -v /internal/runtime | grep -v /cmd/runtime) -coverprofile cover.out
+		$$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
