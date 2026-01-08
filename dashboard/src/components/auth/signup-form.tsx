@@ -34,7 +34,7 @@ export function SignupForm({
   errorMessage: initialMessage,
   returnTo,
   minPasswordLength = 8,
-}: SignupFormProps) {
+}: Readonly<SignupFormProps>) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");

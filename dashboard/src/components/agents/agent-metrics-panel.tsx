@@ -127,7 +127,7 @@ function MetricCard({
   loading,
   color,
   available = true,
-}: MetricCardProps) {
+}: Readonly<MetricCardProps>) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -226,11 +226,11 @@ function TokenUsageChartPanel({
   data,
   loading,
   available,
-}: {
+}: Readonly<{
   data: TokenUsagePoint[];
   loading?: boolean;
   available?: boolean;
-}) {
+}>) {
   return (
     <Card>
       <CardHeader>
@@ -258,7 +258,7 @@ export function AgentMetricsPanel({
   agentName,
   namespace,
   className,
-}: AgentMetricsPanelProps) {
+}: Readonly<AgentMetricsPanelProps>) {
   const { data: metrics, isLoading } = useAgentMetrics(agentName, namespace);
   const grafana = useGrafana();
 

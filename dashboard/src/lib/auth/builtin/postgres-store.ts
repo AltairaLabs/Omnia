@@ -20,7 +20,7 @@ import { hashPassword, generateUserId } from "./password";
  * PostgreSQL user store implementation.
  */
 export class PostgresUserStore implements UserStore {
-  private pool: Pool;
+  private readonly pool: Pool;
 
   constructor(connectionString: string) {
     this.pool = new Pool({
@@ -232,13 +232,13 @@ export class PostgresUserStore implements UserStore {
 
     return {
       users: result.rows.map((row) => this.rowToUser(row)),
-      total: parseInt(countResult.rows[0].count, 10),
+      total: Number.parseInt(countResult.rows[0].count, 10),
     };
   }
 
   async countUsers(): Promise<number> {
     const result = await this.pool.query("SELECT COUNT(*) as count FROM users");
-    return parseInt(result.rows[0].count, 10);
+    return Number.parseInt(result.rows[0].count, 10);
   }
 
   // Login tracking

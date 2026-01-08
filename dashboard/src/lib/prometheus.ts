@@ -122,7 +122,7 @@ export function extractScalar(
       );
       if (!matches) continue;
     }
-    return parseFloat(item.value[1]) || 0;
+    return Number.parseFloat(item.value[1]) || 0;
   }
 
   return 0;
@@ -147,7 +147,7 @@ export function aggregateByLabel(
 
   for (const item of result.data.result) {
     const key = item.metric[groupBy] || "unknown";
-    const value = parseFloat(item.value[1]) || 0;
+    const value = Number.parseFloat(item.value[1]) || 0;
     aggregated.set(key, (aggregated.get(key) || 0) + value);
   }
 
@@ -181,7 +181,7 @@ export function matrixToTimeSeries(
       if (!timeMap.has(timestamp)) {
         timeMap.set(timestamp, {});
       }
-      timeMap.get(timestamp)![seriesKey] = parseFloat(value) || 0;
+      timeMap.get(timestamp)![seriesKey] = Number.parseFloat(value) || 0;
     }
   }
 

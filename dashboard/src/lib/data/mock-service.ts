@@ -90,13 +90,13 @@ const MOCK_RESPONSES = [
 export class MockAgentConnection implements AgentConnection {
   private status: ConnectionStatus = "disconnected";
   private sessionId: string | null = null;
-  private messageHandlers: Array<(message: ServerMessage) => void> = [];
-  private statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
+  private readonly messageHandlers: Array<(message: ServerMessage) => void> = [];
+  private readonly statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
   private mockIndex = 0;
 
   constructor(
-    private namespace: string,
-    private agentName: string
+    private readonly namespace: string,
+    private readonly agentName: string
   ) {}
 
   connect(): void {

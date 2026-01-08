@@ -26,7 +26,7 @@ function formatRelativeTime(timestamp?: string): string {
   return `${diffDays}d ago`;
 }
 
-export function PromptPackCard({ promptPack }: PromptPackCardProps) {
+export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
   const { metadata, spec, status } = promptPack;
   const isCanary = status?.phase === "Canary";
 

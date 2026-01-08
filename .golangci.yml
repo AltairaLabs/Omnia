@@ -8,6 +8,7 @@ linters:
     - dupl
     - errcheck
     - ginkgolinter
+    - gocognit
     - goconst
     - gocyclo
     - govet
@@ -36,6 +37,10 @@ linters:
           - dupl
           - lll
         path: internal/*
+      # Test files often have many test cases with similar structure
+      - linters:
+          - gocognit
+        path: _test\.go$
     paths:
       - third_party$
       - builtin$

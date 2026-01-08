@@ -205,12 +205,11 @@ var _ = Describe("Manager", Ordered, func() {
 				"--clusterrole=omnia-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+			_, _ = utils.Run(cmd) // Ignore error if already exists
 
 			By("validating that the metrics service is available")
 			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
-			_, err = utils.Run(cmd)
+			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
 
 			By("getting the service account token")
@@ -647,8 +646,8 @@ data:
 				g.Expect(output).To(ContainSubstring("true"))
 				g.Expect(strings.Count(output, "true")).To(Equal(2), "Expected 2 containers to be ready")
 			}
-			err := Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
-			if err != nil {
+			ok := Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			if !ok {
 				// Dump debug info on failure
 				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Container readiness failed ===\n")
 				descCmd := exec.Command("kubectl", "describe", "pods",
@@ -672,11 +671,13 @@ data:
 			}
 
 			By("verifying the pod has facade and runtime containers")
+			var output string
+			var err error
 			cmd := exec.Command("kubectl", "get", "pods",
 				"-n", agentsNamespace,
 				"-l", "app.kubernetes.io/instance=test-agent",
 				"-o", "jsonpath={.items[0].spec.containers[*].name}")
-			output, err := utils.Run(cmd)
+			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(ContainSubstring("facade"))
 			Expect(output).To(ContainSubstring("runtime"))
@@ -840,7 +841,29 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyConversationTest, 3*time.Minute, 5*time.Second).Should(Succeed())
+			ok := Eventually(verifyConversationTest, 3*time.Minute, 5*time.Second).Should(Succeed())
+			if !ok {
+				// Dump debug info on failure
+				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Conversation test failed ===\n")
+				descCmd := exec.Command("kubectl", "describe", "pod", "conversation-test", "-n", agentsNamespace)
+				if descOutput, err := utils.Run(descCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Pod describe:\n%s\n", descOutput)
+				}
+				logsCmd := exec.Command("kubectl", "logs", "conversation-test", "-n", agentsNamespace)
+				if logs, err := utils.Run(logsCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Conversation test logs:\n%s\n", logs)
+				}
+				// Also dump facade and runtime logs
+				facadeCmd := exec.Command("kubectl", "logs", "-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent", "-c", "facade", "--tail=100")
+				if facadeLogs, err := utils.Run(facadeCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Facade logs:\n%s\n", facadeLogs)
+				}
+				runtimeCmd := exec.Command("kubectl", "logs", "-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent", "-c", "runtime", "--tail=100")
+				if runtimeLogs, err := utils.Run(runtimeCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Runtime logs:\n%s\n", runtimeLogs)
+				}
+				Fail("Conversation test failed - see debug output above")
+			}
 
 			By("checking the conversation test logs")
 			cmd = exec.Command("kubectl", "logs", "conversation-test", "-n", agentsNamespace)

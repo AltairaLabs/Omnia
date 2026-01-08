@@ -10,7 +10,7 @@ interface ToolCallCardProps {
   className?: string;
 }
 
-export function ToolCallCard({ toolCall, className }: ToolCallCardProps) {
+export function ToolCallCard({ toolCall, className }: Readonly<ToolCallCardProps>) {
   // Start expanded if already has result, otherwise collapsed
   const [isExpanded, setIsExpanded] = useState(toolCall.status !== "pending");
   const prevStatusRef = useRef(toolCall.status);

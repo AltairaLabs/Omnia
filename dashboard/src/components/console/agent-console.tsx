@@ -16,7 +16,7 @@ interface AgentConsoleProps {
   className?: string;
 }
 
-export function AgentConsole({ agentName, namespace, className }: AgentConsoleProps) {
+export function AgentConsole({ agentName, namespace, className }: Readonly<AgentConsoleProps>) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

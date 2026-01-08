@@ -24,7 +24,7 @@ export function CostBadge({
   model,
   showTokens = false,
   className,
-}: CostBadgeProps) {
+}: Readonly<CostBadgeProps>) {
   const cost = calculateCost(model, inputTokens, outputTokens);
   const pricing = getModelPricing(model);
   const totalTokens = inputTokens + outputTokens;

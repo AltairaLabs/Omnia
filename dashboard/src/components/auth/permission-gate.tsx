@@ -44,7 +44,7 @@ export function PermissionGate({
   mode = "all",
   children,
   fallback = null,
-}: PermissionGateProps) {
+}: Readonly<PermissionGateProps>) {
   const { role } = useAuth();
 
   const permissions = Array.isArray(permission) ? permission : [permission];
@@ -76,7 +76,7 @@ export function RequireRole({
   role: requiredRole,
   children,
   fallback = null,
-}: RequireRoleProps) {
+}: Readonly<RequireRoleProps>) {
   const { hasRole } = useAuth();
 
   if (!hasRole(requiredRole)) {
@@ -96,7 +96,7 @@ interface RequireAuthProps {
 /**
  * Conditionally render content only for authenticated users.
  */
-export function RequireAuth({ children, fallback = null }: RequireAuthProps) {
+export function RequireAuth({ children, fallback = null }: Readonly<RequireAuthProps>) {
   const { isAuthenticated } = useAuth();
 
   if (!isAuthenticated) {
@@ -116,7 +116,7 @@ interface CanWriteProps {
 /**
  * Convenience component for write permission checks.
  */
-export function CanWrite({ children, fallback = null }: CanWriteProps) {
+export function CanWrite({ children, fallback = null }: Readonly<CanWriteProps>) {
   const { canWrite } = useAuth();
 
   if (!canWrite) {
@@ -136,7 +136,7 @@ interface CanAdminProps {
 /**
  * Convenience component for admin permission checks.
  */
-export function CanAdmin({ children, fallback = null }: CanAdminProps) {
+export function CanAdmin({ children, fallback = null }: Readonly<CanAdminProps>) {
   const { canAdmin } = useAuth();
 
   if (!canAdmin) {

@@ -29,7 +29,7 @@ export function ResetPasswordForm({
   token,
   error: initialError,
   minPasswordLength = 8,
-}: ResetPasswordFormProps) {
+}: Readonly<ResetPasswordFormProps>) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState(initialError || "");

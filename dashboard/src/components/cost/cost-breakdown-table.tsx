@@ -23,7 +23,7 @@ export function CostBreakdownTable({
   data,
   title = "Cost Breakdown by Agent",
   description = "Detailed cost allocation for each agent",
-}: CostBreakdownTableProps) {
+}: Readonly<CostBreakdownTableProps>) {
   // Sort by total cost descending
   const sortedData = [...data].sort((a, b) => b.totalCost - a.totalCost);
 

@@ -110,7 +110,7 @@ async function deleteApiKey(id: string): Promise<void> {
 }
 
 /** Renders the expiration status for an API key */
-function KeyExpiration({ isExpired, expiresAt }: { isExpired: boolean; expiresAt: string | null }) {
+function KeyExpiration({ isExpired, expiresAt }: Readonly<{ isExpired: boolean; expiresAt: string | null }>) {
   if (isExpired) {
     return <Badge variant="destructive">Expired</Badge>;
   }
@@ -133,14 +133,14 @@ function ApiKeysContent({
   canCreateDelete,
   isFileMode,
   onDeleteKey,
-}: {
+}: Readonly<{
   isLoading: boolean;
   error: Error | null;
   keys: ApiKeyInfo[] | undefined;
   canCreateDelete: boolean;
   isFileMode: boolean;
   onDeleteKey: (id: string) => void;
-}) {
+}>) {
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -295,7 +295,7 @@ export function ApiKeysSection() {
   }, [newKey]);
 
   const handleCreateKey = useCallback(() => {
-    const expiresInDays = expiration === "never" ? null : parseInt(expiration, 10);
+    const expiresInDays = expiration === "never" ? null : Number.parseInt(expiration, 10);
     createMutation.mutate({ name: keyName, expiresInDays });
   }, [keyName, expiration, createMutation]);
 

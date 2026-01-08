@@ -57,7 +57,7 @@ export function GrafanaPanel({
   height = 200,
   className,
   fallback,
-}: GrafanaPanelProps) {
+}: Readonly<GrafanaPanelProps>) {
   const grafana = useGrafana();
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -153,7 +153,7 @@ export function GrafanaPanel({
 /**
  * Default fallback UI when Grafana is not configured.
  */
-function GrafanaFallback({ height }: { height: number }) {
+function GrafanaFallback({ height }: Readonly<{ height: number }>) {
   return (
     <div
       className="flex flex-col items-center justify-center bg-muted/30 rounded-lg border border-dashed"
@@ -175,11 +175,11 @@ export function AgentRequestsPanel({
   agentName,
   namespace,
   className,
-}: {
+}: Readonly<{
   agentName: string;
   namespace: string;
   className?: string;
-}) {
+}>) {
   return (
     <GrafanaPanel
       title="Requests / sec"
@@ -199,11 +199,11 @@ export function AgentLatencyPanel({
   agentName,
   namespace,
   className,
-}: {
+}: Readonly<{
   agentName: string;
   namespace: string;
   className?: string;
-}) {
+}>) {
   return (
     <GrafanaPanel
       title="Latency"
@@ -223,11 +223,11 @@ export function AgentErrorRatePanel({
   agentName,
   namespace,
   className,
-}: {
+}: Readonly<{
   agentName: string;
   namespace: string;
   className?: string;
-}) {
+}>) {
   return (
     <GrafanaPanel
       title="Error Rate"
@@ -248,12 +248,12 @@ export function TokenUsagePanel({
   namespace,
   className,
   height = 250,
-}: {
+}: Readonly<{
   agentName: string;
   namespace: string;
   className?: string;
   height?: number;
-}) {
+}>) {
   return (
     <GrafanaPanel
       title="Token Usage"
@@ -274,11 +274,11 @@ export function ActiveConnectionsPanel({
   agentName,
   namespace,
   className,
-}: {
+}: Readonly<{
   agentName: string;
   namespace: string;
   className?: string;
-}) {
+}>) {
   return (
     <GrafanaPanel
       title="Active Connections"
@@ -297,10 +297,10 @@ export function ActiveConnectionsPanel({
 export function GrafanaPanelSkeleton({
   className,
   height = 200,
-}: {
+}: Readonly<{
   className?: string;
   height?: number;
-}) {
+}>) {
   return (
     <Card className={className}>
       <CardHeader className="pb-2">
@@ -318,7 +318,7 @@ export function GrafanaPanelSkeleton({
  * System-wide overview panels for the main dashboard.
  * Uses the omnia-overview dashboard panels.
  */
-export function SystemOverviewPanels({ className }: { className?: string }) {
+export function SystemOverviewPanels({ className }: Readonly<{ className?: string }>) {
   const grafana = useGrafana();
 
   if (!grafana.enabled) {

@@ -27,7 +27,7 @@ const API_BASE_URL = "/api/operator";
 export class OperatorApiService {
   readonly name = "OperatorApiService";
 
-  private client = createClient<paths>({ baseUrl: API_BASE_URL });
+  private readonly client = createClient<paths>({ baseUrl: API_BASE_URL });
 
   async getAgents(namespace?: string): Promise<AgentRuntime[]> {
     const { data, error } = await this.client.GET("/api/v1/agents", {

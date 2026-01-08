@@ -21,12 +21,12 @@ function ChartContent({
   available,
   isDemo,
   data,
-}: {
+}: Readonly<{
   isLoading: boolean;
   available: boolean;
   isDemo: boolean;
   data: ActivityDataPoint[];
-}) {
+}>) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">

@@ -32,7 +32,7 @@ export function BuiltinLoginForm({
   errorMessage: initialMessage,
   returnTo,
   allowSignup = true,
-}: BuiltinLoginFormProps) {
+}: Readonly<BuiltinLoginFormProps>) {
   const router = useRouter();
   const [identity, setIdentity] = useState("");
   const [password, setPassword] = useState("");

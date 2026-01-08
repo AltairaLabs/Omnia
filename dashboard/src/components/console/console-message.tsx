@@ -14,7 +14,7 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ConsoleMessage({ message, className }: ConsoleMessageProps) {
+export function ConsoleMessage({ message, className }: Readonly<ConsoleMessageProps>) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
 

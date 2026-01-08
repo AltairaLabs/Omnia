@@ -23,7 +23,7 @@ export function CostSummary({
   period = "24h",
   previousPeriodCost,
   className,
-}: CostSummaryProps) {
+}: Readonly<CostSummaryProps>) {
   const cost = calculateCost(model, inputTokens, outputTokens, cacheHits);
   const pricing = getModelPricing(model);
 

@@ -13,11 +13,11 @@ function PostItNote({
   note,
   onEdit,
   onDelete
-}: {
+}: Readonly<{
   note: string;
   onEdit: () => void;
   onDelete: () => void;
-}) {
+}>) {
   return (
     <div
       className="absolute -top-2 -right-2 translate-x-full max-w-[180px] z-10"
@@ -52,7 +52,7 @@ function PostItNote({
 }
 
 // Add note button
-function AddNoteButton({ onClick }: { onClick: () => void }) {
+function AddNoteButton({ onClick }: Readonly<{ onClick: () => void }>) {
   return (
     <button
       className="absolute -top-1 -right-1 w-5 h-5 bg-yellow-400 dark:bg-yellow-500 rounded-full flex items-center justify-center text-yellow-900 hover:scale-110 transition-transform opacity-0 group-hover:opacity-100 shadow-sm"
@@ -77,7 +77,7 @@ const typeColors = {
 };
 
 // Status indicator component
-function StatusDot({ status }: { status?: string }) {
+function StatusDot({ status }: Readonly<{ status?: string }>) {
   let color = "bg-gray-400"; // unknown
   switch (status) {
     case "Running":
@@ -157,7 +157,7 @@ interface CustomNodeProps<T extends Record<string, unknown>> {
 }
 
 // Agent Node Component
-export const AgentNodeComponent = memo(({ data }: CustomNodeProps<AgentNodeData>) => {
+export const AgentNodeComponent = memo(({ data }: Readonly<CustomNodeProps<AgentNodeData>>) => {
   return (
     <div className="relative group">
       <Handle type="target" position={Position.Left} className="!bg-blue-500" />
@@ -195,7 +195,7 @@ export const AgentNodeComponent = memo(({ data }: CustomNodeProps<AgentNodeData>
 AgentNodeComponent.displayName = "AgentNodeComponent";
 
 // PromptPack Node Component
-export const PromptPackNodeComponent = memo(({ data }: CustomNodeProps<PromptPackNodeData>) => {
+export const PromptPackNodeComponent = memo(({ data }: Readonly<CustomNodeProps<PromptPackNodeData>>) => {
   return (
     <div className="relative group">
       <Handle type="target" position={Position.Left} className="!bg-purple-500" />
@@ -235,7 +235,7 @@ export const PromptPackNodeComponent = memo(({ data }: CustomNodeProps<PromptPac
 PromptPackNodeComponent.displayName = "PromptPackNodeComponent";
 
 // ToolRegistry Node Component
-export const ToolRegistryNodeComponent = memo(({ data }: CustomNodeProps<ToolRegistryNodeData>) => {
+export const ToolRegistryNodeComponent = memo(({ data }: Readonly<CustomNodeProps<ToolRegistryNodeData>>) => {
   return (
     <div className="relative group">
       <Handle type="target" position={Position.Left} className="!bg-orange-500" />
@@ -275,7 +275,7 @@ export const ToolRegistryNodeComponent = memo(({ data }: CustomNodeProps<ToolReg
 ToolRegistryNodeComponent.displayName = "ToolRegistryNodeComponent";
 
 // Tool Node Component
-export const ToolNodeComponent = memo(({ data }: CustomNodeProps<ToolNodeData>) => {
+export const ToolNodeComponent = memo(({ data }: Readonly<CustomNodeProps<ToolNodeData>>) => {
   return (
     <div className="relative">
       <Handle type="target" position={Position.Left} className="!bg-teal-500" />
@@ -301,7 +301,7 @@ export const ToolNodeComponent = memo(({ data }: CustomNodeProps<ToolNodeData>) 
 ToolNodeComponent.displayName = "ToolNodeComponent";
 
 // Prompt Node Component (individual prompts within a PromptPack)
-export const PromptNodeComponent = memo(({ data }: CustomNodeProps<PromptNodeData>) => {
+export const PromptNodeComponent = memo(({ data }: Readonly<CustomNodeProps<PromptNodeData>>) => {
   return (
     <div className="relative">
       <Handle type="target" position={Position.Left} className="!bg-violet-500" />

@@ -17,7 +17,7 @@ interface AgentCardProps {
   agent: AgentRuntime;
 }
 
-export function AgentCard({ agent }: AgentCardProps) {
+export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const { metadata, spec, status } = agent;
   const queryClient = useQueryClient();
   const dataService = useDataService();

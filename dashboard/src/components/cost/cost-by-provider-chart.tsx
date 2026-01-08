@@ -35,7 +35,7 @@ export function CostByProviderChart({
   data,
   title = "Cost by Provider",
   description = "LLM cost distribution across providers",
-}: CostByProviderChartProps) {
+}: Readonly<CostByProviderChartProps>) {
   const totalCost = data.reduce((sum, item) => sum + item.cost, 0);
 
   // Format data for pie chart

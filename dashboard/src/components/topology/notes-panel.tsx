@@ -57,7 +57,7 @@ const typeLabels = {
   toolregistry: "ToolRegistry",
 };
 
-export function NotesPanel({ resources, selectedNamespaces }: NotesPanelProps) {
+export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPanelProps>) {
   const [notes, setNotes] = useState<NotesMap>(() => {
     if (typeof window === "undefined") return {};
     return loadNotes();

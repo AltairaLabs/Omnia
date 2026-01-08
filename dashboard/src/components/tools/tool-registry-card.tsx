@@ -40,7 +40,7 @@ function getHandlerTypeIcon(type: string) {
   }
 }
 
-function ToolStatusIcon({ status }: { status: DiscoveredTool["status"] }) {
+function ToolStatusIcon({ status }: Readonly<{ status: DiscoveredTool["status"] }>) {
   switch (status) {
     case "Available":
       return <CheckCircle className="h-3 w-3 text-green-500" />;
@@ -51,7 +51,7 @@ function ToolStatusIcon({ status }: { status: DiscoveredTool["status"] }) {
   }
 }
 
-export function ToolRegistryCard({ registry }: ToolRegistryCardProps) {
+export function ToolRegistryCard({ registry }: Readonly<ToolRegistryCardProps>) {
   const { metadata, spec, status } = registry;
   const tools = status?.discoveredTools || [];
   const availableCount = tools.filter((t) => t.status === "Available").length;

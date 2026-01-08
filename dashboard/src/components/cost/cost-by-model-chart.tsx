@@ -38,7 +38,7 @@ export function CostByModelChart({
   data,
   title = "Cost by Model",
   description = "LLM cost breakdown by model",
-}: CostByModelChartProps) {
+}: Readonly<CostByModelChartProps>) {
   // Filter out models with zero cost and sort by cost descending
   const chartData = data
     .filter((item) => item.cost > 0)

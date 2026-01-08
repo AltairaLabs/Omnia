@@ -33,7 +33,7 @@ function formatRelativeTime(timestamp: string): string {
 /**
  * Single event row component.
  */
-function EventRow({ event }: { event: K8sEvent }) {
+function EventRow({ event }: Readonly<{ event: K8sEvent }>) {
   const isWarning = event.type === "Warning";
 
   return (
@@ -144,7 +144,7 @@ function renderEventsPanelContent(
 /**
  * Events panel showing Kubernetes events for an agent.
  */
-export function EventsPanel({ agentName, namespace }: EventsPanelProps) {
+export function EventsPanel({ agentName, namespace }: Readonly<EventsPanelProps>) {
   const { data: events, isLoading, error, refetch, isFetching } = useAgentEvents(
     agentName,
     namespace

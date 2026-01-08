@@ -34,7 +34,7 @@ function formatAge(timestamp?: string): string {
   return "<1h";
 }
 
-export function AgentTable({ agents }: AgentTableProps) {
+export function AgentTable({ agents }: Readonly<AgentTableProps>) {
   return (
     <div className="rounded-md border">
       <Table>

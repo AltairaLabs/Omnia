@@ -103,7 +103,7 @@ function highlightYaml(yamlString: string): React.ReactNode[] {
   });
 }
 
-export function YamlBlock({ data, className }: YamlBlockProps) {
+export function YamlBlock({ data, className }: Readonly<YamlBlockProps>) {
   const yamlString = useMemo(() => {
     try {
       return yaml.dump(data, {

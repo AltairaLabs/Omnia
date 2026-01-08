@@ -36,7 +36,7 @@ export function CostOverTimeChart({
   description = "LLM costs by provider over the last 24 hours",
   height = 350,
   grafanaUrl,
-}: CostOverTimeChartProps) {
+}: Readonly<CostOverTimeChartProps>) {
   // Format data for chart
   const chartData = data.map((point) => ({
     time: new Date(point.timestamp).toLocaleTimeString([], {

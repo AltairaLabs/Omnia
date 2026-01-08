@@ -24,7 +24,7 @@ export function NamespaceFilter({
   namespaces,
   selectedNamespaces,
   onSelectionChange,
-}: NamespaceFilterProps) {
+}: Readonly<NamespaceFilterProps>) {
   // Sort namespaces alphabetically
   const sortedNamespaces = useMemo(
     () => [...namespaces].sort((a, b) => a.localeCompare(b)),

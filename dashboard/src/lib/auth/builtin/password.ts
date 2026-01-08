@@ -5,7 +5,7 @@
  */
 
 import bcrypt from "bcrypt";
-import { randomBytes, createHash } from "crypto";
+import { randomBytes, createHash } from "node:crypto";
 
 /**
  * Number of bcrypt salt rounds.

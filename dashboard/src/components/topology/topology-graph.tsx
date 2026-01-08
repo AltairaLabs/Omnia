@@ -38,7 +38,7 @@ export function TopologyGraph({
   onNoteEdit,
   onNoteDelete,
   className,
-}: TopologyGraphProps) {
+}: Readonly<TopologyGraphProps>) {
   // Build the initial graph
   const initialGraph = useMemo(
     () => {

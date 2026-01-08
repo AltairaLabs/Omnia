@@ -176,7 +176,7 @@ function matrixToSeries(
 
   for (const series of result.data.result) {
     for (const [ts, val] of series.values || []) {
-      const value = parseFloat(val) || 0;
+      const value = Number.parseFloat(val) || 0;
       timeMap.set(ts, (timeMap.get(ts) || 0) + value);
     }
   }
@@ -210,7 +210,7 @@ function processTokenResult(
       if (!timeMap.has(ts)) {
         timeMap.set(ts, { input: 0, output: 0 });
       }
-      timeMap.get(ts)![field] += parseFloat(val) || 0;
+      timeMap.get(ts)![field] += Number.parseFloat(val) || 0;
     }
   }
 }
@@ -250,8 +250,8 @@ function extractScalar(result: {
     return 0;
   }
   return result.data.result.reduce((sum, item) => {
-    const val = parseFloat(item.value?.[1] || "0");
-    return sum + (isNaN(val) ? 0 : val);
+    const val = Number.parseFloat(item.value?.[1] || "0");
+    return sum + (Number.isNaN(val) ? 0 : val);
   }, 0);
 }
 
@@ -358,11 +358,11 @@ async function fetchAgentMetrics(
         unit: "ms",
       },
       errorRate: {
-        current: isNaN(errorRate) ? 0 : errorRate,
-        display: formatValue(isNaN(errorRate) ? 0 : errorRate, "%"),
+        current: Number.isNaN(errorRate) ? 0 : errorRate,
+        display: formatValue(Number.isNaN(errorRate) ? 0 : errorRate, "%"),
         series: matrixToSeries(errorRateSeries).map((p) => ({
           ...p,
-          value: isNaN(p.value) ? 0 : p.value,
+          value: Number.isNaN(p.value) ? 0 : p.value,
         })),
         unit: "%",
       },

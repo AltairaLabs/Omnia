@@ -18,7 +18,7 @@ export function StatCard({
   description,
   icon: Icon,
   loading,
-}: StatCardProps) {
+}: Readonly<StatCardProps>) {
   if (loading) {
     return (
       <Card>

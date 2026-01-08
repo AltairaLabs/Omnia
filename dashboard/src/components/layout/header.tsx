@@ -11,7 +11,7 @@ interface HeaderProps {
   children?: React.ReactNode;
 }
 
-export function Header({ title, description, children }: HeaderProps) {
+export function Header({ title, description, children }: Readonly<HeaderProps>) {
   const { theme, setTheme } = useTheme();
 
   return (

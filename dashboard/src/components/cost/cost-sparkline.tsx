@@ -16,7 +16,7 @@ export function CostSparkline({
   data,
   color = "#3B82F6",
   height = 32,
-}: CostSparklineProps) {
+}: Readonly<CostSparklineProps>) {
   if (!data || data.length === 0) {
     return (
       <div

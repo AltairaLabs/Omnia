@@ -52,12 +52,12 @@ function AutoscalingIndicator({
   minReplicas,
   maxReplicas,
   compact,
-}: {
+}: Readonly<{
   type?: string;
   minReplicas: number;
   maxReplicas: number;
   compact: boolean;
-}) {
+}>) {
   if (compact) {
     return (
       <Tooltip>
@@ -140,7 +140,7 @@ function ScaleConfirmDialog({
   onConfirm,
   onCancel,
   compact,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   confirmAction: ConfirmAction | null;
@@ -148,7 +148,7 @@ function ScaleConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
   compact: boolean;
-}) {
+}>) {
   const isScaleToZero = confirmAction?.type === "scale-to-zero";
   const title = getDialogTitle(isScaleToZero, compact);
   const buttonLabel = isScaleToZero ? "Scale to Zero" : "Scale Down";
@@ -187,7 +187,7 @@ export function ScaleControl({
   onScale,
   className,
   compact = false,
-}: ScaleControlProps) {
+}: Readonly<ScaleControlProps>) {
   const { isReadOnly, message: readOnlyMessage } = useReadOnly();
   const { can } = usePermissions();
   const canScale = can(Permission.AGENTS_SCALE);

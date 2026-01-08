@@ -20,7 +20,7 @@ import { hashPassword, generateUserId } from "./password";
  * SQLite user store implementation.
  */
 export class SQLiteUserStore implements UserStore {
-  private db: Database.Database;
+  private readonly db: Database.Database;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);

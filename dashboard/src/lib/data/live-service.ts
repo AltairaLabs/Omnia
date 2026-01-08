@@ -37,12 +37,12 @@ export class LiveAgentConnection implements AgentConnection {
   private status: ConnectionStatus = "disconnected";
   private sessionId: string | null = null;
   private ws: WebSocket | null = null;
-  private messageHandlers: Array<(message: ServerMessage) => void> = [];
-  private statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
+  private readonly messageHandlers: Array<(message: ServerMessage) => void> = [];
+  private readonly statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
 
   constructor(
-    private namespace: string,
-    private agentName: string
+    private readonly namespace: string,
+    private readonly agentName: string
   ) {}
 
   connect(): void {
@@ -55,7 +55,7 @@ export class LiveAgentConnection implements AgentConnection {
     try {
       // Connect to the WebSocket proxy server
       // In production, WS_PROXY_URL is configured; in dev, proxy runs on port 3002
-      const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+      const protocol = typeof globalThis !== "undefined" && globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
       const wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
 
       let wsUrl: string;
@@ -64,7 +64,7 @@ export class LiveAgentConnection implements AgentConnection {
         wsUrl = `${wsProxyUrl}/api/agents/${this.namespace}/${this.agentName}/ws`;
       } else {
         // Development: WebSocket proxy on port 3002
-        const wsHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+        const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.hostname : "localhost";
         wsUrl = `${protocol}//${wsHost}:3002/api/agents/${this.namespace}/${this.agentName}/ws`;
       }
 
@@ -176,8 +176,8 @@ export class LiveDataService implements DataService {
   readonly name = "LiveDataService";
   readonly isDemo = false;
 
-  private operatorService: OperatorApiService;
-  private prometheusService: PrometheusService;
+  private readonly operatorService: OperatorApiService;
+  private readonly prometheusService: PrometheusService;
 
   constructor() {
     this.operatorService = new OperatorApiService();

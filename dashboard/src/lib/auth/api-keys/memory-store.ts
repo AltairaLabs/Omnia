@@ -8,7 +8,7 @@
  * For production, use a persistent store like Redis or PostgreSQL.
  */
 
-import { randomBytes } from "crypto";
+import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import {
   API_KEY_PREFIX,

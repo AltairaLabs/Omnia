@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,28 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// Log message constants.
+const (
+	logMsgFailedToUpdateStatus = "Failed to update status"
+)
+
+// Kubernetes label constants.
+const (
+	labelAppName      = "app.kubernetes.io/name"
+	labelAppInstance  = "app.kubernetes.io/instance"
+	labelAppManagedBy = "app.kubernetes.io/managed-by"
+	labelOmniaComp    = "omnia.altairalabs.ai/component"
+)
+
+// Label value constants.
+const (
+	labelValueOmniaAgent    = "omnia-agent"
+	labelValueOmniaOperator = "omnia-operator"
+)
+
+// KEDA API group constant.
+const kedaAPIGroup = "keda.sh"
 
 const (
 	// FacadeContainerName is the name of the facade container in the pod.
@@ -412,6 +435,126 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
 
+// reconcileReferences fetches and validates all referenced resources.
+// Returns promptPack (required), toolRegistry (optional), provider (optional), and any error.
+func (r *AgentRuntimeReconciler) reconcileReferences(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) (*omniav1alpha1.PromptPack, *omniav1alpha1.ToolRegistry, *omniav1alpha1.Provider, ctrl.Result, error) {
+	// Fetch required PromptPack
+	promptPack, err := r.fetchPromptPack(ctx, agentRuntime)
+	if err != nil {
+		r.handleRefError(ctx, log, agentRuntime, ConditionTypePromptPackReady, "PromptPackNotFound", err)
+		return nil, nil, nil, ctrl.Result{}, err
+	}
+	r.setCondition(agentRuntime, ConditionTypePromptPackReady, metav1.ConditionTrue,
+		"PromptPackFound", "PromptPack resource found")
+
+	// Fetch optional ToolRegistry
+	var toolRegistry *omniav1alpha1.ToolRegistry
+	if agentRuntime.Spec.ToolRegistryRef != nil {
+		toolRegistry, err = r.fetchToolRegistry(ctx, agentRuntime)
+		if err != nil {
+			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionFalse,
+				"ToolRegistryNotFound", err.Error())
+			log.Info("ToolRegistry not found, continuing without tools", "error", err)
+		} else {
+			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionTrue,
+				"ToolRegistryFound", "ToolRegistry resource found")
+		}
+	}
+
+	// Fetch optional Provider
+	var provider *omniav1alpha1.Provider
+	if agentRuntime.Spec.ProviderRef != nil {
+		provider, result, err := r.reconcileProviderRef(ctx, log, agentRuntime)
+		if err != nil || result.RequeueAfter > 0 {
+			return nil, nil, nil, result, err
+		}
+		return promptPack, toolRegistry, provider, ctrl.Result{}, nil
+	}
+
+	return promptPack, toolRegistry, provider, ctrl.Result{}, nil
+}
+
+// reconcileProviderRef fetches and validates the Provider reference.
+func (r *AgentRuntimeReconciler) reconcileProviderRef(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) (*omniav1alpha1.Provider, ctrl.Result, error) {
+	provider, err := r.fetchProvider(ctx, agentRuntime)
+	if err != nil {
+		r.handleRefError(ctx, log, agentRuntime, ConditionTypeProviderReady, "ProviderNotFound", err)
+		return nil, ctrl.Result{}, err
+	}
+	if provider.Status.Phase != omniav1alpha1.ProviderPhaseReady {
+		r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
+			"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
+		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
+		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return nil, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionTrue,
+		"ProviderFound", "Provider resource found and ready")
+	return provider, ctrl.Result{}, nil
+}
+
+// handleRefError handles reference fetch errors by setting condition, updating status, and logging.
+func (r *AgentRuntimeReconciler) handleRefError(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	condType string,
+	reason string,
+	err error,
+) {
+	r.setCondition(agentRuntime, condType, metav1.ConditionFalse, reason, err.Error())
+	agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
+	if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
+		log.Error(statusErr, logMsgFailedToUpdateStatus)
+	}
+}
+
+// reconcileResources creates/updates Deployment and Service.
+func (r *AgentRuntimeReconciler) reconcileResources(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
+) (*appsv1.Deployment, error) {
+	// Reconcile tools ConfigMap
+	if toolRegistry != nil {
+		if err := r.reconcileToolsConfigMap(ctx, agentRuntime, toolRegistry); err != nil {
+			log.Error(err, "Failed to reconcile tools ConfigMap")
+		}
+	}
+
+	// Reconcile Deployment
+	deployment, err := r.reconcileDeployment(ctx, agentRuntime, promptPack, toolRegistry, provider)
+	if err != nil {
+		r.handleRefError(ctx, log, agentRuntime, ConditionTypeDeploymentReady, "DeploymentFailed", err)
+		return nil, err
+	}
+	r.setCondition(agentRuntime, ConditionTypeDeploymentReady, metav1.ConditionTrue,
+		"DeploymentCreated", "Deployment created/updated successfully")
+
+	// Reconcile Service
+	if err := r.reconcileService(ctx, agentRuntime); err != nil {
+		r.handleRefError(ctx, log, agentRuntime, ConditionTypeServiceReady, "ServiceFailed", err)
+		return nil, err
+	}
+	r.setCondition(agentRuntime, ConditionTypeServiceReady, metav1.ConditionTrue,
+		"ServiceCreated", "Service created/updated successfully")
+
+	return deployment, nil
+}
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -439,7 +582,6 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err := r.Update(ctx, agentRuntime); err != nil {
 			return ctrl.Result{}, err
 		}
-		// Requeue immediately to continue reconciliation
 		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
@@ -451,97 +593,17 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	// Fetch referenced PromptPack
-	promptPack, err := r.fetchPromptPack(ctx, agentRuntime)
+	// Fetch all references
+	promptPack, toolRegistry, provider, result, err := r.reconcileReferences(ctx, log, agentRuntime)
+	if err != nil || result.RequeueAfter > 0 {
+		return result, err
+	}
+
+	// Reconcile resources
+	deployment, err := r.reconcileResources(ctx, log, agentRuntime, promptPack, toolRegistry, provider)
 	if err != nil {
-		r.setCondition(agentRuntime, ConditionTypePromptPackReady, metav1.ConditionFalse,
-			"PromptPackNotFound", err.Error())
-		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
-		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
-		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(agentRuntime, ConditionTypePromptPackReady, metav1.ConditionTrue,
-		"PromptPackFound", "PromptPack resource found")
-
-	// Fetch referenced ToolRegistry (optional)
-	var toolRegistry *omniav1alpha1.ToolRegistry
-	if agentRuntime.Spec.ToolRegistryRef != nil {
-		toolRegistry, err = r.fetchToolRegistry(ctx, agentRuntime)
-		if err != nil {
-			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionFalse,
-				"ToolRegistryNotFound", err.Error())
-			// ToolRegistry is optional, so we continue with a warning
-			log.Info("ToolRegistry not found, continuing without tools", "error", err)
-		} else {
-			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionTrue,
-				"ToolRegistryFound", "ToolRegistry resource found")
-		}
-	}
-
-	// Fetch referenced Provider (optional, takes precedence over inline provider)
-	var provider *omniav1alpha1.Provider
-	if agentRuntime.Spec.ProviderRef != nil {
-		provider, err = r.fetchProvider(ctx, agentRuntime)
-		if err != nil {
-			r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
-				"ProviderNotFound", err.Error())
-			agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
-			if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
-				log.Error(statusErr, "Failed to update status")
-			}
-			return ctrl.Result{}, err
-		}
-		// Check if Provider is ready
-		if provider.Status.Phase != omniav1alpha1.ProviderPhaseReady {
-			r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
-				"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
-			agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
-			if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
-				log.Error(statusErr, "Failed to update status")
-			}
-			// Requeue to wait for Provider to become ready
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-		r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionTrue,
-			"ProviderFound", "Provider resource found and ready")
-	}
-
-	// Reconcile tools ConfigMap (if ToolRegistry is present)
-	if toolRegistry != nil {
-		if err := r.reconcileToolsConfigMap(ctx, agentRuntime, toolRegistry); err != nil {
-			log.Error(err, "Failed to reconcile tools ConfigMap")
-			// Don't fail the entire reconciliation, tools are optional
-		}
-	}
-
-	// Reconcile Deployment
-	deployment, err := r.reconcileDeployment(ctx, agentRuntime, promptPack, toolRegistry, provider)
-	if err != nil {
-		r.setCondition(agentRuntime, ConditionTypeDeploymentReady, metav1.ConditionFalse,
-			"DeploymentFailed", err.Error())
-		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
-		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
-		}
-		return ctrl.Result{}, err
-	}
-	r.setCondition(agentRuntime, ConditionTypeDeploymentReady, metav1.ConditionTrue,
-		"DeploymentCreated", "Deployment created/updated successfully")
-
-	// Reconcile Service
-	if err := r.reconcileService(ctx, agentRuntime); err != nil {
-		r.setCondition(agentRuntime, ConditionTypeServiceReady, metav1.ConditionFalse,
-			"ServiceFailed", err.Error())
-		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
-		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
-		}
-		return ctrl.Result{}, err
-	}
-	r.setCondition(agentRuntime, ConditionTypeServiceReady, metav1.ConditionTrue,
-		"ServiceCreated", "Service created/updated successfully")
 
 	// Reconcile autoscaling (HPA or KEDA if enabled)
 	if err := r.reconcileAutoscaling(ctx, agentRuntime); err != nil {
@@ -680,10 +742,10 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	provider *omniav1alpha1.Provider,
 ) {
 	labels := map[string]string{
-		"app.kubernetes.io/name":         "omnia-agent",
-		"app.kubernetes.io/instance":     agentRuntime.Name,
-		"app.kubernetes.io/managed-by":   "omnia-operator",
-		"omnia.altairalabs.ai/component": "agent",
+		labelAppName:      labelValueOmniaAgent,
+		labelAppInstance:  agentRuntime.Name,
+		labelAppManagedBy: labelValueOmniaOperator,
+		labelOmniaComp:    "agent",
 	}
 
 	replicas := int32(1)
@@ -1181,10 +1243,10 @@ func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
 		}
 
 		labels := map[string]string{
-			"app.kubernetes.io/name":         "omnia-agent",
-			"app.kubernetes.io/instance":     agentRuntime.Name,
-			"app.kubernetes.io/managed-by":   "omnia-operator",
-			"omnia.altairalabs.ai/component": "tools-config",
+			labelAppName:      labelValueOmniaAgent,
+			labelAppInstance:  agentRuntime.Name,
+			labelAppManagedBy: labelValueOmniaOperator,
+			labelOmniaComp:    "tools-config",
 		}
 
 		configMap.Labels = labels
@@ -1203,127 +1265,148 @@ func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
 	return nil
 }
 
+// findEndpoint finds the resolved endpoint for a handler from the discovered tools.
+func findEndpoint(toolRegistry *omniav1alpha1.ToolRegistry, handlerName string) string {
+	for _, discovered := range toolRegistry.Status.DiscoveredTools {
+		if discovered.HandlerName == handlerName && discovered.Status == omniav1alpha1.ToolStatusAvailable {
+			return discovered.Endpoint
+		}
+	}
+	return ""
+}
+
+// buildToolDefinition builds a ToolDefinition from the handler's tool spec.
+func buildToolDefinition(tool *omniav1alpha1.ToolDefinition) *ToolDefinition {
+	if tool == nil {
+		return nil
+	}
+	def := &ToolDefinition{
+		Name:        tool.Name,
+		Description: tool.Description,
+		InputSchema: tool.InputSchema.Raw,
+	}
+	if tool.OutputSchema != nil {
+		def.OutputSchema = tool.OutputSchema.Raw
+	}
+	return def
+}
+
+// buildHTTPConfig builds HTTP configuration for a handler entry.
+func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolHTTP {
+	if h.HTTPConfig == nil {
+		return nil
+	}
+	return &ToolHTTP{
+		Endpoint:    endpoint,
+		Method:      h.HTTPConfig.Method,
+		Headers:     h.HTTPConfig.Headers,
+		ContentType: h.HTTPConfig.ContentType,
+	}
+}
+
+// buildGRPCConfig builds gRPC configuration for a handler entry.
+func buildGRPCConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolGRPC {
+	if h.GRPCConfig == nil {
+		return nil
+	}
+	cfg := &ToolGRPC{
+		Endpoint:              endpoint,
+		TLS:                   h.GRPCConfig.TLS,
+		TLSInsecureSkipVerify: h.GRPCConfig.TLSInsecureSkipVerify,
+	}
+	if h.GRPCConfig.TLSCertPath != nil {
+		cfg.TLSCertPath = *h.GRPCConfig.TLSCertPath
+	}
+	if h.GRPCConfig.TLSKeyPath != nil {
+		cfg.TLSKeyPath = *h.GRPCConfig.TLSKeyPath
+	}
+	if h.GRPCConfig.TLSCAPath != nil {
+		cfg.TLSCAPath = *h.GRPCConfig.TLSCAPath
+	}
+	return cfg
+}
+
+// buildMCPConfig builds MCP configuration for a handler entry.
+func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) *ToolMCP {
+	if h.MCPConfig == nil {
+		return nil
+	}
+	cfg := &ToolMCP{
+		Transport: string(h.MCPConfig.Transport),
+		Env:       h.MCPConfig.Env,
+	}
+	if h.MCPConfig.Endpoint != nil {
+		cfg.Endpoint = *h.MCPConfig.Endpoint
+	}
+	if h.MCPConfig.Command != nil {
+		cfg.Command = *h.MCPConfig.Command
+	}
+	if len(h.MCPConfig.Args) > 0 {
+		cfg.Args = h.MCPConfig.Args
+	}
+	if h.MCPConfig.WorkDir != nil {
+		cfg.WorkDir = *h.MCPConfig.WorkDir
+	}
+	return cfg
+}
+
+// buildOpenAPIConfig builds OpenAPI configuration for a handler entry.
+func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) *ToolOpenAPI {
+	if h.OpenAPIConfig == nil {
+		return nil
+	}
+	cfg := &ToolOpenAPI{
+		SpecURL:         h.OpenAPIConfig.SpecURL,
+		OperationFilter: h.OpenAPIConfig.OperationFilter,
+	}
+	if h.OpenAPIConfig.BaseURL != nil {
+		cfg.BaseURL = *h.OpenAPIConfig.BaseURL
+	}
+	return cfg
+}
+
+// buildHandlerEntry builds a single handler entry from the handler spec.
+func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) HandlerEntry {
+	entry := HandlerEntry{
+		Name:     h.Name,
+		Type:     string(h.Type),
+		Endpoint: endpoint,
+	}
+	if h.Timeout != nil {
+		entry.Timeout = *h.Timeout
+	}
+	if h.Retries != nil {
+		entry.Retries = *h.Retries
+	}
+
+	switch h.Type {
+	case omniav1alpha1.HandlerTypeHTTP:
+		entry.HTTPConfig = buildHTTPConfig(h, endpoint)
+		entry.Tool = buildToolDefinition(h.Tool)
+	case omniav1alpha1.HandlerTypeGRPC:
+		entry.GRPCConfig = buildGRPCConfig(h, endpoint)
+		entry.Tool = buildToolDefinition(h.Tool)
+	case omniav1alpha1.HandlerTypeMCP:
+		entry.MCPConfig = buildMCPConfig(h)
+	case omniav1alpha1.HandlerTypeOpenAPI:
+		entry.OpenAPIConfig = buildOpenAPIConfig(h)
+	}
+
+	return entry
+}
+
 // buildToolsConfig builds the tools configuration from ToolRegistry spec and status.
 func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.ToolRegistry) ToolConfig {
 	config := ToolConfig{
 		Handlers: make([]HandlerEntry, 0, len(toolRegistry.Spec.Handlers)),
 	}
 
-	// Build handler entries from spec, using discovered endpoints from status
 	for _, h := range toolRegistry.Spec.Handlers {
-		// Find the corresponding discovered tool to get the resolved endpoint
-		var endpoint string
-		for _, discovered := range toolRegistry.Status.DiscoveredTools {
-			if discovered.HandlerName == h.Name && discovered.Status == omniav1alpha1.ToolStatusAvailable {
-				endpoint = discovered.Endpoint
-				break
-			}
-		}
-
-		// Skip if endpoint couldn't be resolved
+		endpoint := findEndpoint(toolRegistry, h.Name)
 		if endpoint == "" {
 			continue
 		}
-
-		entry := HandlerEntry{
-			Name:     h.Name,
-			Type:     string(h.Type),
-			Endpoint: endpoint,
-		}
-
-		// Set timeout and retries
-		if h.Timeout != nil {
-			entry.Timeout = *h.Timeout
-		}
-		if h.Retries != nil {
-			entry.Retries = *h.Retries
-		}
-
-		// Set type-specific configuration
-		switch h.Type {
-		case omniav1alpha1.HandlerTypeHTTP:
-			if h.HTTPConfig != nil {
-				entry.HTTPConfig = &ToolHTTP{
-					Endpoint:    endpoint,
-					Method:      h.HTTPConfig.Method,
-					Headers:     h.HTTPConfig.Headers,
-					ContentType: h.HTTPConfig.ContentType,
-				}
-			}
-			// Include tool definition for HTTP handlers
-			if h.Tool != nil {
-				entry.Tool = &ToolDefinition{
-					Name:        h.Tool.Name,
-					Description: h.Tool.Description,
-					InputSchema: h.Tool.InputSchema.Raw,
-				}
-				if h.Tool.OutputSchema != nil {
-					entry.Tool.OutputSchema = h.Tool.OutputSchema.Raw
-				}
-			}
-
-		case omniav1alpha1.HandlerTypeGRPC:
-			if h.GRPCConfig != nil {
-				entry.GRPCConfig = &ToolGRPC{
-					Endpoint:              endpoint,
-					TLS:                   h.GRPCConfig.TLS,
-					TLSInsecureSkipVerify: h.GRPCConfig.TLSInsecureSkipVerify,
-				}
-				if h.GRPCConfig.TLSCertPath != nil {
-					entry.GRPCConfig.TLSCertPath = *h.GRPCConfig.TLSCertPath
-				}
-				if h.GRPCConfig.TLSKeyPath != nil {
-					entry.GRPCConfig.TLSKeyPath = *h.GRPCConfig.TLSKeyPath
-				}
-				if h.GRPCConfig.TLSCAPath != nil {
-					entry.GRPCConfig.TLSCAPath = *h.GRPCConfig.TLSCAPath
-				}
-			}
-			// Include tool definition for gRPC handlers
-			if h.Tool != nil {
-				entry.Tool = &ToolDefinition{
-					Name:        h.Tool.Name,
-					Description: h.Tool.Description,
-					InputSchema: h.Tool.InputSchema.Raw,
-				}
-				if h.Tool.OutputSchema != nil {
-					entry.Tool.OutputSchema = h.Tool.OutputSchema.Raw
-				}
-			}
-
-		case omniav1alpha1.HandlerTypeMCP:
-			if h.MCPConfig != nil {
-				entry.MCPConfig = &ToolMCP{
-					Transport: string(h.MCPConfig.Transport),
-					Env:       h.MCPConfig.Env,
-				}
-				if h.MCPConfig.Endpoint != nil {
-					entry.MCPConfig.Endpoint = *h.MCPConfig.Endpoint
-				}
-				if h.MCPConfig.Command != nil {
-					entry.MCPConfig.Command = *h.MCPConfig.Command
-				}
-				if len(h.MCPConfig.Args) > 0 {
-					entry.MCPConfig.Args = h.MCPConfig.Args
-				}
-				if h.MCPConfig.WorkDir != nil {
-					entry.MCPConfig.WorkDir = *h.MCPConfig.WorkDir
-				}
-			}
-
-		case omniav1alpha1.HandlerTypeOpenAPI:
-			if h.OpenAPIConfig != nil {
-				entry.OpenAPIConfig = &ToolOpenAPI{
-					SpecURL:         h.OpenAPIConfig.SpecURL,
-					OperationFilter: h.OpenAPIConfig.OperationFilter,
-				}
-				if h.OpenAPIConfig.BaseURL != nil {
-					entry.OpenAPIConfig.BaseURL = *h.OpenAPIConfig.BaseURL
-				}
-			}
-		}
-
-		config.Handlers = append(config.Handlers, entry)
+		config.Handlers = append(config.Handlers, buildHandlerEntry(&h, endpoint))
 	}
 
 	return config
@@ -1351,10 +1434,10 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		}
 
 		labels := map[string]string{
-			"app.kubernetes.io/name":         "omnia-agent",
-			"app.kubernetes.io/instance":     agentRuntime.Name,
-			"app.kubernetes.io/managed-by":   "omnia-operator",
-			"omnia.altairalabs.ai/component": "agent",
+			labelAppName:      labelValueOmniaAgent,
+			labelAppInstance:  agentRuntime.Name,
+			labelAppManagedBy: labelValueOmniaOperator,
+			labelOmniaComp:    "agent",
 		}
 
 		// Prometheus scrape annotations on Service (not pod, as Istio overrides pod annotations)
@@ -1474,7 +1557,7 @@ func (r *AgentRuntimeReconciler) cleanupKEDA(ctx context.Context, agentRuntime *
 	// KEDA ScaledObject cleanup using unstructured
 	scaledObject := &unstructured.Unstructured{}
 	scaledObject.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "keda.sh",
+		Group:   kedaAPIGroup,
 		Version: "v1alpha1",
 		Kind:    "ScaledObject",
 	})
@@ -1502,7 +1585,7 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 	// Build KEDA ScaledObject using unstructured to avoid dependency on KEDA API
 	scaledObject := &unstructured.Unstructured{}
 	scaledObject.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "keda.sh",
+		Group:   kedaAPIGroup,
 		Version: "v1alpha1",
 		Kind:    "ScaledObject",
 	})
@@ -1510,10 +1593,10 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 	scaledObject.SetNamespace(agentRuntime.Namespace)
 
 	labels := map[string]string{
-		"app.kubernetes.io/name":         "omnia-agent",
-		"app.kubernetes.io/instance":     agentRuntime.Name,
-		"app.kubernetes.io/managed-by":   "omnia-operator",
-		"omnia.altairalabs.ai/component": "agent",
+		labelAppName:      labelValueOmniaAgent,
+		labelAppInstance:  agentRuntime.Name,
+		labelAppManagedBy: labelValueOmniaOperator,
+		labelOmniaComp:    "agent",
 	}
 	scaledObject.SetLabels(labels)
 
@@ -1572,7 +1655,7 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 	// Check if ScaledObject exists
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "keda.sh",
+		Group:   kedaAPIGroup,
 		Version: "v1alpha1",
 		Kind:    "ScaledObject",
 	})
@@ -1703,10 +1786,10 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 		}
 
 		labels := map[string]string{
-			"app.kubernetes.io/name":         "omnia-agent",
-			"app.kubernetes.io/instance":     agentRuntime.Name,
-			"app.kubernetes.io/managed-by":   "omnia-operator",
-			"omnia.altairalabs.ai/component": "agent",
+			labelAppName:      labelValueOmniaAgent,
+			labelAppInstance:  agentRuntime.Name,
+			labelAppManagedBy: labelValueOmniaOperator,
+			labelOmniaComp:    "agent",
 		}
 
 		hpa.Labels = labels

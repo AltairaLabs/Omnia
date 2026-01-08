@@ -107,7 +107,7 @@ export function useGrafana(): GrafanaConfig {
   const remotePath = normalizePath(
     process.env.NEXT_PUBLIC_GRAFANA_PATH || "/grafana/"
   );
-  const orgId = parseInt(process.env.NEXT_PUBLIC_GRAFANA_ORG_ID || "1", 10);
+  const orgId = Number.parseInt(process.env.NEXT_PUBLIC_GRAFANA_ORG_ID || "1", 10);
 
   return {
     enabled: !!baseUrl,

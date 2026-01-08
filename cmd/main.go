@@ -44,6 +44,9 @@ import (
 
 const logKeyController = "controller"
 
+// Error message constants.
+const errUnableToCreateController = "unable to create controller"
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -196,28 +199,28 @@ func main() {
 		FacadeImage:    facadeImage,
 		FrameworkImage: frameworkImage,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", logKeyController, "AgentRuntime")
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
 	}
 	if err := (&controller.PromptPackReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", logKeyController, "PromptPack")
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "PromptPack")
 		os.Exit(1)
 	}
 	if err := (&controller.ToolRegistryReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", logKeyController, "ToolRegistry")
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ToolRegistry")
 		os.Exit(1)
 	}
 	if err := (&controller.ProviderReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", logKeyController, "Provider")
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "Provider")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

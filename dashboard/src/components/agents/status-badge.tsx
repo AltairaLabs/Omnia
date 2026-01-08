@@ -27,7 +27,7 @@ interface StatusBadgeProps {
   className?: string;
 }
 
-export function StatusBadge({ phase, className }: StatusBadgeProps) {
+export function StatusBadge({ phase, className }: Readonly<StatusBadgeProps>) {
   if (!phase) {
     return (
       <Badge variant="outline" className={cn("text-xs", className)}>

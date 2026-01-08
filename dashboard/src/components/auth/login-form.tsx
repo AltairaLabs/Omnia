@@ -41,14 +41,14 @@ export function LoginForm({
   error,
   errorMessage,
   returnTo,
-}: LoginFormProps) {
+}: Readonly<LoginFormProps>) {
   const handleLogin = () => {
     // Redirect to OAuth login endpoint with returnTo
-    const loginUrl = new URL("/api/auth/login", window.location.origin);
+    const loginUrl = new URL("/api/auth/login", globalThis.location.origin);
     if (returnTo) {
       loginUrl.searchParams.set("returnTo", returnTo);
     }
-    window.location.href = loginUrl.href;
+    globalThis.location.href = loginUrl.href;
   };
 
   // Get human-readable error message

@@ -169,7 +169,7 @@ function renderDeployButtonContent(isSubmitting: boolean, success: boolean) {
   );
 }
 
-export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
+export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>) {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<WizardFormData>(INITIAL_FORM_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -641,7 +641,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
                   id="facadePort"
                   type="number"
                   value={formData.facadePort}
-                  onChange={(e) => updateField("facadePort", parseInt(e.target.value) || 8080)}
+                  onChange={(e) => updateField("facadePort", Number.parseInt(e.target.value) || 8080)}
                 />
               </div>
             </div>
@@ -653,7 +653,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
                 type="number"
                 min={0}
                 value={formData.replicas}
-                onChange={(e) => updateField("replicas", parseInt(e.target.value) || 0)}
+                onChange={(e) => updateField("replicas", Number.parseInt(e.target.value) || 0)}
               />
             </div>
 
@@ -820,7 +820,7 @@ export function DeployWizard({ open, onOpenChange }: DeployWizardProps) {
         <div className="flex justify-between px-2 mb-2">
           {STEPS.map((s, i) => (
             <div
-              key={i}
+              key={s.title}
               className={cn(
                 "flex flex-col items-center",
                 i <= step ? "text-primary" : "text-muted-foreground"

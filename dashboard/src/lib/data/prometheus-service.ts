@@ -156,7 +156,7 @@ export class PrometheusService {
     if (result.status !== "success" || !result.data?.result) return;
     for (const item of result.data.result as PrometheusVectorResult[]) {
       const agent = this.getOrCreateAgent(agentMap, item.metric);
-      agent[field] = parseFloat(item.value[1]) || 0;
+      agent[field] = Number.parseFloat(item.value[1]) || 0;
     }
   }
 

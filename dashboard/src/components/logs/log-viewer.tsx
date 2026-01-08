@@ -66,12 +66,12 @@ function LogContent({
   logs,
   filteredLogs,
   formatTimestamp,
-}: {
+}: Readonly<{
   isLoading: boolean;
   logs: LogEntry[];
   filteredLogs: LogEntry[];
   formatTimestamp: (date: Date) => string;
-}) {
+}>) {
   if (isLoading && logs.length === 0) {
     return (
       <div className="flex items-center justify-center h-32 text-muted-foreground">
@@ -122,7 +122,7 @@ export function LogViewer({
   containers = ["facade", "runtime"],
   className,
   defaultTailLines = 100,
-}: LogViewerProps) {
+}: Readonly<LogViewerProps>) {
   const { isDemoMode } = useDemoMode();
   const [tailLines, setTailLines] = useState(defaultTailLines);
 

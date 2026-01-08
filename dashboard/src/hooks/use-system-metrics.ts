@@ -93,7 +93,7 @@ function matrixToDataPoints(
 
   for (const series of result.data.result) {
     for (const [ts, val] of series.values || []) {
-      const value = parseFloat(val) || 0;
+      const value = Number.parseFloat(val) || 0;
       if (aggregateSum) {
         timeMap.set(ts, (timeMap.get(ts) || 0) + value);
       } else {
@@ -229,8 +229,8 @@ function extractScalarFromResult(result: {
   }
   // Sum all results (in case there are multiple)
   return result.data.result.reduce((sum, item) => {
-    const val = parseFloat(item.value?.[1] || "0");
-    return sum + (isNaN(val) ? 0 : val);
+    const val = Number.parseFloat(item.value?.[1] || "0");
+    return sum + (Number.isNaN(val) ? 0 : val);
   }, 0);
 }
 

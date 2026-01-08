@@ -12,7 +12,7 @@ import {
 } from "./types";
 import { SQLiteUserStore } from "./sqlite-store";
 import { PostgresUserStore } from "./postgres-store";
-import path from "path";
+import path from "node:path";
 
 // Singleton store instance
 let store: UserStore | null = null;
@@ -34,27 +34,27 @@ export function getBuiltinConfig(): BuiltinAuthConfig {
 
     allowSignup: process.env.OMNIA_BUILTIN_ALLOW_SIGNUP === "true",
     verifyEmail: process.env.OMNIA_BUILTIN_VERIFY_EMAIL === "true",
-    minPasswordLength: parseInt(
+    minPasswordLength: Number.parseInt(
       process.env.OMNIA_BUILTIN_MIN_PASSWORD_LENGTH ||
         String(DEFAULT_BUILTIN_CONFIG.minPasswordLength),
       10
     ),
-    maxFailedAttempts: parseInt(
+    maxFailedAttempts: Number.parseInt(
       process.env.OMNIA_BUILTIN_MAX_FAILED_ATTEMPTS ||
         String(DEFAULT_BUILTIN_CONFIG.maxFailedAttempts),
       10
     ),
-    lockoutDuration: parseInt(
+    lockoutDuration: Number.parseInt(
       process.env.OMNIA_BUILTIN_LOCKOUT_DURATION ||
         String(DEFAULT_BUILTIN_CONFIG.lockoutDuration),
       10
     ),
-    resetTokenExpiration: parseInt(
+    resetTokenExpiration: Number.parseInt(
       process.env.OMNIA_BUILTIN_RESET_TOKEN_EXPIRATION ||
         String(DEFAULT_BUILTIN_CONFIG.resetTokenExpiration),
       10
     ),
-    verificationTokenExpiration: parseInt(
+    verificationTokenExpiration: Number.parseInt(
       process.env.OMNIA_BUILTIN_VERIFICATION_TOKEN_EXPIRATION ||
         String(DEFAULT_BUILTIN_CONFIG.verificationTokenExpiration),
       10

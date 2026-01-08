@@ -69,11 +69,11 @@ export function getApiKeyConfig(): ApiKeyConfig {
     enabled: process.env.OMNIA_AUTH_API_KEYS_ENABLED !== "false",
     storeType,
     filePath,
-    maxKeysPerUser: parseInt(
+    maxKeysPerUser: Number.parseInt(
       process.env.OMNIA_AUTH_API_KEYS_MAX_PER_USER || "10",
       10
     ),
-    defaultExpirationDays: parseInt(
+    defaultExpirationDays: Number.parseInt(
       process.env.OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION || "90",
       10
     ),

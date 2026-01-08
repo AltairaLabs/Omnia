@@ -34,13 +34,13 @@ function MetricCardContent({
   metric,
   title,
   color,
-}: {
+}: Readonly<{
   loading: boolean;
   available: boolean;
   metric: SystemMetric;
   title: string;
   color: string;
-}) {
+}>) {
   const hasData = metric.series.length > 0;
 
   if (loading) {
@@ -125,7 +125,7 @@ function MetricCard({
   loading,
   color,
   available = true,
-}: MetricCardProps) {
+}: Readonly<MetricCardProps>) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -157,7 +157,7 @@ function MetricCard({
  * Falls back to empty state when Prometheus is not available.
  * Includes link to Grafana for detailed analysis.
  */
-export function SystemMetrics({ className }: { className?: string }) {
+export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
   const { data: metrics, isLoading } = useSystemMetrics();
   const grafana = useGrafana();
 

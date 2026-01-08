@@ -97,6 +97,11 @@ const (
 	defaultHealthPort      = 9001
 )
 
+// Error format constants.
+const (
+	errFmtInvalidEnvVar = "invalid %s: %w"
+)
+
 // Session type constants.
 const (
 	SessionTypeMemory = "memory"
@@ -139,7 +144,7 @@ func LoadConfig() (*Config, error) {
 	if rate := os.Getenv(envTracingSampleRate); rate != "" {
 		r, err := strconv.ParseFloat(rate, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s: %w", envTracingSampleRate, err)
+			return nil, fmt.Errorf(errFmtInvalidEnvVar, envTracingSampleRate, err)
 		}
 		if r < 0 || r > 1 {
 			return nil, fmt.Errorf("invalid %s: must be between 0.0 and 1.0", envTracingSampleRate)
@@ -151,7 +156,7 @@ func LoadConfig() (*Config, error) {
 	if port := os.Getenv(envGRPCPort); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s: %w", envGRPCPort, err)
+			return nil, fmt.Errorf(errFmtInvalidEnvVar, envGRPCPort, err)
 		}
 		cfg.GRPCPort = p
 	}
@@ -159,7 +164,7 @@ func LoadConfig() (*Config, error) {
 	if port := os.Getenv(envHealthPort); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s: %w", envHealthPort, err)
+			return nil, fmt.Errorf(errFmtInvalidEnvVar, envHealthPort, err)
 		}
 		cfg.HealthPort = p
 	}
@@ -168,7 +173,7 @@ func LoadConfig() (*Config, error) {
 	if ttl := os.Getenv(envSessionTTL); ttl != "" {
 		d, err := time.ParseDuration(ttl)
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s: %w", envSessionTTL, err)
+			return nil, fmt.Errorf(errFmtInvalidEnvVar, envSessionTTL, err)
 		}
 		cfg.SessionTTL = d
 	}

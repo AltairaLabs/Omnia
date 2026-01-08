@@ -70,7 +70,7 @@ function processPrometheusResult(
         timeMap.set(ts, { requests: 0, sessions: 0 });
       }
       const entry = timeMap.get(ts)!;
-      const value = parseFloat(val) || 0;
+      const value = Number.parseFloat(val) || 0;
       entry[field] = aggregator === "sum" ? entry[field] + value : Math.max(entry[field], value);
     }
   }

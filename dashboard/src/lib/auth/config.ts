@@ -8,7 +8,7 @@
  * - anonymous: No authentication required
  */
 
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_CLAIM_MAPPING,
   DEFAULT_SCOPES,
@@ -100,7 +100,7 @@ export function getAuthConfig(): AuthConfig {
     session: {
       cookieName: process.env.OMNIA_SESSION_COOKIE_NAME || "omnia_session",
       secret: process.env.OMNIA_SESSION_SECRET || generateDevSecret(),
-      ttl: parseInt(process.env.OMNIA_SESSION_TTL || "86400", 10), // 24 hours
+      ttl: Number.parseInt(process.env.OMNIA_SESSION_TTL || "86400", 10), // 24 hours
     },
     anonymous: {
       role: (process.env.OMNIA_AUTH_ANONYMOUS_ROLE || "viewer") as UserRole,

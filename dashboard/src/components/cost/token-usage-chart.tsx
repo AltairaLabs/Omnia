@@ -34,7 +34,7 @@ export function TokenUsageChart({
   description = "Input and output tokens over time",
   showRequests = false,
   height = 300,
-}: TokenUsageChartProps) {
+}: Readonly<TokenUsageChartProps>) {
   // Format data for chart
   const chartData = data.map((point) => ({
     time: new Date(point.timestamp).toLocaleTimeString([], {

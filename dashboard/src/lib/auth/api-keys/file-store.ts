@@ -24,7 +24,7 @@
  * }
  */
 
-import { readFileSync, existsSync, watchFile, unwatchFile } from "fs";
+import { readFileSync, existsSync, watchFile, unwatchFile } from "node:fs";
 import bcrypt from "bcryptjs";
 import {
   API_KEY_PREFIX,
@@ -76,10 +76,10 @@ function parseStoredKey(stored: StoredKey): ApiKey {
  * The store watches the file for changes and reloads automatically.
  */
 export class FileApiKeyStore implements ApiKeyStore {
-  private filePath: string;
-  private keys: Map<string, ApiKey> = new Map();
+  private readonly filePath: string;
+  private readonly keys: Map<string, ApiKey> = new Map();
   private lastModified: number = 0;
-  private watchEnabled: boolean;
+  private readonly watchEnabled: boolean;
 
   constructor(filePath: string, options: { watch?: boolean } = {}) {
     this.filePath = filePath;

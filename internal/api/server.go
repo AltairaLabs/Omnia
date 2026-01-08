@@ -21,6 +21,11 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// Error message constants.
+const (
+	errMethodNotAllowed = "method not allowed"
+)
+
 // Server provides REST API endpoints for the Omnia dashboard.
 type Server struct {
 	client    client.Client
@@ -118,7 +123,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.createAgent(w, r)
 	default:
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 	}
 }
 
@@ -191,7 +196,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 // handleAgentOrLogs routes to agent details, logs, or events based on path.
 func (s *Server) handleAgentOrLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -344,104 +349,108 @@ type JSONLogEntry struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-// parseLogLine parses a single log line (with timestamp prefix from kubectl logs --timestamps).
-func parseLogLine(line, containerName string) LogEntry {
-	entry := LogEntry{
-		Timestamp: time.Now(),
-		Level:     "info",
-		Message:   line,
-		Container: containerName,
-	}
-
-	// Try to parse timestamp prefix (format: 2006-01-02T15:04:05.123456789Z <message>)
-	// The timestamp length varies based on nanosecond precision, so find the space separator
-	messageContent := line
+// parseTimestampPrefix extracts the timestamp and message content from a log line with kubectl --timestamps prefix.
+func parseTimestampPrefix(line string) (time.Time, string) {
+	// Format: 2006-01-02T15:04:05.123456789Z <message>
 	if len(line) > 20 && line[4] == '-' && line[7] == '-' && line[10] == 'T' {
-		// Find the space that separates timestamp from log content
 		spaceIdx := strings.Index(line, " ")
 		if spaceIdx > 20 && spaceIdx < 40 {
-			// Parse the timestamp portion
 			if ts, err := time.Parse(time.RFC3339Nano, line[:spaceIdx]); err == nil {
-				entry.Timestamp = ts
-				messageContent = strings.TrimSpace(line[spaceIdx+1:])
+				return ts, strings.TrimSpace(line[spaceIdx+1:])
 			}
 		}
+	}
+	return time.Now(), line
+}
+
+// buildJSONLogMessage constructs a human-readable message from a JSON log entry.
+func buildJSONLogMessage(jsonLog JSONLogEntry) string {
+	var msgParts []string
+
+	if jsonLog.Logger != "" {
+		msgParts = append(msgParts, "["+jsonLog.Logger+"]")
+	}
+	if jsonLog.Caller != "" {
+		msgParts = append(msgParts, "["+jsonLog.Caller+"]")
+	}
+	msgParts = append(msgParts, jsonLog.Msg)
+
+	contextParts := buildContextParts(jsonLog)
+	if len(contextParts) > 0 {
+		msgParts = append(msgParts, "("+strings.Join(contextParts, ", ")+")")
+	}
+	if jsonLog.Error != "" {
+		msgParts = append(msgParts, "error: "+jsonLog.Error)
+	}
+
+	return strings.Join(msgParts, " ")
+}
+
+// buildContextParts extracts context key-value pairs from a JSON log entry.
+func buildContextParts(jsonLog JSONLogEntry) []string {
+	var parts []string
+	if jsonLog.Agent != "" {
+		parts = append(parts, "agent="+jsonLog.Agent)
+	}
+	if jsonLog.Namespace != "" {
+		parts = append(parts, "namespace="+jsonLog.Namespace)
+	}
+	if jsonLog.Addr != "" {
+		parts = append(parts, "addr="+jsonLog.Addr)
+	}
+	if jsonLog.Address != "" {
+		parts = append(parts, "address="+jsonLog.Address)
+	}
+	if jsonLog.SessionID != "" {
+		parts = append(parts, "session_id="+jsonLog.SessionID)
+	}
+	return parts
+}
+
+// detectLogLevel infers the log level from plain text message content.
+func detectLogLevel(message string) string {
+	msgLower := strings.ToLower(message)
+	switch {
+	case strings.Contains(msgLower, "error"):
+		return "error"
+	case strings.Contains(msgLower, "warn"):
+		return "warn"
+	case strings.Contains(msgLower, "debug"):
+		return "debug"
+	default:
+		return "info"
+	}
+}
+
+// parseLogLine parses a single log line (with timestamp prefix from kubectl logs --timestamps).
+func parseLogLine(line, containerName string) LogEntry {
+	timestamp, messageContent := parseTimestampPrefix(line)
+	entry := LogEntry{
+		Timestamp: timestamp,
+		Level:     "info",
+		Message:   messageContent,
+		Container: containerName,
 	}
 
 	// Try to parse as JSON log (zap format)
 	if strings.HasPrefix(messageContent, "{") {
 		var jsonLog JSONLogEntry
 		if err := json.Unmarshal([]byte(messageContent), &jsonLog); err == nil {
-			// Extract level
 			if jsonLog.Level != "" {
 				entry.Level = strings.ToLower(jsonLog.Level)
 			}
-
-			// Use timestamp from JSON if available (zap uses unix epoch with fractional seconds)
 			if jsonLog.TS > 0 {
 				sec := int64(jsonLog.TS)
 				nsec := int64((jsonLog.TS - float64(sec)) * 1e9)
 				entry.Timestamp = time.Unix(sec, nsec)
 			}
-
-			// Build a human-readable message with all relevant context
-			var msgParts []string
-
-			// Add logger name if present
-			if jsonLog.Logger != "" {
-				msgParts = append(msgParts, "["+jsonLog.Logger+"]")
-			}
-
-			// Add caller if present
-			if jsonLog.Caller != "" {
-				msgParts = append(msgParts, "["+jsonLog.Caller+"]")
-			}
-
-			// Add main message
-			msgParts = append(msgParts, jsonLog.Msg)
-
-			// Add context fields
-			var contextParts []string
-			if jsonLog.Agent != "" {
-				contextParts = append(contextParts, "agent="+jsonLog.Agent)
-			}
-			if jsonLog.Namespace != "" {
-				contextParts = append(contextParts, "namespace="+jsonLog.Namespace)
-			}
-			if jsonLog.Addr != "" {
-				contextParts = append(contextParts, "addr="+jsonLog.Addr)
-			}
-			if jsonLog.Address != "" {
-				contextParts = append(contextParts, "address="+jsonLog.Address)
-			}
-			if jsonLog.SessionID != "" {
-				contextParts = append(contextParts, "session_id="+jsonLog.SessionID)
-			}
-			if len(contextParts) > 0 {
-				msgParts = append(msgParts, "("+strings.Join(contextParts, ", ")+")")
-			}
-
-			// Add error if present
-			if jsonLog.Error != "" {
-				msgParts = append(msgParts, "error: "+jsonLog.Error)
-			}
-
-			entry.Message = strings.Join(msgParts, " ")
+			entry.Message = buildJSONLogMessage(jsonLog)
 			return entry
 		}
 	}
 
 	// Fallback: detect log level from message content
-	entry.Message = messageContent
-	msgLower := strings.ToLower(messageContent)
-	switch {
-	case strings.Contains(msgLower, "error"):
-		entry.Level = "error"
-	case strings.Contains(msgLower, "warn"):
-		entry.Level = "warn"
-	case strings.Contains(msgLower, "debug"):
-		entry.Level = "debug"
-	}
+	entry.Level = detectLogLevel(messageContent)
 
 	return entry
 }
@@ -578,7 +587,7 @@ func sortEventsByTimestamp(events []K8sEvent) {
 // handlePromptPacks lists all PromptPacks.
 func (s *Server) handlePromptPacks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -605,7 +614,7 @@ func (s *Server) handlePromptPacks(w http.ResponseWriter, r *http.Request) {
 // handlePromptPack gets a specific PromptPack.
 func (s *Server) handlePromptPack(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -632,7 +641,7 @@ func (s *Server) handlePromptPack(w http.ResponseWriter, r *http.Request) {
 // handleToolRegistries lists all ToolRegistries.
 func (s *Server) handleToolRegistries(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -659,7 +668,7 @@ func (s *Server) handleToolRegistries(w http.ResponseWriter, r *http.Request) {
 // handleToolRegistry gets a specific ToolRegistry.
 func (s *Server) handleToolRegistry(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -686,7 +695,7 @@ func (s *Server) handleToolRegistry(w http.ResponseWriter, r *http.Request) {
 // handleProviders lists all Providers.
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -733,7 +742,7 @@ type Stats struct {
 // handleStats returns aggregated statistics.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
@@ -791,7 +800,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // handleNamespaces returns a list of namespaces in the cluster.
 func (s *Server) handleNamespaces(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
 		return
 	}
 
