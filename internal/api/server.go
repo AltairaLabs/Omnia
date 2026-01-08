@@ -432,10 +432,10 @@ func parseLogLine(line, containerName string) LogEntry {
 		Container: containerName,
 	}
 
-	// Try to parse as JSON log (zap format)
+	// Try to parse as JSON log (zap format) - fallback to text if parsing fails
 	if strings.HasPrefix(messageContent, "{") {
 		var jsonLog JSONLogEntry
-		if err := json.Unmarshal([]byte(messageContent), &jsonLog); err == nil {
+		if json.Unmarshal([]byte(messageContent), &jsonLog) == nil {
 			if jsonLog.Level != "" {
 				entry.Level = strings.ToLower(jsonLog.Level)
 			}
@@ -749,9 +749,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	stats := Stats{}
 
-	// Count agents
+	// Count agents (best-effort: ignore errors)
 	var agents omniav1alpha1.AgentRuntimeList
-	if err := s.client.List(ctx, &agents); err == nil {
+	if s.client.List(ctx, &agents) == nil {
 		stats.Agents.Total = len(agents.Items)
 		for _, a := range agents.Items {
 			switch a.Status.Phase {
@@ -765,9 +765,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Count promptpacks
+	// Count promptpacks (best-effort: ignore errors)
 	var packs omniav1alpha1.PromptPackList
-	if err := s.client.List(ctx, &packs); err == nil {
+	if s.client.List(ctx, &packs) == nil {
 		stats.PromptPacks.Total = len(packs.Items)
 		for _, p := range packs.Items {
 			switch p.Status.Phase {
@@ -779,9 +779,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Count tools
+	// Count tools (best-effort: ignore errors)
 	var registries omniav1alpha1.ToolRegistryList
-	if err := s.client.List(ctx, &registries); err == nil {
+	if s.client.List(ctx, &registries) == nil {
 		for _, reg := range registries.Items {
 			stats.Tools.Total += int(reg.Status.DiscoveredToolsCount)
 			for _, t := range reg.Status.DiscoveredTools {
@@ -832,11 +832,14 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		Handler: s.Handler(),
 	}
 
-	// Graceful shutdown
+	// Graceful shutdown with timeout
+	// Note: We use a fresh context because ctx is already cancelled when this runs
 	go func() {
 		<-ctx.Done()
 		s.log.Info("shutting down API server")
-		if err := server.Shutdown(context.Background()); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.TODO(), 30*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
 			s.log.Error(err, "error shutting down API server")
 		}
 	}()

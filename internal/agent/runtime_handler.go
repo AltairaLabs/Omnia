@@ -109,7 +109,7 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		// Parse arguments JSON to map
 		var args map[string]interface{}
 		if msg.ToolCall.ArgumentsJson != "" {
-			if err := json.Unmarshal([]byte(msg.ToolCall.ArgumentsJson), &args); err != nil {
+			if json.Unmarshal([]byte(msg.ToolCall.ArgumentsJson), &args) != nil {
 				// If parsing fails, use raw JSON as single argument
 				args = map[string]interface{}{"raw": msg.ToolCall.ArgumentsJson}
 			}
@@ -124,7 +124,7 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		// Parse result JSON
 		var result interface{}
 		if msg.ToolResult.ResultJson != "" {
-			if err := json.Unmarshal([]byte(msg.ToolResult.ResultJson), &result); err != nil {
+			if json.Unmarshal([]byte(msg.ToolResult.ResultJson), &result) != nil {
 				result = msg.ToolResult.ResultJson
 			}
 		}

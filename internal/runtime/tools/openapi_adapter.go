@@ -503,7 +503,7 @@ func (a *OpenAPIAdapter) Call(ctx context.Context, name string, args map[string]
 
 	// Parse response as JSON if possible
 	var content any
-	if err := json.Unmarshal(body, &content); err != nil {
+	if json.Unmarshal(body, &content) != nil {
 		content = string(body)
 	}
 

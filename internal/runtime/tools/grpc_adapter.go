@@ -210,7 +210,7 @@ func (a *GRPCAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 		}
 		if tool.InputSchema != "" {
 			var schema map[string]any
-			if err := json.Unmarshal([]byte(tool.InputSchema), &schema); err == nil {
+			if json.Unmarshal([]byte(tool.InputSchema), &schema) == nil {
 				info.InputSchema = schema
 			}
 		}
@@ -248,7 +248,7 @@ func (a *GRPCAdapter) Call(ctx context.Context, name string, args map[string]any
 	// Parse result
 	var content any
 	if resp.ResultJson != "" {
-		if err := json.Unmarshal([]byte(resp.ResultJson), &content); err != nil {
+		if json.Unmarshal([]byte(resp.ResultJson), &content) != nil {
 			// If not valid JSON, use as string
 			content = resp.ResultJson
 		}

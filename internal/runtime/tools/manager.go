@@ -165,236 +165,140 @@ func (m *Manager) LoadFromToolConfig(config *ToolConfig) error {
 // loadFromHandlers loads adapters from the new handler-based config format.
 func (m *Manager) loadFromHandlers(handlers []HandlerEntry) error {
 	for _, h := range handlers {
-		timeout := m.parseTimeout(h.Name, h.Timeout)
-
-		switch h.Type {
-		case ToolTypeMCP:
-			if h.MCPConfig == nil {
-				m.log.Info("skipping MCP handler without config", "handler", h.Name)
-				continue
-			}
-
-			adapterConfig := MCPAdapterConfig{
-				Name:      h.Name,
-				Transport: MCPTransportType(h.MCPConfig.Transport),
-				Endpoint:  h.MCPConfig.Endpoint,
-				Command:   h.MCPConfig.Command,
-				Args:      h.MCPConfig.Args,
-				WorkDir:   h.MCPConfig.WorkDir,
-				Env:       h.MCPConfig.Env,
-			}
-
-			adapter := NewMCPAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register MCP adapter %q: %w", h.Name, err)
-			}
-
-		case ToolTypeOpenAPI:
-			if h.OpenAPIConfig == nil {
-				m.log.Info("skipping OpenAPI handler without config", "handler", h.Name)
-				continue
-			}
-
-			adapterConfig := OpenAPIAdapterConfig{
-				Name:            h.Name,
-				SpecURL:         h.OpenAPIConfig.SpecURL,
-				BaseURL:         h.OpenAPIConfig.BaseURL,
-				OperationFilter: h.OpenAPIConfig.OperationFilter,
-				Headers:         h.OpenAPIConfig.Headers,
-				AuthType:        h.OpenAPIConfig.AuthType,
-				AuthToken:       h.OpenAPIConfig.AuthToken,
-				Timeout:         timeout,
-			}
-
-			adapter := NewOpenAPIAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register OpenAPI adapter %q: %w", h.Name, err)
-			}
-
-		case ToolTypeHTTP:
-			if h.HTTPConfig == nil {
-				m.log.Info("skipping HTTP handler without config", "handler", h.Name)
-				continue
-			}
-			if h.Tool == nil {
-				m.log.Info("skipping HTTP handler without tool definition", "handler", h.Name)
-				continue
-			}
-
-			// Convert inputSchema to map[string]any for the adapter
-			var inputSchema map[string]any
-			if h.Tool.InputSchema != nil {
-				if schemaMap, ok := h.Tool.InputSchema.(map[string]any); ok {
-					inputSchema = schemaMap
-				}
-			}
-
-			adapterConfig := HTTPAdapterConfig{
-				Name:        h.Name,
-				Endpoint:    h.HTTPConfig.Endpoint,
-				Method:      h.HTTPConfig.Method,
-				Headers:     h.HTTPConfig.Headers,
-				ContentType: h.HTTPConfig.ContentType,
-				AuthType:    h.HTTPConfig.AuthType,
-				AuthToken:   h.HTTPConfig.AuthToken,
-				Timeout:     timeout,
-				// Tool definition for explicit handlers
-				ToolName:        h.Tool.Name,
-				ToolDescription: h.Tool.Description,
-				ToolInputSchema: inputSchema,
-			}
-
-			adapter := NewHTTPAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register HTTP adapter %q: %w", h.Name, err)
-			}
-
-		case ToolTypeGRPC:
-			if h.GRPCConfig == nil {
-				m.log.Info("skipping gRPC handler without config", "handler", h.Name)
-				continue
-			}
-			if h.Tool == nil {
-				m.log.Info("skipping gRPC handler without tool definition", "handler", h.Name)
-				continue
-			}
-
-			// Convert inputSchema to map[string]any for the adapter
-			var inputSchema map[string]any
-			if h.Tool.InputSchema != nil {
-				if schemaMap, ok := h.Tool.InputSchema.(map[string]any); ok {
-					inputSchema = schemaMap
-				}
-			}
-
-			adapterConfig := GRPCAdapterConfig{
-				Name:                  h.Name,
-				Endpoint:              h.GRPCConfig.Endpoint,
-				TLS:                   h.GRPCConfig.TLS,
-				TLSCertPath:           h.GRPCConfig.TLSCertPath,
-				TLSKeyPath:            h.GRPCConfig.TLSKeyPath,
-				TLSCAPath:             h.GRPCConfig.TLSCAPath,
-				TLSInsecureSkipVerify: h.GRPCConfig.TLSInsecureSkipVerify,
-				Timeout:               timeout,
-				// Tool definition for explicit handlers
-				ToolName:        h.Tool.Name,
-				ToolDescription: h.Tool.Description,
-				ToolInputSchema: inputSchema,
-			}
-
-			adapter := NewGRPCAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register gRPC adapter %q: %w", h.Name, err)
-			}
-
-		default:
-			m.log.Info("unknown handler type", "handler", h.Name, "type", h.Type)
+		if err := m.loadHandler(h); err != nil {
+			return err
 		}
 	}
-
 	return nil
+}
+
+// loadHandler processes a single handler entry and registers the appropriate adapter.
+func (m *Manager) loadHandler(h HandlerEntry) error {
+	timeout := m.parseTimeout(h.Name, h.Timeout)
+
+	switch h.Type {
+	case ToolTypeMCP:
+		return m.loadMCPHandler(h)
+	case ToolTypeOpenAPI:
+		return m.loadOpenAPIHandler(h, timeout)
+	case ToolTypeHTTP:
+		return m.loadHTTPHandler(h, timeout)
+	case ToolTypeGRPC:
+		return m.loadGRPCHandler(h, timeout)
+	default:
+		m.log.Info("unknown handler type", "handler", h.Name, "type", h.Type)
+	}
+	return nil
+}
+
+// loadMCPHandler processes an MCP handler entry.
+func (m *Manager) loadMCPHandler(h HandlerEntry) error {
+	if h.MCPConfig == nil {
+		m.log.Info("skipping MCP handler without config", "handler", h.Name)
+		return nil
+	}
+	return m.registerMCPAdapter(h.Name, h.MCPConfig)
+}
+
+// loadOpenAPIHandler processes an OpenAPI handler entry.
+func (m *Manager) loadOpenAPIHandler(h HandlerEntry, timeout time.Duration) error {
+	if h.OpenAPIConfig == nil {
+		m.log.Info("skipping OpenAPI handler without config", "handler", h.Name)
+		return nil
+	}
+	return m.registerOpenAPIAdapter(h.Name, h.OpenAPIConfig, timeout)
+}
+
+// loadHTTPHandler processes an HTTP handler entry.
+func (m *Manager) loadHTTPHandler(h HandlerEntry, timeout time.Duration) error {
+	if h.HTTPConfig == nil {
+		m.log.Info("skipping HTTP handler without config", "handler", h.Name)
+		return nil
+	}
+	if h.Tool == nil {
+		m.log.Info("skipping HTTP handler without tool definition", "handler", h.Name)
+		return nil
+	}
+	return m.registerHTTPAdapter(h.Name, h.HTTPConfig, h.Tool, timeout)
+}
+
+// loadGRPCHandler processes a gRPC handler entry.
+func (m *Manager) loadGRPCHandler(h HandlerEntry, timeout time.Duration) error {
+	if h.GRPCConfig == nil {
+		m.log.Info("skipping gRPC handler without config", "handler", h.Name)
+		return nil
+	}
+	if h.Tool == nil {
+		m.log.Info("skipping gRPC handler without tool definition", "handler", h.Name)
+		return nil
+	}
+	return m.registerGRPCAdapter(h.Name, h.GRPCConfig, h.Tool, timeout)
 }
 
 // loadFromLegacyTools loads adapters from the legacy tool-based config format.
 // Deprecated: This is maintained for backward compatibility.
 func (m *Manager) loadFromLegacyTools(tools []ToolEntry) error {
 	for _, tool := range tools {
-		timeout := m.parseTimeout(tool.Name, tool.Timeout)
-
-		switch tool.Type {
-		case ToolTypeMCP:
-			if tool.MCPConfig == nil {
-				m.log.Info("skipping MCP tool without config", "tool", tool.Name)
-				continue
-			}
-
-			adapterConfig := MCPAdapterConfig{
-				Name:      tool.Name,
-				Transport: MCPTransportType(tool.MCPConfig.Transport),
-				Endpoint:  tool.MCPConfig.Endpoint,
-				Command:   tool.MCPConfig.Command,
-				Args:      tool.MCPConfig.Args,
-				WorkDir:   tool.MCPConfig.WorkDir,
-				Env:       tool.MCPConfig.Env,
-			}
-
-			adapter := NewMCPAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register MCP adapter %q: %w", tool.Name, err)
-			}
-
-		case ToolTypeGRPC:
-			if tool.GRPCConfig == nil {
-				m.log.Info("skipping gRPC tool without config", "tool", tool.Name)
-				continue
-			}
-
-			adapterConfig := GRPCAdapterConfig{
-				Name:                  tool.Name,
-				Endpoint:              tool.GRPCConfig.Endpoint,
-				TLS:                   tool.GRPCConfig.TLS,
-				TLSCertPath:           tool.GRPCConfig.TLSCertPath,
-				TLSKeyPath:            tool.GRPCConfig.TLSKeyPath,
-				TLSCAPath:             tool.GRPCConfig.TLSCAPath,
-				TLSInsecureSkipVerify: tool.GRPCConfig.TLSInsecureSkipVerify,
-				Timeout:               timeout,
-			}
-
-			adapter := NewGRPCAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register gRPC adapter %q: %w", tool.Name, err)
-			}
-
-		case ToolTypeHTTP:
-			if tool.HTTPConfig == nil {
-				m.log.Info("skipping HTTP tool without config", "tool", tool.Name)
-				continue
-			}
-
-			adapterConfig := HTTPAdapterConfig{
-				Name:        tool.Name,
-				Endpoint:    tool.HTTPConfig.Endpoint,
-				Method:      tool.HTTPConfig.Method,
-				Headers:     tool.HTTPConfig.Headers,
-				ContentType: tool.HTTPConfig.ContentType,
-				AuthType:    tool.HTTPConfig.AuthType,
-				AuthToken:   tool.HTTPConfig.AuthToken,
-				Timeout:     timeout,
-			}
-
-			adapter := NewHTTPAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register HTTP adapter %q: %w", tool.Name, err)
-			}
-
-		case ToolTypeOpenAPI:
-			if tool.OpenAPIConfig == nil {
-				m.log.Info("skipping OpenAPI tool without config", "tool", tool.Name)
-				continue
-			}
-
-			adapterConfig := OpenAPIAdapterConfig{
-				Name:            tool.Name,
-				SpecURL:         tool.OpenAPIConfig.SpecURL,
-				BaseURL:         tool.OpenAPIConfig.BaseURL,
-				OperationFilter: tool.OpenAPIConfig.OperationFilter,
-				Headers:         tool.OpenAPIConfig.Headers,
-				AuthType:        tool.OpenAPIConfig.AuthType,
-				AuthToken:       tool.OpenAPIConfig.AuthToken,
-				Timeout:         timeout,
-			}
-
-			adapter := NewOpenAPIAdapter(adapterConfig, m.log)
-			if err := m.RegisterAdapter(adapter); err != nil {
-				return fmt.Errorf("failed to register OpenAPI adapter %q: %w", tool.Name, err)
-			}
-
-		default:
-			m.log.Info("unknown tool type", "tool", tool.Name, "type", tool.Type)
+		if err := m.loadLegacyTool(tool); err != nil {
+			return err
 		}
 	}
-
 	return nil
+}
+
+// loadLegacyTool processes a single legacy tool entry and registers the appropriate adapter.
+func (m *Manager) loadLegacyTool(tool ToolEntry) error {
+	timeout := m.parseTimeout(tool.Name, tool.Timeout)
+
+	switch tool.Type {
+	case ToolTypeMCP:
+		return m.loadLegacyMCPTool(tool)
+	case ToolTypeGRPC:
+		return m.loadLegacyGRPCTool(tool, timeout)
+	case ToolTypeHTTP:
+		return m.loadLegacyHTTPTool(tool, timeout)
+	case ToolTypeOpenAPI:
+		return m.loadLegacyOpenAPITool(tool, timeout)
+	default:
+		m.log.Info("unknown tool type", "tool", tool.Name, "type", tool.Type)
+	}
+	return nil
+}
+
+// loadLegacyMCPTool processes a legacy MCP tool entry.
+func (m *Manager) loadLegacyMCPTool(tool ToolEntry) error {
+	if tool.MCPConfig == nil {
+		m.log.Info("skipping MCP tool without config", "tool", tool.Name)
+		return nil
+	}
+	return m.registerMCPAdapter(tool.Name, tool.MCPConfig)
+}
+
+// loadLegacyGRPCTool processes a legacy gRPC tool entry.
+func (m *Manager) loadLegacyGRPCTool(tool ToolEntry, timeout time.Duration) error {
+	if tool.GRPCConfig == nil {
+		m.log.Info("skipping gRPC tool without config", "tool", tool.Name)
+		return nil
+	}
+	return m.registerGRPCAdapterLegacy(tool.Name, tool.GRPCConfig, timeout)
+}
+
+// loadLegacyHTTPTool processes a legacy HTTP tool entry.
+func (m *Manager) loadLegacyHTTPTool(tool ToolEntry, timeout time.Duration) error {
+	if tool.HTTPConfig == nil {
+		m.log.Info("skipping HTTP tool without config", "tool", tool.Name)
+		return nil
+	}
+	return m.registerHTTPAdapterLegacy(tool.Name, tool.HTTPConfig, timeout)
+}
+
+// loadLegacyOpenAPITool processes a legacy OpenAPI tool entry.
+func (m *Manager) loadLegacyOpenAPITool(tool ToolEntry, timeout time.Duration) error {
+	if tool.OpenAPIConfig == nil {
+		m.log.Info("skipping OpenAPI tool without config", "tool", tool.Name)
+		return nil
+	}
+	return m.registerOpenAPIAdapter(tool.Name, tool.OpenAPIConfig, timeout)
 }
 
 // parseTimeout parses a timeout string and returns the duration.
@@ -408,4 +312,134 @@ func (m *Manager) parseTimeout(name, timeoutStr string) time.Duration {
 		return 0
 	}
 	return timeout
+}
+
+// extractInputSchema converts the tool input schema to a map if possible.
+func extractInputSchema(schema any) map[string]any {
+	if schema == nil {
+		return nil
+	}
+	if schemaMap, ok := schema.(map[string]any); ok {
+		return schemaMap
+	}
+	return nil
+}
+
+// registerMCPAdapter creates and registers an MCP adapter from handler config.
+func (m *Manager) registerMCPAdapter(name string, config *MCPCfg) error {
+	adapterConfig := MCPAdapterConfig{
+		Name:      name,
+		Transport: MCPTransportType(config.Transport),
+		Endpoint:  config.Endpoint,
+		Command:   config.Command,
+		Args:      config.Args,
+		WorkDir:   config.WorkDir,
+		Env:       config.Env,
+	}
+	adapter := NewMCPAdapter(adapterConfig, m.log)
+	if err := m.RegisterAdapter(adapter); err != nil {
+		return fmt.Errorf("failed to register MCP adapter %q: %w", name, err)
+	}
+	return nil
+}
+
+// registerOpenAPIAdapter creates and registers an OpenAPI adapter from handler config.
+func (m *Manager) registerOpenAPIAdapter(name string, config *OpenAPICfg, timeout time.Duration) error {
+	adapterConfig := OpenAPIAdapterConfig{
+		Name:            name,
+		SpecURL:         config.SpecURL,
+		BaseURL:         config.BaseURL,
+		OperationFilter: config.OperationFilter,
+		Headers:         config.Headers,
+		AuthType:        config.AuthType,
+		AuthToken:       config.AuthToken,
+		Timeout:         timeout,
+	}
+	adapter := NewOpenAPIAdapter(adapterConfig, m.log)
+	if err := m.RegisterAdapter(adapter); err != nil {
+		return fmt.Errorf("failed to register OpenAPI adapter %q: %w", name, err)
+	}
+	return nil
+}
+
+// registerHTTPAdapter creates and registers an HTTP adapter from handler config.
+func (m *Manager) registerHTTPAdapter(name string, config *HTTPCfg, tool *ToolDefCfg, timeout time.Duration) error {
+	adapterConfig := HTTPAdapterConfig{
+		Name:            name,
+		Endpoint:        config.Endpoint,
+		Method:          config.Method,
+		Headers:         config.Headers,
+		ContentType:     config.ContentType,
+		AuthType:        config.AuthType,
+		AuthToken:       config.AuthToken,
+		Timeout:         timeout,
+		ToolName:        tool.Name,
+		ToolDescription: tool.Description,
+		ToolInputSchema: extractInputSchema(tool.InputSchema),
+	}
+	adapter := NewHTTPAdapter(adapterConfig, m.log)
+	if err := m.RegisterAdapter(adapter); err != nil {
+		return fmt.Errorf("failed to register HTTP adapter %q: %w", name, err)
+	}
+	return nil
+}
+
+// registerGRPCAdapter creates and registers a gRPC adapter from handler config.
+func (m *Manager) registerGRPCAdapter(name string, config *GRPCCfg, tool *ToolDefCfg, timeout time.Duration) error {
+	adapterConfig := GRPCAdapterConfig{
+		Name:                  name,
+		Endpoint:              config.Endpoint,
+		TLS:                   config.TLS,
+		TLSCertPath:           config.TLSCertPath,
+		TLSKeyPath:            config.TLSKeyPath,
+		TLSCAPath:             config.TLSCAPath,
+		TLSInsecureSkipVerify: config.TLSInsecureSkipVerify,
+		Timeout:               timeout,
+		ToolName:              tool.Name,
+		ToolDescription:       tool.Description,
+		ToolInputSchema:       extractInputSchema(tool.InputSchema),
+	}
+	adapter := NewGRPCAdapter(adapterConfig, m.log)
+	if err := m.RegisterAdapter(adapter); err != nil {
+		return fmt.Errorf("failed to register gRPC adapter %q: %w", name, err)
+	}
+	return nil
+}
+
+// registerHTTPAdapterLegacy creates and registers an HTTP adapter from legacy tool config.
+func (m *Manager) registerHTTPAdapterLegacy(name string, config *HTTPCfg, timeout time.Duration) error {
+	adapterConfig := HTTPAdapterConfig{
+		Name:        name,
+		Endpoint:    config.Endpoint,
+		Method:      config.Method,
+		Headers:     config.Headers,
+		ContentType: config.ContentType,
+		AuthType:    config.AuthType,
+		AuthToken:   config.AuthToken,
+		Timeout:     timeout,
+	}
+	adapter := NewHTTPAdapter(adapterConfig, m.log)
+	if err := m.RegisterAdapter(adapter); err != nil {
+		return fmt.Errorf("failed to register HTTP adapter %q: %w", name, err)
+	}
+	return nil
+}
+
+// registerGRPCAdapterLegacy creates and registers a gRPC adapter from legacy tool config.
+func (m *Manager) registerGRPCAdapterLegacy(name string, config *GRPCCfg, timeout time.Duration) error {
+	adapterConfig := GRPCAdapterConfig{
+		Name:                  name,
+		Endpoint:              config.Endpoint,
+		TLS:                   config.TLS,
+		TLSCertPath:           config.TLSCertPath,
+		TLSKeyPath:            config.TLSKeyPath,
+		TLSCAPath:             config.TLSCAPath,
+		TLSInsecureSkipVerify: config.TLSInsecureSkipVerify,
+		Timeout:               timeout,
+	}
+	adapter := NewGRPCAdapter(adapterConfig, m.log)
+	if err := m.RegisterAdapter(adapter); err != nil {
+		return fmt.Errorf("failed to register gRPC adapter %q: %w", name, err)
+	}
+	return nil
 }

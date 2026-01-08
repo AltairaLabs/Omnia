@@ -273,10 +273,10 @@ func (s *Server) sendPing(c *Connection) bool {
 	if c.closed {
 		return false
 	}
-	if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
+	if c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)) != nil {
 		return false
 	}
-	if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+	if c.conn.WriteMessage(websocket.PingMessage, nil) != nil {
 		return false
 	}
 	return true

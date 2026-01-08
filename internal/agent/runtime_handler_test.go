@@ -259,3 +259,220 @@ func TestRuntimeClient_Health(t *testing.T) {
 	assert.True(t, resp.Healthy)
 	assert.Equal(t, "ready", resp.Status)
 }
+
+func TestRuntimeHandler_HandleMessage_WithMetadata(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{
+		Content: "Hello",
+		Metadata: map[string]string{
+			"user_id":    "user-123",
+			"request_id": "req-456",
+		},
+	}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+	assert.Equal(t, "Done", writer.doneMsg)
+}
+
+func TestRuntimeHandler_HandleMessage_ToolCallInvalidJSON(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
+				Id:            "call-1",
+				Name:          "test_tool",
+				ArgumentsJson: "invalid json {",
+			}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Hello"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	require.Len(t, writer.toolCalls, 1)
+	assert.Equal(t, "call-1", writer.toolCalls[0].ID)
+	assert.Equal(t, "test_tool", writer.toolCalls[0].Name)
+	// Invalid JSON should fallback to raw
+	assert.Equal(t, "invalid json {", writer.toolCalls[0].Arguments["raw"])
+}
+
+func TestRuntimeHandler_HandleMessage_ToolCallEmptyArgs(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
+				Id:            "call-1",
+				Name:          "no_args_tool",
+				ArgumentsJson: "",
+			}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Hello"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	require.Len(t, writer.toolCalls, 1)
+	assert.Nil(t, writer.toolCalls[0].Arguments)
+}
+
+func TestRuntimeHandler_HandleMessage_ToolResultInvalidJSON(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
+				Id:         "call-1",
+				ResultJson: "not valid json",
+				IsError:    false,
+			}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Hello"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	require.Len(t, writer.toolResults, 1)
+	assert.Equal(t, "call-1", writer.toolResults[0].ID)
+	// Invalid JSON should use raw string as result
+	assert.Equal(t, "not valid json", writer.toolResults[0].Result)
+}
+
+func TestRuntimeHandler_HandleMessage_ToolResultEmptyJSON(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
+				Id:         "call-1",
+				ResultJson: "",
+				IsError:    false,
+			}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Hello"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	require.Len(t, writer.toolResults, 1)
+	assert.Equal(t, "call-1", writer.toolResults[0].ID)
+	assert.Nil(t, writer.toolResults[0].Result)
+}
+
+func TestRuntimeHandler_HandleMessage_ToolResultIsError(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
+				Id:         "call-1",
+				ResultJson: `"Something went wrong"`,
+				IsError:    true,
+			}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Hello"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	require.Len(t, writer.toolResults, 1)
+	assert.Equal(t, "call-1", writer.toolResults[0].ID)
+	assert.Nil(t, writer.toolResults[0].Result)
+	assert.Equal(t, "Something went wrong", writer.toolResults[0].Error)
+}
