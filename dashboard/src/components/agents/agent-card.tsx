@@ -87,7 +87,10 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
               </p>
             </div>
             <div
+              role="group"
+              aria-label="Replica controls"
               onClick={(e) => e.preventDefault()}
+              onKeyDown={(e) => e.stopPropagation()}
             >
               <p className="text-muted-foreground mb-1">Replicas</p>
               <ScaleControl
