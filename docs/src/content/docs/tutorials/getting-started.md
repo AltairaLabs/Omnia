@@ -51,9 +51,9 @@ metadata:
   namespace: default
 data:
   # Compiled PromptPack JSON (use `packc` to compile from YAML source)
-  promptpack.json: |
+  pack.json: |
     {
-      "$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "assistant",
       "name": "Assistant",
       "version": "1.0.0",
@@ -89,6 +89,7 @@ spec:
   rollout:
     type: immediate
   source:
+    type: configmap
     configMapRef:
       name: assistant-prompts
 ```
@@ -106,9 +107,10 @@ Verify the PromptPack is ready:
 kubectl get promptpack assistant-pack
 ```
 
-> **Tip**: Author PromptPacks in YAML and compile them to JSON using [packc](https://promptpack.org) for validation and optimization:
+> **Tip**: Author PromptPacks in YAML and compile them to JSON using [packc](https://promptkit.altairalabs.ai/packc/reference/) for validation and optimization:
 > ```bash
-> packc compile prompts.yaml -o promptpack.json
+> packc compile --config arena.yaml --output pack.json --id assistant
+> kubectl create configmap assistant-prompts --from-file=pack.json
 > ```
 
 ## Step 3: Configure the LLM Provider

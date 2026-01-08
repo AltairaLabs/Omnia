@@ -29,7 +29,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/schema"
 )
+
+// validPackJSON is a valid PromptPack JSON that passes schema validation
+const validPackJSON = `{
+	"id": "test-pack",
+	"name": "Test Pack",
+	"version": "1.0.0",
+	"template_engine": {
+		"version": "v1",
+		"syntax": "{{variable}}"
+	},
+	"prompts": {
+		"default": {
+			"id": "default",
+			"name": "Default Prompt",
+			"version": "1.0.0",
+			"system_template": "You are a helpful assistant."
+		}
+	}
+}`
 
 var _ = Describe("PromptPack Controller", func() {
 	const (
@@ -54,7 +74,7 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Data: map[string]string{
-					"system.txt": "You are a helpful assistant.",
+					"pack.json": validPackJSON,
 				},
 			}
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
@@ -106,8 +126,9 @@ var _ = Describe("PromptPack Controller", func() {
 		It("should set phase to Active and set SourceValid condition", func() {
 			By("reconciling the PromptPack")
 			reconciler := &PromptPackReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -222,7 +243,7 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Data: map[string]string{
-					"system.txt": "You are a helpful assistant v2.",
+					"pack.json": validPackJSON,
 				},
 			}
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
@@ -277,8 +298,9 @@ var _ = Describe("PromptPack Controller", func() {
 		It("should set phase to Canary and track canary weight", func() {
 			By("reconciling the PromptPack")
 			reconciler := &PromptPackReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -319,7 +341,7 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Data: map[string]string{
-					"system.txt": "Test prompt.",
+					"pack.json": validPackJSON,
 				},
 			}
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
@@ -401,8 +423,9 @@ var _ = Describe("PromptPack Controller", func() {
 		It("should find the referencing AgentRuntime and set notification condition", func() {
 			By("reconciling the PromptPack")
 			reconciler := &PromptPackReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -524,7 +547,7 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Data: map[string]string{
-					"system.txt": "Full canary prompt.",
+					"pack.json": validPackJSON,
 				},
 			}
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
@@ -578,8 +601,9 @@ var _ = Describe("PromptPack Controller", func() {
 		It("should promote to Active phase", func() {
 			By("reconciling the PromptPack")
 			reconciler := &PromptPackReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -668,8 +692,9 @@ var _ = Describe("PromptPack Controller", func() {
 		It("should fail validation with empty ConfigMap error", func() {
 			By("reconciling the PromptPack")
 			reconciler := &PromptPackReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -706,7 +731,7 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Data: map[string]string{
-					"system.txt": "Watch test prompt.",
+					"pack.json": validPackJSON,
 				},
 			}
 			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
@@ -757,14 +782,202 @@ var _ = Describe("PromptPack Controller", func() {
 		It("should return reconcile requests for PromptPacks referencing the ConfigMap", func() {
 			By("calling findPromptPacksForConfigMap")
 			reconciler := &PromptPackReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
 			}
 
 			requests := reconciler.findPromptPacksForConfigMap(ctx, configMap)
 			Expect(requests).To(HaveLen(1))
 			Expect(requests[0].Name).To(Equal("watch-test-pack"))
 			Expect(requests[0].Namespace).To(Equal(promptPackNamespace))
+		})
+	})
+
+	Context("When ConfigMap is missing pack.json key", func() {
+		var (
+			promptPack *omniav1alpha1.PromptPack
+			configMap  *corev1.ConfigMap
+		)
+
+		BeforeEach(func() {
+			By("creating a ConfigMap without pack.json")
+			configMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-packjson-configmap",
+					Namespace: promptPackNamespace,
+				},
+				Data: map[string]string{
+					"system.txt": "This is not pack.json",
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			By("creating the PromptPack")
+			promptPack = &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-packjson-pack",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{
+							Name: "no-packjson-configmap",
+						},
+					},
+					Version: "1.0.0",
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			pp := &omniav1alpha1.PromptPack{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "no-packjson-pack",
+				Namespace: promptPackNamespace,
+			}, pp)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, pp)).To(Succeed())
+			}
+
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "no-packjson-configmap",
+				Namespace: promptPackNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("should fail validation with missing pack.json error", func() {
+			By("reconciling the PromptPack")
+			reconciler := &PromptPackReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "no-packjson-pack",
+					Namespace: promptPackNamespace,
+				},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("pack.json"))
+
+			By("checking the updated status")
+			updatedPP := &omniav1alpha1.PromptPack{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "no-packjson-pack",
+				Namespace: promptPackNamespace,
+			}, updatedPP)).To(Succeed())
+
+			Expect(updatedPP.Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseFailed))
+		})
+	})
+
+	Context("When pack.json fails schema validation", func() {
+		var (
+			promptPack *omniav1alpha1.PromptPack
+			configMap  *corev1.ConfigMap
+		)
+
+		BeforeEach(func() {
+			By("creating a ConfigMap with invalid pack.json")
+			configMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "invalid-schema-configmap",
+					Namespace: promptPackNamespace,
+				},
+				Data: map[string]string{
+					// Invalid pack.json: missing required fields
+					"pack.json": `{"name": "test"}`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			By("creating the PromptPack")
+			promptPack = &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "invalid-schema-pack",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{
+							Name: "invalid-schema-configmap",
+						},
+					},
+					Version: "1.0.0",
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			pp := &omniav1alpha1.PromptPack{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "invalid-schema-pack",
+				Namespace: promptPackNamespace,
+			}, pp)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, pp)).To(Succeed())
+			}
+
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "invalid-schema-configmap",
+				Namespace: promptPackNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("should fail validation with schema error", func() {
+			By("reconciling the PromptPack")
+			reconciler := &PromptPackReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidator(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "invalid-schema-pack",
+					Namespace: promptPackNamespace,
+				},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid pack.json"))
+
+			By("checking the updated status")
+			updatedPP := &omniav1alpha1.PromptPack{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "invalid-schema-pack",
+				Namespace: promptPackNamespace,
+			}, updatedPP)).To(Succeed())
+
+			Expect(updatedPP.Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseFailed))
+
+			By("checking the SchemaValid condition is set to False")
+			schemaCondition := meta.FindStatusCondition(updatedPP.Status.Conditions, PromptPackConditionTypeSchemaValid)
+			Expect(schemaCondition).NotTo(BeNil())
+			Expect(schemaCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(schemaCondition.Reason).To(Equal("SchemaValidationFailed"))
 		})
 	})
 })

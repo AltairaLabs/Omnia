@@ -18,13 +18,13 @@ spec:
     type: immediate
 ---
 # ConfigMap containing the compiled PromptPack JSON
-# Use `packc compile prompts.yaml -o promptpack.json` to generate this
+# Use `packc compile --config arena.yaml --output pack.json --id customer-support` to generate this
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: customer-support-prompts
 data:
-  promptpack.json: |
+  pack.json: |
     {
       "$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
       "id": "customer-support",

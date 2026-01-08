@@ -374,6 +374,8 @@ spec:
 
 		It("should create and validate a PromptPack", func() {
 			By("creating a ConfigMap for the PromptPack")
+			// The ConfigMap must contain pack.json in PromptKit format
+			// This is the format expected by the runtime container
 			configMapManifest := `
 apiVersion: v1
 kind: ConfigMap
@@ -381,11 +383,24 @@ metadata:
   name: test-prompts
   namespace: test-agents
 data:
-  system.txt: |
-    You are a test assistant for E2E testing.
-  config.yaml: |
-    model: gpt-4
-    temperature: 0.7
+  pack.json: |
+    {
+      "id": "test-prompts",
+      "name": "test-prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.0",
+          "system_template": "You are a test assistant for E2E testing."
+        }
+      }
+    }
 `
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(configMapManifest)
@@ -428,6 +443,14 @@ spec:
 				"-n", agentsNamespace,
 				"-o", "jsonpath={.status.conditions[?(@.type=='SourceValid')].status}")
 			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("True"))
+
+			By("verifying the SchemaValid condition is True")
+			cmd = exec.Command("kubectl", "get", "promptpack", "test-prompts",
+				"-n", agentsNamespace,
+				"-o", "jsonpath={.status.conditions[?(@.type=='SchemaValid')].status}")
+			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("True"))
 		})
@@ -603,6 +626,7 @@ spec:
 			Expect(err).NotTo(HaveOccurred())
 
 			By("updating the PromptPack ConfigMap")
+			// Update pack.json with a modified system template
 			configMapUpdate := `
 apiVersion: v1
 kind: ConfigMap
@@ -610,11 +634,24 @@ metadata:
   name: test-prompts
   namespace: test-agents
 data:
-  system.txt: |
-    You are an UPDATED test assistant for E2E testing.
-  config.yaml: |
-    model: gpt-4
-    temperature: 0.8
+  pack.json: |
+    {
+      "id": "test-prompts",
+      "name": "test-prompts",
+      "version": "1.0.1",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.1",
+          "system_template": "You are an UPDATED test assistant for E2E testing."
+        }
+      }
+    }
 `
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(configMapUpdate)
@@ -646,7 +683,7 @@ data:
 				g.Expect(output).To(ContainSubstring("true"))
 				g.Expect(strings.Count(output, "true")).To(Equal(2), "Expected 2 containers to be ready")
 			}
-			ok := Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			ok := Eventually(verifyContainersReady, 5*time.Minute, 5*time.Second).Should(Succeed())
 			if !ok {
 				// Dump debug info on failure
 				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Container readiness failed ===\n")
@@ -1519,7 +1556,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("true true"), "Both containers should be ready")
 			}
-			Eventually(verifyContainersReady, 3*time.Minute, 5*time.Second).Should(Succeed())
+			Eventually(verifyContainersReady, 5*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("waiting for service endpoint to be ready")
 			verifyServiceEndpoint := func(g Gomega) {

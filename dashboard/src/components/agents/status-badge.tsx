@@ -40,6 +40,7 @@ export function StatusBadge({ phase, className }: Readonly<StatusBadgeProps>) {
     <Badge
       variant="outline"
       className={cn("text-xs", phaseStyles[phase], className)}
+      data-testid="status-badge"
     >
       {phase}
     </Badge>

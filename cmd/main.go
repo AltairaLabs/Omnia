@@ -39,6 +39,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/api"
 	"github.com/altairalabs/omnia/internal/controller"
+	"github.com/altairalabs/omnia/internal/schema"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -203,8 +204,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.PromptPackReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		SchemaValidator: schema.NewSchemaValidatorWithOptions(ctrl.Log, nil, 0),
+		Recorder:        mgr.GetEventRecorderFor("promptpack-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "PromptPack")
 		os.Exit(1)
