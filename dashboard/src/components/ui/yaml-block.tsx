@@ -29,8 +29,8 @@ function highlightYaml(yamlString: string): React.ReactNode[] {
       );
     }
 
-    // Key-value pair
-    const keyMatch = line.match(/^(\s*)([^:]+):(.*)/);
+    // Key-value pair - use non-greedy match with explicit character class
+    const keyMatch = line.match(/^(\s*)([a-zA-Z0-9_.-]+):\s*(.*)/);
     if (keyMatch) {
       const [, indent, key, rest] = keyMatch;
       const value = rest.trim();
@@ -50,9 +50,9 @@ function highlightYaml(yamlString: string): React.ReactNode[] {
             <span className="text-cyan-600 dark:text-cyan-400">{value}</span>
           );
         } else if (value.startsWith('"') || value.startsWith("'")) {
-          // Quoted string
+          // Quoted string - use slightly different shade to distinguish
           valueElement = (
-            <span className="text-green-600 dark:text-green-400">{value}</span>
+            <span className="text-emerald-600 dark:text-emerald-400">{value}</span>
           );
         } else if (value === "null" || value === "~") {
           // Null

@@ -12,8 +12,8 @@ import {
   GRAFANA_DASHBOARDS,
   OVERVIEW_PANELS,
   AGENT_DETAIL_PANELS,
+  type GrafanaPanelOptions,
 } from "@/hooks";
-import type { GrafanaPanelOptions } from "@/hooks";
 import { cn } from "@/lib/utils";
 
 interface GrafanaPanelProps {

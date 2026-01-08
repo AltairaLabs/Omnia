@@ -8,22 +8,20 @@ import type { ConsoleMessage, ConsoleState, ConnectionStatus } from "@/types/web
  * Uses a Map keyed by "namespace/agentName" to store state for each agent.
  */
 
-type ConsoleKey = string;
-
 interface StoredConsoleState extends ConsoleState {
   // Additional metadata
   lastActivity: Date;
 }
 
 // Module-level store that persists across component lifecycles
-const consoleStates = new Map<ConsoleKey, StoredConsoleState>();
+const consoleStates = new Map<string, StoredConsoleState>();
 const listeners = new Set<() => void>();
 
 // Cache for snapshot references to prevent useSyncExternalStore infinite loop
 // The snapshot function must return a cached value when state hasn't changed
-const snapshotCache = new Map<ConsoleKey, StoredConsoleState>();
+const snapshotCache = new Map<string, StoredConsoleState>();
 
-function getKey(namespace: string, agentName: string): ConsoleKey {
+function getKey(namespace: string, agentName: string): string {
   return `${namespace}/${agentName}`;
 }
 
@@ -37,7 +35,7 @@ function createDefaultState(): StoredConsoleState {
   };
 }
 
-function getState(key: ConsoleKey): StoredConsoleState {
+function getState(key: string): StoredConsoleState {
   const existing = consoleStates.get(key);
   if (existing) return existing;
 
@@ -50,7 +48,7 @@ function getState(key: ConsoleKey): StoredConsoleState {
   return cached;
 }
 
-function setState(key: ConsoleKey, state: Partial<StoredConsoleState>): void {
+function setState(key: string, state: Partial<StoredConsoleState>): void {
   const existing = getState(key);
   consoleStates.set(key, {
     ...existing,

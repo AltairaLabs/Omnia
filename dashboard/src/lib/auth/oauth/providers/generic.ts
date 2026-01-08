@@ -4,8 +4,11 @@
  * Works with any OIDC-compliant identity provider that supports discovery.
  */
 
-import type { OAuthProviderConfig } from "../types";
-import { DEFAULT_CLAIM_MAPPING, DEFAULT_SCOPES } from "../types";
+import {
+  DEFAULT_CLAIM_MAPPING,
+  DEFAULT_SCOPES,
+  type OAuthProviderConfig,
+} from "../types";
 
 export function getGenericProviderConfig(): Partial<OAuthProviderConfig> {
   return {

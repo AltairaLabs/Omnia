@@ -5,7 +5,7 @@
  * Suitable for production multi-instance deployments.
  */
 
-import { Pool, PoolClient } from "pg";
+import { Pool } from "pg";
 import type {
   UserStore,
   StoredUser,

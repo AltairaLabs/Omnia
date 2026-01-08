@@ -58,13 +58,13 @@ export function NamespaceFilter({
   };
 
   // Determine button label
-  const buttonLabel = allSelected
-    ? "All namespaces"
-    : noneSelected
-      ? "No namespaces"
-      : selectedNamespaces.length === 1
-        ? selectedNamespaces[0]
-        : `${selectedNamespaces.length} namespaces`;
+  const getButtonLabel = (): string => {
+    if (allSelected) return "All namespaces";
+    if (noneSelected) return "No namespaces";
+    if (selectedNamespaces.length === 1) return selectedNamespaces[0];
+    return `${selectedNamespaces.length} namespaces`;
+  };
+  const buttonLabel = getButtonLabel();
 
   return (
     <Popover>

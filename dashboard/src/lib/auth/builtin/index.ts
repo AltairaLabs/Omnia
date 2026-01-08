@@ -4,10 +4,14 @@
  * Provides local user database authentication with pluggable storage.
  */
 
-import type { UserStore, BuiltinAuthConfig, UserStoreType } from "./types";
+import {
+  DEFAULT_BUILTIN_CONFIG,
+  type UserStore,
+  type BuiltinAuthConfig,
+  type UserStoreType,
+} from "./types";
 import { SQLiteUserStore } from "./sqlite-store";
 import { PostgresUserStore } from "./postgres-store";
-import { DEFAULT_BUILTIN_CONFIG } from "./types";
 import path from "path";
 
 // Singleton store instance

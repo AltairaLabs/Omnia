@@ -28,6 +28,12 @@ export interface PrometheusMatrixResult extends PrometheusResult {
 }
 
 /**
+ * Timestamp type for Prometheus queries.
+ * Can be a Date object, Unix timestamp (seconds), or RFC3339 string.
+ */
+export type PrometheusTimestamp = Date | number | string;
+
+/**
  * Execute an instant Prometheus query.
  *
  * @param query - PromQL query string
@@ -58,11 +64,11 @@ export async function queryPrometheus(
  */
 export async function queryPrometheusRange(
   query: string,
-  start: Date | number | string,
-  end: Date | number | string,
+  start: PrometheusTimestamp,
+  end: PrometheusTimestamp,
   step: string = "1h"
 ): Promise<PrometheusResponse<PrometheusMatrixResult>> {
-  const formatTime = (t: Date | number | string): string => {
+  const formatTime = (t: PrometheusTimestamp): string => {
     if (t instanceof Date) {
       return (t.getTime() / 1000).toFixed(3);
     }

@@ -33,8 +33,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { useToolRegistry } from "@/hooks";
-import { useAgents } from "@/hooks";
+import { useToolRegistry, useAgents } from "@/hooks";
 import type { DiscoveredTool, HandlerDefinition } from "@/types";
 
 interface PageProps {

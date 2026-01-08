@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { identity, password, remember: _remember } = body;
+  const { identity, password } = body;
 
   if (!identity || !password) {
     return NextResponse.json(

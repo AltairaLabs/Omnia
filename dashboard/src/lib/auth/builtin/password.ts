@@ -84,10 +84,16 @@ export function validatePassword(
 
 /**
  * Validate email format.
+ * Uses a simple but efficient regex pattern.
  */
 export function validateEmail(email: string): boolean {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
+  // Simple email validation - check for @ and domain with dot
+  // Avoids complex regex that could be slow with malicious input
+  if (email.length > 254) return false; // RFC 5321 limit
+  const atIndex = email.indexOf("@");
+  if (atIndex < 1) return false;
+  const domain = email.slice(atIndex + 1);
+  return domain.includes(".") && !domain.startsWith(".") && !domain.endsWith(".");
 }
 
 /**
@@ -122,7 +128,7 @@ export function calculatePasswordStrength(password: string): number {
   if (password.length >= 8) score++;
   if (password.length >= 12) score++;
   if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
+  if (/\d/.test(password)) score++;
   if (/[^a-zA-Z0-9]/.test(password)) score++;
 
   return Math.min(score, 4);

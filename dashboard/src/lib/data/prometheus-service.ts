@@ -8,7 +8,6 @@ import {
   queryPrometheus,
   queryPrometheusRange,
   isPrometheusAvailable,
-  aggregateByLabel,
   matrixToTimeSeries,
   type PrometheusVectorResult,
 } from "../prometheus";
@@ -160,7 +159,6 @@ export class PrometheusService {
     const getAgent = (metric: Record<string, string>): CostAllocationItem => {
       const key = `${metric.namespace}/${metric.agent}/${metric.model}`;
       if (!agentMap.has(key)) {
-        const pricing = getModelPricing(metric.model);
         agentMap.set(key, {
           agent: metric.agent || "unknown",
           namespace: metric.namespace || "default",
@@ -280,11 +278,17 @@ export class PrometheusService {
   private buildProviderCosts(byAgent: CostAllocationItem[]): ProviderCost[] {
     const providerMap = new Map<string, ProviderCost>();
 
+    const getProviderDisplayName = (p: string): string => {
+      if (p === "anthropic") return "Anthropic";
+      if (p === "openai") return "OpenAI";
+      return p;
+    };
+
     for (const item of byAgent) {
       const provider = item.provider === "claude" ? "anthropic" : item.provider;
       if (!providerMap.has(provider)) {
         providerMap.set(provider, {
-          name: provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : provider,
+          name: getProviderDisplayName(provider),
           provider,
           cost: 0,
           requests: 0,

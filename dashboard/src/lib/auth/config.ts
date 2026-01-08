@@ -9,8 +9,13 @@
  */
 
 import { readFileSync } from "fs";
-import type { OAuthConfig, OAuthProviderType, ClaimMapping } from "./oauth/types";
-import { DEFAULT_CLAIM_MAPPING, DEFAULT_SCOPES } from "./oauth/types";
+import {
+  DEFAULT_CLAIM_MAPPING,
+  DEFAULT_SCOPES,
+  type OAuthConfig,
+  type OAuthProviderType,
+  type ClaimMapping,
+} from "./oauth/types";
 
 // Re-export OAuth types for convenience
 export type { OAuthConfig, OAuthProviderType, ClaimMapping };

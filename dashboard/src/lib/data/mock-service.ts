@@ -162,7 +162,6 @@ export class MockAgentConnection implements AgentConnection {
 
     // Simulate streaming response - send content word by word
     const words = mockResponse.content.split(" ");
-    let charIndex = 0;
 
     // Start streaming chunks
     words.forEach((word, index) => {
@@ -173,7 +172,6 @@ export class MockAgentConnection implements AgentConnection {
           content: (index > 0 ? " " : "") + word,
           timestamp: new Date().toISOString(),
         });
-        charIndex += word.length + 1;
       }, 100 + index * 50);
     });
 

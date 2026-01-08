@@ -26,14 +26,15 @@
 
 import { readFileSync, existsSync, watchFile, unwatchFile } from "fs";
 import bcrypt from "bcryptjs";
-import type {
-  ApiKey,
-  ApiKeyInfo,
-  ApiKeyStore,
-  CreateApiKeyOptions,
-  NewApiKey,
+import {
+  API_KEY_PREFIX,
+  toApiKeyInfo,
+  type ApiKey,
+  type ApiKeyInfo,
+  type ApiKeyStore,
+  type CreateApiKeyOptions,
+  type NewApiKey,
 } from "./types";
-import { API_KEY_PREFIX, toApiKeyInfo } from "./types";
 
 interface StoredKey {
   id: string;
