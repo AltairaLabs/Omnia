@@ -22,7 +22,10 @@
     "test:e2e:report": "playwright show-report",
     "test:e2e:codegen": "playwright codegen",
     "generate:api": "openapi-typescript ../api/openapi/openapi.yaml -o src/lib/api/schema.d.ts",
-    "generate:api-key": "node scripts/generate-api-key.mjs"
+    "generate:api-key": "node scripts/generate-api-key.mjs",
+    "screenshots": "playwright test --project=screenshots",
+    "videos": "playwright test --project=video-capture",
+    "screenshots:all": "playwright test --project=screenshots && playwright test --project=video-capture && ./scripts/convert-videos.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

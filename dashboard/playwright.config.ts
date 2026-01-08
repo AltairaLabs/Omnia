@@ -1,13 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright configuration for Omnia Dashboard E2E tests.
+ * Playwright configuration for Omnia Dashboard.
+ *
+ * Projects:
+ * - chromium: E2E tests (npm run test:e2e)
+ * - screenshots: Screenshot capture (npm run screenshots)
+ * - video-capture: Video capture for GIFs (npm run videos)
+ *
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
   testDir: './e2e',
-  /* Run tests in parallel */
-  fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code */
   forbidOnly: !!process.env.CI,
   /* Retry failed tests on CI */
@@ -24,28 +28,43 @@ export default defineConfig({
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
     /* Collect trace when retrying a failed test */
     trace: 'on-first-retry',
-    /* Capture screenshot on failure */
-    screenshot: 'only-on-failure',
-    /* Video recording on failure */
-    video: 'on-first-retry',
   },
 
-  /* Configure projects for major browsers */
+  /* Configure projects */
   projects: [
-    /* Desktop browsers */
+    /* E2E tests - run with: npm run test:e2e */
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      testIgnore: '**/screenshots/**',
+      use: {
+        ...devices['Desktop Chrome'],
+        screenshot: 'only-on-failure',
+        video: 'on-first-retry',
+      },
     },
-    /* Uncomment to enable more browsers */
-    // {
-    //   name: 'firefox',
-    //   use: { ...devices['Desktop Firefox'] },
-    // },
-    // {
-    //   name: 'webkit',
-    //   use: { ...devices['Desktop Safari'] },
-    // },
+    /* Screenshot capture - run with: npm run screenshots */
+    {
+      name: 'screenshots',
+      testMatch: '**/screenshots/capture.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        screenshot: 'off',
+        video: 'off',
+      },
+    },
+    /* Video capture for GIFs - run with: npm run videos */
+    {
+      name: 'video-capture',
+      testMatch: '**/screenshots/videos.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 800, height: 600 },
+        video: {
+          mode: 'on',
+          size: { width: 800, height: 600 },
+        },
+      },
+    },
   ],
 
   /* Run local dev server before tests if not in CI */
