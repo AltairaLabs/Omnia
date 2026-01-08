@@ -91,6 +91,14 @@ test-junit: manifests generate fmt vet setup-envtest gotestsum ## Run tests with
 		$(GOTESTSUM) --junitfile test-results.xml --format testdox -- \
 		$$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+.PHONY: test-integration
+test-integration: manifests generate fmt vet ## Run integration tests (facade-runtime gRPC communication).
+	go test -tags=integration ./test/integration/... -v -timeout 5m
+
+.PHONY: test-integration-run
+test-integration-run: ## Run a specific integration test by name (use TEST=TestName).
+	go test -tags=integration ./test/integration/... -v -run $(TEST) -timeout 5m
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
