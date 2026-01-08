@@ -201,33 +201,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 	log := logctx.LoggerWithContext(s.log, ctx)
+	defer s.cleanupConnection(c, log)
 
-	defer func() {
-		s.mu.Lock()
-		delete(s.connections, c.conn)
-		s.mu.Unlock()
-
-		c.mu.Lock()
-		c.closed = true
-		c.mu.Unlock()
-
-		// Record connection closed
-		s.metrics.ConnectionClosed()
-
-		if err := c.conn.Close(); err != nil {
-			log.Error(err, "error closing connection")
-		}
-	}()
-
-	// Configure connection
-	c.conn.SetReadLimit(s.config.MaxMessageSize)
-	if err := c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout)); err != nil {
-		log.Error(err, "failed to set read deadline")
+	if err := s.configureConnection(c); err != nil {
+		log.Error(err, "failed to configure connection")
 		return
 	}
-	c.conn.SetPongHandler(func(string) error {
-		return c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout))
-	})
 
 	// Start ping ticker
 	pingTicker := time.NewTicker(s.config.PingInterval)
@@ -237,75 +216,123 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
-		for {
-			select {
-			case <-connCtx.Done():
-				return
-			case <-pingTicker.C:
-				c.mu.Lock()
-				if c.closed {
-					c.mu.Unlock()
-					return
-				}
-				if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
-					c.mu.Unlock()
-					return
-				}
-				if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					c.mu.Unlock()
-					return
-				}
-				c.mu.Unlock()
-			}
-		}
-	}()
+	go s.runPingLoop(connCtx, c, pingTicker)
 
 	// Message read loop
+	s.readMessageLoop(connCtx, c, log)
+}
+
+// cleanupConnection handles connection cleanup when it closes.
+func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
+	s.mu.Lock()
+	delete(s.connections, c.conn)
+	s.mu.Unlock()
+
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+
+	s.metrics.ConnectionClosed()
+
+	if err := c.conn.Close(); err != nil {
+		log.Error(err, "error closing connection")
+	}
+}
+
+// configureConnection sets up connection limits and handlers.
+func (s *Server) configureConnection(c *Connection) error {
+	c.conn.SetReadLimit(s.config.MaxMessageSize)
+	if err := c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout)); err != nil {
+		return err
+	}
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(s.config.PongTimeout))
+	})
+	return nil
+}
+
+// runPingLoop sends periodic pings to keep the connection alive.
+func (s *Server) runPingLoop(ctx context.Context, c *Connection, ticker *time.Ticker) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.sendPing(c) {
+				return
+			}
+		}
+	}
+}
+
+// sendPing sends a ping message to the connection. Returns false if connection should close.
+func (s *Server) sendPing(c *Connection) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return false
+	}
+	if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
+		return false
+	}
+	if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+		return false
+	}
+	return true
+}
+
+// readMessageLoop reads and processes messages from the connection.
+func (s *Server) readMessageLoop(ctx context.Context, c *Connection, log logr.Logger) {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			// Only log truly unexpected close errors (not normal closure, going away, or no status)
-			if websocket.IsUnexpectedCloseError(err,
-				websocket.CloseNormalClosure,
-				websocket.CloseGoingAway,
-				websocket.CloseNoStatusReceived,
-				websocket.CloseAbnormalClosure,
-			) {
-				log.Error(err, "unexpected close error")
-			}
+			s.logCloseError(err, log)
 			return
 		}
 
-		// Record message received
 		s.metrics.MessageReceived()
-
-		// Parse message
-		var clientMsg ClientMessage
-		if err := json.Unmarshal(message, &clientMsg); err != nil {
-			log.Error(err, "failed to unmarshal message", "raw", string(message))
-			s.sendError(c, "", ErrorCodeInvalidMessage, "invalid message format")
-			continue
-		}
-
-		// Handle message with timing
-		s.metrics.RequestStarted()
-		startTime := time.Now()
-
-		err = s.processMessage(connCtx, c, &clientMsg, log)
-
-		duration := time.Since(startTime).Seconds()
-		status := "success"
-		if err != nil {
-			status = "error"
-			log.Error(err, "error processing message")
-		}
-		handlerName := "none"
-		if s.handler != nil {
-			handlerName = s.handler.Name()
-		}
-		s.metrics.RequestCompleted(status, duration, handlerName)
+		s.handleClientMessage(ctx, c, message, log)
 	}
+}
+
+// logCloseError logs unexpected close errors.
+func (s *Server) logCloseError(err error, log logr.Logger) {
+	if websocket.IsUnexpectedCloseError(err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseNoStatusReceived,
+		websocket.CloseAbnormalClosure,
+	) {
+		log.Error(err, "unexpected close error")
+	}
+}
+
+// handleClientMessage parses and processes a single client message.
+func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message []byte, log logr.Logger) {
+	var clientMsg ClientMessage
+	if err := json.Unmarshal(message, &clientMsg); err != nil {
+		log.Error(err, "failed to unmarshal message", "raw", string(message))
+		s.sendError(c, "", ErrorCodeInvalidMessage, "invalid message format")
+		return
+	}
+
+	s.metrics.RequestStarted()
+	startTime := time.Now()
+
+	err := s.processMessage(ctx, c, &clientMsg, log)
+
+	duration := time.Since(startTime).Seconds()
+	status := "success"
+	if err != nil {
+		status = "error"
+		log.Error(err, "error processing message")
+	}
+	handlerName := "none"
+	if s.handler != nil {
+		handlerName = s.handler.Name()
+	}
+	s.metrics.RequestCompleted(status, duration, handlerName)
 }
 
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {

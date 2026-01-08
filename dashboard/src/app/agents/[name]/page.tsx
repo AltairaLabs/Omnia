@@ -190,8 +190,8 @@ export default function AgentDetailPage({ params }: AgentDetailPageProps) {
                           </tr>
                         </thead>
                         <tbody>
-                          {status.conditions.map((condition, index) => (
-                            <tr key={index} className="border-b last:border-0">
+                          {status.conditions.map((condition) => (
+                            <tr key={condition.type} className="border-b last:border-0">
                               <td className="py-2 pr-4">
                                 <span
                                   className={`px-2 py-0.5 rounded text-xs font-medium ${

@@ -250,8 +250,8 @@ export default function ToolDetailPage({ params }: PageProps) {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {status.conditions.map((condition, idx) => (
-                      <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                    {status.conditions.map((condition) => (
+                      <div key={condition.type} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
                         {condition.status === "True" ? (
                           <CheckCircle className="h-4 w-4 text-green-500 mt-0.5" />
                         ) : (
@@ -358,10 +358,10 @@ export default function ToolDetailPage({ params }: PageProps) {
               </CardHeader>
               <CardContent>
                 <Accordion type="multiple" className="w-full">
-                  {handlers.map((handler, idx) => {
+                  {handlers.map((handler) => {
                     const Icon = getHandlerTypeIcon(handler.type);
                     return (
-                      <AccordionItem key={idx} value={`handler-${idx}`}>
+                      <AccordionItem key={handler.name} value={`handler-${handler.name}`}>
                         <AccordionTrigger className="hover:no-underline">
                           <div className="flex items-center gap-3">
                             <Icon className="h-4 w-4 text-muted-foreground" />

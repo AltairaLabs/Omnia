@@ -270,9 +270,9 @@ export function LogViewer({
               {logs.length === 0 ? "No logs yet..." : "No logs match the current filters"}
             </div>
           ) : (
-            filteredLogs.map((log, index) => (
+            filteredLogs.map((log) => (
               <div
-                key={index}
+                key={`${log.timestamp.getTime()}-${log.level}-${log.container}-${log.message.slice(0, 50)}`}
                 className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
               >
                 <span className="text-muted-foreground shrink-0">

@@ -88,7 +88,7 @@ export function useAgentConsole({
         }
         break;
 
-      case "chunk":
+      case "chunk": {
         // Check if we need to append to existing streaming message or create new
         const currentMessages = messagesRef.current;
         const lastMsg = currentMessages[currentMessages.length - 1];
@@ -109,6 +109,7 @@ export function useAgentConsole({
           });
         }
         break;
+      }
 
       case "done":
         // Mark message as complete
@@ -157,13 +158,14 @@ export function useAgentConsole({
         }
         break;
 
-      case "error":
+      case "error": {
         // Handle error messages from the proxy or agent
         const errorMsg = message.error?.message || "Unknown error";
         const errorCode = message.error?.code || "UNKNOWN";
         console.error(`[useAgentConsole] Error from server: [${errorCode}] ${errorMsg}`);
         setStatus("error", errorMsg);
         break;
+      }
     }
   }, [addMessage, updateLastMessage, setSessionId, setStatus]);
 

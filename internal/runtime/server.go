@@ -378,17 +378,9 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 	// Add mock provider if enabled
 	if s.mockProvider {
 		log.Info("using mock provider for conversation")
-		var provider *mock.Provider
-		if s.mockConfigPath != "" {
-			// Use file-based mock repository
-			repo, err := mock.NewFileMockRepository(s.mockConfigPath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to load mock config: %w", err)
-			}
-			provider = mock.NewProviderWithRepository("mock", "mock-model", false, repo)
-		} else {
-			// Use in-memory mock provider with default responses
-			provider = mock.NewProvider("mock", "mock-model", false)
+		provider, err := s.createMockProvider()
+		if err != nil {
+			return nil, err
 		}
 		opts = append(opts, sdk.WithProvider(provider))
 	}
@@ -419,6 +411,20 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 
 	s.conversations[sessionID] = conv
 	return conv, nil
+}
+
+// createMockProvider creates a mock provider based on configuration.
+func (s *Server) createMockProvider() (*mock.Provider, error) {
+	if s.mockConfigPath != "" {
+		// Use file-based mock repository
+		repo, err := mock.NewFileMockRepository(s.mockConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load mock config: %w", err)
+		}
+		return mock.NewProviderWithRepository("mock", "mock-model", false, repo), nil
+	}
+	// Use in-memory mock provider with default responses
+	return mock.NewProvider("mock", "mock-model", false), nil
 }
 
 // registerToolsWithConversation registers all available tools with a conversation.
