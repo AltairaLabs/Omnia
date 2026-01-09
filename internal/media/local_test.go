@@ -18,6 +18,7 @@ package media
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -617,6 +618,128 @@ func TestLocalStorage_CleanupExpired_EmptyDir(t *testing.T) {
 	}
 	if cleaned != 0 {
 		t.Errorf("CleanupExpired() cleaned %d files, want 0", cleaned)
+	}
+}
+
+func TestLocalStorage_CleanupExpired_WithExpiredFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "media-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	config := DefaultLocalStorageConfig(tmpDir, "http://localhost:8080")
+	storage, err := NewLocalStorage(config)
+	if err != nil {
+		t.Fatalf("NewLocalStorage() error = %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	ctx := context.Background()
+
+	// Create a normal file first
+	creds, err := storage.GetUploadURL(ctx, UploadRequest{
+		SessionID: "session-expired",
+		Filename:  "test.txt",
+		MIMEType:  "text/plain",
+		SizeBytes: 5,
+	})
+	if err != nil {
+		t.Fatalf("GetUploadURL() error = %v", err)
+	}
+
+	uploadPath, _ := storage.GetUploadPath(creds.UploadID)
+	if err := os.WriteFile(uploadPath, []byte("hello"), 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+	if err := storage.CompleteUpload(ctx, creds.UploadID, 5); err != nil {
+		t.Fatalf("CompleteUpload() error = %v", err)
+	}
+
+	// Now manually update the metadata to set an expired time
+	ref, _ := ParseStorageRef(creds.StorageRef)
+	metaPath := filepath.Join(tmpDir, ref.SessionID, ref.MediaID+".meta")
+	expiredMeta := struct {
+		Filename  string    `json:"filename"`
+		MIMEType  string    `json:"mime_type"`
+		SizeBytes int64     `json:"size_bytes"`
+		CreatedAt time.Time `json:"created_at"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}{
+		Filename:  "test.txt",
+		MIMEType:  "text/plain",
+		SizeBytes: 5,
+		CreatedAt: time.Now().Add(-2 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour), // Expired 1 hour ago
+	}
+	metaData, _ := json.Marshal(expiredMeta)
+	if err := os.WriteFile(metaPath, metaData, 0600); err != nil {
+		t.Fatalf("Failed to write expired metadata: %v", err)
+	}
+
+	// Run cleanup - should remove the expired file
+	cleaned, err := storage.CleanupExpired(ctx)
+	if err != nil {
+		t.Fatalf("CleanupExpired() error = %v", err)
+	}
+
+	if cleaned != 1 {
+		t.Errorf("CleanupExpired() cleaned %d files, want 1", cleaned)
+	}
+
+	// File should no longer exist
+	_, err = storage.GetMediaInfo(ctx, creds.StorageRef)
+	if err != ErrMediaNotFound && err != ErrMediaExpired {
+		t.Errorf("Expected ErrMediaNotFound or ErrMediaExpired, got: %v", err)
+	}
+}
+
+func TestLocalStorage_CleanupExpired_WithNonDirEntries(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "media-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	config := DefaultLocalStorageConfig(tmpDir, "http://localhost:8080")
+	storage, err := NewLocalStorage(config)
+	if err != nil {
+		t.Fatalf("NewLocalStorage() error = %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	ctx := context.Background()
+
+	// Create a regular file (not a directory) in the base path
+	// This tests the non-directory entry skip path
+	if err := os.WriteFile(filepath.Join(tmpDir, "not-a-dir.txt"), []byte("test"), 0600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Run cleanup - should not error and should skip the file
+	cleaned, err := storage.CleanupExpired(ctx)
+	if err != nil {
+		t.Fatalf("CleanupExpired() error = %v", err)
+	}
+	if cleaned != 0 {
+		t.Errorf("CleanupExpired() cleaned %d files, want 0", cleaned)
+	}
+}
+
+func TestNewLocalStorage_InvalidPath(t *testing.T) {
+	// Try to create storage with an invalid path (file instead of directory)
+	tmpFile, err := os.CreateTemp("", "invalid-path-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	_ = tmpFile.Close()
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	// Use the file path as base path - MkdirAll will fail
+	config := DefaultLocalStorageConfig(filepath.Join(tmpFile.Name(), "subdir"), "http://localhost:8080")
+	_, err = NewLocalStorage(config)
+	if err == nil {
+		t.Error("Expected error when creating storage with invalid path")
 	}
 }
 
