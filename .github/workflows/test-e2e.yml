@@ -45,6 +45,9 @@ jobs:
   test-e2e:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
+    # E2E tests are informational for PRs - they don't block merging
+    # They only block releases (enforced in release workflow)
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Clone the code
         uses: actions/checkout@v6

@@ -672,7 +672,81 @@ data:
 
 		It("should have both facade and runtime containers running", func() {
 			By("waiting for the agent pod to be ready with all containers")
+
+			// Helper to dump debug info
+			dumpDebugInfo := func(reason string) {
+				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: %s ===\n", reason)
+
+				descCmd := exec.Command("kubectl", "describe", "pods",
+					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent")
+				descOutput, _ := utils.Run(descCmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Pod describe:\n%s\n", descOutput)
+
+				facadeLogsCmd := exec.Command("kubectl", "logs",
+					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent",
+					"-c", "facade", "--tail=100")
+				facadeLogs, _ := utils.Run(facadeLogsCmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Facade logs:\n%s\n", facadeLogs)
+
+				runtimeLogsCmd := exec.Command("kubectl", "logs",
+					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent",
+					"-c", "runtime", "--tail=100")
+				runtimeLogs, _ := utils.Run(runtimeLogsCmd)
+				_, _ = fmt.Fprintf(GinkgoWriter, "Runtime logs:\n%s\n", runtimeLogs)
+			}
+
+			// Check for container failure states that should cause early exit
+			checkForFailures := func() error {
+				// Get container states as JSON for detailed inspection
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=test-agent",
+					"-o", "jsonpath={range .items[0].status.containerStatuses[*]}{.name}:{.state}{.lastState}|{end}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return nil // Pod may not exist yet
+				}
+
+				// Check for failure indicators in the state
+				failurePatterns := []string{
+					"CrashLoopBackOff",
+					"ImagePullBackOff",
+					"ErrImagePull",
+					"CreateContainerError",
+					"InvalidImageName",
+					"CreateContainerConfigError",
+				}
+				for _, pattern := range failurePatterns {
+					if strings.Contains(output, pattern) {
+						return fmt.Errorf("container in failure state: %s", pattern)
+					}
+				}
+
+				// Check for containers that have terminated with error
+				if strings.Contains(output, `"terminated"`) && strings.Contains(output, `"exitCode"`) {
+					// Get exit codes
+					exitCmd := exec.Command("kubectl", "get", "pods",
+						"-n", agentsNamespace,
+						"-l", "app.kubernetes.io/instance=test-agent",
+						"-o", "jsonpath={range .items[0].status.containerStatuses[*]}{.name}={.state.terminated.exitCode}/{.lastState.terminated.exitCode} {end}")
+					exitOutput, _ := utils.Run(exitCmd)
+					if strings.Contains(exitOutput, "=1/") || strings.Contains(exitOutput, "/1 ") ||
+						(strings.Contains(exitOutput, "=1 ") && !strings.Contains(exitOutput, "=0/")) {
+						return fmt.Errorf("container terminated with non-zero exit code: %s", exitOutput)
+					}
+				}
+
+				return nil
+			}
+
 			verifyContainersReady := func(g Gomega) {
+				// First check for failure states - fail fast
+				if err := checkForFailures(); err != nil {
+					dumpDebugInfo(err.Error())
+					g.Expect(err).NotTo(HaveOccurred(), "Container entered failure state")
+				}
+
+				// Check readiness
 				cmd := exec.Command("kubectl", "get", "pods",
 					"-n", agentsNamespace,
 					"-l", "app.kubernetes.io/instance=test-agent",
@@ -685,25 +759,7 @@ data:
 			}
 			ok := Eventually(verifyContainersReady, 5*time.Minute, 5*time.Second).Should(Succeed())
 			if !ok {
-				// Dump debug info on failure
-				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Container readiness failed ===\n")
-				descCmd := exec.Command("kubectl", "describe", "pods",
-					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent")
-				descOutput, _ := utils.Run(descCmd)
-				_, _ = fmt.Fprintf(GinkgoWriter, "Pod describe:\n%s\n", descOutput)
-
-				facadeLogsCmd := exec.Command("kubectl", "logs",
-					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent",
-					"-c", "facade", "--tail=50")
-				facadeLogs, _ := utils.Run(facadeLogsCmd)
-				_, _ = fmt.Fprintf(GinkgoWriter, "Facade logs:\n%s\n", facadeLogs)
-
-				runtimeLogsCmd := exec.Command("kubectl", "logs",
-					"-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent",
-					"-c", "runtime", "--tail=50")
-				runtimeLogs, _ := utils.Run(runtimeLogsCmd)
-				_, _ = fmt.Fprintf(GinkgoWriter, "Runtime logs:\n%s\n", runtimeLogs)
-
+				dumpDebugInfo("Container readiness timeout")
 				Fail("Container readiness check failed - see debug output above")
 			}
 

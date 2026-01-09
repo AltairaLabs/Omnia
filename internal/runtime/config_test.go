@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/altairalabs/omnia/pkg/provider"
 )
 
 func TestLoadConfig_AllFields(t *testing.T) {
@@ -50,7 +52,7 @@ func TestLoadConfig_AllFields(t *testing.T) {
 	assert.Equal(t, SessionTypeRedis, cfg.SessionType)
 	assert.Equal(t, "redis://localhost:6379", cfg.SessionURL)
 	assert.Equal(t, 2*time.Hour, cfg.SessionTTL)
-	assert.Equal(t, ProviderTypeClaude, cfg.ProviderType)
+	assert.Equal(t, string(provider.TypeClaude), cfg.ProviderType)
 	assert.Equal(t, "claude-3-opus-20240229", cfg.Model)
 	assert.Equal(t, "https://api.anthropic.com", cfg.BaseURL)
 	assert.Equal(t, "/custom/tools.yaml", cfg.ToolsConfigPath)
@@ -187,10 +189,12 @@ func TestLoadConfig_ProviderTypes(t *testing.T) {
 		providerType string
 		expected     string
 	}{
-		{"auto", "auto", ProviderTypeAuto},
-		{"claude", "claude", ProviderTypeClaude},
-		{"openai", "openai", ProviderTypeOpenAI},
-		{"gemini", "gemini", ProviderTypeGemini},
+		{"auto", "auto", string(provider.TypeAuto)},
+		{"claude", "claude", string(provider.TypeClaude)},
+		{"openai", "openai", string(provider.TypeOpenAI)},
+		{"gemini", "gemini", string(provider.TypeGemini)},
+		{"ollama", "ollama", string(provider.TypeOllama)},
+		{"mock", "mock", string(provider.TypeMock)},
 	}
 
 	for _, tc := range testCases {
