@@ -243,7 +243,7 @@ type AutoscalingConfig struct {
 }
 
 // ProviderType defines the LLM provider type.
-// +kubebuilder:validation:Enum=auto;claude;openai;gemini
+// +kubebuilder:validation:Enum=auto;claude;openai;gemini;ollama;mock
 type ProviderType string
 
 const (
@@ -255,6 +255,12 @@ const (
 	ProviderTypeOpenAI ProviderType = "openai"
 	// ProviderTypeGemini uses Google's Gemini models.
 	ProviderTypeGemini ProviderType = "gemini"
+	// ProviderTypeOllama uses locally-hosted Ollama models.
+	// Does not require secretRef. Requires baseURL to be set.
+	ProviderTypeOllama ProviderType = "ollama"
+	// ProviderTypeMock uses PromptKit's mock provider for testing.
+	// Does not require secretRef. Returns canned responses based on scenario.
+	ProviderTypeMock ProviderType = "mock"
 )
 
 // ProviderDefaults defines tuning parameters for the LLM provider.
@@ -340,6 +346,12 @@ type ProviderConfig struct {
 	// If not specified, PromptKit's built-in pricing is used.
 	// +optional
 	Pricing *ProviderPricing `json:"pricing,omitempty"`
+
+	// additionalConfig contains provider-specific settings passed to PromptKit.
+	// For Ollama: "keep_alive" (e.g., "5m") to keep model loaded between requests.
+	// For Mock: "mock_config" path to mock responses YAML file.
+	// +optional
+	AdditionalConfig map[string]string `json:"additionalConfig,omitempty"`
 }
 
 // FrameworkType defines which agent framework to use.

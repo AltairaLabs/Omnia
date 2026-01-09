@@ -48,6 +48,10 @@ export interface AgentRuntimeSpec {
    * If not specified and providerRef is also not specified, PromptKit's auto-detection
    * is used with credentials from a secret named "<agentruntime-name>-provider" if it exists. */
   provider?: {
+    /** additionalConfig contains provider-specific settings passed to PromptKit.
+     * For Ollama: "keep_alive" (e.g., "5m") to keep model loaded between requests.
+     * For Mock: "mock_config" path to mock responses YAML file. */
+    additionalConfig?: Record<string, string>;
     /** baseURL overrides the provider's default API endpoint.
      * Useful for proxies or self-hosted models. */
     baseURL?: string;
@@ -94,7 +98,7 @@ export interface AgentRuntimeSpec {
     /** type specifies the provider type.
      * "auto" uses PromptKit's auto-detection based on available credentials.
      * "claude", "openai", "gemini" explicitly select a provider. */
-    type?: "auto" | "claude" | "openai" | "gemini";
+    type?: "auto" | "claude" | "openai" | "gemini" | "ollama" | "mock";
   };
   /** providerRef references a Provider resource for LLM configuration.
    * If specified, the referenced Provider's configuration is used.

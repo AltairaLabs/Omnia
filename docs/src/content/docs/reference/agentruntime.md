@@ -56,13 +56,28 @@ Inline provider configuration. Use `providerRef` instead for production deployme
 
 | Field | Type | Required |
 |-------|------|----------|
-| `provider.type` | string | Yes (`claude`, `openai`, `gemini`, `auto`) |
+| `provider.type` | string | Yes |
 | `provider.model` | string | No |
-| `provider.secretRef.name` | string | Yes |
+| `provider.secretRef.name` | string | Depends on type |
 | `provider.secretRef.key` | string | No |
+| `provider.baseURL` | string | No (required for `ollama`) |
 | `provider.defaults.temperature` | string | No |
 | `provider.defaults.topP` | string | No |
 | `provider.defaults.maxTokens` | integer | No |
+| `provider.additionalConfig` | map[string]string | No |
+
+#### Provider Types
+
+| Type | Description | Requires Secret |
+|------|-------------|-----------------|
+| `auto` | Auto-detect from available credentials | Yes |
+| `claude` | Anthropic Claude models | Yes |
+| `openai` | OpenAI GPT models | Yes |
+| `gemini` | Google Gemini models | Yes |
+| `ollama` | Local Ollama models (for development) | No |
+| `mock` | Mock provider (for testing) | No |
+
+#### Cloud Provider Example
 
 ```yaml
 spec:
@@ -71,7 +86,7 @@ spec:
     model: claude-sonnet-4-20250514
     secretRef:
       name: llm-credentials
-    defaults:
+    config:
       temperature: "0.7"
 ```
 
@@ -87,6 +102,51 @@ stringData:
   # Or: OPENAI_API_KEY: "sk-..."   # For OpenAI
   # Or: GEMINI_API_KEY: "..."      # For Gemini
 ```
+
+#### Ollama Provider Example
+
+For local development with [Ollama](https://ollama.ai), no API key is required:
+
+```yaml
+spec:
+  provider:
+    type: ollama
+    model: llava:13b                              # Vision-capable model
+    baseURL: http://ollama.ollama-system:11434    # Required for Ollama
+    additionalConfig:
+      keep_alive: "5m"                            # Keep model loaded between requests
+```
+
+Ollama is ideal for:
+- Local development without API keys
+- Testing vision/multimodal features with models like `llava`
+- Privacy-sensitive environments where data can't leave the cluster
+
+#### Mock Provider Example
+
+For automated testing with deterministic responses:
+
+```yaml
+spec:
+  provider:
+    type: mock
+    model: mock-model
+    additionalConfig:
+      mock_config: "/config/mock-responses.yaml"  # Path to canned responses
+```
+
+The mock provider returns pre-configured responses based on scenario ID and turn number, enabling fast, deterministic E2E tests without LLM API calls.
+
+#### `additionalConfig`
+
+Provider-specific settings passed as environment variables to PromptKit:
+
+| Provider | Key | Description |
+|----------|-----|-------------|
+| `ollama` | `keep_alive` | Duration to keep model loaded (e.g., "5m", "1h") |
+| `mock` | `mock_config` | Path to mock responses YAML file |
+
+Keys are converted to environment variables with `OMNIA_PROVIDER_` prefix (e.g., `keep_alive` → `OMNIA_PROVIDER_KEEP_ALIVE`).
 
 > **Note**: If both `providerRef` and `provider` are specified, `providerRef` takes precedence.
 

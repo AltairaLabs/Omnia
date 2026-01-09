@@ -149,6 +149,14 @@ spec:
                   If not specified and providerRef is also not specified, PromptKit's auto-detection
                   is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
                 properties:
+                  additionalConfig:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      additionalConfig contains provider-specific settings passed to PromptKit.
+                      For Ollama: "keep_alive" (e.g., "5m") to keep model loaded between requests.
+                      For Mock: "mock_config" path to mock responses YAML file.
+                    type: object
                   baseURL:
                     description: |-
                       baseURL overrides the provider's default API endpoint.
@@ -229,6 +237,8 @@ spec:
                     - claude
                     - openai
                     - gemini
+                    - ollama
+                    - mock
                     type: string
                 type: object
               providerRef:

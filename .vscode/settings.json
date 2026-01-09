@@ -22,5 +22,7 @@
     "sonarlint.connectedMode.project": {
         "connectionId": "altairalabs",
         "projectKey": "AltairaLabs_Omnia"
-    }
+    },
+    "go.testTags": "",
+    "go.testExplorerPackages": []
 }

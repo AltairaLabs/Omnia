@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -155,15 +156,16 @@ var providerKeyMapping = map[omniav1alpha1.ProviderType][]string{
 
 // providerEnvConfig holds common provider configuration for building environment variables.
 type providerEnvConfig struct {
-	Type        omniav1alpha1.ProviderType
-	Model       string
-	BaseURL     string
-	Temperature *string
-	TopP        *string
-	MaxTokens   *int32
-	InputCost   *string
-	OutputCost  *string
-	CachedCost  *string
+	Type             omniav1alpha1.ProviderType
+	Model            string
+	BaseURL          string
+	Temperature      *string
+	TopP             *string
+	MaxTokens        *int32
+	InputCost        *string
+	OutputCost       *string
+	CachedCost       *string
+	AdditionalConfig map[string]string
 }
 
 // addProviderEnvVars adds provider configuration environment variables to the slice.
@@ -196,6 +198,11 @@ func addProviderEnvVars(envVars []corev1.EnvVar, cfg providerEnvConfig) []corev1
 	if cfg.CachedCost != nil {
 		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_CACHED_COST", Value: *cfg.CachedCost})
 	}
+	// Add additional config as environment variables with OMNIA_PROVIDER_ prefix
+	for key, value := range cfg.AdditionalConfig {
+		envName := "OMNIA_PROVIDER_" + strings.ToUpper(strings.ReplaceAll(key, "-", "_"))
+		envVars = append(envVars, corev1.EnvVar{Name: envName, Value: value})
+	}
 	return envVars
 }
 
@@ -207,6 +214,7 @@ func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVa
 		}
 		cfg.Model = provider.Model
 		cfg.BaseURL = provider.BaseURL
+		cfg.AdditionalConfig = provider.AdditionalConfig
 		if provider.Config != nil {
 			cfg.Temperature = provider.Config.Temperature
 			cfg.TopP = provider.Config.TopP

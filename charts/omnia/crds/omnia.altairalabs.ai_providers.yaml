@@ -128,6 +128,8 @@ spec:
                 - claude
                 - openai
                 - gemini
+                - ollama
+                - mock
                 type: string
               validateCredentials:
                 default: false

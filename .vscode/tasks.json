@@ -1,0 +1,192 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "e2e: All Tests",
+      "type": "shell",
+      "command": "make test-e2e",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: List All Specs",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --dry-run -v ./test/e2e/",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Manager - Controller Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should run successfully' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Manager - Metrics Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should ensure the metrics endpoint' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: CRDs - PromptPack Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should create and validate a PromptPack' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: CRDs - ToolRegistry Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should create and validate a ToolRegistry' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: CRDs - AgentRuntime Deployment",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should create an AgentRuntime and deploy' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: CRDs - AgentRuntime Reconcile",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should update AgentRuntime when PromptPack changes' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Agent - Containers Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should have both facade and runtime containers' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Agent - WebSocket Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should handle WebSocket connections' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Agent - Conversation Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should complete a basic conversation' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Agent - Session/Redis Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should persist session state' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Agent - HTTP Tools Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should execute tools via HTTP adapter' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Image - CRD Overrides Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should use CRD image overrides' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Image - Operator Defaults Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should use operator defaults when CRD' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Image - Partial Overrides Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should allow partial image overrides' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "e2e: Agent - Demo Handler Test",
+      "type": "shell",
+      "command": "KIND=kind KIND_CLUSTER=omnia-test-e2e ginkgo --tags=e2e --focus='should handle tool calls via demo handler' ./test/e2e/ -- -v -timeout 20m",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

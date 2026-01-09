@@ -3059,6 +3059,127 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 		})
 	})
 
+	Context("buildProviderEnvVars", func() {
+		It("should build env vars with AdditionalConfig", func() {
+			provider := &omniav1alpha1.ProviderConfig{
+				Type:    omniav1alpha1.ProviderTypeOllama,
+				Model:   "llava:13b",
+				BaseURL: "http://ollama.ollama-system:11434",
+				AdditionalConfig: map[string]string{
+					"keep_alive":  "5m",
+					"mock_config": "/config/responses.yaml",
+				},
+			}
+
+			envVars := buildProviderEnvVars(provider)
+
+			// Check all env vars are present
+			envMap := make(map[string]string)
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("ollama"))
+			Expect(envMap["OMNIA_PROVIDER_MODEL"]).To(Equal("llava:13b"))
+			Expect(envMap["OMNIA_PROVIDER_BASE_URL"]).To(Equal("http://ollama.ollama-system:11434"))
+			Expect(envMap["OMNIA_PROVIDER_KEEP_ALIVE"]).To(Equal("5m"))
+			Expect(envMap["OMNIA_PROVIDER_MOCK_CONFIG"]).To(Equal("/config/responses.yaml"))
+		})
+
+		It("should handle Ollama provider without secretRef", func() {
+			provider := &omniav1alpha1.ProviderConfig{
+				Type:    omniav1alpha1.ProviderTypeOllama,
+				Model:   "llava:7b",
+				BaseURL: "http://localhost:11434",
+				// Note: no SecretRef - Ollama doesn't need API keys
+			}
+
+			envVars := buildProviderEnvVars(provider)
+
+			// Should have provider config but no secret-based env vars
+			envMap := make(map[string]string)
+			secretEnvCount := 0
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+				if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+					secretEnvCount++
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("ollama"))
+			Expect(envMap["OMNIA_PROVIDER_MODEL"]).To(Equal("llava:7b"))
+			Expect(secretEnvCount).To(Equal(0), "Ollama should not have secret-based env vars")
+		})
+
+		It("should handle Mock provider without secretRef", func() {
+			provider := &omniav1alpha1.ProviderConfig{
+				Type:  omniav1alpha1.ProviderTypeMock,
+				Model: "mock-model",
+				AdditionalConfig: map[string]string{
+					"mock_config": "/config/mock-responses.yaml",
+				},
+				// Note: no SecretRef - Mock provider doesn't need API keys
+			}
+
+			envVars := buildProviderEnvVars(provider)
+
+			// Should have provider config but no secret-based env vars
+			envMap := make(map[string]string)
+			secretEnvCount := 0
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+				if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+					secretEnvCount++
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("mock"))
+			Expect(envMap["OMNIA_PROVIDER_MODEL"]).To(Equal("mock-model"))
+			Expect(envMap["OMNIA_PROVIDER_MOCK_CONFIG"]).To(Equal("/config/mock-responses.yaml"))
+			Expect(secretEnvCount).To(Equal(0), "Mock provider should not have secret-based env vars")
+		})
+
+		It("should convert hyphenated keys to underscored env vars", func() {
+			provider := &omniav1alpha1.ProviderConfig{
+				Type: omniav1alpha1.ProviderTypeMock,
+				AdditionalConfig: map[string]string{
+					"some-hyphenated-key": "value",
+				},
+			}
+
+			envVars := buildProviderEnvVars(provider)
+
+			envMap := make(map[string]string)
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_SOME_HYPHENATED_KEY"]).To(Equal("value"))
+		})
+
+		It("should handle nil provider config", func() {
+			envVars := buildProviderEnvVars(nil)
+
+			// Should default to auto provider type
+			envMap := make(map[string]string)
+			for _, env := range envVars {
+				if env.Value != "" {
+					envMap[env.Name] = env.Value
+				}
+			}
+
+			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("auto"))
+		})
+	})
+
 	Context("buildSecretEnvVarsWithKey", func() {
 		It("should create env var with correct name for Claude", func() {
 			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}

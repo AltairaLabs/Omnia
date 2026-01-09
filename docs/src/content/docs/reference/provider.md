@@ -21,17 +21,21 @@ kind: Provider
 
 The LLM provider type.
 
-| Value | Description |
-|-------|-------------|
-| `claude` | Anthropic's Claude models |
-| `openai` | OpenAI's GPT models |
-| `gemini` | Google's Gemini models |
-| `auto` | Auto-detect based on available credentials |
+| Value | Description | Requires Secret |
+|-------|-------------|-----------------|
+| `claude` | Anthropic's Claude models | Yes |
+| `openai` | OpenAI's GPT models | Yes |
+| `gemini` | Google's Gemini models | Yes |
+| `ollama` | Local Ollama models (for development) | No |
+| `mock` | Mock provider (for testing) | No |
+| `auto` | Auto-detect based on available credentials | Yes |
 
 ```yaml
 spec:
   type: claude
 ```
+
+> **Note**: For `ollama` and `mock` providers, `secretRef` is not required. Use inline `provider` configuration in AgentRuntime instead of the Provider CRD for these types.
 
 ### `model`
 
@@ -42,6 +46,7 @@ The model identifier to use. If not specified, the provider's default model is u
 | Claude | `claude-sonnet-4-20250514`, `claude-opus-4-20250514` |
 | OpenAI | `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo` |
 | Gemini | `gemini-pro`, `gemini-1.5-pro` |
+| Ollama | `llava:13b`, `llama3.2-vision:11b`, `llama3:8b` |
 
 ```yaml
 spec:
