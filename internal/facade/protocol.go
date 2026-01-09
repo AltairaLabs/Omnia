@@ -150,20 +150,23 @@ type MessageType string
 
 const (
 	// Client to Server message types
-	MessageTypeMessage MessageType = "message"
+	MessageTypeMessage       MessageType = "message"
+	MessageTypeUploadRequest MessageType = "upload_request"
 
 	// Server to Client message types
-	MessageTypeChunk      MessageType = "chunk"
-	MessageTypeDone       MessageType = "done"
-	MessageTypeToolCall   MessageType = "tool_call"
-	MessageTypeToolResult MessageType = "tool_result"
-	MessageTypeError      MessageType = "error"
-	MessageTypeConnected  MessageType = "connected"
+	MessageTypeChunk          MessageType = "chunk"
+	MessageTypeDone           MessageType = "done"
+	MessageTypeToolCall       MessageType = "tool_call"
+	MessageTypeToolResult     MessageType = "tool_result"
+	MessageTypeError          MessageType = "error"
+	MessageTypeConnected      MessageType = "connected"
+	MessageTypeUploadReady    MessageType = "upload_ready"
+	MessageTypeUploadComplete MessageType = "upload_complete"
 )
 
 // ClientMessage represents a message sent from client to server.
 type ClientMessage struct {
-	// Type is the message type (always "message" for client messages).
+	// Type is the message type ("message" or "upload_request").
 	Type MessageType `json:"type"`
 	// SessionID is the optional session ID for resuming a session.
 	SessionID string `json:"session_id,omitempty"`
@@ -175,6 +178,8 @@ type ClientMessage struct {
 	Parts []ContentPart `json:"parts,omitempty"`
 	// Metadata contains optional additional data.
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// UploadRequest contains upload request details (for type "upload_request").
+	UploadRequest *UploadRequestInfo `json:"upload_request,omitempty"`
 }
 
 // ServerMessage represents a message sent from server to client.
@@ -195,6 +200,10 @@ type ServerMessage struct {
 	ToolResult *ToolResultInfo `json:"tool_result,omitempty"`
 	// Error contains error details (for error type).
 	Error *ErrorInfo `json:"error,omitempty"`
+	// UploadReady contains upload URL details (for upload_ready type).
+	UploadReady *UploadReadyInfo `json:"upload_ready,omitempty"`
+	// UploadComplete contains upload completion details (for upload_complete type).
+	UploadComplete *UploadCompleteInfo `json:"upload_complete,omitempty"`
 	// Timestamp is when the message was created.
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -229,6 +238,38 @@ type ErrorInfo struct {
 	Details map[string]interface{} `json:"details,omitempty"`
 }
 
+// UploadRequestInfo contains information about a file upload request from the client.
+type UploadRequestInfo struct {
+	// Filename is the original filename.
+	Filename string `json:"filename"`
+	// MimeType is the MIME type of the file.
+	MimeType string `json:"mime_type"`
+	// SizeBytes is the file size in bytes.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// UploadReadyInfo contains information for the client to perform the upload.
+type UploadReadyInfo struct {
+	// UploadID is the unique identifier for this upload.
+	UploadID string `json:"upload_id"`
+	// UploadURL is the URL where the client should PUT the file content.
+	UploadURL string `json:"upload_url"`
+	// StorageRef is the storage reference to use in subsequent messages.
+	StorageRef string `json:"storage_ref"`
+	// ExpiresAt is when the upload URL expires.
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// UploadCompleteInfo contains information about a completed upload.
+type UploadCompleteInfo struct {
+	// UploadID is the upload identifier.
+	UploadID string `json:"upload_id"`
+	// StorageRef is the storage reference for the uploaded file.
+	StorageRef string `json:"storage_ref"`
+	// SizeBytes is the actual size of the uploaded file.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
 // Error codes.
 const (
 	ErrorCodeInvalidMessage   = "INVALID_MESSAGE"
@@ -237,6 +278,8 @@ const (
 	ErrorCodeInternalError    = "INTERNAL_ERROR"
 	ErrorCodeAgentUnavailable = "AGENT_UNAVAILABLE"
 	ErrorCodeToolFailed       = "TOOL_FAILED"
+	ErrorCodeUploadFailed     = "UPLOAD_FAILED"
+	ErrorCodeMediaNotEnabled  = "MEDIA_NOT_ENABLED"
 )
 
 // NewChunkMessage creates a new chunk message.
@@ -319,6 +362,26 @@ func NewChunkMessageWithParts(sessionID string, parts []ContentPart) *ServerMess
 		SessionID: sessionID,
 		Parts:     parts,
 		Timestamp: time.Now(),
+	}
+}
+
+// NewUploadReadyMessage creates a new upload ready message.
+func NewUploadReadyMessage(sessionID string, uploadReady *UploadReadyInfo) *ServerMessage {
+	return &ServerMessage{
+		Type:        MessageTypeUploadReady,
+		SessionID:   sessionID,
+		UploadReady: uploadReady,
+		Timestamp:   time.Now(),
+	}
+}
+
+// NewUploadCompleteMessage creates a new upload complete message.
+func NewUploadCompleteMessage(sessionID string, uploadComplete *UploadCompleteInfo) *ServerMessage {
+	return &ServerMessage{
+		Type:           MessageTypeUploadComplete,
+		SessionID:      sessionID,
+		UploadComplete: uploadComplete,
+		Timestamp:      time.Now(),
 	}
 }
 

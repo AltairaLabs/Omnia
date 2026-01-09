@@ -91,6 +91,14 @@ func (m *mockResponseWriter) WriteError(code, message string) error {
 	return nil
 }
 
+func (m *mockResponseWriter) WriteUploadReady(_ *facade.UploadReadyInfo) error {
+	return m.err
+}
+
+func (m *mockResponseWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) error {
+	return m.err
+}
+
 func TestNewEchoHandler(t *testing.T) {
 	handler := NewEchoHandler()
 	if handler == nil {

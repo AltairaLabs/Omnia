@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
@@ -87,6 +88,10 @@ type ResponseWriter interface {
 	WriteToolResult(result *ToolResultInfo) error
 	// WriteError sends an error message.
 	WriteError(code, message string) error
+	// WriteUploadReady sends upload URL information to the client.
+	WriteUploadReady(uploadReady *UploadReadyInfo) error
+	// WriteUploadComplete notifies the client that an upload is complete.
+	WriteUploadComplete(uploadComplete *UploadCompleteInfo) error
 }
 
 // Server is a WebSocket server for agent communication.
@@ -96,6 +101,7 @@ type Server struct {
 	sessionStore session.Store
 	handler      MessageHandler
 	metrics      ServerMetrics
+	mediaStorage media.Storage
 	log          logr.Logger
 
 	mu          sync.RWMutex
@@ -120,6 +126,14 @@ type ServerOption func(*Server)
 func WithMetrics(m ServerMetrics) ServerOption {
 	return func(s *Server) {
 		s.metrics = m
+	}
+}
+
+// WithMediaStorage sets the media storage for the server.
+// When set, the server can handle upload_request messages from clients.
+func WithMediaStorage(ms media.Storage) ServerOption {
+	return func(s *Server) {
+		s.mediaStorage = ms
 	}
 }
 
@@ -363,7 +377,19 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		}
 	}
 
-	// Store user message
+	// Create response writer (needed for all message types)
+	writer := &connResponseWriter{
+		conn:      c,
+		sessionID: sessionID,
+		server:    s,
+	}
+
+	// Handle upload_request messages separately
+	if msg.Type == MessageTypeUploadRequest {
+		return s.handleUploadRequest(ctx, sessionID, msg, writer, log)
+	}
+
+	// Store user message (only for regular messages)
 	if err := s.sessionStore.AppendMessage(ctx, sessionID, session.Message{
 		Role:      session.RoleUser,
 		Content:   msg.Content,
@@ -371,13 +397,6 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		Timestamp: time.Now(),
 	}); err != nil {
 		log.Error(err, "failed to store user message")
-	}
-
-	// Create response writer
-	writer := &connResponseWriter{
-		conn:      c,
-		sessionID: sessionID,
-		server:    s,
 	}
 
 	// Handle message
@@ -422,6 +441,53 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	}
 
 	return sess.ID, nil
+}
+
+// handleUploadRequest processes an upload_request message from the client.
+func (s *Server) handleUploadRequest(ctx context.Context, sessionID string, msg *ClientMessage, writer *connResponseWriter, log logr.Logger) error {
+	// Check if media storage is enabled
+	if s.mediaStorage == nil {
+		log.Info("upload_request received but media storage not enabled")
+		return writer.WriteError(ErrorCodeMediaNotEnabled, "media storage is not enabled")
+	}
+
+	// Validate the upload request
+	if msg.UploadRequest == nil {
+		log.Info("upload_request missing upload_request field")
+		return writer.WriteError(ErrorCodeInvalidMessage, "upload_request field is required")
+	}
+
+	req := msg.UploadRequest
+	if req.Filename == "" {
+		return writer.WriteError(ErrorCodeInvalidMessage, "filename is required")
+	}
+	if req.MimeType == "" {
+		return writer.WriteError(ErrorCodeInvalidMessage, "mime_type is required")
+	}
+	if req.SizeBytes <= 0 {
+		return writer.WriteError(ErrorCodeInvalidMessage, "size_bytes must be positive")
+	}
+
+	// Request upload URL from storage
+	creds, err := s.mediaStorage.GetUploadURL(ctx, media.UploadRequest{
+		SessionID: sessionID,
+		Filename:  req.Filename,
+		MIMEType:  req.MimeType,
+		SizeBytes: req.SizeBytes,
+	})
+	if err != nil {
+		log.Error(err, "failed to get upload URL", "filename", req.Filename)
+		return writer.WriteError(ErrorCodeUploadFailed, "failed to prepare upload")
+	}
+
+	// Send upload_ready response
+	log.Info("upload ready", "uploadID", creds.UploadID, "storageRef", creds.StorageRef)
+	return writer.WriteUploadReady(&UploadReadyInfo{
+		UploadID:   creds.UploadID,
+		UploadURL:  creds.URL,
+		StorageRef: creds.StorageRef,
+		ExpiresAt:  creds.ExpiresAt,
+	})
 }
 
 func (s *Server) sendMessage(c *Connection, msg *ServerMessage) error {
@@ -522,4 +588,12 @@ func (w *connResponseWriter) WriteToolResult(result *ToolResultInfo) error {
 
 func (w *connResponseWriter) WriteError(code, message string) error {
 	return w.server.sendMessage(w.conn, NewErrorMessage(w.sessionID, code, message))
+}
+
+func (w *connResponseWriter) WriteUploadReady(uploadReady *UploadReadyInfo) error {
+	return w.server.sendMessage(w.conn, NewUploadReadyMessage(w.sessionID, uploadReady))
+}
+
+func (w *connResponseWriter) WriteUploadComplete(uploadComplete *UploadCompleteInfo) error {
+	return w.server.sendMessage(w.conn, NewUploadCompleteMessage(w.sessionID, uploadComplete))
 }
