@@ -171,6 +171,51 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
     [handleSend]
   );
 
+  // Handle paste - extract images from clipboard
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles: File[] = [];
+
+      for (const item of Array.from(items)) {
+        // Check if item is an image
+        if (item.type.startsWith("image/") && isAllowedType(item.type)) {
+          const file = item.getAsFile();
+          if (file && file.size <= MAX_FILE_SIZE) {
+            imageFiles.push(file);
+          }
+        }
+      }
+
+      // If we found images, process them
+      if (imageFiles.length > 0) {
+        // Prevent default only if we're handling images
+        // This allows normal text paste to work
+        e.preventDefault();
+
+        const newAttachments: FileAttachment[] = [];
+
+        for (const file of imageFiles) {
+          const dataUrl = await fileToDataUrl(file);
+          newAttachments.push({
+            id: crypto.randomUUID(),
+            // Generate a name for pasted images (they don't have one)
+            name: `pasted-image-${Date.now()}.${file.type.split("/")[1] || "png"}`,
+            type: file.type,
+            size: file.size,
+            dataUrl,
+          });
+        }
+
+        // Add to attachments, respecting max limit
+        setAttachments((prev) => [...prev, ...newAttachments].slice(0, MAX_FILES));
+      }
+    },
+    []
+  );
+
   // Status badge
   const statusBadge = {
     disconnected: (
@@ -292,9 +337,10 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               status === "connected"
-                ? "Type a message... (Enter to send, Shift+Enter for new line)"
+                ? "Type a message... (Enter to send, Shift+Enter for new line, Paste images)"
                 : "Connect to start chatting..."
             }
             disabled={status !== "connected"}
