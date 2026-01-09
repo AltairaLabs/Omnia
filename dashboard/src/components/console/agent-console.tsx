@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload } from "lucide-react";
+import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,21 +18,54 @@ interface AgentConsoleProps {
   className?: string;
 }
 
-// File validation constants
-const ALLOWED_TYPES = [
+// File validation constants - MIME types for validation
+const ALLOWED_MIME_TYPES = [
+  // Images
   "image/png",
   "image/jpeg",
   "image/gif",
   "image/webp",
+  // Audio
   "audio/mpeg",
   "audio/wav",
   "audio/ogg",
+  // Documents
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  // Code files (browsers may report various MIME types)
+  "text/javascript",
+  "text/typescript",
+  "application/javascript",
+  "application/typescript",
+  "text/x-python",
+  "application/x-python-code",
+  // Data
+  "text/csv",
+  "application/json",
 ];
+
+// File extensions for the file picker (more reliable than MIME types)
+const ALLOWED_EXTENSIONS = [
+  ".png", ".jpg", ".jpeg", ".gif", ".webp",  // Images
+  ".mp3", ".wav", ".ogg",                     // Audio
+  ".pdf", ".txt", ".md",                      // Documents
+  ".js", ".ts", ".jsx", ".tsx", ".py",        // Code
+  ".csv", ".json",                            // Data
+];
+
+// Combined accept string for file input
+const ACCEPT_STRING = [...ALLOWED_MIME_TYPES, ...ALLOWED_EXTENSIONS].join(",");
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
-function isAllowedType(type: string): boolean {
-  return ALLOWED_TYPES.includes(type);
+function isAllowedType(type: string, filename: string): boolean {
+  // Check MIME type
+  if (ALLOWED_MIME_TYPES.includes(type)) return true;
+  // Fallback to extension check for files with generic MIME types
+  const ext = "." + filename.split(".").pop()?.toLowerCase();
+  return ALLOWED_EXTENSIONS.includes(ext);
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -50,6 +83,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
   const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
   // Always use mock mode for now (until K8s integration)
@@ -86,7 +120,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
 
     for (const file of Array.from(files)) {
       // Validate type
-      if (!isAllowedType(file.type)) continue;
+      if (!isAllowedType(file.type, file.name)) continue;
 
       // Validate size
       if (file.size > MAX_FILE_SIZE) continue;
@@ -180,8 +214,10 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
       const imageFiles: File[] = [];
 
       for (const item of Array.from(items)) {
-        // Check if item is an image
-        if (item.type.startsWith("image/") && isAllowedType(item.type)) {
+        // Check if item is an image with allowed type
+        const ext = item.type.split("/")[1] || "png";
+        const tempName = `pasted.${ext}`;
+        if (item.type.startsWith("image/") && isAllowedType(item.type, tempName)) {
           const file = item.getAsFile();
           if (file && file.size <= MAX_FILE_SIZE) {
             imageFiles.push(file);
@@ -215,6 +251,23 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
     },
     []
   );
+
+  // Handle file input change (from attachment button)
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+        processFiles(e.target.files);
+      }
+      // Reset input so the same file can be selected again
+      e.target.value = "";
+    },
+    [processFiles]
+  );
+
+  // Handle attachment button click
+  const handleAttachmentClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
 
   // Status badge
   const statusBadge = {
@@ -331,7 +384,29 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
           />
         )}
 
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPT_STRING}
+          onChange={handleFileInputChange}
+          className="hidden"
+          aria-hidden="true"
+        />
+
         <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={handleAttachmentClick}
+            disabled={status !== "connected" || attachments.length >= MAX_FILES}
+            className="shrink-0"
+            aria-label="Attach files"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
           <Textarea
             ref={textareaRef}
             value={input}
@@ -340,7 +415,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
             onPaste={handlePaste}
             placeholder={
               status === "connected"
-                ? "Type a message... (Enter to send, Shift+Enter for new line, Paste images)"
+                ? "Type a message... (Enter to send, Shift+Enter for new line)"
                 : "Connect to start chatting..."
             }
             disabled={status !== "connected"}
@@ -351,6 +426,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
             onClick={handleSend}
             disabled={(!input.trim() && attachments.length === 0) || status !== "connected"}
             className="shrink-0"
+            aria-label="Send message"
           >
             <Send className="h-4 w-4" />
           </Button>
