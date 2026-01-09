@@ -173,6 +173,215 @@ describe("ConsoleMessage", () => {
     });
   });
 
+  describe("audio attachments", () => {
+    const mockAudioAttachment: FileAttachment = {
+      id: "audio-1",
+      name: "recording.mp3",
+      type: "audio/mpeg",
+      size: 5000,
+      dataUrl: "data:audio/mpeg;base64,audiodata123",
+    };
+
+    it("should render audio player for audio attachments", () => {
+      const messageWithAudio: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockAudioAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithAudio} />);
+
+      const audioElement = document.querySelector("audio");
+      expect(audioElement).toBeInTheDocument();
+      expect(audioElement).toHaveAttribute("controls");
+      expect(audioElement).toHaveAttribute("aria-label", `Audio: ${mockAudioAttachment.name}`);
+    });
+
+    it("should display audio filename", () => {
+      const messageWithAudio: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockAudioAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithAudio} />);
+
+      expect(screen.getByText("recording.mp3")).toBeInTheDocument();
+    });
+
+    it("should render multiple audio attachments", () => {
+      const secondAudio: FileAttachment = {
+        id: "audio-2",
+        name: "song.wav",
+        type: "audio/wav",
+        size: 10000,
+        dataUrl: "data:audio/wav;base64,wavdata456",
+      };
+
+      const messageWithMultipleAudio: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockAudioAttachment, secondAudio],
+      };
+
+      render(<ConsoleMessage message={messageWithMultipleAudio} />);
+
+      const audioElements = document.querySelectorAll("audio");
+      expect(audioElements).toHaveLength(2);
+    });
+  });
+
+  describe("video attachments", () => {
+    const mockVideoAttachment: FileAttachment = {
+      id: "video-1",
+      name: "clip.mp4",
+      type: "video/mp4",
+      size: 50000,
+      dataUrl: "data:video/mp4;base64,videodata789",
+    };
+
+    it("should render video player for video attachments", () => {
+      const messageWithVideo: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockVideoAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithVideo} />);
+
+      const videoElement = document.querySelector("video");
+      expect(videoElement).toBeInTheDocument();
+      expect(videoElement).toHaveAttribute("controls");
+      expect(videoElement).toHaveAttribute("aria-label", `Video: ${mockVideoAttachment.name}`);
+    });
+
+    it("should display video filename", () => {
+      const messageWithVideo: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockVideoAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithVideo} />);
+
+      expect(screen.getByText("clip.mp4")).toBeInTheDocument();
+    });
+  });
+
+  describe("file attachments (download links)", () => {
+    const mockPdfAttachment: FileAttachment = {
+      id: "pdf-1",
+      name: "document.pdf",
+      type: "application/pdf",
+      size: 2048,
+      dataUrl: "data:application/pdf;base64,pdfdata123",
+    };
+
+    const mockJsonAttachment: FileAttachment = {
+      id: "json-1",
+      name: "data.json",
+      type: "application/json",
+      size: 512,
+      dataUrl: "data:application/json;base64,jsondata456",
+    };
+
+    const mockCodeAttachment: FileAttachment = {
+      id: "code-1",
+      name: "script.py",
+      type: "text/x-python",
+      size: 1024,
+      dataUrl: "data:text/x-python;base64,codedata789",
+    };
+
+    it("should render download link for PDF attachments", () => {
+      const messageWithPdf: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockPdfAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithPdf} />);
+
+      const link = screen.getByRole("link");
+      expect(link).toHaveAttribute("href", mockPdfAttachment.dataUrl);
+      expect(link).toHaveAttribute("download", "document.pdf");
+      expect(screen.getByText("document.pdf")).toBeInTheDocument();
+    });
+
+    it("should display file size", () => {
+      const messageWithPdf: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockPdfAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithPdf} />);
+
+      expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+    });
+
+    it("should render multiple file attachments", () => {
+      const messageWithFiles: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockPdfAttachment, mockJsonAttachment, mockCodeAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithFiles} />);
+
+      const links = screen.getAllByRole("link");
+      expect(links).toHaveLength(3);
+      expect(screen.getByText("document.pdf")).toBeInTheDocument();
+      expect(screen.getByText("data.json")).toBeInTheDocument();
+      expect(screen.getByText("script.py")).toBeInTheDocument();
+    });
+
+    it("should format bytes correctly", () => {
+      const smallFile: FileAttachment = {
+        id: "small-1",
+        name: "tiny.txt",
+        type: "text/plain",
+        size: 100,
+        dataUrl: "data:text/plain;base64,abc",
+      };
+
+      const largeFile: FileAttachment = {
+        id: "large-1",
+        name: "big.bin",
+        type: "application/octet-stream",
+        size: 5 * 1024 * 1024,
+        dataUrl: "data:application/octet-stream;base64,xyz",
+      };
+
+      const messageWithFiles: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [smallFile, largeFile],
+      };
+
+      render(<ConsoleMessage message={messageWithFiles} />);
+
+      expect(screen.getByText("100 B")).toBeInTheDocument();
+      expect(screen.getByText("5.0 MB")).toBeInTheDocument();
+    });
+  });
+
+  describe("mixed attachments", () => {
+    it("should render all attachment types in one message", () => {
+      const messageWithMixed: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [
+          { id: "img-1", name: "photo.png", type: "image/png", size: 1000, dataUrl: "data:image/png;base64,img" },
+          { id: "audio-1", name: "voice.mp3", type: "audio/mpeg", size: 2000, dataUrl: "data:audio/mpeg;base64,audio" },
+          { id: "video-1", name: "movie.mp4", type: "video/mp4", size: 3000, dataUrl: "data:video/mp4;base64,video" },
+          { id: "file-1", name: "doc.pdf", type: "application/pdf", size: 4000, dataUrl: "data:application/pdf;base64,pdf" },
+        ],
+      };
+
+      render(<ConsoleMessage message={messageWithMixed} />);
+
+      // Image
+      expect(screen.getByRole("img")).toBeInTheDocument();
+      // Audio
+      expect(document.querySelector("audio")).toBeInTheDocument();
+      // Video
+      expect(document.querySelector("video")).toBeInTheDocument();
+      // File download
+      expect(screen.getByRole("link")).toBeInTheDocument();
+    });
+  });
+
   describe("accessibility", () => {
     it("should have no accessibility violations for user message", async () => {
       const { container } = render(<ConsoleMessage message={baseMessage} />);
