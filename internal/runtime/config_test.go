@@ -210,6 +210,60 @@ func TestLoadConfig_ProviderTypes(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_MockProviderAutoEnabled(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envProviderType, "mock")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, string(provider.TypeMock), cfg.ProviderType)
+	assert.True(t, cfg.MockProvider, "MockProvider should be auto-enabled when provider type is 'mock'")
+}
+
+func TestLoadConfig_MockConfigFromProviderAdditionalConfig(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envProviderType, "mock")
+	t.Setenv("OMNIA_PROVIDER_MOCK_CONFIG", "/config/mock-responses.yaml")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, "/config/mock-responses.yaml", cfg.MockConfigPath, "MockConfigPath should be set from OMNIA_PROVIDER_MOCK_CONFIG")
+}
+
+func TestLoadConfig_MockConfigDirectEnvTakesPrecedence(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envProviderType, "mock")
+	t.Setenv(envMockConfigPath, "/direct/mock.yaml")
+	t.Setenv("OMNIA_PROVIDER_MOCK_CONFIG", "/provider/mock.yaml")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, "/direct/mock.yaml", cfg.MockConfigPath, "Direct OMNIA_MOCK_CONFIG should take precedence")
+}
+
+func TestLoadConfig_MockProviderNotAutoEnabledForOtherTypes(t *testing.T) {
+	testCases := []string{"auto", "claude", "openai", "gemini", "ollama"}
+
+	for _, providerType := range testCases {
+		t.Run(providerType, func(t *testing.T) {
+			t.Setenv(envAgentName, "test-agent")
+			t.Setenv(envNamespace, "test-ns")
+			t.Setenv(envProviderType, providerType)
+
+			cfg, err := LoadConfig()
+			require.NoError(t, err)
+
+			assert.False(t, cfg.MockProvider, "MockProvider should not be auto-enabled for provider type '%s'", providerType)
+		})
+	}
+}
+
 func TestLoadConfig_TracingEnabled(t *testing.T) {
 	t.Setenv(envAgentName, "test-agent")
 	t.Setenv(envNamespace, "test-ns")

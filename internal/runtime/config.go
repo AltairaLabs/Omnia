@@ -66,25 +66,26 @@ type Config struct {
 
 // Environment variable names.
 const (
-	envAgentName         = "OMNIA_AGENT_NAME"
-	envNamespace         = "OMNIA_NAMESPACE"
-	envPromptPackPath    = "OMNIA_PROMPTPACK_PATH"
-	envPromptName        = "OMNIA_PROMPT_NAME"
-	envSessionType       = "OMNIA_SESSION_TYPE"
-	envSessionURL        = "OMNIA_SESSION_URL"
-	envSessionTTL        = "OMNIA_SESSION_TTL"
-	envProviderType      = "OMNIA_PROVIDER_TYPE"
-	envProviderModel     = "OMNIA_PROVIDER_MODEL"
-	envProviderBaseURL   = "OMNIA_PROVIDER_BASE_URL"
-	envMockProvider      = "OMNIA_MOCK_PROVIDER"
-	envMockConfigPath    = "OMNIA_MOCK_CONFIG"
-	envToolsConfigPath   = "OMNIA_TOOLS_CONFIG"
-	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
-	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
-	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
-	envTracingInsecure   = "OMNIA_TRACING_INSECURE"
-	envGRPCPort          = "OMNIA_GRPC_PORT"
-	envHealthPort        = "OMNIA_HEALTH_PORT"
+	envAgentName              = "OMNIA_AGENT_NAME"
+	envNamespace              = "OMNIA_NAMESPACE"
+	envPromptPackPath         = "OMNIA_PROMPTPACK_PATH"
+	envPromptName             = "OMNIA_PROMPT_NAME"
+	envSessionType            = "OMNIA_SESSION_TYPE"
+	envSessionURL             = "OMNIA_SESSION_URL"
+	envSessionTTL             = "OMNIA_SESSION_TTL"
+	envProviderType           = "OMNIA_PROVIDER_TYPE"
+	envProviderModel          = "OMNIA_PROVIDER_MODEL"
+	envProviderBaseURL        = "OMNIA_PROVIDER_BASE_URL"
+	envMockProvider           = "OMNIA_MOCK_PROVIDER"
+	envMockConfigPath         = "OMNIA_MOCK_CONFIG"
+	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
+	envToolsConfigPath        = "OMNIA_TOOLS_CONFIG"
+	envTracingEnabled         = "OMNIA_TRACING_ENABLED"
+	envTracingEndpoint        = "OMNIA_TRACING_ENDPOINT"
+	envTracingSampleRate      = "OMNIA_TRACING_SAMPLE_RATE"
+	envTracingInsecure        = "OMNIA_TRACING_INSECURE"
+	envGRPCPort               = "OMNIA_GRPC_PORT"
+	envHealthPort             = "OMNIA_HEALTH_PORT"
 )
 
 // Default values.
@@ -123,7 +124,7 @@ func LoadConfig() (*Config, error) {
 		Model:             os.Getenv(envProviderModel),
 		BaseURL:           os.Getenv(envProviderBaseURL),
 		MockProvider:      os.Getenv(envMockProvider) == "true",
-		MockConfigPath:    os.Getenv(envMockConfigPath),
+		MockConfigPath:    getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
 		ToolsConfigPath:   getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
 		TracingEnabled:    os.Getenv(envTracingEnabled) == "true",
 		TracingEndpoint:   os.Getenv(envTracingEndpoint),
@@ -140,6 +141,12 @@ func LoadConfig() (*Config, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
+	}
+
+	// Auto-enable mock provider when provider type is "mock"
+	// This allows provider.type: mock to work as a first-class selection
+	if cfg.ProviderType == string(provider.TypeMock) {
+		cfg.MockProvider = true
 	}
 
 	return cfg, nil
