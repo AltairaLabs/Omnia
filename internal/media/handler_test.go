@@ -490,6 +490,60 @@ func TestHandler_Upload_ErrorPaths(t *testing.T) {
 	}
 }
 
+func TestParseMediaPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		urlPath string
+		prefix  string
+		wantRef *StorageRef
+		wantErr bool
+	}{
+		{
+			name:    "valid path",
+			urlPath: "/media/download/session-123/media-456",
+			prefix:  "/media/download/",
+			wantRef: &StorageRef{SessionID: "session-123", MediaID: "media-456"},
+			wantErr: false,
+		},
+		{
+			name:    "missing media ID",
+			urlPath: "/media/download/session-only",
+			prefix:  "/media/download/",
+			wantRef: nil,
+			wantErr: true,
+		},
+		{
+			name:    "empty session ID",
+			urlPath: "/media/download//media-456",
+			prefix:  "/media/download/",
+			wantRef: nil,
+			wantErr: true,
+		},
+		{
+			name:    "too many segments",
+			urlPath: "/media/download/a/b/c",
+			prefix:  "/media/download/",
+			wantRef: nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref, err := parseMediaPath(tt.urlPath, tt.prefix)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseMediaPath() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantRef != nil {
+				if ref == nil || ref.SessionID != tt.wantRef.SessionID || ref.MediaID != tt.wantRef.MediaID {
+					t.Errorf("parseMediaPath() = %v, want %v", ref, tt.wantRef)
+				}
+			}
+		})
+	}
+}
+
 func TestHandler_WriteError(t *testing.T) {
 	handler, storage, tmpDir := setupTestHandler(t)
 	defer func() { _ = os.RemoveAll(tmpDir) }()

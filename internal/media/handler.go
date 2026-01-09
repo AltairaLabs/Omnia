@@ -143,6 +143,17 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// parseMediaPath extracts session ID and media ID from a path like "/{prefix}/{session-id}/{media-id}".
+// Returns the StorageRef or an error if the path is invalid.
+func parseMediaPath(urlPath, prefix string) (*StorageRef, error) {
+	path := strings.TrimPrefix(urlPath, prefix)
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, ErrInvalidStorageRef
+	}
+	return &StorageRef{SessionID: parts[0], MediaID: parts[1]}, nil
+}
+
 // handleDownload serves media content.
 // GET /media/download/{session-id}/{media-id}
 func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -151,24 +162,12 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract session ID and media ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/media/download/")
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 {
+	ref, err := parseMediaPath(r.URL.Path, "/media/download/")
+	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
 
-	sessionID := parts[0]
-	mediaID := parts[1]
-
-	// Build storage reference
-	ref := StorageRef{
-		SessionID: sessionID,
-		MediaID:   mediaID,
-	}
-
-	// Get media info to check expiration and get MIME type
 	info, err := h.storage.GetMediaInfo(r.Context(), ref.String())
 	if err != nil {
 		h.log.Error(err, "failed to get media info", "ref", ref.String())
@@ -176,7 +175,6 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the file path
 	filePath, err := h.storage.GetMediaPath(ref.String())
 	if err != nil {
 		h.log.Error(err, "failed to get media path", "ref", ref.String())
@@ -184,7 +182,6 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set headers
 	w.Header().Set("Content-Type", info.MIMEType)
 	if info.Filename != "" {
 		w.Header().Set("Content-Disposition", "inline; filename=\""+info.Filename+"\"")
@@ -193,7 +190,6 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(info.SizeBytes, 10))
 	}
 
-	// Serve the file
 	http.ServeFile(w, r, filePath)
 }
 
@@ -205,21 +201,10 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract session ID and media ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/media/info/")
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 {
+	ref, err := parseMediaPath(r.URL.Path, "/media/info/")
+	if err != nil {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
-	}
-
-	sessionID := parts[0]
-	mediaID := parts[1]
-
-	// Build storage reference
-	ref := StorageRef{
-		SessionID: sessionID,
-		MediaID:   mediaID,
 	}
 
 	info, err := h.storage.GetMediaInfo(r.Context(), ref.String())
