@@ -257,10 +257,14 @@ describe("ConsoleMessage", () => {
 
       render(<ConsoleMessage message={messageWithVideo} />);
 
+      // VideoPlayer uses custom controls with a play overlay
       const videoElement = document.querySelector("video");
       expect(videoElement).toBeInTheDocument();
-      expect(videoElement).toHaveAttribute("controls");
+      expect(videoElement).toHaveAttribute("src", mockVideoAttachment.dataUrl);
       expect(videoElement).toHaveAttribute("aria-label", `Video: ${mockVideoAttachment.name}`);
+
+      // Custom player has play overlay button
+      expect(screen.getByRole("button", { name: "Play video" })).toBeInTheDocument();
     });
 
     it("should display video filename", () => {

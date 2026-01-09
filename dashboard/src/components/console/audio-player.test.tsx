@@ -128,6 +128,91 @@ describe("AudioPlayer", () => {
     });
   });
 
+  describe("slider interactions", () => {
+    it("should render volume slider with correct initial value", () => {
+      render(<AudioPlayer src="data:audio/mp3;base64,test" />);
+
+      const volumeSlider = screen.getByRole("slider", { name: "Volume" });
+      expect(volumeSlider).toBeInTheDocument();
+      expect(volumeSlider).toHaveAttribute("aria-valuenow", "100");
+    });
+
+    it("should render seek slider", () => {
+      render(<AudioPlayer src="data:audio/mp3;base64,test" />);
+
+      const seekSlider = screen.getByRole("slider", { name: "Seek audio" });
+      expect(seekSlider).toBeInTheDocument();
+      expect(seekSlider).toHaveAttribute("aria-valuenow", "0");
+    });
+
+    it("should show volume at 0 when muted", async () => {
+      render(<AudioPlayer src="data:audio/mp3;base64,test" />);
+
+      // Mute
+      const muteButton = screen.getByRole("button", { name: "Mute" });
+      await act(async () => {
+        fireEvent.click(muteButton);
+      });
+
+      // Volume slider should show 0 when muted
+      const volumeSlider = screen.getByRole("slider", { name: "Volume" });
+      expect(volumeSlider).toHaveAttribute("aria-valuenow", "0");
+    });
+  });
+
+  describe("audio events", () => {
+    it("should handle loadedmetadata event", async () => {
+      const { container } = render(<AudioPlayer src="data:audio/mp3;base64,test" />);
+
+      const audioElement = container.querySelector("audio") as HTMLAudioElement;
+
+      // Simulate loadedmetadata event with a duration
+      Object.defineProperty(audioElement, "duration", { value: 120, writable: true });
+      Object.defineProperty(audioElement, "readyState", { value: 4, writable: true });
+
+      await act(async () => {
+        fireEvent(audioElement, new Event("loadedmetadata"));
+      });
+
+      // Time display should show the duration
+      expect(screen.getByText(/2:00/)).toBeInTheDocument();
+    });
+
+    it("should handle timeupdate event", async () => {
+      const { container } = render(<AudioPlayer src="data:audio/mp3;base64,test" />);
+
+      const audioElement = container.querySelector("audio") as HTMLAudioElement;
+
+      // Set duration first
+      Object.defineProperty(audioElement, "duration", { value: 120, writable: true });
+      await act(async () => {
+        fireEvent(audioElement, new Event("loadedmetadata"));
+      });
+
+      // Simulate timeupdate
+      Object.defineProperty(audioElement, "currentTime", { value: 30, writable: true });
+      await act(async () => {
+        fireEvent(audioElement, new Event("timeupdate"));
+      });
+
+      // Time display should show current time
+      expect(screen.getByText(/0:30/)).toBeInTheDocument();
+    });
+
+    it("should handle ended event", async () => {
+      const { container } = render(<AudioPlayer src="data:audio/mp3;base64,test" />);
+
+      const audioElement = container.querySelector("audio") as HTMLAudioElement;
+
+      await act(async () => {
+        fireEvent(audioElement, new Event("ended"));
+      });
+
+      // Should show play button (not pause) after ended
+      expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    });
+  });
+
   describe("accessibility", () => {
     it("should have accessible play button", () => {
       render(<AudioPlayer src="data:audio/mp3;base64,test" />);
