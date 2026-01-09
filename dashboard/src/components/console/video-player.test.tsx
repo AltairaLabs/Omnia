@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import { VideoPlayer } from "./video-player";
 
 // Mock ResizeObserver for Radix UI components (needs to be a class)
@@ -94,7 +95,9 @@ describe("VideoPlayer", () => {
 
       // Control buttons should now be visible (jsdom doesn't implement play(),
       // so the button stays as "Play" instead of "Pause")
-      expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+      // There are multiple "Play" buttons (container + control), so check for multiple
+      const playButtons = screen.getAllByRole("button", { name: "Play" });
+      expect(playButtons.length).toBeGreaterThanOrEqual(1);
       expect(screen.getByRole("button", { name: "Mute" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Fullscreen" })).toBeInTheDocument();
     });
@@ -291,7 +294,9 @@ describe("VideoPlayer", () => {
       });
 
       // Controls should still be visible after mouse move
-      expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+      // (Multiple "Play" buttons exist: container and control button)
+      const playButtons = screen.getAllByRole("button", { name: "Play" });
+      expect(playButtons.length).toBeGreaterThanOrEqual(1);
     });
 
     it("should handle mouse leave on container", async () => {
@@ -360,6 +365,36 @@ describe("VideoPlayer", () => {
 
       rerender(<VideoPlayer src="data:video/mp4;base64,test" fileSize={5242880} />);
       expect(screen.getByText("5.0 MB")).toBeInTheDocument();
+    });
+  });
+
+  describe("axe accessibility", () => {
+    it("should have no accessibility violations in initial state", async () => {
+      const { container } = render(<VideoPlayer src="data:video/mp4;base64,test" />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations with filename", async () => {
+      const { container } = render(
+        <VideoPlayer src="data:video/mp4;base64,test" filename="video.mp4" />
+      );
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations after video starts", async () => {
+      const { container } = render(<VideoPlayer src="data:video/mp4;base64,test" />);
+
+      const playButton = screen.getByRole("button", { name: "Play video" });
+      await act(async () => {
+        fireEvent.click(playButton);
+      });
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
     });
   });
 });

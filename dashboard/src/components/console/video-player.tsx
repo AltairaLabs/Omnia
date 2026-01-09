@@ -182,6 +182,7 @@ export function VideoPlayer({ src, type, filename, fileSize, className }: Readon
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Mouse events control auto-hide of video controls, keyboard users can always access controls via tab
     <div
       ref={containerRef}
       className={cn(
@@ -199,7 +200,8 @@ export function VideoPlayer({ src, type, filename, fileSize, className }: Readon
         </p>
       )}
 
-      {/* Video container */}
+      {/* Video container - click to toggle play (enhancement, not primary interaction method) */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Clicking video area is enhancement, primary control is the play overlay button */}
       <div
         className={cn(
           "relative bg-black cursor-pointer",
