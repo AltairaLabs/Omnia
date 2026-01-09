@@ -114,6 +114,8 @@ const (
 	ProviderTypeClaude = "claude"
 	ProviderTypeOpenAI = "openai"
 	ProviderTypeGemini = "gemini"
+	ProviderTypeOllama = "ollama"
+	ProviderTypeMock   = "mock"
 )
 
 // LoadConfig loads configuration from environment variables.
@@ -251,10 +253,11 @@ func (cfg *Config) validateSessionConfig() error {
 // validateProviderType validates the provider type.
 func (cfg *Config) validateProviderType() error {
 	switch cfg.ProviderType {
-	case ProviderTypeAuto, ProviderTypeClaude, ProviderTypeOpenAI, ProviderTypeGemini:
+	case ProviderTypeAuto, ProviderTypeClaude, ProviderTypeOpenAI, ProviderTypeGemini,
+		ProviderTypeOllama, ProviderTypeMock:
 		return nil
 	default:
-		return fmt.Errorf("invalid %s: must be 'auto', 'claude', 'openai', or 'gemini'", envProviderType)
+		return fmt.Errorf("invalid %s: must be 'auto', 'claude', 'openai', 'gemini', 'ollama', or 'mock'", envProviderType)
 	}
 }
 

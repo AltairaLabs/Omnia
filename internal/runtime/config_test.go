@@ -191,6 +191,8 @@ func TestLoadConfig_ProviderTypes(t *testing.T) {
 		{"claude", "claude", ProviderTypeClaude},
 		{"openai", "openai", ProviderTypeOpenAI},
 		{"gemini", "gemini", ProviderTypeGemini},
+		{"ollama", "ollama", ProviderTypeOllama},
+		{"mock", "mock", ProviderTypeMock},
 	}
 
 	for _, tc := range testCases {
