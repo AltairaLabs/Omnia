@@ -19,6 +19,132 @@ package facade
 
 import "time"
 
+// ContentPartType represents the type of content in a message part.
+type ContentPartType string
+
+const (
+	// ContentPartTypeText represents text content.
+	ContentPartTypeText ContentPartType = "text"
+	// ContentPartTypeImage represents an image.
+	ContentPartTypeImage ContentPartType = "image"
+	// ContentPartTypeAudio represents audio content.
+	ContentPartTypeAudio ContentPartType = "audio"
+	// ContentPartTypeVideo represents video content.
+	ContentPartTypeVideo ContentPartType = "video"
+	// ContentPartTypeFile represents a generic file.
+	ContentPartTypeFile ContentPartType = "file"
+)
+
+// ContentPart represents a part of a multi-modal message.
+// A message can contain multiple parts of different types (text, images, audio, etc.).
+type ContentPart struct {
+	// Type is the content part type.
+	Type ContentPartType `json:"type"`
+	// Text is the text content (for type "text").
+	Text string `json:"text,omitempty"`
+	// Media contains media content details (for image, audio, video, file types).
+	Media *MediaContent `json:"media,omitempty"`
+}
+
+// MediaContent contains the data or reference to media content.
+// Exactly one of Data, URL, or StorageRef should be set.
+type MediaContent struct {
+	// Data is base64-encoded content for small files (< 256KB recommended).
+	Data string `json:"data,omitempty"`
+	// URL is an HTTP/HTTPS URL for externalized files.
+	URL string `json:"url,omitempty"`
+	// StorageRef is a backend storage reference (e.g., S3 key).
+	StorageRef string `json:"storage_ref,omitempty"`
+
+	// MimeType is the MIME type of the content (required).
+	MimeType string `json:"mime_type"`
+
+	// Filename is the original filename (optional).
+	Filename string `json:"filename,omitempty"`
+	// SizeBytes is the file size in bytes (optional).
+	SizeBytes int64 `json:"size_bytes,omitempty"`
+
+	// Image-specific fields
+	// Width is the image width in pixels.
+	Width int `json:"width,omitempty"`
+	// Height is the image height in pixels.
+	Height int `json:"height,omitempty"`
+	// Detail is a processing hint for vision models ("low", "high", "auto").
+	Detail string `json:"detail,omitempty"`
+
+	// Audio/Video-specific fields
+	// DurationMs is the duration in milliseconds.
+	DurationMs int64 `json:"duration_ms,omitempty"`
+	// SampleRate is the audio sample rate in Hz.
+	SampleRate int `json:"sample_rate,omitempty"`
+	// Channels is the number of audio channels (1=mono, 2=stereo).
+	Channels int `json:"channels,omitempty"`
+}
+
+// NewTextPart creates a new text content part.
+func NewTextPart(text string) ContentPart {
+	return ContentPart{
+		Type: ContentPartTypeText,
+		Text: text,
+	}
+}
+
+// NewImagePart creates a new image content part with base64 data.
+func NewImagePart(data, mimeType string) ContentPart {
+	return ContentPart{
+		Type: ContentPartTypeImage,
+		Media: &MediaContent{
+			Data:     data,
+			MimeType: mimeType,
+		},
+	}
+}
+
+// NewImagePartFromURL creates a new image content part from a URL.
+func NewImagePartFromURL(url, mimeType string) ContentPart {
+	return ContentPart{
+		Type: ContentPartTypeImage,
+		Media: &MediaContent{
+			URL:      url,
+			MimeType: mimeType,
+		},
+	}
+}
+
+// NewAudioPart creates a new audio content part with base64 data.
+func NewAudioPart(data, mimeType string) ContentPart {
+	return ContentPart{
+		Type: ContentPartTypeAudio,
+		Media: &MediaContent{
+			Data:     data,
+			MimeType: mimeType,
+		},
+	}
+}
+
+// NewAudioPartFromURL creates a new audio content part from a URL.
+func NewAudioPartFromURL(url, mimeType string) ContentPart {
+	return ContentPart{
+		Type: ContentPartTypeAudio,
+		Media: &MediaContent{
+			URL:      url,
+			MimeType: mimeType,
+		},
+	}
+}
+
+// NewFilePart creates a new file content part from a URL.
+func NewFilePart(url, mimeType, filename string) ContentPart {
+	return ContentPart{
+		Type: ContentPartTypeFile,
+		Media: &MediaContent{
+			URL:      url,
+			MimeType: mimeType,
+			Filename: filename,
+		},
+	}
+}
+
 // MessageType represents the type of WebSocket message.
 type MessageType string
 
@@ -41,8 +167,12 @@ type ClientMessage struct {
 	Type MessageType `json:"type"`
 	// SessionID is the optional session ID for resuming a session.
 	SessionID string `json:"session_id,omitempty"`
-	// Content is the message content.
-	Content string `json:"content"`
+	// Content is the message content (text-only, for backward compatibility).
+	// If Parts is provided, it takes precedence over Content.
+	Content string `json:"content,omitempty"`
+	// Parts contains multi-modal content parts (text, images, audio, etc.).
+	// When provided, this takes precedence over the Content field.
+	Parts []ContentPart `json:"parts,omitempty"`
 	// Metadata contains optional additional data.
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
@@ -54,7 +184,11 @@ type ServerMessage struct {
 	// SessionID is the session identifier.
 	SessionID string `json:"session_id,omitempty"`
 	// Content is the message content (for chunk, done, error types).
+	// For text-only responses. If Parts is provided, it takes precedence.
 	Content string `json:"content,omitempty"`
+	// Parts contains multi-modal content parts (text, images, audio, etc.).
+	// Used for responses that include media content.
+	Parts []ContentPart `json:"parts,omitempty"`
 	// ToolCall contains tool call details (for tool_call type).
 	ToolCall *ToolCallInfo `json:"tool_call,omitempty"`
 	// ToolResult contains tool result details (for tool_result type).
@@ -165,4 +299,82 @@ func NewConnectedMessage(sessionID string) *ServerMessage {
 		SessionID: sessionID,
 		Timestamp: time.Now(),
 	}
+}
+
+// NewDoneMessageWithParts creates a new done message with multi-modal parts.
+func NewDoneMessageWithParts(sessionID string, parts []ContentPart) *ServerMessage {
+	return &ServerMessage{
+		Type:      MessageTypeDone,
+		SessionID: sessionID,
+		Parts:     parts,
+		Timestamp: time.Now(),
+	}
+}
+
+// NewChunkMessageWithParts creates a new chunk message with multi-modal parts.
+// This is useful for streaming responses that include media chunks.
+func NewChunkMessageWithParts(sessionID string, parts []ContentPart) *ServerMessage {
+	return &ServerMessage{
+		Type:      MessageTypeChunk,
+		SessionID: sessionID,
+		Parts:     parts,
+		Timestamp: time.Now(),
+	}
+}
+
+// GetTextContent returns the text content from a ClientMessage.
+// It checks Parts first, then falls back to Content for backward compatibility.
+func (m *ClientMessage) GetTextContent() string {
+	if len(m.Parts) > 0 {
+		for _, part := range m.Parts {
+			if part.Type == ContentPartTypeText && part.Text != "" {
+				return part.Text
+			}
+		}
+	}
+	return m.Content
+}
+
+// HasMediaContent returns true if the message contains any media parts.
+func (m *ClientMessage) HasMediaContent() bool {
+	for _, part := range m.Parts {
+		if part.Type != ContentPartTypeText && part.Media != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// GetMediaParts returns all non-text parts from the message.
+func (m *ClientMessage) GetMediaParts() []ContentPart {
+	var media []ContentPart
+	for _, part := range m.Parts {
+		if part.Type != ContentPartTypeText {
+			media = append(media, part)
+		}
+	}
+	return media
+}
+
+// GetTextContent returns the text content from a ServerMessage.
+// It checks Parts first, then falls back to Content.
+func (m *ServerMessage) GetTextContent() string {
+	if len(m.Parts) > 0 {
+		for _, part := range m.Parts {
+			if part.Type == ContentPartTypeText && part.Text != "" {
+				return part.Text
+			}
+		}
+	}
+	return m.Content
+}
+
+// HasMediaContent returns true if the message contains any media parts.
+func (m *ServerMessage) HasMediaContent() bool {
+	for _, part := range m.Parts {
+		if part.Type != ContentPartTypeText && part.Media != nil {
+			return true
+		}
+	}
+	return false
 }

@@ -51,9 +51,98 @@ Send a user message to the agent:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | string | Yes | Must be `"message"` |
-| `content` | string | Yes | User message content |
+| `content` | string | No | User message content (text-only) |
+| `parts` | array | No | Multi-modal content parts (see below) |
 | `session_id` | string | No | Resume existing session |
 | `metadata` | object | No | Custom metadata |
+
+> **Note**: Either `content` or `parts` should be provided. If both are present, `parts` takes precedence.
+
+#### Multi-Modal Message
+
+Send a message with images or other media:
+
+```json
+{
+  "type": "message",
+  "session_id": "sess-abc123",
+  "parts": [
+    {
+      "type": "text",
+      "text": "What's in this image?"
+    },
+    {
+      "type": "image",
+      "media": {
+        "url": "https://example.com/photo.jpg",
+        "mime_type": "image/jpeg"
+      }
+    }
+  ]
+}
+```
+
+##### ContentPart Types
+
+| Type | Description |
+|------|-------------|
+| `text` | Plain text content |
+| `image` | Image (JPEG, PNG, GIF, WebP) |
+| `audio` | Audio file (MP3, WAV, OGG) |
+| `video` | Video file (MP4, WebM) |
+| `file` | Generic file attachment |
+
+##### ContentPart Structure
+
+```typescript
+interface ContentPart {
+  type: "text" | "image" | "audio" | "video" | "file"
+  text?: string        // For type: "text"
+  media?: MediaContent // For media types
+}
+
+interface MediaContent {
+  // Data source (exactly one required)
+  data?: string        // Base64-encoded (< 256KB recommended)
+  url?: string         // HTTP/HTTPS URL
+  storage_ref?: string // Backend storage reference
+
+  // Required
+  mime_type: string    // e.g., "image/jpeg", "audio/mp3"
+
+  // Optional metadata
+  filename?: string
+  size_bytes?: number
+
+  // Image-specific
+  width?: number
+  height?: number
+  detail?: "low" | "high" | "auto"  // Vision model hint
+
+  // Audio/Video-specific
+  duration_ms?: number
+  sample_rate?: number  // Audio: Hz
+  channels?: number     // Audio: 1=mono, 2=stereo
+}
+```
+
+##### Example: Image with Base64 Data
+
+```json
+{
+  "type": "message",
+  "parts": [
+    { "type": "text", "text": "Describe this image" },
+    {
+      "type": "image",
+      "media": {
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR...",
+        "mime_type": "image/png"
+      }
+    }
+  ]
+}
+```
 
 ### Server Messages
 
@@ -91,6 +180,34 @@ Final response completion:
   "content": "Hello! I'm doing great, thank you for asking!"
 }
 ```
+
+#### Multi-Modal Response
+
+For responses containing media (e.g., generated images), the server uses the `parts` array:
+
+```json
+{
+  "type": "done",
+  "session_id": "sess-abc123",
+  "parts": [
+    {
+      "type": "text",
+      "text": "Here's the image you requested:"
+    },
+    {
+      "type": "image",
+      "media": {
+        "url": "https://storage.example.com/generated/img-123.png",
+        "mime_type": "image/png",
+        "width": 1024,
+        "height": 1024
+      }
+    }
+  ]
+}
+```
+
+> **Note**: When `parts` is present, it takes precedence over `content`. For backward compatibility, text-only responses may use either format.
 
 #### Tool Call
 
