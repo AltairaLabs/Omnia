@@ -110,18 +110,18 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
         print_header "Dashboard: Tests with Coverage"
         # Run tests with coverage - Vitest enforces thresholds in vitest.config.ts
         # Thresholds: 80% for statements, branches, functions, and lines
-        DASHBOARD_TEST_OUTPUT=$(cd "$REPO_ROOT/dashboard" && npm run test:coverage 2>&1) || true
+        DASHBOARD_TEST_OUTPUT=$(cd "$REPO_ROOT/dashboard" && npm run test:coverage 2>&1)
         DASHBOARD_TEST_EXIT=$?
 
-        if [ $DASHBOARD_TEST_EXIT -ne 0 ]; then
-            # Check if it's a coverage threshold failure
-            if echo "$DASHBOARD_TEST_OUTPUT" | grep -q "Coverage for"; then
-                print_error "Dashboard coverage below threshold (80%)"
-                echo "$DASHBOARD_TEST_OUTPUT" | grep -E "Coverage for|ERROR" | head -10
-            else
-                print_error "Dashboard tests failed"
-                echo "$DASHBOARD_TEST_OUTPUT" | grep -E "(FAIL|Error:|✕)" | head -20
-            fi
+        # Check for coverage threshold failures (Vitest outputs "ERROR: Coverage for X does not meet threshold")
+        if echo "$DASHBOARD_TEST_OUTPUT" | grep -q "ERROR: Coverage for"; then
+            print_error "Dashboard coverage below threshold (80%)"
+            echo "$DASHBOARD_TEST_OUTPUT" | grep -E "ERROR: Coverage for" | head -10
+            CHECKS_FAILED=1
+        elif [ $DASHBOARD_TEST_EXIT -ne 0 ]; then
+            # Test failures (not coverage related)
+            print_error "Dashboard tests failed"
+            echo "$DASHBOARD_TEST_OUTPUT" | grep -E "(FAIL|Error:|✕)" | head -20
             CHECKS_FAILED=1
         else
             # Extract coverage from Vitest output (format: "All files  |  XX.XX |  XX.XX |  XX.XX |  XX.XX")
