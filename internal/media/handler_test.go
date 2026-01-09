@@ -398,145 +398,95 @@ func TestHandler_RegisterRoutes(t *testing.T) {
 	}
 }
 
-func TestHandler_Upload_CreateFileError(t *testing.T) {
-	handler, storage, tmpDir := setupTestHandler(t)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-	defer func() { _ = storage.Close() }()
-
-	// First, request an upload URL
-	creds, err := storage.GetUploadURL(context.TODO(), UploadRequest{
-		SessionID: "session-123",
-		Filename:  "test.txt",
-		MIMEType:  "text/plain",
-		SizeBytes: 5,
-	})
-	if err != nil {
-		t.Fatalf("GetUploadURL() error = %v", err)
-	}
-
-	// Save original createFile and restore after test
-	origCreateFile := createFile
-	defer func() { createFile = origCreateFile }()
-
-	// Mock createFile to return an error
-	createFile = func(path string) (io.WriteCloser, error) {
-		return nil, os.ErrPermission
-	}
-
-	req := httptest.NewRequest(http.MethodPut, "/media/upload/"+creds.UploadID, bytes.NewBufferString("hello"))
-	rec := httptest.NewRecorder()
-
-	handler.handleUpload(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("handleUpload() status = %v, want %v", rec.Code, http.StatusInternalServerError)
-	}
-}
-
-// failingWriter is an io.WriteCloser that fails on Write
-type failingWriter struct {
+// mockWriter is a configurable io.WriteCloser for testing error paths
+type mockWriter struct {
+	file        *os.File
 	failOnWrite bool
 	failOnClose bool
 }
 
-func (f *failingWriter) Write(p []byte) (n int, err error) {
-	if f.failOnWrite {
+func (m *mockWriter) Write(p []byte) (n int, err error) {
+	if m.failOnWrite {
 		return 0, os.ErrPermission
+	}
+	if m.file != nil {
+		return m.file.Write(p)
 	}
 	return len(p), nil
 }
 
-func (f *failingWriter) Close() error {
-	if f.failOnClose {
+func (m *mockWriter) Close() error {
+	if m.file != nil {
+		_ = m.file.Close()
+	}
+	if m.failOnClose {
 		return os.ErrPermission
 	}
 	return nil
 }
 
-func TestHandler_Upload_WriteError(t *testing.T) {
-	handler, storage, tmpDir := setupTestHandler(t)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-	defer func() { _ = storage.Close() }()
-
-	// First, request an upload URL
-	creds, err := storage.GetUploadURL(context.TODO(), UploadRequest{
-		SessionID: "session-123",
-		Filename:  "test.txt",
-		MIMEType:  "text/plain",
-		SizeBytes: 5,
-	})
-	if err != nil {
-		t.Fatalf("GetUploadURL() error = %v", err)
+func TestHandler_Upload_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockCreateFile func(path string) (io.WriteCloser, error)
+		wantStatus     int
+	}{
+		{
+			name: "create file error",
+			mockCreateFile: func(path string) (io.WriteCloser, error) {
+				return nil, os.ErrPermission
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "write error",
+			mockCreateFile: func(path string) (io.WriteCloser, error) {
+				return &mockWriter{failOnWrite: true}, nil
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "close error (logged only)",
+			mockCreateFile: func(path string) (io.WriteCloser, error) {
+				file, err := os.Create(path)
+				if err != nil {
+					return nil, err
+				}
+				return &mockWriter{file: file, failOnClose: true}, nil
+			},
+			wantStatus: http.StatusNoContent, // Close errors are logged but don't fail the upload
+		},
 	}
 
-	// Save original createFile and restore after test
-	origCreateFile := createFile
-	defer func() { createFile = origCreateFile }()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, storage, tmpDir := setupTestHandler(t)
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+			defer func() { _ = storage.Close() }()
 
-	// Mock createFile to return a writer that fails on Write
-	createFile = func(path string) (io.WriteCloser, error) {
-		return &failingWriter{failOnWrite: true}, nil
-	}
+			creds, err := storage.GetUploadURL(context.TODO(), UploadRequest{
+				SessionID: "session-123",
+				Filename:  "test.txt",
+				MIMEType:  "text/plain",
+				SizeBytes: 5,
+			})
+			if err != nil {
+				t.Fatalf("GetUploadURL() error = %v", err)
+			}
 
-	req := httptest.NewRequest(http.MethodPut, "/media/upload/"+creds.UploadID, bytes.NewBufferString("hello"))
-	rec := httptest.NewRecorder()
+			origCreateFile := createFile
+			defer func() { createFile = origCreateFile }()
+			createFile = tt.mockCreateFile
 
-	handler.handleUpload(rec, req)
+			req := httptest.NewRequest(http.MethodPut, "/media/upload/"+creds.UploadID, bytes.NewBufferString("hello"))
+			rec := httptest.NewRecorder()
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("handleUpload() status = %v, want %v", rec.Code, http.StatusInternalServerError)
-	}
-}
+			handler.handleUpload(rec, req)
 
-// wrappedWriter wraps a real file but fails on close
-type wrappedWriter struct {
-	*os.File
-}
-
-func (w *wrappedWriter) Close() error {
-	// Close the real file first to flush data
-	_ = w.File.Close()
-	// Return an error to trigger the error logging path
-	return os.ErrPermission
-}
-
-func TestHandler_Upload_CloseError(t *testing.T) {
-	handler, storage, tmpDir := setupTestHandler(t)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-	defer func() { _ = storage.Close() }()
-
-	// First, request an upload URL
-	creds, err := storage.GetUploadURL(context.TODO(), UploadRequest{
-		SessionID: "session-123",
-		Filename:  "test.txt",
-		MIMEType:  "text/plain",
-		SizeBytes: 5,
-	})
-	if err != nil {
-		t.Fatalf("GetUploadURL() error = %v", err)
-	}
-
-	// Save original createFile and restore after test
-	origCreateFile := createFile
-	defer func() { createFile = origCreateFile }()
-
-	// Mock createFile to return a writer that writes to the real file but fails on Close
-	createFile = func(path string) (io.WriteCloser, error) {
-		file, err := os.Create(path)
-		if err != nil {
-			return nil, err
-		}
-		return &wrappedWriter{File: file}, nil
-	}
-
-	req := httptest.NewRequest(http.MethodPut, "/media/upload/"+creds.UploadID, bytes.NewBufferString("hello"))
-	rec := httptest.NewRecorder()
-
-	handler.handleUpload(rec, req)
-
-	// The upload should succeed (close error is logged but not returned)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("handleUpload() status = %v, want %v", rec.Code, http.StatusNoContent)
+			if rec.Code != tt.wantStatus {
+				t.Errorf("handleUpload() status = %v, want %v", rec.Code, tt.wantStatus)
+			}
+		})
 	}
 }
 
