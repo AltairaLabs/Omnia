@@ -144,6 +144,32 @@ interface MediaContent {
 }
 ```
 
+#### Upload Request
+
+Request an upload URL for a file (requires facade media storage to be enabled):
+
+```json
+{
+  "type": "upload_request",
+  "session_id": "sess-abc123",
+  "upload_request": {
+    "filename": "photo.jpg",
+    "mime_type": "image/jpeg",
+    "size_bytes": 102400
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | Yes | Must be `"upload_request"` |
+| `session_id` | string | No | Resume existing session |
+| `upload_request.filename` | string | Yes | Original filename |
+| `upload_request.mime_type` | string | Yes | MIME type of the file |
+| `upload_request.size_bytes` | number | Yes | File size in bytes |
+
+The server responds with an `upload_ready` message containing the upload URL. After uploading the file via HTTP PUT, the client can reference it using the `storage_ref` in subsequent messages.
+
 ### Server Messages
 
 Messages sent from server to client.
@@ -240,6 +266,52 @@ Result from a tool call:
 }
 ```
 
+#### Upload Ready
+
+Response to an `upload_request` with the upload URL:
+
+```json
+{
+  "type": "upload_ready",
+  "session_id": "sess-abc123",
+  "upload_ready": {
+    "upload_id": "upl-xyz789",
+    "upload_url": "http://agent.example.com/media/upload/upl-xyz789",
+    "storage_ref": "omnia://sessions/sess-abc123/media/med-def456",
+    "expires_at": "2025-01-09T12:00:00Z"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `upload_ready.upload_id` | string | Unique upload identifier |
+| `upload_ready.upload_url` | string | URL to PUT the file content |
+| `upload_ready.storage_ref` | string | Storage reference for the uploaded file |
+| `upload_ready.expires_at` | string | When the upload URL expires (ISO 8601) |
+
+#### Upload Complete
+
+Notification that a file upload has completed successfully:
+
+```json
+{
+  "type": "upload_complete",
+  "session_id": "sess-abc123",
+  "upload_complete": {
+    "upload_id": "upl-xyz789",
+    "storage_ref": "omnia://sessions/sess-abc123/media/med-def456",
+    "size_bytes": 102400
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `upload_complete.upload_id` | string | Upload identifier |
+| `upload_complete.storage_ref` | string | Storage reference for the uploaded file |
+| `upload_complete.size_bytes` | number | Actual file size in bytes |
+
 #### Error
 
 Error message:
@@ -263,6 +335,8 @@ Error message:
 | `PROVIDER_ERROR` | LLM provider returned an error |
 | `TOOL_ERROR` | Tool execution failed |
 | `INTERNAL_ERROR` | Internal server error |
+| `UPLOAD_FAILED` | File upload operation failed |
+| `MEDIA_NOT_ENABLED` | Media storage is not enabled on the facade |
 
 ## Message Flow
 
@@ -297,6 +371,27 @@ sequenceDiagram
     S-->>C: chunk
     S-->>C: done
 ```
+
+### With File Upload (WebSocket)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: upload_request
+    S-->>C: upload_ready (upload_url, storage_ref)
+    C->>S: PUT file to upload_url (HTTP)
+    C->>S: message with storage_ref
+    S-->>C: chunk
+    S-->>C: done
+```
+
+This flow shows uploading a file via WebSocket before sending a message that references it. The client:
+1. Sends an `upload_request` via WebSocket
+2. Receives `upload_ready` with the upload URL
+3. PUTs the file content to the upload URL via HTTP
+4. Sends a message with the `storage_ref` in the media content
 
 ### Session Resumption
 

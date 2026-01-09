@@ -19,6 +19,7 @@ package facade
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,7 +29,14 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
 
+	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+)
+
+// Test constants.
+const (
+	testUploadID  = "upload-123"
+	testUploadURL = "http://example.com/upload/" + testUploadID
 )
 
 // mockHandler implements MessageHandler for testing.
@@ -605,5 +613,441 @@ func TestServerHandlerError(t *testing.T) {
 	}
 	if errorMsg.Type != MessageTypeError {
 		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+}
+
+func TestServerUploadRequest_MediaNotEnabled(t *testing.T) {
+	// Server without media storage
+	_, ts := newTestServer(t, nil)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send upload_request
+	clientMsg := ClientMessage{
+		Type: MessageTypeUploadRequest,
+		UploadRequest: &UploadRequestInfo{
+			Filename:  "test.jpg",
+			MimeType:  "image/jpeg",
+			SizeBytes: 1024,
+		},
+	}
+	if err := ws.WriteJSON(clientMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message first
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+	if connectedMsg.Type != MessageTypeConnected {
+		t.Errorf("Expected connected message, got %v", connectedMsg.Type)
+	}
+
+	// Read error message
+	var errorMsg ServerMessage
+	if err := ws.ReadJSON(&errorMsg); err != nil {
+		t.Fatalf("Failed to read error message: %v", err)
+	}
+	if errorMsg.Type != MessageTypeError {
+		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+	if errorMsg.Error == nil {
+		t.Fatal("Error field should not be nil")
+	}
+	if errorMsg.Error.Code != ErrorCodeMediaNotEnabled {
+		t.Errorf("Error code = %v, want %v", errorMsg.Error.Code, ErrorCodeMediaNotEnabled)
+	}
+}
+
+func TestServerUploadRequest_MissingUploadRequestField(t *testing.T) {
+	// Server without media storage (to test validation before media check)
+	_, ts := newTestServer(t, nil)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send upload_request without the upload_request field
+	clientMsg := ClientMessage{
+		Type: MessageTypeUploadRequest,
+		// UploadRequest intentionally nil
+	}
+	if err := ws.WriteJSON(clientMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+
+	// Read error message - should get MEDIA_NOT_ENABLED first since no media storage
+	var errorMsg ServerMessage
+	if err := ws.ReadJSON(&errorMsg); err != nil {
+		t.Fatalf("Failed to read error message: %v", err)
+	}
+	if errorMsg.Type != MessageTypeError {
+		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+}
+
+func TestNewUploadReadyMessage(t *testing.T) {
+	info := &UploadReadyInfo{
+		UploadID:   testUploadID,
+		UploadURL:  testUploadURL,
+		StorageRef: "omnia://sessions/sess-123/media/media-456",
+		ExpiresAt:  time.Now().Add(1 * time.Hour),
+	}
+
+	msg := NewUploadReadyMessage("sess-123", info)
+
+	if msg.Type != MessageTypeUploadReady {
+		t.Errorf("Type = %v, want %v", msg.Type, MessageTypeUploadReady)
+	}
+	if msg.SessionID != "sess-123" {
+		t.Errorf("SessionID = %v, want sess-123", msg.SessionID)
+	}
+	if msg.UploadReady == nil {
+		t.Fatal("UploadReady should not be nil")
+	}
+	if msg.UploadReady.UploadID != testUploadID {
+		t.Errorf("UploadID = %v, want %v", msg.UploadReady.UploadID, testUploadID)
+	}
+	if msg.UploadReady.UploadURL != testUploadURL {
+		t.Errorf("UploadURL = %v, want %v", msg.UploadReady.UploadURL, testUploadURL)
+	}
+	if msg.UploadReady.StorageRef != "omnia://sessions/sess-123/media/media-456" {
+		t.Errorf("StorageRef = %v, want omnia://sessions/sess-123/media/media-456", msg.UploadReady.StorageRef)
+	}
+}
+
+func TestNewUploadCompleteMessage(t *testing.T) {
+	info := &UploadCompleteInfo{
+		UploadID:   testUploadID,
+		StorageRef: "omnia://sessions/sess-123/media/media-456",
+		SizeBytes:  1024,
+	}
+
+	msg := NewUploadCompleteMessage("sess-123", info)
+
+	if msg.Type != MessageTypeUploadComplete {
+		t.Errorf("Type = %v, want %v", msg.Type, MessageTypeUploadComplete)
+	}
+	if msg.SessionID != "sess-123" {
+		t.Errorf("SessionID = %v, want sess-123", msg.SessionID)
+	}
+	if msg.UploadComplete == nil {
+		t.Fatal("UploadComplete should not be nil")
+	}
+	if msg.UploadComplete.UploadID != testUploadID {
+		t.Errorf("UploadID = %v, want %v", msg.UploadComplete.UploadID, testUploadID)
+	}
+	if msg.UploadComplete.StorageRef != "omnia://sessions/sess-123/media/media-456" {
+		t.Errorf("StorageRef = %v, want omnia://sessions/sess-123/media/media-456", msg.UploadComplete.StorageRef)
+	}
+	if msg.UploadComplete.SizeBytes != 1024 {
+		t.Errorf("SizeBytes = %v, want 1024", msg.UploadComplete.SizeBytes)
+	}
+}
+
+func TestUploadRequestInfoJSON(t *testing.T) {
+	info := &UploadRequestInfo{
+		Filename:  "test.jpg",
+		MimeType:  "image/jpeg",
+		SizeBytes: 2048,
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded UploadRequestInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.Filename != "test.jpg" {
+		t.Errorf("Filename = %v, want test.jpg", decoded.Filename)
+	}
+	if decoded.MimeType != "image/jpeg" {
+		t.Errorf("MimeType = %v, want image/jpeg", decoded.MimeType)
+	}
+	if decoded.SizeBytes != 2048 {
+		t.Errorf("SizeBytes = %v, want 2048", decoded.SizeBytes)
+	}
+}
+
+func TestUploadMessageTypes(t *testing.T) {
+	// Verify the new message type constants
+	if MessageTypeUploadRequest != "upload_request" {
+		t.Errorf("MessageTypeUploadRequest = %v, want upload_request", MessageTypeUploadRequest)
+	}
+	if MessageTypeUploadReady != "upload_ready" {
+		t.Errorf("MessageTypeUploadReady = %v, want upload_ready", MessageTypeUploadReady)
+	}
+	if MessageTypeUploadComplete != "upload_complete" {
+		t.Errorf("MessageTypeUploadComplete = %v, want upload_complete", MessageTypeUploadComplete)
+	}
+}
+
+func TestUploadErrorCodes(t *testing.T) {
+	// Verify the new error codes
+	if ErrorCodeUploadFailed != "UPLOAD_FAILED" {
+		t.Errorf("ErrorCodeUploadFailed = %v, want UPLOAD_FAILED", ErrorCodeUploadFailed)
+	}
+	if ErrorCodeMediaNotEnabled != "MEDIA_NOT_ENABLED" {
+		t.Errorf("ErrorCodeMediaNotEnabled = %v, want MEDIA_NOT_ENABLED", ErrorCodeMediaNotEnabled)
+	}
+}
+
+// mockMediaStorage implements media.Storage for testing.
+type mockMediaStorage struct {
+	getUploadURLFunc func(ctx context.Context, req media.UploadRequest) (*media.UploadCredentials, error)
+}
+
+func (m *mockMediaStorage) GetUploadURL(ctx context.Context, req media.UploadRequest) (*media.UploadCredentials, error) {
+	if m.getUploadURLFunc != nil {
+		return m.getUploadURLFunc(ctx, req)
+	}
+	return &media.UploadCredentials{
+		UploadID:   testUploadID,
+		URL:        testUploadURL,
+		StorageRef: "omnia://sessions/" + req.SessionID + "/media/media-123",
+		ExpiresAt:  time.Now().Add(1 * time.Hour),
+	}, nil
+}
+
+func (m *mockMediaStorage) GetDownloadURL(_ context.Context, storageRef string) (string, error) {
+	return "http://example.com/download/" + storageRef, nil
+}
+
+func (m *mockMediaStorage) GetMediaInfo(_ context.Context, _ string) (*media.MediaInfo, error) {
+	return nil, nil
+}
+
+func (m *mockMediaStorage) Delete(_ context.Context, _ string) error {
+	return nil
+}
+
+func (m *mockMediaStorage) Close() error {
+	return nil
+}
+
+func newTestServerWithMedia(t *testing.T, handler MessageHandler, storage media.Storage) *httptest.Server {
+	t.Helper()
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, handler, log, WithMediaStorage(storage))
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	return ts
+}
+
+func TestServerUploadRequest_Success(t *testing.T) {
+	storage := &mockMediaStorage{}
+	ts := newTestServerWithMedia(t, nil, storage)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send upload_request
+	clientMsg := ClientMessage{
+		Type: MessageTypeUploadRequest,
+		UploadRequest: &UploadRequestInfo{
+			Filename:  "test.jpg",
+			MimeType:  "image/jpeg",
+			SizeBytes: 1024,
+		},
+	}
+	if err := ws.WriteJSON(clientMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message first
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+	if connectedMsg.Type != MessageTypeConnected {
+		t.Errorf("Expected connected message, got %v", connectedMsg.Type)
+	}
+
+	// Read upload_ready message
+	var uploadReadyMsg ServerMessage
+	if err := ws.ReadJSON(&uploadReadyMsg); err != nil {
+		t.Fatalf("Failed to read upload_ready message: %v", err)
+	}
+	if uploadReadyMsg.Type != MessageTypeUploadReady {
+		t.Errorf("Expected upload_ready message, got %v", uploadReadyMsg.Type)
+	}
+	if uploadReadyMsg.UploadReady == nil {
+		t.Fatal("UploadReady should not be nil")
+	}
+	if uploadReadyMsg.UploadReady.UploadID != testUploadID {
+		t.Errorf("UploadID = %v, want %v", uploadReadyMsg.UploadReady.UploadID, testUploadID)
+	}
+	if uploadReadyMsg.UploadReady.UploadURL != testUploadURL {
+		t.Errorf("UploadURL = %v, want %v", uploadReadyMsg.UploadReady.UploadURL, testUploadURL)
+	}
+	if !strings.Contains(uploadReadyMsg.UploadReady.StorageRef, "omnia://sessions/") {
+		t.Errorf("StorageRef should contain omnia://sessions/, got %v", uploadReadyMsg.UploadReady.StorageRef)
+	}
+}
+
+func TestServerUploadRequest_ValidationErrors(t *testing.T) {
+	storage := &mockMediaStorage{}
+	ts := newTestServerWithMedia(t, nil, storage)
+
+	tests := []struct {
+		name          string
+		uploadRequest *UploadRequestInfo
+		expectedCode  string
+	}{
+		{
+			name:          "missing filename",
+			uploadRequest: &UploadRequestInfo{MimeType: "image/jpeg", SizeBytes: 1024},
+			expectedCode:  ErrorCodeInvalidMessage,
+		},
+		{
+			name:          "missing mime_type",
+			uploadRequest: &UploadRequestInfo{Filename: "test.jpg", SizeBytes: 1024},
+			expectedCode:  ErrorCodeInvalidMessage,
+		},
+		{
+			name:          "invalid size_bytes",
+			uploadRequest: &UploadRequestInfo{Filename: "test.jpg", MimeType: "image/jpeg", SizeBytes: 0},
+			expectedCode:  ErrorCodeInvalidMessage,
+		},
+		{
+			name:          "missing upload_request field",
+			uploadRequest: nil,
+			expectedCode:  ErrorCodeInvalidMessage,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+			if err != nil {
+				t.Fatalf("Failed to connect: %v", err)
+			}
+			defer func() { _ = ws.Close() }()
+
+			// Send upload_request
+			clientMsg := ClientMessage{
+				Type:          MessageTypeUploadRequest,
+				UploadRequest: tc.uploadRequest,
+			}
+			if err := ws.WriteJSON(clientMsg); err != nil {
+				t.Fatalf("Failed to send message: %v", err)
+			}
+
+			// Read connected message
+			var connectedMsg ServerMessage
+			if err := ws.ReadJSON(&connectedMsg); err != nil {
+				t.Fatalf("Failed to read connected message: %v", err)
+			}
+
+			// Read error message
+			var errorMsg ServerMessage
+			if err := ws.ReadJSON(&errorMsg); err != nil {
+				t.Fatalf("Failed to read error message: %v", err)
+			}
+			if errorMsg.Type != MessageTypeError {
+				t.Errorf("Expected error message, got %v", errorMsg.Type)
+			}
+			if errorMsg.Error == nil {
+				t.Fatal("Error field should not be nil")
+			}
+			if errorMsg.Error.Code != tc.expectedCode {
+				t.Errorf("Error code = %v, want %v", errorMsg.Error.Code, tc.expectedCode)
+			}
+		})
+	}
+}
+
+func TestServerUploadRequest_StorageError(t *testing.T) {
+	storage := &mockMediaStorage{
+		getUploadURLFunc: func(_ context.Context, _ media.UploadRequest) (*media.UploadCredentials, error) {
+			return nil, errors.New("storage error")
+		},
+	}
+	ts := newTestServerWithMedia(t, nil, storage)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send upload_request
+	clientMsg := ClientMessage{
+		Type: MessageTypeUploadRequest,
+		UploadRequest: &UploadRequestInfo{
+			Filename:  "test.jpg",
+			MimeType:  "image/jpeg",
+			SizeBytes: 1024,
+		},
+	}
+	if err := ws.WriteJSON(clientMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+
+	// Read error message
+	var errorMsg ServerMessage
+	if err := ws.ReadJSON(&errorMsg); err != nil {
+		t.Fatalf("Failed to read error message: %v", err)
+	}
+	if errorMsg.Type != MessageTypeError {
+		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+	if errorMsg.Error == nil {
+		t.Fatal("Error field should not be nil")
+	}
+	if errorMsg.Error.Code != ErrorCodeUploadFailed {
+		t.Errorf("Error code = %v, want %v", errorMsg.Error.Code, ErrorCodeUploadFailed)
+	}
+}
+
+func TestWithMediaStorage(t *testing.T) {
+	storage := &mockMediaStorage{}
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	cfg := DefaultServerConfig()
+	log := logr.Discard()
+
+	server := NewServer(cfg, store, nil, log, WithMediaStorage(storage))
+
+	if server.mediaStorage == nil {
+		t.Error("mediaStorage should not be nil after WithMediaStorage")
 	}
 }
