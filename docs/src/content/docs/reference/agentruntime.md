@@ -256,6 +256,22 @@ Session store types:
 - `redis` - Redis backend (recommended)
 - `postgres` - PostgreSQL backend
 
+### `media`
+
+Media configuration for resolving `mock://` URLs in mock provider responses.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `media.basePath` | string | /etc/omnia/media | No |
+
+```yaml
+spec:
+  media:
+    basePath: /etc/omnia/media
+```
+
+The `basePath` sets the `OMNIA_MEDIA_BASE_PATH` environment variable, which the runtime uses to resolve `mock://` URLs to actual file paths. This is primarily used with the mock provider for testing multimodal responses.
+
 ### `runtime`
 
 Deployment-related settings including replicas, resources, and autoscaling.
@@ -279,6 +295,42 @@ spec:
         value: "agents"
         effect: "NoSchedule"
 ```
+
+### `runtime.volumes` and `runtime.volumeMounts`
+
+Mount additional volumes in the runtime container for media files, mock configurations, or other data.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `runtime.volumes` | []Volume | Kubernetes Volume definitions |
+| `runtime.volumeMounts` | []VolumeMount | Volume mounts for the runtime container |
+
+```yaml
+spec:
+  runtime:
+    volumes:
+      - name: mock-media
+        persistentVolumeClaim:
+          claimName: media-pvc
+      - name: mock-config
+        configMap:
+          name: mock-responses
+    volumeMounts:
+      - name: mock-media
+        mountPath: /etc/omnia/media
+        readOnly: true
+      - name: mock-config
+        mountPath: /etc/omnia/mock
+        readOnly: true
+```
+
+Supported volume types include:
+- `persistentVolumeClaim` - Mount a PVC for persistent storage
+- `configMap` - Mount a ConfigMap as files
+- `secret` - Mount a Secret as files
+- `emptyDir` - Temporary storage (cleared on pod restart)
+
+This is commonly used with the mock provider to mount media files (images, audio) and mock response configurations for testing.
 
 ### `runtime.autoscaling`
 
