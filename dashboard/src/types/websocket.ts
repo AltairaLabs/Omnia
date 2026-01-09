@@ -65,6 +65,15 @@ export const ErrorCodes = {
   AGENT_NOT_FOUND: "AGENT_NOT_FOUND",
 } as const;
 
+// File attachment for messages
+export interface FileAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string; // base64 data URL for preview and sending
+}
+
 // Console message types for UI rendering
 export type ConsoleMessageRole = "user" | "assistant" | "system";
 
@@ -74,6 +83,7 @@ export interface ConsoleMessage {
   content: string;
   timestamp: Date;
   toolCalls?: ToolCallWithResult[];
+  attachments?: FileAttachment[];
   isStreaming?: boolean;
 }
 
