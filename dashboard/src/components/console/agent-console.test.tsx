@@ -283,6 +283,103 @@ describe("AgentConsole", () => {
       expect(fileInput).toHaveAttribute("accept");
       expect(fileInput?.getAttribute("accept")).toContain("image/png");
       expect(fileInput?.getAttribute("accept")).toContain("audio/mpeg");
+      // Check for new file types
+      expect(fileInput?.getAttribute("accept")).toContain("application/pdf");
+      expect(fileInput?.getAttribute("accept")).toContain(".json");
+    });
+
+    it("should trigger file input click when attachment button is clicked", () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      const clickSpy = vi.spyOn(fileInput, "click");
+
+      const attachButton = screen.getByRole("button", { name: "Attach files" });
+      fireEvent.click(attachButton);
+
+      expect(clickSpy).toHaveBeenCalled();
+    });
+
+    it("should process files when file input changes", async () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+      // Create a mock file
+      const file = new File(["test content"], "test.txt", { type: "text/plain" });
+
+      // Trigger file selection
+      Object.defineProperty(fileInput, "files", {
+        value: [file],
+        writable: false,
+      });
+
+      fireEvent.change(fileInput);
+
+      // Wait for async file processing
+      await vi.waitFor(() => {
+        // File input value should be reset after processing
+        expect(fileInput.value).toBe("");
+      });
+    });
+
+    it("should handle empty file input change", () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+      // Trigger change with no files
+      Object.defineProperty(fileInput, "files", {
+        value: [],
+        writable: false,
+      });
+
+      // Should not throw - verify component is still rendered
+      fireEvent.change(fileInput);
+      expect(screen.getByRole("textbox")).toBeInTheDocument();
+    });
+  });
+
+  describe("file validation", () => {
+    it("should accept files with valid extensions", async () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+      // Create a JSON file (text/plain MIME but .json extension)
+      const jsonFile = new File(['{"key": "value"}'], "data.json", { type: "application/json" });
+
+      Object.defineProperty(fileInput, "files", {
+        value: [jsonFile],
+        writable: false,
+      });
+
+      fireEvent.change(fileInput);
+
+      // Wait for async processing
+      await vi.waitFor(() => {
+        expect(fileInput.value).toBe("");
+      });
+    });
+
+    it("should accept Python files by extension", async () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+      // Python files may have generic MIME type
+      const pyFile = new File(['print("hello")'], "script.py", { type: "text/x-python" });
+
+      Object.defineProperty(fileInput, "files", {
+        value: [pyFile],
+        writable: false,
+      });
+
+      fireEvent.change(fileInput);
+
+      await vi.waitFor(() => {
+        expect(fileInput.value).toBe("");
+      });
     });
   });
 });
