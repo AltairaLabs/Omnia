@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload } from "lucide-react";
+import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -50,6 +50,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
   const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
   // Always use mock mode for now (until K8s integration)
@@ -216,6 +217,23 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
     []
   );
 
+  // Handle file input change (from attachment button)
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+        processFiles(e.target.files);
+      }
+      // Reset input so the same file can be selected again
+      e.target.value = "";
+    },
+    [processFiles]
+  );
+
+  // Handle attachment button click
+  const handleAttachmentClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
   // Status badge
   const statusBadge = {
     disconnected: (
@@ -331,7 +349,29 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
           />
         )}
 
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ALLOWED_TYPES.join(",")}
+          onChange={handleFileInputChange}
+          className="hidden"
+          aria-hidden="true"
+        />
+
         <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={handleAttachmentClick}
+            disabled={status !== "connected" || attachments.length >= MAX_FILES}
+            className="shrink-0"
+            aria-label="Attach files"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
           <Textarea
             ref={textareaRef}
             value={input}
@@ -340,7 +380,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
             onPaste={handlePaste}
             placeholder={
               status === "connected"
-                ? "Type a message... (Enter to send, Shift+Enter for new line, Paste images)"
+                ? "Type a message... (Enter to send, Shift+Enter for new line)"
                 : "Connect to start chatting..."
             }
             disabled={status !== "connected"}
@@ -351,6 +391,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
             onClick={handleSend}
             disabled={(!input.trim() && attachments.length === 0) || status !== "connected"}
             className="shrink-0"
+            aria-label="Send message"
           >
             <Send className="h-4 w-4" />
           </Button>

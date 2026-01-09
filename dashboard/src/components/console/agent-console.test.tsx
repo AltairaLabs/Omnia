@@ -31,14 +31,14 @@ describe("AgentConsole", () => {
   });
 
   describe("paste handling", () => {
-    it("should render the console with paste-enabled textarea", () => {
+    it("should render the console with textarea", () => {
       render(<AgentConsole agentName="test-agent" namespace="default" />);
 
       const textarea = screen.getByRole("textbox");
       expect(textarea).toBeInTheDocument();
       expect(textarea).toHaveAttribute(
         "placeholder",
-        expect.stringContaining("Paste images")
+        expect.stringContaining("Enter to send")
       );
     });
 
@@ -257,6 +257,32 @@ describe("AgentConsole", () => {
 
       expect(screen.getByText(/Start a conversation with/)).toBeInTheDocument();
       expect(screen.getByText("test-agent")).toBeInTheDocument();
+    });
+  });
+
+  describe("attachment button", () => {
+    it("should render attachment button", () => {
+      render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const attachButton = screen.getByRole("button", { name: "Attach files" });
+      expect(attachButton).toBeInTheDocument();
+    });
+
+    it("should have hidden file input", () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]');
+      expect(fileInput).toBeInTheDocument();
+      expect(fileInput).toHaveClass("hidden");
+    });
+
+    it("should accept correct file types", () => {
+      const { container } = render(<AgentConsole agentName="test-agent" namespace="default" />);
+
+      const fileInput = container.querySelector('input[type="file"]');
+      expect(fileInput).toHaveAttribute("accept");
+      expect(fileInput?.getAttribute("accept")).toContain("image/png");
+      expect(fileInput?.getAttribute("accept")).toContain("audio/mpeg");
     });
   });
 });
