@@ -98,16 +98,20 @@ export function AttachmentPreview({
               </>
             )}
 
-            {/* Remove button */}
+            {/* Remove button - pointer-events-none when invisible to not block clicks */}
             {!readonly && onRemove && (
               <button
                 type="button"
-                onClick={() => onRemove(attachment.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(attachment.id);
+                }}
                 className={cn(
-                  "absolute top-1 right-1 p-0.5 rounded-full",
+                  "absolute top-1 right-1 p-0.5 rounded-full z-10",
                   "bg-background/80 hover:bg-destructive hover:text-destructive-foreground",
                   "opacity-0 group-hover:opacity-100 transition-opacity",
-                  "focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring"
+                  "pointer-events-none group-hover:pointer-events-auto",
+                  "focus:opacity-100 focus:pointer-events-auto focus:outline-none focus:ring-2 focus:ring-ring"
                 )}
                 aria-label={`Remove ${attachment.name}`}
               >
@@ -115,11 +119,11 @@ export function AttachmentPreview({
               </button>
             )}
 
-            {/* Image overlay with file info on hover */}
+            {/* Image overlay with file info on hover - pointer-events-none to not block clicks */}
             {isImage && (
               <div
                 className={cn(
-                  "absolute inset-x-0 bottom-0 px-1 py-0.5",
+                  "absolute inset-x-0 bottom-0 px-1 py-0.5 pointer-events-none",
                   "bg-background/80 text-xs truncate",
                   "opacity-0 group-hover:opacity-100 transition-opacity"
                 )}
