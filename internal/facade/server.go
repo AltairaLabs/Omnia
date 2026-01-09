@@ -75,8 +75,12 @@ type MessageHandler interface {
 type ResponseWriter interface {
 	// WriteChunk sends a chunk of the response.
 	WriteChunk(content string) error
+	// WriteChunkWithParts sends a chunk with multi-modal content parts.
+	WriteChunkWithParts(parts []ContentPart) error
 	// WriteDone signals the response is complete.
 	WriteDone(content string) error
+	// WriteDoneWithParts signals completion with multi-modal content parts.
+	WriteDoneWithParts(parts []ContentPart) error
 	// WriteToolCall notifies of a tool call.
 	WriteToolCall(toolCall *ToolCallInfo) error
 	// WriteToolResult sends a tool result.
@@ -496,8 +500,16 @@ func (w *connResponseWriter) WriteChunk(content string) error {
 	return w.server.sendMessage(w.conn, NewChunkMessage(w.sessionID, content))
 }
 
+func (w *connResponseWriter) WriteChunkWithParts(parts []ContentPart) error {
+	return w.server.sendMessage(w.conn, NewChunkMessageWithParts(w.sessionID, parts))
+}
+
 func (w *connResponseWriter) WriteDone(content string) error {
 	return w.server.sendMessage(w.conn, NewDoneMessage(w.sessionID, content))
+}
+
+func (w *connResponseWriter) WriteDoneWithParts(parts []ContentPart) error {
+	return w.server.sendMessage(w.conn, NewDoneMessageWithParts(w.sessionID, parts))
 }
 
 func (w *connResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {

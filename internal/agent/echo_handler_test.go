@@ -26,7 +26,9 @@ import (
 // mockResponseWriter implements facade.ResponseWriter for testing.
 type mockResponseWriter struct {
 	chunks      []string
+	chunkParts  [][]facade.ContentPart
 	doneMsg     string
+	doneParts   []facade.ContentPart
 	toolCalls   []*facade.ToolCallInfo
 	toolResults []*facade.ToolResultInfo
 	errors      []struct{ code, message string }
@@ -41,11 +43,27 @@ func (m *mockResponseWriter) WriteChunk(content string) error {
 	return nil
 }
 
+func (m *mockResponseWriter) WriteChunkWithParts(parts []facade.ContentPart) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.chunkParts = append(m.chunkParts, parts)
+	return nil
+}
+
 func (m *mockResponseWriter) WriteDone(content string) error {
 	if m.err != nil {
 		return m.err
 	}
 	m.doneMsg = content
+	return nil
+}
+
+func (m *mockResponseWriter) WriteDoneWithParts(parts []facade.ContentPart) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.doneParts = parts
 	return nil
 }
 

@@ -476,3 +476,141 @@ func TestRuntimeHandler_HandleMessage_ToolResultIsError(t *testing.T) {
 	assert.Nil(t, writer.toolResults[0].Result)
 	assert.Equal(t, "Something went wrong", writer.toolResults[0].Error)
 }
+
+func TestRuntimeHandler_HandleMessage_MultimodalResponse(t *testing.T) {
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{
+				FinalContent: "Here is an image",
+				Parts: []*runtimev1.ContentPart{
+					{Type: "text", Text: "Here is an image:"},
+					{Type: "image", Media: &runtimev1.MediaContent{
+						Data:     "base64encodeddata",
+						MimeType: "image/png",
+					}},
+				},
+			}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Show me an image"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	// Should use WriteDoneWithParts instead of WriteDone
+	assert.Empty(t, writer.doneMsg, "text-only WriteDone should not be called")
+	require.Len(t, writer.doneParts, 2, "expected 2 content parts")
+
+	// Verify text part
+	assert.Equal(t, facade.ContentPartTypeText, writer.doneParts[0].Type)
+	assert.Equal(t, "Here is an image:", writer.doneParts[0].Text)
+
+	// Verify image part
+	assert.Equal(t, facade.ContentPartTypeImage, writer.doneParts[1].Type)
+	require.NotNil(t, writer.doneParts[1].Media)
+	assert.Equal(t, "base64encodeddata", writer.doneParts[1].Media.Data)
+	assert.Equal(t, "image/png", writer.doneParts[1].Media.MimeType)
+}
+
+func TestRuntimeHandler_HandleMessage_MultimodalInput(t *testing.T) {
+	var receivedParts []*runtimev1.ContentPart
+
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "I see the image"}}},
+		},
+		healthy: true,
+	}
+
+	// Override Converse to capture the received message
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+
+	server := grpc.NewServer()
+	capturingServer := &capturingRuntimeServer{
+		mockRuntimeServer: mock,
+		onReceive: func(msg *runtimev1.ClientMessage) {
+			receivedParts = msg.Parts
+		},
+	}
+	runtimev1.RegisterRuntimeServiceServer(server, capturingServer)
+
+	go func() {
+		_ = server.Serve(lis)
+	}()
+	defer server.Stop()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	// Send multimodal message
+	msg := &facade.ClientMessage{
+		Content: "What's in this image?",
+		Parts: []facade.ContentPart{
+			{Type: facade.ContentPartTypeText, Text: "What's in this image?"},
+			{Type: facade.ContentPartTypeImage, Media: &facade.MediaContent{
+				Data:     "testbase64data",
+				MimeType: "image/jpeg",
+			}},
+		},
+	}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	// Verify the runtime received the multimodal parts
+	require.Len(t, receivedParts, 2, "expected 2 parts to be sent to runtime")
+
+	assert.Equal(t, "text", receivedParts[0].Type)
+	assert.Equal(t, "What's in this image?", receivedParts[0].Text)
+
+	assert.Equal(t, "image", receivedParts[1].Type)
+	require.NotNil(t, receivedParts[1].Media)
+	assert.Equal(t, "testbase64data", receivedParts[1].Media.Data)
+	assert.Equal(t, "image/jpeg", receivedParts[1].Media.MimeType)
+}
+
+// capturingRuntimeServer wraps mockRuntimeServer to capture received messages.
+type capturingRuntimeServer struct {
+	*mockRuntimeServer
+	onReceive func(*runtimev1.ClientMessage)
+}
+
+func (s *capturingRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	msg, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if s.onReceive != nil {
+		s.onReceive(msg)
+	}
+
+	for _, resp := range s.responses {
+		if err := stream.Send(resp); err != nil {
+			return err
+		}
+	}
+	return nil
+}
