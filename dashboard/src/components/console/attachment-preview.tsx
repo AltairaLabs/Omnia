@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { X, FileAudio, FileImage, File } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ImageLightbox } from "./image-lightbox";
 import type { FileAttachment } from "@/types/websocket";
 
 interface AttachmentPreviewProps {
@@ -33,6 +35,20 @@ export function AttachmentPreview({
   className,
   readonly = false,
 }: Readonly<AttachmentPreviewProps>) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Get all image attachments for the lightbox
+  const imageAttachments = attachments.filter((a) => isImageType(a.type));
+
+  const handleImageClick = (attachment: FileAttachment) => {
+    const imageIndex = imageAttachments.findIndex((a) => a.id === attachment.id);
+    if (imageIndex !== -1) {
+      setLightboxIndex(imageIndex);
+      setLightboxOpen(true);
+    }
+  };
+
   if (attachments.length === 0) return null;
 
   return (
@@ -55,12 +71,19 @@ export function AttachmentPreview({
             )}
           >
             {isImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={attachment.dataUrl}
-                alt={attachment.name}
-                className="w-full h-full object-cover"
-              />
+              <button
+                type="button"
+                onClick={() => handleImageClick(attachment)}
+                className="w-full h-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                aria-label={`View ${attachment.name}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={attachment.dataUrl}
+                  alt={attachment.name}
+                  className="w-full h-full object-cover"
+                />
+              </button>
             ) : (
               <>
                 <FileIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -107,6 +130,20 @@ export function AttachmentPreview({
           </div>
         );
       })}
+
+      {/* Image Lightbox */}
+      {imageAttachments.length > 0 && (
+        <ImageLightbox
+          images={imageAttachments.map((a) => ({
+            src: a.dataUrl,
+            alt: a.name,
+            filename: a.name,
+          }))}
+          initialIndex={lightboxIndex}
+          open={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+        />
+      )}
     </div>
   );
 }
