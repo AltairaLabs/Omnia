@@ -1,13 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import { User, Bot, Loader2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToolCallCard } from "./tool-call-card";
-import type { ConsoleMessage as ConsoleMessageType } from "@/types/websocket";
+import { ImageLightbox } from "./image-lightbox";
+import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 interface ConsoleMessageProps {
   message: ConsoleMessageType;
   className?: string;
+}
+
+function isImageType(type: string): boolean {
+  return type.startsWith("image/");
 }
 
 function formatTime(date: Date): string {
@@ -15,8 +21,22 @@ function formatTime(date: Date): string {
 }
 
 export function ConsoleMessage({ message, className }: Readonly<ConsoleMessageProps>) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
+
+  // Get image attachments for lightbox
+  const imageAttachments = message.attachments?.filter((a) => isImageType(a.type)) ?? [];
+
+  const handleImageClick = (attachment: FileAttachment) => {
+    const imageIndex = imageAttachments.findIndex((a) => a.id === attachment.id);
+    if (imageIndex !== -1) {
+      setLightboxIndex(imageIndex);
+      setLightboxOpen(true);
+    }
+  };
 
   // System messages render as centered dividers
   if (isSystem) {
@@ -90,6 +110,42 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
             </div>
           )}
         </div>
+
+        {/* Image attachments */}
+        {imageAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {imageAttachments.map((attachment) => (
+              <button
+                key={attachment.id}
+                type="button"
+                onClick={() => handleImageClick(attachment)}
+                className="relative rounded-lg overflow-hidden cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                aria-label={`View ${attachment.name}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={attachment.dataUrl}
+                  alt={attachment.name}
+                  className="max-w-[200px] max-h-[200px] object-contain"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Image Lightbox */}
+        {imageAttachments.length > 0 && (
+          <ImageLightbox
+            images={imageAttachments.map((a) => ({
+              src: a.dataUrl,
+              alt: a.name,
+              filename: a.name,
+            }))}
+            initialIndex={lightboxIndex}
+            open={lightboxOpen}
+            onOpenChange={setLightboxOpen}
+          />
+        )}
 
         {/* Tool calls */}
         {message.toolCalls && message.toolCalls.length > 0 && (

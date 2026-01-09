@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import { ConsoleMessage } from "./console-message";
-import type { ConsoleMessage as ConsoleMessageType } from "@/types/websocket";
+import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 describe("ConsoleMessage", () => {
   const baseMessage: ConsoleMessageType = {
@@ -91,6 +92,117 @@ describe("ConsoleMessage", () => {
       // Just check that something time-like is present
       const timeElements = screen.getAllByText(/\d{1,2}:\d{2}/);
       expect(timeElements.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("image attachments", () => {
+    const mockImageAttachment: FileAttachment = {
+      id: "img-1",
+      name: "test-image.png",
+      type: "image/png",
+      size: 1024,
+      dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+    };
+
+    const mockNonImageAttachment: FileAttachment = {
+      id: "file-1",
+      name: "document.pdf",
+      type: "application/pdf",
+      size: 2048,
+      dataUrl: "data:application/pdf;base64,abc123",
+    };
+
+    it("should render image attachments", () => {
+      const messageWithImages: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockImageAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithImages} />);
+
+      const img = screen.getByRole("img");
+      expect(img).toBeInTheDocument();
+      expect(img).toHaveAttribute("src", mockImageAttachment.dataUrl);
+    });
+
+    it("should not render non-image attachments as images", () => {
+      const messageWithNonImage: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockNonImageAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithNonImage} />);
+
+      // Non-image attachments should not create img elements in the attachments section
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("should render multiple image attachments", () => {
+      const secondImage: FileAttachment = {
+        id: "img-2",
+        name: "test-image-2.jpg",
+        type: "image/jpeg",
+        size: 2048,
+        dataUrl: "data:image/jpeg;base64,xyz789",
+      };
+
+      const messageWithMultipleImages: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockImageAttachment, secondImage],
+      };
+
+      render(<ConsoleMessage message={messageWithMultipleImages} />);
+
+      const images = screen.getAllByRole("img");
+      expect(images).toHaveLength(2);
+    });
+
+    it("should open lightbox when image is clicked", () => {
+      const messageWithImages: ConsoleMessageType = {
+        ...baseMessage,
+        attachments: [mockImageAttachment],
+      };
+
+      render(<ConsoleMessage message={messageWithImages} />);
+
+      const imageButton = screen.getByRole("button", { name: `View ${mockImageAttachment.name}` });
+      fireEvent.click(imageButton);
+
+      // Lightbox should be open - check for zoom controls
+      expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+    });
+  });
+
+  describe("accessibility", () => {
+    it("should have no accessibility violations for user message", async () => {
+      const { container } = render(<ConsoleMessage message={baseMessage} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations for assistant message", async () => {
+      const assistantMessage: ConsoleMessageType = {
+        ...baseMessage,
+        role: "assistant",
+        content: "How can I help you?",
+      };
+      const { container } = render(<ConsoleMessage message={assistantMessage} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations for system message", async () => {
+      const systemMessage: ConsoleMessageType = {
+        ...baseMessage,
+        role: "system",
+        content: "Connected to agent",
+      };
+      const { container } = render(<ConsoleMessage message={systemMessage} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
     });
   });
 });
