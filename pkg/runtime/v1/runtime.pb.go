@@ -29,10 +29,14 @@ type ClientMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// session_id identifies the conversation session for state management.
 	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// content is the user's message text.
+	// content is the user's message text (legacy, for backward compatibility).
+	// For multimodal messages, use the parts field instead.
 	Content string `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
 	// metadata contains optional key-value pairs for additional context.
-	Metadata      map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Metadata map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// parts contains multimodal content parts (text, images, audio, video, files).
+	// If non-empty, this takes precedence over the content field.
+	Parts         []*ContentPart `protobuf:"bytes,4,rep,name=parts,proto3" json:"parts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -84,6 +88,13 @@ func (x *ClientMessage) GetContent() string {
 func (x *ClientMessage) GetMetadata() map[string]string {
 	if x != nil {
 		return x.Metadata
+	}
+	return nil
+}
+
+func (x *ClientMessage) GetParts() []*ContentPart {
+	if x != nil {
+		return x.Parts
 	}
 	return nil
 }
@@ -812,12 +823,13 @@ var File_api_proto_runtime_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\xd0\x01\n" +
+	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\x85\x02\n" +
 	"\rClientMessage\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12I\n" +
-	"\bmetadata\x18\x03 \x03(\v2-.omnia.runtime.v1.ClientMessage.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x03 \x03(\v2-.omnia.runtime.v1.ClientMessage.MetadataEntryR\bmetadata\x123\n" +
+	"\x05parts\x18\x04 \x03(\v2\x1d.omnia.runtime.v1.ContentPartR\x05parts\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa6\x02\n" +
@@ -898,23 +910,24 @@ var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 }
 var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
 	12, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
-	2,  // 1: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
-	3,  // 2: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
-	4,  // 3: omnia.runtime.v1.ServerMessage.tool_result:type_name -> omnia.runtime.v1.ToolResult
-	5,  // 4: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
-	9,  // 5: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
-	8,  // 6: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
-	6,  // 7: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
-	7,  // 8: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
-	0,  // 9: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
-	10, // 10: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
-	1,  // 11: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
-	11, // 12: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
-	11, // [11:13] is the sub-list for method output_type
-	9,  // [9:11] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	6,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
+	2,  // 2: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
+	3,  // 3: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
+	4,  // 4: omnia.runtime.v1.ServerMessage.tool_result:type_name -> omnia.runtime.v1.ToolResult
+	5,  // 5: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
+	9,  // 6: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
+	8,  // 7: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
+	6,  // 8: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
+	7,  // 9: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
+	0,  // 10: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
+	10, // 11: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
+	1,  // 12: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
+	11, // 13: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
+	12, // [12:14] is the sub-list for method output_type
+	10, // [10:12] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_runtime_v1_runtime_proto_init() }

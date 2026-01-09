@@ -25,11 +25,16 @@ message ClientMessage {
   // session_id identifies the conversation session for state management.
   string session_id = 1;
 
-  // content is the user's message text.
+  // content is the user's message text (legacy, for backward compatibility).
+  // For multimodal messages, use the parts field instead.
   string content = 2;
 
   // metadata contains optional key-value pairs for additional context.
   map<string, string> metadata = 3;
+
+  // parts contains multimodal content parts (text, images, audio, video, files).
+  // If non-empty, this takes precedence over the content field.
+  repeated ContentPart parts = 4;
 }
 
 // ServerMessage represents a message from the runtime to the client.

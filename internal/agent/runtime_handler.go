@@ -67,6 +67,7 @@ func (h *RuntimeHandler) HandleMessage(
 		SessionId: sessionID,
 		Content:   msg.Content,
 		Metadata:  metadata,
+		Parts:     toGRPCContentParts(msg.Parts),
 	}
 
 	if err := stream.Send(grpcMsg); err != nil {
@@ -103,6 +104,10 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		return writer.WriteChunk(msg.Chunk.Content)
 
 	case *runtimev1.ServerMessage_Done:
+		// If response has multimodal parts, forward them; otherwise use text
+		if len(msg.Done.Parts) > 0 {
+			return writer.WriteDoneWithParts(fromGRPCContentParts(msg.Done.Parts))
+		}
 		return writer.WriteDone(msg.Done.FinalContent)
 
 	case *runtimev1.ServerMessage_ToolCall:
@@ -150,4 +155,52 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 // Client returns the underlying runtime client for health checks.
 func (h *RuntimeHandler) Client() *facade.RuntimeClient {
 	return h.client
+}
+
+// toGRPCContentParts converts facade ContentParts to gRPC ContentParts.
+func toGRPCContentParts(parts []facade.ContentPart) []*runtimev1.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+
+	grpcParts := make([]*runtimev1.ContentPart, len(parts))
+	for i, part := range parts {
+		grpcPart := &runtimev1.ContentPart{
+			Type: string(part.Type),
+			Text: part.Text,
+		}
+		if part.Media != nil {
+			grpcPart.Media = &runtimev1.MediaContent{
+				Data:     part.Media.Data,
+				Url:      part.Media.URL,
+				MimeType: part.Media.MimeType,
+			}
+		}
+		grpcParts[i] = grpcPart
+	}
+	return grpcParts
+}
+
+// fromGRPCContentParts converts gRPC ContentParts to facade ContentParts.
+func fromGRPCContentParts(parts []*runtimev1.ContentPart) []facade.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+
+	facadeParts := make([]facade.ContentPart, len(parts))
+	for i, part := range parts {
+		facadePart := facade.ContentPart{
+			Type: facade.ContentPartType(part.Type),
+			Text: part.Text,
+		}
+		if part.Media != nil {
+			facadePart.Media = &facade.MediaContent{
+				Data:     part.Media.Data,
+				URL:      part.Media.Url,
+				MimeType: part.Media.MimeType,
+			}
+		}
+		facadeParts[i] = facadePart
+	}
+	return facadeParts
 }
