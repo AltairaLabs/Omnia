@@ -344,6 +344,111 @@ If the session exists and hasn't expired, conversation history is preserved.
 
 Sessions expire based on the AgentRuntime's `session.ttl` configuration. Attempting to resume an expired session creates a new one.
 
+## Media Upload (Optional)
+
+When facade media storage is enabled, clients can upload files via HTTP before referencing them in WebSocket messages. This avoids base64-encoding large files in the WebSocket protocol.
+
+### Upload Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as Facade
+
+    C->>F: POST /media/request-upload
+    F-->>C: {upload_url, storage_ref}
+    C->>F: PUT /media/upload/{id} (file content)
+    F-->>C: 204 No Content
+    C->>F: WebSocket message with storage_ref
+```
+
+### Step 1: Request Upload URL
+
+```bash
+POST /media/request-upload
+Content-Type: application/json
+
+{
+  "session_id": "sess-abc123",
+  "filename": "photo.jpg",
+  "mime_type": "image/jpeg",
+  "size_bytes": 102400
+}
+```
+
+Response:
+
+```json
+{
+  "upload_url": "http://agent.example.com/media/upload/upl-xyz789",
+  "upload_id": "upl-xyz789",
+  "storage_ref": "omnia://sessions/sess-abc123/media/med-def456",
+  "expires_at": "2025-01-09T12:00:00Z"
+}
+```
+
+### Step 2: Upload File
+
+```bash
+PUT /media/upload/upl-xyz789
+Content-Type: image/jpeg
+
+<binary file content>
+```
+
+Response: `204 No Content` on success.
+
+### Step 3: Reference in WebSocket Message
+
+```json
+{
+  "type": "message",
+  "session_id": "sess-abc123",
+  "parts": [
+    { "type": "text", "text": "What's in this image?" },
+    {
+      "type": "image",
+      "media": {
+        "storage_ref": "omnia://sessions/sess-abc123/media/med-def456",
+        "mime_type": "image/jpeg"
+      }
+    }
+  ]
+}
+```
+
+### Media Info Endpoint
+
+Retrieve metadata about uploaded media:
+
+```bash
+GET /media/info/{session-id}/{media-id}
+```
+
+Response:
+
+```json
+{
+  "filename": "photo.jpg",
+  "mime_type": "image/jpeg",
+  "size_bytes": 102400,
+  "created_at": "2025-01-09T11:00:00Z",
+  "expires_at": "2025-01-10T11:00:00Z"
+}
+```
+
+### Media Download Endpoint
+
+Download previously uploaded media:
+
+```bash
+GET /media/download/{session-id}/{media-id}
+```
+
+Returns the file with appropriate `Content-Type` and `Content-Disposition` headers.
+
+> **Note**: Media upload is only available when the facade is configured with media storage. See [AgentRuntime facade.media configuration](/reference/agentruntime/#facademedia) for details.
+
 ## Connection Health
 
 The server sends WebSocket ping frames to maintain connection health. Clients should respond with pong frames automatically (most WebSocket libraries handle this).
