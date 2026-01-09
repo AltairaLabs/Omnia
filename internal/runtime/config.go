@@ -49,6 +49,7 @@ type Config struct {
 	// Mock provider configuration (for testing)
 	MockProvider   bool   // Enable mock provider instead of real LLM
 	MockConfigPath string // Path to mock responses YAML file (optional)
+	MediaBasePath  string // Base path for resolving mock:// URLs to media files
 
 	// Tools configuration
 	ToolsConfigPath string // Path to tools.yaml configuration file
@@ -79,6 +80,7 @@ const (
 	envMockProvider           = "OMNIA_MOCK_PROVIDER"
 	envMockConfigPath         = "OMNIA_MOCK_CONFIG"
 	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
+	envMediaBasePath          = "OMNIA_MEDIA_BASE_PATH"
 	envToolsConfigPath        = "OMNIA_TOOLS_CONFIG"
 	envTracingEnabled         = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint        = "OMNIA_TRACING_ENDPOINT"
@@ -95,6 +97,7 @@ const (
 	defaultSessionType     = "memory"
 	defaultSessionTTL      = 24 * time.Hour
 	defaultProviderType    = "auto"
+	defaultMediaBasePath   = "/etc/omnia/media"
 	defaultToolsConfigPath = "/etc/omnia/tools/tools.yaml"
 	defaultGRPCPort        = 9000
 	defaultHealthPort      = 9001
@@ -125,6 +128,7 @@ func LoadConfig() (*Config, error) {
 		BaseURL:           os.Getenv(envProviderBaseURL),
 		MockProvider:      os.Getenv(envMockProvider) == "true",
 		MockConfigPath:    getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
+		MediaBasePath:     getEnvOrDefault(envMediaBasePath, defaultMediaBasePath),
 		ToolsConfigPath:   getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
 		TracingEnabled:    os.Getenv(envTracingEnabled) == "true",
 		TracingEndpoint:   os.Getenv(envTracingEndpoint),

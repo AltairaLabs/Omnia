@@ -32,6 +32,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
@@ -71,6 +72,9 @@ type Server struct {
 	metrics      *Metrics
 	providerType string
 	model        string
+
+	// Media resolution for mock provider
+	mediaResolver *MediaResolver
 }
 
 // ServerOption configures the server.
@@ -161,6 +165,15 @@ func WithProviderInfo(providerType, model string) ServerOption {
 	return func(s *Server) {
 		s.providerType = providerType
 		s.model = model
+	}
+}
+
+// WithMediaBasePath sets the base path for resolving mock:// URLs.
+func WithMediaBasePath(path string) ServerOption {
+	return func(s *Server) {
+		if path != "" {
+			s.mediaResolver = NewMediaResolver(path)
+		}
 	}
 }
 
@@ -352,12 +365,23 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 		// (EventProviderCallCompleted/EventProviderCallFailed)
 	}
 
+	// Build multimodal parts if response contains media
+	var parts []*runtimev1.ContentPart
+	if resp.HasMedia() && s.mediaResolver != nil {
+		parts, err = s.resolveResponseParts(ctx, resp.Parts())
+		if err != nil {
+			log.Error(err, "failed to resolve media parts, falling back to text-only")
+			// Continue with text-only response
+		}
+	}
+
 	// Send done message
 	if err := stream.Send(&runtimev1.ServerMessage{
 		Message: &runtimev1.ServerMessage_Done{
 			Done: &runtimev1.Done{
 				FinalContent: responseText,
 				Usage:        usage,
+				Parts:        parts,
 			},
 		},
 	}); err != nil {
@@ -365,6 +389,108 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	}
 
 	return nil
+}
+
+// resolveResponseParts converts PromptKit ContentParts to gRPC ContentParts,
+// resolving any file:// or mock:// URLs to base64 data.
+func (s *Server) resolveResponseParts(ctx context.Context, parts []types.ContentPart) ([]*runtimev1.ContentPart, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+	result := make([]*runtimev1.ContentPart, 0, len(parts))
+
+	for _, part := range parts {
+		grpcPart := &runtimev1.ContentPart{
+			Type: part.Type,
+		}
+
+		switch part.Type {
+		case types.ContentTypeText:
+			if part.Text != nil {
+				grpcPart.Text = *part.Text
+			}
+
+		case types.ContentTypeImage, types.ContentTypeAudio, types.ContentTypeVideo:
+			if part.Media == nil {
+				continue
+			}
+
+			mediaContent, err := s.resolveMediaContent(ctx, part.Media)
+			if err != nil {
+				log.Error(err, "failed to resolve media content", "type", part.Type)
+				continue
+			}
+			grpcPart.Media = mediaContent
+		}
+
+		result = append(result, grpcPart)
+	}
+
+	return result, nil
+}
+
+// resolveMediaContent resolves a PromptKit MediaContent to a gRPC MediaContent,
+// converting file:// and mock:// URLs to base64 data.
+func (s *Server) resolveMediaContent(ctx context.Context, media *types.MediaContent) (*runtimev1.MediaContent, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
+	// If we already have base64 data, use it directly
+	if media.Data != nil && *media.Data != "" {
+		return &runtimev1.MediaContent{
+			Data:     *media.Data,
+			MimeType: media.MIMEType,
+		}, nil
+	}
+
+	// If we have a URL, try to resolve it
+	if media.URL != nil && *media.URL != "" {
+		url := *media.URL
+
+		// Check if URL needs resolution (file:// or mock://)
+		if IsResolvableURL(url) {
+			if s.mediaResolver == nil {
+				return nil, fmt.Errorf("media resolver not configured, cannot resolve URL: %s", url)
+			}
+
+			base64Data, mimeType, isPassthrough, err := s.mediaResolver.ResolveURL(url)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve media URL %s: %w", url, err)
+			}
+
+			if isPassthrough {
+				// HTTP/HTTPS URL - pass through unchanged
+				return &runtimev1.MediaContent{
+					Url:      url,
+					MimeType: mimeType,
+				}, nil
+			}
+
+			log.V(1).Info("resolved media URL", "url", url, "mimeType", mimeType, "dataSize", len(base64Data))
+			return &runtimev1.MediaContent{
+				Data:     base64Data,
+				MimeType: mimeType,
+			}, nil
+		}
+
+		// HTTP/HTTPS URL - pass through unchanged
+		return &runtimev1.MediaContent{
+			Url:      url,
+			MimeType: media.MIMEType,
+		}, nil
+	}
+
+	// If we have a file path, read it
+	if media.FilePath != nil && *media.FilePath != "" {
+		base64Data, mimeType, _, err := s.mediaResolver.ResolveURL("file://" + *media.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read media file %s: %w", *media.FilePath, err)
+		}
+
+		return &runtimev1.MediaContent{
+			Data:     base64Data,
+			MimeType: mimeType,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("media content has no data source")
 }
 
 // getOrCreateConversation gets an existing conversation or creates a new one.
