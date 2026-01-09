@@ -23,8 +23,9 @@ COPY internal/ internal/
 COPY pkg/ pkg/
 
 # Build the agent binary
-# Use TARGETARCH from buildx or default to arm64 for Apple Silicon
-ARG TARGETARCH=arm64
+# TARGETARCH is set automatically by buildx, or passed via --build-arg
+# Default to amd64 for CI environments that don't use buildx
+ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-w -s" \
     -o agent \
