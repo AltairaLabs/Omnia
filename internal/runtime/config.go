@@ -22,6 +22,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/altairalabs/omnia/pkg/provider"
 )
 
 // Config holds runtime configuration loaded from environment variables.
@@ -106,16 +108,6 @@ const (
 const (
 	SessionTypeMemory = "memory"
 	SessionTypeRedis  = "redis"
-)
-
-// Provider type constants.
-const (
-	ProviderTypeAuto   = "auto"
-	ProviderTypeClaude = "claude"
-	ProviderTypeOpenAI = "openai"
-	ProviderTypeGemini = "gemini"
-	ProviderTypeOllama = "ollama"
-	ProviderTypeMock   = "mock"
 )
 
 // LoadConfig loads configuration from environment variables.
@@ -252,13 +244,10 @@ func (cfg *Config) validateSessionConfig() error {
 
 // validateProviderType validates the provider type.
 func (cfg *Config) validateProviderType() error {
-	switch cfg.ProviderType {
-	case ProviderTypeAuto, ProviderTypeClaude, ProviderTypeOpenAI, ProviderTypeGemini,
-		ProviderTypeOllama, ProviderTypeMock:
-		return nil
-	default:
-		return fmt.Errorf("invalid %s: must be 'auto', 'claude', 'openai', 'gemini', 'ollama', or 'mock'", envProviderType)
+	if !provider.Type(cfg.ProviderType).IsValid() {
+		return fmt.Errorf("invalid %s: must be one of %v", envProviderType, provider.ValidTypes)
 	}
+	return nil
 }
 
 func getEnvOrDefault(key, defaultValue string) string {
