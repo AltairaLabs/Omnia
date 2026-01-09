@@ -214,7 +214,6 @@ describe("VideoPlayer", () => {
       // Mock requestFullscreen to throw
       const mockRequestFullscreen = vi.fn().mockRejectedValue(new Error("Fullscreen not allowed"));
       HTMLDivElement.prototype.requestFullscreen = mockRequestFullscreen;
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       render(<VideoPlayer src="data:video/mp4;base64,test" />);
 
@@ -229,13 +228,13 @@ describe("VideoPlayer", () => {
         fireEvent.click(fullscreenButton);
       });
 
-      // Wait for the error to be logged
+      // Wait for the promise to resolve
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
-      expect(consoleSpy).toHaveBeenCalledWith("Fullscreen error:", expect.any(Error));
-      consoleSpy.mockRestore();
+      // Should not crash - the error is silently caught
+      expect(screen.getByRole("button", { name: "Fullscreen" })).toBeInTheDocument();
     });
   });
 

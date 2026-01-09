@@ -166,8 +166,9 @@ export function VideoPlayer({ src, type, filename, fileSize, className }: Readon
       } else {
         await document.exitFullscreen();
       }
-    } catch (error) {
-      console.error("Fullscreen error:", error);
+    } catch {
+      // Fullscreen may not be available in all contexts (e.g., iframe restrictions)
+      // Silently ignore as the user can still use the player without fullscreen
     }
   }, []);
 
