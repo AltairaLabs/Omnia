@@ -821,3 +821,239 @@ func TestServer_Converse_ResumeSession(t *testing.T) {
 	// Should still only have one conversation for this session
 	assert.Len(t, server.conversations, 1)
 }
+
+// Tests for scenario detection functions
+
+func TestExtractMockScenario_ExplicitMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		content  string
+		expected string
+	}{
+		{
+			name:     "explicit scenario in metadata",
+			metadata: map[string]string{MetadataKeyMockScenario: "custom-scenario"},
+			content:  "Hello world",
+			expected: "custom-scenario",
+		},
+		{
+			name:     "image-analysis scenario",
+			metadata: map[string]string{MetadataKeyMockScenario: ScenarioImageAnalysis},
+			content:  "Analyze this",
+			expected: ScenarioImageAnalysis,
+		},
+		{
+			name:     "empty scenario falls back to auto-detection",
+			metadata: map[string]string{MetadataKeyMockScenario: ""},
+			content:  "Hello",
+			expected: ScenarioDefault,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractMockScenario(tt.metadata, tt.content)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExtractMockScenario_ContentTypeMetadata(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		expected    string
+	}{
+		{"image/png", "image/png", ScenarioImageAnalysis},
+		{"image/jpeg", "image/jpeg", ScenarioImageAnalysis},
+		{"PNG file", "png", ScenarioImageAnalysis},
+		{"audio/mp3", "audio/mp3", ScenarioAudioAnalysis},
+		{"audio/wav", "audio/wav", ScenarioAudioAnalysis},
+		{"MP3 file", "mp3", ScenarioAudioAnalysis},
+		{"application/pdf", "application/pdf", ScenarioDocumentQA},
+		{"pdf file", "pdf", ScenarioDocumentQA},
+		{"text/plain", "text/plain", ScenarioDocumentQA},
+		{"unknown type", "application/octet-stream", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata := map[string]string{MetadataKeyContentType: tt.contentType}
+			result := extractMockScenario(metadata, "")
+			if tt.expected == "" {
+				assert.Equal(t, ScenarioDefault, result)
+			} else {
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestExtractMockScenario_ContentPatterns(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected string
+	}{
+		{"image reference", "[image: uploaded.png] What is in this image?", ScenarioImageAnalysis},
+		{"audio reference", "[audio: recording.mp3] Transcribe this", ScenarioAudioAnalysis},
+		{"document reference", "[document: report.pdf] Summarize", ScenarioDocumentQA},
+		{"pdf reference", "[pdf: contract.pdf] Extract key terms", ScenarioDocumentQA},
+		{"no pattern", "Hello, how are you?", ScenarioDefault},
+		{"case insensitive", "[IMAGE: photo.jpg] Describe", ScenarioImageAnalysis},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractMockScenario(nil, tt.content)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExtractMockScenario_Priority(t *testing.T) {
+	// Explicit metadata takes priority over content type and content patterns
+	t.Run("metadata takes priority over content type", func(t *testing.T) {
+		metadata := map[string]string{
+			MetadataKeyMockScenario: "custom",
+			MetadataKeyContentType:  "image/png",
+		}
+		result := extractMockScenario(metadata, "[audio: test.mp3]")
+		assert.Equal(t, "custom", result)
+	})
+
+	t.Run("content type takes priority over content patterns", func(t *testing.T) {
+		metadata := map[string]string{
+			MetadataKeyContentType: "image/png",
+		}
+		result := extractMockScenario(metadata, "[audio: test.mp3]")
+		assert.Equal(t, ScenarioImageAnalysis, result)
+	})
+}
+
+func TestDetectScenarioFromContentType(t *testing.T) {
+	tests := []struct {
+		contentType string
+		expected    string
+	}{
+		// Image types
+		{"image/png", ScenarioImageAnalysis},
+		{"image/jpeg", ScenarioImageAnalysis},
+		{"image/gif", ScenarioImageAnalysis},
+		{"image/webp", ScenarioImageAnalysis},
+		{"image/svg+xml", ScenarioImageAnalysis},
+		// Audio types
+		{"audio/mpeg", ScenarioAudioAnalysis},
+		{"audio/wav", ScenarioAudioAnalysis},
+		{"audio/ogg", ScenarioAudioAnalysis},
+		// Document types
+		{"application/pdf", ScenarioDocumentQA},
+		{"text/plain", ScenarioDocumentQA},
+		{"text/html", ScenarioDocumentQA},
+		// Unknown
+		{"application/octet-stream", ""},
+		{"video/mp4", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			result := detectScenarioFromContentType(tt.contentType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestContainsPattern(t *testing.T) {
+	tests := []struct {
+		s        string
+		pattern  string
+		expected bool
+	}{
+		{"Hello World", "world", true}, // Case insensitive
+		{"Hello World", "WORLD", true}, // Case insensitive
+		{"image/png", "image/", true},
+		{"application/pdf", "pdf", true},
+		{"hello", "hello", true},
+		{"hello", "goodbye", false},
+		{"", "test", false},
+		{"test", "", true}, // Empty pattern always matches
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%s", tt.s, tt.pattern), func(t *testing.T) {
+			result := containsPattern(tt.s, tt.pattern)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsImageContentType(t *testing.T) {
+	tests := []struct {
+		contentType string
+		expected    bool
+	}{
+		{"image/png", true},
+		{"image/jpeg", true},
+		{"image/gif", true},
+		{"image/webp", true},
+		{"image/svg+xml", true},
+		{"PNG", true},
+		{"jpg", true},
+		{"jpeg", true},
+		{"audio/mp3", false},
+		{"application/pdf", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			result := isImageContentType(tt.contentType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsAudioContentType(t *testing.T) {
+	tests := []struct {
+		contentType string
+		expected    bool
+	}{
+		{"audio/mpeg", true},
+		{"audio/wav", true},
+		{"audio/ogg", true},
+		{"mp3", true},
+		{"wav", true},
+		{"flac", true},
+		{"image/png", false},
+		{"application/pdf", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			result := isAudioContentType(tt.contentType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsDocumentContentType(t *testing.T) {
+	tests := []struct {
+		contentType string
+		expected    bool
+	}{
+		{"application/pdf", true},
+		{"pdf", true},
+		{"text/plain", true},
+		{"text/html", true},
+		{"document", true},
+		{"image/png", false},
+		{"audio/mp3", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			result := isDocumentContentType(tt.contentType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
