@@ -391,6 +391,15 @@ type FrameworkConfig struct {
 	Image string `json:"image,omitempty"`
 }
 
+// MediaConfig defines configuration for media file resolution.
+type MediaConfig struct {
+	// basePath is the base directory for resolving mock:// URLs.
+	// Defaults to /etc/omnia/media if not specified.
+	// +optional
+	// +kubebuilder:default="/etc/omnia/media"
+	BasePath string `json:"basePath,omitempty"`
+}
+
 // RuntimeConfig defines deployment-related settings.
 type RuntimeConfig struct {
 	// replicas is the desired number of agent runtime pods.
@@ -419,6 +428,16 @@ type RuntimeConfig struct {
 	// affinity defines affinity rules for pod scheduling.
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// volumes defines additional volumes to mount in the runtime pod.
+	// Use this to mount PVCs, ConfigMaps, or Secrets for media files or mock configurations.
+	// +optional
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// volumeMounts defines additional volume mounts for the runtime container.
+	// Each mount must reference a volume defined in the volumes field.
+	// +optional
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
@@ -448,6 +467,10 @@ type AgentRuntimeSpec struct {
 	// runtime configures deployment settings like replicas and resources.
 	// +optional
 	Runtime *RuntimeConfig `json:"runtime,omitempty"`
+
+	// media configures media file resolution for mock provider responses.
+	// +optional
+	Media *MediaConfig `json:"media,omitempty"`
 
 	// providerRef references a Provider resource for LLM configuration.
 	// If specified, the referenced Provider's configuration is used.

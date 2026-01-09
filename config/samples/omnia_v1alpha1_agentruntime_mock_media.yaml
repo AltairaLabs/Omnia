@@ -1,0 +1,54 @@
+# Example: AgentRuntime with mock provider and media volume mounts
+# This configuration demonstrates how to:
+# 1. Configure media base path for resolving mock:// URLs
+# 2. Mount a PVC for media files (images, audio, etc.)
+# 3. Mount a ConfigMap for mock response configuration
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: mock-agent-with-media
+  labels:
+    app.kubernetes.io/name: mock-agent-with-media
+    app.kubernetes.io/component: agent
+spec:
+  # Reference to a PromptPack containing agent prompts
+  promptPackRef:
+    name: test-pack
+    version: "1.0.0"
+
+  # WebSocket facade for client connections
+  facade:
+    type: websocket
+
+  # Mock provider for testing without real LLM API calls
+  provider:
+    type: mock
+    additionalConfig:
+      # Path to mock response configuration file
+      mock_config: /etc/omnia/mock/responses.yaml
+
+  # Media configuration for mock:// URL resolution
+  media:
+    basePath: /etc/omnia/media
+
+  # Runtime configuration with custom volumes
+  runtime:
+    replicas: 1
+    # Define volumes to mount in the pod
+    volumes:
+      # PVC for storing media files (images, audio, etc.)
+      - name: mock-media
+        persistentVolumeClaim:
+          claimName: test-media-pvc
+      # ConfigMap containing mock response definitions
+      - name: mock-config
+        configMap:
+          name: mock-responses
+    # Mount volumes in the runtime container
+    volumeMounts:
+      - name: mock-media
+        mountPath: /etc/omnia/media
+        readOnly: true
+      - name: mock-config
+        mountPath: /etc/omnia/mock
+        readOnly: true

@@ -818,7 +818,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 			},
 		},
 		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry, provider),
-		VolumeMounts: r.buildRuntimeVolumeMounts(promptPack, toolRegistry),
+		VolumeMounts: r.buildRuntimeVolumeMounts(agentRuntime, promptPack, toolRegistry),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
@@ -989,6 +989,14 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	// Add session config for conversation persistence
 	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_URL")...)
 
+	// Add media config for mock provider responses
+	if agentRuntime.Spec.Media != nil && agentRuntime.Spec.Media.BasePath != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_MEDIA_BASE_PATH",
+			Value: agentRuntime.Spec.Media.BasePath,
+		})
+	}
+
 	// Check for mock provider annotation (for E2E testing)
 	if mockProvider, ok := agentRuntime.Annotations[MockProviderAnnotation]; ok && mockProvider == "true" {
 		envVars = append(envVars, corev1.EnvVar{
@@ -1034,11 +1042,17 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		})
 	}
 
+	// Add user-specified volumes for media files, mock configs, etc.
+	if agentRuntime.Spec.Runtime != nil && len(agentRuntime.Spec.Runtime.Volumes) > 0 {
+		volumes = append(volumes, agentRuntime.Spec.Runtime.Volumes...)
+	}
+
 	return volumes
 }
 
 // buildRuntimeVolumeMounts creates volume mounts for the runtime container.
 func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
+	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
 ) []corev1.VolumeMount {
@@ -1061,6 +1075,11 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 			MountPath: ToolsMountPath,
 			ReadOnly:  true,
 		})
+	}
+
+	// Add user-specified volume mounts for media files, mock configs, etc.
+	if agentRuntime.Spec.Runtime != nil && len(agentRuntime.Spec.Runtime.VolumeMounts) > 0 {
+		volumeMounts = append(volumeMounts, agentRuntime.Spec.Runtime.VolumeMounts...)
 	}
 
 	return volumeMounts
