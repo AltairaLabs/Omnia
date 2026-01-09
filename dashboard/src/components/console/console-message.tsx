@@ -5,6 +5,7 @@ import { User, Bot, Loader2, Info, FileDown, FileText, FileCode, FileSpreadsheet
 import { cn } from "@/lib/utils";
 import { ToolCallCard } from "./tool-call-card";
 import { ImageLightbox } from "./image-lightbox";
+import { AudioPlayer } from "./audio-player";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 interface ConsoleMessageProps {
@@ -183,23 +184,11 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
         {audioAttachments.length > 0 && (
           <div className="flex flex-col gap-2 w-full">
             {audioAttachments.map((attachment) => (
-              <div
+              <AudioPlayer
                 key={attachment.id}
-                className="rounded-lg border bg-background/50 p-3"
-              >
-                <p className="text-xs text-muted-foreground mb-2 truncate" title={attachment.name}>
-                  {attachment.name}
-                </p>
-                <audio
-                  controls
-                  className="w-full h-10"
-                  preload="metadata"
-                  aria-label={`Audio: ${attachment.name}`}
-                >
-                  <source src={attachment.dataUrl} type={attachment.type} />
-                  Your browser does not support audio playback.
-                </audio>
-              </div>
+                src={attachment.dataUrl}
+                filename={attachment.name}
+              />
             ))}
           </div>
         )}

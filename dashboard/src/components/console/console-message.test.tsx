@@ -1,8 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { axe } from "vitest-axe";
 import { ConsoleMessage } from "./console-message";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
+
+// Mock ResizeObserver for Radix UI components (used by AudioPlayer's Slider)
+class MockResizeObserver {
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+}
+global.ResizeObserver = MockResizeObserver;
 
 describe("ConsoleMessage", () => {
   const baseMessage: ConsoleMessageType = {
@@ -190,10 +198,14 @@ describe("ConsoleMessage", () => {
 
       render(<ConsoleMessage message={messageWithAudio} />);
 
+      // AudioPlayer uses a hidden audio element with custom controls
       const audioElement = document.querySelector("audio");
       expect(audioElement).toBeInTheDocument();
-      expect(audioElement).toHaveAttribute("controls");
-      expect(audioElement).toHaveAttribute("aria-label", `Audio: ${mockAudioAttachment.name}`);
+      expect(audioElement).toHaveAttribute("src", mockAudioAttachment.dataUrl);
+
+      // Custom player has play button and volume controls
+      expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Mute" })).toBeInTheDocument();
     });
 
     it("should display audio filename", () => {
