@@ -43,6 +43,10 @@ const (
 	EnvSessionStoreURL     = "OMNIA_SESSION_STORE_URL"
 	EnvPromptPackMountPath = "OMNIA_PROMPTPACK_MOUNT_PATH"
 	EnvHealthPort          = "OMNIA_HEALTH_PORT"
+	EnvMediaStorageType    = "OMNIA_MEDIA_STORAGE_TYPE"
+	EnvMediaStoragePath    = "OMNIA_MEDIA_STORAGE_PATH"
+	EnvMediaMaxFileSize    = "OMNIA_MEDIA_MAX_FILE_SIZE"
+	EnvMediaDefaultTTL     = "OMNIA_MEDIA_DEFAULT_TTL"
 )
 
 // Default values.
@@ -52,6 +56,9 @@ const (
 	DefaultRuntimeAddress      = "localhost:9000"
 	DefaultSessionTTL          = 24 * time.Hour
 	DefaultPromptPackMountPath = "/etc/promptpack"
+	DefaultMediaStoragePath    = "/var/lib/omnia/media"
+	DefaultMediaMaxFileSize    = 100 * 1024 * 1024 // 100MB
+	DefaultMediaDefaultTTL     = 24 * time.Hour
 )
 
 // Error format strings.
@@ -70,6 +77,16 @@ type SessionType string
 const (
 	SessionTypeMemory SessionType = "memory"
 	SessionTypeRedis  SessionType = "redis"
+)
+
+// MediaStorageType represents the type of media storage backend.
+type MediaStorageType string
+
+const (
+	// MediaStorageTypeNone disables media storage.
+	MediaStorageTypeNone MediaStorageType = "none"
+	// MediaStorageTypeLocal uses the local filesystem for media storage.
+	MediaStorageTypeLocal MediaStorageType = "local"
 )
 
 // HandlerMode represents the message handler mode.
@@ -115,6 +132,12 @@ type Config struct {
 	SessionTTL      time.Duration
 	SessionStoreURL string
 
+	// Media storage configuration.
+	MediaStorageType MediaStorageType
+	MediaStoragePath string
+	MediaMaxFileSize int64
+	MediaDefaultTTL  time.Duration
+
 	// Health check port.
 	HealthPort int
 }
@@ -124,14 +147,15 @@ const errWithValueFmt = "%w: %s"
 
 // Validation errors.
 var (
-	ErrMissingAgentName    = errors.New("OMNIA_AGENT_NAME is required")
-	ErrMissingNamespace    = errors.New("OMNIA_NAMESPACE is required")
-	ErrMissingPromptPack   = errors.New("OMNIA_PROMPTPACK_NAME is required")
-	ErrMissingProviderKey  = errors.New("OMNIA_PROVIDER_API_KEY is required for runtime handler mode")
-	ErrInvalidFacadeType   = errors.New("invalid facade type")
-	ErrInvalidHandlerMode  = errors.New("invalid handler mode")
-	ErrInvalidSessionType  = errors.New("invalid session type")
-	ErrMissingSessionStore = errors.New("OMNIA_SESSION_STORE_URL is required for redis session type")
+	ErrMissingAgentName       = errors.New("OMNIA_AGENT_NAME is required")
+	ErrMissingNamespace       = errors.New("OMNIA_NAMESPACE is required")
+	ErrMissingPromptPack      = errors.New("OMNIA_PROMPTPACK_NAME is required")
+	ErrMissingProviderKey     = errors.New("OMNIA_PROVIDER_API_KEY is required for runtime handler mode")
+	ErrInvalidFacadeType      = errors.New("invalid facade type")
+	ErrInvalidHandlerMode     = errors.New("invalid handler mode")
+	ErrInvalidSessionType     = errors.New("invalid session type")
+	ErrMissingSessionStore    = errors.New("OMNIA_SESSION_STORE_URL is required for redis session type")
+	ErrInvalidMediaStorageTyp = errors.New("invalid media storage type")
 )
 
 // LoadFromEnv loads configuration from environment variables.
@@ -184,6 +208,23 @@ func LoadFromEnv() (*Config, error) {
 	}
 	cfg.SessionTTL = sessionTTL
 
+	// Parse media storage configuration
+	mediaStorageType := getEnvOrDefault(EnvMediaStorageType, string(MediaStorageTypeNone))
+	cfg.MediaStorageType = MediaStorageType(mediaStorageType)
+	cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)
+
+	mediaMaxFileSize, err := getEnvAsInt64(EnvMediaMaxFileSize, DefaultMediaMaxFileSize)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvMediaMaxFileSize, err)
+	}
+	cfg.MediaMaxFileSize = mediaMaxFileSize
+
+	mediaDefaultTTL, err := getEnvAsDuration(EnvMediaDefaultTTL, DefaultMediaDefaultTTL)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvMediaDefaultTTL, err)
+	}
+	cfg.MediaDefaultTTL = mediaDefaultTTL
+
 	return cfg, nil
 }
 
@@ -227,6 +268,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(errWithValueFmt, ErrInvalidSessionType, c.SessionType)
 	}
 
+	// Validate media storage type
+	switch c.MediaStorageType {
+	case MediaStorageTypeNone, MediaStorageTypeLocal:
+		// Valid
+	default:
+		return fmt.Errorf(errWithValueFmt, ErrInvalidMediaStorageTyp, c.MediaStorageType)
+	}
+
 	return nil
 }
 
@@ -245,6 +294,14 @@ func getEnvAsInt(key string, defaultValue int) (int, error) {
 		return defaultValue, nil
 	}
 	return strconv.Atoi(valueStr)
+}
+
+func getEnvAsInt64(key string, defaultValue int64) (int64, error) {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue, nil
+	}
+	return strconv.ParseInt(valueStr, 10, 64)
 }
 
 func getEnvAsDuration(key string, defaultValue time.Duration) (time.Duration, error) {

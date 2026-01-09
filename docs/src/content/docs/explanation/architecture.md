@@ -70,6 +70,18 @@ The facade container handles external client communication:
 - **Session Management** - Creates and tracks conversation sessions
 - **Protocol Translation** - Converts WebSocket messages to gRPC calls
 - **Connection Lifecycle** - Handles connect, disconnect, and heartbeat
+- **Media Storage** (optional) - Handles file uploads for multi-modal messages
+
+##### Optional Media Storage
+
+The facade can optionally provide media storage for runtimes that don't have built-in media externalization. When enabled, clients can upload files via HTTP before referencing them in WebSocket messages.
+
+This is useful when:
+- Using a custom runtime without media handling
+- Need a runtime-agnostic upload endpoint
+- Want to avoid base64-encoding large files in WebSocket messages
+
+Runtimes like PromptKit have built-in media externalization, so facade media storage can remain disabled (the default).
 
 #### Runtime Container
 

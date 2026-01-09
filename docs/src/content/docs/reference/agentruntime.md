@@ -216,6 +216,52 @@ The `facade.image` field allows you to override the default facade container ima
 - Running a custom build of the facade
 - Pinning to a specific version different from the operator default
 
+### `facade.media`
+
+Optional media storage configuration for the facade. When enabled, clients can upload files via HTTP endpoints before referencing them in WebSocket messages.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `facade.media.enabled` | boolean | false | No |
+| `facade.media.storagePath` | string | /var/omnia/media | No |
+| `facade.media.publicURL` | string | - | Yes (if enabled) |
+| `facade.media.maxFileSize` | string | 10Mi | No |
+| `facade.media.defaultTTL` | duration | 24h | No |
+
+```yaml
+spec:
+  facade:
+    type: websocket
+    port: 8080
+    media:
+      enabled: true
+      storagePath: /var/omnia/media
+      publicURL: https://agent.example.com
+      maxFileSize: 10Mi
+      defaultTTL: 24h
+```
+
+#### When to Use Facade Media Storage
+
+Facade media storage is useful when:
+- Using a custom runtime without built-in media externalization
+- Need a runtime-agnostic upload endpoint
+- Want to avoid base64-encoding large files in WebSocket messages
+
+> **Note**: Runtimes like PromptKit have built-in media externalization, so facade media storage can remain disabled (the default).
+
+#### Environment Variables
+
+The facade media configuration is passed to the container via environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `OMNIA_MEDIA_STORAGE_TYPE` | `none` (disabled) or `local` (enabled) |
+| `OMNIA_MEDIA_STORAGE_PATH` | Directory for storing uploaded files |
+| `OMNIA_MEDIA_PUBLIC_URL` | Base URL for generating download URLs |
+| `OMNIA_MEDIA_MAX_FILE_SIZE` | Maximum upload size in bytes |
+| `OMNIA_MEDIA_DEFAULT_TTL` | Default time-to-live for uploads |
+
 ### `toolRegistryRef`
 
 Optional reference to a ToolRegistry resource.

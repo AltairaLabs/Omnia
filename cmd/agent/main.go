@@ -31,6 +31,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 )
 
@@ -98,6 +99,17 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
 	mux.Handle("/metrics", promhttp.Handler())
+
+	// Initialize media storage if configured
+	mediaStorage, mediaCleanup := initMediaStorage(cfg, log)
+	if mediaCleanup != nil {
+		defer mediaCleanup()
+	}
+	if mediaStorage != nil {
+		mediaHandler := media.NewHandler(mediaStorage, log)
+		mediaHandler.RegisterRoutes(mux)
+		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
+	}
 
 	// Create facade HTTP server
 	facadeServer := &http.Server{
@@ -292,6 +304,48 @@ func createHandler(cfg *agent.Config, log interface {
 		return handler, cleanup
 	default:
 		log.Info("unknown handler mode, using nil handler", "mode", cfg.HandlerMode)
+		return nil, nil
+	}
+}
+
+// initMediaStorage creates the appropriate media storage backend based on configuration.
+// Returns the storage and an optional cleanup function.
+func initMediaStorage(cfg *agent.Config, log interface {
+	Info(string, ...any)
+	Error(error, string, ...any)
+}) (*media.LocalStorage, func()) {
+	switch cfg.MediaStorageType {
+	case agent.MediaStorageTypeNone:
+		log.Info("media storage disabled")
+		return nil, nil
+	case agent.MediaStorageTypeLocal:
+		log.Info("using local filesystem media storage", "path", cfg.MediaStoragePath)
+
+		// Build base URL from the facade port
+		baseURL := fmt.Sprintf("http://localhost:%d", cfg.FacadePort)
+
+		storageCfg := media.LocalStorageConfig{
+			BasePath:     cfg.MediaStoragePath,
+			BaseURL:      baseURL,
+			DefaultTTL:   cfg.MediaDefaultTTL,
+			UploadURLTTL: 15 * time.Minute,
+			MaxFileSize:  cfg.MediaMaxFileSize,
+		}
+
+		storage, err := media.NewLocalStorage(storageCfg)
+		if err != nil {
+			log.Error(err, "failed to initialize local media storage")
+			return nil, nil
+		}
+
+		cleanup := func() {
+			if err := storage.Close(); err != nil {
+				log.Error(err, "error closing media storage")
+			}
+		}
+		return storage, cleanup
+	default:
+		log.Info("unknown media storage type, disabling", "type", cfg.MediaStorageType)
 		return nil, nil
 	}
 }
