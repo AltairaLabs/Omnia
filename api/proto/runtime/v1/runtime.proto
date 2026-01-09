@@ -89,10 +89,42 @@ message ToolResult {
 // Done signals the completion of a conversation turn.
 message Done {
   // final_content contains the complete response text (optional).
+  // For text-only responses, this contains the full response.
+  // For multimodal responses, use the parts field instead.
   string final_content = 1;
 
   // usage contains token usage statistics for this turn.
   Usage usage = 2;
+
+  // parts contains multimodal content parts (text, images, audio, video).
+  // If non-empty, this takes precedence over final_content for rich responses.
+  repeated ContentPart parts = 3;
+}
+
+// ContentPart represents a single piece of content in a multimodal message.
+message ContentPart {
+  // type indicates the content type: "text", "image", "audio", "video"
+  string type = 1;
+
+  // text contains text content (only set when type="text")
+  string text = 2;
+
+  // media contains media content (only set when type="image", "audio", or "video")
+  MediaContent media = 3;
+}
+
+// MediaContent represents media data (image, audio, video) in a message.
+message MediaContent {
+  // Exactly one of data or url should be set.
+
+  // data contains base64-encoded media data (for resolved file:// and mock:// URLs)
+  string data = 1;
+
+  // url contains the media URL (for http:// and https:// URLs that are passed through)
+  string url = 2;
+
+  // mime_type indicates the media format (e.g., "image/png", "audio/mp3")
+  string mime_type = 3;
 }
 
 // Usage contains token usage and cost information.

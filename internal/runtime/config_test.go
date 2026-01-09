@@ -323,3 +323,24 @@ func TestLoadConfig_TracingSampleRateNegative(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be between 0.0 and 1.0")
 }
+
+func TestLoadConfig_MediaBasePath(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envMediaBasePath, "/custom/media/path")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, "/custom/media/path", cfg.MediaBasePath)
+}
+
+func TestLoadConfig_MediaBasePathDefault(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, defaultMediaBasePath, cfg.MediaBasePath)
+}
