@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import { AttachmentPreview } from "./attachment-preview";
 import type { FileAttachment } from "@/types/websocket";
 
@@ -178,6 +179,28 @@ describe("AttachmentPreview", () => {
       // The filename appears in an overlay div for images
       const filenameElements = screen.getAllByText(mockImageAttachment.name);
       expect(filenameElements.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("accessibility", () => {
+    it("should have no accessibility violations with image attachments", async () => {
+      const { container } = render(
+        <AttachmentPreview attachments={[mockImageAttachment]} />
+      );
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations with mixed attachments", async () => {
+      const { container } = render(
+        <AttachmentPreview
+          attachments={[mockImageAttachment, mockAudioAttachment, mockFileAttachment]}
+        />
+      );
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
     });
   });
 });

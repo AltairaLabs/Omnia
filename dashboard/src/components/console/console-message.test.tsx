@@ -1,15 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import { ConsoleMessage } from "./console-message";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
-
-// Mock ResizeObserver for Radix components
-class ResizeObserverMock {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-global.ResizeObserver = ResizeObserverMock;
 
 describe("ConsoleMessage", () => {
   const baseMessage: ConsoleMessageType = {
@@ -177,6 +170,39 @@ describe("ConsoleMessage", () => {
 
       // Lightbox should be open - check for zoom controls
       expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+    });
+  });
+
+  describe("accessibility", () => {
+    it("should have no accessibility violations for user message", async () => {
+      const { container } = render(<ConsoleMessage message={baseMessage} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations for assistant message", async () => {
+      const assistantMessage: ConsoleMessageType = {
+        ...baseMessage,
+        role: "assistant",
+        content: "How can I help you?",
+      };
+      const { container } = render(<ConsoleMessage message={assistantMessage} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations for system message", async () => {
+      const systemMessage: ConsoleMessageType = {
+        ...baseMessage,
+        role: "system",
+        content: "Connected to agent",
+      };
+      const { container } = render(<ConsoleMessage message={systemMessage} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
     });
   });
 });

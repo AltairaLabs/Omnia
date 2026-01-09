@@ -1,5 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { vi } from "vitest";
+import * as matchers from "vitest-axe/matchers";
+import { expect, vi } from "vitest";
+
+// Extend vitest expect with axe matchers
+expect.extend(matchers);
 
 // Mock matchMedia
 Object.defineProperty(globalThis, "matchMedia", {

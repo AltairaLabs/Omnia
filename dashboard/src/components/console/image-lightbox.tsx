@@ -160,7 +160,13 @@ function ImageLightboxContent({
       <DialogPrimitive.Content
         className="fixed inset-0 z-50 flex flex-col outline-none"
         onPointerDownOutside={(e) => e.preventDefault()}
+        aria-describedby={undefined}
       >
+        {/* Visually hidden title for accessibility */}
+        <DialogPrimitive.Title className="sr-only">
+          Image viewer
+        </DialogPrimitive.Title>
+
         {/* Header with controls */}
         <div className="flex items-center justify-between p-4 text-white">
           <div className="flex items-center gap-2">

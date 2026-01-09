@@ -1,14 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { axe } from "vitest-axe";
 import { ImageLightbox } from "./image-lightbox";
-
-// Mock ResizeObserver for Radix components
-class ResizeObserverMock {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-global.ResizeObserver = ResizeObserverMock;
 
 describe("ImageLightbox", () => {
   const mockImages = [
@@ -403,6 +396,24 @@ describe("ImageLightbox", () => {
 
       // Should be at image 3
       expect(screen.getByText("3 / 3")).toBeInTheDocument();
+    });
+  });
+
+  describe("accessibility", () => {
+    it("should have no accessibility violations when open", async () => {
+      const { container } = render(<ImageLightbox {...defaultProps} />);
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+
+    it("should have no accessibility violations with single image", async () => {
+      const { container } = render(
+        <ImageLightbox {...defaultProps} images={[mockImages[0]]} />
+      );
+
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
     });
   });
 });
