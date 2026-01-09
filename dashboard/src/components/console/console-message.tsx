@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { ToolCallCard } from "./tool-call-card";
 import { ImageLightbox } from "./image-lightbox";
 import { AudioPlayer } from "./audio-player";
+import { VideoPlayer } from "./video-player";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 interface ConsoleMessageProps {
@@ -197,23 +198,13 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
         {videoAttachments.length > 0 && (
           <div className="flex flex-col gap-2 w-full">
             {videoAttachments.map((attachment) => (
-              <div
+              <VideoPlayer
                 key={attachment.id}
-                className="rounded-lg border bg-background/50 overflow-hidden"
-              >
-                <p className="text-xs text-muted-foreground p-2 truncate" title={attachment.name}>
-                  {attachment.name}
-                </p>
-                <video
-                  controls
-                  className="w-full max-h-[300px]"
-                  preload="metadata"
-                  aria-label={`Video: ${attachment.name}`}
-                >
-                  <source src={attachment.dataUrl} type={attachment.type} />
-                  Your browser does not support video playback.
-                </video>
-              </div>
+                src={attachment.dataUrl}
+                type={attachment.type}
+                filename={attachment.name}
+                fileSize={attachment.size}
+              />
             ))}
           </div>
         )}

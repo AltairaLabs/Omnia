@@ -298,6 +298,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
   }[status];
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Drag events for file drop zone, keyboard users can use the attach file button instead
     <div
       className={cn("flex flex-col h-[600px] border rounded-lg relative", className)}
       onDragEnter={handleDragEnter}

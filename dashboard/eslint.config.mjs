@@ -46,6 +46,11 @@ const eslintConfig = defineConfig([
       "prefer-const": "error",
       eqeqeq: ["error", "always", { null: "ignore" }],
 
+      // Accessibility rules - eslint-config-next only includes a subset, add important ones
+      "jsx-a11y/click-events-have-key-events": "error",
+      "jsx-a11y/no-static-element-interactions": "error",
+      "jsx-a11y/interactive-supports-focus": "error",
+
       // Import organization (if plugin available)
       "import/no-duplicates": "off", // Handled by no-duplicate-imports
 

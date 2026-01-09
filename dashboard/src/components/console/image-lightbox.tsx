@@ -240,6 +240,7 @@ function ImageLightboxContent({
         </div>
 
         {/* Image container */}
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Mouse events for pan/drag functionality, keyboard users can use zoom buttons */}
         <div
           className="flex-1 flex items-center justify-center overflow-hidden relative"
           onWheel={handleWheel}
