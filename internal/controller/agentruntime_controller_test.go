@@ -2145,6 +2145,178 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return hpa.Spec.MaxReplicas
 			}, timeout, interval).Should(Equal(int32(15)))
 		})
+
+		It("should set OMNIA_MEDIA_BASE_PATH when media config is specified", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with media config")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeMock,
+					},
+					Media: &omniav1alpha1.MediaConfig{
+						BasePath: "/custom/media/path",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying OMNIA_MEDIA_BASE_PATH is set")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			var runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == RuntimeContainerName {
+					runtimeContainer = c
+					break
+				}
+			}
+			Expect(runtimeContainer).NotTo(BeNil())
+
+			envMap := make(map[string]corev1.EnvVar)
+			for _, env := range runtimeContainer.Env {
+				envMap[env.Name] = env
+			}
+			Expect(envMap).To(HaveKey("OMNIA_MEDIA_BASE_PATH"))
+			Expect(envMap["OMNIA_MEDIA_BASE_PATH"].Value).To(Equal("/custom/media/path"))
+		})
+
+		It("should mount user-specified volumes and volumeMounts", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{
+							Name: "prompts-config",
+						},
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with custom volumes")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeMock,
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Volumes: []corev1.Volume{
+							{
+								Name: "mock-media",
+								VolumeSource: corev1.VolumeSource{
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "media-config",
+										},
+									},
+								},
+							},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      "mock-media",
+								MountPath: "/etc/omnia/media",
+								ReadOnly:  true,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("verifying user volumes are mounted")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			// Find runtime container
+			var runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				if c.Name == RuntimeContainerName {
+					runtimeContainer = c
+					break
+				}
+			}
+			Expect(runtimeContainer).NotTo(BeNil())
+
+			// Check volume mounts include user-specified mount
+			mountMap := make(map[string]corev1.VolumeMount)
+			for _, m := range runtimeContainer.VolumeMounts {
+				mountMap[m.Name] = m
+			}
+			Expect(mountMap).To(HaveKey("mock-media"))
+			Expect(mountMap["mock-media"].MountPath).To(Equal("/etc/omnia/media"))
+			Expect(mountMap["mock-media"].ReadOnly).To(BeTrue())
+
+			// Check volumes include user-specified volume
+			volMap := make(map[string]corev1.Volume)
+			for _, v := range deployment.Spec.Template.Spec.Volumes {
+				volMap[v.Name] = v
+			}
+			Expect(volMap).To(HaveKey("mock-media"))
+			Expect(volMap["mock-media"].ConfigMap.Name).To(Equal("media-config"))
+		})
 	})
 
 	Context("When using providerRef", func() {
