@@ -286,3 +286,11 @@ func (m *mockResponseWriter) WriteError(code, message string) error {
 	m.errors = append(m.errors, struct{ code, message string }{code, message})
 	return nil
 }
+
+func (m *mockResponseWriter) WriteUploadReady(_ *facade.UploadReadyInfo) error {
+	return nil
+}
+
+func (m *mockResponseWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) error {
+	return nil
+}
