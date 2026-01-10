@@ -1,0 +1,103 @@
+# Validate Direct Push
+#
+# This workflow validates that direct pushes to main (bypassing PR requirement)
+# only contain changes to allowed file paths:
+# - .github/**/*.yaml (workflow files)
+# - .github/**/*.yml (workflow files)
+# - docs/** (documentation content)
+#
+# Direct pushes with changes to other files will fail this check.
+
+name: Validate Direct Push
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Validate Allowed Paths
+    runs-on: ubuntu-latest
+
+    # Skip if this is a PR merge (has associated PR number)
+    if: github.event.head_commit.message != '' && !contains(github.event.head_commit.message, 'Merge pull request')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for PR association
+        id: check-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check if this commit is associated with a merged PR
+          PR_NUMBER=$(gh pr list --state merged --search "${{ github.sha }}" --json number --jq '.[0].number // empty')
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "This commit is from PR #$PR_NUMBER - skipping validation"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "This appears to be a direct push - validating file paths"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate changed files
+        if: steps.check-pr.outputs.skip != 'true'
+        run: |
+          echo "Checking files changed in direct push..."
+
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          echo ""
+
+          # Define allowed patterns
+          DISALLOWED_FILES=""
+
+          while IFS= read -r file; do
+            # Skip empty lines
+            [ -z "$file" ] && continue
+
+            # Check if file matches allowed patterns
+            case "$file" in
+              .github/*.yaml|.github/*.yml|.github/**/*.yaml|.github/**/*.yml)
+                echo "✓ Allowed (workflow): $file"
+                ;;
+              docs/*)
+                echo "✓ Allowed (docs): $file"
+                ;;
+              *.md)
+                echo "✓ Allowed (markdown): $file"
+                ;;
+              *)
+                echo "✗ NOT ALLOWED: $file"
+                DISALLOWED_FILES="$DISALLOWED_FILES$file\n"
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
+
+          # Fail if any disallowed files were found
+          if [ -n "$DISALLOWED_FILES" ]; then
+            echo ""
+            echo "=========================================="
+            echo "ERROR: Direct push contains disallowed files!"
+            echo "=========================================="
+            echo ""
+            echo "Direct pushes to main are only allowed for:"
+            echo "  - .github/**/*.yaml or .github/**/*.yml (workflow files)"
+            echo "  - docs/** (documentation)"
+            echo "  - *.md (markdown files)"
+            echo ""
+            echo "Please use a pull request for other changes."
+            echo ""
+            exit 1
+          fi
+
+          echo ""
+          echo "✓ All changed files are in allowed paths"
