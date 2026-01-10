@@ -106,7 +106,7 @@ func main() {
 		defer mediaCleanup()
 	}
 	if mediaStorage != nil {
-		mediaHandler := media.NewHandler(mediaStorage, log)
+		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
 		mediaHandler.RegisterRoutes(mux)
 		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
 	}
