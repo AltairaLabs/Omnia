@@ -312,6 +312,38 @@ Notification that a file upload has completed successfully:
 | `upload_complete.storage_ref` | string | Storage reference for the uploaded file |
 | `upload_complete.size_bytes` | number | Actual file size in bytes |
 
+#### Media Chunk
+
+Streaming media chunk for audio/video responses. Allows playback to begin before the entire media is generated:
+
+```json
+{
+  "type": "media_chunk",
+  "session_id": "sess-abc123",
+  "media_chunk": {
+    "media_id": "audio-xyz789",
+    "sequence": 0,
+    "is_last": false,
+    "data": "//uQxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVV...",
+    "mime_type": "audio/mp3"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `media_chunk.media_id` | string | Unique identifier for the media stream |
+| `media_chunk.sequence` | number | Sequence number for ordering (0-indexed) |
+| `media_chunk.is_last` | boolean | Whether this is the final chunk |
+| `media_chunk.data` | string | Base64-encoded chunk data |
+| `media_chunk.mime_type` | string | MIME type (e.g., "audio/mp3", "video/mp4") |
+
+The client should:
+1. Buffer chunks by `media_id` and `sequence`
+2. Begin playback once sufficient data is buffered
+3. Assemble the complete media when `is_last: true` is received
+4. The final `done` message may include a complete media URL for replay
+
 #### Error
 
 Error message:
@@ -392,6 +424,34 @@ This flow shows uploading a file via WebSocket before sending a message that ref
 2. Receives `upload_ready` with the upload URL
 3. PUTs the file content to the upload URL via HTTP
 4. Sends a message with the `storage_ref` in the media content
+
+### With Streaming Media Response
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant A as Agent (TTS/Video Gen)
+
+    C->>S: message ("Read this text aloud")
+    S->>A: Generate audio
+    A-->>S: Audio chunk 1
+    S-->>C: media_chunk (seq=0)
+    Note over C: Begin playback
+    A-->>S: Audio chunk 2
+    S-->>C: media_chunk (seq=1)
+    A-->>S: Audio chunk 3 (final)
+    S-->>C: media_chunk (seq=2, is_last=true)
+    S-->>C: done (with complete media URL)
+```
+
+This flow shows streaming audio/video responses. The client:
+1. Sends a message requesting audio/video generation
+2. Receives `media_chunk` messages as data becomes available
+3. Buffers chunks by `media_id` and `sequence` number
+4. Begins playback once sufficient data is buffered
+5. Assembles the complete media when `is_last: true` is received
+6. Optionally uses the complete media URL from the `done` message for replay
 
 ### Session Resumption
 

@@ -294,3 +294,7 @@ func (m *mockResponseWriter) WriteUploadReady(_ *facade.UploadReadyInfo) error {
 func (m *mockResponseWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) error {
 	return nil
 }
+
+func (m *mockResponseWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error {
+	return nil
+}

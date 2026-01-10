@@ -162,6 +162,7 @@ const (
 	MessageTypeConnected      MessageType = "connected"
 	MessageTypeUploadReady    MessageType = "upload_ready"
 	MessageTypeUploadComplete MessageType = "upload_complete"
+	MessageTypeMediaChunk     MessageType = "media_chunk"
 )
 
 // ClientMessage represents a message sent from client to server.
@@ -204,6 +205,8 @@ type ServerMessage struct {
 	UploadReady *UploadReadyInfo `json:"upload_ready,omitempty"`
 	// UploadComplete contains upload completion details (for upload_complete type).
 	UploadComplete *UploadCompleteInfo `json:"upload_complete,omitempty"`
+	// MediaChunk contains streaming media chunk details (for media_chunk type).
+	MediaChunk *MediaChunkInfo `json:"media_chunk,omitempty"`
 	// Timestamp is when the message was created.
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -268,6 +271,23 @@ type UploadCompleteInfo struct {
 	StorageRef string `json:"storage_ref"`
 	// SizeBytes is the actual size of the uploaded file.
 	SizeBytes int64 `json:"size_bytes"`
+}
+
+// MediaChunkInfo contains information about a streaming media chunk.
+// This is used for streaming audio/video responses where playback can begin
+// before the entire media is generated.
+type MediaChunkInfo struct {
+	// MediaID is the unique identifier for this media stream.
+	// All chunks belonging to the same media share this ID.
+	MediaID string `json:"media_id"`
+	// Sequence is the sequence number for ordering chunks (0-indexed).
+	Sequence int `json:"sequence"`
+	// IsLast indicates whether this is the final chunk.
+	IsLast bool `json:"is_last"`
+	// Data is the base64-encoded chunk data.
+	Data string `json:"data"`
+	// MimeType is the MIME type of the media (e.g., "audio/mp3", "video/mp4").
+	MimeType string `json:"mime_type"`
 }
 
 // Error codes.
@@ -382,6 +402,16 @@ func NewUploadCompleteMessage(sessionID string, uploadComplete *UploadCompleteIn
 		SessionID:      sessionID,
 		UploadComplete: uploadComplete,
 		Timestamp:      time.Now(),
+	}
+}
+
+// NewMediaChunkMessage creates a new media chunk message for streaming media responses.
+func NewMediaChunkMessage(sessionID string, mediaChunk *MediaChunkInfo) *ServerMessage {
+	return &ServerMessage{
+		Type:       MessageTypeMediaChunk,
+		SessionID:  sessionID,
+		MediaChunk: mediaChunk,
+		Timestamp:  time.Now(),
 	}
 }
 
