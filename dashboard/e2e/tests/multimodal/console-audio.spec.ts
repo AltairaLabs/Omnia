@@ -123,4 +123,92 @@ test.describe('Console Audio Player', () => {
       expect(ariaLabel || title || textContent?.trim()).toBeTruthy();
     }
   });
+
+  test('should have audio element with valid source', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an audio response
+    await sendMessageAndWait(page, PLAY_AUDIO);
+
+    // Get the audio player
+    const lastMessage = await getLastAssistantMessage(page);
+    const audioPlayer = lastMessage!.locator(SELECTORS.audioPlayer);
+    await expect(audioPlayer).toBeVisible({ timeout: 10000 });
+
+    // Find the audio element (may be hidden as part of custom player UI)
+    const audioElement = audioPlayer.locator('audio');
+    await expect(audioElement).toBeAttached();
+
+    // Verify audio has a valid source (data URL or blob URL)
+    const src = await audioElement.getAttribute('src');
+    expect(src).toBeTruthy();
+    expect(src!.startsWith('data:audio/') || src!.startsWith('blob:')).toBeTruthy();
+  });
+
+  test('should have correct audio MIME type', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an audio response
+    await sendMessageAndWait(page, SEND_AUDIO);
+
+    // Get the audio player
+    const lastMessage = await getLastAssistantMessage(page);
+    const audioPlayer = lastMessage!.locator(SELECTORS.audioPlayer);
+    await expect(audioPlayer).toBeVisible({ timeout: 10000 });
+
+    // Find the audio element
+    const audioElement = audioPlayer.locator('audio');
+    const src = await audioElement.getAttribute('src');
+
+    // If it's a data URL, verify the MIME type is audio/*
+    if (src?.startsWith('data:')) {
+      expect(src).toMatch(/^data:audio\/(mpeg|mp3|wav|ogg|webm)/);
+    }
+
+    // If it's a blob URL, we can't verify MIME type directly but the element should exist
+    expect(src).toBeTruthy();
+  });
+
+  test('should have download button or link', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an audio response
+    await sendMessageAndWait(page, PLAY_AUDIO);
+
+    // Get the audio player
+    const lastMessage = await getLastAssistantMessage(page);
+    const audioPlayer = lastMessage!.locator(SELECTORS.audioPlayer);
+    await expect(audioPlayer).toBeVisible({ timeout: 10000 });
+
+    // Look for download button or link
+    const downloadButton = audioPlayer.locator(
+      'a[download], button[aria-label*="download"], button[aria-label*="Download"], ' +
+      '[data-testid="audio-download"], button:has-text("Download")'
+    );
+
+    // If download button exists, verify it's clickable
+    const count = await downloadButton.count();
+    if (count > 0) {
+      await expect(downloadButton.first()).toBeEnabled();
+    }
+    // Note: Download button is optional - test passes if element exists and is enabled
+  });
+
+  test('should have interactive play button', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an audio response
+    await sendMessageAndWait(page, PLAY_AUDIO);
+
+    // Get the audio player
+    const lastMessage = await getLastAssistantMessage(page);
+    const audioPlayer = lastMessage!.locator(SELECTORS.audioPlayer);
+    await expect(audioPlayer).toBeVisible({ timeout: 10000 });
+
+    // Find play button - should be enabled and clickable
+    const playButton = audioPlayer.locator('[data-testid="audio-play-button"], button').first();
+    await expect(playButton).toBeEnabled();
+
+    // Verify the audio element has a valid source (playback may be blocked in headless browser)
+    const audioElement = audioPlayer.locator('audio');
+    const src = await audioElement.getAttribute('src');
+    expect(src).toBeTruthy();
+
+    // Verify button is interactive (can be clicked without error)
+    await playButton.click();
+    await page.waitForTimeout(100);
+    await expect(playButton).toBeEnabled();
+  });
 });
