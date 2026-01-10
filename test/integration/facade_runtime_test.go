@@ -298,3 +298,11 @@ func (m *mockResponseWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) e
 func (m *mockResponseWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error {
 	return nil
 }
+
+func (m *mockResponseWriter) SupportsBinary() bool {
+	return false
+}
+
+func (m *mockResponseWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte, _ uint32, _ bool, _ string, _ []byte) error {
+	return nil
+}

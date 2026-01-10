@@ -5,13 +5,17 @@
 
 // Message types
 export type MessageType =
-  | "message"      // Client → Server: user message
-  | "chunk"        // Server → Client: streaming text chunk
-  | "done"         // Server → Client: response complete
-  | "tool_call"    // Server → Client: agent is calling a tool
-  | "tool_result"  // Server → Client: tool execution result
-  | "error"        // Server → Client: error occurred
-  | "connected";   // Server → Client: connection established
+  | "message"         // Client → Server: user message
+  | "upload_request"  // Client → Server: file upload request
+  | "chunk"           // Server → Client: streaming text chunk
+  | "done"            // Server → Client: response complete
+  | "tool_call"       // Server → Client: agent is calling a tool
+  | "tool_result"     // Server → Client: tool execution result
+  | "error"           // Server → Client: error occurred
+  | "connected"       // Server → Client: connection established
+  | "upload_ready"    // Server → Client: upload URL ready
+  | "upload_complete" // Server → Client: upload complete
+  | "media_chunk";    // Server → Client: streaming media chunk
 
 // Client → Server message
 export interface ClientMessage {
@@ -19,6 +23,42 @@ export interface ClientMessage {
   session_id?: string;
   content: string;
   metadata?: Record<string, string>;
+}
+
+// Connection capabilities for binary frame support
+export interface ConnectionCapabilities {
+  binary_frames: boolean;
+  max_payload_size?: number;
+  protocol_version?: number;
+}
+
+// Connected message info with capabilities
+export interface ConnectedInfo {
+  capabilities?: ConnectionCapabilities;
+}
+
+// Media chunk info for streaming responses
+export interface MediaChunkInfo {
+  media_id: string;
+  sequence: number;
+  is_last: boolean;
+  data: string; // base64 for JSON frames
+  mime_type: string;
+}
+
+// Upload ready info
+export interface UploadReadyInfo {
+  upload_id: string;
+  upload_url: string;
+  storage_ref: string;
+  expires_at: string;
+}
+
+// Upload complete info
+export interface UploadCompleteInfo {
+  upload_id: string;
+  storage_ref: string;
+  size_bytes: number;
 }
 
 // Server → Client message
@@ -29,6 +69,10 @@ export interface ServerMessage {
   tool_call?: ToolCallInfo;
   tool_result?: ToolResultInfo;
   error?: ErrorInfo;
+  connected?: ConnectedInfo;
+  media_chunk?: MediaChunkInfo;
+  upload_ready?: UploadReadyInfo;
+  upload_complete?: UploadCompleteInfo;
   timestamp: string;
 }
 
@@ -105,4 +149,107 @@ export interface ConsoleState {
   status: ConnectionStatus;
   messages: ConsoleMessage[];
   error: string | null;
+}
+
+// Binary WebSocket frame support
+export const BINARY_MAGIC = "OMNI";
+export const BINARY_VERSION = 1;
+export const BINARY_HEADER_SIZE = 32;
+export const MEDIA_ID_SIZE = 12;
+
+// Binary message types
+export const BinaryMessageType = {
+  MEDIA_CHUNK: 1,
+  UPLOAD: 2,
+} as const;
+
+// Binary frame header
+export interface BinaryFrameHeader {
+  magic: string;
+  version: number;
+  flags: number;
+  messageType: number;
+  metadataLen: number;
+  payloadLen: number;
+  sequence: number;
+  mediaId: string;
+}
+
+// Binary frame flags
+export const BinaryFlags = {
+  COMPRESSED: 0x01,
+  CHUNKED: 0x02,
+  IS_LAST: 0x04,
+} as const;
+
+/**
+ * Decode a binary WebSocket frame.
+ * Returns parsed header, metadata, and payload.
+ */
+export function decodeBinaryFrame(data: ArrayBuffer): {
+  header: BinaryFrameHeader;
+  metadata: Record<string, unknown>;
+  payload: ArrayBuffer;
+} {
+  const view = new DataView(data);
+  const decoder = new TextDecoder();
+
+  // Read header
+  const magic = decoder.decode(new Uint8Array(data, 0, 4));
+  if (magic !== BINARY_MAGIC) {
+    throw new Error(`Invalid magic bytes: ${magic}`);
+  }
+
+  const version = view.getUint8(4);
+  if (version !== BINARY_VERSION) {
+    throw new Error(`Unsupported protocol version: ${version}`);
+  }
+
+  const flags = view.getUint8(5);
+  const messageType = view.getUint16(6, false); // big-endian
+  const metadataLen = view.getUint32(8, false);
+  const payloadLen = view.getUint32(12, false);
+  const sequence = view.getUint32(16, false);
+
+  // Read media ID, trimming null bytes
+  const mediaIdBytes = new Uint8Array(data, 20, MEDIA_ID_SIZE);
+  let mediaIdLen = MEDIA_ID_SIZE;
+  for (let i = 0; i < MEDIA_ID_SIZE; i++) {
+    if (mediaIdBytes[i] === 0) {
+      mediaIdLen = i;
+      break;
+    }
+  }
+  const mediaId = decoder.decode(mediaIdBytes.slice(0, mediaIdLen));
+
+  const header: BinaryFrameHeader = {
+    magic,
+    version,
+    flags,
+    messageType,
+    metadataLen,
+    payloadLen,
+    sequence,
+    mediaId,
+  };
+
+  // Read metadata
+  let metadata: Record<string, unknown> = {};
+  if (metadataLen > 0) {
+    const metadataBytes = new Uint8Array(data, BINARY_HEADER_SIZE, metadataLen);
+    const metadataJson = decoder.decode(metadataBytes);
+    metadata = JSON.parse(metadataJson);
+  }
+
+  // Read payload
+  const payload = data.slice(BINARY_HEADER_SIZE + metadataLen);
+
+  return { header, metadata, payload };
+}
+
+/**
+ * Check if a binary frame has the is_last flag set.
+ */
+export function isBinaryFrameLast(flags: number): boolean {
+  return (flags & BinaryFlags.IS_LAST) !== 0;
 }
