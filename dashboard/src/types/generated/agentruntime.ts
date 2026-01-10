@@ -4,6 +4,21 @@
 import type { ObjectMeta } from "../common";
 
 export interface AgentRuntimeSpec {
+  /** console configures the dashboard console UI settings.
+   * Use this to customize allowed file attachment types and size limits. */
+  console?: {
+    /** allowedAttachmentTypes specifies MIME types allowed for file uploads.
+     * Supports specific types ("image/png") and wildcards ("image/*").
+     * If not specified, defaults to common types: image/*, audio/*, application/pdf, text/plain, text/markdown. */
+    allowedAttachmentTypes?: string[];
+    /** allowedExtensions specifies file extensions as fallback for browsers with generic MIME types.
+     * If not specified, extensions are inferred from allowedAttachmentTypes. */
+    allowedExtensions?: string[];
+    /** maxFileSize is the maximum file size in bytes for attachments. */
+    maxFileSize?: number;
+    /** maxFiles is the maximum number of files that can be attached to a single message. */
+    maxFiles?: number;
+  };
   /** facade configures the client-facing connection interface. */
   facade: {
     /** handler specifies the message handler mode.

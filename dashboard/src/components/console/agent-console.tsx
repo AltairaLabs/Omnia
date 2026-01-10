@@ -7,9 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useAgentConsole } from "@/hooks";
+import { useAgentConsole, useConsoleConfig } from "@/hooks";
 import { ConsoleMessage } from "./console-message";
 import { AttachmentPreview } from "./attachment-preview";
+import { isAllowedType, formatFileSize } from "./attachment-utils";
 import type { FileAttachment } from "@/types/websocket";
 
 interface AgentConsoleProps {
@@ -18,56 +19,6 @@ interface AgentConsoleProps {
   /** Optional session ID for multi-tab support */
   sessionId?: string;
   className?: string;
-}
-
-// File validation constants - MIME types for validation
-const ALLOWED_MIME_TYPES = [
-  // Images
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  // Audio
-  "audio/mpeg",
-  "audio/wav",
-  "audio/ogg",
-  // Documents
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  // Code files (browsers may report various MIME types)
-  "text/javascript",
-  "text/typescript",
-  "application/javascript",
-  "application/typescript",
-  "text/x-python",
-  "application/x-python-code",
-  // Data
-  "text/csv",
-  "application/json",
-];
-
-// File extensions for the file picker (more reliable than MIME types)
-const ALLOWED_EXTENSIONS = [
-  ".png", ".jpg", ".jpeg", ".gif", ".webp",  // Images
-  ".mp3", ".wav", ".ogg",                     // Audio
-  ".pdf", ".txt", ".md",                      // Documents
-  ".js", ".ts", ".jsx", ".tsx", ".py",        // Code
-  ".csv", ".json",                            // Data
-];
-
-// Combined accept string for file input
-const ACCEPT_STRING = [...ALLOWED_MIME_TYPES, ...ALLOWED_EXTENSIONS].join(",");
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_FILES = 5;
-
-function isAllowedType(type: string, filename: string): boolean {
-  // Check MIME type
-  if (ALLOWED_MIME_TYPES.includes(type)) return true;
-  // Fallback to extension check for files with generic MIME types
-  const ext = "." + filename.split(".").pop()?.toLowerCase();
-  return ALLOWED_EXTENSIONS.includes(ext);
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -87,6 +38,9 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
+
+  // Get attachment config from agent's console configuration
+  const { config: attachmentConfig } = useConsoleConfig(namespace, agentName);
 
   // Always use mock mode for now (until K8s integration)
   const {
@@ -122,11 +76,16 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     const validFiles: FileAttachment[] = [];
 
     for (const file of Array.from(files)) {
-      // Validate type
-      if (!isAllowedType(file.type, file.name)) continue;
+      // Validate type using config
+      const typeCheck = isAllowedType(
+        file,
+        attachmentConfig.allowedMimeTypes,
+        attachmentConfig.allowedExtensions
+      );
+      if (!typeCheck.allowed) continue;
 
-      // Validate size
-      if (file.size > MAX_FILE_SIZE) continue;
+      // Validate size using config
+      if (file.size > attachmentConfig.maxFileSize) continue;
 
       // Convert to data URL
       const dataUrl = await fileToDataUrl(file);
@@ -140,9 +99,9 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
       });
     }
 
-    // Limit total files
-    setAttachments((prev) => [...prev, ...validFiles].slice(0, MAX_FILES));
-  }, []);
+    // Limit total files using config
+    setAttachments((prev) => [...prev, ...validFiles].slice(0, attachmentConfig.maxFiles));
+  }, [attachmentConfig]);
 
   // Remove attachment
   const removeAttachment = useCallback((id: string) => {
@@ -218,12 +177,19 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
 
       for (const item of Array.from(items)) {
         // Check if item is an image with allowed type
-        const ext = item.type.split("/")[1] || "png";
-        const tempName = `pasted.${ext}`;
-        if (item.type.startsWith("image/") && isAllowedType(item.type, tempName)) {
-          const file = item.getAsFile();
-          if (file && file.size <= MAX_FILE_SIZE) {
-            imageFiles.push(file);
+        if (item.type.startsWith("image/")) {
+          const ext = item.type.split("/")[1] || "png";
+          const tempName = `pasted.${ext}`;
+          const typeCheck = isAllowedType(
+            { type: item.type, name: tempName },
+            attachmentConfig.allowedMimeTypes,
+            attachmentConfig.allowedExtensions
+          );
+          if (typeCheck.allowed) {
+            const file = item.getAsFile();
+            if (file && file.size <= attachmentConfig.maxFileSize) {
+              imageFiles.push(file);
+            }
           }
         }
       }
@@ -249,10 +215,10 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
         }
 
         // Add to attachments, respecting max limit
-        setAttachments((prev) => [...prev, ...newAttachments].slice(0, MAX_FILES));
+        setAttachments((prev) => [...prev, ...newAttachments].slice(0, attachmentConfig.maxFiles));
       }
     },
-    []
+    [attachmentConfig]
   );
 
   // Handle file input change (from attachment button)
@@ -316,7 +282,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             <Upload className="h-12 w-12" />
             <p className="text-lg font-medium">Drop files here</p>
             <p className="text-sm text-muted-foreground">
-              Images and audio files up to 10MB
+              Files up to {formatFileSize(attachmentConfig.maxFileSize)}
             </p>
           </div>
         </div>
@@ -393,7 +359,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           ref={fileInputRef}
           type="file"
           multiple
-          accept={ACCEPT_STRING}
+          accept={attachmentConfig.acceptString}
           onChange={handleFileInputChange}
           className="hidden"
           aria-hidden="true"
@@ -405,7 +371,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             variant="outline"
             size="icon"
             onClick={handleAttachmentClick}
-            disabled={status !== "connected" || attachments.length >= MAX_FILES}
+            disabled={status !== "connected" || attachments.length >= attachmentConfig.maxFiles}
             className="shrink-0"
             aria-label="Attach files"
           >

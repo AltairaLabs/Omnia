@@ -54,6 +54,42 @@ spec:
           spec:
             description: spec defines the desired state of AgentRuntime
             properties:
+              console:
+                description: |-
+                  console configures the dashboard console UI settings.
+                  Use this to customize allowed file attachment types and size limits.
+                properties:
+                  allowedAttachmentTypes:
+                    description: |-
+                      allowedAttachmentTypes specifies MIME types allowed for file uploads.
+                      Supports specific types ("image/png") and wildcards ("image/*").
+                      If not specified, defaults to common types: image/*, audio/*, application/pdf, text/plain, text/markdown.
+                    items:
+                      type: string
+                    type: array
+                  allowedExtensions:
+                    description: |-
+                      allowedExtensions specifies file extensions as fallback for browsers with generic MIME types.
+                      If not specified, extensions are inferred from allowedAttachmentTypes.
+                    items:
+                      type: string
+                    type: array
+                  maxFileSize:
+                    default: 10485760
+                    description: maxFileSize is the maximum file size in bytes for
+                      attachments.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  maxFiles:
+                    default: 5
+                    description: maxFiles is the maximum number of files that can
+                      be attached to a single message.
+                    format: int32
+                    maximum: 20
+                    minimum: 1
+                    type: integer
+                type: object
               facade:
                 description: facade configures the client-facing connection interface.
                 properties:

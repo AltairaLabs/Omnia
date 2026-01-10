@@ -14,6 +14,30 @@ vi.mock("@/hooks", () => ({
     disconnect: vi.fn(),
     clearMessages: vi.fn(),
   }),
+  useConsoleConfig: () => ({
+    config: {
+      allowedMimeTypes: [
+        "image/png", "image/jpeg", "image/gif", "image/webp",
+        "audio/mpeg", "audio/wav", "audio/ogg",
+        "application/pdf", "text/plain", "text/markdown",
+        "text/javascript", "application/javascript",
+        "text/x-python", "text/csv", "application/json",
+      ],
+      allowedExtensions: [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp",
+        ".mp3", ".wav", ".ogg",
+        ".pdf", ".txt", ".md",
+        ".js", ".ts", ".jsx", ".tsx", ".py",
+        ".csv", ".json",
+      ],
+      maxFileSize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 5,
+      acceptString: "image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,application/pdf,text/plain,text/markdown,text/javascript,application/javascript,text/x-python,text/csv,application/json,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.ogg,.pdf,.txt,.md,.js,.ts,.jsx,.tsx,.py,.csv,.json",
+    },
+    isLoading: false,
+    error: null,
+    rawConfig: undefined,
+  }),
 }));
 
 // Mock crypto.randomUUID

@@ -400,6 +400,33 @@ type MediaConfig struct {
 	BasePath string `json:"basePath,omitempty"`
 }
 
+// ConsoleConfig defines configuration for the dashboard console UI.
+type ConsoleConfig struct {
+	// allowedAttachmentTypes specifies MIME types allowed for file uploads.
+	// Supports specific types ("image/png") and wildcards ("image/*").
+	// If not specified, defaults to common types: image/*, audio/*, application/pdf, text/plain, text/markdown.
+	// +optional
+	AllowedAttachmentTypes []string `json:"allowedAttachmentTypes,omitempty"`
+
+	// allowedExtensions specifies file extensions as fallback for browsers with generic MIME types.
+	// If not specified, extensions are inferred from allowedAttachmentTypes.
+	// +optional
+	AllowedExtensions []string `json:"allowedExtensions,omitempty"`
+
+	// maxFileSize is the maximum file size in bytes for attachments.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=10485760
+	// +optional
+	MaxFileSize *int64 `json:"maxFileSize,omitempty"`
+
+	// maxFiles is the maximum number of files that can be attached to a single message.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +kubebuilder:default=5
+	// +optional
+	MaxFiles *int32 `json:"maxFiles,omitempty"`
+}
+
 // RuntimeConfig defines deployment-related settings.
 type RuntimeConfig struct {
 	// replicas is the desired number of agent runtime pods.
@@ -483,6 +510,11 @@ type AgentRuntimeSpec struct {
 	// is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
 	// +optional
 	Provider *ProviderConfig `json:"provider,omitempty"`
+
+	// console configures the dashboard console UI settings.
+	// Use this to customize allowed file attachment types and size limits.
+	// +optional
+	Console *ConsoleConfig `json:"console,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.

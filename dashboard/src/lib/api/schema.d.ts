@@ -239,6 +239,7 @@ export interface components {
             facade?: components["schemas"]["FacadeConfig"];
             session?: components["schemas"]["SessionConfig"];
             runtime?: components["schemas"]["RuntimeConfig"];
+            console?: components["schemas"]["ConsoleConfig"];
         };
         LocalObjectReference: {
             name?: string;
@@ -275,6 +276,24 @@ export interface components {
             type?: "hpa" | "keda";
             minReplicas?: number;
             maxReplicas?: number;
+        };
+        /** @description Configuration for dashboard console UI */
+        ConsoleConfig: {
+            /** @description MIME types allowed for file uploads (e.g., "image/*", "application/pdf") */
+            allowedAttachmentTypes?: string[];
+            /** @description File extensions as fallback (e.g., ".png", ".pdf") */
+            allowedExtensions?: string[];
+            /**
+             * Format: int64
+             * @description Maximum file size in bytes
+             * @default 10485760
+             */
+            maxFileSize: number;
+            /**
+             * @description Maximum number of files per message
+             * @default 5
+             */
+            maxFiles: number;
         };
         AgentRuntimeStatus: {
             /** @enum {string} */
