@@ -83,6 +83,33 @@ This is useful when:
 
 Runtimes like PromptKit have built-in media externalization, so facade media storage can remain disabled (the default).
 
+**Supported Storage Backends:**
+
+| Backend | Description | Authentication |
+|---------|-------------|----------------|
+| `local` | Local filesystem | N/A |
+| `s3` | Amazon S3, MinIO, LocalStack | IAM roles, IRSA, access keys |
+| `gcs` | Google Cloud Storage | Workload Identity, service accounts |
+| `azure` | Azure Blob Storage | Managed Identity, account keys |
+
+Cloud backends use presigned URLs for direct uploads, bypassing the facade for better performance:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as Facade
+    participant CS as Cloud Storage
+
+    C->>F: POST /media/request-upload
+    F-->>C: {uploadId, presignedUrl}
+    C->>CS: PUT presignedUrl (direct)
+    CS-->>C: 200 OK
+    C->>F: POST /media/confirm-upload/{id}
+    F-->>C: {mediaInfo}
+```
+
+See [Configure Media Storage](/how-to/configure-media-storage/) for detailed setup instructions.
+
 #### Runtime Container
 
 The runtime container handles LLM interactions and tool execution:

@@ -47,6 +47,22 @@ const (
 	EnvMediaStoragePath    = "OMNIA_MEDIA_STORAGE_PATH"
 	EnvMediaMaxFileSize    = "OMNIA_MEDIA_MAX_FILE_SIZE"
 	EnvMediaDefaultTTL     = "OMNIA_MEDIA_DEFAULT_TTL"
+
+	// S3 storage configuration.
+	EnvMediaS3Bucket   = "OMNIA_MEDIA_S3_BUCKET"
+	EnvMediaS3Region   = "OMNIA_MEDIA_S3_REGION"
+	EnvMediaS3Prefix   = "OMNIA_MEDIA_S3_PREFIX"
+	EnvMediaS3Endpoint = "OMNIA_MEDIA_S3_ENDPOINT" // Optional, for S3-compatible services (MinIO, LocalStack)
+
+	// GCS storage configuration.
+	EnvMediaGCSBucket = "OMNIA_MEDIA_GCS_BUCKET"
+	EnvMediaGCSPrefix = "OMNIA_MEDIA_GCS_PREFIX"
+
+	// Azure Blob Storage configuration.
+	EnvMediaAzureAccount   = "OMNIA_MEDIA_AZURE_ACCOUNT"
+	EnvMediaAzureContainer = "OMNIA_MEDIA_AZURE_CONTAINER"
+	EnvMediaAzurePrefix    = "OMNIA_MEDIA_AZURE_PREFIX"
+	EnvMediaAzureKey       = "OMNIA_MEDIA_AZURE_KEY" // Optional, for cross-cloud or explicit credentials
 )
 
 // Default values.
@@ -87,6 +103,12 @@ const (
 	MediaStorageTypeNone MediaStorageType = "none"
 	// MediaStorageTypeLocal uses the local filesystem for media storage.
 	MediaStorageTypeLocal MediaStorageType = "local"
+	// MediaStorageTypeS3 uses Amazon S3 or S3-compatible storage.
+	MediaStorageTypeS3 MediaStorageType = "s3"
+	// MediaStorageTypeGCS uses Google Cloud Storage.
+	MediaStorageTypeGCS MediaStorageType = "gcs"
+	// MediaStorageTypeAzure uses Azure Blob Storage.
+	MediaStorageTypeAzure MediaStorageType = "azure"
 )
 
 // HandlerMode represents the message handler mode.
@@ -138,6 +160,22 @@ type Config struct {
 	MediaMaxFileSize int64
 	MediaDefaultTTL  time.Duration
 
+	// S3 storage configuration.
+	MediaS3Bucket   string
+	MediaS3Region   string
+	MediaS3Prefix   string
+	MediaS3Endpoint string // Optional, for S3-compatible services
+
+	// GCS storage configuration.
+	MediaGCSBucket string
+	MediaGCSPrefix string
+
+	// Azure Blob Storage configuration.
+	MediaAzureAccount   string
+	MediaAzureContainer string
+	MediaAzurePrefix    string
+	MediaAzureKey       string // Optional, for cross-cloud or explicit credentials
+
 	// Health check port.
 	HealthPort int
 }
@@ -156,6 +194,11 @@ var (
 	ErrInvalidSessionType     = errors.New("invalid session type")
 	ErrMissingSessionStore    = errors.New("OMNIA_SESSION_STORE_URL is required for redis session type")
 	ErrInvalidMediaStorageTyp = errors.New("invalid media storage type")
+	ErrMissingS3Bucket        = errors.New("OMNIA_MEDIA_S3_BUCKET is required for s3 storage type")
+	ErrMissingS3Region        = errors.New("OMNIA_MEDIA_S3_REGION is required for s3 storage type")
+	ErrMissingGCSBucket       = errors.New("OMNIA_MEDIA_GCS_BUCKET is required for gcs storage type")
+	ErrMissingAzureAccount    = errors.New("OMNIA_MEDIA_AZURE_ACCOUNT is required for azure storage type")
+	ErrMissingAzureContainer  = errors.New("OMNIA_MEDIA_AZURE_CONTAINER is required for azure storage type")
 )
 
 // LoadFromEnv loads configuration from environment variables.
@@ -225,6 +268,22 @@ func LoadFromEnv() (*Config, error) {
 	}
 	cfg.MediaDefaultTTL = mediaDefaultTTL
 
+	// Parse S3 storage configuration
+	cfg.MediaS3Bucket = os.Getenv(EnvMediaS3Bucket)
+	cfg.MediaS3Region = os.Getenv(EnvMediaS3Region)
+	cfg.MediaS3Prefix = os.Getenv(EnvMediaS3Prefix)
+	cfg.MediaS3Endpoint = os.Getenv(EnvMediaS3Endpoint)
+
+	// Parse GCS storage configuration
+	cfg.MediaGCSBucket = os.Getenv(EnvMediaGCSBucket)
+	cfg.MediaGCSPrefix = os.Getenv(EnvMediaGCSPrefix)
+
+	// Parse Azure storage configuration
+	cfg.MediaAzureAccount = os.Getenv(EnvMediaAzureAccount)
+	cfg.MediaAzureContainer = os.Getenv(EnvMediaAzureContainer)
+	cfg.MediaAzurePrefix = os.Getenv(EnvMediaAzurePrefix)
+	cfg.MediaAzureKey = os.Getenv(EnvMediaAzureKey)
+
 	return cfg, nil
 }
 
@@ -271,7 +330,25 @@ func (c *Config) Validate() error {
 	// Validate media storage type
 	switch c.MediaStorageType {
 	case MediaStorageTypeNone, MediaStorageTypeLocal:
-		// Valid
+		// Valid, no additional config needed
+	case MediaStorageTypeS3:
+		if c.MediaS3Bucket == "" {
+			return ErrMissingS3Bucket
+		}
+		if c.MediaS3Region == "" {
+			return ErrMissingS3Region
+		}
+	case MediaStorageTypeGCS:
+		if c.MediaGCSBucket == "" {
+			return ErrMissingGCSBucket
+		}
+	case MediaStorageTypeAzure:
+		if c.MediaAzureAccount == "" {
+			return ErrMissingAzureAccount
+		}
+		if c.MediaAzureContainer == "" {
+			return ErrMissingAzureContainer
+		}
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidMediaStorageTyp, c.MediaStorageType)
 	}

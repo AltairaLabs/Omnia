@@ -50,9 +50,13 @@ func (n *noOpMetrics) DownloadFailed()                {}
 
 // Handler provides HTTP endpoints for media upload and download.
 type Handler struct {
-	storage *LocalStorage
+	storage Storage
 	log     logr.Logger
 	metrics HandlerMetrics
+	// proxyStorage is set when storage implements ProxyUploadStorage (e.g., LocalStorage)
+	proxyStorage ProxyUploadStorage
+	// directStorage is set when storage implements DirectUploadStorage (e.g., S3, GCS)
+	directStorage DirectUploadStorage
 }
 
 // HandlerOption is a functional option for configuring the handler.
@@ -66,12 +70,21 @@ func WithHandlerMetrics(m HandlerMetrics) HandlerOption {
 }
 
 // NewHandler creates a new media HTTP handler.
-func NewHandler(storage *LocalStorage, log logr.Logger, opts ...HandlerOption) *Handler {
+func NewHandler(storage Storage, log logr.Logger, opts ...HandlerOption) *Handler {
 	h := &Handler{
 		storage: storage,
 		log:     log.WithName("media-handler"),
 		metrics: &noOpMetrics{},
 	}
+
+	// Check which extended interfaces the storage implements
+	if ps, ok := storage.(ProxyUploadStorage); ok {
+		h.proxyStorage = ps
+	}
+	if ds, ok := storage.(DirectUploadStorage); ok {
+		h.directStorage = ds
+	}
+
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -80,10 +93,24 @@ func NewHandler(storage *LocalStorage, log logr.Logger, opts ...HandlerOption) *
 
 // RegisterRoutes registers the media routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/media/upload/", h.handleUpload)
-	mux.HandleFunc("/media/download/", h.handleDownload)
+	// Common routes for all storage types
 	mux.HandleFunc("/media/request-upload", h.handleRequestUpload)
 	mux.HandleFunc("/media/info/", h.handleInfo)
+
+	// Routes for proxy storage (LocalStorage) - uploads go through facade
+	if h.proxyStorage != nil {
+		mux.HandleFunc("/media/upload/", h.handleUpload)
+		mux.HandleFunc("/media/download/", h.handleDownload)
+	}
+
+	// Routes for direct storage (S3/GCS) - uploads go directly to cloud
+	if h.directStorage != nil {
+		mux.HandleFunc("/media/confirm-upload/", h.handleConfirmUpload)
+		// For direct storage, download returns a redirect to presigned URL
+		if h.proxyStorage == nil {
+			mux.HandleFunc("/media/download/", h.handleCloudDownload)
+		}
+	}
 }
 
 // handleRequestUpload generates presigned upload credentials.
@@ -145,8 +172,14 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the file path for this upload
-	filePath, err := h.storage.GetUploadPath(uploadID)
+	// Get the file path for this upload (only works with proxy storage)
+	if h.proxyStorage == nil {
+		h.metrics.UploadFailed()
+		http.Error(w, "direct upload not supported for this storage type", http.StatusBadRequest)
+		return
+	}
+
+	filePath, err := h.proxyStorage.GetUploadPath(uploadID)
 	if err != nil {
 		h.metrics.UploadFailed()
 		h.log.Error(err, "failed to get upload path", "uploadID", uploadID)
@@ -177,7 +210,7 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Complete the upload
-	if err := h.storage.CompleteUpload(r.Context(), uploadID, written); err != nil {
+	if err := h.proxyStorage.CompleteUpload(r.Context(), uploadID, written); err != nil {
 		h.metrics.UploadFailed()
 		h.log.Error(err, "failed to complete upload", "uploadID", uploadID)
 		h.writeError(w, err)
@@ -226,7 +259,7 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath, err := h.storage.GetMediaPath(ref.String())
+	filePath, err := h.proxyStorage.GetMediaPath(ref.String())
 	if err != nil {
 		h.metrics.DownloadFailed()
 		h.log.Error(err, "failed to get media path", "ref", ref.String())
@@ -244,6 +277,78 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	h.metrics.DownloadCompleted(info.SizeBytes)
 	http.ServeFile(w, r, filePath)
+}
+
+// handleConfirmUpload confirms that a direct upload completed (S3/GCS).
+// POST /media/confirm-upload/{upload-id}
+func (h *Handler) handleConfirmUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	startTime := time.Now()
+	h.metrics.UploadStarted()
+
+	uploadID := strings.TrimPrefix(r.URL.Path, "/media/confirm-upload/")
+	if uploadID == "" {
+		h.metrics.UploadFailed()
+		http.Error(w, "upload ID required", http.StatusBadRequest)
+		return
+	}
+
+	if h.directStorage == nil {
+		h.metrics.UploadFailed()
+		http.Error(w, "confirm not supported for this storage type", http.StatusBadRequest)
+		return
+	}
+
+	info, err := h.directStorage.ConfirmUpload(r.Context(), uploadID)
+	if err != nil {
+		h.metrics.UploadFailed()
+		h.log.Error(err, "failed to confirm upload", "uploadID", uploadID)
+		h.writeError(w, err)
+		return
+	}
+
+	duration := time.Since(startTime).Seconds()
+	h.metrics.UploadCompleted(info.SizeBytes, duration)
+	h.log.Info("upload confirmed", "uploadID", uploadID, "bytes", info.SizeBytes)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(info); err != nil {
+		h.log.Error(err, "failed to encode response")
+	}
+}
+
+// handleCloudDownload returns a presigned download URL or redirects to it (S3/GCS).
+// GET /media/download/{session-id}/{media-id}
+func (h *Handler) handleCloudDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.metrics.DownloadStarted()
+
+	ref, err := parseMediaPath(r.URL.Path, "/media/download/")
+	if err != nil {
+		h.metrics.DownloadFailed()
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	downloadURL, err := h.storage.GetDownloadURL(r.Context(), ref.String())
+	if err != nil {
+		h.metrics.DownloadFailed()
+		h.log.Error(err, "failed to get download URL", "ref", ref.String())
+		h.writeError(w, err)
+		return
+	}
+
+	// Redirect to the presigned URL
+	h.metrics.DownloadCompleted(0) // Size not known until client downloads
+	http.Redirect(w, r, downloadURL, http.StatusTemporaryRedirect)
 }
 
 // handleInfo returns metadata about stored media.

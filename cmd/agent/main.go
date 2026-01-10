@@ -313,11 +313,14 @@ func createHandler(cfg *agent.Config, log interface {
 func initMediaStorage(cfg *agent.Config, log interface {
 	Info(string, ...any)
 	Error(error, string, ...any)
-}) (*media.LocalStorage, func()) {
+}) (media.Storage, func()) {
+	ctx := context.Background()
+
 	switch cfg.MediaStorageType {
 	case agent.MediaStorageTypeNone:
 		log.Info("media storage disabled")
 		return nil, nil
+
 	case agent.MediaStorageTypeLocal:
 		log.Info("using local filesystem media storage", "path", cfg.MediaStoragePath)
 
@@ -338,12 +341,101 @@ func initMediaStorage(cfg *agent.Config, log interface {
 			return nil, nil
 		}
 
-		cleanup := func() {
+		return storage, func() {
 			if err := storage.Close(); err != nil {
 				log.Error(err, "error closing media storage")
 			}
 		}
-		return storage, cleanup
+
+	case agent.MediaStorageTypeS3:
+		log.Info("using S3 media storage",
+			"bucket", cfg.MediaS3Bucket,
+			"region", cfg.MediaS3Region,
+			"prefix", cfg.MediaS3Prefix,
+			"endpoint", cfg.MediaS3Endpoint,
+		)
+
+		storageCfg := media.S3Config{
+			Bucket:         cfg.MediaS3Bucket,
+			Region:         cfg.MediaS3Region,
+			Prefix:         cfg.MediaS3Prefix,
+			Endpoint:       cfg.MediaS3Endpoint,
+			UsePathStyle:   cfg.MediaS3Endpoint != "", // Use path style for custom endpoints (MinIO)
+			UploadURLTTL:   15 * time.Minute,
+			DownloadURLTTL: 1 * time.Hour,
+			DefaultTTL:     cfg.MediaDefaultTTL,
+			MaxFileSize:    cfg.MediaMaxFileSize,
+		}
+
+		storage, err := media.NewS3Storage(ctx, storageCfg)
+		if err != nil {
+			log.Error(err, "failed to initialize S3 media storage")
+			return nil, nil
+		}
+
+		return storage, func() {
+			if err := storage.Close(); err != nil {
+				log.Error(err, "error closing S3 storage")
+			}
+		}
+
+	case agent.MediaStorageTypeGCS:
+		log.Info("using GCS media storage",
+			"bucket", cfg.MediaGCSBucket,
+			"prefix", cfg.MediaGCSPrefix,
+		)
+
+		storageCfg := media.GCSConfig{
+			Bucket:         cfg.MediaGCSBucket,
+			Prefix:         cfg.MediaGCSPrefix,
+			UploadURLTTL:   15 * time.Minute,
+			DownloadURLTTL: 1 * time.Hour,
+			DefaultTTL:     cfg.MediaDefaultTTL,
+			MaxFileSize:    cfg.MediaMaxFileSize,
+		}
+
+		storage, err := media.NewGCSStorage(ctx, storageCfg)
+		if err != nil {
+			log.Error(err, "failed to initialize GCS media storage")
+			return nil, nil
+		}
+
+		return storage, func() {
+			if err := storage.Close(); err != nil {
+				log.Error(err, "error closing GCS storage")
+			}
+		}
+
+	case agent.MediaStorageTypeAzure:
+		log.Info("using Azure Blob storage",
+			"account", cfg.MediaAzureAccount,
+			"container", cfg.MediaAzureContainer,
+			"prefix", cfg.MediaAzurePrefix,
+		)
+
+		storageCfg := media.AzureConfig{
+			AccountName:    cfg.MediaAzureAccount,
+			ContainerName:  cfg.MediaAzureContainer,
+			Prefix:         cfg.MediaAzurePrefix,
+			AccountKey:     cfg.MediaAzureKey, // Optional - uses DefaultAzureCredential if empty
+			UploadURLTTL:   15 * time.Minute,
+			DownloadURLTTL: 1 * time.Hour,
+			DefaultTTL:     cfg.MediaDefaultTTL,
+			MaxFileSize:    cfg.MediaMaxFileSize,
+		}
+
+		storage, err := media.NewAzureStorage(ctx, storageCfg)
+		if err != nil {
+			log.Error(err, "failed to initialize Azure media storage")
+			return nil, nil
+		}
+
+		return storage, func() {
+			if err := storage.Close(); err != nil {
+				log.Error(err, "error closing Azure storage")
+			}
+		}
+
 	default:
 		log.Info("unknown media storage type, disabling", "type", cfg.MediaStorageType)
 		return nil, nil
