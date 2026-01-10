@@ -326,7 +326,8 @@ describe("ConsoleMessage", () => {
 
       render(<ConsoleMessage message={messageWithPdf} />);
 
-      expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+      // DocumentPreview shows size with file type, e.g., "2.0 KB • PDF Document"
+      expect(screen.getByText(/2\.0 KB/)).toBeInTheDocument();
     });
 
     it("should render multiple file attachments", () => {
@@ -368,8 +369,9 @@ describe("ConsoleMessage", () => {
 
       render(<ConsoleMessage message={messageWithFiles} />);
 
-      expect(screen.getByText("100 B")).toBeInTheDocument();
-      expect(screen.getByText("5.0 MB")).toBeInTheDocument();
+      // DocumentPreview shows size with file type, e.g., "100 B • Text File"
+      expect(screen.getByText(/100 B/)).toBeInTheDocument();
+      expect(screen.getByText(/5\.0 MB/)).toBeInTheDocument();
     });
   });
 
