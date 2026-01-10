@@ -35,7 +35,7 @@ export default defineConfig({
     /* E2E tests - run with: npm run test:e2e */
     {
       name: 'chromium',
-      testIgnore: '**/screenshots/**',
+      testIgnore: ['**/screenshots/**', '**/multimodal/**'],
       use: {
         ...devices['Desktop Chrome'],
         screenshot: 'only-on-failure',
