@@ -48,42 +48,43 @@ export default defineConfig({
   ],
 
   /* Run both dashboard and agent servers before tests */
-  webServer: process.env.CI
-    ? undefined
-    : [
-        {
-          // Dashboard server - uses demo mode for mock data but real WebSocket for console
-          command: 'npm run dev',
-          url: 'http://localhost:3000',
-          reuseExistingServer: false,
-          timeout: 120 * 1000,
-          env: {
-            // Keep demo mode enabled for mock agent data
-            DEMO_MODE: 'true',
-            NEXT_PUBLIC_DEMO_MODE: 'true',
-            // Point to local agent facade - this enables real WebSocket in MockDataService
-            NEXT_PUBLIC_WS_PROXY_URL: 'ws://localhost:8080',
-            // Direct mode: connect to agent's /ws endpoint directly (not through proxy)
-            NEXT_PUBLIC_WS_DIRECT_MODE: 'true',
-          },
-        },
-        {
-          // Agent server with demo handler (returns canned multi-modal responses)
-          command: `go run ${path.resolve(__dirname, '../cmd/agent/main.go')}`,
-          url: 'http://localhost:8081/healthz',
-          reuseExistingServer: false,
-          timeout: 60 * 1000,
-          env: {
-            OMNIA_HANDLER_MODE: 'demo',
-            OMNIA_AGENT_NAME: 'e2e-test-agent',
-            OMNIA_NAMESPACE: 'default',
-            OMNIA_PROMPTPACK_NAME: 'e2e-test-promptpack',
-            OMNIA_FACADE_PORT: '8080',
-            OMNIA_HEALTH_PORT: '8081',
-            OMNIA_SESSION_TYPE: 'memory',
-          },
-        },
-      ],
+  webServer: [
+    {
+      // Dashboard server - uses demo mode for mock data but real WebSocket for console
+      command: 'npm run dev',
+      url: 'http://localhost:3000',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120 * 1000,
+      env: {
+        // Keep demo mode enabled for mock agent data
+        DEMO_MODE: 'true',
+        NEXT_PUBLIC_DEMO_MODE: 'true',
+        // Point to local agent facade - this enables real WebSocket in MockDataService
+        NEXT_PUBLIC_WS_PROXY_URL: 'ws://localhost:8080',
+        // Direct mode: connect to agent's /ws endpoint directly (not through proxy)
+        NEXT_PUBLIC_WS_DIRECT_MODE: 'true',
+      },
+    },
+    {
+      // Agent server with demo handler (returns canned multi-modal responses)
+      // In CI, use pre-built binary; locally use go run
+      command: process.env.CI
+        ? `${path.resolve(__dirname, '../bin/agent')}`
+        : `go run ${path.resolve(__dirname, '../cmd/agent/main.go')}`,
+      url: 'http://localhost:8081/healthz',
+      reuseExistingServer: !process.env.CI,
+      timeout: 60 * 1000,
+      env: {
+        OMNIA_HANDLER_MODE: 'demo',
+        OMNIA_AGENT_NAME: 'e2e-test-agent',
+        OMNIA_NAMESPACE: 'default',
+        OMNIA_PROMPTPACK_NAME: 'e2e-test-promptpack',
+        OMNIA_FACADE_PORT: '8080',
+        OMNIA_HEALTH_PORT: '8081',
+        OMNIA_SESSION_TYPE: 'memory',
+      },
+    },
+  ],
 
   /* Output directory for test artifacts */
   outputDir: 'test-results/multimodal/',
