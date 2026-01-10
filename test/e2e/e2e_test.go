@@ -1785,7 +1785,7 @@ spec:
 			Eventually(getPodIP, time.Minute, time.Second).Should(Succeed())
 
 			By("creating a curl pod to fetch runtime metrics")
-			// The runtime container exposes metrics on port 9090
+			// The runtime container exposes metrics on port 9001 (health port)
 			metricsTestManifest := fmt.Sprintf(`
 apiVersion: v1
 kind: Pod
@@ -1800,8 +1800,8 @@ spec:
     command: ["sh", "-c"]
     args:
     - |
-      echo "Fetching metrics from runtime container at %s:9090"
-      curl -s "http://%s:9090/metrics" > /tmp/metrics.txt
+      echo "Fetching metrics from runtime container at %s:9001"
+      curl -s "http://%s:9001/metrics" > /tmp/metrics.txt
       if [ $? -ne 0 ]; then
         echo "ERROR: Failed to fetch metrics"
         exit 1
