@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { User, Bot, Loader2, Info, FileDown, FileText, FileCode, FileSpreadsheet } from "lucide-react";
+import { User, Bot, Loader2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToolCallCard } from "./tool-call-card";
 import { ImageLightbox } from "./image-lightbox";
 import { AudioPlayer } from "./audio-player";
 import { VideoPlayer } from "./video-player";
+import { DocumentPreview } from "./document-preview";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 interface ConsoleMessageProps {
@@ -24,25 +25,6 @@ function isAudioType(type: string): boolean {
 
 function isVideoType(type: string): boolean {
   return type.startsWith("video/");
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function getFileIcon(type: string, filename: string) {
-  if (type === "application/pdf" || filename.endsWith(".pdf")) {
-    return <FileText className="h-4 w-4" />;
-  }
-  if (type === "application/json" || type === "text/csv" || filename.match(/\.(json|csv)$/)) {
-    return <FileSpreadsheet className="h-4 w-4" />;
-  }
-  if (type.startsWith("text/") || filename.match(/\.(js|ts|jsx|tsx|py|md|txt)$/)) {
-    return <FileCode className="h-4 w-4" />;
-  }
-  return <FileDown className="h-4 w-4" />;
 }
 
 function formatTime(date: Date): string {
@@ -209,29 +191,17 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
           </div>
         )}
 
-        {/* File attachments (download links) */}
+        {/* File attachments (document previews) */}
         {fileAttachments.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 w-full max-w-md">
             {fileAttachments.map((attachment) => (
-              <a
+              <DocumentPreview
                 key={attachment.id}
-                href={attachment.dataUrl}
-                download={attachment.name}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg border px-3 py-2",
-                  "bg-background/50 hover:bg-background/80 transition-colors",
-                  "text-sm text-foreground no-underline"
-                )}
-                title={`Download ${attachment.name}`}
-              >
-                {getFileIcon(attachment.type, attachment.name)}
-                <div className="flex flex-col min-w-0">
-                  <span className="truncate max-w-[150px]">{attachment.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatFileSize(attachment.size)}
-                  </span>
-                </div>
-              </a>
+                src={attachment.dataUrl}
+                filename={attachment.name}
+                type={attachment.type}
+                size={attachment.size}
+              />
             ))}
           </div>
         )}
