@@ -517,6 +517,68 @@ keda:
     serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"
 ```
 
+## Demo Mode
+
+Demo mode deploys Ollama (local LLM) with a vision-capable agent, allowing users to try Omnia without external API keys:
+
+```yaml
+demo:
+  enabled: false
+  namespace: omnia-demo
+
+  ollama:
+    image:
+      repository: ollama/ollama
+      tag: latest
+      pullPolicy: IfNotPresent
+    model: llava:7b  # Vision-capable model
+    keepAlive: "24h"
+    resources:
+      requests:
+        memory: "4Gi"
+        cpu: "2"
+      limits:
+        memory: "16Gi"
+        cpu: "8"
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: ""
+
+  agent:
+    name: vision-demo
+    handler: runtime
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+  promptPack:
+    systemPrompt: |
+      You are a helpful vision-capable AI assistant...
+```
+
+### Requirements
+
+- **RAM**: Minimum 8GB, 16GB recommended
+- **Disk**: ~10GB for the llava:7b model
+- **CPU**: 4+ cores (GPU optional but significantly faster)
+
+### Usage
+
+```bash
+helm install omnia oci://ghcr.io/altairalabs/omnia \
+  --namespace omnia-system \
+  --create-namespace \
+  --set demo.enabled=true
+```
+
+Once deployed, the demo agent is accessible at `vision-demo.omnia-demo.svc:8080`.
+
 ## Example Configurations
 
 ### Minimal (Development)
@@ -617,4 +679,20 @@ authentication:
 
 keda:
   enabled: false
+```
+
+### Demo Mode (Try Without API Keys)
+
+Quick-start demo with local Ollama LLM:
+
+```yaml
+demo:
+  enabled: true
+  ollama:
+    persistence:
+      enabled: true
+      size: 20Gi
+
+dashboard:
+  enabled: true
 ```

@@ -147,6 +147,62 @@ helm install omnia charts/omnia -n omnia-system --create-namespace \
   --set dashboard.image.pullPolicy=Never
 ```
 
+## Using Ollama for Local LLM Development
+
+For testing with a real local LLM (no API costs), you can enable Ollama with the llava vision model:
+
+### Requirements
+
+- **RAM**: Minimum 8GB, 16GB recommended
+- **Disk**: ~10GB for the llava:7b model
+- **CPU**: 4+ cores (GPU optional but significantly faster)
+
+### Start with Ollama
+
+```bash
+# Using make target
+make dev-ollama
+
+# Or set environment variable
+ENABLE_OLLAMA=true tilt up
+```
+
+This will:
+1. Deploy Ollama to the cluster
+2. Create a PersistentVolume for model caching
+3. Pull the llava:7b vision model (first run takes several minutes)
+4. Create a demo vision-capable AgentRuntime
+
+### Access Ollama
+
+- **From cluster**: `http://ollama.ollama-system:11434`
+- **From host**: `http://localhost:11434` (via port-forward)
+
+### Test the Vision Agent
+
+Once deployed, you can test the `ollama-vision-agent` through the dashboard. It supports:
+- Text conversations
+- Image analysis (upload images for vision capabilities)
+- No API keys required
+
+### GPU Acceleration (Optional)
+
+For faster inference:
+
+- **NVIDIA GPUs**: Install nvidia-docker2 and configure Docker/kind with GPU access
+- **Apple Silicon**: Use Docker Desktop with "Use Rosetta" disabled
+
+### Demo Mode with Helm
+
+For production-like demos, enable demo mode in the Helm chart:
+
+```bash
+helm install omnia charts/omnia -n omnia-system --create-namespace \
+  --set demo.enabled=true
+```
+
+This deploys Ollama with a pre-configured vision agent.
+
 ## Deploy Redis (Optional)
 
 For session persistence testing:

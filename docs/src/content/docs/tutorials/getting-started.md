@@ -15,7 +15,24 @@ Before you begin, ensure you have:
 - A Kubernetes cluster (kind, minikube, or a cloud provider)
 - `kubectl` configured to access your cluster
 - `helm` v3 installed
-- An LLM provider API key (OpenAI, Anthropic, etc.)
+- An LLM provider API key (OpenAI, Anthropic, etc.) — *or use Demo Mode below*
+
+:::tip[No API Key? Try Demo Mode]
+If you don't have an API key yet, you can try Omnia with the built-in demo mode that uses Ollama (a local LLM):
+
+```bash
+helm install omnia oci://ghcr.io/altairalabs/omnia \
+  -n omnia-system --create-namespace \
+  --set demo.enabled=true \
+  --set dashboard.enabled=true
+```
+
+This deploys a vision-capable agent using the llava:7b model running locally. No API keys required!
+
+**Requirements**: 8GB+ RAM, 10GB disk for the model.
+
+Once deployed, access the dashboard at `http://localhost:3000` (after port-forwarding) and connect to the `vision-demo` agent.
+:::
 
 ## Step 1: Install the Operator
 

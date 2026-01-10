@@ -1,0 +1,107 @@
+{{- if .Values.demo.enabled }}
+---
+# PersistentVolumeClaim for Ollama model cache
+{{- if .Values.demo.ollama.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.demo.ollama.persistence.storageClass }}
+  storageClassName: {{ .Values.demo.ollama.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.demo.ollama.persistence.size }}
+{{- end }}
+---
+# Ollama StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  serviceName: ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ollama
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama
+        app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    spec:
+      containers:
+        - name: ollama
+          image: "{{ .Values.demo.ollama.image.repository }}:{{ .Values.demo.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.demo.ollama.image.pullPolicy }}
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: {{ .Values.demo.ollama.keepAlive | quote }}
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          resources:
+            {{- toYaml .Values.demo.ollama.resources | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: models
+          {{- if .Values.demo.ollama.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: ollama-models
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+# Ollama Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  selector:
+    app.kubernetes.io/name: ollama
+  ports:
+    - port: 11434
+      targetPort: http
+      name: http
+  type: ClusterIP
+{{- end }}

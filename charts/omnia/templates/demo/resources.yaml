@@ -1,0 +1,112 @@
+{{- if .Values.demo.enabled }}
+---
+# Dummy secret for Ollama (Ollama doesn't require an API key)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ollama-credentials
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+type: Opaque
+stringData:
+  # Ollama doesn't require an API key, but Provider requires a secretRef
+  api-key: "ollama-local"
+---
+# Provider configuration for Ollama
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: ollama
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  type: ollama
+  model: {{ .Values.demo.ollama.model }}
+  baseURL: http://ollama.{{ .Values.demo.namespace }}:11434
+  secretRef:
+    name: ollama-credentials
+  defaults:
+    temperature: "0.7"
+---
+# ConfigMap for the demo PromptPack (vision-capable)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-vision-prompts
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-vision-prompts",
+      "name": "Demo Vision Prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Vision Assistant",
+          "version": "1.0.0",
+          "system_template": {{ .Values.demo.promptPack.systemPrompt | toJson }},
+          "parameters": {
+            "temperature": 0.7
+          }
+        }
+      }
+    }
+---
+# PromptPack for the demo agent
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-vision-prompts
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-vision-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+---
+# Demo AgentRuntime using Ollama with vision capabilities
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.demo.agent.name }}
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  promptPackRef:
+    name: demo-vision-prompts
+  provider:
+    providerRef:
+      name: ollama
+  facade:
+    type: websocket
+    port: 8080
+    handler: {{ .Values.demo.agent.handler }}
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.demo.agent.replicas }}
+    resources:
+      {{- toYaml .Values.demo.agent.resources | nindent 6 }}
+{{- end }}

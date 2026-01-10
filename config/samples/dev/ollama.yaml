@@ -1,0 +1,299 @@
+# Ollama Local LLM for Development
+#
+# This deploys Ollama with the llava:7b vision model pre-pulled for local
+# development and testing. Enable via ENABLE_OLLAMA=True in Tiltfile.
+#
+# Requirements:
+# - Minimum 8GB RAM (16GB recommended for llava:7b)
+# - CPU: 4+ cores (GPU optional but significantly faster)
+# - Disk: ~10GB for llava:7b model
+#
+# GPU Support (optional):
+# - NVIDIA: Install nvidia-docker2 and configure Docker/kind with GPU access
+# - Apple Silicon: Use Docker Desktop with "Use Rosetta" disabled
+#
+# Usage:
+#   tilt up                    # Uses ENABLE_OLLAMA setting in Tiltfile
+#   make dev-ollama            # Starts with Ollama enabled
+#
+# API Endpoint: http://ollama:11434 (from within cluster)
+#             http://localhost:11434 (from host via port-forward)
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ollama-system
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/part-of: omnia-dev
+
+---
+# PersistentVolumeClaim for model cache
+# Models are large (~4GB for llava:7b) and should persist across restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  namespace: ollama-system
+  labels:
+    app.kubernetes.io/name: ollama
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# Ollama StatefulSet
+# Using StatefulSet for stable network identity and persistent storage
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama
+  namespace: ollama-system
+  labels:
+    app.kubernetes.io/name: ollama
+spec:
+  serviceName: ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ollama
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            # Keep models loaded in memory for faster inference
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+            # Allow connections from any host (required for k8s)
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "16Gi"
+              cpu: "8"
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          # Startup probe: allow up to 10 minutes for first model pull
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 60
+          # Liveness probe
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          # Readiness probe
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-models
+
+---
+# Ollama Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ollama-system
+  labels:
+    app.kubernetes.io/name: ollama
+spec:
+  selector:
+    app.kubernetes.io/name: ollama
+  ports:
+    - port: 11434
+      targetPort: http
+      name: http
+  type: ClusterIP
+
+---
+# Job to pre-pull the llava model
+# This runs after Ollama is ready and pulls llava:7b for vision capabilities
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-pull-llava
+  namespace: ollama-system
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/component: model-pull
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama
+        app.kubernetes.io/component: model-pull
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for Ollama to be ready before pulling
+        - name: wait-for-ollama
+          image: curlimages/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for Ollama to be ready..."
+              until curl -sf http://ollama.ollama-system:11434/; do
+                echo "Ollama not ready, waiting..."
+                sleep 5
+              done
+              echo "Ollama is ready!"
+      containers:
+        - name: pull-model
+          image: curlimages/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Pulling llava:7b model (this may take several minutes)..."
+              curl -X POST http://ollama.ollama-system:11434/api/pull \
+                -H "Content-Type: application/json" \
+                -d '{"name": "llava:7b", "stream": false}' \
+                --max-time 3600
+
+              echo ""
+              echo "Verifying model is available..."
+              curl -s http://ollama.ollama-system:11434/api/tags | grep -q "llava" && \
+                echo "llava:7b model ready!" || \
+                (echo "Failed to verify model" && exit 1)
+
+---
+# =============================================================================
+# Ollama Provider and Demo Agent
+# These resources are created in dev-agents namespace alongside other samples
+# =============================================================================
+
+---
+# Dummy secret for Ollama (Ollama doesn't require an API key)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ollama-credentials
+  namespace: dev-agents
+type: Opaque
+stringData:
+  api-key: "ollama-local"
+
+---
+# Provider for Ollama
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: ollama
+  namespace: dev-agents
+spec:
+  type: ollama
+  model: llava:7b
+  baseURL: http://ollama.ollama-system:11434
+  secretRef:
+    name: ollama-credentials
+  defaults:
+    temperature: "0.7"
+
+---
+# Vision-capable PromptPack for Ollama
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ollama-vision-prompts
+  namespace: dev-agents
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "ollama-vision-prompts",
+      "name": "Ollama Vision Prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Vision Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a helpful vision-capable AI assistant powered by Ollama.\nYou can analyze images and answer questions about them.\nBe concise, friendly, and helpful in your responses.\n\nWhen analyzing images:\n- Describe what you see clearly and objectively\n- Point out notable details or interesting elements\n- Answer any specific questions about the image content",
+          "parameters": {
+            "temperature": 0.7
+          }
+        }
+      }
+    }
+
+---
+# PromptPack for Ollama vision agent
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: ollama-vision-prompts
+  namespace: dev-agents
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: ollama-vision-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+
+---
+# AgentRuntime using Ollama with vision capabilities
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: ollama-vision-agent
+  namespace: dev-agents
+spec:
+  promptPackRef:
+    name: ollama-vision-prompts
+  provider:
+    providerRef:
+      name: ollama
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
