@@ -124,6 +124,7 @@ func main() {
 
 	// Create Prometheus metrics
 	metrics := pkruntime.NewMetrics(cfg.AgentName, cfg.Namespace)
+	runtimeMetrics := pkruntime.NewRuntimeMetrics(cfg.AgentName, cfg.Namespace)
 
 	// Create runtime server
 	serverOpts := []pkruntime.ServerOption{
@@ -136,6 +137,7 @@ func main() {
 		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
 		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
 		pkruntime.WithMetrics(metrics),
+		pkruntime.WithRuntimeMetrics(runtimeMetrics),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 	}
 	if tracingProvider != nil {

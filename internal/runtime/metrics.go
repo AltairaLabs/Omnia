@@ -34,3 +34,17 @@ func NewMetrics(agentName, namespace string) *Metrics {
 
 // NoOpMetrics is a no-op implementation for when metrics are disabled.
 type NoOpMetrics = metrics.NoOpLLMMetrics
+
+// RuntimeMetrics is an alias to the shared runtime metrics for tool/pipeline tracking.
+type RuntimeMetrics = metrics.RuntimeMetrics
+
+// NewRuntimeMetrics creates and registers Prometheus metrics for runtime operations.
+func NewRuntimeMetrics(agentName, namespace string) *RuntimeMetrics {
+	return metrics.NewRuntimeMetrics(metrics.RuntimeMetricsConfig{
+		AgentName: agentName,
+		Namespace: namespace,
+	})
+}
+
+// NoOpRuntimeMetrics is a no-op implementation for when runtime metrics are disabled.
+type NoOpRuntimeMetrics = metrics.NoOpRuntimeMetrics

@@ -69,16 +69,65 @@ Then access `http://<gateway-ip>:8080/grafana/`
 
 ## View Agent Metrics
 
-Omnia agents expose Prometheus metrics automatically. Key metrics include:
+Omnia agents expose Prometheus metrics automatically on the `/metrics` endpoint. Metrics are organized into several categories.
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `omnia_agent_connections_active` | Gauge | Current WebSocket connections |
-| `omnia_agent_connections_total` | Counter | Total connections since startup |
-| `omnia_agent_requests_inflight` | Gauge | Pending LLM requests |
-| `omnia_agent_request_duration_seconds` | Histogram | Request latency |
-| `omnia_agent_messages_received_total` | Counter | Messages received |
-| `omnia_agent_messages_sent_total` | Counter | Messages sent |
+### Facade Metrics
+
+Connection and session metrics from the WebSocket facade:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_agent_connections_active` | Gauge | - | Current WebSocket connections |
+| `omnia_agent_connections_total` | Counter | - | Total connections since startup |
+| `omnia_agent_requests_inflight` | Gauge | - | Pending LLM requests |
+| `omnia_agent_request_duration_seconds` | Histogram | - | Request latency |
+| `omnia_agent_messages_received_total` | Counter | - | Messages received |
+| `omnia_agent_messages_sent_total` | Counter | - | Messages sent |
+
+### LLM Metrics
+
+Token usage and cost metrics from LLM provider calls:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_llm_input_tokens_total` | Counter | provider, model | Input tokens sent to LLMs |
+| `omnia_llm_output_tokens_total` | Counter | provider, model | Output tokens received |
+| `omnia_llm_cache_hits_total` | Counter | provider, model | Prompt cache hits |
+| `omnia_llm_requests_total` | Counter | provider, model, status | Total LLM requests |
+| `omnia_llm_cost_usd_total` | Counter | provider, model | Estimated cost in USD |
+| `omnia_llm_request_duration_seconds` | Histogram | provider, model | LLM request duration |
+
+### Runtime Metrics
+
+Detailed metrics for pipelines, stages, tools, and validations:
+
+**Pipeline Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_pipelines_active` | Gauge | - | Currently active pipelines |
+| `omnia_runtime_pipeline_duration_seconds` | Histogram | status | Pipeline execution duration |
+
+**Stage Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_stage_elements_total` | Counter | stage, status | Total stage executions |
+| `omnia_runtime_stage_duration_seconds` | Histogram | stage, stage_type | Stage execution duration |
+
+**Tool Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_tool_calls_total` | Counter | tool, status | Total tool invocations |
+| `omnia_runtime_tool_call_duration_seconds` | Histogram | tool | Tool execution duration |
+
+**Validation Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_validations_total` | Counter | validator, validator_type, status | Total validations |
+| `omnia_runtime_validation_duration_seconds` | Histogram | validator, validator_type | Validation duration |
 
 ### Query Metrics in Grafana
 
@@ -86,12 +135,27 @@ Omnia agents expose Prometheus metrics automatically. Key metrics include:
 2. Select the **Prometheus** datasource
 3. Try these queries:
 
-```text
+```promql
+# Active connections
 omnia_agent_connections_active
 
+# Request rate
 rate(omnia_agent_requests_total[5m])
 
+# P95 request latency
 histogram_quantile(0.95, rate(omnia_agent_request_duration_seconds_bucket[5m]))
+
+# LLM cost per model (last hour)
+sum by (model) (increase(omnia_llm_cost_usd_total[1h]))
+
+# Token usage rate by provider
+sum by (provider) (rate(omnia_llm_input_tokens_total[5m] + omnia_llm_output_tokens_total[5m]))
+
+# Tool call error rate
+sum(rate(omnia_runtime_tool_calls_total{status="error"}[5m])) / sum(rate(omnia_runtime_tool_calls_total[5m]))
+
+# Average pipeline duration
+histogram_quantile(0.5, rate(omnia_runtime_pipeline_duration_seconds_bucket[5m]))
 ```
 
 ## View Agent Logs

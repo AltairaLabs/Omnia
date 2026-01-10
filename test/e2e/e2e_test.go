@@ -1755,6 +1755,10 @@ spec:
 				"-n", agentsNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
+
+		// Note: Runtime metrics (omnia_runtime_*) are exposed on port 9001 via the health endpoint.
+		// The metrics implementation is tested via unit tests in pkg/metrics/runtime_test.go.
+		// E2E testing of the metrics endpoint in Kind clusters has networking limitations.
 	})
 })
 

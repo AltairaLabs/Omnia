@@ -102,6 +102,16 @@ func TestServerOptions(t *testing.T) {
 		assert.Equal(t, metrics, server.metrics)
 	})
 
+	t.Run("WithRuntimeMetrics", func(t *testing.T) {
+		// Create runtime metrics and set them
+		runtimeMetrics := NewRuntimeMetrics("test-agent", "test-ns")
+		server := NewServer(
+			WithRuntimeMetrics(runtimeMetrics),
+		)
+		assert.NotNil(t, server.runtimeMetrics)
+		assert.Equal(t, runtimeMetrics, server.runtimeMetrics)
+	})
+
 	t.Run("WithProviderInfo", func(t *testing.T) {
 		server := NewServer(
 			WithProviderInfo("anthropic", "claude-3-opus"),
@@ -539,6 +549,11 @@ func writeTestFile(t *testing.T, path, content string) error {
 func TestNewMetrics(t *testing.T) {
 	metrics := NewMetrics("test-agent", "test-namespace")
 	require.NotNil(t, metrics)
+}
+
+func TestNewRuntimeMetrics(t *testing.T) {
+	runtimeMetrics := NewRuntimeMetrics("test-agent", "test-namespace")
+	require.NotNil(t, runtimeMetrics)
 }
 
 func TestServer_InitializeTools_NoConfig(t *testing.T) {
