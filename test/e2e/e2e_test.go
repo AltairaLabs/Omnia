@@ -1786,6 +1786,7 @@ spec:
 
 			By("creating a curl pod to fetch runtime metrics")
 			// The runtime container exposes metrics on port 9001 (health port)
+			// We use grep directly on the curl output to check for metrics
 			metricsTestManifest := fmt.Sprintf(`
 apiVersion: v1
 kind: Pod
@@ -1801,61 +1802,35 @@ spec:
     args:
     - |
       echo "Fetching metrics from runtime container at %s:9001"
-      curl -s "http://%s:9001/metrics" > /tmp/metrics.txt
-      if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to fetch metrics"
+      METRICS=$(curl -sf "http://%s:9001/metrics" 2>&1)
+      CURL_EXIT=$?
+      if [ $CURL_EXIT -ne 0 ]; then
+        echo "ERROR: Failed to fetch metrics (exit code: $CURL_EXIT)"
+        echo "Response: $METRICS"
         exit 1
       fi
-      echo "=== Runtime Metrics ==="
-      # Check for key runtime metrics
-      if grep -q "omnia_runtime_pipelines_active" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_pipelines_active"
-      else
-        echo "MISSING: omnia_runtime_pipelines_active"
-      fi
-      if grep -q "omnia_runtime_pipeline_duration_seconds" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_pipeline_duration_seconds"
-      else
-        echo "MISSING: omnia_runtime_pipeline_duration_seconds"
-      fi
-      if grep -q "omnia_runtime_tool_calls_total" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_tool_calls_total"
-      else
-        echo "MISSING: omnia_runtime_tool_calls_total"
-      fi
-      if grep -q "omnia_runtime_tool_call_duration_seconds" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_tool_call_duration_seconds"
-      else
-        echo "MISSING: omnia_runtime_tool_call_duration_seconds"
-      fi
-      if grep -q "omnia_runtime_stage_elements_total" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_stage_elements_total"
-      else
-        echo "MISSING: omnia_runtime_stage_elements_total"
-      fi
-      if grep -q "omnia_runtime_stage_duration_seconds" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_stage_duration_seconds"
-      else
-        echo "MISSING: omnia_runtime_stage_duration_seconds"
-      fi
-      if grep -q "omnia_runtime_validations_total" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_validations_total"
-      else
-        echo "MISSING: omnia_runtime_validations_total"
-      fi
-      if grep -q "omnia_runtime_validation_duration_seconds" /tmp/metrics.txt; then
-        echo "FOUND: omnia_runtime_validation_duration_seconds"
-      else
-        echo "MISSING: omnia_runtime_validation_duration_seconds"
-      fi
-      # Verify at least the core metrics are present
-      if grep -q "omnia_runtime_pipeline_duration_seconds" /tmp/metrics.txt && \
-         grep -q "omnia_runtime_tool_call_duration_seconds" /tmp/metrics.txt; then
+      echo "=== Checking Runtime Metrics ==="
+      FOUND=0
+      MISSING=0
+      for metric in omnia_runtime_pipelines_active omnia_runtime_pipeline_duration_seconds omnia_runtime_tool_calls_total omnia_runtime_tool_call_duration_seconds omnia_runtime_stage_elements_total omnia_runtime_stage_duration_seconds omnia_runtime_validations_total omnia_runtime_validation_duration_seconds; do
+        if echo "$METRICS" | grep -q "$metric"; then
+          echo "FOUND: $metric"
+          FOUND=$((FOUND + 1))
+        else
+          echo "MISSING: $metric"
+          MISSING=$((MISSING + 1))
+        fi
+      done
+      echo "=== Summary: $FOUND found, $MISSING missing ==="
+      # Require at least the histogram metrics to be present
+      if echo "$METRICS" | grep -q "omnia_runtime_pipeline_duration_seconds" && \
+         echo "$METRICS" | grep -q "omnia_runtime_tool_call_duration_seconds"; then
         echo "TEST PASSED: Core runtime metrics are present"
+        exit 0
       else
         echo "ERROR: Missing core runtime metrics"
         echo "=== Full metrics output ==="
-        cat /tmp/metrics.txt
+        echo "$METRICS"
         exit 1
       fi
 `, podIP, podIP)
