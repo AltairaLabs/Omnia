@@ -18,6 +18,7 @@ package facade
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -96,6 +97,11 @@ type ResponseWriter interface {
 	// Used for streaming audio/video responses where playback can begin
 	// before the entire media is generated.
 	WriteMediaChunk(mediaChunk *MediaChunkInfo) error
+	// WriteBinaryMediaChunk sends a streaming media chunk as a binary frame.
+	// Falls back to base64 JSON if the client doesn't support binary frames.
+	WriteBinaryMediaChunk(mediaID [MediaIDSize]byte, sequence uint32, isLast bool, mimeType string, payload []byte) error
+	// SupportsBinary returns true if the client supports binary WebSocket frames.
+	SupportsBinary() bool
 }
 
 // Server is a WebSocket server for agent communication.
@@ -115,12 +121,13 @@ type Server struct {
 
 // Connection represents an active WebSocket connection.
 type Connection struct {
-	conn      *websocket.Conn
-	sessionID string
-	agentName string
-	namespace string
-	mu        sync.Mutex
-	closed    bool
+	conn          *websocket.Conn
+	sessionID     string
+	agentName     string
+	namespace     string
+	binaryCapable bool // Client supports binary WebSocket frames
+	mu            sync.Mutex
+	closed        bool
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -184,6 +191,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		namespace = "default"
 	}
 
+	// Check if client requests binary frame support
+	binaryCapable := r.URL.Query().Get("binary") == "true"
+
 	if agentName == "" {
 		http.Error(w, "agent parameter is required", http.StatusBadRequest)
 		return
@@ -197,9 +207,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Create connection wrapper
 	c := &Connection{
-		conn:      conn,
-		agentName: agentName,
-		namespace: namespace,
+		conn:          conn,
+		agentName:     agentName,
+		namespace:     namespace,
+		binaryCapable: binaryCapable,
 	}
 
 	s.mu.Lock()
@@ -307,14 +318,20 @@ func (s *Server) sendPing(c *Connection) bool {
 // readMessageLoop reads and processes messages from the connection.
 func (s *Server) readMessageLoop(ctx context.Context, c *Connection, log logr.Logger) {
 	for {
-		_, message, err := c.conn.ReadMessage()
+		messageType, message, err := c.conn.ReadMessage()
 		if err != nil {
 			s.logCloseError(err, log)
 			return
 		}
 
 		s.metrics.MessageReceived()
-		s.handleClientMessage(ctx, c, message, log)
+
+		// Handle based on WebSocket message type
+		if messageType == websocket.BinaryMessage {
+			s.handleBinaryMessage(ctx, c, message, log)
+		} else {
+			s.handleClientMessage(ctx, c, message, log)
+		}
 	}
 }
 
@@ -355,6 +372,58 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 		handlerName = s.handler.Name()
 	}
 	s.metrics.RequestCompleted(status, duration, handlerName)
+}
+
+// handleBinaryMessage decodes and processes a binary WebSocket frame.
+func (s *Server) handleBinaryMessage(_ context.Context, c *Connection, data []byte, log logr.Logger) {
+	frame, err := DecodeBinaryFrame(data)
+	if err != nil {
+		log.Error(err, "failed to decode binary frame")
+		s.sendError(c, "", ErrorCodeInvalidMessage, "invalid binary frame: "+err.Error())
+		return
+	}
+
+	log.V(1).Info("received binary frame",
+		"messageType", frame.Header.MessageType.String(),
+		"sequence", frame.Header.Sequence,
+		"payloadLen", frame.Header.PayloadLen,
+	)
+
+	switch frame.Header.MessageType {
+	case BinaryMessageTypeUpload:
+		// Binary upload handling could be added here in the future
+		log.Info("binary upload not yet implemented")
+		s.sendError(c, "", ErrorCodeInvalidMessage, "binary upload not yet implemented")
+	default:
+		log.Error(nil, "unknown binary message type", "type", frame.Header.MessageType)
+		s.sendError(c, "", ErrorCodeInvalidMessage, "unknown binary message type")
+	}
+}
+
+// sendBinaryFrame sends a binary WebSocket frame to the connection.
+func (s *Server) sendBinaryFrame(c *Connection, frame *BinaryFrame) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil
+	}
+
+	data, err := frame.Encode()
+	if err != nil {
+		return err
+	}
+
+	if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
+		return err
+	}
+
+	if err := c.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		return err
+	}
+
+	s.metrics.MessageSent()
+	return nil
 }
 
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
@@ -522,6 +591,13 @@ func (s *Server) sendError(c *Connection, sessionID, code, message string) {
 }
 
 func (s *Server) sendConnected(c *Connection, sessionID string) error {
+	if c.binaryCapable {
+		return s.sendMessage(c, NewConnectedMessageWithCapabilities(sessionID, &ConnectionCapabilities{
+			BinaryFrames:    true,
+			MaxPayloadSize:  int(s.config.MaxMessageSize),
+			ProtocolVersion: BinaryVersion,
+		}))
+	}
 	return s.sendMessage(c, NewConnectedMessage(sessionID))
 }
 
@@ -604,4 +680,28 @@ func (w *connResponseWriter) WriteUploadComplete(uploadComplete *UploadCompleteI
 
 func (w *connResponseWriter) WriteMediaChunk(mediaChunk *MediaChunkInfo) error {
 	return w.server.sendMessage(w.conn, NewMediaChunkMessage(w.sessionID, mediaChunk))
+}
+
+func (w *connResponseWriter) SupportsBinary() bool {
+	return w.conn.binaryCapable
+}
+
+func (w *connResponseWriter) WriteBinaryMediaChunk(mediaID [MediaIDSize]byte, sequence uint32, isLast bool, mimeType string, payload []byte) error {
+	if !w.SupportsBinary() {
+		// Fallback to base64 JSON for clients that don't support binary
+		return w.WriteMediaChunk(&MediaChunkInfo{
+			MediaID:  MediaIDToString(mediaID),
+			Sequence: int(sequence),
+			IsLast:   isLast,
+			Data:     base64.StdEncoding.EncodeToString(payload),
+			MimeType: mimeType,
+		})
+	}
+
+	frame, err := NewMediaChunkFrame(w.sessionID, mediaID, sequence, isLast, mimeType, payload)
+	if err != nil {
+		return err
+	}
+
+	return w.server.sendBinaryFrame(w.conn, frame)
 }

@@ -13,13 +13,14 @@ This document describes the WebSocket protocol used by Omnia agent facades.
 ### URL Format
 
 ```text
-ws://host:port?agent=<agent-name>&namespace=<namespace>
+ws://host:port?agent=<agent-name>&namespace=<namespace>&binary=<true|false>
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `agent` | Yes | Name of the AgentRuntime |
 | `namespace` | No | Namespace (defaults to `default`) |
+| `binary` | No | Enable binary WebSocket frame support (defaults to `false`) |
 
 ### Example
 
@@ -184,6 +185,28 @@ Sent immediately after connection:
   "session_id": "sess-abc123"
 }
 ```
+
+When `binary=true` is specified in the connection URL, the connected message includes capabilities:
+
+```json
+{
+  "type": "connected",
+  "session_id": "sess-abc123",
+  "connected": {
+    "capabilities": {
+      "binary_frames": true,
+      "max_payload_size": 524288,
+      "protocol_version": 1
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `connected.capabilities.binary_frames` | boolean | Server supports binary WebSocket frames |
+| `connected.capabilities.max_payload_size` | number | Maximum payload size in bytes |
+| `connected.capabilities.protocol_version` | number | Binary protocol version |
 
 #### Chunk
 
@@ -603,6 +626,94 @@ GET /media/download/{session-id}/{media-id}
 Returns the file with appropriate `Content-Type` and `Content-Disposition` headers.
 
 > **Note**: Media upload is only available when the facade is configured with media storage. See [AgentRuntime facade.media configuration](/reference/agentruntime/#facademedia) for details.
+
+## Binary WebSocket Frames
+
+When binary frame support is enabled (`binary=true` query parameter), the server can send binary WebSocket frames for efficient media streaming. This reduces bandwidth by approximately 33% compared to base64-encoded JSON.
+
+### Binary Frame Structure
+
+```
+┌──────────────────┬─────────────────┬──────────────────────────┐
+│ Header (32 bytes)│ Metadata (JSON) │ Binary Payload           │
+└──────────────────┴─────────────────┴──────────────────────────┘
+```
+
+### Header Layout
+
+| Field | Offset | Size | Type | Description |
+|-------|--------|------|------|-------------|
+| Magic | 0 | 4 | bytes | `"OMNI"` magic bytes |
+| Version | 4 | 1 | uint8 | Protocol version (currently `1`) |
+| Flags | 5 | 1 | uint8 | Bit flags (see below) |
+| MessageType | 6 | 2 | uint16 | Message type (big-endian) |
+| MetadataLen | 8 | 4 | uint32 | JSON metadata length (big-endian) |
+| PayloadLen | 12 | 4 | uint32 | Binary payload length (big-endian) |
+| Sequence | 16 | 4 | uint32 | Sequence number (big-endian) |
+| MediaID | 20 | 12 | bytes | Media stream identifier |
+
+### Flags
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 0 | Compressed | Payload is compressed (reserved) |
+| 1 | Chunked | Part of a chunked transfer |
+| 2 | IsLast | Last chunk in a stream |
+
+### Message Types
+
+| Value | Name | Description |
+|-------|------|-------------|
+| 1 | MediaChunk | Streaming media chunk |
+| 2 | Upload | Binary upload data (reserved) |
+
+### Binary Media Chunk
+
+When `binary_frames` capability is enabled, `media_chunk` messages may be sent as binary frames instead of JSON. The metadata contains:
+
+```json
+{
+  "session_id": "sess-abc123",
+  "mime_type": "audio/mp3"
+}
+```
+
+The payload contains raw binary audio/video data (not base64-encoded).
+
+### Example: JavaScript Binary Frame Handling
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080?agent=my-agent&binary=true');
+ws.binaryType = 'arraybuffer';
+
+ws.onmessage = (event) => {
+  if (event.data instanceof ArrayBuffer) {
+    // Binary frame
+    const view = new DataView(event.data);
+    const magic = new TextDecoder().decode(new Uint8Array(event.data, 0, 4));
+
+    if (magic === 'OMNI') {
+      const metadataLen = view.getUint32(8, false);
+      const payloadLen = view.getUint32(12, false);
+      const sequence = view.getUint32(16, false);
+      const isLast = (view.getUint8(5) & 0x04) !== 0;
+
+      // Extract payload (raw audio/video data)
+      const payload = event.data.slice(32 + metadataLen);
+
+      // Process binary media chunk...
+    }
+  } else {
+    // JSON text frame
+    const msg = JSON.parse(event.data);
+    // Handle JSON message...
+  }
+};
+```
+
+### Fallback Behavior
+
+When a client doesn't request binary frames (`binary=true` not set), the server always sends JSON text frames with base64-encoded media data. This ensures backward compatibility with existing clients.
 
 ## Connection Health
 

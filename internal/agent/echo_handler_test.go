@@ -103,6 +103,14 @@ func (m *mockResponseWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error {
 	return m.err
 }
 
+func (m *mockResponseWriter) SupportsBinary() bool {
+	return false
+}
+
+func (m *mockResponseWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte, _ uint32, _ bool, _ string, _ []byte) error {
+	return m.err
+}
+
 func TestNewEchoHandler(t *testing.T) {
 	handler := NewEchoHandler()
 	if handler == nil {

@@ -1051,3 +1051,310 @@ func TestWithMediaStorage(t *testing.T) {
 		t.Error("mediaStorage should not be nil after WithMediaStorage")
 	}
 }
+
+func TestServerBinaryCapabilityNegotiation(t *testing.T) {
+	handler := &mockHandler{}
+	_, ts := newTestServer(t, handler)
+
+	t.Run("without binary param", func(t *testing.T) {
+		ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+		if err != nil {
+			t.Fatalf("Failed to connect: %v", err)
+		}
+		defer func() { _ = ws.Close() }()
+
+		// Send message
+		clientMsg := ClientMessage{
+			Type:    MessageTypeMessage,
+			Content: "Hello",
+		}
+		if err := ws.WriteJSON(clientMsg); err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// Read connected message
+		var connectedMsg ServerMessage
+		if err := ws.ReadJSON(&connectedMsg); err != nil {
+			t.Fatalf("Failed to read connected message: %v", err)
+		}
+
+		// Without binary param, Connected.Capabilities should be nil
+		if connectedMsg.Connected != nil {
+			t.Errorf("Expected Connected to be nil without binary param, got %+v", connectedMsg.Connected)
+		}
+	})
+
+	t.Run("with binary=true param", func(t *testing.T) {
+		ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=true", nil)
+		if err != nil {
+			t.Fatalf("Failed to connect: %v", err)
+		}
+		defer func() { _ = ws.Close() }()
+
+		// Send message
+		clientMsg := ClientMessage{
+			Type:    MessageTypeMessage,
+			Content: "Hello",
+		}
+		if err := ws.WriteJSON(clientMsg); err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// Read connected message
+		var connectedMsg ServerMessage
+		if err := ws.ReadJSON(&connectedMsg); err != nil {
+			t.Fatalf("Failed to read connected message: %v", err)
+		}
+
+		// With binary=true, Connected.Capabilities should be set
+		if connectedMsg.Connected == nil {
+			t.Fatal("Expected Connected to be set with binary=true param")
+		}
+		if connectedMsg.Connected.Capabilities == nil {
+			t.Fatal("Expected Capabilities to be set")
+		}
+		if !connectedMsg.Connected.Capabilities.BinaryFrames {
+			t.Error("Expected BinaryFrames to be true")
+		}
+		if connectedMsg.Connected.Capabilities.ProtocolVersion != BinaryVersion {
+			t.Errorf("ProtocolVersion = %d, want %d", connectedMsg.Connected.Capabilities.ProtocolVersion, BinaryVersion)
+		}
+		if connectedMsg.Connected.Capabilities.MaxPayloadSize != int(DefaultServerConfig().MaxMessageSize) {
+			t.Errorf("MaxPayloadSize = %d, want %d", connectedMsg.Connected.Capabilities.MaxPayloadSize, DefaultServerConfig().MaxMessageSize)
+		}
+	})
+
+	t.Run("with binary=false param", func(t *testing.T) {
+		ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=false", nil)
+		if err != nil {
+			t.Fatalf("Failed to connect: %v", err)
+		}
+		defer func() { _ = ws.Close() }()
+
+		// Send message
+		clientMsg := ClientMessage{
+			Type:    MessageTypeMessage,
+			Content: "Hello",
+		}
+		if err := ws.WriteJSON(clientMsg); err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// Read connected message
+		var connectedMsg ServerMessage
+		if err := ws.ReadJSON(&connectedMsg); err != nil {
+			t.Fatalf("Failed to read connected message: %v", err)
+		}
+
+		// With binary=false, Connected should be nil (same as not providing)
+		if connectedMsg.Connected != nil {
+			t.Errorf("Expected Connected to be nil with binary=false param, got %+v", connectedMsg.Connected)
+		}
+	})
+}
+
+func TestServerBinaryMessageHandling(t *testing.T) {
+	handler := &mockHandler{}
+	_, ts := newTestServer(t, handler)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=true", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Create a binary frame with unknown message type
+	frame := &BinaryFrame{
+		Header: BinaryHeader{
+			Magic:       [4]byte{'O', 'M', 'N', 'I'},
+			Version:     BinaryVersion,
+			Flags:       0,
+			MessageType: BinaryMessageType(99), // Unknown type
+			MetadataLen: 0,
+			PayloadLen:  0,
+			Sequence:    0,
+		},
+	}
+
+	data, err := frame.Encode()
+	if err != nil {
+		t.Fatalf("Failed to encode frame: %v", err)
+	}
+
+	// Send binary message
+	if err := ws.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		t.Fatalf("Failed to send binary message: %v", err)
+	}
+
+	// Should receive an error message
+	var errorMsg ServerMessage
+	if err := ws.ReadJSON(&errorMsg); err != nil {
+		t.Fatalf("Failed to read error message: %v", err)
+	}
+	if errorMsg.Type != MessageTypeError {
+		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+	if errorMsg.Error == nil {
+		t.Fatal("Error field should not be nil")
+	}
+	if errorMsg.Error.Code != ErrorCodeInvalidMessage {
+		t.Errorf("Error code = %v, want %v", errorMsg.Error.Code, ErrorCodeInvalidMessage)
+	}
+}
+
+func TestServerInvalidBinaryFrame(t *testing.T) {
+	handler := &mockHandler{}
+	_, ts := newTestServer(t, handler)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=true", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send invalid binary message (wrong magic bytes)
+	invalidData := make([]byte, BinaryHeaderSize)
+	copy(invalidData[0:4], "BAD!")
+	invalidData[4] = BinaryVersion
+
+	if err := ws.WriteMessage(websocket.BinaryMessage, invalidData); err != nil {
+		t.Fatalf("Failed to send binary message: %v", err)
+	}
+
+	// Should receive an error message
+	var errorMsg ServerMessage
+	if err := ws.ReadJSON(&errorMsg); err != nil {
+		t.Fatalf("Failed to read error message: %v", err)
+	}
+	if errorMsg.Type != MessageTypeError {
+		t.Errorf("Expected error message, got %v", errorMsg.Type)
+	}
+	if errorMsg.Error == nil {
+		t.Fatal("Error field should not be nil")
+	}
+	if !strings.Contains(errorMsg.Error.Message, "invalid binary frame") {
+		t.Errorf("Error message should mention 'invalid binary frame', got: %v", errorMsg.Error.Message)
+	}
+}
+
+func TestServerWriteBinaryMediaChunk(t *testing.T) {
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			// Test SupportsBinary
+			if !writer.SupportsBinary() {
+				return errors.New("expected binary support")
+			}
+
+			// Test WriteBinaryMediaChunk
+			mediaID := MediaIDFromString("test-media")
+			payload := []byte("test audio data")
+			return writer.WriteBinaryMediaChunk(mediaID, 0, true, "audio/mp3", payload)
+		},
+	}
+
+	_, ts := newTestServer(t, handler)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=true", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send message
+	clientMsg := ClientMessage{
+		Type:    MessageTypeMessage,
+		Content: "Hello",
+	}
+	if err := ws.WriteJSON(clientMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+
+	// Read binary frame
+	msgType, data, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read binary message: %v", err)
+	}
+	if msgType != websocket.BinaryMessage {
+		t.Errorf("Expected binary message type, got %v", msgType)
+	}
+
+	// Decode binary frame
+	frame, err := DecodeBinaryFrame(data)
+	if err != nil {
+		t.Fatalf("Failed to decode binary frame: %v", err)
+	}
+
+	if frame.Header.MessageType != BinaryMessageTypeMediaChunk {
+		t.Errorf("Expected media chunk message type, got %v", frame.Header.MessageType)
+	}
+	if !frame.Header.Flags.IsLast() {
+		t.Error("Expected is_last flag to be set")
+	}
+	if string(frame.Payload) != "test audio data" {
+		t.Errorf("Payload = %q, want 'test audio data'", string(frame.Payload))
+	}
+}
+
+func TestServerWriteBinaryMediaChunkFallback(t *testing.T) {
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			// Without binary support, WriteBinaryMediaChunk should fall back to JSON
+			if writer.SupportsBinary() {
+				return errors.New("expected no binary support")
+			}
+
+			mediaID := MediaIDFromString("test-media")
+			payload := []byte("test audio data")
+			return writer.WriteBinaryMediaChunk(mediaID, 0, true, "audio/mp3", payload)
+		},
+	}
+
+	_, ts := newTestServer(t, handler)
+
+	// Connect WITHOUT binary=true
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send message
+	clientMsg := ClientMessage{
+		Type:    MessageTypeMessage,
+		Content: "Hello",
+	}
+	if err := ws.WriteJSON(clientMsg); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+
+	// Read media_chunk message (should be JSON fallback)
+	var mediaChunkMsg ServerMessage
+	if err := ws.ReadJSON(&mediaChunkMsg); err != nil {
+		t.Fatalf("Failed to read media chunk message: %v", err)
+	}
+
+	if mediaChunkMsg.Type != MessageTypeMediaChunk {
+		t.Errorf("Expected media_chunk message type, got %v", mediaChunkMsg.Type)
+	}
+	if mediaChunkMsg.MediaChunk == nil {
+		t.Fatal("MediaChunk should not be nil")
+	}
+	if mediaChunkMsg.MediaChunk.MimeType != "audio/mp3" {
+		t.Errorf("MimeType = %q, want 'audio/mp3'", mediaChunkMsg.MediaChunk.MimeType)
+	}
+	if !mediaChunkMsg.MediaChunk.IsLast {
+		t.Error("Expected is_last to be true")
+	}
+}

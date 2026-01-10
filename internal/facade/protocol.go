@@ -207,6 +207,8 @@ type ServerMessage struct {
 	UploadComplete *UploadCompleteInfo `json:"upload_complete,omitempty"`
 	// MediaChunk contains streaming media chunk details (for media_chunk type).
 	MediaChunk *MediaChunkInfo `json:"media_chunk,omitempty"`
+	// Connected contains connection info (for connected type).
+	Connected *ConnectedInfo `json:"connected,omitempty"`
 	// Timestamp is when the message was created.
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -290,6 +292,23 @@ type MediaChunkInfo struct {
 	MimeType string `json:"mime_type"`
 }
 
+// ConnectionCapabilities represents negotiated connection features.
+// Sent in the connected message to inform the client of available capabilities.
+type ConnectionCapabilities struct {
+	// BinaryFrames indicates whether the server supports binary WebSocket frames.
+	BinaryFrames bool `json:"binary_frames"`
+	// MaxPayloadSize is the maximum binary payload size in bytes.
+	MaxPayloadSize int `json:"max_payload_size,omitempty"`
+	// ProtocolVersion is the binary protocol version supported.
+	ProtocolVersion int `json:"protocol_version,omitempty"`
+}
+
+// ConnectedInfo contains additional information sent with the connected message.
+type ConnectedInfo struct {
+	// Capabilities describes the server's supported features.
+	Capabilities *ConnectionCapabilities `json:"capabilities,omitempty"`
+}
+
 // Error codes.
 const (
 	ErrorCodeInvalidMessage   = "INVALID_MESSAGE"
@@ -360,6 +379,18 @@ func NewConnectedMessage(sessionID string) *ServerMessage {
 	return &ServerMessage{
 		Type:      MessageTypeConnected,
 		SessionID: sessionID,
+		Timestamp: time.Now(),
+	}
+}
+
+// NewConnectedMessageWithCapabilities creates a new connected message with capabilities.
+func NewConnectedMessageWithCapabilities(sessionID string, capabilities *ConnectionCapabilities) *ServerMessage {
+	return &ServerMessage{
+		Type:      MessageTypeConnected,
+		SessionID: sessionID,
+		Connected: &ConnectedInfo{
+			Capabilities: capabilities,
+		},
 		Timestamp: time.Now(),
 	}
 }
