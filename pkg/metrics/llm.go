@@ -22,6 +22,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// Status label constants for metrics.
+const (
+	StatusSuccess = "success"
+	StatusError   = "error"
+)
+
 // LLMMetrics holds all Prometheus metrics for LLM interactions.
 // These metrics track LLM usage for cost analysis and monitoring.
 // This is shared between the runtime and demo handler.
@@ -124,9 +130,9 @@ type LLMRequestMetrics struct {
 
 // RecordRequest records metrics for an LLM request.
 func (m *LLMMetrics) RecordRequest(req LLMRequestMetrics) {
-	status := "success"
+	status := StatusSuccess
 	if !req.Success {
-		status = "error"
+		status = StatusError
 	}
 
 	m.InputTokensTotal.WithLabelValues(req.Provider, req.Model).Add(float64(req.InputTokens))
