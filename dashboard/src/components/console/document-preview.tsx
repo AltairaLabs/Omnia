@@ -15,6 +15,24 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
+// File size constants
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = 1024 * 1024;
+
+// Preview constants
+const TEXT_PREVIEW_MAX_CHARS = 2000;
+const PDF_PREVIEW_HEIGHT = 300;
+const TEXT_PREVIEW_HEIGHT = 300;
+const ERROR_DISPLAY_HEIGHT = 150;
+
+// Code/text file extensions that support preview
+const CODE_EXTENSIONS = new Set([
+  "js", "ts", "jsx", "tsx", "py", "rb", "go", "rs", "java",
+  "c", "cpp", "h", "hpp", "cs", "php", "swift", "kt", "scala",
+  "md", "txt", "xml", "yaml", "yml", "toml", "ini", "cfg",
+  "conf", "sh", "bash", "zsh", "ps1",
+]);
+
 interface DocumentPreviewProps {
   src: string;
   filename: string;
@@ -29,78 +47,76 @@ interface FileTypeInfo {
   canPreview: boolean;
 }
 
+// MIME type to file info mapping
+const MIME_TYPE_MAP: Record<string, FileTypeInfo> = {
+  "application/pdf": { icon: FileText, label: "PDF Document", canPreview: true },
+  "application/msword": { icon: FileText, label: "Word Document", canPreview: false },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": { icon: FileText, label: "Word Document", canPreview: false },
+  "application/vnd.ms-excel": { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false },
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false },
+  "text/csv": { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false },
+  "application/vnd.ms-powerpoint": { icon: FileImage, label: "Presentation", canPreview: false },
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": { icon: FileImage, label: "Presentation", canPreview: false },
+  "application/json": { icon: FileCode, label: "JSON File", canPreview: true },
+  "application/zip": { icon: FileArchive, label: "Archive", canPreview: false },
+  "application/x-zip-compressed": { icon: FileArchive, label: "Archive", canPreview: false },
+  "application/x-rar-compressed": { icon: FileArchive, label: "Archive", canPreview: false },
+  "application/x-7z-compressed": { icon: FileArchive, label: "Archive", canPreview: false },
+  "application/gzip": { icon: FileArchive, label: "Archive", canPreview: false },
+  "application/x-tar": { icon: FileArchive, label: "Archive", canPreview: false },
+};
+
+// Extension to file info mapping for fallback detection
+const EXTENSION_MAP: Record<string, FileTypeInfo> = {
+  pdf: { icon: FileText, label: "PDF Document", canPreview: true },
+  doc: { icon: FileText, label: "Word Document", canPreview: false },
+  docx: { icon: FileText, label: "Word Document", canPreview: false },
+  xls: { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false },
+  xlsx: { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false },
+  csv: { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false },
+  ppt: { icon: FileImage, label: "Presentation", canPreview: false },
+  pptx: { icon: FileImage, label: "Presentation", canPreview: false },
+  json: { icon: FileCode, label: "JSON File", canPreview: true },
+  zip: { icon: FileArchive, label: "Archive", canPreview: false },
+  rar: { icon: FileArchive, label: "Archive", canPreview: false },
+  "7z": { icon: FileArchive, label: "Archive", canPreview: false },
+  gz: { icon: FileArchive, label: "Archive", canPreview: false },
+  tar: { icon: FileArchive, label: "Archive", canPreview: false },
+  bz2: { icon: FileArchive, label: "Archive", canPreview: false },
+};
+
+const DEFAULT_FILE_INFO: FileTypeInfo = { icon: File, label: "File", canPreview: false };
+const TEXT_FILE_INFO: FileTypeInfo = { icon: FileCode, label: "Text File", canPreview: true };
+
 function getFileTypeInfo(type: string, filename: string): FileTypeInfo {
-  // PDF
-  if (type === "application/pdf" || filename.endsWith(".pdf")) {
-    return { icon: FileText, label: "PDF Document", canPreview: true };
+  // Check MIME type first
+  if (MIME_TYPE_MAP[type]) {
+    return MIME_TYPE_MAP[type];
   }
 
-  // Word documents
-  if (
-    type === "application/msword" ||
-    type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    filename.match(/\.(doc|docx)$/i)
-  ) {
-    return { icon: FileText, label: "Word Document", canPreview: false };
+  // Check text types
+  if (type.startsWith("text/")) {
+    return TEXT_FILE_INFO;
   }
 
-  // Excel/Spreadsheets
-  if (
-    type === "application/vnd.ms-excel" ||
-    type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-    type === "text/csv" ||
-    filename.match(/\.(xls|xlsx|csv)$/i)
-  ) {
-    return { icon: FileSpreadsheet, label: "Spreadsheet", canPreview: false };
-  }
-
-  // PowerPoint
-  if (
-    type === "application/vnd.ms-powerpoint" ||
-    type === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
-    filename.match(/\.(ppt|pptx)$/i)
-  ) {
-    return { icon: FileImage, label: "Presentation", canPreview: false };
-  }
-
-  // JSON
-  if (type === "application/json" || filename.endsWith(".json")) {
-    return { icon: FileCode, label: "JSON File", canPreview: true };
-  }
-
-  // Code/Text files - check by extension
-  const codeExtensions = new Set([
-    "js", "ts", "jsx", "tsx", "py", "rb", "go", "rs", "java",
-    "c", "cpp", "h", "hpp", "cs", "php", "swift", "kt", "scala",
-    "md", "txt", "xml", "yaml", "yml", "toml", "ini", "cfg",
-    "conf", "sh", "bash", "zsh", "ps1",
-  ]);
+  // Fall back to extension-based detection
   const ext = filename.split(".").pop()?.toLowerCase();
-  if (type.startsWith("text/") || (ext && codeExtensions.has(ext))) {
-    return { icon: FileCode, label: "Text File", canPreview: true };
+  if (ext) {
+    if (EXTENSION_MAP[ext]) {
+      return EXTENSION_MAP[ext];
+    }
+    if (CODE_EXTENSIONS.has(ext)) {
+      return TEXT_FILE_INFO;
+    }
   }
 
-  // Archives
-  if (
-    type === "application/zip" ||
-    type === "application/x-zip-compressed" ||
-    type === "application/x-rar-compressed" ||
-    type === "application/x-7z-compressed" ||
-    type === "application/gzip" ||
-    type === "application/x-tar" ||
-    filename.match(/\.(zip|rar|7z|gz|tar|bz2)$/i)
-  ) {
-    return { icon: FileArchive, label: "Archive", canPreview: false };
-  }
-
-  // Default
-  return { icon: File, label: "File", canPreview: false };
+  return DEFAULT_FILE_INFO;
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < BYTES_PER_KB) return `${bytes} B`;
+  if (bytes < BYTES_PER_MB) return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
+  return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
 }
 
 export function DocumentPreview({
@@ -201,10 +217,14 @@ function PdfPreview({ src, filename }: Readonly<PdfPreviewProps>) {
       <object
         data={src}
         type="application/pdf"
-        className="w-full h-[300px]"
+        className="w-full"
+        style={{ height: PDF_PREVIEW_HEIGHT }}
         aria-label={`Preview of ${filename}`}
       >
-        <div className="flex items-center justify-center h-[300px] text-sm text-muted-foreground">
+        <div
+          className="flex items-center justify-center text-sm text-muted-foreground"
+          style={{ height: PDF_PREVIEW_HEIGHT }}
+        >
           <p>PDF preview not available in your browser</p>
         </div>
       </object>
@@ -223,8 +243,9 @@ function TextPreview({ src }: Readonly<TextPreviewProps>) {
       const base64Match = src.match(/^data:[^;]+;base64,(.+)$/);
       if (base64Match) {
         const decoded = atob(base64Match[1]);
-        // Limit preview to first 2000 characters
-        const truncated = decoded.slice(0, 2000) + (decoded.length > 2000 ? "\n..." : "");
+        const truncated = decoded.length > TEXT_PREVIEW_MAX_CHARS
+          ? decoded.slice(0, TEXT_PREVIEW_MAX_CHARS) + "\n..."
+          : decoded;
         return { content: truncated, error: false };
       }
       return { content: null, error: true };
@@ -235,14 +256,20 @@ function TextPreview({ src }: Readonly<TextPreviewProps>) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-[150px] text-sm text-muted-foreground">
+      <div
+        className="flex items-center justify-center text-sm text-muted-foreground"
+        style={{ height: ERROR_DISPLAY_HEIGHT }}
+      >
         <p>Unable to preview file content</p>
       </div>
     );
   }
 
   return (
-    <pre className="p-3 text-xs overflow-auto max-h-[300px] bg-muted/30 font-mono whitespace-pre-wrap break-words">
+    <pre
+      className="p-3 text-xs overflow-auto bg-muted/30 font-mono whitespace-pre-wrap break-words"
+      style={{ maxHeight: TEXT_PREVIEW_HEIGHT }}
+    >
       {content}
     </pre>
   );
