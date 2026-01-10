@@ -92,15 +92,73 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 	})
 	reg.MustRegister(messagesSent)
 
+	// Media metrics
+	uploadsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        "omnia_facade_uploads_total",
+		Help:        "Total number of media upload attempts",
+		ConstLabels: labels,
+	}, []string{"status"})
+	reg.MustRegister(uploadsTotal)
+
+	uploadBytesTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        "omnia_facade_upload_bytes_total",
+		Help:        "Total bytes uploaded",
+		ConstLabels: labels,
+	})
+	reg.MustRegister(uploadBytesTotal)
+
+	uploadDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:        "omnia_facade_upload_duration_seconds",
+		Help:        "Upload duration in seconds",
+		ConstLabels: labels,
+		Buckets:     []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120},
+	})
+	reg.MustRegister(uploadDuration)
+
+	downloadsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        "omnia_facade_downloads_total",
+		Help:        "Total number of media download attempts",
+		ConstLabels: labels,
+	}, []string{"status"})
+	reg.MustRegister(downloadsTotal)
+
+	downloadBytesTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        "omnia_facade_download_bytes_total",
+		Help:        "Total bytes downloaded",
+		ConstLabels: labels,
+	})
+	reg.MustRegister(downloadBytesTotal)
+
+	mediaChunksTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        "omnia_facade_media_chunks_total",
+		Help:        "Total number of media chunks sent",
+		ConstLabels: labels,
+	}, []string{"type"})
+	reg.MustRegister(mediaChunksTotal)
+
+	mediaChunkBytesTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        "omnia_facade_media_chunk_bytes_total",
+		Help:        "Total bytes sent as media chunks",
+		ConstLabels: labels,
+	})
+	reg.MustRegister(mediaChunkBytesTotal)
+
 	return &Metrics{
-		ConnectionsActive: connectionsActive,
-		ConnectionsTotal:  connectionsTotal,
-		SessionsActive:    sessionsActive,
-		RequestsInflight:  requestsInflight,
-		RequestsTotal:     requestsTotal,
-		RequestDuration:   requestDuration,
-		MessagesReceived:  messagesReceived,
-		MessagesSent:      messagesSent,
+		ConnectionsActive:    connectionsActive,
+		ConnectionsTotal:     connectionsTotal,
+		SessionsActive:       sessionsActive,
+		RequestsInflight:     requestsInflight,
+		RequestsTotal:        requestsTotal,
+		RequestDuration:      requestDuration,
+		MessagesReceived:     messagesReceived,
+		MessagesSent:         messagesSent,
+		UploadsTotal:         uploadsTotal,
+		UploadBytesTotal:     uploadBytesTotal,
+		UploadDuration:       uploadDuration,
+		DownloadsTotal:       downloadsTotal,
+		DownloadBytesTotal:   downloadBytesTotal,
+		MediaChunksTotal:     mediaChunksTotal,
+		MediaChunkBytesTotal: mediaChunkBytesTotal,
 	}
 }
 
@@ -117,6 +175,14 @@ func TestNewMetrics(t *testing.T) {
 	assert.NotNil(t, m.RequestDuration)
 	assert.NotNil(t, m.MessagesReceived)
 	assert.NotNil(t, m.MessagesSent)
+	// Media metrics
+	assert.NotNil(t, m.UploadsTotal)
+	assert.NotNil(t, m.UploadBytesTotal)
+	assert.NotNil(t, m.UploadDuration)
+	assert.NotNil(t, m.DownloadsTotal)
+	assert.NotNil(t, m.DownloadBytesTotal)
+	assert.NotNil(t, m.MediaChunksTotal)
+	assert.NotNil(t, m.MediaChunkBytesTotal)
 }
 
 func TestMetricsConnectionTracking(t *testing.T) {
@@ -214,4 +280,120 @@ func getCounterValue(t *testing.T, c prometheus.Counter) float64 {
 	err := m.Write(metric)
 	require.NoError(t, err)
 	return metric.GetCounter().GetValue()
+}
+
+func TestMetricsUploadTracking(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	// UploadStarted is a no-op (we track in completed/failed)
+	m.UploadStarted()
+
+	// Test successful upload
+	m.UploadCompleted(1024, 1.5)
+	assert.Equal(t, float64(1024), getCounterValue(t, m.UploadBytesTotal))
+
+	// Test failed upload
+	m.UploadFailed()
+
+	// Verify counter vec values by collecting
+	ch := make(chan prometheus.Metric, 10)
+	m.UploadsTotal.Collect(ch)
+	close(ch)
+
+	successCount := 0.0
+	failedCount := 0.0
+	for metric := range ch {
+		d := &dto.Metric{}
+		require.NoError(t, metric.Write(d))
+		for _, label := range d.GetLabel() {
+			if label.GetName() == "status" {
+				if label.GetValue() == "success" {
+					successCount = d.GetCounter().GetValue()
+				} else if label.GetValue() == "failed" {
+					failedCount = d.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	assert.Equal(t, 1.0, successCount)
+	assert.Equal(t, 1.0, failedCount)
+}
+
+func TestMetricsDownloadTracking(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	// DownloadStarted is a no-op (we track in completed/failed)
+	m.DownloadStarted()
+
+	// Test successful download
+	m.DownloadCompleted(2048)
+	assert.Equal(t, float64(2048), getCounterValue(t, m.DownloadBytesTotal))
+
+	// Test another download
+	m.DownloadCompleted(1024)
+	assert.Equal(t, float64(3072), getCounterValue(t, m.DownloadBytesTotal))
+
+	// Test failed download
+	m.DownloadFailed()
+
+	// Verify counter vec values
+	ch := make(chan prometheus.Metric, 10)
+	m.DownloadsTotal.Collect(ch)
+	close(ch)
+
+	successCount := 0.0
+	failedCount := 0.0
+	for metric := range ch {
+		d := &dto.Metric{}
+		require.NoError(t, metric.Write(d))
+		for _, label := range d.GetLabel() {
+			if label.GetName() == "status" {
+				if label.GetValue() == "success" {
+					successCount = d.GetCounter().GetValue()
+				} else if label.GetValue() == "failed" {
+					failedCount = d.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	assert.Equal(t, 2.0, successCount)
+	assert.Equal(t, 1.0, failedCount)
+}
+
+func TestMetricsMediaChunkTracking(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	// Test JSON chunk
+	m.MediaChunkSent(false, 512)
+	assert.Equal(t, float64(512), getCounterValue(t, m.MediaChunkBytesTotal))
+
+	// Test binary chunk
+	m.MediaChunkSent(true, 1024)
+	assert.Equal(t, float64(1536), getCounterValue(t, m.MediaChunkBytesTotal))
+
+	// Verify counter vec values by type
+	ch := make(chan prometheus.Metric, 10)
+	m.MediaChunksTotal.Collect(ch)
+	close(ch)
+
+	jsonCount := 0.0
+	binaryCount := 0.0
+	for metric := range ch {
+		d := &dto.Metric{}
+		require.NoError(t, metric.Write(d))
+		for _, label := range d.GetLabel() {
+			if label.GetName() == "type" {
+				if label.GetValue() == "json" {
+					jsonCount = d.GetCounter().GetValue()
+				} else if label.GetValue() == "binary" {
+					binaryCount = d.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	assert.Equal(t, 1.0, jsonCount)
+	assert.Equal(t, 1.0, binaryCount)
 }

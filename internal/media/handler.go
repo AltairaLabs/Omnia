@@ -23,22 +23,59 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 )
+
+// HandlerMetrics defines the metrics interface for the media handler.
+type HandlerMetrics interface {
+	UploadStarted()
+	UploadCompleted(bytes int64, durationSeconds float64)
+	UploadFailed()
+	DownloadStarted()
+	DownloadCompleted(bytes int64)
+	DownloadFailed()
+}
+
+// noOpMetrics is a no-op metrics implementation.
+type noOpMetrics struct{}
+
+func (n *noOpMetrics) UploadStarted()                 {}
+func (n *noOpMetrics) UploadCompleted(int64, float64) {}
+func (n *noOpMetrics) UploadFailed()                  {}
+func (n *noOpMetrics) DownloadStarted()               {}
+func (n *noOpMetrics) DownloadCompleted(int64)        {}
+func (n *noOpMetrics) DownloadFailed()                {}
 
 // Handler provides HTTP endpoints for media upload and download.
 type Handler struct {
 	storage *LocalStorage
 	log     logr.Logger
+	metrics HandlerMetrics
+}
+
+// HandlerOption is a functional option for configuring the handler.
+type HandlerOption func(*Handler)
+
+// WithHandlerMetrics sets the metrics for the handler.
+func WithHandlerMetrics(m HandlerMetrics) HandlerOption {
+	return func(h *Handler) {
+		h.metrics = m
+	}
 }
 
 // NewHandler creates a new media HTTP handler.
-func NewHandler(storage *LocalStorage, log logr.Logger) *Handler {
-	return &Handler{
+func NewHandler(storage *LocalStorage, log logr.Logger, opts ...HandlerOption) *Handler {
+	h := &Handler{
 		storage: storage,
 		log:     log.WithName("media-handler"),
+		metrics: &noOpMetrics{},
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // RegisterRoutes registers the media routes on the given mux.
@@ -97,9 +134,13 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	startTime := time.Now()
+	h.metrics.UploadStarted()
+
 	// Extract upload ID from path
 	uploadID := strings.TrimPrefix(r.URL.Path, "/media/upload/")
 	if uploadID == "" {
+		h.metrics.UploadFailed()
 		http.Error(w, "upload ID required", http.StatusBadRequest)
 		return
 	}
@@ -107,6 +148,7 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Get the file path for this upload
 	filePath, err := h.storage.GetUploadPath(uploadID)
 	if err != nil {
+		h.metrics.UploadFailed()
 		h.log.Error(err, "failed to get upload path", "uploadID", uploadID)
 		h.writeError(w, err)
 		return
@@ -115,6 +157,7 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Create the file and copy the request body
 	file, err := createFile(filePath)
 	if err != nil {
+		h.metrics.UploadFailed()
 		h.log.Error(err, "failed to create file", "path", filePath)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -127,6 +170,7 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	written, err := io.Copy(file, r.Body)
 	if err != nil {
+		h.metrics.UploadFailed()
 		h.log.Error(err, "failed to write file", "path", filePath)
 		http.Error(w, "failed to store file", http.StatusInternalServerError)
 		return
@@ -134,12 +178,15 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Complete the upload
 	if err := h.storage.CompleteUpload(r.Context(), uploadID, written); err != nil {
+		h.metrics.UploadFailed()
 		h.log.Error(err, "failed to complete upload", "uploadID", uploadID)
 		h.writeError(w, err)
 		return
 	}
 
-	h.log.Info("upload completed", "uploadID", uploadID, "bytes", written)
+	duration := time.Since(startTime).Seconds()
+	h.metrics.UploadCompleted(written, duration)
+	h.log.Info("upload completed", "uploadID", uploadID, "bytes", written, "duration_seconds", duration)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -162,14 +209,18 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.metrics.DownloadStarted()
+
 	ref, err := parseMediaPath(r.URL.Path, "/media/download/")
 	if err != nil {
+		h.metrics.DownloadFailed()
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
 
 	info, err := h.storage.GetMediaInfo(r.Context(), ref.String())
 	if err != nil {
+		h.metrics.DownloadFailed()
 		h.log.Error(err, "failed to get media info", "ref", ref.String())
 		h.writeError(w, err)
 		return
@@ -177,6 +228,7 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	filePath, err := h.storage.GetMediaPath(ref.String())
 	if err != nil {
+		h.metrics.DownloadFailed()
 		h.log.Error(err, "failed to get media path", "ref", ref.String())
 		h.writeError(w, err)
 		return
@@ -190,6 +242,7 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(info.SizeBytes, 10))
 	}
 
+	h.metrics.DownloadCompleted(info.SizeBytes)
 	http.ServeFile(w, r, filePath)
 }
 

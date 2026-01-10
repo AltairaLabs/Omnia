@@ -35,6 +35,22 @@ type ServerMetrics interface {
 	MessageReceived()
 	// MessageSent records a sent message.
 	MessageSent()
+
+	// Media metrics
+	// UploadStarted records the start of a media upload.
+	UploadStarted()
+	// UploadCompleted records a successful media upload with size and duration.
+	UploadCompleted(bytes int64, durationSeconds float64)
+	// UploadFailed records a failed media upload.
+	UploadFailed()
+	// DownloadStarted records the start of a media download.
+	DownloadStarted()
+	// DownloadCompleted records a successful media download with size.
+	DownloadCompleted(bytes int64)
+	// DownloadFailed records a failed media download.
+	DownloadFailed()
+	// MediaChunkSent records a media chunk sent to the client.
+	MediaChunkSent(isBinary bool, bytes int)
 }
 
 // NoOpMetrics is a no-op implementation of ServerMetrics for when metrics are disabled.
@@ -64,3 +80,24 @@ func (n *NoOpMetrics) MessageReceived() { /* no-op: null object pattern */ }
 
 // MessageSent is a no-op - metrics are disabled.
 func (n *NoOpMetrics) MessageSent() { /* no-op: null object pattern */ }
+
+// UploadStarted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) UploadStarted() { /* no-op: null object pattern */ }
+
+// UploadCompleted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) UploadCompleted(int64, float64) { /* no-op: null object pattern */ }
+
+// UploadFailed is a no-op - metrics are disabled.
+func (n *NoOpMetrics) UploadFailed() { /* no-op: null object pattern */ }
+
+// DownloadStarted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) DownloadStarted() { /* no-op: null object pattern */ }
+
+// DownloadCompleted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) DownloadCompleted(int64) { /* no-op: null object pattern */ }
+
+// DownloadFailed is a no-op - metrics are disabled.
+func (n *NoOpMetrics) DownloadFailed() { /* no-op: null object pattern */ }
+
+// MediaChunkSent is a no-op - metrics are disabled.
+func (n *NoOpMetrics) MediaChunkSent(bool, int) { /* no-op: null object pattern */ }

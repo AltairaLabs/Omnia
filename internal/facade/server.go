@@ -679,7 +679,11 @@ func (w *connResponseWriter) WriteUploadComplete(uploadComplete *UploadCompleteI
 }
 
 func (w *connResponseWriter) WriteMediaChunk(mediaChunk *MediaChunkInfo) error {
-	return w.server.sendMessage(w.conn, NewMediaChunkMessage(w.sessionID, mediaChunk))
+	err := w.server.sendMessage(w.conn, NewMediaChunkMessage(w.sessionID, mediaChunk))
+	if err == nil {
+		w.server.metrics.MediaChunkSent(false, len(mediaChunk.Data))
+	}
+	return err
 }
 
 func (w *connResponseWriter) SupportsBinary() bool {
@@ -703,5 +707,9 @@ func (w *connResponseWriter) WriteBinaryMediaChunk(mediaID [MediaIDSize]byte, se
 		return err
 	}
 
-	return w.server.sendBinaryFrame(w.conn, frame)
+	err = w.server.sendBinaryFrame(w.conn, frame)
+	if err == nil {
+		w.server.metrics.MediaChunkSent(true, len(payload))
+	}
+	return err
 }
