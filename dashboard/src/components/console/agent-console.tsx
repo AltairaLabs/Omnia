@@ -15,6 +15,8 @@ import type { FileAttachment } from "@/types/websocket";
 interface AgentConsoleProps {
   agentName: string;
   namespace: string;
+  /** Optional session ID for multi-tab support */
+  sessionId?: string;
   className?: string;
 }
 
@@ -77,7 +79,7 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-export function AgentConsole({ agentName, namespace, className }: Readonly<AgentConsoleProps>) {
+export function AgentConsole({ agentName, namespace, sessionId, className }: Readonly<AgentConsoleProps>) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -88,7 +90,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
 
   // Always use mock mode for now (until K8s integration)
   const {
-    sessionId,
+    sessionId: serverSessionId,
     status,
     messages,
     error,
@@ -99,6 +101,7 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
   } = useAgentConsole({
     agentName,
     namespace,
+    sessionId,
   });
 
   // Auto-connect on mount
@@ -323,9 +326,9 @@ export function AgentConsole({ agentName, namespace, className }: Readonly<Agent
       <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
         <div className="flex items-center gap-3">
           {statusBadge}
-          {sessionId && (
+          {serverSessionId && (
             <span className="text-xs text-muted-foreground">
-              Session: {sessionId.slice(0, 12)}...
+              Session: {serverSessionId.slice(0, 12)}...
             </span>
           )}
         </div>

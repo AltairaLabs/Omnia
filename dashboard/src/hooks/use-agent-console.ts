@@ -8,11 +8,13 @@ import type {
   ToolCallWithResult,
 } from "@/types/websocket";
 import { useDataService, type AgentConnection } from "@/lib/data";
-import { useConsoleStore } from "./use-console-store";
+import { useConsoleStore, useConsoleStoreBySession } from "./use-console-store";
 
 interface UseAgentConsoleOptions {
   agentName: string;
   namespace: string;
+  /** Optional session ID for multi-tab support. If provided, uses this as the store key. */
+  sessionId?: string;
 }
 
 interface UseAgentConsoleReturn extends ConsoleState {
@@ -40,13 +42,18 @@ function generateId(): string {
 export function useAgentConsole({
   agentName,
   namespace,
+  sessionId: customSessionId,
 }: UseAgentConsoleOptions): UseAgentConsoleReturn {
   const service = useDataService();
   const connectionRef = useRef<AgentConnection | null>(null);
   const handlersRegistered = useRef(false);
 
   // Use persistent store for state
-  const store = useConsoleStore(namespace, agentName);
+  // If customSessionId is provided, use it directly as the store key (for multi-tab support)
+  // Otherwise, fall back to namespace/agentName key (for single-session use)
+  const storeBySession = useConsoleStoreBySession(customSessionId ?? "");
+  const storeByAgent = useConsoleStore(namespace, agentName);
+  const store = customSessionId ? storeBySession : storeByAgent;
   const {
     sessionId,
     status,

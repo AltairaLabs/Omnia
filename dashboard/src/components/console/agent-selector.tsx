@@ -1,0 +1,187 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { Bot, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useNamespaces } from "@/hooks/use-namespaces";
+import { useAgents } from "@/hooks/use-agents";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+
+interface AgentSelectorProps {
+  /** Called when an agent is selected and confirmed */
+  onSelect: (namespace: string, agentName: string) => void;
+  /** Optional CSS class name */
+  className?: string;
+}
+
+/**
+ * Agent selector component for choosing an agent to start a conversation with.
+ * Shows namespace and agent dropdowns with a "Start Conversation" button.
+ */
+export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorProps>) {
+  const [selectedNamespace, setSelectedNamespace] = useState<string>("");
+  const [selectedAgent, setSelectedAgent] = useState<string>("");
+
+  // Fetch namespaces
+  const { data: namespaces, isLoading: namespacesLoading } = useNamespaces();
+
+  // Fetch agents for the selected namespace (only Running agents)
+  const { data: agents, isLoading: agentsLoading } = useAgents({
+    namespace: selectedNamespace || undefined,
+    phase: "Running",
+  });
+
+  // Filter agents by selected namespace
+  const filteredAgents = useMemo(() => {
+    if (!agents) return [];
+    if (!selectedNamespace) return agents;
+    return agents.filter((a) => a.metadata.namespace === selectedNamespace);
+  }, [agents, selectedNamespace]);
+
+  // Get unique namespaces from agents if namespace list is empty
+  const availableNamespaces = useMemo(() => {
+    if (namespaces && namespaces.length > 0) return namespaces;
+    if (!agents) return [];
+    const ns = new Set(agents.map((a) => a.metadata.namespace).filter(Boolean));
+    return Array.from(ns) as string[];
+  }, [namespaces, agents]);
+
+  const handleNamespaceChange = (value: string) => {
+    setSelectedNamespace(value === "__all__" ? "" : value);
+    setSelectedAgent(""); // Reset agent when namespace changes
+  };
+
+  const handleAgentChange = (value: string) => {
+    setSelectedAgent(value);
+  };
+
+  const handleStartConversation = () => {
+    if (selectedAgent) {
+      // Find the agent to get its namespace
+      const agent = filteredAgents.find((a) => a.metadata.name === selectedAgent);
+      if (agent) {
+        onSelect(agent.metadata.namespace || "default", agent.metadata.name);
+      }
+    }
+  };
+
+  const isLoading = namespacesLoading || agentsLoading;
+  const canStart = selectedAgent && !isLoading;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center h-full p-8",
+        className
+      )}
+    >
+      <div className="flex flex-col items-center gap-6 max-w-md w-full">
+        {/* Icon */}
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+          <Bot className="h-8 w-8 text-muted-foreground" />
+        </div>
+
+        {/* Title */}
+        <div className="text-center">
+          <h2 className="text-lg font-semibold">Start a Conversation</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Select an agent to begin chatting
+          </p>
+        </div>
+
+        {/* Selectors */}
+        <div className="flex flex-col gap-4 w-full">
+          {/* Namespace selector */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Namespace</label>
+            <Select
+              value={selectedNamespace || "__all__"}
+              onValueChange={handleNamespaceChange}
+              disabled={isLoading}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All namespaces" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All namespaces</SelectItem>
+                {availableNamespaces.map((ns) => (
+                  <SelectItem key={ns} value={ns}>
+                    {ns}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Agent selector */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Agent</label>
+            <Select
+              value={selectedAgent}
+              onValueChange={handleAgentChange}
+              disabled={isLoading || filteredAgents.length === 0}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    isLoading
+                      ? "Loading agents..."
+                      : filteredAgents.length === 0
+                        ? "No running agents"
+                        : "Select an agent"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {filteredAgents.map((agent) => (
+                  <SelectItem key={agent.metadata.uid} value={agent.metadata.name}>
+                    <div className="flex items-center gap-2">
+                      <span>{agent.metadata.name}</span>
+                      {agent.metadata.namespace && selectedNamespace === "" && (
+                        <Badge variant="outline" className="text-xs">
+                          {agent.metadata.namespace}
+                        </Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Start button */}
+        <Button
+          onClick={handleStartConversation}
+          disabled={!canStart}
+          className="w-full"
+          size="lg"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading...
+            </>
+          ) : (
+            "Start Conversation"
+          )}
+        </Button>
+
+        {/* Help text */}
+        {filteredAgents.length === 0 && !isLoading && (
+          <p className="text-sm text-muted-foreground text-center">
+            No running agents available. Deploy an agent first to start a conversation.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}

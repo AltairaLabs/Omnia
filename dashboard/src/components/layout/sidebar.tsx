@@ -13,12 +13,14 @@ import {
   Settings,
   Network,
   DollarSign,
+  Terminal,
 } from "lucide-react";
 
 const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Topology", href: "/topology", icon: Network },
   { name: "Agents", href: "/agents", icon: Bot },
+  { name: "Console", href: "/console", icon: Terminal },
   { name: "PromptPacks", href: "/promptpacks", icon: FileText },
   { name: "Tools", href: "/tools", icon: Wrench },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
