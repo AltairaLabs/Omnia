@@ -136,4 +136,56 @@ test.describe('Console Image Attachments', () => {
     expect(boundingBox!.width).toBeGreaterThan(0);
     expect(boundingBox!.height).toBeGreaterThan(0);
   });
+
+  test('should have image with valid MIME type in source', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an image response
+    await sendMessageAndWait(page, SHOW_IMAGE);
+
+    // Get the image
+    const lastMessage = await getLastAssistantMessage(page);
+    const img = lastMessage!.locator(SELECTORS.imageAttachment).locator('img');
+    await expect(img).toBeVisible({ timeout: 10000 });
+
+    // Verify image source has correct MIME type
+    const src = await img.getAttribute('src');
+    expect(src).toBeTruthy();
+
+    // Should be a data URL with image MIME type or a blob URL
+    if (src!.startsWith('data:')) {
+      expect(src).toMatch(/^data:image\/(png|jpeg|gif|webp|svg\+xml)/);
+    } else if (src!.startsWith('blob:')) {
+      // Blob URLs don't contain MIME type info, but verify it's a valid blob URL
+      expect(src).toMatch(/^blob:https?:\/\//);
+    }
+  });
+
+  test('should load image successfully without errors', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an image response
+    await sendMessageAndWait(page, SEND_IMAGE);
+
+    // Get the image
+    const lastMessage = await getLastAssistantMessage(page);
+    const img = lastMessage!.locator(SELECTORS.imageAttachment).locator('img');
+    await expect(img).toBeVisible({ timeout: 10000 });
+
+    // Verify image loaded successfully (naturalWidth > 0 means loaded)
+    const isLoaded = await img.evaluate((el: HTMLImageElement) => {
+      return el.complete && el.naturalWidth > 0;
+    });
+    expect(isLoaded).toBeTruthy();
+  });
+
+  test('should have alt text for accessibility', async ({ connectedConsolePage: page }) => {
+    // Send a message that triggers an image response
+    await sendMessageAndWait(page, SHOW_IMAGE);
+
+    // Get the image
+    const lastMessage = await getLastAssistantMessage(page);
+    const img = lastMessage!.locator(SELECTORS.imageAttachment).locator('img');
+    await expect(img).toBeVisible({ timeout: 10000 });
+
+    // Verify image has alt attribute (may be empty string for decorative images)
+    const alt = await img.getAttribute('alt');
+    expect(alt !== null).toBeTruthy(); // alt attribute should exist
+  });
 });
