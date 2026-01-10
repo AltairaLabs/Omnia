@@ -1,7 +1,9 @@
 export { AgentConsole } from "./agent-console";
+export { AgentSelector } from "./agent-selector";
 export { AttachmentPreview } from "./attachment-preview";
 export { AudioPlayer } from "./audio-player";
 export { ConsoleMessage } from "./console-message";
+export { ConsoleTabs } from "./console-tabs";
 export { DocumentPreview } from "./document-preview";
 export { ImageLightbox } from "./image-lightbox";
 export { ToolCallCard } from "./tool-call-card";

@@ -5,7 +5,11 @@ import type { ConsoleMessage, ConsoleState, ConnectionStatus } from "@/types/web
 
 /**
  * Simple store for console state that persists across component unmounts.
- * Uses a Map keyed by "namespace/agentName" to store state for each agent.
+ * Uses a Map keyed by session ID or "namespace/agentName" to store state.
+ *
+ * Two APIs are provided:
+ * - useConsoleStoreBySession(sessionId): Use a custom session ID as the key
+ * - useConsoleStore(namespace, agentName): Legacy API using namespace/agentName as key
  */
 
 interface StoredConsoleState extends ConsoleState {
@@ -67,37 +71,45 @@ function subscribe(callback: () => void): () => void {
 }
 
 /**
- * Hook to access and update console state for an agent.
+ * Clear state for a given key. Used when closing tabs.
+ */
+export function clearConsoleState(key: string): void {
+  consoleStates.delete(key);
+  snapshotCache.delete(key);
+  listeners.forEach((listener) => listener());
+}
+
+/**
+ * Hook to access and update console state using a session ID as the key.
+ * Use this for multi-session tab support where each tab has a unique session ID.
  * State persists even when the component unmounts.
  */
-export function useConsoleStore(namespace: string, agentName: string) {
-  const key = getKey(namespace, agentName);
-
+export function useConsoleStoreBySession(sessionKey: string) {
   // Subscribe to store changes
   const store = useSyncExternalStore(
     subscribe,
-    () => getState(key),
-    () => getState(key)
+    () => getState(sessionKey),
+    () => getState(sessionKey)
   );
 
   const setMessages = useCallback(
     (messages: ConsoleMessage[]) => {
-      setState(key, { messages });
+      setState(sessionKey, { messages });
     },
-    [key]
+    [sessionKey]
   );
 
   const addMessage = useCallback(
     (message: ConsoleMessage) => {
-      const current = getState(key);
-      setState(key, { messages: [...current.messages, message] });
+      const current = getState(sessionKey);
+      setState(sessionKey, { messages: [...current.messages, message] });
     },
-    [key]
+    [sessionKey]
   );
 
   const updateLastMessage = useCallback(
     (updater: (msg: ConsoleMessage) => ConsoleMessage) => {
-      const current = getState(key);
+      const current = getState(sessionKey);
       if (current.messages.length === 0) return;
 
       const messages = [...current.messages];
@@ -105,28 +117,28 @@ export function useConsoleStore(namespace: string, agentName: string) {
       if (lastMessage) {
         messages[messages.length - 1] = updater(lastMessage);
       }
-      setState(key, { messages });
+      setState(sessionKey, { messages });
     },
-    [key]
+    [sessionKey]
   );
 
   const setStatus = useCallback(
     (status: ConnectionStatus, error?: string | null) => {
-      setState(key, { status, error: error ?? null });
+      setState(sessionKey, { status, error: error ?? null });
     },
-    [key]
+    [sessionKey]
   );
 
   const setSessionId = useCallback(
     (sessionId: string | null) => {
-      setState(key, { sessionId });
+      setState(sessionKey, { sessionId });
     },
-    [key]
+    [sessionKey]
   );
 
   const clearMessages = useCallback(() => {
-    setState(key, { messages: [], sessionId: null });
-  }, [key]);
+    setState(sessionKey, { messages: [], sessionId: null });
+  }, [sessionKey]);
 
   return {
     ...store,
@@ -137,4 +149,15 @@ export function useConsoleStore(namespace: string, agentName: string) {
     setSessionId,
     clearMessages,
   };
+}
+
+/**
+ * Hook to access and update console state for an agent.
+ * Uses namespace/agentName as the key. For multi-session support,
+ * use useConsoleStoreBySession instead.
+ * State persists even when the component unmounts.
+ */
+export function useConsoleStore(namespace: string, agentName: string) {
+  const key = getKey(namespace, agentName);
+  return useConsoleStoreBySession(key);
 }
