@@ -1755,6 +1755,151 @@ spec:
 				"-n", agentsNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
+
+		It("should expose runtime metrics on the agent pod", func() {
+			By("getting the agent pod name")
+			var podName string
+			getPodName := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=test-agent",
+					"-o", "jsonpath={.items[0].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty())
+				podName = output
+			}
+			Eventually(getPodName, time.Minute, time.Second).Should(Succeed())
+
+			By("getting the pod IP for direct access to runtime metrics")
+			var podIP string
+			getPodIP := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", podName,
+					"-n", agentsNamespace,
+					"-o", "jsonpath={.status.podIP}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty())
+				podIP = output
+			}
+			Eventually(getPodIP, time.Minute, time.Second).Should(Succeed())
+
+			By("creating a curl pod to fetch runtime metrics")
+			// The runtime container exposes metrics on port 9090
+			metricsTestManifest := fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: runtime-metrics-test
+  namespace: test-agents
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "Fetching metrics from runtime container at %s:9090"
+      curl -s "http://%s:9090/metrics" > /tmp/metrics.txt
+      if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to fetch metrics"
+        exit 1
+      fi
+      echo "=== Runtime Metrics ==="
+      # Check for key runtime metrics
+      if grep -q "omnia_runtime_pipelines_active" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_pipelines_active"
+      else
+        echo "MISSING: omnia_runtime_pipelines_active"
+      fi
+      if grep -q "omnia_runtime_pipeline_duration_seconds" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_pipeline_duration_seconds"
+      else
+        echo "MISSING: omnia_runtime_pipeline_duration_seconds"
+      fi
+      if grep -q "omnia_runtime_tool_calls_total" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_tool_calls_total"
+      else
+        echo "MISSING: omnia_runtime_tool_calls_total"
+      fi
+      if grep -q "omnia_runtime_tool_call_duration_seconds" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_tool_call_duration_seconds"
+      else
+        echo "MISSING: omnia_runtime_tool_call_duration_seconds"
+      fi
+      if grep -q "omnia_runtime_stage_elements_total" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_stage_elements_total"
+      else
+        echo "MISSING: omnia_runtime_stage_elements_total"
+      fi
+      if grep -q "omnia_runtime_stage_duration_seconds" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_stage_duration_seconds"
+      else
+        echo "MISSING: omnia_runtime_stage_duration_seconds"
+      fi
+      if grep -q "omnia_runtime_validations_total" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_validations_total"
+      else
+        echo "MISSING: omnia_runtime_validations_total"
+      fi
+      if grep -q "omnia_runtime_validation_duration_seconds" /tmp/metrics.txt; then
+        echo "FOUND: omnia_runtime_validation_duration_seconds"
+      else
+        echo "MISSING: omnia_runtime_validation_duration_seconds"
+      fi
+      # Verify at least the core metrics are present
+      if grep -q "omnia_runtime_pipeline_duration_seconds" /tmp/metrics.txt && \
+         grep -q "omnia_runtime_tool_call_duration_seconds" /tmp/metrics.txt; then
+        echo "TEST PASSED: Core runtime metrics are present"
+      else
+        echo "ERROR: Missing core runtime metrics"
+        echo "=== Full metrics output ==="
+        cat /tmp/metrics.txt
+        exit 1
+      fi
+`, podIP, podIP)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(metricsTestManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create runtime metrics test pod")
+
+			By("waiting for the metrics test to complete")
+			verifyMetricsTest := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "runtime-metrics-test",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			ok := Eventually(verifyMetricsTest, 2*time.Minute, 5*time.Second).Should(Succeed())
+			if !ok {
+				// Dump debug info on failure
+				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Runtime metrics test failed ===\n")
+				logsCmd := exec.Command("kubectl", "logs", "runtime-metrics-test", "-n", agentsNamespace)
+				if logs, err := utils.Run(logsCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Metrics test logs:\n%s\n", logs)
+				}
+				descCmd := exec.Command("kubectl", "describe", "pod", "runtime-metrics-test", "-n", agentsNamespace)
+				if desc, err := utils.Run(descCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Pod describe:\n%s\n", desc)
+				}
+				Fail("Runtime metrics test failed - see debug output above")
+			}
+
+			By("checking the metrics test logs")
+			cmd = exec.Command("kubectl", "logs", "runtime-metrics-test", "-n", agentsNamespace)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			_, _ = fmt.Fprintf(GinkgoWriter, "Runtime metrics test output:\n%s\n", output)
+			Expect(output).To(ContainSubstring("TEST PASSED"), "Runtime metrics test should pass")
+			Expect(output).NotTo(ContainSubstring("ERROR:"), "Runtime metrics test should not have errors")
+
+			By("cleaning up runtime metrics test pod")
+			cmd = exec.Command("kubectl", "delete", "pod", "runtime-metrics-test",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
 	})
 })
 
