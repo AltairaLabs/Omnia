@@ -688,3 +688,72 @@ keda:
     # -- Prometheus server address for KEDA triggers
     # This is the default when using the Prometheus subchart
     serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"
+
+# ============================================================================
+# Demo Mode
+# Quick-start demo with Ollama (local LLM) and a multi-modal vision agent
+# Enables users to try Omnia without external API keys
+# ============================================================================
+
+demo:
+  # -- Enable demo mode (deploys Ollama + demo agent)
+  enabled: false
+
+  # -- Namespace for demo resources
+  namespace: omnia-demo
+
+  # Ollama configuration (local LLM server)
+  ollama:
+    # -- Ollama image
+    image:
+      repository: ollama/ollama
+      tag: latest
+      pullPolicy: IfNotPresent
+    # -- Model to pre-pull (llava for vision capabilities)
+    model: llava:7b
+    # -- Keep model loaded in memory
+    keepAlive: "24h"
+    # -- Resource requirements
+    # llava:7b requires ~4GB RAM minimum, 8GB recommended
+    resources:
+      requests:
+        memory: "4Gi"
+        cpu: "2"
+      limits:
+        memory: "16Gi"
+        cpu: "8"
+    # -- Persistence for model cache (models are 4-8GB)
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: ""
+
+  # Demo agent configuration
+  agent:
+    # -- Agent name
+    name: vision-demo
+    # -- Facade handler type
+    handler: runtime
+    # -- Number of replicas
+    replicas: 1
+    # -- Resource requirements
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+  # Demo PromptPack configuration
+  promptPack:
+    # -- System prompt for the demo agent
+    systemPrompt: |
+      You are a helpful vision-capable AI assistant powered by Ollama.
+      You can analyze images and answer questions about them.
+      Be concise, friendly, and helpful in your responses.
+
+      When analyzing images:
+      - Describe what you see clearly and objectively
+      - Point out notable details or interesting elements
+      - Answer any specific questions about the image content

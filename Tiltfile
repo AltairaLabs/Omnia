@@ -20,6 +20,12 @@ load('ext://namespace', 'namespace_create')
 # Set to True to enable Prometheus/Grafana for cost tracking development
 ENABLE_OBSERVABILITY = True
 
+# Set to True to enable Ollama for local LLM development
+# Requires: 8GB+ RAM, 10GB+ disk for llava:7b model
+# See config/samples/dev/ollama.yaml for requirements
+# Can be set via environment: ENABLE_OLLAMA=true tilt up
+ENABLE_OLLAMA = os.getenv('ENABLE_OLLAMA', '').lower() in ('true', '1', 'yes') or False
+
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind'])
 
@@ -208,6 +214,28 @@ if ENABLE_OBSERVABILITY:
     )
 
 # ============================================================================
+# Ollama (Local LLM) for Development
+# ============================================================================
+
+if ENABLE_OLLAMA:
+    # Apply Ollama manifests
+    local_resource(
+        'ollama-deploy',
+        cmd='kubectl apply -f config/samples/dev/ollama.yaml',
+        deps=['config/samples/dev/ollama.yaml'],
+        labels=['ollama'],
+    )
+
+    # Wait for Ollama to be ready and expose port
+    k8s_resource(
+        'ollama',
+        new_name='ollama-server',
+        labels=['ollama'],
+        port_forwards=['11434:11434'],
+        resource_deps=['ollama-deploy'],
+    )
+
+# ============================================================================
 # Sample Resources for Development
 # ============================================================================
 
@@ -217,7 +245,7 @@ local_resource(
     cmd='kubectl apply -f config/samples/dev/',
     deps=['config/samples/dev'],
     labels=['samples'],
-    resource_deps=['omnia-controller-manager'],
+    resource_deps=['omnia-controller-manager'] + (['ollama-server'] if ENABLE_OLLAMA else []),
 )
 
 # Restart agent pods when facade/framework images are rebuilt

@@ -274,6 +274,27 @@ generate-dashboard-api: ## Generate TypeScript API client from OpenAPI spec
 generate-all: manifests generate generate-proto sync-chart-crds generate-dashboard-types generate-dashboard-api ## Run all code generation
 	@echo "All code generation complete."
 
+##@ Local Development (Tilt)
+
+.PHONY: dev
+dev: ## Start local development cluster with Tilt
+	tilt up
+
+.PHONY: dev-ollama
+dev-ollama: ## Start local development with Ollama enabled (local LLM)
+	@echo "Starting Tilt with Ollama enabled..."
+	@echo "Note: Ollama requires 8GB+ RAM and will pull llava:7b (~4GB) on first run"
+	ENABLE_OLLAMA=true tilt up
+
+.PHONY: dev-down
+dev-down: ## Stop local development cluster
+	tilt down
+
+.PHONY: dev-demo
+dev-demo: ## Start development with demo mode (Ollama + vision agent)
+	@echo "Starting Tilt with demo mode..."
+	ENABLE_OLLAMA=true tilt up
+
 ##@ Build
 
 .PHONY: build
