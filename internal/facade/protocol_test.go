@@ -820,3 +820,149 @@ func TestBackwardCompatibility(t *testing.T) {
 		t.Errorf("GetTextContent() = %v, want 'Hello'", msg.GetTextContent())
 	}
 }
+
+// Tests for streaming media chunk support
+
+func TestMediaChunkInfoJSON(t *testing.T) {
+	chunk := MediaChunkInfo{
+		MediaID:  "audio-123",
+		Sequence: 0,
+		IsLast:   false,
+		Data:     "//uQxAAA...",
+		MimeType: "audio/mp3",
+	}
+
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded MediaChunkInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.MediaID != chunk.MediaID {
+		t.Errorf("MediaID = %v, want %v", decoded.MediaID, chunk.MediaID)
+	}
+	if decoded.Sequence != chunk.Sequence {
+		t.Errorf("Sequence = %v, want %v", decoded.Sequence, chunk.Sequence)
+	}
+	if decoded.IsLast != chunk.IsLast {
+		t.Errorf("IsLast = %v, want %v", decoded.IsLast, chunk.IsLast)
+	}
+	if decoded.Data != chunk.Data {
+		t.Errorf("Data = %v, want %v", decoded.Data, chunk.Data)
+	}
+	if decoded.MimeType != chunk.MimeType {
+		t.Errorf("MimeType = %v, want %v", decoded.MimeType, chunk.MimeType)
+	}
+}
+
+func TestMediaChunkInfoLastChunk(t *testing.T) {
+	chunk := MediaChunkInfo{
+		MediaID:  "video-456",
+		Sequence: 10,
+		IsLast:   true,
+		Data:     "finalChunkData==",
+		MimeType: "video/mp4",
+	}
+
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded MediaChunkInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if !decoded.IsLast {
+		t.Error("IsLast should be true for final chunk")
+	}
+	if decoded.Sequence != 10 {
+		t.Errorf("Sequence = %v, want 10", decoded.Sequence)
+	}
+}
+
+func TestNewMediaChunkMessage(t *testing.T) {
+	chunk := &MediaChunkInfo{
+		MediaID:  "audio-stream-1",
+		Sequence: 5,
+		IsLast:   false,
+		Data:     "SGVsbG8gV29ybGQ=",
+		MimeType: "audio/wav",
+	}
+
+	msg := NewMediaChunkMessage(testSessionID, chunk)
+
+	if msg.Type != MessageTypeMediaChunk {
+		t.Errorf("Type = %v, want %v", msg.Type, MessageTypeMediaChunk)
+	}
+	if msg.SessionID != testSessionID {
+		t.Errorf("SessionID = %v, want %v", msg.SessionID, testSessionID)
+	}
+	if msg.MediaChunk == nil {
+		t.Fatal("MediaChunk should not be nil")
+	}
+	if msg.MediaChunk.MediaID != chunk.MediaID {
+		t.Errorf("MediaChunk.MediaID = %v, want %v", msg.MediaChunk.MediaID, chunk.MediaID)
+	}
+	if msg.MediaChunk.Sequence != chunk.Sequence {
+		t.Errorf("MediaChunk.Sequence = %v, want %v", msg.MediaChunk.Sequence, chunk.Sequence)
+	}
+	if msg.MediaChunk.IsLast != chunk.IsLast {
+		t.Errorf("MediaChunk.IsLast = %v, want %v", msg.MediaChunk.IsLast, chunk.IsLast)
+	}
+	if msg.MediaChunk.Data != chunk.Data {
+		t.Errorf("MediaChunk.Data = %v, want %v", msg.MediaChunk.Data, chunk.Data)
+	}
+	if msg.MediaChunk.MimeType != chunk.MimeType {
+		t.Errorf("MediaChunk.MimeType = %v, want %v", msg.MediaChunk.MimeType, chunk.MimeType)
+	}
+	if msg.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestMediaChunkMessageType(t *testing.T) {
+	if string(MessageTypeMediaChunk) != "media_chunk" {
+		t.Errorf("MessageTypeMediaChunk = %v, want 'media_chunk'", MessageTypeMediaChunk)
+	}
+}
+
+func TestServerMessageWithMediaChunk(t *testing.T) {
+	msg := ServerMessage{
+		Type:      MessageTypeMediaChunk,
+		SessionID: "test-session",
+		MediaChunk: &MediaChunkInfo{
+			MediaID:  "stream-1",
+			Sequence: 0,
+			IsLast:   false,
+			Data:     "YXVkaW9kYXRh",
+			MimeType: "audio/mp3",
+		},
+		Timestamp: time.Now(),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded ServerMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.Type != MessageTypeMediaChunk {
+		t.Errorf("Type = %v, want %v", decoded.Type, MessageTypeMediaChunk)
+	}
+	if decoded.MediaChunk == nil {
+		t.Fatal("MediaChunk should not be nil")
+	}
+	if decoded.MediaChunk.MediaID != "stream-1" {
+		t.Errorf("MediaChunk.MediaID = %v, want 'stream-1'", decoded.MediaChunk.MediaID)
+	}
+}

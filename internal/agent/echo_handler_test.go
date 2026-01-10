@@ -99,6 +99,10 @@ func (m *mockResponseWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) e
 	return m.err
 }
 
+func (m *mockResponseWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error {
+	return m.err
+}
+
 func TestNewEchoHandler(t *testing.T) {
 	handler := NewEchoHandler()
 	if handler == nil {

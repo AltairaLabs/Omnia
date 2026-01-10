@@ -92,6 +92,10 @@ type ResponseWriter interface {
 	WriteUploadReady(uploadReady *UploadReadyInfo) error
 	// WriteUploadComplete notifies the client that an upload is complete.
 	WriteUploadComplete(uploadComplete *UploadCompleteInfo) error
+	// WriteMediaChunk sends a streaming media chunk to the client.
+	// Used for streaming audio/video responses where playback can begin
+	// before the entire media is generated.
+	WriteMediaChunk(mediaChunk *MediaChunkInfo) error
 }
 
 // Server is a WebSocket server for agent communication.
@@ -596,4 +600,8 @@ func (w *connResponseWriter) WriteUploadReady(uploadReady *UploadReadyInfo) erro
 
 func (w *connResponseWriter) WriteUploadComplete(uploadComplete *UploadCompleteInfo) error {
 	return w.server.sendMessage(w.conn, NewUploadCompleteMessage(w.sessionID, uploadComplete))
+}
+
+func (w *connResponseWriter) WriteMediaChunk(mediaChunk *MediaChunkInfo) error {
+	return w.server.sendMessage(w.conn, NewMediaChunkMessage(w.sessionID, mediaChunk))
 }
