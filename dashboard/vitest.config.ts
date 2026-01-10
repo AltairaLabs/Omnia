@@ -26,6 +26,15 @@ export default defineConfig({
         "src/app/**/layout.tsx", // Next.js layouts
         "src/app/**/page.tsx", // Next.js pages (tested via E2E)
         "src/app/api/**", // API routes (tested via integration)
+        "src/lib/auth/actions.ts", // Server actions (tested via integration)
+        "src/lib/auth/api-guard.ts", // API middleware (tested via integration)
+        "src/lib/auth/config.ts", // Auth config (tested via integration)
+        "src/lib/auth/proxy.ts", // Proxy utilities (tested via integration)
+        "src/lib/auth/session.ts", // Session handling (tested via integration)
+        "src/lib/auth/types.ts", // Type utilities
+        "src/lib/auth/api-keys/**", // API key stores (tested via integration)
+        "src/lib/auth/oauth/**", // OAuth client (tested via integration)
+        "src/lib/auth/providers/**", // OAuth providers (config only)
       ],
       thresholds: {
         statements: 80,
