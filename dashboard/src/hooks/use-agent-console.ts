@@ -5,7 +5,8 @@ import type {
   ConsoleMessage,
   ConsoleState,
   ServerMessage,
-  ToolCallWithResult,
+  FileAttachment,
+  ContentPart,
 } from "@/types/websocket";
 import { useDataService, type AgentConnection } from "@/lib/data";
 import { useConsoleStore, useConsoleStoreBySession } from "./use-console-store";
@@ -29,6 +30,44 @@ let idCounter = 0;
 function generateId(): string {
   idCounter += 1;
   return `${Date.now()}-${idCounter}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Extract text content from content parts.
+ * Concatenates all text parts with newlines.
+ */
+function extractTextFromParts(parts: ContentPart[]): string {
+  return parts
+    .filter((part) => part.type === "text" && part.text)
+    .map((part) => part.text!)
+    .join("\n");
+}
+
+/**
+ * Convert content parts to file attachments.
+ * Extracts all media parts (image, audio, video, file) and converts them to FileAttachment format.
+ */
+function extractAttachmentsFromParts(parts: ContentPart[]): FileAttachment[] {
+  return parts
+    .filter((part) => part.type !== "text" && part.media)
+    .map((part) => {
+      const media = part.media!;
+      // Generate data URL from base64 data
+      let dataUrl = "";
+      if (media.data) {
+        dataUrl = `data:${media.mime_type};base64,${media.data}`;
+      } else if (media.url) {
+        dataUrl = media.url;
+      }
+
+      return {
+        id: generateId(),
+        name: media.filename || `${part.type}-${Date.now()}`,
+        type: media.mime_type,
+        size: media.size_bytes || 0,
+        dataUrl,
+      };
+    });
 }
 
 /**
@@ -80,32 +119,24 @@ export function useAgentConsole({
   }, [messages]);
 
   // Handle incoming messages from the connection - stable callback
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Switch statement handles multiple message types; extracting handlers would reduce clarity
   const handleMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
-      case "connected":
-        setSessionId(message.session_id || null);
-        // Add system message with session details
-        if (message.session_id) {
-          addMessage({
-            id: generateId(),
-            role: "system",
-            content: `Session started: ${message.session_id}`,
-            timestamp: new Date(),
-          });
-        }
+      case "connected": {
+        const sessionId = message.session_id || null;
+        setSessionId(sessionId);
+        // Add system message with session details when session ID is provided
+        if (sessionId) addMessage({ id: generateId(), role: "system", content: `Session started: ${sessionId}`, timestamp: new Date() });
         break;
+      }
 
       case "chunk": {
-        // Check if we need to append to existing streaming message or create new
-        const currentMessages = messagesRef.current;
-        const lastMsg = currentMessages[currentMessages.length - 1];
-        if (lastMsg?.isStreaming && lastMsg.role === "assistant") {
-          updateLastMessage((msg) => ({
-            ...msg,
-            content: msg.content + (message.content || ""),
-          }));
+        // Append to existing streaming message or create new
+        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
+        const isStreamingAssistant = lastMsg?.isStreaming && lastMsg.role === "assistant";
+        if (isStreamingAssistant) {
+          updateLastMessage((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
         } else {
-          // Create new streaming message
           addMessage({
             id: generateId(),
             role: "assistant",
@@ -118,51 +149,49 @@ export function useAgentConsole({
         break;
       }
 
-      case "done":
-        // Mark message as complete
+      case "done": {
+        // Mark message as complete, with multi-modal content support
+        const hasParts = message.parts && message.parts.length > 0;
+        const textFromParts = hasParts ? extractTextFromParts(message.parts!) : "";
+        const attachments = hasParts ? extractAttachmentsFromParts(message.parts!) : [];
+        const finalContent = textFromParts || message.content || "";
+
         updateLastMessage((msg) => ({
           ...msg,
           isStreaming: false,
-          content: message.content || msg.content,
+          content: finalContent || msg.content,
+          attachments: attachments.length > 0 ? attachments : msg.attachments,
         }));
         break;
+      }
 
       case "tool_call":
         // Add tool call to current message
-        if (message.tool_call) {
-          updateLastMessage((msg) => {
-            const toolCall: ToolCallWithResult = {
-              id: message.tool_call!.id,
-              name: message.tool_call!.name,
-              arguments: message.tool_call!.arguments,
-              status: "pending",
-            };
-            return {
-              ...msg,
-              toolCalls: [...(msg.toolCalls || []), toolCall],
-            };
-          });
-        }
+        if (!message.tool_call) break;
+        updateLastMessage((msg) => ({
+          ...msg,
+          toolCalls: [...(msg.toolCalls || []), {
+            id: message.tool_call!.id,
+            name: message.tool_call!.name,
+            arguments: message.tool_call!.arguments,
+            status: "pending" as const,
+          }],
+        }));
         break;
 
       case "tool_result":
         // Update tool call with result
-        if (message.tool_result) {
-          updateLastMessage((msg) => {
-            const toolCalls = msg.toolCalls?.map((tc) => {
-              if (tc.id === message.tool_result!.id) {
-                return {
-                  ...tc,
-                  result: message.tool_result!.result,
-                  error: message.tool_result!.error,
-                  status: message.tool_result!.error ? "error" as const : "success" as const,
-                };
-              }
-              return tc;
-            });
-            return { ...msg, toolCalls };
-          });
-        }
+        if (!message.tool_result) break;
+        updateLastMessage((msg) => {
+          const resultId = message.tool_result!.id;
+          const resultStatus = message.tool_result!.error ? "error" as const : "success" as const;
+          const toolCalls = msg.toolCalls?.map((tc) =>
+            tc.id === resultId
+              ? { ...tc, result: message.tool_result!.result, error: message.tool_result!.error, status: resultStatus }
+              : tc
+          );
+          return { ...msg, toolCalls };
+        });
         break;
 
       case "error": {

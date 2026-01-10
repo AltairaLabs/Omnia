@@ -37,6 +37,7 @@ import {
   getMockCostByProvider,
   getMockCostByModel,
 } from "../mock-data";
+import { LiveAgentConnection } from "./live-service";
 
 // Simulate network delay for realistic demo experience
 function delay(ms = 100): Promise<void> {
@@ -504,6 +505,11 @@ export class MockDataService implements DataService {
   }
 
   createAgentConnection(namespace: string, name: string): AgentConnection {
+    // Use real WebSocket connection if WS_PROXY_URL is set (for E2E testing)
+    const wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
+    if (wsProxyUrl) {
+      return new LiveAgentConnection(namespace, name);
+    }
     return new MockAgentConnection(namespace, name);
   }
 }

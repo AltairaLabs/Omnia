@@ -274,6 +274,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      data-testid="console-dropzone"
     >
       {/* Drop zone overlay */}
       {isDragging && (
@@ -291,7 +292,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
         <div className="flex items-center gap-3">
-          {statusBadge}
+          <span data-testid="connection-status">{statusBadge}</span>
           {serverSessionId && (
             <span className="text-xs text-muted-foreground">
               Session: {serverSessionId.slice(0, 12)}...
@@ -335,7 +336,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4" data-testid="message-list">
             {messages.map((message) => (
               <ConsoleMessage key={message.id} message={message} />
             ))}
@@ -374,6 +375,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             disabled={status !== "connected" || attachments.length >= attachmentConfig.maxFiles}
             className="shrink-0"
             aria-label="Attach files"
+            data-testid="attachment-button"
           >
             <Paperclip className="h-4 w-4" />
           </Button>
@@ -391,12 +393,14 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             disabled={status !== "connected"}
             className="min-h-[44px] max-h-[120px] resize-none"
             rows={1}
+            data-testid="console-input"
           />
           <Button
             onClick={handleSend}
             disabled={(!input.trim() && attachments.length === 0) || status !== "connected"}
             className="shrink-0"
             aria-label="Send message"
+            data-testid="send-button"
           >
             <Send className="h-4 w-4" />
           </Button>

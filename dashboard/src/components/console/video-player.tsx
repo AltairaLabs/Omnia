@@ -192,6 +192,7 @@ export function VideoPlayer({ src, type, filename, fileSize, className }: Readon
       )}
       onMouseMove={resetControlsTimeout}
       onMouseLeave={() => isPlaying && setShowControls(false)}
+      data-testid="video-player"
     >
       {/* Filename */}
       {filename && !isFullscreen && (

@@ -37,6 +37,34 @@ export interface ConnectedInfo {
   capabilities?: ConnectionCapabilities;
 }
 
+// Content part types for multi-modal messages
+export type ContentPartType = "text" | "image" | "audio" | "video" | "file";
+
+// Media content for non-text parts
+export interface MediaContent {
+  data?: string;      // base64-encoded content
+  url?: string;       // HTTP/HTTPS URL
+  storage_ref?: string; // backend storage reference
+  mime_type: string;
+  filename?: string;
+  size_bytes?: number;
+  // Image-specific fields
+  width?: number;
+  height?: number;
+  detail?: string;
+  // Audio/Video-specific fields
+  duration_ms?: number;
+  sample_rate?: number;
+  channels?: number;
+}
+
+// Content part for multi-modal messages
+export interface ContentPart {
+  type: ContentPartType;
+  text?: string;      // for type "text"
+  media?: MediaContent; // for image, audio, video, file types
+}
+
 // Media chunk info for streaming responses
 export interface MediaChunkInfo {
   media_id: string;
@@ -66,6 +94,7 @@ export interface ServerMessage {
   type: MessageType;
   session_id?: string;
   content?: string;
+  parts?: ContentPart[]; // multi-modal content parts
   tool_call?: ToolCallInfo;
   tool_result?: ToolResultInfo;
   error?: ErrorInfo;

@@ -33,6 +33,25 @@ const (
 	demoOutputPricePer1M = 15.00 // $15 per 1M output tokens
 )
 
+// Test media for multi-modal E2E testing.
+// These are minimal valid files encoded as base64 for testing purposes.
+const (
+	// testImagePNG is a 4x4 blue PNG image (89 bytes).
+	// Created with: convert -size 4x4 xc:#4A90D9 png:- | base64
+	testImagePNG = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVQI12NQYGBgwM0AABLMAQGTlrbRAAAAAElFTkSuQmCC"
+
+	// testAudioMP3 is a minimal valid MP3 frame (silence, ~156 bytes).
+	// This is a valid MP3 header with a silent frame for testing audio player rendering.
+	testAudioMP3 = "//uQxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/7kMQAAAhwBSf0AAABCwClPoAAAFVVVVVVVVVVVVVVVVVVVVVVVVVV"
+
+	// testDocumentPDF is a minimal valid PDF document (~67 bytes).
+	testDocumentPDF = "JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4KJSVFT0YK"
+
+	// testVideoMP4 is a minimal valid MP4 header for testing video player rendering.
+	// This is just enough bytes to be recognized as MP4 format.
+	testVideoMP4 = "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAhtZGF0"
+)
+
 // demoDurationBuckets are histogram buckets for demo mode (shorter than production).
 var demoDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60}
 
@@ -107,8 +126,19 @@ func (h *DemoHandler) HandleMessage(
 	var response string
 	var err error
 
-	// Password reset flow - demonstrates tool calls
-	if strings.Contains(content, "password") {
+	// Multi-modal responses for E2E testing
+	if strings.Contains(content, "show image") || strings.Contains(content, "send image") {
+		response, err = h.handleImageResponse(ctx, writer)
+	} else if strings.Contains(content, "play audio") || strings.Contains(content, "send audio") {
+		response, err = h.handleAudioResponse(ctx, writer)
+	} else if strings.Contains(content, "play video") || strings.Contains(content, "send video") {
+		response, err = h.handleVideoResponse(ctx, writer)
+	} else if strings.Contains(content, "show document") || strings.Contains(content, "send document") || strings.Contains(content, "send pdf") {
+		response, err = h.handleDocumentResponse(ctx, writer)
+	} else if strings.Contains(content, "multimodal") || strings.Contains(content, "mixed content") {
+		response, err = h.handleMultiModalResponse(ctx, writer)
+	} else if strings.Contains(content, "password") {
+		// Password reset flow - demonstrates tool calls
 		response, err = h.handlePasswordReset(ctx, sessionID, writer)
 	} else if strings.Contains(content, "weather") {
 		// Weather query - demonstrates tool calls
@@ -297,4 +327,154 @@ func (h *DemoHandler) handleDefault(_ context.Context, _ string, input string, w
 	}
 
 	return response, writer.WriteDone("")
+}
+
+// Multi-modal response handlers for E2E testing.
+
+func (h *DemoHandler) handleImageResponse(_ context.Context, writer facade.ResponseWriter) (string, error) {
+	textContent := "Here's a test image for you:"
+
+	// Stream the text first
+	if err := writer.WriteChunk(textContent); err != nil {
+		return "", err
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Send multi-modal response with text and image
+	parts := []facade.ContentPart{
+		facade.NewTextPart(textContent),
+		{
+			Type: facade.ContentPartTypeImage,
+			Media: &facade.MediaContent{
+				Data:      testImagePNG,
+				MimeType:  "image/png",
+				Width:     4,
+				Height:    4,
+				SizeBytes: 89,
+			},
+		},
+	}
+
+	return textContent, writer.WriteDoneWithParts(parts)
+}
+
+func (h *DemoHandler) handleAudioResponse(_ context.Context, writer facade.ResponseWriter) (string, error) {
+	textContent := "Here's a test audio clip:"
+
+	// Stream the text first
+	if err := writer.WriteChunk(textContent); err != nil {
+		return "", err
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Send multi-modal response with text and audio
+	parts := []facade.ContentPart{
+		facade.NewTextPart(textContent),
+		{
+			Type: facade.ContentPartTypeAudio,
+			Media: &facade.MediaContent{
+				Data:       testAudioMP3,
+				MimeType:   "audio/mpeg",
+				DurationMs: 1000, // 1 second
+				SampleRate: 44100,
+				Channels:   2,
+				SizeBytes:  156,
+			},
+		},
+	}
+
+	return textContent, writer.WriteDoneWithParts(parts)
+}
+
+func (h *DemoHandler) handleVideoResponse(_ context.Context, writer facade.ResponseWriter) (string, error) {
+	textContent := "Here's a test video clip:"
+
+	// Stream the text first
+	if err := writer.WriteChunk(textContent); err != nil {
+		return "", err
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Send multi-modal response with text and video
+	parts := []facade.ContentPart{
+		facade.NewTextPart(textContent),
+		{
+			Type: facade.ContentPartTypeVideo,
+			Media: &facade.MediaContent{
+				Data:       testVideoMP4,
+				MimeType:   "video/mp4",
+				DurationMs: 2000, // 2 seconds
+				Width:      320,
+				Height:     240,
+				SizeBytes:  48,
+			},
+		},
+	}
+
+	return textContent, writer.WriteDoneWithParts(parts)
+}
+
+func (h *DemoHandler) handleDocumentResponse(_ context.Context, writer facade.ResponseWriter) (string, error) {
+	textContent := "Here's a test document:"
+
+	// Stream the text first
+	if err := writer.WriteChunk(textContent); err != nil {
+		return "", err
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Send multi-modal response with text and document
+	parts := []facade.ContentPart{
+		facade.NewTextPart(textContent),
+		{
+			Type: facade.ContentPartTypeFile,
+			Media: &facade.MediaContent{
+				Data:      testDocumentPDF,
+				MimeType:  "application/pdf",
+				Filename:  "test-document.pdf",
+				SizeBytes: 67,
+			},
+		},
+	}
+
+	return textContent, writer.WriteDoneWithParts(parts)
+}
+
+func (h *DemoHandler) handleMultiModalResponse(_ context.Context, writer facade.ResponseWriter) (string, error) {
+	textContent := "Here's a multi-modal response with text, image, and audio:"
+
+	// Stream the text first
+	if err := writer.WriteChunk(textContent); err != nil {
+		return "", err
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Send multi-modal response with all content types
+	parts := []facade.ContentPart{
+		facade.NewTextPart(textContent),
+		{
+			Type: facade.ContentPartTypeImage,
+			Media: &facade.MediaContent{
+				Data:      testImagePNG,
+				MimeType:  "image/png",
+				Width:     4,
+				Height:    4,
+				SizeBytes: 89,
+			},
+		},
+		facade.NewTextPart("\n\nAnd here's an audio clip:"),
+		{
+			Type: facade.ContentPartTypeAudio,
+			Media: &facade.MediaContent{
+				Data:       testAudioMP3,
+				MimeType:   "audio/mpeg",
+				DurationMs: 1000,
+				SampleRate: 44100,
+				Channels:   2,
+				SizeBytes:  156,
+			},
+		},
+	}
+
+	return textContent, writer.WriteDoneWithParts(parts)
 }

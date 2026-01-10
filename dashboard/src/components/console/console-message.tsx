@@ -78,6 +78,8 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
         isUser && "flex-row-reverse",
         className
       )}
+      data-testid={isUser ? "message-user" : "message-assistant"}
+      data-streaming={message.isStreaming ? "true" : undefined}
     >
       {/* Avatar */}
       <div
@@ -137,6 +139,7 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
                 onClick={() => handleImageClick(attachment)}
                 className="relative rounded-lg overflow-hidden cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 aria-label={`View ${attachment.name}`}
+                data-testid="image-attachment"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img

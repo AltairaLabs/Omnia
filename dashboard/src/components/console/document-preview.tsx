@@ -138,6 +138,7 @@ export function DocumentPreview({
         "rounded-lg border bg-background/50 overflow-hidden",
         className
       )}
+      data-testid="document-preview"
     >
       {/* Header with file info */}
       <div className="flex items-center gap-3 p-3">

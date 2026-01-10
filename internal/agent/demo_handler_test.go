@@ -229,3 +229,240 @@ func TestNewDemoHandlerWithMetrics(t *testing.T) {
 		t.Error("HandleMessage() produced no chunks")
 	}
 }
+
+// Multi-modal response tests for E2E testing support
+
+func TestDemoHandler_HandleMessage_ImageResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "show image", content: "show image"},
+		{name: "send image", content: "Can you send image please?"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewDemoHandler()
+			writer := &mockResponseWriter{}
+			msg := &facade.ClientMessage{Content: tt.content}
+
+			err := handler.HandleMessage(context.Background(), "test-session", msg, writer)
+			if err != nil {
+				t.Errorf("HandleMessage() error = %v", err)
+				return
+			}
+
+			// Should have chunks (text streamed before done)
+			if len(writer.chunks) == 0 {
+				t.Error("HandleMessage() produced no chunks")
+			}
+
+			// Should have doneParts with image
+			if len(writer.doneParts) < 2 {
+				t.Errorf("HandleMessage() produced %d doneParts, want at least 2", len(writer.doneParts))
+				return
+			}
+
+			// First part should be text
+			if writer.doneParts[0].Type != facade.ContentPartTypeText {
+				t.Errorf("doneParts[0].Type = %q, want %q", writer.doneParts[0].Type, facade.ContentPartTypeText)
+			}
+
+			// Second part should be image
+			if writer.doneParts[1].Type != facade.ContentPartTypeImage {
+				t.Errorf("doneParts[1].Type = %q, want %q", writer.doneParts[1].Type, facade.ContentPartTypeImage)
+			}
+			if writer.doneParts[1].Media == nil {
+				t.Error("doneParts[1].Media is nil")
+			} else {
+				if writer.doneParts[1].Media.MimeType != "image/png" {
+					t.Errorf("doneParts[1].Media.MimeType = %q, want %q", writer.doneParts[1].Media.MimeType, "image/png")
+				}
+				if writer.doneParts[1].Media.Data == "" {
+					t.Error("doneParts[1].Media.Data is empty")
+				}
+			}
+		})
+	}
+}
+
+func TestDemoHandler_HandleMessage_AudioResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "play audio", content: "play audio"},
+		{name: "send audio", content: "please send audio"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewDemoHandler()
+			writer := &mockResponseWriter{}
+			msg := &facade.ClientMessage{Content: tt.content}
+
+			err := handler.HandleMessage(context.Background(), "test-session", msg, writer)
+			if err != nil {
+				t.Errorf("HandleMessage() error = %v", err)
+				return
+			}
+
+			// Should have doneParts with audio
+			if len(writer.doneParts) < 2 {
+				t.Errorf("HandleMessage() produced %d doneParts, want at least 2", len(writer.doneParts))
+				return
+			}
+
+			// Second part should be audio
+			if writer.doneParts[1].Type != facade.ContentPartTypeAudio {
+				t.Errorf("doneParts[1].Type = %q, want %q", writer.doneParts[1].Type, facade.ContentPartTypeAudio)
+			}
+			if writer.doneParts[1].Media == nil {
+				t.Error("doneParts[1].Media is nil")
+			} else {
+				if writer.doneParts[1].Media.MimeType != "audio/mpeg" {
+					t.Errorf("doneParts[1].Media.MimeType = %q, want %q", writer.doneParts[1].Media.MimeType, "audio/mpeg")
+				}
+				if writer.doneParts[1].Media.DurationMs != 1000 {
+					t.Errorf("doneParts[1].Media.DurationMs = %d, want %d", writer.doneParts[1].Media.DurationMs, 1000)
+				}
+			}
+		})
+	}
+}
+
+func TestDemoHandler_HandleMessage_VideoResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "play video", content: "play video"},
+		{name: "send video", content: "please send video"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewDemoHandler()
+			writer := &mockResponseWriter{}
+			msg := &facade.ClientMessage{Content: tt.content}
+
+			err := handler.HandleMessage(context.Background(), "test-session", msg, writer)
+			if err != nil {
+				t.Errorf("HandleMessage() error = %v", err)
+				return
+			}
+
+			// Should have doneParts with video
+			if len(writer.doneParts) < 2 {
+				t.Errorf("HandleMessage() produced %d doneParts, want at least 2", len(writer.doneParts))
+				return
+			}
+
+			// Second part should be video
+			if writer.doneParts[1].Type != facade.ContentPartTypeVideo {
+				t.Errorf("doneParts[1].Type = %q, want %q", writer.doneParts[1].Type, facade.ContentPartTypeVideo)
+			}
+			if writer.doneParts[1].Media == nil {
+				t.Error("doneParts[1].Media is nil")
+			} else {
+				if writer.doneParts[1].Media.MimeType != "video/mp4" {
+					t.Errorf("doneParts[1].Media.MimeType = %q, want %q", writer.doneParts[1].Media.MimeType, "video/mp4")
+				}
+				if writer.doneParts[1].Media.DurationMs != 2000 {
+					t.Errorf("doneParts[1].Media.DurationMs = %d, want %d", writer.doneParts[1].Media.DurationMs, 2000)
+				}
+			}
+		})
+	}
+}
+
+func TestDemoHandler_HandleMessage_DocumentResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "show document", content: "show document"},
+		{name: "send document", content: "send document please"},
+		{name: "send pdf", content: "can you send pdf?"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewDemoHandler()
+			writer := &mockResponseWriter{}
+			msg := &facade.ClientMessage{Content: tt.content}
+
+			err := handler.HandleMessage(context.Background(), "test-session", msg, writer)
+			if err != nil {
+				t.Errorf("HandleMessage() error = %v", err)
+				return
+			}
+
+			// Should have doneParts with file
+			if len(writer.doneParts) < 2 {
+				t.Errorf("HandleMessage() produced %d doneParts, want at least 2", len(writer.doneParts))
+				return
+			}
+
+			// Second part should be file
+			if writer.doneParts[1].Type != facade.ContentPartTypeFile {
+				t.Errorf("doneParts[1].Type = %q, want %q", writer.doneParts[1].Type, facade.ContentPartTypeFile)
+			}
+			if writer.doneParts[1].Media == nil {
+				t.Error("doneParts[1].Media is nil")
+			} else {
+				if writer.doneParts[1].Media.MimeType != "application/pdf" {
+					t.Errorf("doneParts[1].Media.MimeType = %q, want %q", writer.doneParts[1].Media.MimeType, "application/pdf")
+				}
+				if writer.doneParts[1].Media.Filename != "test-document.pdf" {
+					t.Errorf("doneParts[1].Media.Filename = %q, want %q", writer.doneParts[1].Media.Filename, "test-document.pdf")
+				}
+			}
+		})
+	}
+}
+
+func TestDemoHandler_HandleMessage_MultiModalResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "multimodal", content: "give me multimodal content"},
+		{name: "mixed content", content: "mixed content please"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewDemoHandler()
+			writer := &mockResponseWriter{}
+			msg := &facade.ClientMessage{Content: tt.content}
+
+			err := handler.HandleMessage(context.Background(), "test-session", msg, writer)
+			if err != nil {
+				t.Errorf("HandleMessage() error = %v", err)
+				return
+			}
+
+			// Should have doneParts with text, image, text, and audio
+			if len(writer.doneParts) < 4 {
+				t.Errorf("HandleMessage() produced %d doneParts, want at least 4", len(writer.doneParts))
+				return
+			}
+
+			// Verify types
+			expectedTypes := []facade.ContentPartType{
+				facade.ContentPartTypeText,
+				facade.ContentPartTypeImage,
+				facade.ContentPartTypeText,
+				facade.ContentPartTypeAudio,
+			}
+
+			for i, expectedType := range expectedTypes {
+				if writer.doneParts[i].Type != expectedType {
+					t.Errorf("doneParts[%d].Type = %q, want %q", i, writer.doneParts[i].Type, expectedType)
+				}
+			}
+		})
+	}
+}

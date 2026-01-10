@@ -161,6 +161,7 @@ function ImageLightboxContent({
         className="fixed inset-0 z-50 flex flex-col outline-none"
         onPointerDownOutside={(e) => e.preventDefault()}
         aria-describedby={undefined}
+        data-testid="image-lightbox"
       >
         {/* Visually hidden title for accessibility */}
         <DialogPrimitive.Title className="sr-only">
@@ -232,6 +233,7 @@ function ImageLightboxContent({
                 size="icon"
                 className="text-white hover:bg-white/20 hover:text-white"
                 aria-label="Close"
+                data-testid="lightbox-close"
               >
                 <X className="h-5 w-5" />
               </Button>

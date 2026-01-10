@@ -98,6 +98,8 @@ func main() {
 	// Create HTTP mux for routing
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
+	// Also handle the dashboard's expected path format for E2E testing
+	mux.Handle("/api/agents/", wsServer)
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// Initialize media storage if configured

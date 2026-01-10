@@ -57,10 +57,15 @@ export class LiveAgentConnection implements AgentConnection {
       // In production, WS_PROXY_URL is configured; in dev, proxy runs on port 3002
       const protocol = typeof globalThis !== "undefined" && globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
       const wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
+      const wsDirectMode = process.env.NEXT_PUBLIC_WS_DIRECT_MODE === "true";
 
       let wsUrl: string;
-      if (wsProxyUrl) {
-        // Production: use configured proxy URL
+      if (wsProxyUrl && wsDirectMode) {
+        // Direct mode: connect directly to the agent's /ws endpoint (for E2E testing)
+        // Include agent and namespace as query params (required by facade server)
+        wsUrl = `${wsProxyUrl}/ws?agent=${encodeURIComponent(this.agentName)}&namespace=${encodeURIComponent(this.namespace)}`;
+      } else if (wsProxyUrl) {
+        // Production: use configured proxy URL with full path
         wsUrl = `${wsProxyUrl}/api/agents/${this.namespace}/${this.agentName}/ws`;
       } else {
         // Development: WebSocket proxy on port 3002

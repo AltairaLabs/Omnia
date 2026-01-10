@@ -240,6 +240,42 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       ],
     },
   },
+  // E2E Test Agent - used by Playwright multimodal tests
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "AgentRuntime",
+    metadata: {
+      name: "e2e-test-agent",
+      namespace: "default",
+      creationTimestamp: hoursAgo(1),
+      uid: "agent-e2e-001",
+      labels: {
+        "app.kubernetes.io/name": "e2e-test-agent",
+        team: "testing",
+      },
+    },
+    spec: {
+      framework: { type: "promptkit", version: "0.4.0" },
+      promptPackRef: { name: "e2e-test-promptpack", version: "1.0.0" },
+      facade: { type: "websocket", port: 8080, handler: "demo" },
+      provider: { type: "claude", model: "claude-sonnet-4-20250514" },
+      session: { type: "memory", ttl: "1h" },
+      runtime: { replicas: 1 },
+    },
+    status: {
+      phase: "Running",
+      replicas: { desired: 1, ready: 1, available: 1 },
+      activeVersion: "1.0.0",
+      conditions: [
+        {
+          type: "Available",
+          status: "True",
+          lastTransitionTime: hoursAgo(1),
+          reason: "MinimumReplicasAvailable",
+        },
+      ],
+    },
+  },
 ];
 
 // Mock PromptPacks

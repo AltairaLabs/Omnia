@@ -57,6 +57,7 @@ export function AttachmentPreview({
         "flex gap-2 overflow-x-auto pb-2",
         className
       )}
+      data-testid="attachment-preview"
     >
       {attachments.map((attachment) => {
         const FileIcon = getFileIcon(attachment.type);

@@ -111,7 +111,7 @@ export function AudioPlayer({ src, filename, className }: Readonly<AudioPlayerPr
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className={cn("rounded-lg border bg-background/50 p-3", className)}>
+    <div className={cn("rounded-lg border bg-background/50 p-3", className)} data-testid="audio-player">
       {/* Hidden audio element */}
       <audio ref={audioRef} src={src} preload="metadata" />
 
