@@ -451,6 +451,8 @@ components:
           $ref: '#/components/schemas/SessionConfig'
         runtime:
           $ref: '#/components/schemas/RuntimeConfig'
+        console:
+          $ref: '#/components/schemas/ConsoleConfig'
 
     LocalObjectReference:
       type: object
@@ -516,6 +518,32 @@ components:
           type: integer
         maxReplicas:
           type: integer
+
+    ConsoleConfig:
+      type: object
+      description: Configuration for dashboard console UI
+      properties:
+        allowedAttachmentTypes:
+          type: array
+          description: MIME types allowed for file uploads (e.g., "image/*", "application/pdf")
+          items:
+            type: string
+        allowedExtensions:
+          type: array
+          description: File extensions as fallback (e.g., ".png", ".pdf")
+          items:
+            type: string
+        maxFileSize:
+          type: integer
+          format: int64
+          description: Maximum file size in bytes
+          default: 10485760
+        maxFiles:
+          type: integer
+          description: Maximum number of files per message
+          default: 5
+          minimum: 1
+          maximum: 20
 
     AgentRuntimeStatus:
       type: object

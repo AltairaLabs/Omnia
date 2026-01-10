@@ -100,6 +100,17 @@ export interface FrameworkConfig {
   image?: string;
 }
 
+export interface ConsoleConfig {
+  /** MIME types allowed for file uploads (e.g., "image/*", "application/pdf") */
+  allowedAttachmentTypes?: string[];
+  /** File extensions as fallback (e.g., ".png", ".pdf") */
+  allowedExtensions?: string[];
+  /** Maximum file size in bytes (default: 10485760 = 10MB) */
+  maxFileSize?: number;
+  /** Maximum number of files per message (default: 5) */
+  maxFiles?: number;
+}
+
 // Spec
 export interface AgentRuntimeSpec {
   framework?: FrameworkConfig;
@@ -110,6 +121,7 @@ export interface AgentRuntimeSpec {
   runtime?: RuntimeConfig;
   provider?: ProviderConfig;
   providerRef?: ProviderRef;
+  console?: ConsoleConfig;
 }
 
 // Status
