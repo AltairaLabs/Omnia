@@ -141,6 +141,72 @@ facade:
     tag: ""  # Defaults to Chart appVersion
 ```
 
+### Media Storage
+
+The facade can optionally provide media storage for file uploads. Configure via environment variables in your AgentRuntime.
+
+#### Local Storage (Development)
+
+```yaml
+# AgentRuntime spec.facade.env
+- name: OMNIA_MEDIA_STORAGE_TYPE
+  value: local
+- name: OMNIA_MEDIA_STORAGE_PATH
+  value: /var/lib/omnia/media
+- name: OMNIA_MEDIA_MAX_FILE_SIZE
+  value: "104857600"  # 100MB
+- name: OMNIA_MEDIA_DEFAULT_TTL
+  value: "24h"
+```
+
+#### S3 Storage (AWS / MinIO)
+
+```yaml
+- name: OMNIA_MEDIA_STORAGE_TYPE
+  value: s3
+- name: OMNIA_MEDIA_S3_BUCKET
+  value: my-media-bucket
+- name: OMNIA_MEDIA_S3_REGION
+  value: us-west-2
+- name: OMNIA_MEDIA_S3_PREFIX
+  value: omnia/media/
+# Optional: for MinIO or S3-compatible services
+- name: OMNIA_MEDIA_S3_ENDPOINT
+  value: http://minio:9000
+```
+
+#### GCS Storage (Google Cloud)
+
+```yaml
+- name: OMNIA_MEDIA_STORAGE_TYPE
+  value: gcs
+- name: OMNIA_MEDIA_GCS_BUCKET
+  value: my-media-bucket
+- name: OMNIA_MEDIA_GCS_PREFIX
+  value: omnia/media/
+```
+
+#### Azure Blob Storage
+
+```yaml
+- name: OMNIA_MEDIA_STORAGE_TYPE
+  value: azure
+- name: OMNIA_MEDIA_AZURE_ACCOUNT
+  value: mystorageaccount
+- name: OMNIA_MEDIA_AZURE_CONTAINER
+  value: media
+- name: OMNIA_MEDIA_AZURE_PREFIX
+  value: omnia/media/
+# Optional: for cross-cloud or explicit credentials
+- name: OMNIA_MEDIA_AZURE_KEY
+  valueFrom:
+    secretKeyRef:
+      name: azure-storage-key
+      key: account-key
+```
+
+See [Configure Media Storage](/how-to/configure-media-storage/) for detailed setup instructions.
+
 ## Framework Configuration
 
 The framework image is used for the agent runtime container. This naming aligns with the CRD's `spec.framework` field.

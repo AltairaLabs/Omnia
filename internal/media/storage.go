@@ -126,6 +126,33 @@ type Storage interface {
 	Close() error
 }
 
+// DirectUploadStorage is implemented by storage backends that support
+// direct client uploads (S3, GCS). These backends return presigned URLs
+// that clients upload to directly, bypassing the facade.
+type DirectUploadStorage interface {
+	Storage
+	// ConfirmUpload verifies that an upload completed and finalizes metadata.
+	// This should be called after the client uploads directly to the presigned URL.
+	// Returns ErrUploadFailed if the upload ID is invalid or expired.
+	// Returns ErrMediaNotFound if the object doesn't exist in storage.
+	ConfirmUpload(ctx context.Context, uploadID string) (*MediaInfo, error)
+}
+
+// ProxyUploadStorage is implemented by storage backends where uploads
+// are proxied through the facade (e.g., LocalStorage).
+type ProxyUploadStorage interface {
+	Storage
+	// GetUploadPath returns the filesystem path for writing an upload.
+	// This is used by the handler to write uploaded content.
+	GetUploadPath(uploadID string) (string, error)
+	// CompleteUpload marks an upload as complete and stores metadata.
+	// This should be called after the upload content has been written.
+	CompleteUpload(ctx context.Context, uploadID string, actualSize int64) error
+	// GetMediaPath returns the filesystem path for reading media.
+	// This is used by the handler to serve downloads.
+	GetMediaPath(storageRef string) (string, error)
+}
+
 // StorageRef represents a parsed storage reference.
 type StorageRef struct {
 	// SessionID is the session the media belongs to.

@@ -63,6 +63,9 @@ type LocalStorage struct {
 	pendingUploads map[string]*pendingUpload
 }
 
+// Compile-time check that LocalStorage implements ProxyUploadStorage.
+var _ ProxyUploadStorage = (*LocalStorage)(nil)
+
 // pendingUpload tracks an initiated upload.
 type pendingUpload struct {
 	StorageRef string
