@@ -35,6 +35,9 @@ export default defineConfig({
         "src/lib/auth/api-keys/**", // API key stores (tested via integration)
         "src/lib/auth/oauth/**", // OAuth client (tested via integration)
         "src/lib/auth/providers/**", // OAuth providers (config only)
+        "src/lib/data/live-service.ts", // Kubernetes API client (tested via E2E)
+        "src/lib/data/operator-service.ts", // Kubernetes operator client (tested via E2E)
+        "src/lib/data/prometheus-service.ts", // Prometheus client (tested via E2E)
       ],
       thresholds: {
         statements: 80,
