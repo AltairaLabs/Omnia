@@ -1,4 +1,5 @@
 {{- if .Values.demo.enabled }}
+{{- $opaSidecar := and .Values.demo.opa.enabled (eq .Values.demo.opa.mode "sidecar") }}
 ---
 # PersistentVolumeClaim for Ollama model cache
 {{- if .Values.demo.ollama.persistence.enabled }}
@@ -22,6 +23,8 @@ spec:
 {{- end }}
 ---
 # Ollama StatefulSet
+# When OPA sidecar mode is enabled, traffic flow is:
+#   Client -> Envoy (11434) -> OPA ext_authz (9191) -> Ollama (11435)
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -43,22 +46,37 @@ spec:
         app.kubernetes.io/part-of: {{ include "omnia.name" . }}
     spec:
       containers:
+        # Ollama LLM server
         - name: ollama
           image: "{{ .Values.demo.ollama.image.repository }}:{{ .Values.demo.ollama.image.tag }}"
           imagePullPolicy: {{ .Values.demo.ollama.image.pullPolicy }}
           ports:
+            {{- if $opaSidecar }}
+            # Internal port when OPA sidecar is enabled (Envoy proxies to this)
+            - containerPort: 11435
+              name: http-internal
+            {{- else }}
+            # Standard port when OPA is disabled
             - containerPort: 11434
               name: http
+            {{- end }}
           env:
             - name: OLLAMA_KEEP_ALIVE
               value: {{ .Values.demo.ollama.keepAlive | quote }}
             - name: OLLAMA_HOST
+              {{- if $opaSidecar }}
+              # Listen on internal port when OPA sidecar is enabled
+              value: "0.0.0.0:11435"
+              {{- else }}
               value: "0.0.0.0:11434"
+              {{- end }}
           resources:
             {{- toYaml .Values.demo.ollama.resources | nindent 12 }}
           volumeMounts:
             - name: models
               mountPath: /root/.ollama
+          {{- if not $opaSidecar }}
+          # Probes target Ollama directly when OPA is disabled
           startupProbe:
             httpGet:
               path: /
@@ -78,6 +96,102 @@ spec:
               port: http
             periodSeconds: 10
             failureThreshold: 3
+          {{- else }}
+          # When OPA sidecar is enabled, use internal port for probes
+          startupProbe:
+            httpGet:
+              path: /
+              port: http-internal
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http-internal
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http-internal
+            periodSeconds: 10
+            failureThreshold: 3
+          {{- end }}
+
+        {{- if $opaSidecar }}
+        # Envoy sidecar - entry point for all traffic
+        # Buffers request body and calls OPA for authorization
+        - name: envoy
+          image: "{{ .Values.demo.opa.envoy.image.repository }}:{{ .Values.demo.opa.envoy.image.tag }}"
+          imagePullPolicy: {{ .Values.demo.opa.envoy.image.pullPolicy }}
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--log-level"
+            - "info"
+          ports:
+            - containerPort: 11434
+              name: http
+            - containerPort: 9901
+              name: admin
+          resources:
+            {{- toYaml .Values.demo.opa.envoy.resources | nindent 12 }}
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+        # OPA sidecar - policy engine for model validation
+        - name: opa
+          image: "{{ .Values.demo.opa.image.repository }}:{{ .Values.demo.opa.image.tag }}"
+          imagePullPolicy: {{ .Values.demo.opa.image.pullPolicy }}
+          args:
+            - "run"
+            - "--server"
+            - "--addr=localhost:8181"
+            - "--diagnostic-addr=0.0.0.0:8282"
+            - "--set=plugins.envoy_ext_authz_grpc.addr=:9191"
+            - "--set=plugins.envoy_ext_authz_grpc.path=envoy/authz/allow"
+            - "--set=decision_logs.console=true"
+            - "/config/policy.rego"
+          ports:
+            - containerPort: 9191
+              name: grpc
+            - containerPort: 8282
+              name: diag
+          resources:
+            {{- toYaml .Values.demo.opa.resources | nindent 12 }}
+          volumeMounts:
+            - name: opa-config
+              mountPath: /config
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health?plugins
+              port: diag
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health?plugins
+              port: diag
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        {{- end }}
+
       volumes:
         - name: models
           {{- if .Values.demo.ollama.persistence.enabled }}
@@ -86,6 +200,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if $opaSidecar }}
+        - name: opa-config
+          configMap:
+            name: ollama-opa-config
+        - name: envoy-config
+          configMap:
+            name: ollama-envoy-config
+        {{- end }}
 ---
 # Ollama Service
 apiVersion: v1

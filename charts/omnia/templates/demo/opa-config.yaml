@@ -1,0 +1,115 @@
+{{- if and .Values.demo.enabled .Values.demo.opa.enabled }}
+---
+# OPA Configuration ConfigMap
+# Contains Rego policy for Ollama model validation
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ollama-opa-config
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama-opa
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+data:
+  # Rego policy for model validation
+  policy.rego: |
+    package envoy.authz
+
+    import rego.v1
+
+    default allow := false
+
+    # Allowed model from Helm values
+    allowed_model := {{ .Values.demo.ollama.model | quote }}
+
+    # Helper to check if path requires model validation
+    requires_model_validation if {
+      input.attributes.request.http.path in ["/api/generate", "/api/chat", "/api/embeddings"]
+    }
+
+    # Helper to check if this is a model pull request
+    is_pull_request if {
+      input.attributes.request.http.path == "/api/pull"
+    }
+
+    # Parse JSON body from request
+    parsed_body := json.unmarshal(input.attributes.request.http.body)
+
+    # Get requested model from body
+    requested_model := parsed_body.model if {
+      parsed_body.model
+    }
+
+    # Get model name from pull request
+    pull_model_name := parsed_body.name if {
+      parsed_body.name
+    }
+
+    # Model matching - exact match
+    model_matches(requested, allowed) if {
+      requested == allowed
+    }
+
+    # Model matching - requested without tag, allowed with tag
+    model_matches(requested, allowed) if {
+      not contains(requested, ":")
+      startswith(allowed, concat("", [requested, ":"]))
+    }
+
+    # Model matching - allowed without tag, requested with tag
+    model_matches(requested, allowed) if {
+      not contains(allowed, ":")
+      startswith(requested, concat("", [allowed, ":"]))
+    }
+
+    # Allow non-model endpoints (health, tags, version, etc.)
+    allow if {
+      not requires_model_validation
+      not is_pull_request
+    }
+
+    # Allow if model matches the allowed model
+    allow if {
+      requires_model_validation
+      model_matches(requested_model, allowed_model)
+    }
+
+    # Allow pull requests only for the allowed model
+    allow if {
+      is_pull_request
+      model_matches(pull_model_name, allowed_model)
+    }
+
+    # Deny response with details
+    deny_message := sprintf("Model '%s' not allowed. Only '%s' is permitted on this instance.", [requested_model, allowed_model]) if {
+      requires_model_validation
+      requested_model
+    }
+
+    deny_message := sprintf("Cannot pull model '%s'. Only '%s' is permitted on this instance.", [pull_model_name, allowed_model]) if {
+      is_pull_request
+      pull_model_name
+    }
+
+    deny_message := "Model validation failed: no model specified in request." if {
+      requires_model_validation
+      not requested_model
+    }
+
+    deny_message := "Model pull failed: no model name specified in request." if {
+      is_pull_request
+      not pull_model_name
+    }
+
+    # Default deny message
+    default deny_message := "Request denied by policy."
+
+    # Response headers for denied requests
+    deny_headers := {"content-type": "application/json"}
+
+    # Deny response body
+    deny_body := json.marshal({
+      "error": deny_message,
+      "allowed_model": allowed_model
+    })
+{{- end }}

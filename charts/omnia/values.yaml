@@ -757,3 +757,45 @@ demo:
       - Describe what you see clearly and objectively
       - Point out notable details or interesting elements
       - Answer any specific questions about the image content
+
+  # OPA Policy Agent for model validation
+  # Prevents model switching when multiple agents share an Ollama instance
+  opa:
+    # -- Enable OPA model validation
+    enabled: false
+    # -- Mode: "sidecar" (OPA+Envoy sidecars, no Istio) or "extauthz" (Istio ext_authz)
+    mode: sidecar
+    # -- OPA image (use envoy variant for sidecar mode)
+    image:
+      repository: openpolicyagent/opa
+      tag: "0.68.0-envoy"
+      pullPolicy: IfNotPresent
+    # -- Resource requirements for OPA container
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+    # -- Envoy proxy image (for sidecar mode)
+    envoy:
+      image:
+        repository: envoyproxy/envoy
+        tag: "v1.31-latest"
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+        limits:
+          cpu: "200m"
+          memory: "128Mi"
+    # -- Istio ext_authz mode settings (only used when mode=extauthz)
+    extauthz:
+      # -- gRPC port for ext_authz service
+      port: 9191
+      # -- Timeout for authorization decisions
+      timeout: 5s
+      # -- Failure mode: "DENY" or "ALLOW" (when OPA unavailable)
+      failureMode: DENY
