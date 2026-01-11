@@ -1,6 +1,13 @@
 /**
  * WebSocket protocol types for agent communication.
  * These mirror the Go types in internal/facade/protocol.go
+ *
+ * NOTE: The proto types (api/proto/runtime/v1/runtime.proto) define the internal
+ * gRPC protocol between facade and runtime. These WebSocket types define the
+ * external protocol between dashboard and facade, which includes additional
+ * metadata fields for rich client experiences.
+ *
+ * To regenerate proto types: npm run generate:proto
  */
 
 // Message types
@@ -22,6 +29,8 @@ export interface ClientMessage {
   type: "message";
   session_id?: string;
   content: string;
+  /** Multi-modal content parts (images, audio, etc.). Takes precedence over content. */
+  parts?: ContentPart[];
   metadata?: Record<string, string>;
 }
 

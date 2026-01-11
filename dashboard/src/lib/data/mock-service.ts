@@ -24,6 +24,7 @@ import type {
 import type {
   ServerMessage,
   ConnectionStatus,
+  ContentPart,
 } from "@/types/websocket";
 
 import {
@@ -122,13 +123,13 @@ export class MockAgentConnection implements AgentConnection {
     this.setStatus("disconnected");
   }
 
-  send(content: string): void {
+  send(content: string, _options?: { sessionId?: string; parts?: ContentPart[] }): void {
     if (this.status !== "connected") {
       console.warn("Cannot send message: not connected");
       return;
     }
 
-    // Simulate response
+    // Simulate response (parts are ignored in mock mode)
     this.simulateResponse(content);
   }
 

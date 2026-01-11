@@ -121,7 +121,7 @@ describe("useAgentConsole", () => {
       result.current.sendMessage("Hello, agent!");
     });
 
-    expect(mockSend).toHaveBeenCalledWith("Hello, agent!");
+    expect(mockSend).toHaveBeenCalledWith("Hello, agent!", { parts: undefined });
   });
 
   it("should not send empty messages", () => {
@@ -238,7 +238,7 @@ describe("useAgentConsole", () => {
     });
 
     expect(result.current.messages[0].content).toBe("Hello with spaces");
-    expect(mockSend).toHaveBeenCalledWith("Hello with spaces");
+    expect(mockSend).toHaveBeenCalledWith("Hello with spaces", { parts: undefined });
   });
 });
 

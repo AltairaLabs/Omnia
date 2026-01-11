@@ -10,6 +10,7 @@ import type { components } from "../api/schema";
 import type {
   ServerMessage,
   ConnectionStatus,
+  ContentPart,
 } from "@/types/websocket";
 
 // Re-export schema types for convenience
@@ -228,8 +229,8 @@ export interface AgentConnection {
   /** Disconnect from the agent */
   disconnect(): void;
 
-  /** Send a message to the agent */
-  send(content: string, sessionId?: string): void;
+  /** Send a message to the agent, optionally with multi-modal content parts */
+  send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void;
 
   /** Register a handler for incoming messages */
   onMessage(handler: (message: ServerMessage) => void): void;

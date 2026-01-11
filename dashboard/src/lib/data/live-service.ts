@@ -25,6 +25,7 @@ import type {
   ServerMessage,
   ConnectionStatus,
   ClientMessage,
+  ContentPart,
 } from "@/types/websocket";
 import { OperatorApiService } from "./operator-service";
 import { PrometheusService } from "./prometheus-service";
@@ -133,7 +134,7 @@ export class LiveAgentConnection implements AgentConnection {
     this.setStatus("disconnected");
   }
 
-  send(content: string, sessionId?: string): void {
+  send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void {
     if (this.ws?.readyState !== WebSocket.OPEN) {
       console.warn("Cannot send message: not connected");
       return;
@@ -141,8 +142,9 @@ export class LiveAgentConnection implements AgentConnection {
 
     const message: ClientMessage = {
       type: "message",
-      session_id: sessionId || this.sessionId || undefined,
+      session_id: options?.sessionId || this.sessionId || undefined,
       content,
+      parts: options?.parts,
     };
 
     this.ws.send(JSON.stringify(message));

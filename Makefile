@@ -75,6 +75,12 @@ generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto 
 		api/proto/tools/v1/tools.proto
 	@echo "Proto generation complete."
 
+.PHONY: generate-proto-ts
+generate-proto-ts: ## Generate TypeScript types from proto files.
+	@echo "Generating TypeScript types from proto files..."
+	cd dashboard && npm run generate:proto
+	@echo "TypeScript proto generation complete."
+
 .PHONY: update-schema
 update-schema: ## Fetch latest PromptPack schema for embedded fallback.
 	@./hack/update-schema.sh
@@ -271,7 +277,7 @@ generate-dashboard-api: ## Generate TypeScript API client from OpenAPI spec
 	cd dashboard && npm run generate:api
 
 .PHONY: generate-all
-generate-all: manifests generate generate-proto sync-chart-crds generate-dashboard-types generate-dashboard-api ## Run all code generation
+generate-all: manifests generate generate-proto generate-proto-ts sync-chart-crds generate-dashboard-types generate-dashboard-api ## Run all code generation
 	@echo "All code generation complete."
 
 ##@ Local Development (Tilt)

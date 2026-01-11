@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"strings"
@@ -30,7 +31,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AltairaLabs/PromptKit/runtime/events"
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/ollama" // Register ollama provider
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -73,6 +76,7 @@ type Server struct {
 	runtimeMetrics *RuntimeMetrics
 	providerType   string
 	model          string
+	baseURL        string // Custom base URL for provider (e.g., Ollama endpoint)
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -174,6 +178,13 @@ func WithProviderInfo(providerType, model string) ServerOption {
 	return func(s *Server) {
 		s.providerType = providerType
 		s.model = model
+	}
+}
+
+// WithBaseURL sets the base URL for the provider (e.g., for Ollama or custom endpoints).
+func WithBaseURL(baseURL string) ServerOption {
+	return func(s *Server) {
+		s.baseURL = baseURL
 	}
 }
 
@@ -328,56 +339,80 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 		log.V(2).Info("enriched message with scenario", "scenario", scenario)
 	}
 
-	// Send the message using PromptKit SDK
-	resp, err := conv.Send(ctx, messageContent)
-	if err != nil {
-		// Event bus will record the failure metric via EventProviderCallFailed
-		return fmt.Errorf("failed to send message: %w", err)
+	// Build send options for multimodal content (images, audio, etc.)
+	sendOpts := buildSendOptions(msg.GetParts(), log)
+
+	// Stream the response using PromptKit SDK streaming API
+	// This streams chunks as they're received from the LLM provider
+	streamCh := conv.Stream(ctx, messageContent, sendOpts...)
+
+	var finalResponse *sdk.Response
+	var accumulatedContent string
+
+	for chunk := range streamCh {
+		if chunk.Error != nil {
+			// Event bus will record the failure metric via EventProviderCallFailed
+			return fmt.Errorf("failed to send message: provider stream failed: %w", chunk.Error)
+		}
+
+		switch chunk.Type {
+		case sdk.ChunkText:
+			// chunk.Text contains the delta (new content), not accumulated
+			if chunk.Text != "" {
+				accumulatedContent += chunk.Text
+				if err := stream.Send(&runtimev1.ServerMessage{
+					Message: &runtimev1.ServerMessage_Chunk{
+						Chunk: &runtimev1.Chunk{Content: chunk.Text},
+					},
+				}); err != nil {
+					return fmt.Errorf("failed to send chunk: %w", err)
+				}
+			}
+
+		case sdk.ChunkDone:
+			// Store final response for usage info
+			finalResponse = chunk.Message
+		}
 	}
 
-	// Stream the response back to the client
-	// For now, send the full response as a single chunk
-	// Note: Streaming will be implemented when SDK supports it
-	responseText := resp.Text()
-
-	// Send chunk
-	if err := stream.Send(&runtimev1.ServerMessage{
-		Message: &runtimev1.ServerMessage_Chunk{
-			Chunk: &runtimev1.Chunk{Content: responseText},
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to send chunk: %w", err)
-	}
-
-	// Build usage info
+	// Build usage info from final response
 	var usage *runtimev1.Usage
-	inputTokens := resp.InputTokens()
-	outputTokens := resp.OutputTokens()
-	costUSD := resp.Cost()
+	var responseText string
 
-	if resp.TokensUsed() > 0 {
-		usage = &runtimev1.Usage{
-			InputTokens:  int32(inputTokens),
-			OutputTokens: int32(outputTokens),
-			CostUsd:      float32(costUSD),
+	if finalResponse != nil {
+		responseText = finalResponse.Text()
+		inputTokens := finalResponse.InputTokens()
+		outputTokens := finalResponse.OutputTokens()
+		costUSD := finalResponse.Cost()
+
+		if finalResponse.TokensUsed() > 0 {
+			usage = &runtimev1.Usage{
+				InputTokens:  int32(inputTokens),
+				OutputTokens: int32(outputTokens),
+				CostUsd:      float32(costUSD),
+			}
+
+			// Add LLM metrics to the conversation span
+			if s.tracingProvider != nil {
+				span := trace.SpanFromContext(ctx)
+				tracing.AddLLMMetrics(span, inputTokens, outputTokens, costUSD)
+				tracing.AddConversationMetrics(span, len(content), len(responseText))
+				tracing.SetSuccess(span)
+			}
+
+			// Note: Prometheus metrics are now recorded via event bus subscriptions
+			// (EventProviderCallCompleted/EventProviderCallFailed)
 		}
-
-		// Add LLM metrics to the conversation span
-		if s.tracingProvider != nil {
-			span := trace.SpanFromContext(ctx)
-			tracing.AddLLMMetrics(span, inputTokens, outputTokens, costUSD)
-			tracing.AddConversationMetrics(span, len(content), len(responseText))
-			tracing.SetSuccess(span)
-		}
-
-		// Note: Prometheus metrics are now recorded via event bus subscriptions
-		// (EventProviderCallCompleted/EventProviderCallFailed)
+	} else {
+		// Fallback if no final response
+		responseText = accumulatedContent
 	}
 
 	// Build multimodal parts if response contains media
 	var parts []*runtimev1.ContentPart
-	if resp.HasMedia() && s.mediaResolver != nil {
-		parts, err = s.resolveResponseParts(ctx, resp.Parts())
+	if finalResponse != nil && finalResponse.HasMedia() && s.mediaResolver != nil {
+		var err error
+		parts, err = s.resolveResponseParts(ctx, finalResponse.Parts())
 		if err != nil {
 			log.Error(err, "failed to resolve media parts, falling back to text-only")
 			// Continue with text-only response
@@ -528,7 +563,7 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 		sdk.WithConversationID(sessionID),
 	}, s.sdkOptions...)
 
-	// Add mock provider if enabled
+	// Add provider based on configuration
 	if s.mockProvider {
 		log.Info("using mock provider for conversation")
 		provider, err := s.createMockProvider()
@@ -536,6 +571,18 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 			return nil, err
 		}
 		opts = append(opts, sdk.WithProvider(provider))
+	} else {
+		// Try to create an explicit provider from config
+		// This is needed for providers like Ollama that need explicit configuration
+		provider, err := s.createProviderFromConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create provider from config: %w", err)
+		}
+		if provider != nil {
+			log.Info("using explicit provider from config", "type", s.providerType)
+			opts = append(opts, sdk.WithProvider(provider))
+		}
+		// If provider is nil, PromptKit will auto-detect from environment
 	}
 
 	// Try to resume existing conversation first
@@ -578,6 +625,37 @@ func (s *Server) createMockProvider() (*mock.Provider, error) {
 	}
 	// Use in-memory mock provider with default responses
 	return mock.NewProvider("mock", "mock-model", false), nil
+}
+
+// createProviderFromConfig creates a PromptKit provider based on runtime configuration.
+// This is used for explicit provider types (ollama, claude, openai, gemini) when
+// the provider type is not "auto" and not "mock".
+// Returns nil, nil if provider type is empty or "auto" (let PromptKit auto-detect).
+func (s *Server) createProviderFromConfig() (providers.Provider, error) {
+	// Skip if no explicit provider type or if using auto-detection
+	if s.providerType == "" || s.providerType == "auto" {
+		return nil, nil
+	}
+
+	// Create provider from spec
+	spec := providers.ProviderSpec{
+		ID:      s.providerType,
+		Type:    s.providerType,
+		Model:   s.model,
+		BaseURL: s.baseURL,
+	}
+
+	s.log.Info("creating explicit provider from config",
+		"type", s.providerType,
+		"model", s.model,
+		"baseURL", s.baseURL)
+
+	provider, err := providers.CreateProviderFromSpec(spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider from spec: %w", err)
+	}
+
+	return provider, nil
 }
 
 // Mock scenario metadata key.
@@ -1081,4 +1159,81 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"durationMs", data.Duration.Milliseconds(),
 		)
 	})
+}
+
+// buildSendOptions converts gRPC content parts to SDK send options.
+// This enables multimodal messages (images, audio, files) to be sent to the LLM.
+func buildSendOptions(parts []*runtimev1.ContentPart, log logr.Logger) []sdk.SendOption {
+	if len(parts) == 0 {
+		return nil
+	}
+
+	var opts []sdk.SendOption
+	for _, part := range parts {
+		if part.Media == nil {
+			continue
+		}
+
+		switch {
+		case isImageContentType(part.Media.MimeType):
+			if part.Media.Data != "" {
+				// Base64-encoded image data - decode it
+				data, err := decodeMediaData(part.Media.Data)
+				if err != nil {
+					log.Error(err, "failed to decode image data")
+					continue
+				}
+				log.V(1).Info("adding image from data", "mimeType", part.Media.MimeType, "size", len(data))
+				opts = append(opts, sdk.WithImageData(data, part.Media.MimeType))
+			} else if part.Media.Url != "" {
+				// Image from URL
+				log.V(1).Info("adding image from URL", "url", part.Media.Url)
+				opts = append(opts, sdk.WithImageURL(part.Media.Url))
+			}
+
+		case isAudioContentType(part.Media.MimeType):
+			if part.Media.Data != "" {
+				log.V(1).Info("adding audio from data", "mimeType", part.Media.MimeType)
+				opts = append(opts, sdk.WithAudioFile(part.Media.Url)) // TODO: SDK needs WithAudioData
+			}
+
+		default:
+			// Generic file
+			if part.Media.Data != "" {
+				data, err := decodeMediaData(part.Media.Data)
+				if err != nil {
+					log.Error(err, "failed to decode file data")
+					continue
+				}
+				log.V(1).Info("adding file from data", "mimeType", part.Media.MimeType, "size", len(data))
+				opts = append(opts, sdk.WithFile(part.Media.MimeType, data))
+			}
+		}
+	}
+
+	return opts
+}
+
+// decodeMediaData decodes base64-encoded media data.
+// It handles both standard and URL-safe base64 encoding.
+func decodeMediaData(data string) ([]byte, error) {
+	// Try standard base64 first
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	// Try URL-safe base64
+	decoded, err = base64.URLEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	// Try raw (no padding) base64
+	decoded, err = base64.RawStdEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	return nil, fmt.Errorf("failed to decode base64 data: %w", err)
 }

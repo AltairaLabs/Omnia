@@ -66,6 +66,7 @@ func main() {
 		"promptName", cfg.PromptName,
 		"providerType", cfg.ProviderType,
 		"model", cfg.Model,
+		"baseURL", cfg.BaseURL,
 		"mockProvider", cfg.MockProvider)
 
 	// Create state store for conversation persistence
@@ -139,6 +140,7 @@ func main() {
 		pkruntime.WithMetrics(metrics),
 		pkruntime.WithRuntimeMetrics(runtimeMetrics),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
+		pkruntime.WithBaseURL(cfg.BaseURL),
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))

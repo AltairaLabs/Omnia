@@ -722,3 +722,57 @@ The server sends WebSocket ping frames to maintain connection health. Clients sh
 Default timeouts:
 - Ping interval: 30 seconds
 - Pong timeout: 60 seconds
+
+## Type Definitions
+
+### Source of Truth
+
+The protocol types are defined in multiple places:
+
+| Location | Purpose |
+|----------|---------|
+| `api/proto/runtime/v1/runtime.proto` | Internal gRPC protocol (facade ↔ runtime) |
+| `internal/facade/protocol.go` | WebSocket protocol (client ↔ facade) |
+| `dashboard/src/types/websocket.ts` | TypeScript types for dashboard |
+| `dashboard/src/lib/proto/` | Generated TypeScript from proto |
+
+### Generating TypeScript Types
+
+TypeScript types can be generated from the Protocol Buffer definitions:
+
+```bash
+# Generate TypeScript from proto files
+cd dashboard
+npm run generate:proto
+
+# Or from the root
+make generate-proto-ts
+```
+
+The generated types are in `dashboard/src/lib/proto/runtime/v1/runtime.ts` and include:
+
+- `ClientMessage` / `ServerMessage` - Core message types
+- `ContentPart` / `MediaContent` - Multi-modal content
+- `ToolCall` / `ToolResult` - Tool invocation types
+- Helper functions: `toJSON()`, `fromJSON()`, `encode()`, `decode()`
+
+### JSON Field Names
+
+The WebSocket protocol uses **snake_case** for JSON field names to match Go conventions:
+
+```json
+{
+  "session_id": "...",
+  "mime_type": "image/png",
+  "size_bytes": 1024
+}
+```
+
+The generated TypeScript types use **camelCase** for property names but serialize to snake_case JSON:
+
+```typescript
+interface MediaContent {
+  mimeType: string;  // TypeScript property
+  // Serializes to: { "mime_type": "..." }
+}
+```

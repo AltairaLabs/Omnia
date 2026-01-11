@@ -19,7 +19,7 @@ interface UseAgentConsoleOptions {
 }
 
 interface UseAgentConsoleReturn extends ConsoleState {
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, attachments?: FileAttachment[]) => void;
   connect: () => void;
   disconnect: () => void;
   clearMessages: () => void;
@@ -41,6 +41,35 @@ function extractTextFromParts(parts: ContentPart[]): string {
     .filter((part) => part.type === "text" && part.text)
     .map((part) => part.text!)
     .join("\n");
+}
+
+/**
+ * Convert file attachments to content parts for sending to the server.
+ * Parses the data URL to extract mime type and base64 data.
+ */
+function convertAttachmentsToParts(attachments: FileAttachment[]): ContentPart[] {
+  return attachments.map((attachment) => {
+    // Parse data URL: "data:image/png;base64,..."
+    const match = attachment.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    const mimeType = match?.[1] || attachment.type;
+    const data = match?.[2] || "";
+
+    // Determine content part type from mime type
+    let type: "image" | "audio" | "video" | "file" = "file";
+    if (mimeType.startsWith("image/")) type = "image";
+    else if (mimeType.startsWith("audio/")) type = "audio";
+    else if (mimeType.startsWith("video/")) type = "video";
+
+    return {
+      type,
+      media: {
+        data,
+        mime_type: mimeType,
+        filename: attachment.name,
+        size_bytes: attachment.size,
+      },
+    };
+  });
 }
 
 /**
@@ -262,22 +291,26 @@ export function useAgentConsole({
   }, []);
 
   // Send a message to the agent
-  const sendMessage = useCallback((content: string) => {
-    if (!content.trim()) return;
+  const sendMessage = useCallback((content: string, attachments?: FileAttachment[]) => {
+    if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-    // Add user message to state
+    // Add user message to state (with attachments for display)
     const userMessage: ConsoleMessage = {
       id: generateId(),
       role: "user",
       content: content.trim(),
       timestamp: new Date(),
+      attachments,
     };
 
     addMessage(userMessage);
 
+    // Convert attachments to content parts for sending
+    const parts = attachments?.length ? convertAttachmentsToParts(attachments) : undefined;
+
     // Send to connection
     if (connectionRef.current) {
-      connectionRef.current.send(content.trim());
+      connectionRef.current.send(content.trim(), { parts });
     } else {
       setStatus("error", "Not connected to agent");
     }
