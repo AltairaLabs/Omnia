@@ -252,6 +252,11 @@ export class LiveDataService implements DataService {
     return this.operatorService.getProviders(namespace);
   }
 
+  async getProvider(namespace: string, name: string): Promise<Provider | undefined> {
+    const providers = await this.getProviders(namespace);
+    return providers.find((p) => p.metadata?.name === name);
+  }
+
   async getStats(): Promise<Stats> {
     return this.operatorService.getStats();
   }

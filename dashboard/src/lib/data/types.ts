@@ -205,6 +205,7 @@ export interface DataService {
 
   // Providers
   getProviders(namespace?: string): Promise<Provider[]>;
+  getProvider(namespace: string, name: string): Promise<Provider | undefined>;
 
   // Stats & Namespaces
   getStats(): Promise<Stats>;

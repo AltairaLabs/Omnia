@@ -487,6 +487,11 @@ export class MockDataService implements DataService {
     return [];
   }
 
+  async getProvider(_namespace: string, _name: string): Promise<Provider | undefined> {
+    await delay();
+    return undefined;
+  }
+
   async getStats(): Promise<Stats> {
     await delay();
     return getMockStats() as unknown as Stats;

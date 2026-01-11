@@ -1,4 +1,5 @@
 export { useAgents, useAgent } from "./use-agents";
+export { useProvider } from "./use-provider";
 export { useConsoleConfig } from "./use-console-config";
 export { usePromptPacks, usePromptPack } from "./use-prompt-packs";
 export { useToolRegistries, useToolRegistry } from "./use-tool-registries";
