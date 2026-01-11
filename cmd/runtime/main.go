@@ -161,8 +161,12 @@ func main() {
 		}
 	}
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with increased message size for multimodal content
+	const maxMsgSize = 16 * 1024 * 1024 // 16MB to support base64-encoded images
+	grpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+	)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 
 	// Register health service
