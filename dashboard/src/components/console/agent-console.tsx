@@ -149,12 +149,12 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   // Handle send
   const handleSend = useCallback(() => {
     if ((input.trim() || attachments.length > 0) && status === "connected") {
-      sendMessage(input);
+      sendMessage(input, attachments);
       setInput("");
       setAttachments([]);
       textareaRef.current?.focus();
     }
-  }, [input, attachments.length, status, sendMessage]);
+  }, [input, attachments, status, sendMessage]);
 
   // Handle key press
   const handleKeyDown = useCallback(

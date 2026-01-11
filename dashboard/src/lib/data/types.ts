@@ -243,4 +243,11 @@ export interface AgentConnection {
 
   /** Get current session ID (if connected) */
   getSessionId(): string | null;
+
+  /**
+   * Get maximum payload size in bytes (from server capabilities).
+   * Returns null if not connected or not yet received.
+   * Files larger than this should use the upload mechanism.
+   */
+  getMaxPayloadSize(): number | null;
 }

@@ -82,14 +82,14 @@ func wsURL(httpURL string) string {
 func TestDefaultServerConfig(t *testing.T) {
 	cfg := DefaultServerConfig()
 
-	if cfg.ReadBufferSize != 1024 {
-		t.Errorf("ReadBufferSize = %v, want 1024", cfg.ReadBufferSize)
+	if cfg.ReadBufferSize != 32*1024 {
+		t.Errorf("ReadBufferSize = %v, want %v", cfg.ReadBufferSize, 32*1024)
 	}
-	if cfg.WriteBufferSize != 1024 {
-		t.Errorf("WriteBufferSize = %v, want 1024", cfg.WriteBufferSize)
+	if cfg.WriteBufferSize != 32*1024 {
+		t.Errorf("WriteBufferSize = %v, want %v", cfg.WriteBufferSize, 32*1024)
 	}
-	if cfg.MaxMessageSize != 512*1024 {
-		t.Errorf("MaxMessageSize = %v, want 524288", cfg.MaxMessageSize)
+	if cfg.MaxMessageSize != 16*1024*1024 {
+		t.Errorf("MaxMessageSize = %v, want %v", cfg.MaxMessageSize, 16*1024*1024)
 	}
 }
 

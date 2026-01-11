@@ -149,6 +149,11 @@ export class MockAgentConnection implements AgentConnection {
     return this.sessionId;
   }
 
+  getMaxPayloadSize(): number | null {
+    // Mock returns 16MB to match the default server config
+    return 16 * 1024 * 1024;
+  }
+
   private setStatus(status: ConnectionStatus, error?: string): void {
     this.status = status;
     this.statusHandlers.forEach((h) => h(status, error));

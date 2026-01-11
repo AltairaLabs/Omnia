@@ -37,6 +37,7 @@ import { PrometheusService } from "./prometheus-service";
 export class LiveAgentConnection implements AgentConnection {
   private status: ConnectionStatus = "disconnected";
   private sessionId: string | null = null;
+  private maxPayloadSize: number | null = null;
   private ws: WebSocket | null = null;
   private readonly messageHandlers: Array<(message: ServerMessage) => void> = [];
   private readonly statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
@@ -92,9 +93,15 @@ export class LiveAgentConnection implements AgentConnection {
 
           const message: ServerMessage = JSON.parse(data);
 
-          // Track session ID from connected message
-          if (message.type === "connected" && message.session_id) {
-            this.sessionId = message.session_id;
+          // Track session ID and capabilities from connected message
+          if (message.type === "connected") {
+            if (message.session_id) {
+              this.sessionId = message.session_id;
+            }
+            // Extract max payload size from server capabilities
+            if (message.connected?.capabilities?.max_payload_size) {
+              this.maxPayloadSize = message.connected.capabilities.max_payload_size;
+            }
           }
 
           this.emitMessage(message);
@@ -113,6 +120,7 @@ export class LiveAgentConnection implements AgentConnection {
         console.warn("[LiveAgentConnection] WebSocket closed:", event.code, event.reason);
         this.ws = null;
         this.sessionId = null;
+        this.maxPayloadSize = null;
         // If we got a close code indicating an error, preserve error status
         if (event.code === 1011 || event.code >= 4000) {
           this.setStatus("error", event.reason || "Connection closed unexpectedly");
@@ -131,6 +139,7 @@ export class LiveAgentConnection implements AgentConnection {
       this.ws = null;
     }
     this.sessionId = null;
+    this.maxPayloadSize = null;
     this.setStatus("disconnected");
   }
 
@@ -164,6 +173,10 @@ export class LiveAgentConnection implements AgentConnection {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  getMaxPayloadSize(): number | null {
+    return this.maxPayloadSize;
   }
 
   private setStatus(status: ConnectionStatus, error?: string): void {
