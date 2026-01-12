@@ -143,20 +143,42 @@ jobs:
         run: |
           echo "=== Waiting for demo agent to be ready ==="
 
-          # Wait for AgentRuntime to be created and ready
-          for i in {1..30}; do
+          # First, verify the AgentRuntime CR exists
+          echo "Checking AgentRuntime CR..."
+          kubectl get agentruntime -n omnia-demo -o yaml || {
+            echo "ERROR: No AgentRuntime found in omnia-demo namespace!"
+            echo "Checking what resources exist..."
+            kubectl get all -n omnia-demo
+            kubectl get provider,promptpack,agentruntime -n omnia-demo || true
+            exit 1
+          }
+
+          # Check operator is running
+          echo "Checking operator status..."
+          kubectl get pods -n omnia-system -l app.kubernetes.io/name=omnia
+          kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia --tail=50 || true
+
+          # Wait for AgentRuntime to be reconciled
+          echo "Waiting for AgentRuntime to be reconciled..."
+          for i in {1..60}; do
             STATUS=$(kubectl get agentruntime vision-demo -n omnia-demo -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
-            echo "AgentRuntime status: $STATUS"
+            echo "AgentRuntime status: $STATUS ($i/60)"
             if [ "$STATUS" == "Running" ]; then
               echo "Agent is running!"
               break
             fi
+            if [ "$STATUS" == "Failed" ]; then
+              echo "AgentRuntime failed!"
+              kubectl describe agentruntime vision-demo -n omnia-demo
+              exit 1
+            fi
             sleep 10
           done
 
-          # Show agent pods
-          kubectl get pods -n omnia-demo
-          kubectl get agentruntime -n omnia-demo
+          # Show all resources
+          echo "=== Resources in omnia-demo ==="
+          kubectl get all -n omnia-demo
+          kubectl get agentruntime -n omnia-demo -o yaml
 
       - name: Install test tools
         run: |
