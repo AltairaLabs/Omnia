@@ -278,25 +278,35 @@ jobs:
           WS_URL="ws://localhost:8080/ws?agent=vision-demo"
           echo "Connecting to: $WS_URL"
 
-          # Test 1: Verify we can connect and receive the "connected" message
-          # -1 means receive one message and exit, --no-close prevents sending close frame
-          RESPONSE=$(timeout 30 websocat -1 --no-close "$WS_URL" 2>&1) || {
-            echo "WebSocket connection test failed or timed out"
-            echo "Response: $RESPONSE"
-            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo --tail=100 || true
-            kill $PF_PID || true
-            exit 1
-          }
+          # Test: Verify we can connect and receive the "connected" message
+          # Use stdin from /dev/null and capture the first line of output
+          # websocat will read stdin, so use exec with timeout for stdout
+          timeout 30 websocat "$WS_URL" < /dev/null > /tmp/ws_output.txt 2>&1 &
+          WS_PID=$!
 
-          echo "Response received: $RESPONSE"
+          # Wait for output (the connected message should arrive quickly)
+          for i in {1..30}; do
+            if [ -s /tmp/ws_output.txt ]; then
+              echo "Got output after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+          # Kill websocat after getting the first message
+          kill $WS_PID 2>/dev/null || true
+
+          echo "Response received:"
+          cat /tmp/ws_output.txt
 
           kill $PF_PID || true
 
           # Verify we got the connected message
-          if echo "$RESPONSE" | grep -q '"type":"connected"'; then
+          if grep -q '"type":"connected"' /tmp/ws_output.txt; then
             echo "WebSocket connection test PASSED - received connected message"
           else
             echo "ERROR: Did not receive expected connected message"
+            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo --tail=100 || true
             exit 1
           fi
 
