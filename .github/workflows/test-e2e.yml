@@ -72,7 +72,7 @@ jobs:
           make test-e2e-junit
 
       - name: Publish Test Results
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         if: always()
         with:
           report_paths: 'e2e-results.xml'
