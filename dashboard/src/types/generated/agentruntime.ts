@@ -18,6 +18,64 @@ export interface AgentRuntimeSpec {
     maxFileSize?: number;
     /** maxFiles is the maximum number of files that can be attached to a single message. */
     maxFiles?: number;
+    /** mediaRequirements defines provider-specific requirements for different media types.
+     * When not specified, the dashboard applies sensible defaults based on the provider type. */
+    mediaRequirements?: {
+      /** audio defines requirements for audio files. */
+      audio?: {
+        /** maxDurationSeconds is the maximum audio duration. */
+        maxDurationSeconds?: number;
+        /** recommendedSampleRate is the optimal sample rate in Hz. */
+        recommendedSampleRate?: number;
+        /** supportsSegmentSelection indicates if the provider supports selecting audio segments. */
+        supportsSegmentSelection?: boolean;
+      };
+      /** document defines requirements for document files (PDFs, etc.). */
+      document?: {
+        /** maxPages is the maximum number of pages that can be processed. */
+        maxPages?: number;
+        /** supportsOCR indicates if the provider supports OCR for scanned documents. */
+        supportsOCR?: boolean;
+      };
+      /** image defines requirements for image files. */
+      image?: {
+        /** compressionGuidance provides guidance on image compression. */
+        compressionGuidance?: "none" | "lossless" | "lossy-high" | "lossy-medium" | "lossy-low";
+        /** maxDimensions specifies the maximum width and height.
+         * Images exceeding these will need to be resized. */
+        maxDimensions?: {
+          /** height in pixels. */
+          height: number;
+          /** width in pixels. */
+          width: number;
+        };
+        /** maxSizeBytes is the maximum file size in bytes for images. */
+        maxSizeBytes?: number;
+        /** preferredFormat is the format that yields best results with this provider. */
+        preferredFormat?: string;
+        /** recommendedDimensions specifies optimal dimensions for best results. */
+        recommendedDimensions?: {
+          /** height in pixels. */
+          height: number;
+          /** width in pixels. */
+          width: number;
+        };
+        /** supportedFormats lists supported image formats (e.g., "png", "jpeg", "gif", "webp"). */
+        supportedFormats?: string[];
+      };
+      /** video defines requirements for video files. */
+      video?: {
+        /** frameExtractionInterval is the interval in seconds between extracted frames.
+         * Only applicable when processingMode includes "frames". */
+        frameExtractionInterval?: number;
+        /** maxDurationSeconds is the maximum video duration. */
+        maxDurationSeconds?: number;
+        /** processingMode indicates how video is processed. */
+        processingMode?: "frames" | "transcription" | "both" | "native";
+        /** supportsSegmentSelection indicates if the provider supports selecting video segments. */
+        supportsSegmentSelection?: boolean;
+      };
+    };
   };
   /** facade configures the client-facing connection interface. */
   facade: {
