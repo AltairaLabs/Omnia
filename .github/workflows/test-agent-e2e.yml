@@ -114,32 +114,30 @@ jobs:
         run: |
           echo "=== Waiting for Ollama pod to be ready ==="
 
-          # Wait for Ollama deployment
-          kubectl wait --for=condition=Available deployment/omnia-ollama \
+          # Wait for Ollama StatefulSet pod to be ready
+          echo "Waiting for Ollama StatefulSet..."
+          kubectl wait --for=condition=Ready pod/ollama-0 \
             -n omnia-demo --timeout=300s || {
-            echo "Ollama deployment not ready, checking status..."
+            echo "Ollama pod not ready, checking status..."
             kubectl get pods -n omnia-demo
-            kubectl describe deployment omnia-ollama -n omnia-demo
+            kubectl describe pod ollama-0 -n omnia-demo || true
             exit 1
           }
 
-          echo "Ollama deployment ready"
+          echo "Ollama pod ready"
 
-          # Wait for model to be pulled (check Ollama logs)
-          echo "Waiting for model to be pulled..."
-          for i in {1..60}; do
-            if kubectl logs -n omnia-demo -l app.kubernetes.io/name=ollama --tail=100 2>/dev/null | grep -q "success"; then
-              echo "Model pull appears complete"
-              break
-            fi
-            echo "Waiting for model... ($i/60)"
-            sleep 10
-          done
+          # Wait for model pull job to complete
+          echo "Waiting for model pull job to complete..."
+          kubectl wait --for=condition=Complete job -l app.kubernetes.io/name=ollama-pull-model \
+            -n omnia-demo --timeout=600s || {
+            echo "Model pull job not complete, checking status..."
+            kubectl get jobs -n omnia-demo
+            kubectl logs -n omnia-demo -l job-name --tail=50 || true
+          }
 
           # Verify model is available
-          OLLAMA_POD=$(kubectl get pods -n omnia-demo -l app.kubernetes.io/name=ollama -o jsonpath='{.items[0].metadata.name}')
-          echo "Checking available models in pod $OLLAMA_POD..."
-          kubectl exec -n omnia-demo $OLLAMA_POD -- ollama list || true
+          echo "Checking available models..."
+          kubectl exec -n omnia-demo ollama-0 -- ollama list || true
 
       - name: Wait for demo agent to be ready
         run: |
