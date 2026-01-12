@@ -16,9 +16,10 @@ import {
 import type { ConsoleMessage, ConsoleMessageRole } from "@/types/websocket";
 
 // Helper to create valid ConsoleMessage objects
+let messageCounter = 0;
 function createMessage(role: ConsoleMessageRole, content: string): ConsoleMessage {
   return {
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    id: `msg-${Date.now()}-${++messageCounter}`,
     role,
     content,
     timestamp: new Date(),
