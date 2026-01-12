@@ -134,14 +134,20 @@ jobs:
 
           # Now try to install omnia with keda.enabled=true - should FAIL
           echo "Attempting to install omnia with keda.enabled=true (should fail)..."
-          if helm install omnia ./charts/omnia \
+          set +e  # Don't exit on error
+          helm install omnia ./charts/omnia \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=true \
-            --timeout 1m 2>&1 | tee /tmp/helm-output.txt; then
+            --timeout 1m 2>&1 | tee /tmp/helm-output.txt
+          HELM_EXIT_CODE=${PIPESTATUS[0]}
+          set -e  # Re-enable exit on error
+
+          if [ $HELM_EXIT_CODE -eq 0 ]; then
             echo "ERROR: Installation should have failed but succeeded!"
             exit 1
           fi
+          echo "Helm install failed as expected (exit code: $HELM_EXIT_CODE)"
 
           # Verify we got the expected error message
           if grep -q "KEDA is already installed" /tmp/helm-output.txt; then
