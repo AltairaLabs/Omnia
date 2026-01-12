@@ -681,12 +681,11 @@ func (s *Server) createMockProvider() (*mock.Provider, error) {
 }
 
 // createProviderFromConfig creates a PromptKit provider based on runtime configuration.
-// This is used for explicit provider types (ollama, claude, openai, gemini) when
-// the provider type is not "auto" and not "mock".
-// Returns nil, nil if provider type is empty or "auto" (let PromptKit auto-detect).
+// This is used for explicit provider types (ollama, claude, openai, gemini).
+// Returns nil, nil if provider type is empty (no provider configured).
 func (s *Server) createProviderFromConfig() (providers.Provider, error) {
-	// Skip if no explicit provider type or if using auto-detection
-	if s.providerType == "" || s.providerType == "auto" {
+	// Skip if no explicit provider type
+	if s.providerType == "" {
 		return nil, nil
 	}
 

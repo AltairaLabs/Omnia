@@ -1215,16 +1215,6 @@ func TestDecodeMediaData(t *testing.T) {
 }
 
 func TestServer_CreateProviderFromConfig(t *testing.T) {
-	t.Run("auto provider type returns nil", func(t *testing.T) {
-		server := NewServer(
-			WithLogger(logr.Discard()),
-			WithProviderInfo("auto", ""),
-		)
-		provider, err := server.createProviderFromConfig()
-		assert.NoError(t, err)
-		assert.Nil(t, provider, "auto provider type should return nil")
-	})
-
 	t.Run("empty provider type returns nil", func(t *testing.T) {
 		server := NewServer(
 			WithLogger(logr.Discard()),

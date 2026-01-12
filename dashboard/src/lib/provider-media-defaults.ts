@@ -17,7 +17,7 @@ const COMPRESSION_LOSSY_MEDIUM: CompressionGuidance = "lossy-medium";
  * These values are based on each provider's documented capabilities and limits.
  */
 export const PROVIDER_MEDIA_DEFAULTS: Record<
-  Exclude<ProviderType, "auto">,
+  ProviderType,
   MediaRequirements
 > = {
   claude: {
@@ -129,7 +129,7 @@ export const PROVIDER_MEDIA_DEFAULTS: Record<
 };
 
 /**
- * Conservative defaults used when provider type is "auto" or unknown.
+ * Conservative defaults used when provider type is unknown.
  * These values are safe across all providers.
  */
 export const CONSERVATIVE_MEDIA_DEFAULTS: MediaRequirements = {
@@ -180,10 +180,9 @@ export function getMediaRequirements(
   overrides?: MediaRequirements
 ): MediaRequirements {
   // Get provider-specific defaults or conservative defaults
-  const defaults =
-    providerType && providerType !== "auto"
-      ? PROVIDER_MEDIA_DEFAULTS[providerType]
-      : CONSERVATIVE_MEDIA_DEFAULTS;
+  const defaults = providerType
+    ? PROVIDER_MEDIA_DEFAULTS[providerType]
+    : CONSERVATIVE_MEDIA_DEFAULTS;
 
   // If no overrides, return defaults
   if (!overrides) {

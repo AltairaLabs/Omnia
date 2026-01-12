@@ -566,6 +566,7 @@ spec:
         cpu: "200m"
         memory: "128Mi"
   provider:
+    type: mock
     secretRef:
       name: test-provider
 `
@@ -1253,6 +1254,7 @@ spec:
         cpu: "200m"
         memory: "128Mi"
   provider:
+    type: mock
     secretRef:
       name: test-provider
 `
@@ -1364,6 +1366,7 @@ spec:
         cpu: "50m"
         memory: "64Mi"
   provider:
+    type: mock
     secretRef:
       name: test-provider
 `, customFacadeImage, customRuntimeImage)
@@ -1439,6 +1442,7 @@ spec:
         cpu: "50m"
         memory: "64Mi"
   provider:
+    type: mock
     secretRef:
       name: test-provider
 `
@@ -1510,6 +1514,7 @@ spec:
         cpu: "50m"
         memory: "64Mi"
   provider:
+    type: mock
     secretRef:
       name: test-provider
 `, customFacadeImage)
@@ -1582,6 +1587,7 @@ spec:
         cpu: "200m"
         memory: "128Mi"
   provider:
+    type: mock
     secretRef:
       name: test-provider
 `

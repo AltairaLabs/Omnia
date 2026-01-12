@@ -115,6 +115,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -176,6 +177,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -275,6 +277,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -343,6 +346,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -412,6 +416,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Port: &customPort,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -476,6 +481,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Replicas: &replicas,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -632,6 +638,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Handler: &demoMode,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -822,7 +829,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					// No Provider config - should default to auto
+					// No Provider config - no provider env vars should be set
 				},
 			}
 			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
@@ -831,7 +838,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
 			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
 
-			By("verifying default provider type is set")
+			By("verifying no provider env vars are set when provider is not configured")
 			deployment := &appsv1.Deployment{}
 			Eventually(func() error {
 				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
@@ -854,10 +861,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 				runtimeEnvMap[env.Name] = env
 			}
 
-			// Check provider type defaults to auto
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_TYPE"].Value).To(Equal("auto"))
-
-			// Optional fields should not be present
+			// Provider env vars should not be present when no provider is configured
+			_, hasProviderType := runtimeEnvMap["OMNIA_PROVIDER_TYPE"]
+			Expect(hasProviderType).To(BeFalse())
 			_, hasModel := runtimeEnvMap["OMNIA_PROVIDER_MODEL"]
 			Expect(hasModel).To(BeFalse())
 			_, hasBaseURL := runtimeEnvMap["OMNIA_PROVIDER_BASE_URL"]
@@ -914,6 +920,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -998,6 +1005,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Image: customRuntimeImage, // CRD override
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1078,6 +1086,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 					},
 					// Framework.Image is NOT set - should fall back to operator default
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1146,6 +1155,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1247,6 +1257,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Name: toolRegistryKey.Name,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1328,6 +1339,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Name: "nonexistent-toolregistry",
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1391,6 +1403,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						},
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1458,6 +1471,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1537,6 +1551,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Namespace: &otherNS,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1598,6 +1613,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1675,6 +1691,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1742,6 +1759,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1817,6 +1835,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1875,6 +1894,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -1951,6 +1971,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -2031,6 +2052,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -2097,6 +2119,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "test-secret",
 						},
@@ -3340,15 +3363,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 		It("should handle nil provider config", func() {
 			envVars := buildProviderEnvVars(nil)
 
-			// Should default to auto provider type
-			envMap := make(map[string]string)
-			for _, env := range envVars {
-				if env.Value != "" {
-					envMap[env.Name] = env.Value
-				}
-			}
-
-			Expect(envMap["OMNIA_PROVIDER_TYPE"]).To(Equal("auto"))
+			// Should return empty slice when provider is nil
+			Expect(envVars).To(BeNil())
 		})
 	})
 
@@ -3379,14 +3395,6 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(envVars).To(HaveLen(1))
 			Expect(envVars[0].Name).To(Equal("GEMINI_API_KEY"))
 			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
-		})
-
-		It("should default to ANTHROPIC_API_KEY for auto provider", func() {
-			secretRef := &corev1.LocalObjectReference{Name: "test-secret"}
-			envVars := buildSecretEnvVarsWithKey(secretRef, omniav1alpha1.ProviderTypeAuto, "custom-key")
-
-			Expect(envVars).To(HaveLen(1))
-			Expect(envVars[0].Name).To(Equal(anthropicAPIKey))
 		})
 	})
 })

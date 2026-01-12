@@ -381,6 +381,7 @@ var _ = Describe("PromptPack Controller", func() {
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
 					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
 						SecretRef: &corev1.LocalObjectReference{
 							Name: "provider-secret",
 						},

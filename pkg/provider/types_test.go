@@ -35,7 +35,6 @@ func TestType_IsValid(t *testing.T) {
 		typ      Type
 		expected bool
 	}{
-		{"auto", TypeAuto, true},
 		{"claude", TypeClaude, true},
 		{"openai", TypeOpenAI, true},
 		{"gemini", TypeGemini, true},
@@ -63,7 +62,6 @@ func TestType_RequiresCredentials(t *testing.T) {
 		typ      Type
 		expected bool
 	}{
-		{"auto", TypeAuto, true},
 		{"claude", TypeClaude, true},
 		{"openai", TypeOpenAI, true},
 		{"gemini", TypeGemini, true},
@@ -80,7 +78,7 @@ func TestType_RequiresCredentials(t *testing.T) {
 
 func TestValidTypes_Complete(t *testing.T) {
 	// Ensure ValidTypes contains all defined constants
-	expected := []Type{TypeAuto, TypeClaude, TypeOpenAI, TypeGemini, TypeOllama, TypeMock}
+	expected := []Type{TypeClaude, TypeOpenAI, TypeGemini, TypeOllama, TypeMock}
 	assert.ElementsMatch(t, expected, ValidTypes)
 }
 

@@ -175,9 +175,8 @@ export interface AgentRuntimeSpec {
       name?: string;
     };
     /** type specifies the provider type.
-     * "auto" uses PromptKit's auto-detection based on available credentials.
-     * "claude", "openai", "gemini" explicitly select a provider. */
-    type?: "auto" | "claude" | "openai" | "gemini" | "ollama" | "mock";
+     * "claude", "openai", "gemini", "ollama", or "mock". */
+    type: "claude" | "openai" | "gemini" | "ollama" | "mock";
   };
   /** providerRef references a Provider resource for LLM configuration.
    * If specified, the referenced Provider's configuration is used.

@@ -36,7 +36,7 @@ interface DeployWizardProps {
 }
 
 type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
-type ProviderType = "auto" | "claude" | "openai" | "gemini";
+type ProviderType = "claude" | "openai" | "gemini" | "ollama";
 type FacadeType = "websocket" | "grpc";
 type SessionType = "memory" | "redis";
 
@@ -78,7 +78,7 @@ const INITIAL_FORM_DATA: WizardFormData = {
   customImage: "",
   promptPackName: "",
   promptPackTrack: "stable",
-  providerType: "auto",
+  providerType: "claude",
   providerModel: "",
   providerSecretName: "",
   toolRegistryName: "",
@@ -113,10 +113,10 @@ const FRAMEWORKS: { value: FrameworkType; label: string; description: string }[]
 ];
 
 const PROVIDERS: { value: ProviderType; label: string; models: string[] }[] = [
-  { value: "auto", label: "Auto-detect", models: [] },
   { value: "claude", label: "Anthropic Claude", models: ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-3-5-sonnet-20241022"] },
   { value: "openai", label: "OpenAI", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"] },
   { value: "gemini", label: "Google Gemini", models: ["gemini-2.0-flash", "gemini-1.5-pro"] },
+  { value: "ollama", label: "Ollama (Local)", models: ["llama3.2", "llava:7b", "mistral"] },
 ];
 
 /**
@@ -246,14 +246,12 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
       };
     }
 
-    // Provider (only if not auto)
-    if (formData.providerType !== "auto" || formData.providerModel || formData.providerSecretName) {
-      (yaml.spec as Record<string, unknown>).provider = {
-        ...(formData.providerType !== "auto" && { type: formData.providerType }),
-        ...(formData.providerModel && { model: formData.providerModel }),
-        ...(formData.providerSecretName && { secretRef: { name: formData.providerSecretName } }),
-      };
-    }
+    // Provider (type is required)
+    (yaml.spec as Record<string, unknown>).provider = {
+      type: formData.providerType,
+      ...(formData.providerModel && { model: formData.providerModel }),
+      ...(formData.providerSecretName && { secretRef: { name: formData.providerSecretName } }),
+    };
 
     // Tool Registry
     if (formData.toolRegistryName) {
@@ -496,40 +494,38 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
               </Select>
             </div>
 
-            {formData.providerType !== "auto" && (
-              <>
-                <div className="space-y-2">
-                  <Label>Model</Label>
-                  <Select
-                    value={formData.providerModel}
-                    onValueChange={(v) => updateField("providerModel", v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PROVIDERS.find((p) => p.value === formData.providerType)?.models.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Select
+                value={formData.providerModel}
+                onValueChange={(v) => updateField("providerModel", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROVIDERS.find((p) => p.value === formData.providerType)?.models.map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="secretName">API Key Secret Name</Label>
-                  <Input
-                    id="secretName"
-                    value={formData.providerSecretName}
-                    onChange={(e) => updateField("providerSecretName", e.target.value)}
-                    placeholder="llm-api-key"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Kubernetes Secret containing the API key
-                  </p>
-                </div>
-              </>
+            {formData.providerType !== "ollama" && (
+              <div className="space-y-2">
+                <Label htmlFor="secretName">API Key Secret Name</Label>
+                <Input
+                  id="secretName"
+                  value={formData.providerSecretName}
+                  onChange={(e) => updateField("providerSecretName", e.target.value)}
+                  placeholder="llm-api-key"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Kubernetes Secret containing the API key
+                </p>
+              </div>
             )}
           </div>
         );

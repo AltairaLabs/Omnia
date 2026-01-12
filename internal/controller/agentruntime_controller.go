@@ -207,30 +207,31 @@ func addProviderEnvVars(envVars []corev1.EnvVar, cfg providerEnvConfig) []corev1
 }
 
 func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVar {
-	cfg := providerEnvConfig{Type: omniav1alpha1.ProviderTypeAuto}
-	if provider != nil {
-		if provider.Type != "" {
-			cfg.Type = provider.Type
-		}
-		cfg.Model = provider.Model
-		cfg.BaseURL = provider.BaseURL
-		cfg.AdditionalConfig = provider.AdditionalConfig
-		if provider.Config != nil {
-			cfg.Temperature = provider.Config.Temperature
-			cfg.TopP = provider.Config.TopP
-			cfg.MaxTokens = provider.Config.MaxTokens
-		}
-		if provider.Pricing != nil {
-			cfg.InputCost = provider.Pricing.InputCostPer1K
-			cfg.OutputCost = provider.Pricing.OutputCostPer1K
-			cfg.CachedCost = provider.Pricing.CachedCostPer1K
-		}
+	if provider == nil {
+		return nil
+	}
+
+	cfg := providerEnvConfig{
+		Type:             provider.Type,
+		Model:            provider.Model,
+		BaseURL:          provider.BaseURL,
+		AdditionalConfig: provider.AdditionalConfig,
+	}
+	if provider.Config != nil {
+		cfg.Temperature = provider.Config.Temperature
+		cfg.TopP = provider.Config.TopP
+		cfg.MaxTokens = provider.Config.MaxTokens
+	}
+	if provider.Pricing != nil {
+		cfg.InputCost = provider.Pricing.InputCostPer1K
+		cfg.OutputCost = provider.Pricing.OutputCostPer1K
+		cfg.CachedCost = provider.Pricing.CachedCostPer1K
 	}
 
 	envVars := addProviderEnvVars(nil, cfg)
 
 	// Add API key from secret
-	if provider != nil && provider.SecretRef != nil {
+	if provider.SecretRef != nil {
 		envVars = append(envVars, buildSecretEnvVars(provider.SecretRef, cfg.Type)...)
 	}
 
@@ -242,19 +243,10 @@ func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVa
 func buildSecretEnvVars(secretRef *corev1.LocalObjectReference, providerType omniav1alpha1.ProviderType) []corev1.EnvVar {
 	var envVars []corev1.EnvVar
 
-	// For explicit provider type, try to inject the primary key
+	// Inject the primary API key env var for the provider type
 	if keyNames, ok := providerKeyMapping[providerType]; ok && len(keyNames) > 0 {
 		envVars = append(envVars, buildSecretKeyEnvVar(secretRef, keyNames[0], keyNames[0]))
 		envVars = append(envVars, buildSecretKeyEnvVar(secretRef, keyNames[0], "api-key"))
-	}
-
-	// For auto-detection, inject all possible API key env vars
-	if providerType == omniav1alpha1.ProviderTypeAuto {
-		for _, keyNames := range providerKeyMapping {
-			if len(keyNames) > 0 {
-				envVars = append(envVars, buildSecretKeyEnvVar(secretRef, keyNames[0], keyNames[0]))
-			}
-		}
 	}
 
 	return envVars
