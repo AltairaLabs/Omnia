@@ -279,13 +279,18 @@ jobs:
           echo "Connecting to: $WS_URL"
 
           # Test: Verify we can connect and receive the "connected" message
-          # Use stdin from /dev/null and capture the first line of output
-          # websocat will read stdin, so use exec with timeout for stdout
-          timeout 30 websocat "$WS_URL" < /dev/null > /tmp/ws_output.txt 2>&1 &
+          # Use a FIFO to keep stdin open while capturing output
+          mkfifo /tmp/ws_fifo
+
+          # Start websocat in background, reading from FIFO
+          timeout 30 websocat "$WS_URL" < /tmp/ws_fifo > /tmp/ws_output.txt 2>&1 &
           WS_PID=$!
 
+          # Open FIFO for writing (keeps the connection open)
+          exec 3>/tmp/ws_fifo
+
           # Wait for output (the connected message should arrive quickly)
-          for i in {1..30}; do
+          for i in {1..20}; do
             if [ -s /tmp/ws_output.txt ]; then
               echo "Got output after ${i}s"
               break
@@ -293,19 +298,23 @@ jobs:
             sleep 1
           done
 
-          # Kill websocat after getting the first message
+          # Close FIFO and kill websocat
+          exec 3>&-
           kill $WS_PID 2>/dev/null || true
+          rm -f /tmp/ws_fifo
 
           echo "Response received:"
-          cat /tmp/ws_output.txt
+          cat /tmp/ws_output.txt || true
 
-          kill $PF_PID || true
+          kill $PF_PID 2>/dev/null || true
 
           # Verify we got the connected message
           if grep -q '"type":"connected"' /tmp/ws_output.txt; then
             echo "WebSocket connection test PASSED - received connected message"
           else
             echo "ERROR: Did not receive expected connected message"
+            echo "Output file contents:"
+            hexdump -C /tmp/ws_output.txt || true
             kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo --tail=100 || true
             exit 1
           fi
