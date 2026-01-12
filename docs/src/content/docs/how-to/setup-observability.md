@@ -314,6 +314,45 @@ grafana:
     passwordKey: admin-password
 ```
 
+### Enable Loki Ruler (Log-based Alerting)
+
+The Loki ruler is disabled by default to avoid startup issues on local development environments. For production deployments that need log-based alerting, enable it:
+
+```yaml
+loki:
+  ruler:
+    enabled: true
+    storage:
+      type: local
+      local:
+        directory: /var/loki/rules
+    alertmanager_url: http://alertmanager:9093
+  singleBinary:
+    extraVolumes:
+      - name: rules
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: rules
+        mountPath: /var/loki/rules
+```
+
+The ruler allows you to:
+- **Alerting rules**: Fire alerts based on LogQL queries (e.g., error rate thresholds)
+- **Recording rules**: Pre-compute expensive queries for faster dashboards
+
+For cloud storage backends (S3, GCS), configure ruler storage accordingly:
+
+```yaml
+loki:
+  ruler:
+    enabled: true
+    storage:
+      type: s3
+      s3:
+        bucketnames: loki-rules
+        region: us-west-2
+```
+
 ### Resource Limits
 
 Adjust resources based on your cluster size:
