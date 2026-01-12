@@ -15,6 +15,14 @@ spec:
     - name: {{ $gatewayName }}
       namespace: {{ .Release.Namespace }}
   rules:
+    # WebSocket route for agent connections (must be before catch-all)
+    - matches:
+        - path:
+            type: RegularExpression
+            value: /api/agents/[^/]+/[^/]+/ws
+      backendRefs:
+        - name: {{ include "omnia.dashboard.fullname" . }}
+          port: 3002
     # Dashboard routes at root path
     - matches:
         - path:

@@ -71,9 +71,10 @@ export class LiveAgentConnection implements AgentConnection {
         // Production: use configured proxy URL with full path
         wsUrl = `${wsProxyUrl}/api/agents/${this.namespace}/${this.agentName}/ws`;
       } else {
-        // Development: WebSocket proxy on port 3002
-        const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.hostname : "localhost";
-        wsUrl = `${protocol}//${wsHost}:3002/api/agents/${this.namespace}/${this.agentName}/ws`;
+        // Use relative URL - works with gateway routing in production
+        // Falls back to localhost:3002 for SSR or when location is unavailable
+        const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.host : "localhost:3002";
+        wsUrl = `${protocol}//${wsHost}/api/agents/${this.namespace}/${this.agentName}/ws`;
       }
 
       this.ws = new WebSocket(wsUrl);
