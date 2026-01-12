@@ -6,6 +6,11 @@ import {
   buildAttachmentConfig,
   buildAcceptString,
   formatFileSize,
+  needsResize,
+  calculateResizedDimensions,
+  shouldCompress,
+  getCompressionQuality,
+  formatDuration,
   DEFAULT_ALLOWED_MIME_TYPES,
   DEFAULT_ALLOWED_EXTENSIONS,
   DEFAULT_MAX_FILE_SIZE,
@@ -250,6 +255,121 @@ describe("attachment-utils", () => {
 
     it("should have 5 as default max files", () => {
       expect(DEFAULT_MAX_FILES).toBe(5);
+    });
+  });
+
+  describe("needsResize", () => {
+    it("should return false when no maxDimensions provided", () => {
+      expect(needsResize(1000, 1000, undefined)).toBe(false);
+    });
+
+    it("should return false when image fits within max dimensions", () => {
+      expect(needsResize(500, 500, { width: 1000, height: 1000 })).toBe(false);
+      expect(needsResize(1000, 500, { width: 1000, height: 1000 })).toBe(false);
+      expect(needsResize(500, 1000, { width: 1000, height: 1000 })).toBe(false);
+    });
+
+    it("should return true when image exceeds max dimensions", () => {
+      expect(needsResize(1500, 500, { width: 1000, height: 1000 })).toBe(true);
+      expect(needsResize(500, 1500, { width: 1000, height: 1000 })).toBe(true);
+      expect(needsResize(1500, 1500, { width: 1000, height: 1000 })).toBe(true);
+    });
+  });
+
+  describe("calculateResizedDimensions", () => {
+    it("should maintain aspect ratio when scaling down wide images", () => {
+      const result = calculateResizedDimensions(2000, 1000, { width: 1000, height: 1000 });
+      expect(result.width).toBe(1000);
+      expect(result.height).toBe(500);
+    });
+
+    it("should maintain aspect ratio when scaling down tall images", () => {
+      const result = calculateResizedDimensions(1000, 2000, { width: 1000, height: 1000 });
+      expect(result.width).toBe(500);
+      expect(result.height).toBe(1000);
+    });
+
+    it("should not scale up images smaller than max", () => {
+      const result = calculateResizedDimensions(500, 500, { width: 1000, height: 1000 });
+      expect(result.width).toBe(500);
+      expect(result.height).toBe(500);
+    });
+
+    it("should handle square images", () => {
+      const result = calculateResizedDimensions(2000, 2000, { width: 1000, height: 1000 });
+      expect(result.width).toBe(1000);
+      expect(result.height).toBe(1000);
+    });
+  });
+
+  describe("shouldCompress", () => {
+    it("should return true when file exceeds max size", () => {
+      expect(shouldCompress(15 * 1024 * 1024, 10 * 1024 * 1024, undefined)).toBe(true);
+    });
+
+    it("should return false when file is within max size and no guidance", () => {
+      expect(shouldCompress(5 * 1024 * 1024, 10 * 1024 * 1024, undefined)).toBe(false);
+    });
+
+    it("should return false when guidance is none", () => {
+      expect(shouldCompress(5 * 1024 * 1024, 10 * 1024 * 1024, "none")).toBe(false);
+    });
+
+    it("should return true for any compression guidance except none", () => {
+      expect(shouldCompress(5 * 1024 * 1024, 10 * 1024 * 1024, "lossless")).toBe(true);
+      expect(shouldCompress(5 * 1024 * 1024, 10 * 1024 * 1024, "lossy-high")).toBe(true);
+      expect(shouldCompress(5 * 1024 * 1024, 10 * 1024 * 1024, "lossy-medium")).toBe(true);
+      expect(shouldCompress(5 * 1024 * 1024, 10 * 1024 * 1024, "lossy-low")).toBe(true);
+    });
+
+    it("should handle undefined max size", () => {
+      expect(shouldCompress(5 * 1024 * 1024, undefined, "lossy-medium")).toBe(true);
+      expect(shouldCompress(5 * 1024 * 1024, undefined, undefined)).toBe(false);
+    });
+  });
+
+  describe("getCompressionQuality", () => {
+    it("should return 1.0 for lossless", () => {
+      expect(getCompressionQuality("lossless")).toBe(1.0);
+    });
+
+    it("should return 0.92 for lossy-high", () => {
+      expect(getCompressionQuality("lossy-high")).toBe(0.92);
+    });
+
+    it("should return 0.85 for lossy-medium", () => {
+      expect(getCompressionQuality("lossy-medium")).toBe(0.85);
+    });
+
+    it("should return 0.7 for lossy-low", () => {
+      expect(getCompressionQuality("lossy-low")).toBe(0.7);
+    });
+
+    it("should return default 0.92 for undefined", () => {
+      expect(getCompressionQuality(undefined)).toBe(0.92);
+    });
+
+    it("should return default 0.92 for none", () => {
+      expect(getCompressionQuality("none")).toBe(0.92);
+    });
+  });
+
+  describe("formatDuration", () => {
+    it("should format seconds only", () => {
+      expect(formatDuration(30)).toBe("30s");
+      expect(formatDuration(59)).toBe("59s");
+    });
+
+    it("should format minutes and seconds", () => {
+      expect(formatDuration(60)).toBe("1m 0s");
+      expect(formatDuration(90)).toBe("1m 30s");
+      expect(formatDuration(3599)).toBe("59m 59s");
+    });
+
+    it("should format hours and minutes", () => {
+      expect(formatDuration(3600)).toBe("1h 0m");
+      expect(formatDuration(3660)).toBe("1h 1m");
+      expect(formatDuration(7200)).toBe("2h 0m");
     });
   });
 });

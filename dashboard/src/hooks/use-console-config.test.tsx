@@ -302,4 +302,41 @@ describe("useConsoleConfig", () => {
     // Should use overridden value
     expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(50 * 1024 * 1024);
   });
+
+  it("should merge partial overrides with provider defaults", async () => {
+    // Only override video, let other fields fall back to provider defaults
+    const mockAgentWithPartialOverrides = {
+      ...mockAgentWithoutConsoleConfig,
+      spec: {
+        provider: { type: "openai" },
+        console: {
+          mediaRequirements: {
+            video: {
+              maxDurationSeconds: 120,
+            },
+          },
+        },
+      },
+    };
+
+    mockUseAgent.mockReturnValue({
+      data: mockAgentWithPartialOverrides,
+      isLoading: false,
+      error: null,
+    });
+
+    const { result } = renderHook(
+      () => useConsoleConfig("production", "partial-override-agent"),
+      { wrapper: TestWrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // Video should use override
+    expect(result.current.mediaRequirements.video?.maxDurationSeconds).toBe(120);
+    // Image should fall back to openai defaults (not overridden)
+    expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(20 * 1024 * 1024);
+  });
 });
