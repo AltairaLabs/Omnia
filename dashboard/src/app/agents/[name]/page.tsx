@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
-import { useAgent } from "@/hooks";
+import { useAgent, useProvider, usePromptPack } from "@/hooks";
 
 interface AgentDetailPageProps {
   params: Promise<{ name: string }>;
@@ -40,6 +40,8 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
   const dataService = useDataService();
 
   const { data: agent, isLoading } = useAgent(name, namespace);
+  const { data: provider } = useProvider(agent?.spec?.providerRef?.name, namespace);
+  const { data: promptPack } = usePromptPack(agent?.spec?.promptPackRef?.name || "", namespace);
 
   const handleTabChange = useCallback((tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -253,12 +255,16 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex justify-between">
+                    <span className="text-muted-foreground">Name</span>
+                    <span className="font-medium">{spec.providerRef?.name || "-"}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="text-muted-foreground">Type</span>
-                    <span className="font-medium capitalize">{spec.provider?.type || "claude"}</span>
+                    <span className="font-medium capitalize">{provider?.spec?.type || spec.provider?.type || "-"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Model</span>
-                    <span className="font-medium">{spec.provider?.model || "claude-sonnet-4-20250514"}</span>
+                    <span className="font-medium">{provider?.spec?.model || spec.provider?.model || "-"}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -291,18 +297,20 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Name</span>
                     <Link
-                      href={`/promptpacks/${spec.promptPackRef?.name}`}
+                      href={`/promptpacks/${spec.promptPackRef?.name}?namespace=${namespace}`}
                       className="font-medium text-primary hover:underline"
                     >
-                      {spec.promptPackRef?.name}
+                      {spec.promptPackRef?.name || "-"}
                     </Link>
                   </div>
-                  {spec.promptPackRef?.version && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Version</span>
-                      <span className="font-medium">{spec.promptPackRef.version}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Version</span>
+                    <span className="font-medium">{promptPack?.spec?.version || spec.promptPackRef?.version || "-"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Phase</span>
+                    <span className="font-medium">{promptPack?.status?.phase || "-"}</span>
+                  </div>
                   {spec.promptPackRef?.track && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Track</span>

@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"strings"
@@ -30,7 +31,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AltairaLabs/PromptKit/runtime/events"
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/ollama" // Register ollama provider
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -73,6 +76,7 @@ type Server struct {
 	runtimeMetrics *RuntimeMetrics
 	providerType   string
 	model          string
+	baseURL        string // Custom base URL for provider (e.g., Ollama endpoint)
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -174,6 +178,13 @@ func WithProviderInfo(providerType, model string) ServerOption {
 	return func(s *Server) {
 		s.providerType = providerType
 		s.model = model
+	}
+}
+
+// WithBaseURL sets the base URL for the provider (e.g., for Ollama or custom endpoints).
+func WithBaseURL(baseURL string) ServerOption {
+	return func(s *Server) {
+		s.baseURL = baseURL
 	}
 }
 
@@ -293,24 +304,13 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	content := msg.GetContent()
 	metadata := msg.GetMetadata()
 
-	// Enrich context with session ID
+	// Enrich context with session ID and start tracing span
 	ctx = logctx.WithSessionID(ctx, sessionID)
 	log := logctx.LoggerWithContext(s.log, ctx)
+	ctx = s.startTracingSpan(ctx, sessionID)
 
-	// Start conversation span if tracing is enabled
-	if s.tracingProvider != nil {
-		var span trace.Span
-		ctx, span = s.tracingProvider.StartConversationSpan(ctx, sessionID)
-		defer span.End()
-	}
-
-	// Extract mock scenario for routing (used when mock provider is enabled)
-	scenario := ScenarioDefault
-	if s.mockProvider {
-		scenario = extractMockScenario(metadata, content)
-		log.V(1).Info("mock scenario detected", "scenario", scenario)
-	}
-
+	// Extract mock scenario and prepare message content
+	scenario := s.extractScenario(metadata, content, log)
 	log.V(1).Info("processing message", "contentLength", len(content), "scenario", scenario)
 
 	// Get or create conversation for this session
@@ -319,68 +319,93 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 		return fmt.Errorf("failed to get conversation: %w", err)
 	}
 
-	// For mock provider, prepend scenario context to help with response routing.
-	// The mock repository can use patterns like "[scenario:image-analysis]" to
-	// match and return appropriate canned responses.
-	messageContent := content
-	if s.mockProvider && scenario != ScenarioDefault {
-		messageContent = fmt.Sprintf("[scenario:%s] %s", scenario, content)
-		log.V(2).Info("enriched message with scenario", "scenario", scenario)
-	}
+	// Prepare message content with scenario if needed
+	messageContent := s.prepareMessageContent(content, scenario, log)
 
-	// Send the message using PromptKit SDK
-	resp, err := conv.Send(ctx, messageContent)
+	// Build send options for multimodal content (images, audio, etc.)
+	sendOpts := buildSendOptions(msg.GetParts(), log)
+
+	// Stream response and collect results
+	finalResponse, accumulatedContent, err := s.streamResponse(ctx, stream, conv, messageContent, sendOpts)
 	if err != nil {
-		// Event bus will record the failure metric via EventProviderCallFailed
-		return fmt.Errorf("failed to send message: %w", err)
+		return err
 	}
 
-	// Stream the response back to the client
-	// For now, send the full response as a single chunk
-	// Note: Streaming will be implemented when SDK supports it
-	responseText := resp.Text()
+	// Build and send the done message
+	return s.sendDoneMessage(ctx, stream, log, finalResponse, accumulatedContent, content)
+}
 
-	// Send chunk
-	if err := stream.Send(&runtimev1.ServerMessage{
-		Message: &runtimev1.ServerMessage_Chunk{
-			Chunk: &runtimev1.Chunk{Content: responseText},
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to send chunk: %w", err)
+// startTracingSpan starts a conversation span if tracing is enabled, returning the enriched context.
+func (s *Server) startTracingSpan(ctx context.Context, sessionID string) context.Context {
+	if s.tracingProvider != nil {
+		var span trace.Span
+		ctx, span = s.tracingProvider.StartConversationSpan(ctx, sessionID)
+		defer span.End()
 	}
+	return ctx
+}
 
-	// Build usage info
-	var usage *runtimev1.Usage
-	inputTokens := resp.InputTokens()
-	outputTokens := resp.OutputTokens()
-	costUSD := resp.Cost()
+// extractScenario extracts the mock scenario from metadata/content if mock provider is enabled.
+func (s *Server) extractScenario(metadata map[string]string, content string, log logr.Logger) string {
+	if !s.mockProvider {
+		return ScenarioDefault
+	}
+	scenario := extractMockScenario(metadata, content)
+	log.V(1).Info("mock scenario detected", "scenario", scenario)
+	return scenario
+}
 
-	if resp.TokensUsed() > 0 {
-		usage = &runtimev1.Usage{
-			InputTokens:  int32(inputTokens),
-			OutputTokens: int32(outputTokens),
-			CostUsd:      float32(costUSD),
+// prepareMessageContent prepends scenario context to the message if using mock provider.
+func (s *Server) prepareMessageContent(content string, scenario string, log logr.Logger) string {
+	if s.mockProvider && scenario != ScenarioDefault {
+		log.V(2).Info("enriched message with scenario", "scenario", scenario)
+		return fmt.Sprintf("[scenario:%s] %s", scenario, content)
+	}
+	return content
+}
+
+// streamResponse streams the LLM response and sends chunks to the client.
+func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, content string, opts []sdk.SendOption) (*sdk.Response, string, error) {
+	streamCh := conv.Stream(ctx, content, opts...)
+	var finalResponse *sdk.Response
+	var accumulatedContent strings.Builder
+
+	for chunk := range streamCh {
+		if chunk.Error != nil {
+			return nil, "", fmt.Errorf("failed to send message: provider stream failed: %w", chunk.Error)
 		}
 
-		// Add LLM metrics to the conversation span
-		if s.tracingProvider != nil {
-			span := trace.SpanFromContext(ctx)
-			tracing.AddLLMMetrics(span, inputTokens, outputTokens, costUSD)
-			tracing.AddConversationMetrics(span, len(content), len(responseText))
-			tracing.SetSuccess(span)
+		switch chunk.Type {
+		case sdk.ChunkText:
+			if chunk.Text != "" {
+				accumulatedContent.WriteString(chunk.Text)
+				if err := stream.Send(&runtimev1.ServerMessage{
+					Message: &runtimev1.ServerMessage_Chunk{
+						Chunk: &runtimev1.Chunk{Content: chunk.Text},
+					},
+				}); err != nil {
+					return nil, "", fmt.Errorf("failed to send chunk: %w", err)
+				}
+			}
+		case sdk.ChunkDone:
+			finalResponse = chunk.Message
 		}
-
-		// Note: Prometheus metrics are now recorded via event bus subscriptions
-		// (EventProviderCallCompleted/EventProviderCallFailed)
 	}
+
+	return finalResponse, accumulatedContent.String(), nil
+}
+
+// sendDoneMessage builds usage info and sends the done message to the client.
+func (s *Server) sendDoneMessage(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, log logr.Logger, finalResponse *sdk.Response, accumulatedContent string, originalContent string) error {
+	responseText, usage := s.buildUsageInfo(ctx, finalResponse, accumulatedContent, originalContent)
 
 	// Build multimodal parts if response contains media
 	var parts []*runtimev1.ContentPart
-	if resp.HasMedia() && s.mediaResolver != nil {
-		parts, err = s.resolveResponseParts(ctx, resp.Parts())
+	if finalResponse != nil && finalResponse.HasMedia() && s.mediaResolver != nil {
+		var err error
+		parts, err = s.resolveResponseParts(ctx, finalResponse.Parts())
 		if err != nil {
 			log.Error(err, "failed to resolve media parts, falling back to text-only")
-			// Continue with text-only response
 		}
 	}
 
@@ -398,6 +423,38 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	}
 
 	return nil
+}
+
+// buildUsageInfo extracts usage info from the final response and records tracing metrics.
+func (s *Server) buildUsageInfo(ctx context.Context, finalResponse *sdk.Response, accumulatedContent string, originalContent string) (string, *runtimev1.Usage) {
+	if finalResponse == nil {
+		return accumulatedContent, nil
+	}
+
+	responseText := finalResponse.Text()
+	if finalResponse.TokensUsed() == 0 {
+		return responseText, nil
+	}
+
+	inputTokens := finalResponse.InputTokens()
+	outputTokens := finalResponse.OutputTokens()
+	costUSD := finalResponse.Cost()
+
+	usage := &runtimev1.Usage{
+		InputTokens:  int32(inputTokens),
+		OutputTokens: int32(outputTokens),
+		CostUsd:      float32(costUSD),
+	}
+
+	// Add LLM metrics to the conversation span
+	if s.tracingProvider != nil {
+		span := trace.SpanFromContext(ctx)
+		tracing.AddLLMMetrics(span, inputTokens, outputTokens, costUSD)
+		tracing.AddConversationMetrics(span, len(originalContent), len(responseText))
+		tracing.SetSuccess(span)
+	}
+
+	return responseText, usage
 }
 
 // resolveResponseParts converts PromptKit ContentParts to gRPC ContentParts,
@@ -504,8 +561,7 @@ func (s *Server) resolveMediaContent(ctx context.Context, media *types.MediaCont
 
 // getOrCreateConversation gets an existing conversation or creates a new one.
 func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) (*sdk.Conversation, error) {
-	log := logctx.LoggerWithContext(s.log, ctx)
-
+	// Try to get existing conversation with read lock
 	s.conversationMu.RLock()
 	conv, exists := s.conversations[sessionID]
 	s.conversationMu.RUnlock()
@@ -514,7 +570,7 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 		return conv, nil
 	}
 
-	// Create new conversation
+	// Create new conversation with write lock
 	s.conversationMu.Lock()
 	defer s.conversationMu.Unlock()
 
@@ -523,32 +579,30 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 		return conv, nil
 	}
 
-	// Build options with conversation ID
-	opts := append([]sdk.Option{
-		sdk.WithConversationID(sessionID),
-	}, s.sdkOptions...)
-
-	// Add mock provider if enabled
-	if s.mockProvider {
-		log.Info("using mock provider for conversation")
-		provider, err := s.createMockProvider()
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, sdk.WithProvider(provider))
+	// Create and initialize the conversation
+	conv, err := s.createConversation(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
 
-	// Try to resume existing conversation first
-	conv, err := sdk.Resume(sessionID, s.packPath, s.promptName, opts...)
+	s.conversations[sessionID] = conv
+	return conv, nil
+}
+
+// createConversation creates and initializes a new conversation with the given session ID.
+func (s *Server) createConversation(ctx context.Context, sessionID string) (*sdk.Conversation, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
+	// Build SDK options with provider
+	opts, err := s.buildConversationOptions(ctx, sessionID)
 	if err != nil {
-		// If resume fails (conversation not found), create new
-		log.V(1).Info("creating new conversation")
-		conv, err = sdk.Open(s.packPath, s.promptName, opts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open pack: %w", err)
-		}
-	} else {
-		log.V(1).Info("resumed existing conversation")
+		return nil, err
+	}
+
+	// Try to resume existing conversation first, or create new
+	conv, err := s.resumeOrOpenConversation(sessionID, opts, log)
+	if err != nil {
+		return nil, err
 	}
 
 	// Register tools with the conversation if available
@@ -562,7 +616,53 @@ func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) 
 	// Subscribe to event bus metrics for observability
 	s.subscribeToEventBusMetrics(sessionID, conv)
 
-	s.conversations[sessionID] = conv
+	return conv, nil
+}
+
+// buildConversationOptions builds the SDK options for a conversation, including provider setup.
+func (s *Server) buildConversationOptions(ctx context.Context, sessionID string) ([]sdk.Option, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
+	opts := append([]sdk.Option{
+		sdk.WithConversationID(sessionID),
+	}, s.sdkOptions...)
+
+	// Add provider based on configuration
+	if s.mockProvider {
+		log.Info("using mock provider for conversation")
+		provider, err := s.createMockProvider()
+		if err != nil {
+			return nil, err
+		}
+		return append(opts, sdk.WithProvider(provider)), nil
+	}
+
+	// Try to create an explicit provider from config
+	provider, err := s.createProviderFromConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider from config: %w", err)
+	}
+	if provider != nil {
+		log.Info("using explicit provider from config", "type", s.providerType)
+		opts = append(opts, sdk.WithProvider(provider))
+	}
+	// If provider is nil, PromptKit will auto-detect from environment
+
+	return opts, nil
+}
+
+// resumeOrOpenConversation tries to resume an existing conversation, or opens a new one.
+func (s *Server) resumeOrOpenConversation(sessionID string, opts []sdk.Option, log logr.Logger) (*sdk.Conversation, error) {
+	conv, err := sdk.Resume(sessionID, s.packPath, s.promptName, opts...)
+	if err != nil {
+		log.V(1).Info("creating new conversation")
+		conv, err = sdk.Open(s.packPath, s.promptName, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open pack: %w", err)
+		}
+	} else {
+		log.V(1).Info("resumed existing conversation")
+	}
 	return conv, nil
 }
 
@@ -578,6 +678,37 @@ func (s *Server) createMockProvider() (*mock.Provider, error) {
 	}
 	// Use in-memory mock provider with default responses
 	return mock.NewProvider("mock", "mock-model", false), nil
+}
+
+// createProviderFromConfig creates a PromptKit provider based on runtime configuration.
+// This is used for explicit provider types (ollama, claude, openai, gemini) when
+// the provider type is not "auto" and not "mock".
+// Returns nil, nil if provider type is empty or "auto" (let PromptKit auto-detect).
+func (s *Server) createProviderFromConfig() (providers.Provider, error) {
+	// Skip if no explicit provider type or if using auto-detection
+	if s.providerType == "" || s.providerType == "auto" {
+		return nil, nil
+	}
+
+	// Create provider from spec
+	spec := providers.ProviderSpec{
+		ID:      s.providerType,
+		Type:    s.providerType,
+		Model:   s.model,
+		BaseURL: s.baseURL,
+	}
+
+	s.log.Info("creating explicit provider from config",
+		"type", s.providerType,
+		"model", s.model,
+		"baseURL", s.baseURL)
+
+	provider, err := providers.CreateProviderFromSpec(spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider from spec: %w", err)
+	}
+
+	return provider, nil
 }
 
 // Mock scenario metadata key.
@@ -1081,4 +1212,103 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"durationMs", data.Duration.Milliseconds(),
 		)
 	})
+}
+
+// buildSendOptions converts gRPC content parts to SDK send options.
+// This enables multimodal messages (images, audio, files) to be sent to the LLM.
+func buildSendOptions(parts []*runtimev1.ContentPart, log logr.Logger) []sdk.SendOption {
+	if len(parts) == 0 {
+		return nil
+	}
+
+	var opts []sdk.SendOption
+	for _, part := range parts {
+		if part.Media == nil {
+			continue
+		}
+
+		opt := processMediaPart(part.Media, log)
+		if opt != nil {
+			opts = append(opts, opt)
+		}
+	}
+
+	return opts
+}
+
+// processMediaPart converts a single media part to an SDK send option based on its type.
+func processMediaPart(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
+	switch {
+	case isImageContentType(media.MimeType):
+		return processImageMedia(media, log)
+	case isAudioContentType(media.MimeType):
+		return processAudioMedia(media, log)
+	default:
+		return processFileMedia(media, log)
+	}
+}
+
+// processImageMedia handles image content (base64 data or URL).
+func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
+	if media.Data != "" {
+		data, err := decodeMediaData(media.Data)
+		if err != nil {
+			log.Error(err, "failed to decode image data")
+			return nil
+		}
+		log.V(1).Info("adding image from data", "mimeType", media.MimeType, "size", len(data))
+		return sdk.WithImageData(data, media.MimeType)
+	}
+	if media.Url != "" {
+		log.V(1).Info("adding image from URL", "url", media.Url)
+		return sdk.WithImageURL(media.Url)
+	}
+	return nil
+}
+
+// processAudioMedia handles audio content.
+func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
+	if media.Data != "" {
+		log.V(1).Info("adding audio from data", "mimeType", media.MimeType)
+		return sdk.WithAudioFile(media.Url) // TODO: SDK needs WithAudioData
+	}
+	return nil
+}
+
+// processFileMedia handles generic file content.
+func processFileMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
+	if media.Data != "" {
+		data, err := decodeMediaData(media.Data)
+		if err != nil {
+			log.Error(err, "failed to decode file data")
+			return nil
+		}
+		log.V(1).Info("adding file from data", "mimeType", media.MimeType, "size", len(data))
+		return sdk.WithFile(media.MimeType, data)
+	}
+	return nil
+}
+
+// decodeMediaData decodes base64-encoded media data.
+// It handles both standard and URL-safe base64 encoding.
+func decodeMediaData(data string) ([]byte, error) {
+	// Try standard base64 first
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	// Try URL-safe base64
+	decoded, err = base64.URLEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	// Try raw (no padding) base64
+	decoded, err = base64.RawStdEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	return nil, fmt.Errorf("failed to decode base64 data: %w", err)
 }

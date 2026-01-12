@@ -3,15 +3,48 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAgents } from "@/hooks";
+import { useAgents, useProvider } from "@/hooks";
 import { cn } from "@/lib/utils";
-import type { AgentRuntimePhase } from "@/types";
+import type { AgentRuntime, AgentRuntimePhase } from "@/types";
 
 const phaseColors: Record<AgentRuntimePhase, string> = {
   Running: "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20",
   Pending: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
   Failed: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
 };
+
+function RecentAgentItem({ agent }: Readonly<{ agent: AgentRuntime }>) {
+  const namespace = agent.metadata.namespace || "default";
+  const { data: provider } = useProvider(agent.spec.providerRef?.name, namespace);
+
+  // Get model from resolved provider, fallback to inline spec, then providerRef name
+  const model = provider?.spec?.model || agent.spec.provider?.model || agent.spec.providerRef?.name || "-";
+
+  return (
+    <div className="flex items-center gap-4">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+        <span className="text-sm font-medium text-primary">
+          {agent.metadata.name.substring(0, 2).toUpperCase()}
+        </span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{agent.metadata.name}</p>
+        <p className="text-xs text-muted-foreground">
+          {namespace} &middot; {model}
+        </p>
+      </div>
+      <Badge
+        variant="outline"
+        className={cn(
+          "text-xs",
+          agent.status?.phase && phaseColors[agent.status.phase]
+        )}
+      >
+        {agent.status?.phase || "Unknown"}
+      </Badge>
+    </div>
+  );
+}
 
 export function RecentAgents() {
   const { data: agents, isLoading } = useAgents();
@@ -58,28 +91,7 @@ export function RecentAgents() {
       <CardContent>
         <div className="space-y-4">
           {recentAgents?.map((agent) => (
-            <div key={agent.metadata.uid} className="flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                <span className="text-sm font-medium text-primary">
-                  {agent.metadata.name.substring(0, 2).toUpperCase()}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{agent.metadata.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {agent.metadata.namespace} &middot; {agent.spec.provider?.model || "claude-sonnet-4-20250514"}
-                </p>
-              </div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-xs",
-                  agent.status?.phase && phaseColors[agent.status.phase]
-                )}
-              >
-                {agent.status?.phase || "Unknown"}
-              </Badge>
-            </div>
+            <RecentAgentItem key={agent.metadata.uid} agent={agent} />
           ))}
         </div>
       </CardContent>

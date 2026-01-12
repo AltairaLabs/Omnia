@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useConsoleTabStore } from "@/hooks/use-console-tab-store";
+import { useConsoleStore, type ConsoleTab } from "@/stores";
 import { AgentConsole } from "./agent-console";
 import { AgentSelector } from "./agent-selector";
 import { Button } from "@/components/ui/button";
@@ -14,18 +14,24 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
  * Manages multiple concurrent agent conversations in tabs.
  */
 export function ConsoleTabs() {
-  const {
-    tabs,
-    activeTabId,
-    createTab,
-    closeTab,
-    setActiveTab,
-    updateTab,
-  } = useConsoleTabStore();
+  const tabs = useConsoleStore((state) => state.tabs);
+  const activeTabId = useConsoleStore((state) => state.activeTabId);
+  const createTab = useConsoleStore((state) => state.createTab);
+  const closeTab = useConsoleStore((state) => state.closeTab);
+  const setActiveTab = useConsoleStore((state) => state.setActiveTab);
+  const updateTab = useConsoleStore((state) => state.updateTab);
 
   // Create an initial tab if none exist
+  // Use a ref to track if we've already tried creating a tab this mount
+  // to avoid race conditions with hydration
+  const hasCreatedInitialTab = useRef(false);
+
   useEffect(() => {
-    if (tabs.length === 0) {
+    // Only create a tab if:
+    // 1. No tabs exist
+    // 2. We haven't already tried to create one this mount cycle
+    if (tabs.length === 0 && !hasCreatedInitialTab.current) {
+      hasCreatedInitialTab.current = true;
       createTab();
     }
   }, [tabs.length, createTab]);
@@ -47,7 +53,7 @@ export function ConsoleTabs() {
     closeTab(tabId);
   };
 
-  const getTabTitle = (tab: typeof tabs[0]): string => {
+  const getTabTitle = (tab: ConsoleTab): string => {
     if (tab.state === "selecting") {
       return "New Session";
     }
@@ -61,16 +67,25 @@ export function ConsoleTabs() {
         <ScrollArea className="flex-1">
           <div className="flex items-center p-1 gap-1">
             {tabs.map((tab) => (
-              <button
+              <div
                 key={tab.id}
+                role="tab"
+                tabIndex={0}
                 onClick={() => setActiveTab(tab.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setActiveTab(tab.id);
+                  }
+                }}
                 className={cn(
-                  "group flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors",
+                  "group flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
                   "hover:bg-background/80",
                   activeTabId === tab.id
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground"
                 )}
+                aria-selected={activeTabId === tab.id}
               >
                 <span className="truncate max-w-[120px]">{getTabTitle(tab)}</span>
                 {tab.state === "active" && tab.namespace && (
@@ -89,7 +104,7 @@ export function ConsoleTabs() {
                 >
                   <X className="h-3 w-3" />
                 </button>
-              </button>
+              </div>
             ))}
           </div>
           <ScrollBar orientation="horizontal" />

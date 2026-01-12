@@ -40,22 +40,35 @@ type RuntimeClientConfig struct {
 	Address string
 	// DialTimeout is the timeout for establishing the connection.
 	DialTimeout time.Duration
+	// MaxMessageSize is the maximum message size in bytes (default 16MB).
+	MaxMessageSize int
 }
 
 // DefaultRuntimeClientConfig returns a RuntimeClientConfig with default values.
 func DefaultRuntimeClientConfig() RuntimeClientConfig {
 	return RuntimeClientConfig{
-		Address:     "localhost:9000",
-		DialTimeout: 10 * time.Second,
+		Address:        "localhost:9000",
+		DialTimeout:    10 * time.Second,
+		MaxMessageSize: 16 * 1024 * 1024, // 16MB to support base64-encoded images
 	}
 }
 
 // NewRuntimeClient creates a new RuntimeClient connected to the runtime sidecar.
 func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
+	// Use default max message size if not specified
+	maxMsgSize := cfg.MaxMessageSize
+	if maxMsgSize == 0 {
+		maxMsgSize = 16 * 1024 * 1024 // 16MB default
+	}
+
 	// Use insecure credentials for localhost sidecar communication.
 	// In production, mTLS could be added for enhanced security.
 	conn, err := grpc.NewClient(cfg.Address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxMsgSize),
+			grpc.MaxCallSendMsgSize(maxMsgSize),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client for %s: %w", cfg.Address, err)

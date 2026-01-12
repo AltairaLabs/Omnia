@@ -1,0 +1,96 @@
+# Values for local Docker Desktop deployment with demo mode and observability
+# Used to verify runtime metrics implementation
+
+# Use local images (Docker Desktop K8s with IfNotPresent)
+image:
+  repository: omnia
+  tag: local
+  pullPolicy: IfNotPresent
+
+facade:
+  image:
+    repository: omnia-facade
+    tag: local
+    pullPolicy: IfNotPresent
+
+# Framework (runtime) image configuration for the operator
+framework:
+  image:
+    repository: omnia-runtime
+    tag: local
+
+dashboard:
+  enabled: true
+  image:
+    repository: omnia-dashboard
+    tag: v2
+    pullPolicy: IfNotPresent
+
+# Enable demo mode with Ollama
+demo:
+  enabled: true
+  namespace: omnia-demo
+  ollama:
+    image:
+      repository: ollama/ollama
+      tag: latest
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    model: llava:7b
+  agent:
+    name: vision-demo
+    handler: runtime
+
+# Enable observability stack
+prometheus:
+  enabled: true
+  server:
+    persistentVolume:
+      enabled: false
+
+grafana:
+  enabled: true
+  adminPassword: admin
+
+# Loki disabled - known issue with Loki 3.0 chart and Docker Desktop local-path provisioner
+# See: https://github.com/AltairaLabs/Omnia/issues/222
+# Error: "mkdir /var/loki/rules: no space left on device" despite PVC being provisioned
+loki:
+  enabled: false
+
+tempo:
+  enabled: true
+  persistence:
+    enabled: false
+
+alloy:
+  enabled: true
+
+# Enable Istio integration
+istio:
+  enabled: true
+
+# Enable external gateway for agent traffic
+gateway:
+  enabled: true
+  className: istio
+
+# Enable internal gateway for observability tools (Grafana, Prometheus)
+internalGateway:
+  enabled: true
+  className: istio
+  grafana:
+    enabled: true
+    path: /grafana
+  prometheus:
+    enabled: true
+    path: /prometheus
+
+# KEDA installed separately, disable subchart
+keda:
+  enabled: false

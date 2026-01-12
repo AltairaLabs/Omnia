@@ -11,6 +11,7 @@ import type {
   DataService,
   AgentRuntime,
   PromptPack,
+  PromptPackContent,
   ToolRegistry,
   Provider,
   Stats,
@@ -25,6 +26,7 @@ import type {
   ServerMessage,
   ConnectionStatus,
   ClientMessage,
+  ContentPart,
 } from "@/types/websocket";
 import { OperatorApiService } from "./operator-service";
 import { PrometheusService } from "./prometheus-service";
@@ -36,6 +38,7 @@ import { PrometheusService } from "./prometheus-service";
 export class LiveAgentConnection implements AgentConnection {
   private status: ConnectionStatus = "disconnected";
   private sessionId: string | null = null;
+  private maxPayloadSize: number | null = null;
   private ws: WebSocket | null = null;
   private readonly messageHandlers: Array<(message: ServerMessage) => void> = [];
   private readonly statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
@@ -91,9 +94,15 @@ export class LiveAgentConnection implements AgentConnection {
 
           const message: ServerMessage = JSON.parse(data);
 
-          // Track session ID from connected message
-          if (message.type === "connected" && message.session_id) {
-            this.sessionId = message.session_id;
+          // Track session ID and capabilities from connected message
+          if (message.type === "connected") {
+            if (message.session_id) {
+              this.sessionId = message.session_id;
+            }
+            // Extract max payload size from server capabilities
+            if (message.connected?.capabilities?.max_payload_size) {
+              this.maxPayloadSize = message.connected.capabilities.max_payload_size;
+            }
           }
 
           this.emitMessage(message);
@@ -112,6 +121,7 @@ export class LiveAgentConnection implements AgentConnection {
         console.warn("[LiveAgentConnection] WebSocket closed:", event.code, event.reason);
         this.ws = null;
         this.sessionId = null;
+        this.maxPayloadSize = null;
         // If we got a close code indicating an error, preserve error status
         if (event.code === 1011 || event.code >= 4000) {
           this.setStatus("error", event.reason || "Connection closed unexpectedly");
@@ -130,10 +140,11 @@ export class LiveAgentConnection implements AgentConnection {
       this.ws = null;
     }
     this.sessionId = null;
+    this.maxPayloadSize = null;
     this.setStatus("disconnected");
   }
 
-  send(content: string, sessionId?: string): void {
+  send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void {
     if (this.ws?.readyState !== WebSocket.OPEN) {
       console.warn("Cannot send message: not connected");
       return;
@@ -141,8 +152,9 @@ export class LiveAgentConnection implements AgentConnection {
 
     const message: ClientMessage = {
       type: "message",
-      session_id: sessionId || this.sessionId || undefined,
+      session_id: options?.sessionId || this.sessionId || undefined,
       content,
+      parts: options?.parts,
     };
 
     this.ws.send(JSON.stringify(message));
@@ -162,6 +174,10 @@ export class LiveAgentConnection implements AgentConnection {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  getMaxPayloadSize(): number | null {
+    return this.maxPayloadSize;
   }
 
   private setStatus(status: ConnectionStatus, error?: string): void {
@@ -225,6 +241,10 @@ export class LiveDataService implements DataService {
     return this.operatorService.getPromptPack(namespace, name);
   }
 
+  async getPromptPackContent(namespace: string, name: string): Promise<PromptPackContent | undefined> {
+    return this.operatorService.getPromptPackContent(namespace, name);
+  }
+
   async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {
     return this.operatorService.getToolRegistries(namespace);
   }
@@ -235,6 +255,11 @@ export class LiveDataService implements DataService {
 
   async getProviders(namespace?: string): Promise<Provider[]> {
     return this.operatorService.getProviders(namespace);
+  }
+
+  async getProvider(namespace: string, name: string): Promise<Provider | undefined> {
+    const providers = await this.getProviders(namespace);
+    return providers.find((p) => p.metadata?.name === name);
   }
 
   async getStats(): Promise<Stats> {

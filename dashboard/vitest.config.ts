@@ -21,6 +21,7 @@ export default defineConfig({
         "**/index.ts",
         "**/index.tsx",
         "src/components/ui/**", // shadcn components - vendor code
+        "src/components/console/markdown.tsx", // visual markdown renderer - tested via E2E
         "src/lib/api/schema.d.ts", // generated API schema
         "src/lib/mock-data.ts", // static mock data for demos
         "src/app/**/layout.tsx", // Next.js layouts

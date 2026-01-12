@@ -7,6 +7,7 @@ import type {
   DataService,
   AgentRuntime,
   PromptPack,
+  PromptPackContent,
   ToolRegistry,
   Provider,
   Stats,
@@ -24,6 +25,7 @@ import type {
 import type {
   ServerMessage,
   ConnectionStatus,
+  ContentPart,
 } from "@/types/websocket";
 
 import {
@@ -122,13 +124,13 @@ export class MockAgentConnection implements AgentConnection {
     this.setStatus("disconnected");
   }
 
-  send(content: string): void {
+  send(content: string, _options?: { sessionId?: string; parts?: ContentPart[] }): void {
     if (this.status !== "connected") {
       console.warn("Cannot send message: not connected");
       return;
     }
 
-    // Simulate response
+    // Simulate response (parts are ignored in mock mode)
     this.simulateResponse(content);
   }
 
@@ -146,6 +148,11 @@ export class MockAgentConnection implements AgentConnection {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  getMaxPayloadSize(): number | null {
+    // Mock returns 16MB to match the default server config
+    return 16 * 1024 * 1024;
   }
 
   private setStatus(status: ConnectionStatus, error?: string): void {
@@ -456,6 +463,30 @@ export class MockDataService implements DataService {
     ) as PromptPack | undefined;
   }
 
+  async getPromptPackContent(_namespace: string, _name: string): Promise<PromptPackContent | undefined> {
+    await delay();
+    // Return mock content
+    return {
+      id: "mock-prompts",
+      name: "Mock Prompts",
+      version: "1.0.0",
+      description: "Mock prompt pack for demo mode",
+      template_engine: {
+        version: "v1",
+        syntax: "{{variable}}",
+      },
+      prompts: {
+        default: {
+          id: "default",
+          name: "Default Prompt",
+          version: "1.0.0",
+          system_template: "You are a helpful AI assistant.",
+          parameters: { temperature: 0.7 },
+        },
+      },
+    };
+  }
+
   async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {
     await delay();
     const registries = mockToolRegistries as ToolRegistry[];
@@ -479,6 +510,11 @@ export class MockDataService implements DataService {
     await delay();
     // No mock providers
     return [];
+  }
+
+  async getProvider(_namespace: string, _name: string): Promise<Provider | undefined> {
+    await delay();
+    return undefined;
   }
 
   async getStats(): Promise<Stats> {

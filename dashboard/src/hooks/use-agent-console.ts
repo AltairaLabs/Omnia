@@ -9,7 +9,7 @@ import type {
   ContentPart,
 } from "@/types/websocket";
 import { useDataService, type AgentConnection } from "@/lib/data";
-import { useConsoleStore, useConsoleStoreBySession } from "./use-console-store";
+import { useConsoleStore, useSession } from "@/stores";
 
 interface UseAgentConsoleOptions {
   agentName: string;
@@ -19,7 +19,7 @@ interface UseAgentConsoleOptions {
 }
 
 interface UseAgentConsoleReturn extends ConsoleState {
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, attachments?: FileAttachment[]) => void;
   connect: () => void;
   disconnect: () => void;
   clearMessages: () => void;
@@ -41,6 +41,35 @@ function extractTextFromParts(parts: ContentPart[]): string {
     .filter((part) => part.type === "text" && part.text)
     .map((part) => part.text!)
     .join("\n");
+}
+
+/**
+ * Convert file attachments to content parts for sending to the server.
+ * Parses the data URL to extract mime type and base64 data.
+ */
+function convertAttachmentsToParts(attachments: FileAttachment[]): ContentPart[] {
+  return attachments.map((attachment) => {
+    // Parse data URL: "data:image/png;base64,..."
+    const match = /^data:([^;]+);base64,(.+)$/.exec(attachment.dataUrl);
+    const mimeType = match?.[1] || attachment.type;
+    const data = match?.[2] || "";
+
+    // Determine content part type from mime type
+    let type: "image" | "audio" | "video" | "file" = "file";
+    if (mimeType.startsWith("image/")) type = "image";
+    else if (mimeType.startsWith("audio/")) type = "audio";
+    else if (mimeType.startsWith("video/")) type = "video";
+
+    return {
+      type,
+      media: {
+        data,
+        mime_type: mimeType,
+        filename: attachment.name,
+        size_bytes: attachment.size,
+      },
+    };
+  });
 }
 
 /**
@@ -88,22 +117,50 @@ export function useAgentConsole({
   const handlersRegistered = useRef(false);
 
   // Use persistent store for state
-  // If customSessionId is provided, use it directly as the store key (for multi-tab support)
-  // Otherwise, fall back to namespace/agentName key (for single-session use)
-  const storeBySession = useConsoleStoreBySession(customSessionId ?? "");
-  const storeByAgent = useConsoleStore(namespace, agentName);
-  const store = customSessionId ? storeBySession : storeByAgent;
+  // sessionId is used as the store key (required for multi-tab support)
+  const tabId = customSessionId || `${namespace}/${agentName}`;
+
+  // Get session state
+  const session = useSession(tabId);
+  const { sessionId, status, messages, error } = session;
+
+  // Get store actions
   const {
-    sessionId,
-    status,
-    messages,
-    error,
     addMessage,
     updateLastMessage,
-    setStatus,
-    setSessionId,
+    setStatus: storeSetStatus,
+    setSessionId: storeSetSessionId,
     clearMessages: storeClearMessages,
-  } = store;
+  } = useConsoleStore();
+
+  // Wrap actions with tabId
+  const setStatus = useCallback(
+    (newStatus: ConsoleState["status"], statusError?: string | null) => {
+      storeSetStatus(tabId, newStatus, statusError);
+    },
+    [tabId, storeSetStatus]
+  );
+
+  const setSessionId = useCallback(
+    (newSessionId: string | null) => {
+      storeSetSessionId(tabId, newSessionId);
+    },
+    [tabId, storeSetSessionId]
+  );
+
+  const addMessageToStore = useCallback(
+    (message: ConsoleMessage) => {
+      addMessage(tabId, message);
+    },
+    [tabId, addMessage]
+  );
+
+  const updateLastMessageInStore = useCallback(
+    (updater: (msg: ConsoleMessage) => ConsoleMessage) => {
+      updateLastMessage(tabId, updater);
+    },
+    [tabId, updateLastMessage]
+  );
 
   // Use refs to access current values in callbacks without dependencies
   const statusRef = useRef(status);
@@ -123,10 +180,10 @@ export function useAgentConsole({
   const handleMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
       case "connected": {
-        const sessionId = message.session_id || null;
-        setSessionId(sessionId);
+        const newSessionId = message.session_id || null;
+        setSessionId(newSessionId);
         // Add system message with session details when session ID is provided
-        if (sessionId) addMessage({ id: generateId(), role: "system", content: `Session started: ${sessionId}`, timestamp: new Date() });
+        if (newSessionId) addMessageToStore({ id: generateId(), role: "system", content: `Session started: ${newSessionId}`, timestamp: new Date() });
         break;
       }
 
@@ -135,9 +192,9 @@ export function useAgentConsole({
         const lastMsg = messagesRef.current[messagesRef.current.length - 1];
         const isStreamingAssistant = lastMsg?.isStreaming && lastMsg.role === "assistant";
         if (isStreamingAssistant) {
-          updateLastMessage((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
+          updateLastMessageInStore((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
         } else {
-          addMessage({
+          addMessageToStore({
             id: generateId(),
             role: "assistant",
             content: message.content || "",
@@ -156,7 +213,7 @@ export function useAgentConsole({
         const attachments = hasParts ? extractAttachmentsFromParts(message.parts!) : [];
         const finalContent = textFromParts || message.content || "";
 
-        updateLastMessage((msg) => ({
+        updateLastMessageInStore((msg) => ({
           ...msg,
           isStreaming: false,
           content: finalContent || msg.content,
@@ -168,7 +225,7 @@ export function useAgentConsole({
       case "tool_call":
         // Add tool call to current message
         if (!message.tool_call) break;
-        updateLastMessage((msg) => ({
+        updateLastMessageInStore((msg) => ({
           ...msg,
           toolCalls: [...(msg.toolCalls || []), {
             id: message.tool_call!.id,
@@ -182,7 +239,7 @@ export function useAgentConsole({
       case "tool_result":
         // Update tool call with result
         if (!message.tool_result) break;
-        updateLastMessage((msg) => {
+        updateLastMessageInStore((msg) => {
           const resultId = message.tool_result!.id;
           const resultStatus = message.tool_result!.error ? "error" as const : "success" as const;
           const toolCalls = msg.toolCalls?.map((tc) =>
@@ -203,7 +260,7 @@ export function useAgentConsole({
         break;
       }
     }
-  }, [addMessage, updateLastMessage, setSessionId, setStatus]);
+  }, [addMessageToStore, updateLastMessageInStore, setSessionId, setStatus]);
 
   // Handle status changes from the connection - stable callback
   const handleStatusChange = useCallback((newStatus: ConsoleState["status"], statusError?: string) => {
@@ -211,14 +268,14 @@ export function useAgentConsole({
 
     // Add system message for status changes
     if (newStatus === "connected" && currentStatus !== "connected") {
-      addMessage({
+      addMessageToStore({
         id: generateId(),
         role: "system",
         content: "Connected to agent",
         timestamp: new Date(),
       });
     } else if (newStatus === "disconnected" && currentStatus === "connected") {
-      addMessage({
+      addMessageToStore({
         id: generateId(),
         role: "system",
         content: "Disconnected from agent",
@@ -226,7 +283,7 @@ export function useAgentConsole({
       });
     } else if (newStatus === "error" && currentStatus !== "error") {
       // Only add error message if we weren't already in error state
-      addMessage({
+      addMessageToStore({
         id: generateId(),
         role: "system",
         content: statusError || "Connection error",
@@ -235,7 +292,7 @@ export function useAgentConsole({
     }
 
     setStatus(newStatus, statusError || null);
-  }, [addMessage, setStatus]);
+  }, [addMessageToStore, setStatus]);
 
   // Connect to the agent
   const connect = useCallback(() => {
@@ -262,31 +319,35 @@ export function useAgentConsole({
   }, []);
 
   // Send a message to the agent
-  const sendMessage = useCallback((content: string) => {
-    if (!content.trim()) return;
+  const sendMessage = useCallback((content: string, attachments?: FileAttachment[]) => {
+    if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-    // Add user message to state
+    // Add user message to state (with attachments for display)
     const userMessage: ConsoleMessage = {
       id: generateId(),
       role: "user",
       content: content.trim(),
       timestamp: new Date(),
+      attachments,
     };
 
-    addMessage(userMessage);
+    addMessageToStore(userMessage);
+
+    // Convert attachments to content parts for sending
+    const parts = attachments?.length ? convertAttachmentsToParts(attachments) : undefined;
 
     // Send to connection
     if (connectionRef.current) {
-      connectionRef.current.send(content.trim());
+      connectionRef.current.send(content.trim(), { parts });
     } else {
       setStatus("error", "Not connected to agent");
     }
-  }, [addMessage, setStatus]);
+  }, [addMessageToStore, setStatus]);
 
   // Clear messages and reset session
   const clearMessages = useCallback(() => {
-    storeClearMessages();
-  }, [storeClearMessages]);
+    storeClearMessages(tabId);
+  }, [storeClearMessages, tabId]);
 
   // Cleanup connection on unmount (but NOT the messages)
   useEffect(() => {

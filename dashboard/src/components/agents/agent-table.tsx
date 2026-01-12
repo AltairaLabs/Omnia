@@ -75,7 +75,7 @@ export function AgentTable({ agents }: Readonly<AgentTableProps>) {
                 {agent.status?.replicas?.desired ?? agent.spec.runtime?.replicas ?? 1}
               </TableCell>
               <TableCell className="capitalize">
-                {agent.spec.provider?.type || "claude"}
+                {agent.spec.providerRef?.name || agent.spec.provider?.type || "-"}
               </TableCell>
               <TableCell>
                 {(() => {

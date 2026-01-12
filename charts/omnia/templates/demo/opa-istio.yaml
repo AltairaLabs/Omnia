@@ -1,0 +1,150 @@
+{{- if and .Values.demo.enabled .Values.demo.opa.enabled (eq .Values.demo.opa.mode "extauthz") .Values.istio.enabled }}
+---
+# OPA Deployment for Istio ext_authz mode
+# Runs as a separate service that Istio's Envoy sidecar calls for authorization
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-opa
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama-opa
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ollama-opa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama-opa
+        app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+        # Disable Istio sidecar injection for OPA itself
+        sidecar.istio.io/inject: "false"
+    spec:
+      containers:
+        - name: opa
+          image: "{{ .Values.demo.opa.image.repository }}:{{ .Values.demo.opa.image.tag }}"
+          imagePullPolicy: {{ .Values.demo.opa.image.pullPolicy }}
+          args:
+            - "run"
+            - "--server"
+            - "--addr=0.0.0.0:8181"
+            - "--diagnostic-addr=0.0.0.0:8282"
+            - "--set=plugins.envoy_ext_authz_grpc.addr=:{{ .Values.demo.opa.extauthz.port }}"
+            - "--set=plugins.envoy_ext_authz_grpc.path=envoy/authz/allow"
+            - "--set=decision_logs.console=true"
+            - "/config/policy.rego"
+          ports:
+            - containerPort: 8181
+              name: http
+            - containerPort: 8282
+              name: diag
+            - containerPort: {{ .Values.demo.opa.extauthz.port }}
+              name: grpc
+          resources:
+            {{- toYaml .Values.demo.opa.resources | nindent 12 }}
+          volumeMounts:
+            - name: opa-config
+              mountPath: /config
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health?plugins
+              port: diag
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health?plugins
+              port: diag
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: opa-config
+          configMap:
+            name: ollama-opa-config
+---
+# OPA Service for ext_authz
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-opa
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama-opa
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  selector:
+    app.kubernetes.io/name: ollama-opa
+  ports:
+    - port: {{ .Values.demo.opa.extauthz.port }}
+      targetPort: grpc
+      name: grpc
+    - port: 8181
+      targetPort: http
+      name: http
+---
+# EnvoyFilter for ext_authz with body inspection
+# Patches Istio's Envoy sidecar on the Ollama pod to call OPA
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: ollama-opa-ext-authz
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: ollama-opa
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  workloadSelector:
+    labels:
+      app.kubernetes.io/name: ollama
+  configPatches:
+    # Add buffer filter for request body inspection
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.buffer
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+            maxRequestBytes: 1048576  # 1MB max body size
+
+    # Add ext_authz filter to call OPA
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.ext_authz
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+            transport_api_version: V3
+            grpc_service:
+              envoy_grpc:
+                cluster_name: outbound|{{ .Values.demo.opa.extauthz.port }}||ollama-opa.{{ .Values.demo.namespace }}.svc.cluster.local
+              timeout: {{ .Values.demo.opa.extauthz.timeout | default "5s" }}
+            with_request_body:
+              max_request_bytes: 65536  # Send up to 64KB of body to OPA
+              allow_partial_message: true
+              pack_as_bytes: false
+            failure_mode_allow: {{ eq (.Values.demo.opa.extauthz.failureMode | default "DENY") "ALLOW" }}
+            status_on_error:
+              code: ServiceUnavailable
+{{- end }}

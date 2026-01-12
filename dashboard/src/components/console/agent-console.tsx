@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAgentConsole, useConsoleConfig } from "@/hooks";
@@ -34,7 +33,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
@@ -66,9 +65,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   // Process dropped files
@@ -149,12 +146,12 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   // Handle send
   const handleSend = useCallback(() => {
     if ((input.trim() || attachments.length > 0) && status === "connected") {
-      sendMessage(input);
+      sendMessage(input, attachments);
       setInput("");
       setAttachments([]);
       textareaRef.current?.focus();
     }
-  }, [input, attachments.length, status, sendMessage]);
+  }, [input, attachments, status, sendMessage]);
 
   // Handle key press
   const handleKeyDown = useCallback(
@@ -325,7 +322,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+      <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <p className="text-center">
@@ -340,9 +337,11 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             {messages.map((message) => (
               <ConsoleMessage key={message.id} message={message} />
             ))}
+            {/* Sentinel element for auto-scroll */}
+            <div ref={messagesEndRef} />
           </div>
         )}
-      </ScrollArea>
+      </div>
 
       {/* Input area */}
       <div className="p-4 border-t bg-muted/30">

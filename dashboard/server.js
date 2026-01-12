@@ -121,9 +121,9 @@ function proxyWebSocket(clientSocket, namespace, name) {
       console.log(`[WS Proxy] Connected to ${namespace}/${name}`);
     });
 
-    upstream.on("message", (data) => {
+    upstream.on("message", (data, isBinary) => {
       if (clientSocket.readyState === WebSocket.OPEN) {
-        clientSocket.send(data);
+        clientSocket.send(data, { binary: isBinary });
       }
     });
 
@@ -172,10 +172,10 @@ function proxyWebSocket(clientSocket, namespace, name) {
       }
     });
 
-    // Forward client messages to upstream
-    clientSocket.on("message", (data) => {
+    // Forward client messages to upstream (preserve binary/text frame type)
+    clientSocket.on("message", (data, isBinary) => {
       if (upstream && upstream.readyState === WebSocket.OPEN) {
-        upstream.send(data);
+        upstream.send(data, { binary: isBinary });
       } else if (!upstreamConnected) {
         // Queue messages or inform client
         console.warn(`[WS Proxy] Client sent message before upstream connected`);

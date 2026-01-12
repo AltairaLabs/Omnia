@@ -95,9 +95,8 @@ metadata:
 spec:
   promptPackRef:
     name: demo-vision-prompts
-  provider:
-    providerRef:
-      name: ollama
+  providerRef:
+    name: ollama
   facade:
     type: websocket
     port: 8080

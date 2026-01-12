@@ -66,6 +66,7 @@ func main() {
 		"promptName", cfg.PromptName,
 		"providerType", cfg.ProviderType,
 		"model", cfg.Model,
+		"baseURL", cfg.BaseURL,
 		"mockProvider", cfg.MockProvider)
 
 	// Create state store for conversation persistence
@@ -139,6 +140,7 @@ func main() {
 		pkruntime.WithMetrics(metrics),
 		pkruntime.WithRuntimeMetrics(runtimeMetrics),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
+		pkruntime.WithBaseURL(cfg.BaseURL),
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
@@ -159,8 +161,12 @@ func main() {
 		}
 	}
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with increased message size for multimodal content
+	const maxMsgSize = 16 * 1024 * 1024 // 16MB to support base64-encoded images
+	grpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+	)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 
 	// Register health service

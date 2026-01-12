@@ -10,6 +10,7 @@ import type { components } from "../api/schema";
 import type {
   ServerMessage,
   ConnectionStatus,
+  ContentPart,
 } from "@/types/websocket";
 
 // Re-export schema types for convenience
@@ -36,6 +37,53 @@ export type AgentPhase = "Pending" | "Running" | "Failed";
 export type PromptPackPhase = "Pending" | "Active" | "Canary" | "Failed";
 export type ToolRegistryPhase = "Pending" | "Ready" | "Degraded" | "Failed";
 export type ProviderPhase = "Pending" | "Ready" | "Failed";
+
+// PromptPack content (resolved from ConfigMap)
+export interface PromptPackContent {
+  id?: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  template_engine?: {
+    version?: string;
+    syntax?: string;
+  };
+  prompts?: Record<string, PromptDefinition>;
+  tools?: ToolDefinition[];
+  fragments?: Record<string, string>;
+  validators?: ValidatorDefinition[];
+}
+
+export interface PromptDefinition {
+  id?: string;
+  name?: string;
+  version?: string;
+  system_template?: string;
+  variables?: PromptVariable[];
+  tools?: string[];
+  parameters?: Record<string, unknown>;
+  validators?: string[];
+}
+
+export interface PromptVariable {
+  name: string;
+  type: string;
+  required?: boolean;
+  values?: string[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface ValidatorDefinition {
+  id: string;
+  name?: string;
+  description?: string;
+  config?: Record<string, unknown>;
+}
 
 /**
  * Kubernetes Event (simplified for dashboard display).
@@ -197,6 +245,7 @@ export interface DataService {
   // PromptPacks
   getPromptPacks(namespace?: string): Promise<PromptPack[]>;
   getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined>;
+  getPromptPackContent(namespace: string, name: string): Promise<PromptPackContent | undefined>;
 
   // ToolRegistries
   getToolRegistries(namespace?: string): Promise<ToolRegistry[]>;
@@ -204,6 +253,7 @@ export interface DataService {
 
   // Providers
   getProviders(namespace?: string): Promise<Provider[]>;
+  getProvider(namespace: string, name: string): Promise<Provider | undefined>;
 
   // Stats & Namespaces
   getStats(): Promise<Stats>;
@@ -228,8 +278,8 @@ export interface AgentConnection {
   /** Disconnect from the agent */
   disconnect(): void;
 
-  /** Send a message to the agent */
-  send(content: string, sessionId?: string): void;
+  /** Send a message to the agent, optionally with multi-modal content parts */
+  send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void;
 
   /** Register a handler for incoming messages */
   onMessage(handler: (message: ServerMessage) => void): void;
@@ -242,4 +292,11 @@ export interface AgentConnection {
 
   /** Get current session ID (if connected) */
   getSessionId(): string | null;
+
+  /**
+   * Get maximum payload size in bytes (from server capabilities).
+   * Returns null if not connected or not yet received.
+   * Files larger than this should use the upload mechanism.
+   */
+  getMaxPayloadSize(): number | null;
 }

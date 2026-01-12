@@ -20,11 +20,11 @@ load('ext://namespace', 'namespace_create')
 # Set to True to enable Prometheus/Grafana for cost tracking development
 ENABLE_OBSERVABILITY = True
 
-# Set to True to enable Ollama for local LLM development
+# Set to True to enable Demo mode with Ollama + OPA model validation
 # Requires: 8GB+ RAM, 10GB+ disk for llava:7b model
-# See config/samples/dev/ollama.yaml for requirements
-# Can be set via environment: ENABLE_OLLAMA=true tilt up
-ENABLE_OLLAMA = os.getenv('ENABLE_OLLAMA', '').lower() in ('true', '1', 'yes') or False
+# Can be set via environment: ENABLE_DEMO=true tilt up
+# Also supports legacy ENABLE_OLLAMA for backwards compatibility
+ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() in ('true', '1', 'yes') or False
 
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind'])
@@ -171,6 +171,20 @@ else:
         'loki.enabled=false',
     ])
 
+if ENABLE_DEMO:
+    # Create demo namespace
+    namespace_create('omnia-demo')
+    helm_set.extend([
+        # Enable demo mode with Ollama
+        'demo.enabled=true',
+        'demo.namespace=omnia-demo',
+        # Enable OPA model validation (sidecar mode, no Istio required)
+        'demo.opa.enabled=true',
+        'demo.opa.mode=sidecar',
+        # Use persistence for model cache
+        'demo.ollama.persistence.enabled=true',
+    ])
+
 # Deploy the Helm chart with development images
 k8s_yaml(helm(
     './charts/omnia',
@@ -214,25 +228,35 @@ if ENABLE_OBSERVABILITY:
     )
 
 # ============================================================================
-# Ollama (Local LLM) for Development
+# Demo Mode Resources (Ollama + OPA)
 # ============================================================================
 
-if ENABLE_OLLAMA:
-    # Apply Ollama manifests
-    local_resource(
-        'ollama-deploy',
-        cmd='kubectl apply -f config/samples/dev/ollama.yaml',
-        deps=['config/samples/dev/ollama.yaml'],
-        labels=['ollama'],
-    )
-
-    # Wait for Ollama to be ready and expose port
+if ENABLE_DEMO:
+    # Configure Ollama StatefulSet with port forward and label
+    # Group related demo resources together
     k8s_resource(
         'ollama',
-        new_name='ollama-server',
-        labels=['ollama'],
-        port_forwards=['11434:11434'],
-        resource_deps=['ollama-deploy'],
+        labels=['demo'],
+        port_forwards=['11434:11434'],  # Ollama API (via Envoy when OPA enabled)
+        extra_pod_selectors={'app.kubernetes.io/name': 'ollama'},
+        objects=[
+            'ollama-models:persistentvolumeclaim',
+            'ollama-opa-config:configmap',
+            'ollama-envoy-config:configmap',
+            'ollama-credentials:secret',
+            'ollama:provider',
+            # Include vision-demo CRs (the Deployment is created by operator)
+            'demo-vision-prompts:configmap',
+            'demo-vision-prompts:promptpack',
+            'vision-demo:agentruntime',
+        ],
+    )
+
+    # Label the model pull job
+    k8s_resource(
+        'ollama-pull-model',
+        labels=['demo'],
+        resource_deps=['ollama'],
     )
 
 # ============================================================================
@@ -240,12 +264,13 @@ if ENABLE_OLLAMA:
 # ============================================================================
 
 # Apply sample resources using local_resource for better control
+# Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples
 local_resource(
     'sample-resources',
     cmd='kubectl apply -f config/samples/dev/',
     deps=['config/samples/dev'],
     labels=['samples'],
-    resource_deps=['omnia-controller-manager'] + (['ollama-server'] if ENABLE_OLLAMA else []),
+    resource_deps=['omnia-controller-manager'],
 )
 
 # Restart agent pods when facade/framework images are rebuilt

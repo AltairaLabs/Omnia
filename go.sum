@@ -22,8 +22,12 @@ cloud.google.com/go/trace v1.11.6 h1:2O2zjPzqPYAHrn3OKl029qlqG6W8ZdYaOWRyr8NgMT4
 cloud.google.com/go/trace v1.11.6/go.mod h1:GA855OeDEBiBMzcckLPE2kDunIpC72N+Pq8WFieFjnI=
 github.com/AltairaLabs/PromptKit/runtime v1.1.6 h1:knLyNdgUYMBWrfFwitYRlh6JhJpfIb+tDQlo26wSGNQ=
 github.com/AltairaLabs/PromptKit/runtime v1.1.6/go.mod h1:m+rWDkMOjdVmXsZC9pAMxgLVkagUwrh/vWuQ6WSF6xg=
+github.com/AltairaLabs/PromptKit/runtime v1.1.7 h1:4sYLL+UH4kBHl4UQd7uh7XJs1I56zJoSIdf2B4aj0E0=
+github.com/AltairaLabs/PromptKit/runtime v1.1.7/go.mod h1:/PQ3T9KAvyvkDkMiMqO//dYpLXohrnoHrvRrdc5pVqc=
 github.com/AltairaLabs/PromptKit/sdk v1.1.6 h1:HgtIZBQ4fxRoexrGZRmzFDJfetL3F35IOzLa2wav1Tk=
 github.com/AltairaLabs/PromptKit/sdk v1.1.6/go.mod h1:c+vAhLWSGFravdRQ1gf9wUTF3CqIiVvFRYiK7QeFoi8=
+github.com/AltairaLabs/PromptKit/sdk v1.1.7 h1:E51wMnPt/lW5uf38Hf5orEjJkmkcciH4aSk+srlMLrw=
+github.com/AltairaLabs/PromptKit/sdk v1.1.7/go.mod h1:c+vAhLWSGFravdRQ1gf9wUTF3CqIiVvFRYiK7QeFoi8=
 github.com/Azure/azure-sdk-for-go/sdk/azcore v1.20.0 h1:JXg2dwJUmPB9JmtVmdEB16APJ7jurfbY5jnfXpJoRMc=
 github.com/Azure/azure-sdk-for-go/sdk/azcore v1.20.0/go.mod h1:YD5h/ldMsG0XiIw7PdyNhLxaM317eFh5yNLccNfGdyw=
 github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1 h1:Hk5QBxZQC1jb2Fwj6mpzme37xbCDdNTxU7O9eb5+LB4=

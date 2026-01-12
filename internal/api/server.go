@@ -23,7 +23,8 @@ import (
 
 // Error message constants.
 const (
-	errMethodNotAllowed = "method not allowed"
+	errMethodNotAllowed    = "method not allowed"
+	errFailedGetPromptPack = "failed to get promptpack"
 )
 
 // Server provides REST API endpoints for the Omnia dashboard.
@@ -611,10 +612,19 @@ func (s *Server) handlePromptPacks(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, packs.Items)
 }
 
-// handlePromptPack gets a specific PromptPack.
+// handlePromptPack gets a specific PromptPack or its content.
 func (s *Server) handlePromptPack(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		return
+	}
+
+	// Check if this is a content request: /api/v1/promptpacks/{namespace}/{name}/content
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/promptpacks/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 3 && parts[2] == "content" {
+		s.handlePromptPackContent(w, r, parts[0], parts[1])
 		return
 	}
 
@@ -630,12 +640,63 @@ func (s *Server) handlePromptPack(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusNotFound, "promptpack not found")
 			return
 		}
-		s.log.Error(err, "failed to get promptpack", "namespace", namespace, "name", name)
-		s.writeError(w, http.StatusInternalServerError, "failed to get promptpack")
+		s.log.Error(err, errFailedGetPromptPack, "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, errFailedGetPromptPack)
 		return
 	}
 
 	s.writeJSON(w, http.StatusOK, pack)
+}
+
+// handlePromptPackContent gets the resolved content (pack.json) of a PromptPack.
+func (s *Server) handlePromptPackContent(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	// Get the PromptPack to find the source ConfigMap
+	var pack omniav1alpha1.PromptPack
+	if err := s.client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &pack); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			s.writeError(w, http.StatusNotFound, "promptpack not found")
+			return
+		}
+		s.log.Error(err, errFailedGetPromptPack, "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, errFailedGetPromptPack)
+		return
+	}
+
+	// Check if source is a ConfigMap
+	if pack.Spec.Source.Type != "configmap" || pack.Spec.Source.ConfigMapRef == nil {
+		s.writeError(w, http.StatusBadRequest, "promptpack source is not a configmap")
+		return
+	}
+
+	// Get the ConfigMap
+	var cm corev1.ConfigMap
+	cmName := pack.Spec.Source.ConfigMapRef.Name
+	if err := s.client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: cmName}, &cm); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			s.writeError(w, http.StatusNotFound, "configmap not found")
+			return
+		}
+		s.log.Error(err, "failed to get configmap", "namespace", namespace, "name", cmName)
+		s.writeError(w, http.StatusInternalServerError, "failed to get configmap")
+		return
+	}
+
+	// Get the pack.json content (default key)
+	content, ok := cm.Data["pack.json"]
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "pack.json not found in configmap")
+		return
+	}
+
+	// Parse and return the JSON content
+	var packContent map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &packContent); err != nil {
+		s.log.Error(err, "failed to parse pack.json")
+		s.writeError(w, http.StatusInternalServerError, "failed to parse pack.json")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, packContent)
 }
 
 // handleToolRegistries lists all ToolRegistries.

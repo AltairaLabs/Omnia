@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"testing"
@@ -118,6 +119,19 @@ func TestServerOptions(t *testing.T) {
 		)
 		assert.Equal(t, "anthropic", server.providerType)
 		assert.Equal(t, "claude-3-opus", server.model)
+	})
+
+	t.Run("WithBaseURL", func(t *testing.T) {
+		server := NewServer(
+			WithBaseURL("http://ollama.localhost:11434"),
+		)
+		assert.Equal(t, "http://ollama.localhost:11434", server.baseURL)
+
+		// Empty base URL should be fine
+		server2 := NewServer(
+			WithBaseURL(""),
+		)
+		assert.Equal(t, "", server2.baseURL)
 	})
 
 	t.Run("WithStateStore", func(t *testing.T) {
@@ -1071,4 +1085,207 @@ func TestIsDocumentContentType(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestBuildSendOptions(t *testing.T) {
+	log := logr.Discard()
+
+	t.Run("empty parts returns nil", func(t *testing.T) {
+		opts := buildSendOptions(nil, log)
+		assert.Nil(t, opts)
+
+		opts = buildSendOptions([]*runtimev1.ContentPart{}, log)
+		assert.Nil(t, opts)
+	})
+
+	t.Run("part without media is skipped", func(t *testing.T) {
+		parts := []*runtimev1.ContentPart{
+			{Text: "just text, no media"},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Empty(t, opts)
+	})
+
+	t.Run("image with base64 data produces send option", func(t *testing.T) {
+		// Small valid base64 image data (1x1 red PNG)
+		pngBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/png",
+					Data:     pngBase64,
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Len(t, opts, 1, "should produce one send option for image")
+	})
+
+	t.Run("image with URL produces send option", func(t *testing.T) {
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/jpeg",
+					Url:      "https://example.com/image.jpg",
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Len(t, opts, 1, "should produce one send option for image URL")
+	})
+
+	t.Run("multiple images produce multiple options", func(t *testing.T) {
+		pngBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/png",
+					Data:     pngBase64,
+				},
+			},
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/jpeg",
+					Url:      "https://example.com/image.jpg",
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Len(t, opts, 2, "should produce two send options")
+	})
+
+	t.Run("invalid base64 is skipped", func(t *testing.T) {
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/png",
+					Data:     "not-valid-base64!!!",
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Empty(t, opts, "invalid base64 should be skipped")
+	})
+
+	t.Run("image without data or URL is skipped", func(t *testing.T) {
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/png",
+					// No Data or Url
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Empty(t, opts, "image without data or URL should be skipped")
+	})
+}
+
+func TestDecodeMediaData(t *testing.T) {
+	t.Run("standard base64", func(t *testing.T) {
+		original := []byte("hello world")
+		encoded := base64.StdEncoding.EncodeToString(original)
+		decoded, err := decodeMediaData(encoded)
+		assert.NoError(t, err)
+		assert.Equal(t, original, decoded)
+	})
+
+	t.Run("URL-safe base64", func(t *testing.T) {
+		original := []byte("hello world")
+		encoded := base64.URLEncoding.EncodeToString(original)
+		decoded, err := decodeMediaData(encoded)
+		assert.NoError(t, err)
+		assert.Equal(t, original, decoded)
+	})
+
+	t.Run("raw base64 no padding", func(t *testing.T) {
+		original := []byte("hello world")
+		encoded := base64.RawStdEncoding.EncodeToString(original)
+		decoded, err := decodeMediaData(encoded)
+		assert.NoError(t, err)
+		assert.Equal(t, original, decoded)
+	})
+
+	t.Run("invalid base64 returns error", func(t *testing.T) {
+		_, err := decodeMediaData("not-valid-base64!!!")
+		assert.Error(t, err)
+	})
+}
+
+func TestServer_CreateProviderFromConfig(t *testing.T) {
+	t.Run("auto provider type returns nil", func(t *testing.T) {
+		server := NewServer(
+			WithLogger(logr.Discard()),
+			WithProviderInfo("auto", ""),
+		)
+		provider, err := server.createProviderFromConfig()
+		assert.NoError(t, err)
+		assert.Nil(t, provider, "auto provider type should return nil")
+	})
+
+	t.Run("empty provider type returns nil", func(t *testing.T) {
+		server := NewServer(
+			WithLogger(logr.Discard()),
+		)
+		provider, err := server.createProviderFromConfig()
+		assert.NoError(t, err)
+		assert.Nil(t, provider, "empty provider type should return nil")
+	})
+
+	t.Run("ollama provider creates explicit provider", func(t *testing.T) {
+		server := NewServer(
+			WithLogger(logr.Discard()),
+			WithProviderInfo("ollama", "llava:7b"),
+			WithBaseURL("http://ollama.localhost:11434"),
+		)
+		provider, err := server.createProviderFromConfig()
+		assert.NoError(t, err)
+		assert.NotNil(t, provider, "ollama provider should create explicit provider")
+		// Ollama uses OpenAI-compatible API, but retains "ollama" as its ID
+		assert.Equal(t, "ollama", provider.ID())
+	})
+
+	t.Run("openai provider creates explicit provider", func(t *testing.T) {
+		// Set API key for openai
+		t.Setenv("OPENAI_API_KEY", "test-key")
+
+		server := NewServer(
+			WithLogger(logr.Discard()),
+			WithProviderInfo("openai", "gpt-4"),
+		)
+		provider, err := server.createProviderFromConfig()
+		assert.NoError(t, err)
+		assert.NotNil(t, provider, "openai provider should create explicit provider")
+		assert.Equal(t, "openai", provider.ID())
+	})
+
+	t.Run("claude provider creates explicit provider", func(t *testing.T) {
+		// Set API key for claude
+		t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+		server := NewServer(
+			WithLogger(logr.Discard()),
+			WithProviderInfo("claude", "claude-3-opus"),
+		)
+		provider, err := server.createProviderFromConfig()
+		assert.NoError(t, err)
+		assert.NotNil(t, provider, "claude provider should create explicit provider")
+		assert.Equal(t, "claude", provider.ID())
+	})
+
+	t.Run("gemini provider creates explicit provider", func(t *testing.T) {
+		// Set API key for gemini
+		t.Setenv("GEMINI_API_KEY", "test-key")
+
+		server := NewServer(
+			WithLogger(logr.Discard()),
+			WithProviderInfo("gemini", "gemini-pro"),
+		)
+		provider, err := server.createProviderFromConfig()
+		assert.NoError(t, err)
+		assert.NotNil(t, provider, "gemini provider should create explicit provider")
+		assert.Equal(t, "gemini", provider.ID())
+	})
 }

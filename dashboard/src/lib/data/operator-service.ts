@@ -8,6 +8,7 @@ import type { paths } from "../api/schema";
 import type {
   AgentRuntime,
   PromptPack,
+  PromptPackContent,
   ToolRegistry,
   Provider,
   Stats,
@@ -165,6 +166,23 @@ export class OperatorApiService {
       throw new Error(`Failed to fetch prompt pack: ${JSON.stringify(error)}`);
     }
     return data as PromptPack | undefined;
+  }
+
+  async getPromptPackContent(
+    namespace: string,
+    name: string
+  ): Promise<PromptPackContent | undefined> {
+    // Call the content endpoint directly (not in OpenAPI schema yet)
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/promptpacks/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/content`
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        return undefined;
+      }
+      throw new Error(`Failed to fetch prompt pack content: ${response.statusText}`);
+    }
+    return response.json() as Promise<PromptPackContent>;
   }
 
   async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {

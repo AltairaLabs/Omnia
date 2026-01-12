@@ -11,6 +11,7 @@ import { CostSparkline } from "@/components/cost";
 import { getMockAgentUsage, mockCostAllocation } from "@/lib/mock-data";
 import { formatCost, calculateCost } from "@/lib/pricing";
 import { useDataService } from "@/lib/data";
+import { useProvider } from "@/hooks";
 import type { AgentRuntime } from "@/types";
 
 interface AgentCardProps {
@@ -21,6 +22,7 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const { metadata, spec, status } = agent;
   const queryClient = useQueryClient();
   const dataService = useDataService();
+  const { data: provider } = useProvider(spec.providerRef?.name, metadata.namespace || "default");
 
   const handleScale = useCallback(async (replicas: number) => {
     await dataService.scaleAgent(metadata.namespace || "default", metadata.name, replicas);
@@ -45,7 +47,8 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const totalCost = costData?.totalCost || 0;
 
   // Determine sparkline color based on provider
-  const sparklineColor = spec.provider?.type === "openai" ? "#8B5CF6" : "#3B82F6";
+  const providerType = provider?.spec?.type || spec.provider?.type;
+  const sparklineColor = providerType === "openai" ? "#8B5CF6" : "#3B82F6";
 
   return (
     <Link href={`/agents/${metadata.name}?namespace=${metadata.namespace}`}>
@@ -78,12 +81,12 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
           <div className="grid grid-cols-2 gap-4 text-sm pt-1">
             <div>
               <p className="text-muted-foreground">Provider</p>
-              <p className="font-medium capitalize">{spec.provider?.type || "claude"}</p>
+              <p className="font-medium capitalize">{providerType || "-"}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Model</p>
-              <p className="font-medium truncate" title={spec.provider?.model}>
-                {spec.provider?.model?.split("-").slice(-2).join("-") || "sonnet-4"}
+              <p className="font-medium truncate" title={provider?.spec?.model || spec.provider?.model}>
+                {(provider?.spec?.model || spec.provider?.model)?.split("-").slice(-2).join("-") || "-"}
               </p>
             </div>
             <div

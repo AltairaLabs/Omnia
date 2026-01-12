@@ -54,12 +54,12 @@ type ServerConfig struct {
 // DefaultServerConfig returns a ServerConfig with default values.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
+		ReadBufferSize:  32 * 1024, // 32KB for large message handling
+		WriteBufferSize: 32 * 1024, // 32KB for large message handling
 		PingInterval:    30 * time.Second,
 		PongTimeout:     60 * time.Second,
 		WriteTimeout:    10 * time.Second,
-		MaxMessageSize:  512 * 1024, // 512KB
+		MaxMessageSize:  16 * 1024 * 1024, // 16MB to support base64-encoded images
 		SessionTTL:      24 * time.Hour,
 	}
 }
@@ -591,14 +591,13 @@ func (s *Server) sendError(c *Connection, sessionID, code, message string) {
 }
 
 func (s *Server) sendConnected(c *Connection, sessionID string) error {
-	if c.binaryCapable {
-		return s.sendMessage(c, NewConnectedMessageWithCapabilities(sessionID, &ConnectionCapabilities{
-			BinaryFrames:    true,
-			MaxPayloadSize:  int(s.config.MaxMessageSize),
-			ProtocolVersion: BinaryVersion,
-		}))
-	}
-	return s.sendMessage(c, NewConnectedMessage(sessionID))
+	// Always send capabilities so clients know the max payload size
+	// for deciding when to use the upload mechanism
+	return s.sendMessage(c, NewConnectedMessageWithCapabilities(sessionID, &ConnectionCapabilities{
+		BinaryFrames:    c.binaryCapable,
+		MaxPayloadSize:  int(s.config.MaxMessageSize),
+		ProtocolVersion: BinaryVersion,
+	}))
 }
 
 // Shutdown gracefully shuts down the server.

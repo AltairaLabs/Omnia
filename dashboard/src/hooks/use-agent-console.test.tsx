@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useAgentConsole } from "./use-agent-console";
-import { clearConsoleState } from "./use-console-store";
+import { useConsoleStore } from "@/stores";
 
 // Mock connection
 const mockConnect = vi.fn();
@@ -31,11 +31,16 @@ vi.stubGlobal("crypto", {
   randomUUID: () => "test-uuid-1234",
 });
 
+// Helper to clear store state
+function clearStoreState() {
+  const store = useConsoleStore.getState();
+  store.clearAllTabs();
+}
+
 describe("useAgentConsole", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearConsoleState("production/my-agent");
-    clearConsoleState("test-session-id");
+    clearStoreState();
   });
 
   it("should return initial state", () => {
@@ -121,7 +126,7 @@ describe("useAgentConsole", () => {
       result.current.sendMessage("Hello, agent!");
     });
 
-    expect(mockSend).toHaveBeenCalledWith("Hello, agent!");
+    expect(mockSend).toHaveBeenCalledWith("Hello, agent!", { parts: undefined });
   });
 
   it("should not send empty messages", () => {
@@ -238,14 +243,14 @@ describe("useAgentConsole", () => {
     });
 
     expect(result.current.messages[0].content).toBe("Hello with spaces");
-    expect(mockSend).toHaveBeenCalledWith("Hello with spaces");
+    expect(mockSend).toHaveBeenCalledWith("Hello with spaces", { parts: undefined });
   });
 });
 
 describe("useAgentConsole message handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearConsoleState("production/test-agent");
+    clearStoreState();
   });
 
   it("should handle connected message", () => {
@@ -582,7 +587,7 @@ describe("useAgentConsole message handling", () => {
 describe("useAgentConsole multi-modal content handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearConsoleState("production/multimodal-agent");
+    clearStoreState();
   });
 
   it("should handle done message with text parts", () => {
@@ -964,7 +969,7 @@ describe("useAgentConsole multi-modal content handling", () => {
 describe("useAgentConsole status change handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearConsoleState("production/status-agent");
+    clearStoreState();
   });
 
   it("should add system message on connect", () => {
