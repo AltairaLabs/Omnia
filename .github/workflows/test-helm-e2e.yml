@@ -195,6 +195,89 @@ jobs:
           kubectl get scaledobject test-scaledobject -n omnia-system
           echo "ScaledObject creation successful with external KEDA"
 
+      - name: Test - Uninstall for observability test
+        run: |
+          helm uninstall omnia -n omnia-system || true
+          helm uninstall keda -n keda || true
+          sleep 5
+
+          # Delete namespaces
+          kubectl delete namespace omnia-system --wait=false --timeout=30s || true
+          kubectl delete namespace keda --wait=false --timeout=30s || true
+
+          # Force remove finalizers if namespace is stuck in Terminating
+          echo "Checking for stuck namespaces..."
+          for ns in omnia-system keda; do
+            if kubectl get namespace $ns 2>/dev/null | grep -q Terminating; then
+              echo "Force-removing finalizers from $ns namespace..."
+              kubectl get namespace $ns -o json | \
+                jq '.spec.finalizers = []' | \
+                kubectl replace --raw "/api/v1/namespaces/$ns/finalize" -f - || true
+            fi
+          done
+
+          # Wait for namespace to be fully terminated
+          echo "Waiting for namespaces to be fully deleted..."
+          for i in {1..60}; do
+            if ! kubectl get namespace omnia-system 2>/dev/null; then
+              echo "Namespace omnia-system deleted"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "WARNING: Namespace still exists after 2 minutes, proceeding anyway"
+            fi
+            echo "Waiting for omnia-system namespace to terminate... ($i/60)"
+            sleep 2
+          done
+
+      - name: Test - Observability stack deployment
+        run: |
+          echo "=== Testing observability stack (Prometheus, Grafana, Loki) ==="
+
+          # Install with observability components enabled
+          helm install omnia ./charts/omnia \
+            --namespace omnia-system \
+            --create-namespace \
+            --set keda.enabled=false \
+            --set prometheus.enabled=true \
+            --set grafana.enabled=true \
+            --set loki.enabled=true \
+            --timeout 5m
+
+          echo "Waiting for observability pods to be created..."
+          sleep 30
+
+          echo "=== Checking Prometheus ==="
+          kubectl get pods -n omnia-system -l "app.kubernetes.io/name=prometheus" || kubectl get pods -n omnia-system | grep prometheus || true
+          kubectl get svc -n omnia-system | grep prometheus || true
+
+          echo "=== Checking Grafana ==="
+          kubectl get pods -n omnia-system -l "app.kubernetes.io/name=grafana" || kubectl get pods -n omnia-system | grep grafana || true
+          kubectl get svc -n omnia-system | grep grafana || true
+
+          echo "=== Checking Loki ==="
+          kubectl get pods -n omnia-system -l "app.kubernetes.io/name=loki" || kubectl get pods -n omnia-system | grep loki || true
+          kubectl get svc -n omnia-system | grep loki || true
+
+          # Verify key services exist
+          echo "=== Verifying key services ==="
+          kubectl get svc -n omnia-system
+
+          # Check that Loki pod is not in CrashLoopBackOff (ruler fix verification)
+          echo "=== Verifying Loki is not crashing ==="
+          sleep 30  # Give pods time to potentially crash
+          LOKI_STATUS=$(kubectl get pods -n omnia-system -l "app.kubernetes.io/name=loki" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "unknown")
+          echo "Loki pod status: $LOKI_STATUS"
+
+          # Check for CrashLoopBackOff
+          if kubectl get pods -n omnia-system | grep -i loki | grep -q "CrashLoopBackOff"; then
+            echo "ERROR: Loki is in CrashLoopBackOff!"
+            kubectl logs -n omnia-system -l "app.kubernetes.io/name=loki" --tail=50 || true
+            exit 1
+          fi
+
+          echo "Observability stack deployment successful!"
+
       - name: Cleanup
         if: always()
         run: |

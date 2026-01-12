@@ -451,6 +451,11 @@ loki:
     enabled: false
   resultsCache:
     enabled: false
+  # -- Disable ruler to avoid "no space left on device" errors on Docker Desktop
+  # The ruler tries to mkdir /var/loki/rules which fails with local-path provisioner
+  # See: https://github.com/grafana/helm-charts/issues/577
+  ruler:
+    enabled: false
 
 # Alloy configuration (unified telemetry collector)
 # See: https://github.com/grafana/helm-charts/tree/main/charts/alloy
