@@ -1,0 +1,5 @@
+{{/*
+This template performs pre-installation checks.
+It doesn't create any resources, just validates the configuration.
+*/}}
+{{- include "omnia.kedaCheck" . -}}

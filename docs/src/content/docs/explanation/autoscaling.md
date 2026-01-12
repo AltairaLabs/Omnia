@@ -84,6 +84,10 @@ Use standard HPA when:
 
 KEDA (Kubernetes Event-Driven Autoscaling) extends HPA with custom metrics and scale-to-zero.
 
+:::note[Installation]
+KEDA can be installed via the Omnia Helm chart (`keda.enabled=true`) or separately. If KEDA is already installed in your cluster, keep `keda.enabled=false` in the Omnia chart—the existing installation will work with Omnia's ScaledObject resources.
+:::
+
 ### How It Works
 
 1. KEDA polls external metric sources (Prometheus, queues, etc.)

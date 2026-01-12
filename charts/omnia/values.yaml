@@ -672,11 +672,17 @@ authentication:
 # KEDA Configuration (Advanced Autoscaling)
 # KEDA enables scale-to-zero, custom metrics scaling, and cron-based scaling
 # See: https://keda.sh/docs/
+#
+# IMPORTANT: If KEDA is already installed in your cluster (e.g., via
+# `helm install keda kedacore/keda`), you MUST keep this disabled to avoid
+# CRD ownership conflicts. The chart will detect existing KEDA installations
+# and fail with a helpful message if you try to enable this subchart.
 # ============================================================================
 
 keda:
   # -- Enable KEDA (Kubernetes Event-driven Autoscaler)
   # Required for AgentRuntime autoscaling with type: keda
+  # Set to false if KEDA is already installed in your cluster
   enabled: false
   # -- KEDA operator configuration
   # See: https://github.com/kedacore/charts/tree/main/keda

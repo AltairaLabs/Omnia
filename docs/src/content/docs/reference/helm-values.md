@@ -506,11 +506,17 @@ authentication:
 
 ## KEDA
 
-Advanced autoscaling with scale-to-zero support:
+Advanced autoscaling with scale-to-zero support.
+
+:::caution[Existing KEDA Installation]
+If KEDA is **already installed** in your cluster (e.g., via `helm install keda kedacore/keda`), you **must** keep `keda.enabled=false` to avoid CRD ownership conflicts. The chart automatically detects existing KEDA installations and will fail with a helpful error message if you try to enable the subchart.
+
+Your existing KEDA installation will work seamlessly with Omnia's ScaledObject resources.
+:::
 
 ```yaml
 keda:
-  enabled: false
+  enabled: false  # Set to true ONLY if KEDA is not already installed
   operator:
     watchNamespace: ""  # Empty = all namespaces
   prometheus:
