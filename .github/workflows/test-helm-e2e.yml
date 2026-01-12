@@ -1,0 +1,207 @@
+name: Helm E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+      - '.github/workflows/test-helm-e2e.yml'
+  pull_request:
+    paths:
+      - 'charts/**'
+      - '.github/workflows/test-helm-e2e.yml'
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  KIND_CLUSTER: helm-e2e-test
+  HELM_VERSION: v3.14.0
+
+jobs:
+  helm-e2e:
+    name: Helm Chart Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name $KIND_CLUSTER --wait 60s
+          kubectl cluster-info --context kind-$KIND_CLUSTER
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          echo "Waiting for cert-manager to be ready..."
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm repo update
+
+      - name: Test - Basic Helm template validation
+        run: |
+          echo "=== Testing helm template generation ==="
+          helm template omnia ./charts/omnia --debug > /dev/null
+          echo "Template generation successful"
+
+      - name: Test - Helm install with KEDA subchart disabled
+        run: |
+          echo "=== Testing basic install (keda.enabled=false) ==="
+          helm install omnia ./charts/omnia \
+            --namespace omnia-system \
+            --create-namespace \
+            --set keda.enabled=false \
+            --wait \
+            --timeout 5m
+
+          echo "Verifying installation..."
+          kubectl get pods -n omnia-system
+          kubectl get deployments -n omnia-system
+
+          echo "Basic install successful"
+
+      - name: Test - Helm upgrade
+        run: |
+          echo "=== Testing helm upgrade ==="
+          helm upgrade omnia ./charts/omnia \
+            --namespace omnia-system \
+            --set keda.enabled=false \
+            --wait \
+            --timeout 5m
+
+          echo "Upgrade successful"
+
+      - name: Test - Uninstall for next test
+        run: |
+          helm uninstall omnia -n omnia-system
+          kubectl delete namespace omnia-system --wait=true
+
+      - name: Test - KEDA conflict detection
+        run: |
+          echo "=== Testing KEDA conflict detection ==="
+
+          # First, install KEDA separately
+          echo "Installing KEDA separately..."
+          helm install keda kedacore/keda \
+            --namespace keda \
+            --create-namespace \
+            --wait \
+            --timeout 5m
+
+          # Verify KEDA CRD exists
+          kubectl get crd scaledobjects.keda.sh
+
+          # Now try to install omnia with keda.enabled=true - should FAIL
+          echo "Attempting to install omnia with keda.enabled=true (should fail)..."
+          if helm install omnia ./charts/omnia \
+            --namespace omnia-system \
+            --create-namespace \
+            --set keda.enabled=true \
+            --timeout 1m 2>&1 | tee /tmp/helm-output.txt; then
+            echo "ERROR: Installation should have failed but succeeded!"
+            exit 1
+          fi
+
+          # Verify we got the expected error message
+          if grep -q "KEDA is already installed" /tmp/helm-output.txt; then
+            echo "Got expected KEDA conflict error message"
+          else
+            echo "ERROR: Did not get expected KEDA conflict error message"
+            cat /tmp/helm-output.txt
+            exit 1
+          fi
+
+          # Now install with keda.enabled=false - should SUCCEED
+          echo "Installing omnia with keda.enabled=false (should succeed)..."
+          helm install omnia ./charts/omnia \
+            --namespace omnia-system \
+            --create-namespace \
+            --set keda.enabled=false \
+            --wait \
+            --timeout 5m
+
+          echo "KEDA conflict detection test passed!"
+
+      - name: Test - Verify ScaledObject works with external KEDA
+        run: |
+          echo "=== Testing ScaledObject with external KEDA ==="
+
+          # Create a test ScaledObject to verify it works with external KEDA
+          cat <<EOF | kubectl apply -f -
+          apiVersion: keda.sh/v1alpha1
+          kind: ScaledObject
+          metadata:
+            name: test-scaledobject
+            namespace: omnia-system
+          spec:
+            scaleTargetRef:
+              name: omnia-controller-manager
+            minReplicaCount: 1
+            maxReplicaCount: 3
+            triggers:
+              - type: cpu
+                metadata:
+                  type: Utilization
+                  value: "80"
+          EOF
+
+          # Verify ScaledObject was created
+          kubectl get scaledobject test-scaledobject -n omnia-system
+          echo "ScaledObject creation successful with external KEDA"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name $KIND_CLUSTER || true
+
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Lint chart
+        run: |
+          helm lint ./charts/omnia
+
+      - name: Validate chart metadata
+        run: |
+          echo "=== Validating Chart.yaml ==="
+          cat ./charts/omnia/Chart.yaml
+
+          # Check required fields
+          grep -q "^name:" ./charts/omnia/Chart.yaml
+          grep -q "^version:" ./charts/omnia/Chart.yaml
+          grep -q "^appVersion:" ./charts/omnia/Chart.yaml
+
+          echo "Chart metadata validation passed"
