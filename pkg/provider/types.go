@@ -29,8 +29,6 @@ type Type string
 
 // Provider type constants.
 const (
-	// TypeAuto uses PromptKit's auto-detection based on available credentials.
-	TypeAuto Type = "auto"
 	// TypeClaude uses Anthropic's Claude models.
 	TypeClaude Type = "claude"
 	// TypeOpenAI uses OpenAI's GPT models.
@@ -48,7 +46,6 @@ const (
 // ValidTypes contains all valid provider types.
 // Used for validation across components.
 var ValidTypes = []Type{
-	TypeAuto,
 	TypeClaude,
 	TypeOpenAI,
 	TypeGemini,

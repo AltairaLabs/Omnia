@@ -7,7 +7,7 @@ export type AgentRuntimePhase = "Pending" | "Running" | "Failed";
 export type FacadeType = "websocket" | "grpc";
 export type HandlerMode = "echo" | "demo" | "runtime";
 export type SessionStoreType = "memory" | "redis" | "postgres";
-export type ProviderType = "auto" | "claude" | "openai" | "gemini" | "ollama" | "mock";
+export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
 export type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
 

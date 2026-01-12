@@ -409,19 +409,18 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                   type:
-                    default: auto
                     description: |-
                       type specifies the provider type.
-                      "auto" uses PromptKit's auto-detection based on available credentials.
-                      "claude", "openai", "gemini" explicitly select a provider.
+                      "claude", "openai", "gemini", "ollama", or "mock".
                     enum:
-                    - auto
                     - claude
                     - openai
                     - gemini
                     - ollama
                     - mock
                     type: string
+                required:
+                - type
                 type: object
               providerRef:
                 description: |-

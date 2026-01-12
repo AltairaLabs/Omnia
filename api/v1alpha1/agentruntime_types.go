@@ -243,12 +243,10 @@ type AutoscalingConfig struct {
 }
 
 // ProviderType defines the LLM provider type.
-// +kubebuilder:validation:Enum=auto;claude;openai;gemini;ollama;mock
+// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock
 type ProviderType string
 
 const (
-	// ProviderTypeAuto uses PromptKit's auto-detection based on available credentials.
-	ProviderTypeAuto ProviderType = "auto"
 	// ProviderTypeClaude uses Anthropic's Claude models.
 	ProviderTypeClaude ProviderType = "claude"
 	// ProviderTypeOpenAI uses OpenAI's GPT models.
@@ -313,11 +311,9 @@ type ProviderRef struct {
 // ProviderConfig defines the LLM provider configuration.
 type ProviderConfig struct {
 	// type specifies the provider type.
-	// "auto" uses PromptKit's auto-detection based on available credentials.
-	// "claude", "openai", "gemini" explicitly select a provider.
-	// +kubebuilder:default=auto
-	// +optional
-	Type ProviderType `json:"type,omitempty"`
+	// "claude", "openai", "gemini", "ollama", or "mock".
+	// +kubebuilder:validation:Required
+	Type ProviderType `json:"type"`
 
 	// model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
 	// If not specified, the provider's default model is used.

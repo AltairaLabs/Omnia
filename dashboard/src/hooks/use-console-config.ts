@@ -19,7 +19,7 @@ export interface ConsoleConfigResult {
   config: AttachmentConfig;
   /** Resolved media requirements based on provider */
   mediaRequirements: MediaRequirements;
-  /** The resolved provider type (may be undefined if "auto") */
+  /** The resolved provider type (may be undefined if not configured) */
   providerType: ProviderType | undefined;
   /** Whether the agent config is still loading */
   isLoading: boolean;

@@ -451,10 +451,5 @@ var _ = Describe("Provider Controller", func() {
 			Expect(keys).To(ContainElement("GEMINI_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
-
-		It("should return generic keys for auto", func() {
-			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeAuto)
-			Expect(keys).To(ContainElement("api-key"))
-		})
 	})
 })

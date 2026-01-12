@@ -189,7 +189,6 @@ func TestLoadConfig_ProviderTypes(t *testing.T) {
 		providerType string
 		expected     string
 	}{
-		{"auto", "auto", string(provider.TypeAuto)},
 		{"claude", "claude", string(provider.TypeClaude)},
 		{"openai", "openai", string(provider.TypeOpenAI)},
 		{"gemini", "gemini", string(provider.TypeGemini)},
@@ -248,7 +247,7 @@ func TestLoadConfig_MockConfigDirectEnvTakesPrecedence(t *testing.T) {
 }
 
 func TestLoadConfig_MockProviderNotAutoEnabledForOtherTypes(t *testing.T) {
-	testCases := []string{"auto", "claude", "openai", "gemini", "ollama"}
+	testCases := []string{"claude", "openai", "gemini", "ollama"}
 
 	for _, providerType := range testCases {
 		t.Run(providerType, func(t *testing.T) {

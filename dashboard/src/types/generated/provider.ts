@@ -45,7 +45,7 @@ export interface ProviderSpec {
     name: string;
   };
   /** type specifies the provider type. */
-  type: "auto" | "claude" | "openai" | "gemini" | "ollama" | "mock";
+  type: "claude" | "openai" | "gemini" | "ollama" | "mock";
   /** validateCredentials enables credential validation on reconciliation.
    * When enabled, the controller attempts to verify credentials with the provider. */
   validateCredentials?: boolean;

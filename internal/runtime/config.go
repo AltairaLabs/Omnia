@@ -42,7 +42,7 @@ type Config struct {
 	SessionTTL  time.Duration // Session TTL
 
 	// Provider configuration
-	ProviderType string // "auto", "claude", "openai", "gemini"
+	ProviderType string // "claude", "openai", "gemini", "ollama", "mock"
 	Model        string // Model override (e.g., "claude-3-opus")
 	BaseURL      string // Custom base URL for API calls
 
@@ -96,7 +96,7 @@ const (
 	defaultPromptName      = "default"
 	defaultSessionType     = "memory"
 	defaultSessionTTL      = 24 * time.Hour
-	defaultProviderType    = "auto"
+	defaultProviderType    = "" // Provider type must be explicitly set
 	defaultMediaBasePath   = "/etc/omnia/media"
 	defaultToolsConfigPath = "/etc/omnia/tools/tools.yaml"
 	defaultGRPCPort        = 9000
@@ -254,7 +254,11 @@ func (cfg *Config) validateSessionConfig() error {
 }
 
 // validateProviderType validates the provider type.
+// Empty provider type is allowed (means no provider configured).
 func (cfg *Config) validateProviderType() error {
+	if cfg.ProviderType == "" {
+		return nil // Empty is valid - no provider configured
+	}
 	if !provider.Type(cfg.ProviderType).IsValid() {
 		return fmt.Errorf("invalid %s: must be one of %v", envProviderType, provider.ValidTypes)
 	}
