@@ -3,7 +3,11 @@
  * Supports configurable MIME types with wildcard patterns (e.g., "image/*").
  */
 
-import type { ConsoleConfig } from "@/types/agent-runtime";
+import type {
+  ConsoleConfig,
+  Dimensions,
+  CompressionGuidance,
+} from "@/types/agent-runtime";
 
 // Default values matching current hardcoded behavior
 export const DEFAULT_ALLOWED_MIME_TYPES = [
@@ -175,4 +179,84 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// =============================================================================
+// Media Requirements Utilities
+// =============================================================================
+
+/**
+ * Check if an image needs resizing based on maximum dimensions.
+ */
+export function needsResize(
+  actualWidth: number,
+  actualHeight: number,
+  maxDimensions?: Dimensions
+): boolean {
+  if (!maxDimensions) return false;
+  return actualWidth > maxDimensions.width || actualHeight > maxDimensions.height;
+}
+
+/**
+ * Calculate target dimensions while maintaining aspect ratio.
+ * Returns dimensions that fit within maxDimensions while preserving aspect ratio.
+ */
+export function calculateResizedDimensions(
+  actualWidth: number,
+  actualHeight: number,
+  maxDimensions: Dimensions
+): Dimensions {
+  const widthRatio = maxDimensions.width / actualWidth;
+  const heightRatio = maxDimensions.height / actualHeight;
+  const ratio = Math.min(widthRatio, heightRatio, 1);
+
+  return {
+    width: Math.round(actualWidth * ratio),
+    height: Math.round(actualHeight * ratio),
+  };
+}
+
+/**
+ * Determine if image compression is recommended based on file size and guidance.
+ */
+export function shouldCompress(
+  fileSize: number,
+  maxSizeBytes: number | undefined,
+  guidance: CompressionGuidance | undefined
+): boolean {
+  // Always compress if file exceeds max size
+  if (maxSizeBytes && fileSize > maxSizeBytes) return true;
+  // Compress based on guidance (anything except "none" suggests compression)
+  if (guidance && guidance !== "none") return true;
+  return false;
+}
+
+/**
+ * Get recommended compression quality based on guidance.
+ * Returns a value from 0-1 suitable for canvas.toBlob quality parameter.
+ */
+export function getCompressionQuality(guidance: CompressionGuidance | undefined): number {
+  switch (guidance) {
+    case "lossless":
+      return 1.0;
+    case "lossy-high":
+      return 0.92;
+    case "lossy-medium":
+      return 0.85;
+    case "lossy-low":
+      return 0.7;
+    default:
+      return 0.92; // Default to high quality
+  }
+}
+
+/**
+ * Format duration in seconds for display.
+ */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
 }

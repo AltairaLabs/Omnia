@@ -294,6 +294,70 @@ export interface components {
              * @default 5
              */
             maxFiles: number;
+            mediaRequirements?: components["schemas"]["MediaRequirements"];
+        };
+        /** @description Width and height in pixels */
+        Dimensions: {
+            /** @description Width in pixels */
+            width: number;
+            /** @description Height in pixels */
+            height: number;
+        };
+        /** @description Requirements for image media */
+        ImageRequirements: {
+            /**
+             * Format: int64
+             * @description Maximum file size in bytes for images
+             */
+            maxSizeBytes?: number;
+            maxDimensions?: components["schemas"]["Dimensions"];
+            recommendedDimensions?: components["schemas"]["Dimensions"];
+            /** @description Supported image formats (e.g., "png", "jpeg", "gif", "webp") */
+            supportedFormats?: string[];
+            /** @description Preferred format for best results */
+            preferredFormat?: string;
+            /**
+             * @description Guidance on image compression
+             * @enum {string}
+             */
+            compressionGuidance?: "none" | "lossless" | "lossy-high" | "lossy-medium" | "lossy-low";
+        };
+        /** @description Requirements for video media */
+        VideoRequirements: {
+            /** @description Maximum video duration in seconds */
+            maxDurationSeconds?: number;
+            /** @description Whether segment selection is supported */
+            supportsSegmentSelection?: boolean;
+            /**
+             * @description How video is processed
+             * @enum {string}
+             */
+            processingMode?: "frames" | "transcription" | "both" | "native";
+            /** @description Interval in seconds between extracted frames */
+            frameExtractionInterval?: number;
+        };
+        /** @description Requirements for audio media */
+        AudioRequirements: {
+            /** @description Maximum audio duration in seconds */
+            maxDurationSeconds?: number;
+            /** @description Recommended sample rate in Hz */
+            recommendedSampleRate?: number;
+            /** @description Whether segment selection is supported */
+            supportsSegmentSelection?: boolean;
+        };
+        /** @description Requirements for document media */
+        DocumentRequirements: {
+            /** @description Maximum number of pages */
+            maxPages?: number;
+            /** @description Whether OCR is supported for scanned documents */
+            supportsOCR?: boolean;
+        };
+        /** @description Provider-specific requirements for different media types */
+        MediaRequirements: {
+            image?: components["schemas"]["ImageRequirements"];
+            video?: components["schemas"]["VideoRequirements"];
+            audio?: components["schemas"]["AudioRequirements"];
+            document?: components["schemas"]["DocumentRequirements"];
         };
         AgentRuntimeStatus: {
             /** @enum {string} */

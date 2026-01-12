@@ -425,6 +425,124 @@ type ConsoleConfig struct {
 	// +kubebuilder:default=5
 	// +optional
 	MaxFiles *int32 `json:"maxFiles,omitempty"`
+
+	// mediaRequirements defines provider-specific requirements for different media types.
+	// When not specified, the dashboard applies sensible defaults based on the provider type.
+	// +optional
+	MediaRequirements *MediaRequirements `json:"mediaRequirements,omitempty"`
+}
+
+// Dimensions represents width and height in pixels.
+type Dimensions struct {
+	// width in pixels.
+	// +kubebuilder:validation:Minimum=1
+	Width int32 `json:"width"`
+
+	// height in pixels.
+	// +kubebuilder:validation:Minimum=1
+	Height int32 `json:"height"`
+}
+
+// ImageRequirements defines requirements for image media.
+type ImageRequirements struct {
+	// maxSizeBytes is the maximum file size in bytes for images.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxSizeBytes *int64 `json:"maxSizeBytes,omitempty"`
+
+	// maxDimensions specifies the maximum width and height.
+	// Images exceeding these will need to be resized.
+	// +optional
+	MaxDimensions *Dimensions `json:"maxDimensions,omitempty"`
+
+	// recommendedDimensions specifies optimal dimensions for best results.
+	// +optional
+	RecommendedDimensions *Dimensions `json:"recommendedDimensions,omitempty"`
+
+	// supportedFormats lists supported image formats (e.g., "png", "jpeg", "gif", "webp").
+	// +optional
+	SupportedFormats []string `json:"supportedFormats,omitempty"`
+
+	// preferredFormat is the format that yields best results with this provider.
+	// +optional
+	PreferredFormat string `json:"preferredFormat,omitempty"`
+
+	// compressionGuidance provides guidance on image compression.
+	// +kubebuilder:validation:Enum=none;lossless;lossy-high;lossy-medium;lossy-low
+	// +optional
+	CompressionGuidance string `json:"compressionGuidance,omitempty"`
+}
+
+// VideoRequirements defines requirements for video media.
+type VideoRequirements struct {
+	// maxDurationSeconds is the maximum video duration.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxDurationSeconds *int32 `json:"maxDurationSeconds,omitempty"`
+
+	// supportsSegmentSelection indicates if the provider supports selecting video segments.
+	// +optional
+	SupportsSegmentSelection bool `json:"supportsSegmentSelection,omitempty"`
+
+	// processingMode indicates how video is processed.
+	// +kubebuilder:validation:Enum=frames;transcription;both;native
+	// +optional
+	ProcessingMode string `json:"processingMode,omitempty"`
+
+	// frameExtractionInterval is the interval in seconds between extracted frames.
+	// Only applicable when processingMode includes "frames".
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	FrameExtractionInterval *int32 `json:"frameExtractionInterval,omitempty"`
+}
+
+// AudioRequirements defines requirements for audio media.
+type AudioRequirements struct {
+	// maxDurationSeconds is the maximum audio duration.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxDurationSeconds *int32 `json:"maxDurationSeconds,omitempty"`
+
+	// recommendedSampleRate is the optimal sample rate in Hz.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RecommendedSampleRate *int32 `json:"recommendedSampleRate,omitempty"`
+
+	// supportsSegmentSelection indicates if the provider supports selecting audio segments.
+	// +optional
+	SupportsSegmentSelection bool `json:"supportsSegmentSelection,omitempty"`
+}
+
+// DocumentRequirements defines requirements for document media.
+type DocumentRequirements struct {
+	// maxPages is the maximum number of pages that can be processed.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxPages *int32 `json:"maxPages,omitempty"`
+
+	// supportsOCR indicates if the provider supports OCR for scanned documents.
+	// +optional
+	SupportsOCR bool `json:"supportsOCR,omitempty"`
+}
+
+// MediaRequirements defines provider-specific requirements for different media types.
+// These requirements help the dashboard optimize file handling and provide user guidance.
+type MediaRequirements struct {
+	// image defines requirements for image files.
+	// +optional
+	Image *ImageRequirements `json:"image,omitempty"`
+
+	// video defines requirements for video files.
+	// +optional
+	Video *VideoRequirements `json:"video,omitempty"`
+
+	// audio defines requirements for audio files.
+	// +optional
+	Audio *AudioRequirements `json:"audio,omitempty"`
+
+	// document defines requirements for document files (PDFs, etc.).
+	// +optional
+	Document *DocumentRequirements `json:"document,omitempty"`
 }
 
 // RuntimeConfig defines deployment-related settings.

@@ -544,6 +544,109 @@ components:
           default: 5
           minimum: 1
           maximum: 20
+        mediaRequirements:
+          $ref: '#/components/schemas/MediaRequirements'
+
+    Dimensions:
+      type: object
+      description: Width and height in pixels
+      required: [width, height]
+      properties:
+        width:
+          type: integer
+          minimum: 1
+          description: Width in pixels
+        height:
+          type: integer
+          minimum: 1
+          description: Height in pixels
+
+    ImageRequirements:
+      type: object
+      description: Requirements for image media
+      properties:
+        maxSizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Maximum file size in bytes for images
+        maxDimensions:
+          $ref: '#/components/schemas/Dimensions'
+        recommendedDimensions:
+          $ref: '#/components/schemas/Dimensions'
+        supportedFormats:
+          type: array
+          items:
+            type: string
+          description: Supported image formats (e.g., "png", "jpeg", "gif", "webp")
+        preferredFormat:
+          type: string
+          description: Preferred format for best results
+        compressionGuidance:
+          type: string
+          enum: [none, lossless, lossy-high, lossy-medium, lossy-low]
+          description: Guidance on image compression
+
+    VideoRequirements:
+      type: object
+      description: Requirements for video media
+      properties:
+        maxDurationSeconds:
+          type: integer
+          minimum: 1
+          description: Maximum video duration in seconds
+        supportsSegmentSelection:
+          type: boolean
+          description: Whether segment selection is supported
+        processingMode:
+          type: string
+          enum: [frames, transcription, both, native]
+          description: How video is processed
+        frameExtractionInterval:
+          type: integer
+          minimum: 1
+          description: Interval in seconds between extracted frames
+
+    AudioRequirements:
+      type: object
+      description: Requirements for audio media
+      properties:
+        maxDurationSeconds:
+          type: integer
+          minimum: 1
+          description: Maximum audio duration in seconds
+        recommendedSampleRate:
+          type: integer
+          minimum: 1
+          description: Recommended sample rate in Hz
+        supportsSegmentSelection:
+          type: boolean
+          description: Whether segment selection is supported
+
+    DocumentRequirements:
+      type: object
+      description: Requirements for document media
+      properties:
+        maxPages:
+          type: integer
+          minimum: 1
+          description: Maximum number of pages
+        supportsOCR:
+          type: boolean
+          description: Whether OCR is supported for scanned documents
+
+    MediaRequirements:
+      type: object
+      description: Provider-specific requirements for different media types
+      properties:
+        image:
+          $ref: '#/components/schemas/ImageRequirements'
+        video:
+          $ref: '#/components/schemas/VideoRequirements'
+        audio:
+          $ref: '#/components/schemas/AudioRequirements'
+        document:
+          $ref: '#/components/schemas/DocumentRequirements'
 
     AgentRuntimeStatus:
       type: object

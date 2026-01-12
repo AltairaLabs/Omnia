@@ -89,6 +89,141 @@ spec:
                     maximum: 20
                     minimum: 1
                     type: integer
+                  mediaRequirements:
+                    description: |-
+                      mediaRequirements defines provider-specific requirements for different media types.
+                      When not specified, the dashboard applies sensible defaults based on the provider type.
+                    properties:
+                      audio:
+                        description: audio defines requirements for audio files.
+                        properties:
+                          maxDurationSeconds:
+                            description: maxDurationSeconds is the maximum audio duration.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          recommendedSampleRate:
+                            description: recommendedSampleRate is the optimal sample
+                              rate in Hz.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          supportsSegmentSelection:
+                            description: supportsSegmentSelection indicates if the
+                              provider supports selecting audio segments.
+                            type: boolean
+                        type: object
+                      document:
+                        description: document defines requirements for document files
+                          (PDFs, etc.).
+                        properties:
+                          maxPages:
+                            description: maxPages is the maximum number of pages that
+                              can be processed.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          supportsOCR:
+                            description: supportsOCR indicates if the provider supports
+                              OCR for scanned documents.
+                            type: boolean
+                        type: object
+                      image:
+                        description: image defines requirements for image files.
+                        properties:
+                          compressionGuidance:
+                            description: compressionGuidance provides guidance on
+                              image compression.
+                            enum:
+                            - none
+                            - lossless
+                            - lossy-high
+                            - lossy-medium
+                            - lossy-low
+                            type: string
+                          maxDimensions:
+                            description: |-
+                              maxDimensions specifies the maximum width and height.
+                              Images exceeding these will need to be resized.
+                            properties:
+                              height:
+                                description: height in pixels.
+                                format: int32
+                                minimum: 1
+                                type: integer
+                              width:
+                                description: width in pixels.
+                                format: int32
+                                minimum: 1
+                                type: integer
+                            required:
+                            - height
+                            - width
+                            type: object
+                          maxSizeBytes:
+                            description: maxSizeBytes is the maximum file size in
+                              bytes for images.
+                            format: int64
+                            minimum: 1
+                            type: integer
+                          preferredFormat:
+                            description: preferredFormat is the format that yields
+                              best results with this provider.
+                            type: string
+                          recommendedDimensions:
+                            description: recommendedDimensions specifies optimal dimensions
+                              for best results.
+                            properties:
+                              height:
+                                description: height in pixels.
+                                format: int32
+                                minimum: 1
+                                type: integer
+                              width:
+                                description: width in pixels.
+                                format: int32
+                                minimum: 1
+                                type: integer
+                            required:
+                            - height
+                            - width
+                            type: object
+                          supportedFormats:
+                            description: supportedFormats lists supported image formats
+                              (e.g., "png", "jpeg", "gif", "webp").
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                      video:
+                        description: video defines requirements for video files.
+                        properties:
+                          frameExtractionInterval:
+                            description: |-
+                              frameExtractionInterval is the interval in seconds between extracted frames.
+                              Only applicable when processingMode includes "frames".
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          maxDurationSeconds:
+                            description: maxDurationSeconds is the maximum video duration.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          processingMode:
+                            description: processingMode indicates how video is processed.
+                            enum:
+                            - frames
+                            - transcription
+                            - both
+                            - native
+                            type: string
+                          supportsSegmentSelection:
+                            description: supportsSegmentSelection indicates if the
+                              provider supports selecting video segments.
+                            type: boolean
+                        type: object
+                    type: object
                 type: object
               facade:
                 description: facade configures the client-facing connection interface.
