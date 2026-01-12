@@ -45,6 +45,9 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+            - name: ws
+              containerPort: 3002
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: {{ include "omnia.dashboard.fullname" . }}

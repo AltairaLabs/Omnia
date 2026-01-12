@@ -12,6 +12,10 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    - port: 3002
+      targetPort: ws
+      protocol: TCP
+      name: ws
   selector:
     {{- include "omnia.dashboard.selectorLabels" . | nindent 4 }}
 {{- end }}
