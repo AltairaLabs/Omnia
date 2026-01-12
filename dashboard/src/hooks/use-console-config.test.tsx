@@ -40,6 +40,12 @@ vi.mock("./use-agents", () => ({
   useAgent: (...args: unknown[]) => mockUseAgent(...args),
 }));
 
+// Mock useProvider hook
+const mockUseProvider = vi.fn();
+vi.mock("./use-provider", () => ({
+  useProvider: (...args: unknown[]) => mockUseProvider(...args),
+}));
+
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -55,6 +61,12 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 describe("useConsoleConfig", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default mock for useProvider - no provider ref
+    mockUseProvider.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+    });
   });
 
   it("should return loading state initially", () => {
@@ -168,5 +180,126 @@ describe("useConsoleConfig", () => {
 
     // Should have default config values from buildAttachmentConfig(undefined)
     expect(result.current.config).toBeDefined();
+  });
+
+  it("should return conservative media requirements when no provider specified", async () => {
+    mockUseAgent.mockReturnValue({
+      data: mockAgentWithoutConsoleConfig,
+      isLoading: false,
+      error: null,
+    });
+
+    const { result } = renderHook(
+      () => useConsoleConfig("production", "simple-agent"),
+      { wrapper: TestWrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // Should have conservative media requirements (no provider = auto = conservative)
+    expect(result.current.mediaRequirements).toBeDefined();
+    expect(result.current.mediaRequirements.image).toBeDefined();
+    expect(result.current.providerType).toBeUndefined();
+  });
+
+  it("should return provider-specific media requirements for claude provider", async () => {
+    const mockAgentWithClaudeProvider = {
+      ...mockAgentWithoutConsoleConfig,
+      spec: {
+        provider: { type: "claude" },
+      },
+    };
+
+    mockUseAgent.mockReturnValue({
+      data: mockAgentWithClaudeProvider,
+      isLoading: false,
+      error: null,
+    });
+
+    const { result } = renderHook(
+      () => useConsoleConfig("production", "claude-agent"),
+      { wrapper: TestWrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // Should have claude-specific media requirements
+    expect(result.current.providerType).toBe("claude");
+    expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(5 * 1024 * 1024);
+    expect(result.current.mediaRequirements.image?.compressionGuidance).toBe("lossless");
+  });
+
+  it("should use provider from ProviderRef when available", async () => {
+    const mockAgentWithProviderRef = {
+      ...mockAgentWithoutConsoleConfig,
+      spec: {
+        providerRef: { name: "shared-openai", namespace: "production" },
+        provider: { type: "claude" }, // inline provider should be overridden
+      },
+    };
+
+    mockUseAgent.mockReturnValue({
+      data: mockAgentWithProviderRef,
+      isLoading: false,
+      error: null,
+    });
+
+    // Mock the provider CRD
+    mockUseProvider.mockReturnValue({
+      data: { spec: { type: "openai" } },
+      isLoading: false,
+      error: null,
+    });
+
+    const { result } = renderHook(
+      () => useConsoleConfig("production", "openai-agent"),
+      { wrapper: TestWrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // Should use openai from ProviderRef, not claude from inline provider
+    expect(result.current.providerType).toBe("openai");
+    expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(20 * 1024 * 1024);
+  });
+
+  it("should use CRD media requirements overrides when specified", async () => {
+    const mockAgentWithOverrides = {
+      ...mockAgentWithoutConsoleConfig,
+      spec: {
+        provider: { type: "claude" },
+        console: {
+          mediaRequirements: {
+            image: {
+              maxSizeBytes: 50 * 1024 * 1024, // Override claude default
+            },
+          },
+        },
+      },
+    };
+
+    mockUseAgent.mockReturnValue({
+      data: mockAgentWithOverrides,
+      isLoading: false,
+      error: null,
+    });
+
+    const { result } = renderHook(
+      () => useConsoleConfig("production", "custom-agent"),
+      { wrapper: TestWrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // Should use overridden value
+    expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(50 * 1024 * 1024);
   });
 });

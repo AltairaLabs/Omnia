@@ -7,7 +7,7 @@ export type AgentRuntimePhase = "Pending" | "Running" | "Failed";
 export type FacadeType = "websocket" | "grpc";
 export type HandlerMode = "echo" | "demo" | "runtime";
 export type SessionStoreType = "memory" | "redis" | "postgres";
-export type ProviderType = "auto" | "claude" | "openai" | "gemini";
+export type ProviderType = "auto" | "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
 export type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
 
@@ -100,6 +100,76 @@ export interface FrameworkConfig {
   image?: string;
 }
 
+/** Width and height in pixels */
+export interface Dimensions {
+  width: number;
+  height: number;
+}
+
+/** Compression guidance for images */
+export type CompressionGuidance = "none" | "lossless" | "lossy-high" | "lossy-medium" | "lossy-low";
+
+/** Video processing mode */
+export type VideoProcessingMode = "frames" | "transcription" | "both" | "native";
+
+/** Requirements for image media */
+export interface ImageRequirements {
+  /** Maximum file size in bytes for images */
+  maxSizeBytes?: number;
+  /** Maximum width and height - images exceeding these will need to be resized */
+  maxDimensions?: Dimensions;
+  /** Optimal dimensions for best results */
+  recommendedDimensions?: Dimensions;
+  /** Supported image formats (e.g., "png", "jpeg", "gif", "webp") */
+  supportedFormats?: string[];
+  /** Format that yields best results with this provider */
+  preferredFormat?: string;
+  /** Guidance on image compression */
+  compressionGuidance?: CompressionGuidance;
+}
+
+/** Requirements for video media */
+export interface VideoRequirements {
+  /** Maximum video duration in seconds */
+  maxDurationSeconds?: number;
+  /** Whether the provider supports selecting video segments */
+  supportsSegmentSelection?: boolean;
+  /** How video is processed */
+  processingMode?: VideoProcessingMode;
+  /** Interval in seconds between extracted frames (when processingMode includes "frames") */
+  frameExtractionInterval?: number;
+}
+
+/** Requirements for audio media */
+export interface AudioRequirements {
+  /** Maximum audio duration in seconds */
+  maxDurationSeconds?: number;
+  /** Optimal sample rate in Hz */
+  recommendedSampleRate?: number;
+  /** Whether the provider supports selecting audio segments */
+  supportsSegmentSelection?: boolean;
+}
+
+/** Requirements for document media */
+export interface DocumentRequirements {
+  /** Maximum number of pages that can be processed */
+  maxPages?: number;
+  /** Whether the provider supports OCR for scanned documents */
+  supportsOCR?: boolean;
+}
+
+/** Provider-specific requirements for different media types */
+export interface MediaRequirements {
+  /** Requirements for image files */
+  image?: ImageRequirements;
+  /** Requirements for video files */
+  video?: VideoRequirements;
+  /** Requirements for audio files */
+  audio?: AudioRequirements;
+  /** Requirements for document files (PDFs, etc.) */
+  document?: DocumentRequirements;
+}
+
 export interface ConsoleConfig {
   /** MIME types allowed for file uploads (e.g., "image/*", "application/pdf") */
   allowedAttachmentTypes?: string[];
@@ -109,6 +179,8 @@ export interface ConsoleConfig {
   maxFileSize?: number;
   /** Maximum number of files per message (default: 5) */
   maxFiles?: number;
+  /** Provider-specific requirements for different media types */
+  mediaRequirements?: MediaRequirements;
 }
 
 // Spec
