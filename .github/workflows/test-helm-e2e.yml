@@ -200,8 +200,19 @@ jobs:
           helm uninstall omnia -n omnia-system || true
           helm uninstall keda -n keda || true
           sleep 5
-          kubectl delete namespace omnia-system --wait=true --timeout=60s || true
+          kubectl delete namespace omnia-system --wait=true --timeout=120s || true
           kubectl delete namespace keda --wait=true --timeout=60s || true
+
+          # Wait for namespace to be fully terminated
+          echo "Waiting for namespaces to be fully deleted..."
+          for i in {1..30}; do
+            if ! kubectl get namespace omnia-system 2>/dev/null; then
+              echo "Namespace omnia-system deleted"
+              break
+            fi
+            echo "Waiting for omnia-system namespace to terminate... ($i/30)"
+            sleep 2
+          done
 
       - name: Test - Observability stack deployment
         run: |
