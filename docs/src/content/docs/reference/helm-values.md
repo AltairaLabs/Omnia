@@ -375,6 +375,10 @@ grafana:
 
 ### Loki
 
+:::note[Docker Desktop]
+Loki 3.0's ruler component can fail with "no space left on device" errors on Docker Desktop with local-path provisioner. The ruler is disabled by default in Omnia's configuration to avoid this issue.
+:::
+
 ```yaml
 loki:
   enabled: true
@@ -403,6 +407,8 @@ loki:
     enabled: false
   resultsCache:
     enabled: false
+  ruler:
+    enabled: false  # Prevents mkdir errors on Docker Desktop
 ```
 
 ### Alloy
