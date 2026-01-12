@@ -1078,9 +1078,19 @@ func TestServerBinaryCapabilityNegotiation(t *testing.T) {
 			t.Fatalf("Failed to read connected message: %v", err)
 		}
 
-		// Without binary param, Connected.Capabilities should be nil
-		if connectedMsg.Connected != nil {
-			t.Errorf("Expected Connected to be nil without binary param, got %+v", connectedMsg.Connected)
+		// Without binary param, Connected should still be sent (for MaxPayloadSize)
+		// but BinaryFrames should be false
+		if connectedMsg.Connected == nil {
+			t.Fatal("Expected Connected to be set (always sent for MaxPayloadSize)")
+		}
+		if connectedMsg.Connected.Capabilities == nil {
+			t.Fatal("Expected Capabilities to be set")
+		}
+		if connectedMsg.Connected.Capabilities.BinaryFrames {
+			t.Error("Expected BinaryFrames to be false without binary param")
+		}
+		if connectedMsg.Connected.Capabilities.MaxPayloadSize != int(DefaultServerConfig().MaxMessageSize) {
+			t.Errorf("MaxPayloadSize = %d, want %d", connectedMsg.Connected.Capabilities.MaxPayloadSize, DefaultServerConfig().MaxMessageSize)
 		}
 	})
 
@@ -1146,9 +1156,19 @@ func TestServerBinaryCapabilityNegotiation(t *testing.T) {
 			t.Fatalf("Failed to read connected message: %v", err)
 		}
 
-		// With binary=false, Connected should be nil (same as not providing)
-		if connectedMsg.Connected != nil {
-			t.Errorf("Expected Connected to be nil with binary=false param, got %+v", connectedMsg.Connected)
+		// With binary=false, Connected should still be sent (for MaxPayloadSize)
+		// but BinaryFrames should be false
+		if connectedMsg.Connected == nil {
+			t.Fatal("Expected Connected to be set (always sent for MaxPayloadSize)")
+		}
+		if connectedMsg.Connected.Capabilities == nil {
+			t.Fatal("Expected Capabilities to be set")
+		}
+		if connectedMsg.Connected.Capabilities.BinaryFrames {
+			t.Error("Expected BinaryFrames to be false with binary=false param")
+		}
+		if connectedMsg.Connected.Capabilities.MaxPayloadSize != int(DefaultServerConfig().MaxMessageSize) {
+			t.Errorf("MaxPayloadSize = %d, want %d", connectedMsg.Connected.Capabilities.MaxPayloadSize, DefaultServerConfig().MaxMessageSize)
 		}
 	})
 }
