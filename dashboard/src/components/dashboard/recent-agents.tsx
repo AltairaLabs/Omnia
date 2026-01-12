@@ -13,7 +13,7 @@ const phaseColors: Record<AgentRuntimePhase, string> = {
   Failed: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
 };
 
-function RecentAgentItem({ agent }: { agent: AgentRuntime }) {
+function RecentAgentItem({ agent }: Readonly<{ agent: AgentRuntime }>) {
   const namespace = agent.metadata.namespace || "default";
   const { data: provider } = useProvider(agent.spec.providerRef?.name, namespace);
 

@@ -50,7 +50,7 @@ function extractTextFromParts(parts: ContentPart[]): string {
 function convertAttachmentsToParts(attachments: FileAttachment[]): ContentPart[] {
   return attachments.map((attachment) => {
     // Parse data URL: "data:image/png;base64,..."
-    const match = attachment.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    const match = /^data:([^;]+);base64,(.+)$/.exec(attachment.dataUrl);
     const mimeType = match?.[1] || attachment.type;
     const data = match?.[2] || "";
 

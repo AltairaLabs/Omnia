@@ -23,7 +23,8 @@ import (
 
 // Error message constants.
 const (
-	errMethodNotAllowed = "method not allowed"
+	errMethodNotAllowed    = "method not allowed"
+	errFailedGetPromptPack = "failed to get promptpack"
 )
 
 // Server provides REST API endpoints for the Omnia dashboard.
@@ -639,8 +640,8 @@ func (s *Server) handlePromptPack(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusNotFound, "promptpack not found")
 			return
 		}
-		s.log.Error(err, "failed to get promptpack", "namespace", namespace, "name", name)
-		s.writeError(w, http.StatusInternalServerError, "failed to get promptpack")
+		s.log.Error(err, errFailedGetPromptPack, "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, errFailedGetPromptPack)
 		return
 	}
 
@@ -656,8 +657,8 @@ func (s *Server) handlePromptPackContent(w http.ResponseWriter, r *http.Request,
 			s.writeError(w, http.StatusNotFound, "promptpack not found")
 			return
 		}
-		s.log.Error(err, "failed to get promptpack", "namespace", namespace, "name", name)
-		s.writeError(w, http.StatusInternalServerError, "failed to get promptpack")
+		s.log.Error(err, errFailedGetPromptPack, "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, errFailedGetPromptPack)
 		return
 	}
 

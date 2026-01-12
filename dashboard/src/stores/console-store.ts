@@ -164,7 +164,7 @@ export const useConsoleStore = create<ConsoleStore>()(
 
       setActiveTab: (id) => {
         const state = get();
-        if (!state.tabs.find((t) => t.id === id)) return;
+        if (!state.tabs.some((t) => t.id === id)) return;
         if (state.activeTabId === id) return;
 
         set({ activeTabId: id });

@@ -234,12 +234,13 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
           </TabsContent>
 
           <TabsContent value="content" className="space-y-4 mt-4">
-            {isContentLoading ? (
+            {isContentLoading && (
               <div className="space-y-4">
                 <Skeleton className="h-32 rounded-lg" />
                 <Skeleton className="h-48 rounded-lg" />
               </div>
-            ) : !packContent ? (
+            )}
+            {!isContentLoading && !packContent && (
               <Card>
                 <CardContent className="py-8 text-center">
                   <p className="text-muted-foreground">
@@ -247,7 +248,8 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                   </p>
                 </CardContent>
               </Card>
-            ) : (
+            )}
+            {!isContentLoading && packContent && (
               <>
                 {/* Metadata Card */}
                 <Card>
@@ -359,7 +361,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                                     <div className="text-xs space-y-1">
                                       {Object.entries(prompt.parameters).map(([key, value]) => (
                                         <div key={key} className="flex justify-between">
-                                          <span className="text-muted-foreground capitalize">{key.replace(/_/g, " ")}</span>
+                                          <span className="text-muted-foreground capitalize">{key.replaceAll("_", " ")}</span>
                                           <span className="font-mono">{String(value)}</span>
                                         </div>
                                       ))}
