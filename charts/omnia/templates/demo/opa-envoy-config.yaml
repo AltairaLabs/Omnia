@@ -45,7 +45,7 @@ data:
                       - name: envoy.filters.http.buffer
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
-                          max_request_bytes: 1048576  # 1MB max body size
+                          max_request_bytes: {{ int (.Values.demo.opa.maxRequestBytes | default 26214400) }}  # 25MB default for multimodal
                       # External authorization via OPA
                       - name: envoy.filters.http.ext_authz
                         typed_config:

@@ -7,6 +7,7 @@ import type {
   DataService,
   AgentRuntime,
   PromptPack,
+  PromptPackContent,
   ToolRegistry,
   Provider,
   Stats,
@@ -460,6 +461,30 @@ export class MockDataService implements DataService {
     return mockPromptPacks.find(
       (p) => p.metadata?.namespace === namespace && p.metadata?.name === name
     ) as PromptPack | undefined;
+  }
+
+  async getPromptPackContent(_namespace: string, _name: string): Promise<PromptPackContent | undefined> {
+    await delay();
+    // Return mock content
+    return {
+      id: "mock-prompts",
+      name: "Mock Prompts",
+      version: "1.0.0",
+      description: "Mock prompt pack for demo mode",
+      template_engine: {
+        version: "v1",
+        syntax: "{{variable}}",
+      },
+      prompts: {
+        default: {
+          id: "default",
+          name: "Default Prompt",
+          version: "1.0.0",
+          system_template: "You are a helpful AI assistant.",
+          parameters: { temperature: 0.7 },
+        },
+      },
+    };
   }
 
   async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {

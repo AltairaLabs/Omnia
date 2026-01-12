@@ -11,6 +11,7 @@ import type {
   DataService,
   AgentRuntime,
   PromptPack,
+  PromptPackContent,
   ToolRegistry,
   Provider,
   Stats,
@@ -238,6 +239,10 @@ export class LiveDataService implements DataService {
 
   async getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined> {
     return this.operatorService.getPromptPack(namespace, name);
+  }
+
+  async getPromptPackContent(namespace: string, name: string): Promise<PromptPackContent | undefined> {
+    return this.operatorService.getPromptPackContent(namespace, name);
   }
 
   async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {

@@ -38,6 +38,53 @@ export type PromptPackPhase = "Pending" | "Active" | "Canary" | "Failed";
 export type ToolRegistryPhase = "Pending" | "Ready" | "Degraded" | "Failed";
 export type ProviderPhase = "Pending" | "Ready" | "Failed";
 
+// PromptPack content (resolved from ConfigMap)
+export interface PromptPackContent {
+  id?: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  template_engine?: {
+    version?: string;
+    syntax?: string;
+  };
+  prompts?: Record<string, PromptDefinition>;
+  tools?: ToolDefinition[];
+  fragments?: Record<string, string>;
+  validators?: ValidatorDefinition[];
+}
+
+export interface PromptDefinition {
+  id?: string;
+  name?: string;
+  version?: string;
+  system_template?: string;
+  variables?: PromptVariable[];
+  tools?: string[];
+  parameters?: Record<string, unknown>;
+  validators?: string[];
+}
+
+export interface PromptVariable {
+  name: string;
+  type: string;
+  required?: boolean;
+  values?: string[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface ValidatorDefinition {
+  id: string;
+  name?: string;
+  description?: string;
+  config?: Record<string, unknown>;
+}
+
 /**
  * Kubernetes Event (simplified for dashboard display).
  */
@@ -198,6 +245,7 @@ export interface DataService {
   // PromptPacks
   getPromptPacks(namespace?: string): Promise<PromptPack[]>;
   getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined>;
+  getPromptPackContent(namespace: string, name: string): Promise<PromptPackContent | undefined>;
 
   // ToolRegistries
   getToolRegistries(namespace?: string): Promise<ToolRegistry[]>;

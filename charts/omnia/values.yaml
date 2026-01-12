@@ -765,6 +765,8 @@ demo:
     enabled: false
     # -- Mode: "sidecar" (OPA+Envoy sidecars, no Istio) or "extauthz" (Istio ext_authz)
     mode: sidecar
+    # -- Maximum request body size in bytes (default 25MB for multimodal/vision requests)
+    maxRequestBytes: 26214400
     # -- OPA image (use envoy variant for sidecar mode)
     image:
       repository: openpolicyagent/opa

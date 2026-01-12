@@ -8,6 +8,7 @@ import { ImageLightbox } from "./image-lightbox";
 import { AudioPlayer } from "./audio-player";
 import { VideoPlayer } from "./video-player";
 import { DocumentPreview } from "./document-preview";
+import { Markdown } from "./markdown";
 import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/types/websocket";
 
 interface ConsoleMessageProps {
@@ -113,8 +114,15 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
           )}
         >
           {/* Message content */}
-          <div className="whitespace-pre-wrap break-words">
-            {message.content}
+          <div className="break-words">
+            {message.content && (
+              <Markdown
+                content={message.content}
+                className={cn(
+                  isUser && "prose-invert"
+                )}
+              />
+            )}
             {message.isStreaming && message.content.length > 0 && (
               <span className="inline-block w-2 h-4 ml-0.5 bg-current animate-pulse" />
             )}
