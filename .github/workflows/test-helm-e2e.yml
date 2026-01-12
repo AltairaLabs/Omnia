@@ -59,8 +59,14 @@ jobs:
 
       - name: Add Helm repositories
         run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
           helm repo add kedacore https://kedacore.github.io/charts
           helm repo update
+
+      - name: Build chart dependencies
+        run: |
+          helm dependency build ./charts/omnia
 
       - name: Test - Basic Helm template validation
         run: |
@@ -189,6 +195,17 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm repo update
+
+      - name: Build chart dependencies
+        run: |
+          helm dependency build ./charts/omnia
 
       - name: Lint chart
         run: |
