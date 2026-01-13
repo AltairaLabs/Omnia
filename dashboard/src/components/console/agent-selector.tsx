@@ -44,7 +44,7 @@ export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorPro
   const availableNamespaces = useMemo(() => {
     if (!agents) return [];
     const ns = new Set(agents.map((a) => a.metadata.namespace).filter(Boolean));
-    return Array.from(ns).sort() as string[];
+    return Array.from(ns).sort((a, b) => (a ?? "").localeCompare(b ?? "")) as string[];
   }, [agents]);
 
   // Filter agents by selected namespace
