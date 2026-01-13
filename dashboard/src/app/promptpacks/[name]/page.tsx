@@ -3,7 +3,7 @@
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Bot, GitBranch, Clock, FileCode, Wrench, MessageSquare, FileText, Shield, Variable } from "lucide-react";
+import { ArrowLeft, Bot, GitBranch, Clock, FileCode, Wrench, MessageSquare, FileText, Shield, Variable } from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatusBadge } from "@/components/agents";
 import { Button } from "@/components/ui/button";
@@ -113,13 +113,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
               Back to PromptPacks
             </Button>
           </Link>
-          <div className="flex items-center gap-2">
-            <StatusBadge phase={status?.phase} />
-            <Button variant="outline" size="sm">
-              <ExternalLink className="mr-2 h-4 w-4" />
-              View in K8s
-            </Button>
-          </div>
+          <StatusBadge phase={status?.phase} />
         </div>
 
         {/* Tabs */}

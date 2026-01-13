@@ -1,14 +1,17 @@
 /**
  * Hook for Grafana integration configuration.
  *
- * When NEXT_PUBLIC_GRAFANA_URL is set, the dashboard can embed Grafana panels
- * for metrics visualization. When not set, fallback UI is shown.
+ * The Grafana URL is fetched from runtime config (via /api/config endpoint),
+ * allowing it to be configured at runtime for different environments
+ * (e.g., localhost:3001 via Tilt, or in-cluster URL in Kubernetes).
  *
- * Environment variables:
- * - NEXT_PUBLIC_GRAFANA_URL: Base URL of Grafana instance (e.g., http://grafana:3000)
+ * Environment variables (set at runtime via ConfigMap):
+ * - NEXT_PUBLIC_GRAFANA_URL: Base URL of Grafana instance (e.g., http://localhost:3001)
  * - NEXT_PUBLIC_GRAFANA_PATH: Subpath on the remote server (default: /grafana/)
  * - NEXT_PUBLIC_GRAFANA_ORG_ID: Grafana organization ID (default: 1)
  */
+
+import { useGrafanaUrl } from "./use-runtime-config";
 
 export interface GrafanaConfig {
   /** Whether Grafana integration is enabled */
@@ -100,10 +103,12 @@ function normalizePath(path: string): string {
 }
 
 /**
- * Returns Grafana configuration from environment variables.
+ * Returns Grafana configuration from runtime config.
+ * The URL is fetched at runtime to support different environments.
  */
 export function useGrafana(): GrafanaConfig {
-  const baseUrl = process.env.NEXT_PUBLIC_GRAFANA_URL || null;
+  const { grafanaUrl } = useGrafanaUrl();
+  const baseUrl = grafanaUrl || null;
   const remotePath = normalizePath(
     process.env.NEXT_PUBLIC_GRAFANA_PATH || "/grafana/"
   );

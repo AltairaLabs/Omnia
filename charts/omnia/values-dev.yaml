@@ -37,6 +37,12 @@ dashboard:
   auth:
     mode: anonymous
     anonymousRole: admin  # Full access for development
+  # WebSocket proxy URL for local development (Tilt forwards port 3002)
+  wsProxy:
+    url: "ws://localhost:3002"
+  # Grafana URL for local development (Tilt forwards port 3001)
+  grafana:
+    url: "http://localhost:3001"
 
 # Disable read-only filesystem for dev (Next.js needs to write .next/)
 securityContext:

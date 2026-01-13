@@ -35,6 +35,11 @@ data:
   PROMETHEUS_URL: "http://{{ .Release.Name }}-prometheus-server:80"
   {{- end }}
 
+  # WebSocket proxy URL (for agent console connections)
+  {{- if .Values.dashboard.wsProxy.url }}
+  NEXT_PUBLIC_WS_PROXY_URL: {{ .Values.dashboard.wsProxy.url | quote }}
+  {{- end }}
+
   # Authentication mode
   OMNIA_AUTH_MODE: {{ .Values.dashboard.auth.mode | quote }}
   OMNIA_SESSION_COOKIE_NAME: {{ .Values.dashboard.auth.cookieName | quote }}

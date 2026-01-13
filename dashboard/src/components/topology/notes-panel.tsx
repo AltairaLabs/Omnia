@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { StickyNote, Plus, Trash2, Bot, FileText, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,7 +22,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  loadNotes,
   setNote,
   deleteNote,
   type NotesMap,
@@ -57,11 +56,26 @@ const typeLabels = {
   toolregistry: "ToolRegistry",
 };
 
+// Custom hook to sync with localStorage without hydration issues
+function useNotesStore(): NotesMap {
+  const getSnapshot = () => {
+    if (typeof window === "undefined") return "{}";
+    return localStorage.getItem("topology-notes") || "{}";
+  };
+
+  const getServerSnapshot = () => "{}";
+
+  const subscribe = (callback: () => void) => {
+    window.addEventListener("storage", callback);
+    return () => window.removeEventListener("storage", callback);
+  };
+
+  const notesString = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return JSON.parse(notesString) as NotesMap;
+}
+
 export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPanelProps>) {
-  const [notes, setNotes] = useState<NotesMap>(() => {
-    if (globalThis.window === undefined) return {};
-    return loadNotes();
-  });
+  const notes = useNotesStore();
   const [isAdding, setIsAdding] = useState(false);
   const [selectedResource, setSelectedResource] = useState<string>("");
   const [newNote, setNewNote] = useState("");
@@ -79,6 +93,11 @@ export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPane
       selectedNamespaces.length === 0 || selectedNamespaces.includes(note.namespace)
   );
 
+  // Helper to trigger re-read from localStorage via storage event
+  const triggerRefresh = () => {
+    window.dispatchEvent(new Event("storage"));
+  };
+
   const handleAddNote = () => {
     if (!selectedResource || !newNote.trim()) return;
 
@@ -88,7 +107,7 @@ export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPane
       string
     ];
     setNote(type, namespace, name, newNote);
-    setNotes(loadNotes());
+    triggerRefresh();
     setNewNote("");
     setSelectedResource("");
     setIsAdding(false);
@@ -98,7 +117,7 @@ export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPane
     const note = notes[key];
     if (!note) return;
     setNote(note.resourceType, note.namespace, note.name, editText);
-    setNotes(loadNotes());
+    triggerRefresh();
     setEditingKey(null);
     setEditText("");
   };
@@ -107,7 +126,7 @@ export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPane
     const note = notes[key];
     if (!note) return;
     deleteNote(note.resourceType, note.namespace, note.name);
-    setNotes(loadNotes());
+    triggerRefresh();
   };
 
   const startEditing = (key: string, currentNote: string) => {

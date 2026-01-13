@@ -1,6 +1,8 @@
 import type { Node, Edge } from "@xyflow/react";
-import type { AgentRuntime, PromptPack, ToolRegistry } from "@/types";
+import ELK from "elkjs/lib/elk.bundled.js";
+import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
 import type { NotesMap } from "@/lib/notes-storage";
+import { getProviderColor } from "./provider-icons";
 
 interface GraphData {
   nodes: Node[];
@@ -11,6 +13,7 @@ interface BuildGraphOptions {
   agents: AgentRuntime[];
   promptPacks: PromptPack[];
   toolRegistries: ToolRegistry[];
+  providers: Provider[];
   onNodeClick?: (type: string, name: string, namespace: string) => void;
   notes?: NotesMap;
   onNoteEdit?: (type: string, namespace: string, name: string) => void;
@@ -23,16 +26,98 @@ function getNoteForResource(notes: NotesMap | undefined, type: string, namespace
   return notes[key]?.note;
 }
 
-// Layout constants
-const COLUMN_GAP = 280;
-const ROW_GAP = 100;
-const INITIAL_X = 50;
-const INITIAL_Y = 50;
+// Node dimensions for layout
+const NODE_WIDTH = 180;
+const NODE_HEIGHT = 80;
+
+// ELK instance (reused)
+const elk = new ELK();
+
+/**
+ * Apply ELK layout to nodes and edges.
+ * ELK provides better edge routing and crossing minimization than dagre.
+ */
+async function applyElkLayout(nodes: Node[], edges: Edge[]): Promise<Node[]> {
+  if (nodes.length === 0) return nodes;
+
+  const elkGraph = {
+    id: "root",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "RIGHT",
+      "elk.spacing.nodeNode": "80",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "200",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.edgeRouting": "ORTHOGONAL",
+      "elk.layered.mergeEdges": "true",
+    },
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+    })),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+    })),
+  };
+
+  const layoutedGraph = await elk.layout(elkGraph);
+
+  return nodes.map((node) => {
+    const elkNode = layoutedGraph.children?.find((n) => n.id === node.id);
+    return {
+      ...node,
+      position: {
+        x: elkNode?.x ?? 0,
+        y: elkNode?.y ?? 0,
+      },
+    };
+  });
+}
+
+/**
+ * Apply simple column-based layout (fallback for sync use).
+ * Groups nodes by type and arranges them in columns.
+ */
+function applySimpleLayout(nodes: Node[]): Node[] {
+  // Group nodes by type
+  const groups: Record<string, Node[]> = {};
+  const typeOrder = ["agent", "promptPack", "toolRegistry", "tool", "provider"];
+
+  nodes.forEach((node) => {
+    const type = node.type || "unknown";
+    if (!groups[type]) groups[type] = [];
+    groups[type].push(node);
+  });
+
+  let xOffset = 50;
+  const ySpacing = NODE_HEIGHT + 40;
+  const xSpacing = NODE_WIDTH + 150;
+
+  typeOrder.forEach((type) => {
+    const typeNodes = groups[type];
+    if (!typeNodes || typeNodes.length === 0) return;
+
+    typeNodes.forEach((node, idx) => {
+      node.position = {
+        x: xOffset,
+        y: 50 + idx * ySpacing,
+      };
+    });
+    xOffset += xSpacing;
+  });
+
+  return nodes;
+}
 
 export function buildTopologyGraph({
   agents,
   promptPacks,
   toolRegistries,
+  providers,
   onNodeClick,
   notes,
   onNoteEdit,
@@ -41,23 +126,17 @@ export function buildTopologyGraph({
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
-  // Track positions
-  let agentY = INITIAL_Y;
-  let toolY = INITIAL_Y;
-
-  // Column positions
-  const agentX = INITIAL_X;
-  const promptPackX = INITIAL_X + COLUMN_GAP;
-  const toolRegistryX = INITIAL_X + COLUMN_GAP;
-  const toolX = INITIAL_X + COLUMN_GAP * 2;
-
   // Create maps for lookups
   const promptPackMap = new Map(promptPacks.map((pp) => [`${pp.metadata.namespace}/${pp.metadata.name}`, pp]));
   const toolRegistryMap = new Map(toolRegistries.map((tr) => [`${tr.metadata.namespace}/${tr.metadata.name}`, tr]));
+  const providerMap = new Map(providers.map((p) => [`${p.metadata.namespace}/${p.metadata.name}`, p]));
 
   // Track which resources are connected
   const connectedPromptPacks = new Set<string>();
   const connectedToolRegistries = new Set<string>();
+  const connectedProviders = new Set<string>();
+  // Track synthetic providers (inline provider configs)
+  const syntheticProviders = new Map<string, { type: ProviderType; model?: string; baseURL?: string }>();
 
   // First pass: Create agent nodes and find connections
   agents.forEach((agent) => {
@@ -66,7 +145,7 @@ export function buildTopologyGraph({
     nodes.push({
       id: agentId,
       type: "agent",
-      position: { x: agentX, y: agentY },
+      position: { x: 0, y: 0 }, // Will be set by dagre
       data: {
         label: agent.metadata.name,
         namespace: agent.metadata.namespace,
@@ -92,156 +171,246 @@ export function buildTopologyGraph({
       connectedToolRegistries.add(trKey);
     }
 
-    agentY += ROW_GAP;
-  });
-
-  // Calculate vertical offset for PromptPacks and ToolRegistries
-  // Position them in the middle column, stacked vertically
-  const middleColumnItems: Array<{ type: "promptPack" | "toolRegistry"; key: string }> = [];
-
-  connectedPromptPacks.forEach((key) => {
-    middleColumnItems.push({ type: "promptPack", key });
-  });
-
-  connectedToolRegistries.forEach((key) => {
-    middleColumnItems.push({ type: "toolRegistry", key });
-  });
-
-  // Add unconnected PromptPacks
-  promptPacks.forEach((pp) => {
-    const key = `${pp.metadata.namespace}/${pp.metadata.name}`;
-    if (!connectedPromptPacks.has(key)) {
-      middleColumnItems.push({ type: "promptPack", key });
+    // Connect to Provider (via providerRef or inline provider)
+    if (agent.spec.providerRef?.name) {
+      const pNamespace = agent.spec.providerRef.namespace || agent.metadata.namespace || "default";
+      const pKey = `${pNamespace}/${agent.spec.providerRef.name}`;
+      connectedProviders.add(pKey);
+    } else if (agent.spec.provider?.type) {
+      // Inline provider - create synthetic provider node
+      const syntheticKey = `synthetic-${agent.spec.provider.type}-${agent.spec.provider.model || "default"}`;
+      syntheticProviders.set(syntheticKey, {
+        type: agent.spec.provider.type,
+        model: agent.spec.provider.model,
+        baseURL: agent.spec.provider.baseURL,
+      });
     }
   });
 
-  // Add unconnected ToolRegistries
-  toolRegistries.forEach((tr) => {
-    const key = `${tr.metadata.namespace}/${tr.metadata.name}`;
-    if (!connectedToolRegistries.has(key)) {
-      middleColumnItems.push({ type: "toolRegistry", key });
-    }
-  });
+  // Create PromptPack nodes
+  const allPromptPackKeys = new Set([
+    ...connectedPromptPacks,
+    ...promptPacks.map((pp) => `${pp.metadata.namespace}/${pp.metadata.name}`),
+  ]);
 
-  // Create PromptPack and ToolRegistry nodes
-  let middleY = INITIAL_Y;
-  middleColumnItems.forEach((item) => {
-    if (item.type === "promptPack") {
-      const pp = promptPackMap.get(item.key);
-      if (!pp) return;
+  allPromptPackKeys.forEach((key) => {
+    const pp = promptPackMap.get(key);
+    if (!pp) return;
 
-      const nodeId = `promptpack-${pp.metadata.namespace}-${pp.metadata.name}`;
-      nodes.push({
-        id: nodeId,
-        type: "promptPack",
-        position: { x: promptPackX, y: middleY },
-        data: {
-          label: pp.metadata.name,
-          namespace: pp.metadata.namespace,
-          version: pp.status?.activeVersion || pp.spec.version,
-          phase: pp.status?.phase,
-          onClick: () => onNodeClick?.("promptpack", pp.metadata.name, pp.metadata.namespace || "default"),
-          note: getNoteForResource(notes, "promptpack", pp.metadata.namespace || "default", pp.metadata.name),
-          onNoteEdit,
-          onNoteDelete,
-        },
-      });
+    const nodeId = `promptpack-${pp.metadata.namespace}-${pp.metadata.name}`;
+    nodes.push({
+      id: nodeId,
+      type: "promptPack",
+      position: { x: 0, y: 0 },
+      data: {
+        label: pp.metadata.name,
+        namespace: pp.metadata.namespace,
+        version: pp.status?.activeVersion || pp.spec.version,
+        phase: pp.status?.phase,
+        onClick: () => onNodeClick?.("promptpack", pp.metadata.name, pp.metadata.namespace || "default"),
+        note: getNoteForResource(notes, "promptpack", pp.metadata.namespace || "default", pp.metadata.name),
+        onNoteEdit,
+        onNoteDelete,
+      },
+    });
 
-      // Create edges from agents to this PromptPack
-      agents.forEach((agent) => {
-        if (
-          agent.spec.promptPackRef?.name === pp.metadata.name &&
-          (agent.metadata.namespace || "default") === (pp.metadata.namespace || "default")
-        ) {
-          edges.push({
-            id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
-            source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
-            target: nodeId,
-            type: "smoothstep",
-            animated: true,
-            style: { stroke: "#8b5cf6" },
-            label: "uses",
-            labelStyle: { fontSize: 10, fill: "#666" },
-            labelBgStyle: { fill: "white", fillOpacity: 0.8 },
-          });
-        }
-      });
-
-      middleY += ROW_GAP;
-    } else {
-      const tr = toolRegistryMap.get(item.key);
-      if (!tr) return;
-
-      const nodeId = `toolregistry-${tr.metadata.namespace}-${tr.metadata.name}`;
-      nodes.push({
-        id: nodeId,
-        type: "toolRegistry",
-        position: { x: toolRegistryX, y: middleY },
-        data: {
-          label: tr.metadata.name,
-          namespace: tr.metadata.namespace,
-          toolCount: tr.status?.discoveredToolsCount,
-          phase: tr.status?.phase,
-          onClick: () => onNodeClick?.("tools", tr.metadata.name, tr.metadata.namespace || "default"),
-          note: getNoteForResource(notes, "toolregistry", tr.metadata.namespace || "default", tr.metadata.name),
-          onNoteEdit,
-          onNoteDelete,
-        },
-      });
-
-      // Create edges from agents to this ToolRegistry
-      agents.forEach((agent) => {
-        if (
-          agent.spec.toolRegistryRef?.name === tr.metadata.name &&
-          (agent.spec.toolRegistryRef.namespace || agent.metadata.namespace) === tr.metadata.namespace
-        ) {
-          edges.push({
-            id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
-            source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
-            target: nodeId,
-            type: "smoothstep",
-            animated: true,
-            style: { stroke: "#f97316" },
-            label: "uses",
-            labelStyle: { fontSize: 10, fill: "#666" },
-            labelBgStyle: { fill: "white", fillOpacity: 0.8 },
-          });
-        }
-      });
-
-      // Create tool nodes for this registry
-      tr.status?.discoveredTools?.forEach((tool) => {
-        const toolNodeId = `tool-${tr.metadata.namespace}-${tr.metadata.name}-${tool.name}`;
-        nodes.push({
-          id: toolNodeId,
-          type: "tool",
-          position: { x: toolX, y: toolY },
-          data: {
-            label: tool.name,
-            handlerType: tool.handlerName,
-            status: tool.status,
-            onClick: () => onNodeClick?.("tools", tr.metadata.name, tr.metadata.namespace || "default"),
-          },
-        });
-
-        // Edge from ToolRegistry to Tool
+    // Create edges from agents to this PromptPack
+    agents.forEach((agent) => {
+      if (
+        agent.spec.promptPackRef?.name === pp.metadata.name &&
+        (agent.metadata.namespace || "default") === (pp.metadata.namespace || "default")
+      ) {
         edges.push({
-          id: `edge-${nodeId}-to-${toolNodeId}`,
-          source: nodeId,
-          target: toolNodeId,
+          id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
+          source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
+          target: nodeId,
           type: "smoothstep",
-          style: { stroke: "#14b8a6" },
-          label: "provides",
+          animated: true,
+          style: { stroke: "#8b5cf6" },
+          label: "uses",
           labelStyle: { fontSize: 10, fill: "#666" },
           labelBgStyle: { fill: "white", fillOpacity: 0.8 },
         });
-
-        toolY += ROW_GAP * 0.8;
-      });
-
-      middleY += ROW_GAP;
-    }
+      }
+    });
   });
 
-  return { nodes, edges };
+  // Create ToolRegistry and Tool nodes
+  const allToolRegistryKeys = new Set([
+    ...connectedToolRegistries,
+    ...toolRegistries.map((tr) => `${tr.metadata.namespace}/${tr.metadata.name}`),
+  ]);
+
+  allToolRegistryKeys.forEach((key) => {
+    const tr = toolRegistryMap.get(key);
+    if (!tr) return;
+
+    const nodeId = `toolregistry-${tr.metadata.namespace}-${tr.metadata.name}`;
+    nodes.push({
+      id: nodeId,
+      type: "toolRegistry",
+      position: { x: 0, y: 0 },
+      data: {
+        label: tr.metadata.name,
+        namespace: tr.metadata.namespace,
+        toolCount: tr.status?.discoveredToolsCount,
+        phase: tr.status?.phase,
+        onClick: () => onNodeClick?.("tools", tr.metadata.name, tr.metadata.namespace || "default"),
+        note: getNoteForResource(notes, "toolregistry", tr.metadata.namespace || "default", tr.metadata.name),
+        onNoteEdit,
+        onNoteDelete,
+      },
+    });
+
+    // Create edges from agents to this ToolRegistry
+    agents.forEach((agent) => {
+      if (
+        agent.spec.toolRegistryRef?.name === tr.metadata.name &&
+        (agent.spec.toolRegistryRef.namespace || agent.metadata.namespace) === tr.metadata.namespace
+      ) {
+        edges.push({
+          id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
+          source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
+          target: nodeId,
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: "#f97316" },
+          label: "uses",
+          labelStyle: { fontSize: 10, fill: "#666" },
+          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+        });
+      }
+    });
+
+    // Create tool nodes for this registry
+    tr.status?.discoveredTools?.forEach((tool) => {
+      const toolNodeId = `tool-${tr.metadata.namespace}-${tr.metadata.name}-${tool.name}`;
+      nodes.push({
+        id: toolNodeId,
+        type: "tool",
+        position: { x: 0, y: 0 },
+        data: {
+          label: tool.name,
+          handlerType: tool.handlerName,
+          status: tool.status,
+          onClick: () => onNodeClick?.("tools", tr.metadata.name, tr.metadata.namespace || "default"),
+        },
+      });
+
+      // Edge from ToolRegistry to Tool
+      edges.push({
+        id: `edge-${nodeId}-to-${toolNodeId}`,
+        source: nodeId,
+        target: toolNodeId,
+        type: "smoothstep",
+        style: { stroke: "#14b8a6" },
+        label: "provides",
+        labelStyle: { fontSize: 10, fill: "#666" },
+        labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+      });
+    });
+  });
+
+  // Create Provider nodes (from Provider CRDs)
+  const allProviderKeys = new Set([
+    ...connectedProviders,
+    ...providers.map((p) => `${p.metadata.namespace}/${p.metadata.name}`),
+  ]);
+
+  allProviderKeys.forEach((key) => {
+    const provider = providerMap.get(key);
+    if (!provider) return;
+
+    const nodeId = `provider-${provider.metadata.namespace}-${provider.metadata.name}`;
+    const providerType = provider.spec.type as ProviderType;
+
+    nodes.push({
+      id: nodeId,
+      type: "provider",
+      position: { x: 0, y: 0 },
+      data: {
+        label: provider.metadata.name,
+        namespace: provider.metadata.namespace,
+        providerType,
+        model: provider.spec.model,
+        baseURL: provider.spec.baseURL,
+        phase: provider.status?.phase,
+        onClick: () => onNodeClick?.("provider", provider.metadata.name, provider.metadata.namespace || "default"),
+      },
+    });
+
+    // Create edges from agents to this Provider
+    agents.forEach((agent) => {
+      if (
+        agent.spec.providerRef?.name === provider.metadata.name &&
+        (agent.spec.providerRef.namespace || agent.metadata.namespace || "default") === (provider.metadata.namespace || "default")
+      ) {
+        edges.push({
+          id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
+          source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
+          target: nodeId,
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: getProviderColor(providerType) },
+          label: "powered by",
+          labelStyle: { fontSize: 10, fill: "#666" },
+          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+        });
+      }
+    });
+  });
+
+  // Create synthetic provider nodes (for inline provider configs)
+  syntheticProviders.forEach((config, syntheticKey) => {
+    const nodeId = `provider-${syntheticKey}`;
+
+    nodes.push({
+      id: nodeId,
+      type: "provider",
+      position: { x: 0, y: 0 },
+      data: {
+        label: config.type,
+        namespace: "(inline)",
+        providerType: config.type,
+        model: config.model,
+        baseURL: config.baseURL,
+        phase: "Ready", // Inline providers don't have status
+      },
+    });
+
+    // Create edges from agents using this inline provider
+    agents.forEach((agent) => {
+      if (
+        !agent.spec.providerRef &&
+        agent.spec.provider?.type === config.type &&
+        (agent.spec.provider.model || "default") === (config.model || "default")
+      ) {
+        edges.push({
+          id: `edge-agent-${agent.metadata.namespace}-${agent.metadata.name}-to-${nodeId}`,
+          source: `agent-${agent.metadata.namespace}-${agent.metadata.name}`,
+          target: nodeId,
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: getProviderColor(config.type) },
+          label: "powered by",
+          labelStyle: { fontSize: 10, fill: "#666" },
+          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+        });
+      }
+    });
+  });
+
+  // Apply simple layout initially (sync) - will be replaced by ELK layout
+  const layoutedNodes = applySimpleLayout(nodes);
+
+  return { nodes: layoutedNodes, edges };
+}
+
+/**
+ * Apply ELK layout to an existing graph.
+ * Call this after buildTopologyGraph to get better edge routing.
+ */
+export async function applyLayoutToGraph(graph: GraphData): Promise<GraphData> {
+  const layoutedNodes = await applyElkLayout(graph.nodes, graph.edges);
+  return { nodes: layoutedNodes, edges: graph.edges };
 }

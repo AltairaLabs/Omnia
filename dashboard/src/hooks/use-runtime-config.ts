@@ -6,14 +6,18 @@ interface RuntimeConfig {
   demoMode: boolean;
   readOnlyMode: boolean;
   readOnlyMessage: string;
+  wsProxyUrl: string;
+  grafanaUrl: string;
 }
 
-// Use NEXT_PUBLIC_DEMO_MODE as build-time default to avoid flash of wrong service
-// The API route will provide the runtime value if different
+// Use NEXT_PUBLIC_* as build-time defaults to avoid flash of wrong state
+// The API route will provide the runtime values if different
 const defaultConfig: RuntimeConfig = {
   demoMode: process.env.NEXT_PUBLIC_DEMO_MODE === "true",
   readOnlyMode: process.env.NEXT_PUBLIC_READ_ONLY_MODE === "true",
   readOnlyMessage: process.env.NEXT_PUBLIC_READ_ONLY_MESSAGE || "This dashboard is in read-only mode",
+  wsProxyUrl: process.env.NEXT_PUBLIC_WS_PROXY_URL || "",
+  grafanaUrl: process.env.NEXT_PUBLIC_GRAFANA_URL || "",
 };
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -66,4 +70,12 @@ export function useReadOnlyMode() {
     message: config.readOnlyMessage,
     loading,
   };
+}
+
+/**
+ * Get the Grafana base URL from runtime config.
+ */
+export function useGrafanaUrl() {
+  const { config, loading } = useRuntimeConfig();
+  return { grafanaUrl: config.grafanaUrl, loading };
 }

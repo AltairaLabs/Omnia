@@ -313,6 +313,13 @@ dashboard:
     # Defaults to in-cluster Prometheus service when prometheus.enabled=true
     url: ""
 
+  # -- WebSocket proxy configuration (for agent console connections)
+  wsProxy:
+    # -- WebSocket proxy URL for browser connections
+    # For local dev: ws://localhost:3002
+    # For production with gateway: leave empty (uses gateway routing)
+    url: ""
+
   # -- Persistent volume for builtin auth SQLite database
   persistence:
     # -- Enable persistence (required for builtin auth with SQLite)
@@ -391,6 +398,13 @@ grafana:
     server:
       root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
       serve_from_sub_path: true
+    # Enable anonymous access for iframe embedding
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+    # Allow embedding in iframes
+    security:
+      allow_embedding: true
   # Sidecar configuration for auto-loading dashboards/datasources
   sidecar:
     dashboards:

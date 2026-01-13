@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useRuntimeConfig, useDemoMode, useReadOnlyMode } from "./use-runtime-config";
+import { useRuntimeConfig, useDemoMode, useReadOnlyMode, useGrafanaUrl } from "./use-runtime-config";
 
 // Store original fetch
 const originalFetch = global.fetch;
@@ -10,6 +10,8 @@ describe("useRuntimeConfig", () => {
     demoMode: true,
     readOnlyMode: false,
     readOnlyMessage: "Test read-only message",
+    wsProxyUrl: "ws://localhost:3002",
+    grafanaUrl: "http://localhost:3001",
   };
 
   beforeEach(() => {
@@ -35,6 +37,8 @@ describe("useRuntimeConfig", () => {
     expect(typeof result.current.config.demoMode).toBe("boolean");
     expect(typeof result.current.config.readOnlyMode).toBe("boolean");
     expect(typeof result.current.config.readOnlyMessage).toBe("string");
+    expect(typeof result.current.config.wsProxyUrl).toBe("string");
+    expect(typeof result.current.config.grafanaUrl).toBe("string");
   });
 
   it("should have loading state", () => {
@@ -88,7 +92,7 @@ describe("useDemoMode", () => {
 
   it("should return isDemoMode and loading state", () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "" }),
+      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "" }),
     });
 
     const { result } = renderHook(() => useDemoMode());
@@ -101,7 +105,7 @@ describe("useDemoMode", () => {
 
   it("should reflect demo mode from config", async () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "" }),
+      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "" }),
     });
 
     const { result } = renderHook(() => useDemoMode());
@@ -126,7 +130,7 @@ describe("useReadOnlyMode", () => {
 
   it("should return isReadOnly, message, and loading state", () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ demoMode: false, readOnlyMode: true, readOnlyMessage: "Custom message" }),
+      json: () => Promise.resolve({ demoMode: false, readOnlyMode: true, readOnlyMessage: "Custom message", wsProxyUrl: "", grafanaUrl: "" }),
     });
 
     const { result } = renderHook(() => useReadOnlyMode());
@@ -145,6 +149,8 @@ describe("useReadOnlyMode", () => {
         demoMode: false,
         readOnlyMode: true,
         readOnlyMessage: "Managed by GitOps",
+        wsProxyUrl: "",
+        grafanaUrl: "",
       }),
     });
 
@@ -157,5 +163,54 @@ describe("useReadOnlyMode", () => {
     // Value depends on fetched config
     expect(typeof result.current.isReadOnly).toBe("boolean");
     expect(typeof result.current.message).toBe("string");
+  });
+});
+
+describe("useGrafanaUrl", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("should return grafanaUrl and loading state", () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "http://localhost:3001",
+      }),
+    });
+
+    const { result } = renderHook(() => useGrafanaUrl());
+
+    expect(result.current).toHaveProperty("grafanaUrl");
+    expect(result.current).toHaveProperty("loading");
+    expect(typeof result.current.grafanaUrl).toBe("string");
+    expect(typeof result.current.loading).toBe("boolean");
+  });
+
+  it("should reflect grafana URL from config", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "http://grafana.example.com:3000",
+      }),
+    });
+
+    const { result } = renderHook(() => useGrafanaUrl());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(typeof result.current.grafanaUrl).toBe("string");
   });
 });

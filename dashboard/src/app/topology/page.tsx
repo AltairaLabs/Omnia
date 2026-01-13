@@ -6,8 +6,9 @@ import { Header } from "@/components/layout";
 import { TopologyGraph, NotesPanel } from "@/components/topology";
 import { NamespaceFilter } from "@/components/filters";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Bot, FileText, Package, Wrench } from "lucide-react";
+import { Bot, FileText, Package, Wrench, Zap } from "lucide-react";
 import { useAgents, usePromptPacks, useToolRegistries } from "@/hooks";
+import { useProviders } from "@/hooks/use-providers";
 import { loadNotes, setNote, deleteNote, type NotesMap } from "@/lib/notes-storage";
 import {
   Dialog,
@@ -40,8 +41,9 @@ export default function TopologyPage() {
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: promptPacks, isLoading: promptPacksLoading } = usePromptPacks();
   const { data: toolRegistries, isLoading: toolRegistriesLoading } = useToolRegistries();
+  const { data: providers, isLoading: providersLoading } = useProviders();
 
-  const isLoading = agentsLoading || promptPacksLoading || toolRegistriesLoading;
+  const isLoading = agentsLoading || promptPacksLoading || toolRegistriesLoading || providersLoading;
 
   // Extract unique namespaces from all resources
   const allNamespaces = useMemo(() => {
@@ -55,8 +57,11 @@ export default function TopologyPage() {
     toolRegistries?.forEach((t) => {
       if (t.metadata.namespace) namespaces.add(t.metadata.namespace);
     });
+    providers?.forEach((p) => {
+      if (p.metadata.namespace) namespaces.add(p.metadata.namespace);
+    });
     return [...namespaces].sort((a, b) => a.localeCompare(b));
-  }, [agents, promptPacks, toolRegistries]);
+  }, [agents, promptPacks, toolRegistries, providers]);
 
   const handleNamespaceChange = useCallback((namespaces: string[]) => {
     setSelectedNamespaces(namespaces);
@@ -108,6 +113,11 @@ export default function TopologyPage() {
     return toolRegistries.filter((t) => t.metadata.namespace && selectedNamespaces.includes(t.metadata.namespace));
   }, [toolRegistries, selectedNamespaces]);
 
+  const filteredProviders = useMemo(() => {
+    if (!providers || selectedNamespaces.length === 0) return providers || [];
+    return providers.filter((p) => p.metadata.namespace && selectedNamespaces.includes(p.metadata.namespace));
+  }, [providers, selectedNamespaces]);
+
   const handleNodeClick = useCallback(
     (type: string, name: string, namespace: string) => {
       switch (type) {
@@ -119,6 +129,10 @@ export default function TopologyPage() {
           break;
         case "tools":
           router.push(`/tools/${name}?namespace=${namespace}`);
+          break;
+        case "provider":
+          // Providers don't have a detail page yet
+          // Could add router.push(`/providers/${name}?namespace=${namespace}`);
           break;
       }
     },
@@ -162,6 +176,11 @@ export default function TopologyPage() {
               <div className="w-3 h-3 rounded bg-teal-500" />
               <Wrench className="h-4 w-4 text-teal-600" />
               <span className="text-muted-foreground">Tools ({totalTools})</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-green-500" />
+              <Zap className="h-4 w-4 text-green-600" />
+              <span className="text-muted-foreground">Providers ({filteredProviders.length})</span>
             </div>
 
             {/* Status indicators */}
@@ -223,6 +242,7 @@ export default function TopologyPage() {
               agents={filteredAgents}
               promptPacks={filteredPromptPacks}
               toolRegistries={filteredToolRegistries}
+              providers={filteredProviders}
               onNodeClick={handleNodeClick}
               notes={notes}
               onNoteEdit={handleNoteEdit}

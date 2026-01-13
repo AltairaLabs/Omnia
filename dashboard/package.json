@@ -60,6 +60,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "elkjs": "^0.11.0",
     "iron-session": "^8.0.4",
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.562.0",
