@@ -122,7 +122,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Routes for proxy storage (LocalStorage) - uploads go through facade
 	if h.proxyStorage != nil {
 		mux.HandleFunc("/media/upload/", h.handleUpload)
-		mux.HandleFunc("/media/download/", h.handleDownload)
+		mux.HandleFunc(pathMediaDownload, h.handleDownload)
 	}
 
 	// Routes for direct storage (S3/GCS) - uploads go directly to cloud
@@ -130,7 +130,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("/media/confirm-upload/", h.handleConfirmUpload)
 		// For direct storage, download returns a redirect to presigned URL
 		if h.proxyStorage == nil {
-			mux.HandleFunc("/media/download/", h.handleCloudDownload)
+			mux.HandleFunc(pathMediaDownload, h.handleCloudDownload)
 		}
 	}
 }
