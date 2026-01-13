@@ -221,6 +221,8 @@ export function VideoPlayer({ src, type, filename, fileSize, className }: Readon
           aria-label={filename ? `Video: ${filename}` : "Video player"}
         >
           {type && <source src={src} type={type} />}
+          {/* Captions track - required for accessibility, empty as captions are user-provided */}
+          <track kind="captions" src="" label="Captions" default />
           Your browser does not support video playback.
         </video>
 

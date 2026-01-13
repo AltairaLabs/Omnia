@@ -354,7 +354,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           />
         )}
 
-        {/* Hidden file input */}
+        {/* Hidden file input - visually hidden but accessible for programmatic clicks */}
         <input
           ref={fileInputRef}
           type="file"
@@ -362,7 +362,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           accept={attachmentConfig.acceptString}
           onChange={handleFileInputChange}
           className="hidden"
-          aria-hidden="true"
+          tabIndex={-1}
         />
 
         <div className="flex gap-2">

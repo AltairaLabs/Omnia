@@ -423,7 +423,7 @@ func (s *LocalStorage) CleanupExpired(ctx context.Context) (int, error) {
 			}
 
 			if info.IsExpired() {
-				if err := s.Delete(ctx, ref.String()); err == nil {
+				if s.Delete(ctx, ref.String()) == nil {
 					cleaned++
 				}
 			}

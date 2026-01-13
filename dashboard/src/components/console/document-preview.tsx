@@ -196,11 +196,8 @@ export function DocumentPreview({
       {/* Preview area */}
       {showPreview && fileInfo.canPreview && (
         <div className="border-t">
-          {isPdf ? (
-            <PdfPreview src={src} filename={filename} />
-          ) : isText ? (
-            <TextPreview src={src} />
-          ) : null}
+          {isPdf && <PdfPreview src={src} filename={filename} />}
+          {isText && !isPdf && <TextPreview src={src} />}
         </div>
       )}
     </div>
