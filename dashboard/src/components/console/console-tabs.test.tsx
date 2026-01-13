@@ -302,5 +302,59 @@ describe("ConsoleTabs", () => {
         expect(comboboxes).toHaveLength(2);
       });
     });
+
+    it("should support keyboard navigation on tabs", async () => {
+      const { ConsoleTabs: FreshConsoleTabs } = await import("./console-tabs");
+      render(<FreshConsoleTabs />, { wrapper: TestWrapper });
+
+      await waitFor(() => {
+        expect(screen.getByText("New Session")).toBeInTheDocument();
+      });
+
+      // Create second tab
+      const newTabButton = screen.getByRole("button", { name: /new tab/i });
+      fireEvent.click(newTabButton);
+
+      await waitFor(() => {
+        const sessions = screen.getAllByText("New Session");
+        expect(sessions.length).toBeGreaterThanOrEqual(2);
+      });
+
+      // Test keyboard navigation with Enter key
+      const tabs = screen.getAllByRole("tab");
+      fireEvent.keyDown(tabs[0], { key: "Enter" });
+
+      // Tab should be selected
+      expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+
+      // Test keyboard navigation with Space key
+      fireEvent.keyDown(tabs[1], { key: " " });
+      expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    });
+  });
+
+  describe("empty state display", () => {
+    it("should show empty state message when no tabs are active", async () => {
+      const storeModule = await import("@/stores");
+      const { ConsoleTabs: FreshConsoleTabs } = await import("./console-tabs");
+
+      render(<FreshConsoleTabs />, { wrapper: TestWrapper });
+
+      await waitFor(() => {
+        expect(screen.getByText("New Session")).toBeInTheDocument();
+      });
+
+      // Close the initial tab to trigger empty state
+      const state = storeModule.useConsoleStore.getState();
+      const tabId = state.tabs[0]?.id;
+      if (tabId) {
+        state.closeTab(tabId);
+      }
+
+      // Should show empty state
+      await waitFor(() => {
+        expect(screen.getByText(/no active session/i)).toBeInTheDocument();
+      });
+    });
   });
 });
