@@ -9,6 +9,37 @@ import { AgentSelector } from "./agent-selector";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
+function renderTabContent(
+  activeTab: ConsoleTab | undefined,
+  handleAgentSelect: (namespace: string, agentName: string) => void
+): React.ReactNode {
+  if (!activeTab) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground">
+        <p>No active session. Click + to create a new tab.</p>
+      </div>
+    );
+  }
+
+  if (activeTab.state === "selecting") {
+    return <AgentSelector onSelect={handleAgentSelect} />;
+  }
+
+  if (activeTab.agentName && activeTab.namespace) {
+    return (
+      <AgentConsole
+        key={activeTab.id}
+        sessionId={activeTab.id}
+        agentName={activeTab.agentName}
+        namespace={activeTab.namespace}
+        className="h-full"
+      />
+    );
+  }
+
+  return null;
+}
+
 /**
  * Multi-session tabbed console container.
  * Manages multiple concurrent agent conversations in tabs.
@@ -126,23 +157,7 @@ export function ConsoleTabs() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab ? (
-          activeTab.state === "selecting" ? (
-            <AgentSelector onSelect={handleAgentSelect} />
-          ) : activeTab.agentName && activeTab.namespace ? (
-            <AgentConsole
-              key={activeTab.id}
-              sessionId={activeTab.id}
-              agentName={activeTab.agentName}
-              namespace={activeTab.namespace}
-              className="h-full"
-            />
-          ) : null
-        ) : (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            <p>No active session. Click + to create a new tab.</p>
-          </div>
-        )}
+        {renderTabContent(activeTab, handleAgentSelect)}
       </div>
     </div>
   );

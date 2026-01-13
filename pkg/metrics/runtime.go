@@ -256,17 +256,27 @@ type RuntimeMetricsRecorder interface {
 // NoOpRuntimeMetrics is a no-op implementation for when metrics are disabled.
 type NoOpRuntimeMetrics struct{}
 
-// RecordToolCall is a no-op implementation.
-func (n *NoOpRuntimeMetrics) RecordToolCall(_ ToolCallMetrics) {}
+// RecordToolCall is a no-op implementation for disabled metrics.
+func (n *NoOpRuntimeMetrics) RecordToolCall(_ ToolCallMetrics) {
+	// Intentionally empty - metrics are disabled
+}
 
-// RecordPipelineStart is a no-op implementation.
-func (n *NoOpRuntimeMetrics) RecordPipelineStart() {}
+// RecordPipelineStart is a no-op implementation for disabled metrics.
+func (n *NoOpRuntimeMetrics) RecordPipelineStart() {
+	// Intentionally empty - metrics are disabled
+}
 
-// RecordPipelineEnd is a no-op implementation.
-func (n *NoOpRuntimeMetrics) RecordPipelineEnd(_ PipelineMetrics) {}
+// RecordPipelineEnd is a no-op implementation for disabled metrics.
+func (n *NoOpRuntimeMetrics) RecordPipelineEnd(_ PipelineMetrics) {
+	// Intentionally empty - metrics are disabled
+}
 
-// RecordStage is a no-op implementation.
-func (n *NoOpRuntimeMetrics) RecordStage(_ StageMetrics) {}
+// RecordStage is a no-op implementation for disabled metrics.
+func (n *NoOpRuntimeMetrics) RecordStage(_ StageMetrics) {
+	// Intentionally empty - metrics are disabled
+}
 
-// RecordValidation is a no-op implementation.
-func (n *NoOpRuntimeMetrics) RecordValidation(_ ValidationMetrics) {}
+// RecordValidation is a no-op implementation for disabled metrics.
+func (n *NoOpRuntimeMetrics) RecordValidation(_ ValidationMetrics) {
+	// Intentionally empty - metrics are disabled
+}

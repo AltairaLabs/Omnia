@@ -310,4 +310,55 @@ describe("AgentSelector", () => {
       });
     });
   });
+
+  describe("placeholder text", () => {
+    it("should show loading placeholder when agents are loading", async () => {
+      // Override the mock for this test
+      const useAgentsMock = await import("@/hooks/use-agents");
+      vi.spyOn(useAgentsMock, "useAgents").mockReturnValue({
+        data: undefined,
+        isLoading: true,
+      } as unknown as ReturnType<typeof useAgentsMock.useAgents>);
+
+      render(<AgentSelector onSelect={mockOnSelect} />, {
+        wrapper: TestWrapper,
+      });
+
+      expect(screen.getByText("Loading agents...")).toBeInTheDocument();
+    });
+
+    it("should show no agents placeholder when no running agents exist", async () => {
+      // Override the mock for this test
+      const useAgentsMock = await import("@/hooks/use-agents");
+      vi.spyOn(useAgentsMock, "useAgents").mockReturnValue({
+        data: [],
+        isLoading: false,
+      } as unknown as ReturnType<typeof useAgentsMock.useAgents>);
+
+      render(<AgentSelector onSelect={mockOnSelect} />, {
+        wrapper: TestWrapper,
+      });
+
+      expect(screen.getByText("No running agents")).toBeInTheDocument();
+    });
+  });
+
+  describe("namespace fallback", () => {
+    it("should derive namespaces from agents when namespace list is empty", async () => {
+      // Override the namespace mock to return empty
+      const useNamespacesMock = await import("@/hooks/use-namespaces");
+      vi.spyOn(useNamespacesMock, "useNamespaces").mockReturnValue({
+        data: [],
+        isLoading: false,
+      } as unknown as ReturnType<typeof useNamespacesMock.useNamespaces>);
+
+      render(<AgentSelector onSelect={mockOnSelect} />, {
+        wrapper: TestWrapper,
+      });
+
+      // The component should still render with namespaces derived from agents
+      const selects = screen.getAllByTestId("select-native");
+      expect(selects[0]).toBeInTheDocument();
+    });
+  });
 });

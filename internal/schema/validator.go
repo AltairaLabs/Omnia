@@ -18,6 +18,7 @@ limitations under the License.
 package schema
 
 import (
+	// embed is used to embed the promptpack.schema.json file for offline validation
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -228,7 +229,7 @@ func extractSchemaURL(data []byte) string {
 	var pack struct {
 		Schema string `json:"$schema"`
 	}
-	if err := json.Unmarshal(data, &pack); err != nil {
+	if json.Unmarshal(data, &pack) != nil {
 		return ""
 	}
 	return pack.Schema
