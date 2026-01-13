@@ -28,7 +28,7 @@ const providerConfig: Record<ProviderType, { color: string; letter: string; labe
  * Provider icon component.
  * Renders a colored circle with the provider's initial letter.
  */
-export function ProviderIcon({ type, size = 24, className = "" }: ProviderIconProps) {
+export function ProviderIcon({ type, size = 24, className = "" }: Readonly<ProviderIconProps>) {
   const config = providerConfig[type] || providerConfig.mock;
 
   return (

@@ -59,15 +59,15 @@ const typeLabels = {
 // Custom hook to sync with localStorage without hydration issues
 function useNotesStore(): NotesMap {
   const getSnapshot = () => {
-    if (typeof window === "undefined") return "{}";
+    if (typeof globalThis.window === "undefined") return "{}";
     return localStorage.getItem("topology-notes") || "{}";
   };
 
   const getServerSnapshot = () => "{}";
 
   const subscribe = (callback: () => void) => {
-    window.addEventListener("storage", callback);
-    return () => window.removeEventListener("storage", callback);
+    globalThis.window.addEventListener("storage", callback);
+    return () => globalThis.window.removeEventListener("storage", callback);
   };
 
   const notesString = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -95,7 +95,7 @@ export function NotesPanel({ resources, selectedNamespaces }: Readonly<NotesPane
 
   // Helper to trigger re-read from localStorage via storage event
   const triggerRefresh = () => {
-    window.dispatchEvent(new Event("storage"));
+    globalThis.window.dispatchEvent(new Event("storage"));
   };
 
   const handleAddNote = () => {
