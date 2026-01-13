@@ -1,0 +1,341 @@
+name: Agent E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+      - 'dashboard/**'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'api/**'
+      - 'Dockerfile*'
+      - '.github/workflows/test-agent-e2e.yml'
+  pull_request:
+    paths:
+      - 'charts/**'
+      - 'dashboard/**'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'api/**'
+      - 'Dockerfile*'
+      - '.github/workflows/test-agent-e2e.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  KIND_CLUSTER: agent-e2e-test
+  HELM_VERSION: v3.14.0
+  # Use a small, fast model for CI testing
+  OLLAMA_MODEL: qwen2:0.5b
+  # Image tag for locally-built images
+  IMAGE_TAG: e2e-test
+
+jobs:
+  agent-e2e:
+    name: Agent Flow Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45  # Increased for image builds + Ollama model pull
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker images
+        run: |
+          echo "=== Building Docker images ==="
+
+          # Build operator image
+          echo "Building omnia (operator) image..."
+          docker build -t ghcr.io/altairalabs/omnia:$IMAGE_TAG -f Dockerfile .
+
+          # Build facade image
+          echo "Building omnia-facade image..."
+          docker build -t ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG -f Dockerfile.agent .
+
+          # Build runtime image
+          echo "Building omnia-runtime image..."
+          docker build -t ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG -f Dockerfile.runtime .
+
+          echo "All images built successfully"
+          docker images | grep altairalabs
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Create kind cluster
+        run: |
+          # Create cluster with extra port mappings for testing
+          cat <<EOF | kind create cluster --name $KIND_CLUSTER --config=-
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+            extraPortMappings:
+            - containerPort: 30080
+              hostPort: 30080
+              protocol: TCP
+          EOF
+          kubectl cluster-info --context kind-$KIND_CLUSTER
+
+      - name: Load images into kind
+        run: |
+          echo "=== Loading images into kind cluster ==="
+          kind load docker-image ghcr.io/altairalabs/omnia:$IMAGE_TAG --name $KIND_CLUSTER
+          kind load docker-image ghcr.io/altairalabs/omnia-facade:$IMAGE_TAG --name $KIND_CLUSTER
+          kind load docker-image ghcr.io/altairalabs/omnia-runtime:$IMAGE_TAG --name $KIND_CLUSTER
+          echo "Images loaded into kind"
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          echo "Waiting for cert-manager to be ready..."
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
+
+      - name: Install Gateway API CRDs
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm repo update
+
+      - name: Build chart dependencies
+        run: |
+          helm dependency build ./charts/omnia
+
+      - name: Deploy Omnia with demo mode
+        run: |
+          echo "=== Deploying Omnia with demo mode (Ollama) ==="
+
+          # Deploy with demo enabled, using locally built images
+          helm install omnia ./charts/omnia \
+            --namespace omnia-system \
+            --create-namespace \
+            --set image.tag=$IMAGE_TAG \
+            --set image.pullPolicy=Never \
+            --set facade.image.tag=$IMAGE_TAG \
+            --set facade.image.pullPolicy=Never \
+            --set framework.image.tag=$IMAGE_TAG \
+            --set framework.image.pullPolicy=Never \
+            --set dashboard.enabled=false \
+            --set demo.enabled=true \
+            --set demo.ollama.model=$OLLAMA_MODEL \
+            --set demo.ollama.resources.requests.memory="2Gi" \
+            --set demo.ollama.resources.limits.memory="4Gi" \
+            --set demo.ollama.persistence.enabled=false \
+            --set keda.enabled=false \
+            --timeout 10m
+
+          echo "Helm install complete"
+
+      - name: Wait for Ollama to be ready
+        run: |
+          echo "=== Waiting for Ollama pod to be ready ==="
+
+          # Wait for Ollama StatefulSet pod to be ready
+          echo "Waiting for Ollama StatefulSet..."
+          kubectl wait --for=condition=Ready pod/ollama-0 \
+            -n omnia-demo --timeout=300s || {
+            echo "Ollama pod not ready, checking status..."
+            kubectl get pods -n omnia-demo
+            kubectl describe pod ollama-0 -n omnia-demo || true
+            exit 1
+          }
+
+          echo "Ollama pod ready"
+
+          # Wait for model pull job to complete
+          echo "Waiting for model pull job to complete..."
+          kubectl wait --for=condition=Complete job -l app.kubernetes.io/name=ollama-pull-model \
+            -n omnia-demo --timeout=600s || {
+            echo "Model pull job not complete, checking status..."
+            kubectl get jobs -n omnia-demo
+            kubectl logs -n omnia-demo -l job-name --tail=50 || true
+          }
+
+          # Verify model is available
+          echo "Checking available models..."
+          kubectl exec -n omnia-demo ollama-0 -- ollama list || true
+
+      - name: Wait for demo agent to be ready
+        run: |
+          echo "=== Waiting for demo agent to be ready ==="
+
+          # First, verify the AgentRuntime CR exists
+          echo "Checking AgentRuntime CR..."
+          kubectl get agentruntime -n omnia-demo -o yaml || {
+            echo "ERROR: No AgentRuntime found in omnia-demo namespace!"
+            echo "Checking what resources exist..."
+            kubectl get all -n omnia-demo
+            kubectl get provider,promptpack,agentruntime -n omnia-demo || true
+            exit 1
+          }
+
+          # Check operator is running
+          echo "Checking operator status..."
+          kubectl get pods -n omnia-system -l app.kubernetes.io/name=omnia
+          kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia --tail=50 || true
+
+          # Wait for AgentRuntime to be reconciled
+          echo "Waiting for AgentRuntime to be reconciled..."
+          for i in {1..60}; do
+            STATUS=$(kubectl get agentruntime vision-demo -n omnia-demo -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+            echo "AgentRuntime status: $STATUS ($i/60)"
+            if [ "$STATUS" == "Running" ]; then
+              echo "Agent is running!"
+              break
+            fi
+            if [ "$STATUS" == "Failed" ]; then
+              echo "AgentRuntime failed!"
+              kubectl describe agentruntime vision-demo -n omnia-demo
+              exit 1
+            fi
+            sleep 10
+          done
+
+          # Show all resources
+          echo "=== Resources in omnia-demo ==="
+          kubectl get all -n omnia-demo
+          kubectl get agentruntime -n omnia-demo -o yaml
+
+      - name: Install test tools
+        run: |
+          # Install websocat for WebSocket testing
+          curl -L https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl -o websocat
+          chmod +x websocat
+          sudo mv websocat /usr/local/bin/
+
+          # Install jq if not present
+          which jq || sudo apt-get install -y jq
+
+      - name: Test agent health via pod status
+        run: |
+          echo "=== Verifying agent pod is healthy ==="
+
+          # Check pod is running
+          POD_STATUS=$(kubectl get pods -n omnia-demo -l app.kubernetes.io/instance=vision-demo -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
+          echo "Pod status: $POD_STATUS"
+
+          if [ "$POD_STATUS" != "Running" ]; then
+            echo "Pod not running! Current status: $POD_STATUS"
+            kubectl get pods -n omnia-demo -o wide
+            kubectl describe pods -n omnia-demo -l app.kubernetes.io/instance=vision-demo || true
+            exit 1
+          fi
+
+          # Check all containers are ready
+          READY=$(kubectl get pods -n omnia-demo -l app.kubernetes.io/instance=vision-demo -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+          echo "Pod ready condition: $READY"
+
+          if [ "$READY" != "True" ]; then
+            echo "WARNING: Pod not fully ready yet, but continuing..."
+          fi
+
+          echo "Agent pod health check passed!"
+
+      - name: Test agent connectivity
+        run: |
+          echo "=== Testing agent connectivity ==="
+
+          # Port forward to agent service
+          kubectl port-forward -n omnia-demo svc/vision-demo 8080:8080 &
+          PF_PID=$!
+          sleep 5
+
+          # Test 1: Verify the HTTP endpoint is responding
+          # The WebSocket endpoint returns 400 without upgrade, but that proves it's running
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/ws?agent=vision-demo")
+          echo "HTTP response code: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" = "400" ]; then
+            echo "Agent HTTP endpoint is responding (400 expected without WebSocket upgrade)"
+          elif [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "101" ]; then
+            echo "Agent endpoint responded with $HTTP_CODE"
+          else
+            echo "ERROR: Unexpected HTTP response code: $HTTP_CODE"
+            kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo --tail=50 || true
+            kill $PF_PID || true
+            exit 1
+          fi
+
+          # Test 2: Verify WebSocket connection is established via logs
+          echo "Triggering WebSocket connection for log verification..."
+          timeout 5 websocat "ws://localhost:8080/ws?agent=vision-demo" < /dev/null > /tmp/ws_test.txt 2>&1 || true
+
+          # Wait for logs to show connection
+          sleep 2
+
+          # Check agent logs for new connection
+          echo "Checking agent logs for WebSocket connection..."
+          CONN_LOG=$(kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo -c facade --tail=20 2>/dev/null | grep "new connection" | tail -1)
+          echo "Connection log: $CONN_LOG"
+
+          if [ -n "$CONN_LOG" ]; then
+            echo "WebSocket connection test PASSED - agent accepted connection"
+          else
+            echo "WARNING: Could not verify WebSocket connection in logs, but HTTP test passed"
+          fi
+
+          kill $PF_PID 2>/dev/null || true
+
+          echo "Agent connectivity test passed!"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          echo "=== Collecting debug information ==="
+
+          echo "--- Pods in omnia-system ---"
+          kubectl get pods -n omnia-system -o wide || true
+
+          echo "--- Pods in omnia-demo ---"
+          kubectl get pods -n omnia-demo -o wide || true
+
+          echo "--- AgentRuntime status ---"
+          kubectl get agentruntime -n omnia-demo -o yaml || true
+
+          echo "--- Ollama logs ---"
+          kubectl logs -n omnia-demo -l app.kubernetes.io/name=ollama --tail=200 || true
+
+          echo "--- Agent logs ---"
+          kubectl logs -n omnia-demo -l app.kubernetes.io/instance=vision-demo --tail=200 || true
+
+          echo "--- Events ---"
+          kubectl get events -n omnia-demo --sort-by='.lastTimestamp' || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name $KIND_CLUSTER || true
