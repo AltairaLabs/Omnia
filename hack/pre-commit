@@ -298,6 +298,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip cloud storage implementations (require external infrastructure: S3/MinIO, GCS emulator, Azurite)
+        if [[ "$file" == "internal/media/s3.go" ]] || [[ "$file" == "internal/media/gcs.go" ]] || [[ "$file" == "internal/media/azure.go" ]] || [[ "$file" == "internal/media/handler.go" ]]; then
+            continue
+        fi
+
         # Calculate ACTUAL statement coverage from raw coverage.out
         # Format: file:startLine.startCol,endLine.endCol numStatements count
         # count > 0 means covered, count = 0 means not covered

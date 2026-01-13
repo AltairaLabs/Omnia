@@ -22,6 +22,12 @@ interface AgentSelectorProps {
   className?: string;
 }
 
+function getAgentPlaceholder(isLoading: boolean, agentCount: number): string {
+  if (isLoading) return "Loading agents...";
+  if (agentCount === 0) return "No running agents";
+  return "Select an agent";
+}
+
 /**
  * Agent selector component for choosing an agent to start a conversation with.
  * Shows namespace and agent dropdowns with a "Start Conversation" button.
@@ -101,13 +107,13 @@ export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorPro
         <div className="flex flex-col gap-4 w-full">
           {/* Namespace selector */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Namespace</label>
+            <label htmlFor="namespace-select" className="text-sm font-medium">Namespace</label>
             <Select
               value={selectedNamespace || "__all__"}
               onValueChange={handleNamespaceChange}
               disabled={isLoading}
             >
-              <SelectTrigger>
+              <SelectTrigger id="namespace-select">
                 <SelectValue placeholder="All namespaces" />
               </SelectTrigger>
               <SelectContent>
@@ -123,21 +129,15 @@ export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorPro
 
           {/* Agent selector */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Agent</label>
+            <label htmlFor="agent-select" className="text-sm font-medium">Agent</label>
             <Select
               value={selectedAgent}
               onValueChange={handleAgentChange}
               disabled={isLoading || filteredAgents.length === 0}
             >
-              <SelectTrigger>
+              <SelectTrigger id="agent-select">
                 <SelectValue
-                  placeholder={
-                    isLoading
-                      ? "Loading agents..."
-                      : filteredAgents.length === 0
-                        ? "No running agents"
-                        : "Select an agent"
-                  }
+                  placeholder={getAgentPlaceholder(isLoading, filteredAgents.length)}
                 />
               </SelectTrigger>
               <SelectContent>

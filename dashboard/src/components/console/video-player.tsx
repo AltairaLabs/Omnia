@@ -15,7 +15,7 @@ interface VideoPlayerProps {
 }
 
 function formatTime(seconds: number): string {
-  if (!isFinite(seconds) || isNaN(seconds)) return "0:00";
+  if (!Number.isFinite(seconds) || Number.isNaN(seconds)) return "0:00";
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
@@ -161,10 +161,10 @@ export function VideoPlayer({ src, type, filename, fileSize, className }: Readon
     if (!container) return;
 
     try {
-      if (!document.fullscreenElement) {
-        await container.requestFullscreen();
-      } else {
+      if (document.fullscreenElement) {
         await document.exitFullscreen();
+      } else {
+        await container.requestFullscreen();
       }
     } catch {
       // Fullscreen may not be available in all contexts (e.g., iframe restrictions)

@@ -28,6 +28,16 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// HTTP handler constants to avoid string duplication.
+const (
+	errMethodNotAllowed = "method not allowed"
+	errInvalidPath      = "invalid path"
+	errFailedToEncode   = "failed to encode response"
+	contentTypeJSON     = "application/json"
+	headerContentType   = "Content-Type"
+	pathMediaDownload   = "/media/download/"
+)
+
 // HandlerMetrics defines the metrics interface for the media handler.
 type HandlerMetrics interface {
 	UploadStarted()
@@ -38,15 +48,27 @@ type HandlerMetrics interface {
 	DownloadFailed()
 }
 
-// noOpMetrics is a no-op metrics implementation.
+// noOpMetrics is a no-op metrics implementation for when metrics are disabled.
 type noOpMetrics struct{}
 
-func (n *noOpMetrics) UploadStarted()                 {}
-func (n *noOpMetrics) UploadCompleted(int64, float64) {}
-func (n *noOpMetrics) UploadFailed()                  {}
-func (n *noOpMetrics) DownloadStarted()               {}
-func (n *noOpMetrics) DownloadCompleted(int64)        {}
-func (n *noOpMetrics) DownloadFailed()                {}
+func (n *noOpMetrics) UploadStarted() {
+	// Intentionally empty - metrics are disabled
+}
+func (n *noOpMetrics) UploadCompleted(int64, float64) {
+	// Intentionally empty - metrics are disabled
+}
+func (n *noOpMetrics) UploadFailed() {
+	// Intentionally empty - metrics are disabled
+}
+func (n *noOpMetrics) DownloadStarted() {
+	// Intentionally empty - metrics are disabled
+}
+func (n *noOpMetrics) DownloadCompleted(int64) {
+	// Intentionally empty - metrics are disabled
+}
+func (n *noOpMetrics) DownloadFailed() {
+	// Intentionally empty - metrics are disabled
+}
 
 // Handler provides HTTP endpoints for media upload and download.
 type Handler struct {
@@ -118,7 +140,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // Body: {"session_id": "...", "filename": "...", "mime_type": "...", "size_bytes": 123}
 func (h *Handler) handleRequestUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -147,9 +169,9 @@ func (h *Handler) handleRequestUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(creds); err != nil {
-		h.log.Error(err, "failed to encode response")
+		h.log.Error(err, errFailedToEncode)
 	}
 }
 
@@ -157,7 +179,7 @@ func (h *Handler) handleRequestUpload(w http.ResponseWriter, r *http.Request) {
 // PUT /media/upload/{upload-id}
 func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -238,16 +260,16 @@ func parseMediaPath(urlPath, prefix string) (*StorageRef, error) {
 // GET /media/download/{session-id}/{media-id}
 func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
 	h.metrics.DownloadStarted()
 
-	ref, err := parseMediaPath(r.URL.Path, "/media/download/")
+	ref, err := parseMediaPath(r.URL.Path, pathMediaDownload)
 	if err != nil {
 		h.metrics.DownloadFailed()
-		http.Error(w, "invalid path", http.StatusBadRequest)
+		http.Error(w, errInvalidPath, http.StatusBadRequest)
 		return
 	}
 
@@ -283,7 +305,7 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 // POST /media/confirm-upload/{upload-id}
 func (h *Handler) handleConfirmUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -315,9 +337,9 @@ func (h *Handler) handleConfirmUpload(w http.ResponseWriter, r *http.Request) {
 	h.metrics.UploadCompleted(info.SizeBytes, duration)
 	h.log.Info("upload confirmed", "uploadID", uploadID, "bytes", info.SizeBytes)
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(info); err != nil {
-		h.log.Error(err, "failed to encode response")
+		h.log.Error(err, errFailedToEncode)
 	}
 }
 
@@ -325,16 +347,16 @@ func (h *Handler) handleConfirmUpload(w http.ResponseWriter, r *http.Request) {
 // GET /media/download/{session-id}/{media-id}
 func (h *Handler) handleCloudDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
 	h.metrics.DownloadStarted()
 
-	ref, err := parseMediaPath(r.URL.Path, "/media/download/")
+	ref, err := parseMediaPath(r.URL.Path, pathMediaDownload)
 	if err != nil {
 		h.metrics.DownloadFailed()
-		http.Error(w, "invalid path", http.StatusBadRequest)
+		http.Error(w, errInvalidPath, http.StatusBadRequest)
 		return
 	}
 
@@ -355,13 +377,13 @@ func (h *Handler) handleCloudDownload(w http.ResponseWriter, r *http.Request) {
 // GET /media/info/{session-id}/{media-id}
 func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 		return
 	}
 
 	ref, err := parseMediaPath(r.URL.Path, "/media/info/")
 	if err != nil {
-		http.Error(w, "invalid path", http.StatusBadRequest)
+		http.Error(w, errInvalidPath, http.StatusBadRequest)
 		return
 	}
 
@@ -372,9 +394,9 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(info); err != nil {
-		h.log.Error(err, "failed to encode response")
+		h.log.Error(err, errFailedToEncode)
 	}
 }
 

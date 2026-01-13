@@ -29,6 +29,12 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
 
+function getZoomCursor(zoom: number, isDragging: boolean): string {
+  if (zoom <= 1) return "cursor-default";
+  if (isDragging) return "cursor-grabbing";
+  return "cursor-grab";
+}
+
 /**
  * Inner component that handles the lightbox state.
  * Separated to allow key-based remounting for state reset.
@@ -80,7 +86,7 @@ function ImageLightboxContent({
     link.download = currentImage.filename || `image-${currentIndex + 1}`;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
+    link.remove();
   }, [currentImage, currentIndex]);
 
   // Handle keyboard navigation
@@ -115,8 +121,8 @@ function ImageLightboxContent({
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    globalThis.addEventListener("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener("keydown", handleKeyDown);
   }, [hasMultipleImages, handlePrevious, handleNext, handleZoomIn, handleZoomOut, resetZoomAndPosition]);
 
   // Handle mouse wheel zoom
@@ -282,7 +288,7 @@ function ImageLightboxContent({
             alt={currentImage.alt}
             className={cn(
               "max-h-full max-w-full object-contain transition-transform select-none",
-              zoom > 1 && isDragging ? "cursor-grabbing" : zoom > 1 ? "cursor-grab" : "cursor-default"
+              getZoomCursor(zoom, isDragging)
             )}
             style={{
               transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,

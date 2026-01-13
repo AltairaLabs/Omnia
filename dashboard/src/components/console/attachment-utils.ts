@@ -238,7 +238,7 @@ export function shouldCompress(
 export function getCompressionQuality(guidance: CompressionGuidance | undefined): number {
   switch (guidance) {
     case "lossless":
-      return 1.0;
+      return 1;
     case "lossy-high":
       return 0.92;
     case "lossy-medium":

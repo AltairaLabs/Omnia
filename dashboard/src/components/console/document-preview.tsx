@@ -241,7 +241,8 @@ function TextPreview({ src }: Readonly<TextPreviewProps>) {
   // Decode base64 content from data URL
   const { content, error } = useMemo(() => {
     try {
-      const base64Match = src.match(/^data:[^;]+;base64,(.+)$/);
+      const base64Regex = /^data:[^;]+;base64,(.+)$/;
+      const base64Match = base64Regex.exec(src);
       if (base64Match) {
         const decoded = atob(base64Match[1]);
         const truncated = decoded.length > TEXT_PREVIEW_MAX_CHARS

@@ -291,9 +291,11 @@ func (s *LocalStorage) GetMediaInfo(ctx context.Context, storageRef string) (*Me
 	}
 
 	if info.IsExpired() {
-		// Clean up expired media in background
+		// Clean up expired media in background.
+		// Using context.Background() intentionally: cleanup must complete
+		// independently of the parent request's lifecycle.
 		go func() {
-			_ = s.Delete(context.Background(), storageRef)
+			_ = s.Delete(context.Background(), storageRef) //nolint:contextcheck // intentional background cleanup
 		}()
 		return nil, ErrMediaExpired
 	}
