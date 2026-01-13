@@ -9,21 +9,30 @@ import {
   type GrafanaConfig,
 } from "./use-grafana";
 
+// Mock the useGrafanaUrl hook
+vi.mock("./use-runtime-config", () => ({
+  useGrafanaUrl: vi.fn(() => ({ grafanaUrl: "", loading: false })),
+}));
+
+import { useGrafanaUrl } from "./use-runtime-config";
+
 describe("useGrafana", () => {
   const originalEnv = process.env;
+  const mockUseGrafanaUrl = vi.mocked(useGrafanaUrl);
 
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
+    mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "", loading: false });
   });
 
   afterEach(() => {
     process.env = originalEnv;
   });
 
-  describe("when NEXT_PUBLIC_GRAFANA_URL is not set", () => {
+  describe("when grafanaUrl is not set", () => {
     it("should return disabled config", () => {
-      delete process.env.NEXT_PUBLIC_GRAFANA_URL;
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "", loading: false });
       const { result } = renderHook(() => useGrafana());
 
       expect(result.current.enabled).toBe(false);
@@ -31,31 +40,31 @@ describe("useGrafana", () => {
     });
 
     it("should have default remote path", () => {
-      delete process.env.NEXT_PUBLIC_GRAFANA_URL;
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "", loading: false });
       const { result } = renderHook(() => useGrafana());
 
       expect(result.current.remotePath).toBe("/grafana/");
     });
 
     it("should have default org ID", () => {
-      delete process.env.NEXT_PUBLIC_GRAFANA_URL;
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "", loading: false });
       const { result } = renderHook(() => useGrafana());
 
       expect(result.current.orgId).toBe(1);
     });
   });
 
-  describe("when NEXT_PUBLIC_GRAFANA_URL is set", () => {
+  describe("when grafanaUrl is set via runtime config", () => {
     it("should return enabled config", () => {
-      process.env.NEXT_PUBLIC_GRAFANA_URL = "https://grafana.example.com"; // NOSONAR - test URL
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "https://grafana.example.com", loading: false }); // NOSONAR - test URL
       const { result } = renderHook(() => useGrafana());
 
       expect(result.current.enabled).toBe(true);
       expect(result.current.baseUrl).toBe("https://grafana.example.com");
     });
 
-    it("should use custom remote path", () => {
-      process.env.NEXT_PUBLIC_GRAFANA_URL = "https://grafana.example.com"; // NOSONAR - test URL
+    it("should use custom remote path from env", () => {
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "https://grafana.example.com", loading: false }); // NOSONAR - test URL
       process.env.NEXT_PUBLIC_GRAFANA_PATH = "/monitoring";
       const { result } = renderHook(() => useGrafana());
 
@@ -63,15 +72,15 @@ describe("useGrafana", () => {
     });
 
     it("should normalize path without leading slash", () => {
-      process.env.NEXT_PUBLIC_GRAFANA_URL = "https://grafana.example.com"; // NOSONAR - test URL
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "https://grafana.example.com", loading: false }); // NOSONAR - test URL
       process.env.NEXT_PUBLIC_GRAFANA_PATH = "metrics";
       const { result } = renderHook(() => useGrafana());
 
       expect(result.current.remotePath).toBe("/metrics/");
     });
 
-    it("should use custom org ID", () => {
-      process.env.NEXT_PUBLIC_GRAFANA_URL = "https://grafana.example.com"; // NOSONAR - test URL
+    it("should use custom org ID from env", () => {
+      mockUseGrafanaUrl.mockReturnValue({ grafanaUrl: "https://grafana.example.com", loading: false }); // NOSONAR - test URL
       process.env.NEXT_PUBLIC_GRAFANA_ORG_ID = "5";
       const { result } = renderHook(() => useGrafana());
 

@@ -91,24 +91,12 @@ spec:
         required: [expression]
     timeout: "5s"
 ---
-# Provider secret (dummy for dev)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: llm-provider
-  namespace: dev-agents
-type: Opaque
-stringData:
-  api-key: "dev-api-key-not-real"
----
 # AgentRuntime with demo handler
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
   name: demo-agent
   namespace: dev-agents
-  annotations:
-    omnia.altairalabs.ai/mock-provider: "true"
 spec:
   promptPackRef:
     name: demo-prompts
@@ -131,8 +119,7 @@ spec:
         cpu: "200m"
         memory: "128Mi"
   provider:
-    secretRef:
-      name: llm-provider
+    type: mock
 ---
 # Runtime agent with mock provider - uses real PromptKit runtime
 # but with simulated LLM responses (no real API calls)
@@ -141,8 +128,6 @@ kind: AgentRuntime
 metadata:
   name: runtime-agent
   namespace: dev-agents
-  annotations:
-    omnia.altairalabs.ai/mock-provider: "true"
 spec:
   promptPackRef:
     name: demo-prompts
@@ -165,8 +150,7 @@ spec:
         cpu: "500m"
         memory: "256Mi"
   provider:
-    secretRef:
-      name: llm-provider
+    type: mock
 ---
 # Echo agent for simple testing
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -174,8 +158,6 @@ kind: AgentRuntime
 metadata:
   name: echo-agent
   namespace: dev-agents
-  annotations:
-    omnia.altairalabs.ai/mock-provider: "true"
 spec:
   promptPackRef:
     name: demo-prompts
@@ -196,5 +178,4 @@ spec:
         cpu: "100m"
         memory: "64Mi"
   provider:
-    secretRef:
-      name: llm-provider
+    type: mock

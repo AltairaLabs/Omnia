@@ -3,7 +3,6 @@
 import { useState, useMemo } from "react";
 import { Bot, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useNamespaces } from "@/hooks/use-namespaces";
 import { useAgents } from "@/hooks/use-agents";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,14 +35,17 @@ export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorPro
   const [selectedNamespace, setSelectedNamespace] = useState<string>("");
   const [selectedAgent, setSelectedAgent] = useState<string>("");
 
-  // Fetch namespaces
-  const { data: namespaces, isLoading: namespacesLoading } = useNamespaces();
-
-  // Fetch agents for the selected namespace (only Running agents)
+  // Fetch all running agents (we'll derive namespaces from them)
   const { data: agents, isLoading: agentsLoading } = useAgents({
-    namespace: selectedNamespace || undefined,
     phase: "Running",
   });
+
+  // Get namespaces that have running agents (exclude empty namespaces)
+  const availableNamespaces = useMemo(() => {
+    if (!agents) return [];
+    const ns = new Set(agents.map((a) => a.metadata.namespace).filter(Boolean));
+    return Array.from(ns).sort((a, b) => (a ?? "").localeCompare(b ?? "")) as string[];
+  }, [agents]);
 
   // Filter agents by selected namespace
   const filteredAgents = useMemo(() => {
@@ -51,14 +53,6 @@ export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorPro
     if (!selectedNamespace) return agents;
     return agents.filter((a) => a.metadata.namespace === selectedNamespace);
   }, [agents, selectedNamespace]);
-
-  // Get unique namespaces from agents if namespace list is empty
-  const availableNamespaces = useMemo(() => {
-    if (namespaces && namespaces.length > 0) return namespaces;
-    if (!agents) return [];
-    const ns = new Set(agents.map((a) => a.metadata.namespace).filter(Boolean));
-    return Array.from(ns) as string[];
-  }, [namespaces, agents]);
 
   const handleNamespaceChange = (value: string) => {
     setSelectedNamespace(value === "__all__" ? "" : value);
@@ -79,7 +73,7 @@ export function AgentSelector({ onSelect, className }: Readonly<AgentSelectorPro
     }
   };
 
-  const isLoading = namespacesLoading || agentsLoading;
+  const isLoading = agentsLoading;
   const canStart = selectedAgent && !isLoading;
 
   return (

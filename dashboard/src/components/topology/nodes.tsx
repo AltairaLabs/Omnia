@@ -4,6 +4,8 @@ import { memo } from "react";
 import { Handle, Position, type Node } from "@xyflow/react";
 import { Bot, FileText, Wrench, Package, MessageSquare, StickyNote, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ProviderIcon } from "./provider-icons";
+import type { ProviderType } from "@/types";
 
 // Base node styles
 const baseNodeStyles = "px-4 py-3 rounded-lg border-2 shadow-sm min-w-[140px] cursor-pointer transition-all hover:shadow-md";
@@ -76,6 +78,7 @@ const typeColors = {
   toolRegistry: "border-orange-500 bg-orange-50 dark:bg-orange-950/30",
   tool: "border-teal-500 bg-teal-50 dark:bg-teal-950/30",
   prompt: "border-violet-500 bg-violet-50 dark:bg-violet-950/30",
+  provider: "border-green-500 bg-green-50 dark:bg-green-950/30",
 };
 
 // Status indicator component
@@ -146,12 +149,23 @@ export interface PromptNodeData extends Record<string, unknown> {
   onClick?: () => void;
 }
 
+export interface ProviderNodeData extends Record<string, unknown> {
+  label: string;
+  namespace: string;
+  providerType: ProviderType;
+  model?: string;
+  baseURL?: string;
+  phase?: string;
+  onClick?: () => void;
+}
+
 // Node types for React Flow
 export type AgentNode = Node<AgentNodeData, "agent">;
 export type PromptPackNode = Node<PromptPackNodeData, "promptPack">;
 export type ToolRegistryNode = Node<ToolRegistryNodeData, "toolRegistry">;
 export type ToolNode = Node<ToolNodeData, "tool">;
 export type PromptNode = Node<PromptNodeData, "prompt">;
+export type ProviderNode = Node<ProviderNodeData, "provider">;
 
 // Props types for custom node components
 interface CustomNodeProps<T extends Record<string, unknown>> {
@@ -323,6 +337,37 @@ export const PromptNodeComponent = memo(({ data }: Readonly<CustomNodeProps<Prom
 });
 PromptNodeComponent.displayName = "PromptNodeComponent";
 
+// Provider Node Component
+export const ProviderNodeComponent = memo(({ data }: Readonly<CustomNodeProps<ProviderNodeData>>) => {
+  return (
+    <div className="relative">
+      <Handle type="target" position={Position.Left} className="!bg-green-500" />
+      <button
+        type="button"
+        className={cn(baseNodeStyles, typeColors.provider)}
+        onClick={data.onClick}
+      >
+        <div className="flex items-center gap-2">
+          <ProviderIcon type={data.providerType} size={20} />
+          <div className="flex flex-col flex-1">
+            <span className="font-medium text-sm">{data.label}</span>
+            <span className="text-xs text-muted-foreground">
+              {data.model || data.providerType}
+            </span>
+            {data.baseURL && (
+              <span className="text-xs text-muted-foreground truncate max-w-[120px]" title={data.baseURL}>
+                {data.baseURL}
+              </span>
+            )}
+          </div>
+          <StatusDot status={data.phase} />
+        </div>
+      </button>
+    </div>
+  );
+});
+ProviderNodeComponent.displayName = "ProviderNodeComponent";
+
 // Export node types map for React Flow
 export const nodeTypes = {
   agent: AgentNodeComponent,
@@ -330,4 +375,5 @@ export const nodeTypes = {
   toolRegistry: ToolRegistryNodeComponent,
   tool: ToolNodeComponent,
   prompt: PromptNodeComponent,
+  provider: ProviderNodeComponent,
 };

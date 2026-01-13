@@ -30,6 +30,7 @@ import type {
 } from "@/types/websocket";
 import { OperatorApiService } from "./operator-service";
 import { PrometheusService } from "./prometheus-service";
+import { getWsProxyUrl } from "@/lib/config";
 
 /**
  * Live agent connection using real WebSocket.
@@ -55,11 +56,23 @@ export class LiveAgentConnection implements AgentConnection {
 
     this.setStatus("connecting");
 
+    // Fetch runtime config and then connect
+    this.initializeConnection().catch((err) => {
+      console.error("Failed to initialize WebSocket connection:", err);
+      this.setStatus("error", err instanceof Error ? err.message : "Failed to connect");
+    });
+  }
+
+  private async initializeConnection(): Promise<void> {
     try {
-      // Connect to the WebSocket proxy server
-      // In production, WS_PROXY_URL is configured; in dev, proxy runs on port 3002
       const protocol = typeof globalThis !== "undefined" && globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
-      const wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
+
+      // Check build-time env var first, then fall back to runtime config
+      let wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
+      if (!wsProxyUrl) {
+        // Fetch from runtime config (needed for K8s deployments where config comes from ConfigMap)
+        wsProxyUrl = await getWsProxyUrl();
+      }
       const wsDirectMode = process.env.NEXT_PUBLIC_WS_DIRECT_MODE === "true";
 
       let wsUrl: string;
@@ -68,11 +81,10 @@ export class LiveAgentConnection implements AgentConnection {
         // Include agent and namespace as query params (required by facade server)
         wsUrl = `${wsProxyUrl}/ws?agent=${encodeURIComponent(this.agentName)}&namespace=${encodeURIComponent(this.namespace)}`;
       } else if (wsProxyUrl) {
-        // Production: use configured proxy URL with full path
+        // Configured proxy URL (dev mode or edge case without ingress)
         wsUrl = `${wsProxyUrl}/api/agents/${this.namespace}/${this.agentName}/ws`;
       } else {
-        // Use relative URL - works with gateway routing in production
-        // Falls back to localhost:3002 for SSR or when location is unavailable
+        // Use relative URL - works with gateway/ingress routing in production
         const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.host : "localhost:3002";
         wsUrl = `${protocol}//${wsHost}/api/agents/${this.namespace}/${this.agentName}/ws`;
       }

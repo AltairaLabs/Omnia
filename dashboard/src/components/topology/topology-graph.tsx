@@ -14,14 +14,15 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { nodeTypes } from "./nodes";
-import { buildTopologyGraph } from "./graph-builder";
-import type { AgentRuntime, PromptPack, ToolRegistry } from "@/types";
+import { buildTopologyGraph, applyLayoutToGraph } from "./graph-builder";
+import type { AgentRuntime, PromptPack, ToolRegistry, Provider } from "@/types";
 import type { NotesMap } from "@/lib/notes-storage";
 
 interface TopologyGraphProps {
   agents: AgentRuntime[];
   promptPacks: PromptPack[];
   toolRegistries: ToolRegistry[];
+  providers: Provider[];
   onNodeClick?: (type: string, name: string, namespace: string) => void;
   notes?: NotesMap;
   onNoteEdit?: (type: string, namespace: string, name: string) => void;
@@ -33,6 +34,7 @@ export function TopologyGraph({
   agents,
   promptPacks,
   toolRegistries,
+  providers,
   onNodeClick,
   notes,
   onNoteEdit,
@@ -46,6 +48,7 @@ export function TopologyGraph({
         agents,
         promptPacks,
         toolRegistries,
+        providers,
         onNodeClick,
         notes,
         onNoteEdit,
@@ -53,16 +56,29 @@ export function TopologyGraph({
       });
       return graph;
     },
-    [agents, promptPacks, toolRegistries, onNodeClick, notes, onNoteEdit, onNoteDelete]
+    [agents, promptPacks, toolRegistries, providers, onNodeClick, notes, onNoteEdit, onNoteDelete]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
 
-  // Update nodes/edges when data changes
+  // Apply ELK layout asynchronously for better edge routing
   useEffect(() => {
-    setNodes(initialGraph.nodes);
-    setEdges(initialGraph.edges);
+    let cancelled = false;
+
+    async function applyLayout() {
+      const layoutedGraph = await applyLayoutToGraph(initialGraph);
+      if (!cancelled) {
+        setNodes(layoutedGraph.nodes);
+        setEdges(layoutedGraph.edges);
+      }
+    }
+
+    applyLayout();
+
+    return () => {
+      cancelled = true;
+    };
   }, [initialGraph, setNodes, setEdges]);
 
   // Custom mini-map node color
@@ -78,6 +94,8 @@ export function TopologyGraph({
         return "#14b8a6"; // teal
       case "prompt":
         return "#a855f7"; // violet
+      case "provider":
+        return "#22c55e"; // green
       default:
         return "#6b7280"; // gray
     }
