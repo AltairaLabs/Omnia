@@ -260,3 +260,41 @@ export function formatDuration(seconds: number): string {
   const mins = Math.floor((seconds % 3600) / 60);
   return `${hours}h ${mins}m`;
 }
+
+// =============================================================================
+// Base64 Encoding Utilities
+// =============================================================================
+
+/**
+ * Base64 encoding adds overhead: 4 output bytes for every 3 input bytes.
+ * This results in approximately 33% size increase.
+ */
+export const BASE64_OVERHEAD_FACTOR = 4 / 3; // ~1.333
+
+/**
+ * Calculate the effective maximum file size for upload, accounting for base64 overhead.
+ *
+ * When files are sent as data URLs (base64 encoded), they grow by ~33%.
+ * This function calculates the maximum raw file size that will stay within
+ * a given limit after base64 encoding.
+ *
+ * @param encodedLimit - The maximum allowed size after base64 encoding (e.g., gRPC limit)
+ * @returns The maximum raw file size that will fit within the limit after encoding
+ *
+ * @example
+ * // With a 16MB gRPC limit, maximum raw file size is ~12MB
+ * getEffectiveMaxSize(16 * 1024 * 1024) // Returns ~11,930,464 bytes
+ */
+export function getEffectiveMaxSize(encodedLimit: number): number {
+  return Math.floor(encodedLimit / BASE64_OVERHEAD_FACTOR);
+}
+
+/**
+ * Calculate the encoded size of a file after base64 conversion.
+ *
+ * @param rawSize - The raw file size in bytes
+ * @returns The approximate size after base64 encoding
+ */
+export function getEncodedSize(rawSize: number): number {
+  return Math.ceil(rawSize * BASE64_OVERHEAD_FACTOR);
+}

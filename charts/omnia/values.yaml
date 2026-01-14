@@ -829,6 +829,33 @@ demo:
       limits:
         cpu: "500m"
         memory: "256Mi"
+    # -- Console configuration for file uploads
+    console:
+      # -- Maximum file size in bytes (8MB leaves room for base64 overhead)
+      maxFileSize: 8388608
+      # -- Maximum number of files per message
+      maxFiles: 3
+      # -- Allowed attachment MIME types
+      allowedAttachmentTypes:
+        - "image/png"
+        - "image/jpeg"
+        - "image/webp"
+        - "image/gif"
+      # -- Media requirements for the vision model
+      mediaRequirements:
+        image:
+          # -- Maximum dimensions (llava:7b supports up to 1344x1344)
+          maxWidth: 1344
+          maxHeight: 1344
+          # -- Recommended dimensions for optimal quality
+          recommendedWidth: 672
+          recommendedHeight: 672
+          # -- Maximum image size in bytes
+          maxSizeBytes: 8388608
+          # -- Preferred output format
+          preferredFormat: "image/jpeg"
+          # -- Compression guidance
+          compressionGuidance: "lossy-medium"
 
   # Demo PromptPack configuration
   promptPack:

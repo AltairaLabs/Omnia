@@ -108,4 +108,24 @@ spec:
     replicas: {{ .Values.demo.agent.replicas }}
     resources:
       {{- toYaml .Values.demo.agent.resources | nindent 6 }}
+  {{- with .Values.demo.agent.console }}
+  console:
+    maxFileSize: {{ .maxFileSize | int64 }}
+    maxFiles: {{ .maxFiles }}
+    allowedAttachmentTypes:
+      {{- toYaml .allowedAttachmentTypes | nindent 6 }}
+    {{- with .mediaRequirements }}
+    mediaRequirements:
+      image:
+        maxDimensions:
+          width: {{ .image.maxWidth }}
+          height: {{ .image.maxHeight }}
+        recommendedDimensions:
+          width: {{ .image.recommendedWidth }}
+          height: {{ .image.recommendedHeight }}
+        maxSizeBytes: {{ .image.maxSizeBytes | int64 }}
+        preferredFormat: {{ .image.preferredFormat | quote }}
+        compressionGuidance: {{ .image.compressionGuidance | quote }}
+    {{- end }}
+  {{- end }}
 {{- end }}

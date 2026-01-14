@@ -43,6 +43,10 @@ export default defineConfig({
         "src/lib/data/prometheus-service.ts", // Prometheus client (tested via E2E)
         "src/lib/data/mock-service.ts", // Mock service (demo mode only)
         "src/hooks/use-agent-cost.ts", // Prometheus queries (tested via E2E)
+        "src/lib/image-processor.ts", // Canvas API image processing (tested via E2E)
+        "src/components/console/image-crop-dialog.tsx", // Image crop UI (tested via E2E)
+        "src/components/console/video-player.tsx", // Video player UI (tested via E2E)
+        "src/components/topology/graph-builder.ts", // ReactFlow graph builder (tested via E2E)
       ],
       thresholds: {
         statements: 80,
