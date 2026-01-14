@@ -26,8 +26,18 @@ ENABLE_OBSERVABILITY = True
 # Also supports legacy ENABLE_OLLAMA for backwards compatibility
 ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() in ('true', '1', 'yes') or False
 
+# Set to True to enable full production-like stack
+# Includes: Istio service mesh, Tempo (tracing), Loki (logging), Alloy (collector),
+#           Gateway API, and dashboard with builtin auth
+# Requires: 16GB+ RAM recommended
+# Can be set via environment: ENABLE_FULL_STACK=true tilt up
+ENABLE_FULL_STACK = os.getenv('ENABLE_FULL_STACK', '').lower() in ('true', '1', 'yes') or False
+
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind'])
+
+# Suppress warnings for images passed as CLI args to operator (not in K8s manifests)
+update_settings(suppress_unused_image_warnings=['omnia-facade-dev', 'omnia-runtime-dev'])
 
 # Create namespace if it doesn't exist
 namespace_create('omnia-system')
@@ -36,9 +46,62 @@ namespace_create('omnia-system')
 # Helm Repositories (required for subcharts)
 # ============================================================================
 
-if ENABLE_OBSERVABILITY:
+if ENABLE_OBSERVABILITY or ENABLE_FULL_STACK:
     helm_repo('prometheus-community', 'https://prometheus-community.github.io/helm-charts')
     helm_repo('grafana', 'https://grafana.github.io/helm-charts')
+
+if ENABLE_FULL_STACK:
+    helm_repo('istio', 'https://istio-release.storage.googleapis.com/charts')
+
+# ============================================================================
+# Full Stack Mode - Istio Installation via Helm
+# ============================================================================
+
+if ENABLE_FULL_STACK:
+    # Create istio-system namespace
+    namespace_create('istio-system')
+
+    # Install Gateway API CRDs and Istio base CRDs (no workloads, just CRDs)
+    # Using local_resource because helm_resource can't track CRD-only releases
+    local_resource(
+        'istio-crds',
+        cmd='''
+            kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+            helm upgrade --install istio-base istio/base -n istio-system --wait
+        ''',
+        labels=['istio'],
+    )
+
+    # Install Istiod (control plane) with OpenTelemetry tracing to Tempo
+    helm_resource(
+        'istiod',
+        'istio/istiod',
+        namespace='istio-system',
+        flags=['--wait', '-f', './charts/omnia/values-istiod.yaml'],
+        labels=['istio'],
+        resource_deps=['istio-crds'],
+    )
+
+    # Install Istio ingress gateway for agent traffic
+    helm_resource(
+        'istio-ingress',
+        'istio/gateway',
+        namespace='istio-system',
+        flags=['--wait'],
+        labels=['istio'],
+        resource_deps=['istiod'],
+    )
+
+    # Enable sidecar injection for agent namespaces
+    local_resource(
+        'istio-inject-labels',
+        cmd='''
+            kubectl label namespace dev-agents istio-injection=enabled --overwrite 2>/dev/null || true
+            kubectl label namespace omnia-demo istio-injection=enabled --overwrite 2>/dev/null || true
+        ''',
+        labels=['istio'],
+        resource_deps=['istiod'],
+    )
 
 # ============================================================================
 # Dashboard - Hot reload development
@@ -131,8 +194,10 @@ helm_set = [
     # Use dev images for agent containers (facade + framework)
     'facade.image.repository=omnia-facade-dev',
     'facade.image.tag=latest',
+    'facade.image.pullPolicy=Never',
     'framework.image.repository=omnia-runtime-dev',
     'framework.image.tag=latest',
+    'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
 ]
@@ -158,9 +223,14 @@ if ENABLE_OBSERVABILITY:
         'dashboard.prometheus.url=http://omnia-prometheus-server:80/prometheus',
         # Use localhost URL for browser access to Grafana iframes
         'dashboard.grafana.url=http://localhost:3001',
-        # Disable Loki/Tempo for simpler setup
+        # Enable Tempo for tracing (works without Istio via runtime instrumentation)
+        'tempo.enabled=true',
+        'tempo.persistence.enabled=false',
+        # Enable tracing for agent runtime containers
+        'tracing.enabled=true',
+        'tracing.endpoint=omnia-tempo.omnia-system.svc.cluster.local:4317',
+        # Disable Loki/Alloy for simpler setup
         'loki.enabled=false',
-        'tempo.enabled=false',
         'alloy.enabled=false',
     ])
 else:
@@ -185,12 +255,61 @@ if ENABLE_DEMO:
         'demo.ollama.persistence.enabled=true',
     ])
 
+if ENABLE_FULL_STACK:
+    # Full stack mode overrides some observability settings
+    # Generate a deterministic session secret for local dev (DO NOT use in production!)
+    helm_set.extend([
+        # Enable Istio integration (telemetry resources)
+        'istio.enabled=true',
+        'istio.tempoService=omnia-tempo.omnia-system.svc.cluster.local',
+        'istio.tempoPort=4317',
+        # Enable Gateway API for agent ingress
+        'gateway.enabled=true',
+        'gateway.className=istio',
+        'internalGateway.enabled=true',
+        'internalGateway.className=istio',
+        # Enable distributed tracing for agent runtimes
+        'tracing.enabled=true',
+        'tracing.endpoint=omnia-tempo.omnia-system.svc.cluster.local:4317',
+        # Enable Tempo for distributed tracing
+        # Uses chart defaults for persistence
+        'tempo.enabled=true',
+        # Enable Loki for log aggregation
+        # Uses chart defaults: SingleBinary mode, persistence enabled, ruler disabled
+        'loki.enabled=true',
+        # Enable Alloy for telemetry collection
+        'alloy.enabled=true',
+        # Configure dashboard with builtin auth
+        'dashboard.auth.mode=builtin',
+        'dashboard.auth.sessionSecret=dev-session-secret-do-not-use-in-prod',
+        # Initial admin user for local development
+        'dashboard.builtin.admin.username=admin',
+        'dashboard.builtin.admin.email=admin@localhost',
+        'dashboard.builtin.admin.password=admin123',
+        'dashboard.persistence.enabled=true',
+        'dashboard.persistence.size=1Gi',
+        # Configure Grafana datasources for Tempo/Loki
+        'grafana.grafana\\.ini.auth\\.anonymous.org_role=Admin',  # Admin for full access
+    ])
+
+    # When full stack is enabled, also enable OPA in extauthz mode (uses Istio)
+    if ENABLE_DEMO:
+        # Override OPA mode to use Istio ext_authz
+        helm_set.extend([
+            'demo.opa.mode=extauthz',
+        ])
+
+# Build values files list
+helm_values = ['./charts/omnia/values-dev.yaml']
+if ENABLE_FULL_STACK:
+    helm_values.append('./charts/omnia/values-istio-prometheus.yaml')
+
 # Deploy the Helm chart with development images
 k8s_yaml(helm(
     './charts/omnia',
     name='omnia',
     namespace='omnia-system',
-    values=['./charts/omnia/values-dev.yaml'],
+    values=helm_values,
     set=helm_set,
 ))
 
@@ -199,6 +318,9 @@ k8s_yaml(helm(
 # ============================================================================
 
 # Group resources for better UI organization
+# Note: facade/runtime images are built by docker_build() but not directly
+# referenced in K8s YAML (they're passed as CLI args to the operator).
+# The restart-agents local_resource handles restarting agent pods when these change.
 k8s_resource(
     'omnia-controller-manager',
     labels=['operator'],
@@ -227,6 +349,63 @@ if ENABLE_OBSERVABILITY:
         port_forwards=['3001:3000'],  # Grafana UI (container port 3000, local 3001)
     )
 
+    # Tempo for distributed tracing (runtime instrumentation, no Istio required)
+    k8s_resource(
+        'omnia-tempo',
+        labels=['observability'],
+        port_forwards=[
+            '3200:3200',   # Tempo HTTP API
+            '4317:4317',   # OTLP gRPC
+            '4318:4318',   # OTLP HTTP
+        ],
+    )
+
+# ============================================================================
+# Full Stack Mode Resources (Istio, Tempo, Loki, Alloy)
+# ============================================================================
+
+if ENABLE_FULL_STACK:
+    # Note: Tempo resource already defined in ENABLE_OBSERVABILITY above
+
+    # Loki for log aggregation
+    k8s_resource(
+        'omnia-loki',
+        labels=['observability'],
+        port_forwards=['3100:3100'],  # Loki HTTP API
+    )
+
+    # Alloy for telemetry collection
+    k8s_resource(
+        'omnia-alloy',
+        labels=['observability'],
+    )
+
+    # Gateway API and Istio resources that need CRDs installed first
+    k8s_resource(
+        workload='',  # No workload, just CRs
+        new_name='istio-config',
+        labels=['istio'],
+        objects=[
+            'omnia-dashboard-route:httproute',
+            'omnia-grafana-route:httproute',
+            'omnia-prometheus-route:httproute',
+            'omnia-telemetry:telemetry',
+        ],
+        resource_deps=['istio-crds'],
+    )
+
+    # Gateway resources (created by Helm chart)
+    k8s_resource(
+        workload='',  # No workload, just CRs
+        new_name='gateways',
+        labels=['istio'],
+        objects=[
+            'omnia-agents:gateway',
+            'omnia-internal:gateway',
+        ],
+        resource_deps=['istio-crds', 'istio-ingress'],
+    )
+
 # ============================================================================
 # Demo Mode Resources (Ollama + OPA)
 # ============================================================================
@@ -234,29 +413,42 @@ if ENABLE_OBSERVABILITY:
 if ENABLE_DEMO:
     # Configure Ollama StatefulSet with port forward and label
     # Group related demo resources together
+    # Object list differs based on OPA mode (sidecar vs extauthz)
+    ollama_objects = [
+        'ollama-models:persistentvolumeclaim',
+        'ollama-opa-config:configmap',
+        'ollama-credentials:secret',
+        'ollama:provider',
+        # Include vision-demo CRs (the Deployment is created by operator)
+        'demo-vision-prompts:configmap',
+        'demo-vision-prompts:promptpack',
+        'vision-demo:agentruntime',
+    ]
+    # Sidecar mode uses Envoy config, extauthz mode uses EnvoyFilter
+    if ENABLE_FULL_STACK:
+        ollama_objects.append('ollama-opa-ext-authz:envoyfilter')
+    else:
+        ollama_objects.append('ollama-envoy-config:configmap')
+
+    # Build resource_deps - need istio-crds when using EnvoyFilter
+    ollama_deps = []
+    if ENABLE_FULL_STACK:
+        ollama_deps.append('istio-crds')
+
     k8s_resource(
         'ollama',
         labels=['demo'],
         port_forwards=['11434:11434'],  # Ollama API (via Envoy when OPA enabled)
         extra_pod_selectors={'app.kubernetes.io/name': 'ollama'},
-        objects=[
-            'ollama-models:persistentvolumeclaim',
-            'ollama-opa-config:configmap',
-            'ollama-envoy-config:configmap',
-            'ollama-credentials:secret',
-            'ollama:provider',
-            # Include vision-demo CRs (the Deployment is created by operator)
-            'demo-vision-prompts:configmap',
-            'demo-vision-prompts:promptpack',
-            'vision-demo:agentruntime',
-        ],
+        objects=ollama_objects,
+        resource_deps=ollama_deps,
     )
 
     # Label the model pull job
+    # Note: The job has its own init container to wait for Ollama, so no resource_deps needed
     k8s_resource(
         'ollama-pull-model',
         labels=['demo'],
-        resource_deps=['ollama'],
     )
 
 # ============================================================================

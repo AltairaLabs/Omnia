@@ -4,6 +4,13 @@
       "command": "node",
       "args": ["/Users/chaholl/repos/altairalabs/tools/kubectl-mcp/dist/index.js"],
       "env": {}
-    }
+    },
+    "sonarqube": {
+        "command": "node",
+        "args": ["/Users/chaholl/repos/altairalabs/tools/sonarqube-mcp/dist/index.js"],
+        "env": {
+          "SONARQUBE_TOKEN": "75f1f26f81c8dd5874e08db2cf11e7117dc9ca23"
+        }
+      }
   }
 }

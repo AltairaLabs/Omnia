@@ -11,6 +11,7 @@ import {
   isPrometheusAvailable,
   type PrometheusMatrixResult,
 } from "@/lib/prometheus";
+import { AgentQueries, LLM_METRICS } from "@/lib/prometheus-queries";
 import { useDemoMode } from "./use-runtime-config";
 
 export interface ActivityDataPoint {
@@ -116,17 +117,18 @@ async function fetchAgentActivity(): Promise<{
 
   try {
     // Fetch requests and sessions in parallel
+    // Using centralized query builder for consistent metric names
     const [requestsResult, sessionsResult] = await Promise.all([
       // Total requests per hour (increase over 1h window)
       queryPrometheusRange(
-        "sum(increase(omnia_llm_requests_total[1h]))",
+        `sum(increase(${LLM_METRICS.REQUESTS_TOTAL}[1h]))`,
         oneDayAgo,
         now,
         "1h"
       ),
       // Active sessions/connections (gauge)
       queryPrometheusRange(
-        "sum(omnia_facade_connections_active)",
+        AgentQueries.connectionsActive(),
         oneDayAgo,
         now,
         "1h"

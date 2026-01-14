@@ -1,0 +1,11 @@
+# Istiod values for ENABLE_FULL_STACK mode
+# Configures OpenTelemetry tracing to Tempo
+
+meshConfig:
+  accessLogFile: /dev/stdout
+  enableTracing: true
+  extensionProviders:
+    - name: opentelemetry
+      opentelemetry:
+        service: omnia-tempo.omnia-system.svc.cluster.local
+        port: 4317

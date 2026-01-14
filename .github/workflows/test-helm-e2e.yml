@@ -278,6 +278,207 @@ jobs:
 
           echo "Observability stack deployment successful!"
 
+      - name: Test - Uninstall for tracing test
+        run: |
+          helm uninstall omnia -n omnia-system || true
+          sleep 5
+          kubectl delete namespace omnia-system --wait=false --timeout=30s || true
+
+          # Wait for namespace deletion
+          for i in {1..30}; do
+            if ! kubectl get namespace omnia-system 2>/dev/null; then
+              echo "Namespace deleted"
+              break
+            fi
+            echo "Waiting for namespace to terminate... ($i/30)"
+            sleep 2
+          done
+
+      - name: Test - Prometheus agent scraping configuration
+        run: |
+          echo "=== Testing Prometheus agent metrics scraping configuration ==="
+
+          # Install with Prometheus and tracing enabled
+          helm install omnia ./charts/omnia \
+            --namespace omnia-system \
+            --create-namespace \
+            --set keda.enabled=false \
+            --set prometheus.enabled=true \
+            --set prometheus.server.persistentVolume.enabled=false \
+            --set prometheus.alertmanager.enabled=false \
+            --set tracing.enabled=true \
+            --set tracing.endpoint=omnia-tempo.omnia-system.svc.cluster.local:4317 \
+            --set tempo.enabled=true \
+            --set tempo.persistence.enabled=false \
+            --set grafana.enabled=false \
+            --set loki.enabled=false \
+            --timeout 5m
+
+          echo "Waiting for Prometheus to be ready..."
+          sleep 30
+
+          # Verify Prometheus server is running
+          echo "=== Checking Prometheus server ==="
+          kubectl get pods -n omnia-system -l "app.kubernetes.io/name=prometheus" -o wide
+
+          # Check Prometheus ConfigMap for omnia-agents scrape job
+          echo "=== Verifying omnia-agents scrape job in Prometheus config ==="
+          PROM_CONFIG=$(kubectl get configmap -n omnia-system -l "app.kubernetes.io/name=prometheus" -o yaml)
+
+          if echo "$PROM_CONFIG" | grep -q "omnia-agents"; then
+            echo "SUCCESS: Found omnia-agents scrape job in Prometheus configuration"
+          else
+            echo "ERROR: omnia-agents scrape job not found in Prometheus configuration"
+            echo "Prometheus ConfigMap contents:"
+            echo "$PROM_CONFIG"
+            exit 1
+          fi
+
+          # Verify the scrape job targets agent pods by label
+          if echo "$PROM_CONFIG" | grep -q "omnia_altairalabs_ai_component"; then
+            echo "SUCCESS: Scrape job targets pods with omnia.altairalabs.ai/component label"
+          else
+            echo "ERROR: Scrape job not configured to target agent component label"
+            exit 1
+          fi
+
+          # Verify the scrape job uses custom Istio-safe annotation for port
+          if echo "$PROM_CONFIG" | grep -q "omnia_altairalabs_ai_metrics_port"; then
+            echo "SUCCESS: Scrape job uses Istio-safe custom annotation for metrics port"
+          else
+            echo "ERROR: Scrape job should use omnia.altairalabs.ai/metrics-port annotation"
+            exit 1
+          fi
+
+          echo "Prometheus agent scraping configuration test passed!"
+
+      - name: Test - Tempo tracing deployment
+        run: |
+          echo "=== Testing Tempo distributed tracing ==="
+
+          # Verify Tempo is running
+          echo "Waiting for Tempo to be ready..."
+          kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=tempo" \
+            -n omnia-system --timeout=120s || {
+            echo "Tempo pods:"
+            kubectl get pods -n omnia-system -l "app.kubernetes.io/name=tempo" -o wide
+            kubectl describe pods -n omnia-system -l "app.kubernetes.io/name=tempo"
+            exit 1
+          }
+
+          echo "=== Checking Tempo service ==="
+          kubectl get svc -n omnia-system | grep tempo
+
+          # Verify Tempo endpoints are accessible
+          echo "=== Testing Tempo API accessibility ==="
+          kubectl run tempo-test --rm -i --restart=Never \
+            --image=curlimages/curl:latest \
+            --namespace=omnia-system \
+            -- curl -s -o /dev/null -w "%{http_code}" \
+               http://omnia-tempo.omnia-system.svc.cluster.local:3200/ready \
+            | grep -q "200" && echo "SUCCESS: Tempo is ready" || {
+            echo "WARNING: Could not verify Tempo readiness via API"
+          }
+
+          echo "Tempo tracing deployment test passed!"
+
+      - name: Test - Tracing environment variables in Helm template
+        run: |
+          echo "=== Testing tracing configuration in Helm templates ==="
+
+          # Generate template with tracing enabled and check for env vars
+          TEMPLATE_OUTPUT=$(helm template omnia ./charts/omnia \
+            --set tracing.enabled=true \
+            --set tracing.endpoint=tempo.example.com:4317)
+
+          # Verify tracing flags are passed to operator
+          if echo "$TEMPLATE_OUTPUT" | grep -q "tracing-enabled=true"; then
+            echo "SUCCESS: --tracing-enabled flag is set in operator deployment"
+          else
+            echo "ERROR: --tracing-enabled flag not found in operator deployment"
+            exit 1
+          fi
+
+          if echo "$TEMPLATE_OUTPUT" | grep -q "tracing-endpoint=tempo.example.com:4317"; then
+            echo "SUCCESS: --tracing-endpoint flag is set correctly"
+          else
+            echo "ERROR: --tracing-endpoint flag not found or incorrect"
+            exit 1
+          fi
+
+          echo "Tracing Helm template configuration test passed!"
+
+      - name: Test - Uninstall for Istio tracing test
+        run: |
+          helm uninstall omnia -n omnia-system || true
+          sleep 5
+          kubectl delete namespace omnia-system --wait=false --timeout=30s || true
+
+          for i in {1..30}; do
+            if ! kubectl get namespace omnia-system 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Test - Istio telemetry configuration (template only)
+        run: |
+          echo "=== Testing Istio telemetry Helm templates ==="
+
+          # Generate template with Istio enabled
+          TEMPLATE_OUTPUT=$(helm template omnia ./charts/omnia \
+            --set istio.enabled=true \
+            --set istio.tempoService=omnia-tempo.omnia-system.svc.cluster.local \
+            --set istio.tempoPort=4317)
+
+          # Verify Telemetry resource is created
+          if echo "$TEMPLATE_OUTPUT" | grep -q "kind: Telemetry"; then
+            echo "SUCCESS: Telemetry resource is created when istio.enabled=true"
+          else
+            echo "ERROR: Telemetry resource not found in template output"
+            exit 1
+          fi
+
+          # Verify Telemetry is in istio-system namespace
+          if echo "$TEMPLATE_OUTPUT" | grep -A5 "kind: Telemetry" | grep -q "namespace: istio-system"; then
+            echo "SUCCESS: Telemetry resource is in istio-system namespace"
+          else
+            echo "ERROR: Telemetry resource should be in istio-system namespace for mesh-wide config"
+            exit 1
+          fi
+
+          # Verify OpenTelemetry tracing provider is configured
+          if echo "$TEMPLATE_OUTPUT" | grep -q "opentelemetry"; then
+            echo "SUCCESS: OpenTelemetry tracing provider is configured"
+          else
+            echo "ERROR: OpenTelemetry provider not found in Telemetry resource"
+            exit 1
+          fi
+
+          # Verify access logging is enabled
+          if echo "$TEMPLATE_OUTPUT" | grep -q "accessLogging"; then
+            echo "SUCCESS: Access logging is configured in Telemetry resource"
+          else
+            echo "WARNING: Access logging not found (may be optional)"
+          fi
+
+          echo "Istio telemetry template configuration test passed!"
+
+      - name: Test - Template with tracing disabled
+        run: |
+          echo "=== Testing Helm template with tracing disabled ==="
+
+          TEMPLATE_OUTPUT=$(helm template omnia ./charts/omnia \
+            --set tracing.enabled=false)
+
+          # Verify tracing flags are NOT present when disabled
+          if echo "$TEMPLATE_OUTPUT" | grep -q "tracing-enabled"; then
+            echo "ERROR: --tracing-enabled flag should not be present when tracing is disabled"
+            exit 1
+          fi
+
+          echo "SUCCESS: Tracing flags correctly omitted when disabled"
+
       - name: Cleanup
         if: always()
         run: |

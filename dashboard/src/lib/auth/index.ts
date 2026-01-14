@@ -56,6 +56,21 @@ async function handleProxyAuth(): Promise<User> {
 }
 
 /**
+ * Handle builtin mode authentication.
+ */
+async function handleBuiltinAuth(): Promise<User> {
+  const sessionUser = await getCurrentUser();
+
+  if (sessionUser?.provider === "builtin") {
+    return sessionUser;
+  }
+
+  // No authenticated user - return anonymous
+  // Middleware will handle redirect to login page
+  return createAnonymousUser("viewer");
+}
+
+/**
  * Handle OAuth mode authentication.
  */
 async function handleOAuthAuth(config: AuthConfig): Promise<User> {
@@ -106,6 +121,8 @@ export async function getUser(): Promise<User> {
       return handleProxyAuth();
     case "oauth":
       return handleOAuthAuth(config);
+    case "builtin":
+      return handleBuiltinAuth();
     default:
       return createAnonymousUser(config.anonymous.role);
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,15 +11,45 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, User, Shield } from "lucide-react";
+
+/**
+ * Generate Gravatar URL from email.
+ * Uses SHA-256 hash (Gravatar supports both MD5 and SHA-256).
+ */
+async function getGravatarUrl(email: string, size = 80): Promise<string> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const encoder = new TextEncoder();
+  const data = encoder.encode(normalizedEmail);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+  return `https://www.gravatar.com/avatar/${hash}?s=${size}&d=identicon`;
+}
+
+/**
+ * Hook to get Gravatar URL for an email.
+ */
+function useGravatar(email?: string): string | undefined {
+  const [gravatarUrl, setGravatarUrl] = useState<string>();
+
+  useEffect(() => {
+    if (email) {
+      getGravatarUrl(email).then(setGravatarUrl);
+    }
+  }, [email]);
+
+  return gravatarUrl;
+}
 
 /**
  * User menu dropdown showing current user info and actions.
  */
 export function UserMenu() {
   const { user, isAuthenticated, role, logout } = useAuth();
+  const gravatarUrl = useGravatar(user.email);
 
   // Don't show menu for anonymous users
   if (!isAuthenticated) {
@@ -37,6 +68,7 @@ export function UserMenu() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
           <Avatar className="h-8 w-8">
+            {gravatarUrl && <AvatarImage src={gravatarUrl} alt={user.displayName || user.username} />}
             <AvatarFallback className="text-xs">{initials}</AvatarFallback>
           </Avatar>
         </Button>

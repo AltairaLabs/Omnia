@@ -25,6 +25,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -71,14 +72,26 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var facadeImage string
+	var facadeImagePullPolicy string
 	var frameworkImage string
+	var frameworkImagePullPolicy string
+	var tracingEnabled bool
+	var tracingEndpoint string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&facadeImage, "facade-image", "",
 		"The image to use for facade containers. If not set, defaults to ghcr.io/altairalabs/omnia-facade:latest")
+	flag.StringVar(&facadeImagePullPolicy, "facade-image-pull-policy", "",
+		"The image pull policy for facade containers. Valid values: Always, Never, IfNotPresent. Defaults to IfNotPresent")
 	flag.StringVar(&frameworkImage, "framework-image", "",
 		"The image to use for framework containers. If not set, defaults to ghcr.io/altairalabs/omnia-runtime:latest")
+	flag.StringVar(&frameworkImagePullPolicy, "framework-image-pull-policy", "",
+		"The image pull policy for framework containers. Valid values: Always, Never, IfNotPresent. Defaults to IfNotPresent")
+	flag.BoolVar(&tracingEnabled, "tracing-enabled", false,
+		"Enable distributed tracing for agent runtime containers")
+	flag.StringVar(&tracingEndpoint, "tracing-endpoint", "",
+		"OTLP endpoint for traces (e.g., tempo.omnia-system.svc.cluster.local:4317)")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -195,10 +208,14 @@ func main() {
 	}
 
 	if err := (&controller.AgentRuntimeReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		FacadeImage:    facadeImage,
-		FrameworkImage: frameworkImage,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		FacadeImage:              facadeImage,
+		FacadeImagePullPolicy:    corev1.PullPolicy(facadeImagePullPolicy),
+		FrameworkImage:           frameworkImage,
+		FrameworkImagePullPolicy: corev1.PullPolicy(frameworkImagePullPolicy),
+		TracingEnabled:           tracingEnabled,
+		TracingEndpoint:          tracingEndpoint,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

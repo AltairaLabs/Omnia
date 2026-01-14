@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,24 @@ import { ConsoleMessage } from "./console-message";
 import { AttachmentPreview } from "./attachment-preview";
 import { isAllowedType, formatFileSize } from "./attachment-utils";
 import type { FileAttachment } from "@/types/websocket";
+
+/**
+ * Animated thinking indicator shown while waiting for model response.
+ */
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+        <span className="text-xs font-medium text-primary">AI</span>
+      </div>
+      <div className="flex items-center gap-1 pt-2">
+        <span className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+        <span className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+        <span className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce" />
+      </div>
+    </div>
+  );
+}
 
 interface AgentConsoleProps {
   agentName: string;
@@ -235,6 +253,16 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     fileInputRef.current?.click();
   }, []);
 
+  // Determine if we should show the thinking indicator
+  // Show when the last message is from the user (waiting for assistant response)
+  // Hide if there's an error or we're disconnected
+  const isWaitingForResponse = useMemo(() => {
+    if (messages.length === 0) return false;
+    if (status === "error" || status === "disconnected") return false;
+    const lastMessage = messages[messages.length - 1];
+    return lastMessage.role === "user";
+  }, [messages, status]);
+
   // Status badge
   const statusBadge = {
     disconnected: (
@@ -337,6 +365,8 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             {messages.map((message) => (
               <ConsoleMessage key={message.id} message={message} />
             ))}
+            {/* Thinking indicator while waiting for response */}
+            {isWaitingForResponse && <ThinkingIndicator />}
             {/* Sentinel element for auto-scroll */}
             <div ref={messagesEndRef} />
           </div>

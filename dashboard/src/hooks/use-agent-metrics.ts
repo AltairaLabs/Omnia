@@ -17,6 +17,7 @@ import {
   type PrometheusVectorResult,
   type PrometheusMatrixResult,
 } from "@/lib/prometheus";
+import { AgentQueries, LLMQueries } from "@/lib/prometheus-queries";
 import { useDemoMode } from "./use-runtime-config";
 
 export interface MetricTimeSeriesPoint {
@@ -269,7 +270,7 @@ async function fetchAgentMetrics(
 
   const now = new Date();
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-  const filter = `agent="${agentName}",namespace="${namespace}"`;
+  const filter = { agent: agentName, namespace };
 
   try {
     const [
@@ -286,55 +287,21 @@ async function fetchAgentMetrics(
       inputTokensSeries,
       outputTokensSeries,
     ] = await Promise.all([
-      // Request rate
-      queryPrometheus(`sum(rate(omnia_llm_requests_total{${filter}}[5m]))`),
-      // P95 latency
-      queryPrometheus(
-        `histogram_quantile(0.95, sum(rate(omnia_facade_request_duration_seconds_bucket{${filter}}[5m])) by (le)) * 1000`
-      ),
+      // Request rate (using LLM requests)
+      queryPrometheus(LLMQueries.requestRate(filter)),
+      // P95 latency (using agent request duration)
+      queryPrometheus(AgentQueries.p95Latency(filter)),
       // Error rate
-      queryPrometheus(
-        `sum(rate(omnia_llm_requests_total{${filter},status="error"}[5m])) / sum(rate(omnia_llm_requests_total{${filter}}[5m]))`
-      ),
+      queryPrometheus(LLMQueries.errorRate(filter)),
       // Active connections
-      queryPrometheus(`sum(omnia_facade_connections_active{${filter}})`),
+      queryPrometheus(AgentQueries.connectionsActive(filter)),
       // Time series
-      queryPrometheusRange(
-        `sum(rate(omnia_llm_requests_total{${filter}}[5m]))`,
-        oneHourAgo,
-        now,
-        "5m"
-      ),
-      queryPrometheusRange(
-        `histogram_quantile(0.95, sum(rate(omnia_facade_request_duration_seconds_bucket{${filter}}[5m])) by (le)) * 1000`,
-        oneHourAgo,
-        now,
-        "5m"
-      ),
-      queryPrometheusRange(
-        `sum(rate(omnia_llm_requests_total{${filter},status="error"}[5m])) / sum(rate(omnia_llm_requests_total{${filter}}[5m]))`,
-        oneHourAgo,
-        now,
-        "5m"
-      ),
-      queryPrometheusRange(
-        `sum(omnia_facade_connections_active{${filter}})`,
-        oneHourAgo,
-        now,
-        "5m"
-      ),
-      queryPrometheusRange(
-        `sum(increase(omnia_llm_input_tokens_total{${filter}}[5m]))`,
-        oneHourAgo,
-        now,
-        "5m"
-      ),
-      queryPrometheusRange(
-        `sum(increase(omnia_llm_output_tokens_total{${filter}}[5m]))`,
-        oneHourAgo,
-        now,
-        "5m"
-      ),
+      queryPrometheusRange(LLMQueries.requestRate(filter), oneHourAgo, now, "5m"),
+      queryPrometheusRange(AgentQueries.p95Latency(filter), oneHourAgo, now, "5m"),
+      queryPrometheusRange(LLMQueries.errorRate(filter), oneHourAgo, now, "5m"),
+      queryPrometheusRange(AgentQueries.connectionsActive(filter), oneHourAgo, now, "5m"),
+      queryPrometheusRange(LLMQueries.inputTokenIncrease(filter), oneHourAgo, now, "5m"),
+      queryPrometheusRange(LLMQueries.outputTokenIncrease(filter), oneHourAgo, now, "5m"),
     ]);
 
     const reqRate = extractScalar(reqRateCurrent);
