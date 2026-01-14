@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +34,12 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/mock"
-	_ "github.com/AltairaLabs/PromptKit/runtime/providers/ollama" // Register ollama provider
+	// Register all providers via blank imports
+	// TODO: PromptKit should provide a "providers/all" package for convenience
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/gemini"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/ollama"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/openai"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -206,6 +212,15 @@ func NewServer(opts ...ServerOption) *Server {
 
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// Initialize metrics with known label values so they appear in /metrics immediately.
+	// CounterVec and HistogramVec only show up in Prometheus output after being observed.
+	if s.metrics != nil && s.providerType != "" && s.model != "" {
+		s.metrics.Initialize(s.providerType, s.model)
+	}
+	if s.runtimeMetrics != nil {
+		s.runtimeMetrics.Initialize()
 	}
 
 	return s
@@ -1265,13 +1280,58 @@ func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 	return nil
 }
 
-// processAudioMedia handles audio content.
+// processAudioMedia handles audio content (base64 data or URL).
+// For base64 data, writes to a temp file since sdk.WithAudioFile requires a path.
 func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
 	if media.Data != "" {
-		log.V(1).Info("adding audio from data", "mimeType", media.MimeType)
-		return sdk.WithAudioFile(media.Url) // TODO: SDK needs WithAudioData
+		data, err := decodeMediaData(media.Data)
+		if err != nil {
+			log.Error(err, "failed to decode audio data")
+			return nil
+		}
+		// Write to temp file - sdk.WithAudioFile requires a file path
+		ext := mimeToExtension(media.MimeType)
+		tmpFile, err := os.CreateTemp("", "audio-*"+ext)
+		if err != nil {
+			log.Error(err, "failed to create temp file for audio")
+			return nil
+		}
+		if _, err := tmpFile.Write(data); err != nil {
+			log.Error(err, "failed to write audio to temp file")
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			return nil
+		}
+		tmpFile.Close()
+		log.V(1).Info("adding audio from temp file", "path", tmpFile.Name(), "mimeType", media.MimeType, "size", len(data))
+		// Note: temp file should be cleaned up after the request completes
+		return sdk.WithAudioFile(tmpFile.Name())
+	}
+	if media.Url != "" {
+		log.V(1).Info("adding audio from URL", "url", media.Url)
+		return sdk.WithAudioFile(media.Url)
 	}
 	return nil
+}
+
+// mimeToExtension returns a file extension for common audio MIME types.
+func mimeToExtension(mimeType string) string {
+	switch mimeType {
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "audio/wav", "audio/wave":
+		return ".wav"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/webm":
+		return ".webm"
+	case "audio/aac":
+		return ".aac"
+	case "audio/flac":
+		return ".flac"
+	default:
+		return ".audio"
+	}
 }
 
 // processFileMedia handles generic file content.

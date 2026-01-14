@@ -129,6 +129,23 @@ func NewLLMMetrics(cfg LLMMetricsConfig) *LLMMetrics {
 	}
 }
 
+// Initialize pre-registers metrics with the given label values.
+// This ensures metrics appear in /metrics output immediately at startup,
+// even before any LLM requests are made. For CounterVec/HistogramVec,
+// Prometheus only shows metrics after they've been observed with specific label values.
+func (m *LLMMetrics) Initialize(provider, model string) {
+	// Initialize counters with zero (Add(0) registers the label combination)
+	m.InputTokensTotal.WithLabelValues(provider, model).Add(0)
+	m.OutputTokensTotal.WithLabelValues(provider, model).Add(0)
+	m.CacheHitsTotal.WithLabelValues(provider, model).Add(0)
+	m.RequestsTotal.WithLabelValues(provider, model, StatusSuccess).Add(0)
+	m.RequestsTotal.WithLabelValues(provider, model, StatusError).Add(0)
+	m.CostUSDTotal.WithLabelValues(provider, model).Add(0)
+	// Histograms are initialized by observing zero (won't affect distribution)
+	// Note: We don't observe 0 for histograms as it would add a data point
+	// The histogram will appear once first real observation is made
+}
+
 // LLMRequestMetrics contains the metrics for a single LLM request.
 type LLMRequestMetrics struct {
 	Provider        string

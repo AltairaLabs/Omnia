@@ -106,7 +106,7 @@ const (
 	defaultSessionTTL      = 24 * time.Hour
 	defaultProviderType    = "" // Provider type must be explicitly set
 	defaultMediaBasePath   = "/etc/omnia/media"
-	defaultToolsConfigPath = "/etc/omnia/tools/tools.yaml"
+	defaultToolsConfigPath = "" // Empty by default; only set when OMNIA_TOOLS_CONFIG_PATH is provided
 	defaultGRPCPort        = 9000
 	defaultHealthPort      = 9001
 )

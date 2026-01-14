@@ -165,6 +165,18 @@ func NewRuntimeMetrics(cfg RuntimeMetricsConfig) *RuntimeMetrics {
 	}
 }
 
+// Initialize pre-registers runtime metrics.
+// This ensures metrics appear in /metrics output immediately at startup.
+// For RuntimeMetrics, most labels are dynamic (tool names, stage names, etc.),
+// so we only pre-register the ones with known label values.
+func (m *RuntimeMetrics) Initialize() {
+	// Initialize the pipelines active gauge (no variable labels)
+	m.PipelinesActive.WithLabelValues().Set(0)
+	// Initialize pipeline duration status labels
+	m.PipelineDuration.WithLabelValues(StatusSuccess)
+	m.PipelineDuration.WithLabelValues(StatusError)
+}
+
 // ToolCallMetrics contains the metrics for a single tool call.
 type ToolCallMetrics struct {
 	ToolName        string
