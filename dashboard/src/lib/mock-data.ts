@@ -7,6 +7,7 @@ import type {
   Session,
   SessionSummary,
 } from "@/types";
+import type { CostTimeSeriesPoint } from "@/lib/data/types";
 
 // Helper to generate timestamps
 const hoursAgo = (hours: number) =>
@@ -1342,12 +1343,8 @@ export interface CostAllocationItem {
   totalCost: number;
 }
 
-export interface CostTimeSeriesPoint {
-  timestamp: string;
-  anthropic: number;
-  openai: number;
-  total: number;
-}
+// Re-export from types for backwards compatibility
+export type { CostTimeSeriesPoint } from "@/lib/data/types";
 
 // Detailed cost allocation per agent (derived from mockAgentUsage with pricing applied)
 export const mockCostAllocation: CostAllocationItem[] = [
@@ -1447,14 +1444,17 @@ export const mockCostAllocation: CostAllocationItem[] = [
 function generateCostTimeSeries(hours: number): CostTimeSeriesPoint[] {
   const series: CostTimeSeriesPoint[] = [];
   for (let i = hours; i > 0; i--) {
-    const hourVariance = 0.7 + Math.random() * 0.6; // 70% to 130%
+    const hourVariance = 0.7 + Math.random() * 0.6; // NOSONAR - mock data (70% to 130%)
     const anthropic = 3.2 * hourVariance; // ~$3.2/hour base for Anthropic
     const openai = 4.2 * hourVariance; // ~$4.2/hour base for OpenAI
+    const total = anthropic + openai;
     series.push({
       timestamp: hoursAgo(i),
-      anthropic: Number(anthropic.toFixed(2)),
-      openai: Number(openai.toFixed(2)),
-      total: Number((anthropic + openai).toFixed(2)),
+      byProvider: {
+        anthropic: Number(anthropic.toFixed(2)),
+        openai: Number(openai.toFixed(2)),
+      },
+      total: Number(total.toFixed(2)),
     });
   }
   return series;

@@ -202,7 +202,10 @@ func TestEstimateTokens(t *testing.T) {
 func TestNewDemoHandlerWithMetrics(t *testing.T) {
 	// Note: NewDemoLLMMetrics and Record are tested indirectly through this test
 	// because promauto registers metrics globally and re-registration would panic.
-	handler := NewDemoHandlerWithMetrics("test-agent", "test-namespace")
+	handler := NewDemoHandlerWithMetrics(DemoMetricsConfig{
+		AgentName: "test-agent",
+		Namespace: "test-namespace",
+	})
 	if handler == nil {
 		t.Fatal("NewDemoHandlerWithMetrics() returned nil")
 	}

@@ -55,6 +55,15 @@ type LLMMetrics struct {
 type LLMMetricsConfig struct {
 	AgentName string
 	Namespace string
+
+	// PromptPack CRD reference (for Grafana queries)
+	PromptPackName      string
+	PromptPackNamespace string
+
+	// Provider CRD reference (for Grafana queries, only when using providerRef)
+	ProviderRefName      string
+	ProviderRefNamespace string
+
 	// Buckets for the request duration histogram.
 	// If nil, defaults to standard LLM buckets.
 	DurationBuckets []float64
@@ -67,8 +76,12 @@ var DefaultLLMDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60, 120, 300}
 // NewLLMMetrics creates and registers all Prometheus metrics for LLM interactions.
 func NewLLMMetrics(cfg LLMMetricsConfig) *LLMMetrics {
 	labels := prometheus.Labels{
-		"agent":     cfg.AgentName,
-		"namespace": cfg.Namespace,
+		"agent":                  cfg.AgentName,
+		"namespace":              cfg.Namespace,
+		"promptpack_name":        cfg.PromptPackName,
+		"promptpack_namespace":   cfg.PromptPackNamespace,
+		"provider_ref_name":      cfg.ProviderRefName,
+		"provider_ref_namespace": cfg.ProviderRefNamespace,
 	}
 
 	buckets := cfg.DurationBuckets

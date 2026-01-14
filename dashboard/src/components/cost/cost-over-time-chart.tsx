@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,14 +14,9 @@ import {
   Legend,
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
+import { getProviderColor, getProviderDisplayName } from "@/lib/provider-utils";
 import { ExternalLink } from "lucide-react";
-
-interface CostTimeSeriesPoint {
-  timestamp: string;
-  anthropic: number;
-  openai: number;
-  total: number;
-}
+import type { CostTimeSeriesPoint } from "@/lib/data/types";
 
 interface CostOverTimeChartProps {
   data: CostTimeSeriesPoint[];
@@ -37,15 +33,34 @@ export function CostOverTimeChart({
   height = 350,
   grafanaUrl,
 }: Readonly<CostOverTimeChartProps>) {
-  // Format data for chart
-  const chartData = data.map((point) => ({
-    time: new Date(point.timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    Anthropic: point.anthropic,
-    OpenAI: point.openai,
-  }));
+  // Extract unique providers from data
+  const providers = useMemo(() => {
+    const providerSet = new Set<string>();
+    for (const point of data) {
+      for (const provider of Object.keys(point.byProvider)) {
+        providerSet.add(provider);
+      }
+    }
+    // Sort providers for consistent ordering
+    return Array.from(providerSet).sort();
+  }, [data]);
+
+  // Format data for chart - flatten byProvider into individual keys
+  const chartData = useMemo(() => {
+    return data.map((point) => {
+      const row: Record<string, string | number> = {
+        time: new Date(point.timestamp).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      };
+      // Add each provider's cost as a separate key
+      for (const provider of providers) {
+        row[getProviderDisplayName(provider)] = point.byProvider[provider] || 0;
+      }
+      return row;
+    });
+  }, [data, providers]);
 
   return (
     <Card>
@@ -70,14 +85,22 @@ export function CostOverTimeChart({
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData}>
               <defs>
-                <linearGradient id="colorAnthropic" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="colorOpenAI" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0} />
-                </linearGradient>
+                {providers.map((provider, index) => {
+                  const color = getProviderColor(provider, index);
+                  return (
+                    <linearGradient
+                      key={provider}
+                      id={`color-${provider}`}
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop offset="5%" stopColor={color} stopOpacity={0.4} />
+                      <stop offset="95%" stopColor={color} stopOpacity={0} />
+                    </linearGradient>
+                  );
+                })}
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis
@@ -110,24 +133,22 @@ export function CostOverTimeChart({
                 iconType="circle"
                 iconSize={8}
               />
-              <Area
-                type="monotone"
-                dataKey="Anthropic"
-                stackId="1"
-                stroke="#3B82F6"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorAnthropic)"
-              />
-              <Area
-                type="monotone"
-                dataKey="OpenAI"
-                stackId="1"
-                stroke="#8B5CF6"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorOpenAI)"
-              />
+              {providers.map((provider, index) => {
+                const color = getProviderColor(provider, index);
+                const displayName = getProviderDisplayName(provider);
+                return (
+                  <Area
+                    key={provider}
+                    type="monotone"
+                    dataKey={displayName}
+                    stackId="1"
+                    stroke={color}
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill={`url(#color-${provider})`}
+                  />
+                );
+              })}
             </AreaChart>
           </ResponsiveContainer>
         </div>

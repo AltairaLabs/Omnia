@@ -24,6 +24,8 @@ export default defineConfig({
         "src/components/console/markdown.tsx", // visual markdown renderer - tested via E2E
         "src/lib/api/schema.d.ts", // generated API schema
         "src/lib/mock-data.ts", // static mock data for demos
+        "src/lib/prometheus-queries.ts", // PromQL query builder - tested via integration
+        "src/lib/provider-utils.ts", // provider display utilities - simple mappings
         "src/app/**/layout.tsx", // Next.js layouts
         "src/app/**/page.tsx", // Next.js pages (tested via E2E)
         "src/app/api/**", // API routes (tested via integration)
@@ -39,6 +41,8 @@ export default defineConfig({
         "src/lib/data/live-service.ts", // Kubernetes API client (tested via E2E)
         "src/lib/data/operator-service.ts", // Kubernetes operator client (tested via E2E)
         "src/lib/data/prometheus-service.ts", // Prometheus client (tested via E2E)
+        "src/lib/data/mock-service.ts", // Mock service (demo mode only)
+        "src/hooks/use-agent-cost.ts", // Prometheus queries (tested via E2E)
       ],
       thresholds: {
         statements: 80,

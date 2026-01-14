@@ -291,6 +291,12 @@ func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvV
 
 	envVars := addProviderEnvVars(nil, cfg)
 
+	// Add Provider CRD reference info for metrics labels
+	envVars = append(envVars,
+		corev1.EnvVar{Name: "OMNIA_PROVIDER_REF_NAME", Value: provider.Name},
+		corev1.EnvVar{Name: "OMNIA_PROVIDER_REF_NAMESPACE", Value: provider.Namespace},
+	)
+
 	// API key from secret
 	secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
 	if provider.Spec.SecretRef.Key != nil {
@@ -326,9 +332,14 @@ const (
 // AgentRuntimeReconciler reconciles a AgentRuntime object
 type AgentRuntimeReconciler struct {
 	client.Client
-	Scheme         *runtime.Scheme
-	FacadeImage    string
-	FrameworkImage string
+	Scheme                   *runtime.Scheme
+	FacadeImage              string
+	FacadeImagePullPolicy    corev1.PullPolicy
+	FrameworkImage           string
+	FrameworkImagePullPolicy corev1.PullPolicy
+	// Tracing configuration for runtime containers
+	TracingEnabled  bool
+	TracingEndpoint string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -696,10 +707,15 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	}
 
 	// Prometheus scrape annotations for metrics collection
+	// - prometheus.io/* annotations tell Prometheus where to scrape (non-Istio pods use these directly)
+	// - prometheus.istio.io/merge-metrics tells Istio to merge app metrics with Envoy stats
+	//   Istio reads prometheus.io/port and prometheus.io/path BEFORE overwriting them,
+	//   then merges app metrics into port 15020 alongside Envoy metrics
 	podAnnotations := map[string]string{
-		"prometheus.io/scrape": "true",
-		"prometheus.io/port":   fmt.Sprintf("%d", facadePort),
-		"prometheus.io/path":   "/metrics",
+		"prometheus.io/scrape":              "true",
+		"prometheus.io/port":                fmt.Sprintf("%d", facadePort),
+		"prometheus.io/path":                "/metrics",
+		"prometheus.istio.io/merge-metrics": "true",
 	}
 
 	deployment.Labels = labels
@@ -734,10 +750,16 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 		facadeImage = DefaultFacadeImage
 	}
 
+	// Use configured pull policy, or default to IfNotPresent
+	pullPolicy := r.FacadeImagePullPolicy
+	if pullPolicy == "" {
+		pullPolicy = corev1.PullIfNotPresent
+	}
+
 	container := corev1.Container{
 		Name:            FacadeContainerName,
 		Image:           facadeImage,
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		ImagePullPolicy: pullPolicy,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "facade",
@@ -793,10 +815,16 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 		frameworkImage = DefaultFrameworkImage
 	}
 
+	// Use configured pull policy, or default to IfNotPresent
+	runtimePullPolicy := r.FrameworkImagePullPolicy
+	if runtimePullPolicy == "" {
+		runtimePullPolicy = corev1.PullIfNotPresent
+	}
+
 	container := corev1.Container{
 		Name:            RuntimeContainerName,
 		Image:           frameworkImage,
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		ImagePullPolicy: runtimePullPolicy,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "grpc",
@@ -865,6 +893,10 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Value: promptPack.Name,
 		},
 		{
+			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
+			Value: promptPack.Namespace,
+		},
+		{
 			Name:  "OMNIA_PROMPTPACK_VERSION",
 			Value: promptPack.Spec.Version,
 		},
@@ -926,6 +958,10 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		{
 			Name:  "OMNIA_PROMPTPACK_NAME",
 			Value: promptPack.Name,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
+			Value: promptPack.Namespace,
 		},
 		{
 			Name:  "OMNIA_PROMPTPACK_VERSION",
@@ -995,6 +1031,25 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			Name:  "OMNIA_MOCK_PROVIDER",
 			Value: "true",
 		})
+	}
+
+	// Add tracing configuration if enabled
+	if r.TracingEnabled && r.TracingEndpoint != "" {
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_ENABLED",
+				Value: "true",
+			},
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_ENDPOINT",
+				Value: r.TracingEndpoint,
+			},
+			// Use insecure connection for in-cluster communication
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_INSECURE",
+				Value: "true",
+			},
+		)
 	}
 
 	return envVars

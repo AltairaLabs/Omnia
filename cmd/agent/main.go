@@ -267,7 +267,11 @@ func createHandler(cfg *agent.Config, log interface {
 		return agent.NewEchoHandler(), nil
 	case agent.HandlerModeDemo:
 		log.Info("using demo handler mode with LLM metrics")
-		return agent.NewDemoHandlerWithMetrics(cfg.AgentName, cfg.Namespace), nil
+		return agent.NewDemoHandlerWithMetrics(agent.DemoMetricsConfig{
+			AgentName: cfg.AgentName,
+			Namespace: cfg.Namespace,
+			// PromptPack and Provider ref fields can be set when agent config supports them
+		}), nil
 	case agent.HandlerModeRuntime:
 		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
 

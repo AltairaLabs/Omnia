@@ -8,10 +8,9 @@ import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
 import { ScaleControl } from "./scale-control";
 import { CostSparkline } from "@/components/cost";
-import { getMockAgentUsage, mockCostAllocation } from "@/lib/mock-data";
-import { formatCost, calculateCost } from "@/lib/pricing";
+import { formatCost } from "@/lib/pricing";
 import { useDataService } from "@/lib/data";
-import { useProvider } from "@/hooks";
+import { useProvider, useAgentCost } from "@/hooks";
 import type { AgentRuntime } from "@/types";
 
 interface AgentCardProps {
@@ -24,26 +23,20 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const dataService = useDataService();
   const { data: provider } = useProvider(spec.providerRef?.name, metadata.namespace || "default");
 
+  // Fetch real cost data from Prometheus
+  const { data: costData } = useAgentCost(
+    metadata.namespace || "default",
+    metadata.name
+  );
+
   const handleScale = useCallback(async (replicas: number) => {
     await dataService.scaleAgent(metadata.namespace || "default", metadata.name, replicas);
     // Invalidate queries to refresh data
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
   }, [metadata.namespace, metadata.name, queryClient, dataService]);
 
-  // Get usage data for sparkline
-  const usage = getMockAgentUsage(metadata.namespace || "default", metadata.name);
-  const sparklineData = usage?.timeSeries?.map((point) => ({
-    value: calculateCost(
-      usage.model,
-      point.inputTokens,
-      point.outputTokens
-    ),
-  })) || [];
-
-  // Get cost allocation for this agent
-  const costData = mockCostAllocation.find(
-    (c) => c.agent === metadata.name && c.namespace === metadata.namespace
-  );
+  // Use real sparkline data from Prometheus
+  const sparklineData = costData?.timeSeries || [];
   const totalCost = costData?.totalCost || 0;
 
   // Determine sparkline color based on provider

@@ -124,7 +124,14 @@ func main() {
 	}
 
 	// Create Prometheus metrics
-	metrics := pkruntime.NewMetrics(cfg.AgentName, cfg.Namespace)
+	metrics := pkruntime.NewMetrics(pkruntime.MetricsConfig{
+		AgentName:            cfg.AgentName,
+		Namespace:            cfg.Namespace,
+		PromptPackName:       cfg.PromptPackName,
+		PromptPackNamespace:  cfg.PromptPackNamespace,
+		ProviderRefName:      cfg.ProviderRefName,
+		ProviderRefNamespace: cfg.ProviderRefNamespace,
+	})
 	runtimeMetrics := pkruntime.NewRuntimeMetrics(cfg.AgentName, cfg.Namespace)
 
 	// Create runtime server

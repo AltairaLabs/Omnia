@@ -24,11 +24,25 @@ import (
 // These metrics track LLM usage for cost analysis and monitoring.
 type Metrics = metrics.LLMMetrics
 
+// MetricsConfig holds configuration for creating metrics.
+type MetricsConfig struct {
+	AgentName            string
+	Namespace            string
+	PromptPackName       string
+	PromptPackNamespace  string
+	ProviderRefName      string
+	ProviderRefNamespace string
+}
+
 // NewMetrics creates and registers all Prometheus metrics for the runtime.
-func NewMetrics(agentName, namespace string) *Metrics {
+func NewMetrics(cfg MetricsConfig) *Metrics {
 	return metrics.NewLLMMetrics(metrics.LLMMetricsConfig{
-		AgentName: agentName,
-		Namespace: namespace,
+		AgentName:            cfg.AgentName,
+		Namespace:            cfg.Namespace,
+		PromptPackName:       cfg.PromptPackName,
+		PromptPackNamespace:  cfg.PromptPackNamespace,
+		ProviderRefName:      cfg.ProviderRefName,
+		ProviderRefNamespace: cfg.ProviderRefNamespace,
 	})
 }
 

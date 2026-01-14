@@ -25,12 +25,14 @@ import (
 	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
-// Simulated pricing (per 1M tokens)
+// Demo mode configuration.
+// Uses "mock" provider since this handler doesn't call any real LLM.
+// Simulated pricing is intentionally low to make demo data obvious.
 const (
-	demoProvider         = "anthropic"
-	demoModel            = "claude-sonnet-4"
-	demoInputPricePer1M  = 3.00  // $3 per 1M input tokens
-	demoOutputPricePer1M = 15.00 // $15 per 1M output tokens
+	demoProvider         = "mock"
+	demoModel            = "mock-llm"
+	demoInputPricePer1M  = 0.10 // $0.10 per 1M input tokens (very cheap, obviously demo)
+	demoOutputPricePer1M = 0.30 // $0.30 per 1M output tokens
 )
 
 // Test media for multi-modal E2E testing.
@@ -55,12 +57,26 @@ const (
 // demoDurationBuckets are histogram buckets for demo mode (shorter than production).
 var demoDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60}
 
+// DemoMetricsConfig holds configuration for demo mode metrics.
+type DemoMetricsConfig struct {
+	AgentName            string
+	Namespace            string
+	PromptPackName       string
+	PromptPackNamespace  string
+	ProviderRefName      string
+	ProviderRefNamespace string
+}
+
 // newDemoLLMMetrics creates LLM metrics for demo mode using the shared metrics package.
-func newDemoLLMMetrics(agentName, namespace string) *metrics.LLMMetrics {
+func newDemoLLMMetrics(cfg DemoMetricsConfig) *metrics.LLMMetrics {
 	return metrics.NewLLMMetrics(metrics.LLMMetricsConfig{
-		AgentName:       agentName,
-		Namespace:       namespace,
-		DurationBuckets: demoDurationBuckets,
+		AgentName:            cfg.AgentName,
+		Namespace:            cfg.Namespace,
+		PromptPackName:       cfg.PromptPackName,
+		PromptPackNamespace:  cfg.PromptPackNamespace,
+		ProviderRefName:      cfg.ProviderRefName,
+		ProviderRefNamespace: cfg.ProviderRefNamespace,
+		DurationBuckets:      demoDurationBuckets,
 	})
 }
 
@@ -99,9 +115,9 @@ func NewDemoHandler() *DemoHandler {
 }
 
 // NewDemoHandlerWithMetrics creates a DemoHandler with LLM metrics.
-func NewDemoHandlerWithMetrics(agentName, namespace string) *DemoHandler {
+func NewDemoHandlerWithMetrics(cfg DemoMetricsConfig) *DemoHandler {
 	return &DemoHandler{
-		metrics: newDemoLLMMetrics(agentName, namespace),
+		metrics: newDemoLLMMetrics(cfg),
 	}
 }
 
