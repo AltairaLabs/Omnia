@@ -8,6 +8,8 @@ interface RuntimeConfig {
   readOnlyMessage: string;
   wsProxyUrl: string;
   grafanaUrl: string;
+  lokiEnabled: boolean;
+  tempoEnabled: boolean;
 }
 
 // Use NEXT_PUBLIC_* as build-time defaults to avoid flash of wrong state
@@ -18,6 +20,8 @@ const defaultConfig: RuntimeConfig = {
   readOnlyMessage: process.env.NEXT_PUBLIC_READ_ONLY_MESSAGE || "This dashboard is in read-only mode",
   wsProxyUrl: process.env.NEXT_PUBLIC_WS_PROXY_URL || "",
   grafanaUrl: process.env.NEXT_PUBLIC_GRAFANA_URL || "",
+  lokiEnabled: process.env.NEXT_PUBLIC_LOKI_ENABLED === "true",
+  tempoEnabled: process.env.NEXT_PUBLIC_TEMPO_ENABLED === "true",
 };
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -78,4 +82,32 @@ export function useReadOnlyMode() {
 export function useGrafanaUrl() {
   const { config, loading } = useRuntimeConfig();
   return { grafanaUrl: config.grafanaUrl, loading };
+}
+
+/**
+ * Check if Loki (logs) is enabled.
+ */
+export function useLokiEnabled() {
+  const { config, loading } = useRuntimeConfig();
+  return { lokiEnabled: config.lokiEnabled, loading };
+}
+
+/**
+ * Check if Tempo (traces) is enabled.
+ */
+export function useTempoEnabled() {
+  const { config, loading } = useRuntimeConfig();
+  return { tempoEnabled: config.tempoEnabled, loading };
+}
+
+/**
+ * Get observability features status (Loki and Tempo).
+ */
+export function useObservabilityConfig() {
+  const { config, loading } = useRuntimeConfig();
+  return {
+    lokiEnabled: config.lokiEnabled,
+    tempoEnabled: config.tempoEnabled,
+    loading,
+  };
 }

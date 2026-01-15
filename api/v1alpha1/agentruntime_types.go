@@ -266,6 +266,19 @@ const (
 	ProviderTypeMock ProviderType = "mock"
 )
 
+// TruncationStrategy defines how to handle context overflow.
+// +kubebuilder:validation:Enum=sliding;summarize;custom
+type TruncationStrategy string
+
+const (
+	// TruncationStrategySliding removes oldest messages first (default).
+	TruncationStrategySliding TruncationStrategy = "sliding"
+	// TruncationStrategySummarize summarizes old messages before removing.
+	TruncationStrategySummarize TruncationStrategy = "summarize"
+	// TruncationStrategyCustom delegates to custom runtime implementation.
+	TruncationStrategyCustom TruncationStrategy = "custom"
+)
+
 // ProviderDefaults defines tuning parameters for the LLM provider.
 type ProviderDefaults struct {
 	// temperature controls randomness in responses (0.0-2.0).
@@ -282,6 +295,20 @@ type ProviderDefaults struct {
 	// maxTokens limits the maximum number of tokens in the response.
 	// +optional
 	MaxTokens *int32 `json:"maxTokens,omitempty"`
+
+	// contextWindow is the model's maximum context size in tokens.
+	// When conversation history exceeds this budget, truncation is applied.
+	// If not specified, no automatic truncation is performed.
+	// +optional
+	ContextWindow *int32 `json:"contextWindow,omitempty"`
+
+	// truncationStrategy defines how to handle context overflow.
+	// - sliding: Remove oldest messages first (default)
+	// - summarize: Summarize old messages before removing
+	// - custom: Delegate to custom runtime implementation
+	// +kubebuilder:default=sliding
+	// +optional
+	TruncationStrategy TruncationStrategy `json:"truncationStrategy,omitempty"`
 }
 
 // ProviderPricing defines cost tracking configuration for the provider.

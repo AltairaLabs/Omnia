@@ -621,20 +621,42 @@ alloy:
           forward_to = [loki.process.pods.receiver]
         }
 
-        // Process logs (parse JSON, extract level)
+        // Process logs (parse JSON, extract level, filter noise)
         loki.process "pods" {
           forward_to = [loki.write.default.receiver]
 
           // Parse CRI format
           stage.cri {}
 
-          // Try to parse JSON logs
+          // Drop noisy health check and metrics logs
+          stage.drop {
+            expression  = ".*(GET|POST) /(health|healthz|ready|readyz|metrics|livez).*"
+            drop_counter_reason = "health_metrics_filter"
+          }
+
+          // Try to parse JSON logs and extract timestamp
           stage.json {
             expressions = {
-              level  = "level",
-              msg    = "msg",
-              caller = "caller",
+              level     = "level",
+              msg       = "msg",
+              caller    = "caller",
+              timestamp = "time",
+              ts        = "ts",
             }
+          }
+
+          // Extract timestamp from JSON 'time' field (common in structured logs)
+          stage.timestamp {
+            source = "timestamp"
+            format = "RFC3339"
+            fallback_formats = ["RFC3339Nano", "Unix", "UnixMs", "UnixUs", "UnixNs"]
+          }
+
+          // Fallback: try 'ts' field (used by zap and other loggers)
+          stage.timestamp {
+            source = "ts"
+            format = "RFC3339"
+            fallback_formats = ["RFC3339Nano", "Unix", "UnixMs", "UnixUs", "UnixNs"]
           }
 
           // Add level as label if extracted
@@ -642,6 +664,20 @@ alloy:
             values = {
               level = "",
             }
+          }
+
+          // Store extracted fields as structured metadata (queryable but not indexed)
+          // Requires Loki 3.0+ with structured metadata enabled
+          stage.structured_metadata {
+            values = {
+              msg    = "",
+              caller = "",
+            }
+          }
+
+          // Output a clean log line (just the message if available)
+          stage.output {
+            source = "msg"
           }
         }
 
@@ -822,6 +858,12 @@ demo:
     model: llava:7b
     # -- Keep model loaded in memory
     keepAlive: "24h"
+    # -- Context window size (number of tokens) for Ollama server.
+    # This is the Ollama-side limit. Default is 2048.
+    numCtx: 8192
+    # -- Context window budget for PromptKit truncation.
+    # Should be <= numCtx. When conversation exceeds this, older messages are truncated.
+    contextWindow: 8192
     # -- Resource requirements
     # llava:7b requires ~4GB RAM minimum, 8GB recommended
     resources:

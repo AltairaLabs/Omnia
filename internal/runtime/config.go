@@ -50,6 +50,10 @@ type Config struct {
 	ProviderRefName      string // Name of the Provider CRD (for metrics, if using providerRef)
 	ProviderRefNamespace string // Namespace of the Provider CRD (for metrics)
 
+	// Context management
+	ContextWindow      int    // Token budget for conversation context (0 = no limit)
+	TruncationStrategy string // How to handle context overflow: "sliding", "summarize", "custom"
+
 	// Mock provider configuration (for testing)
 	MockProvider   bool   // Enable mock provider instead of real LLM
 	MockConfigPath string // Path to mock responses YAML file (optional)
@@ -85,6 +89,8 @@ const (
 	envProviderBaseURL        = "OMNIA_PROVIDER_BASE_URL"
 	envProviderRefName        = "OMNIA_PROVIDER_REF_NAME"
 	envProviderRefNamespace   = "OMNIA_PROVIDER_REF_NAMESPACE"
+	envContextWindow          = "OMNIA_CONTEXT_WINDOW"
+	envTruncationStrategy     = "OMNIA_TRUNCATION_STRATEGY"
 	envMockProvider           = "OMNIA_MOCK_PROVIDER"
 	envMockConfigPath         = "OMNIA_MOCK_CONFIG"
 	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
@@ -138,6 +144,7 @@ func LoadConfig() (*Config, error) {
 		BaseURL:              os.Getenv(envProviderBaseURL),
 		ProviderRefName:      os.Getenv(envProviderRefName),
 		ProviderRefNamespace: os.Getenv(envProviderRefNamespace),
+		TruncationStrategy:   os.Getenv(envTruncationStrategy),
 		MockProvider:         os.Getenv(envMockProvider) == "true",
 		MockConfigPath:       getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
 		MediaBasePath:        getEnvOrDefault(envMediaBasePath, defaultMediaBasePath),
@@ -176,7 +183,27 @@ func (cfg *Config) parseEnvironmentOverrides() error {
 	if err := cfg.parsePorts(); err != nil {
 		return err
 	}
+	if err := cfg.parseContextWindow(); err != nil {
+		return err
+	}
 	return cfg.parseSessionTTL()
+}
+
+// parseContextWindow parses the context window size from environment.
+func (cfg *Config) parseContextWindow() error {
+	ctx := os.Getenv(envContextWindow)
+	if ctx == "" {
+		return nil
+	}
+	c, err := strconv.Atoi(ctx)
+	if err != nil {
+		return fmt.Errorf(errFmtInvalidEnvVar, envContextWindow, err)
+	}
+	if c < 0 {
+		return fmt.Errorf("invalid %s: must be positive", envContextWindow)
+	}
+	cfg.ContextWindow = c
+	return nil
 }
 
 // parseTracingSampleRate parses the tracing sample rate from environment.

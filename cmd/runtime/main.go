@@ -178,6 +178,8 @@ func main() {
 		pkruntime.WithRuntimeMetrics(runtimeMetrics),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 		pkruntime.WithBaseURL(cfg.BaseURL),
+		pkruntime.WithContextWindow(cfg.ContextWindow),
+		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))

@@ -63,16 +63,18 @@ func buildSessionEnvVars(session *omniav1alpha1.SessionConfig, urlEnvName string
 
 // providerEnvConfig holds common provider configuration for building environment variables.
 type providerEnvConfig struct {
-	Type             omniav1alpha1.ProviderType
-	Model            string
-	BaseURL          string
-	Temperature      *string
-	TopP             *string
-	MaxTokens        *int32
-	InputCost        *string
-	OutputCost       *string
-	CachedCost       *string
-	AdditionalConfig map[string]string
+	Type               omniav1alpha1.ProviderType
+	Model              string
+	BaseURL            string
+	Temperature        *string
+	TopP               *string
+	MaxTokens          *int32
+	ContextWindow      *int32
+	TruncationStrategy omniav1alpha1.TruncationStrategy
+	InputCost          *string
+	OutputCost         *string
+	CachedCost         *string
+	AdditionalConfig   map[string]string
 }
 
 // addProviderEnvVars adds provider configuration environment variables to the slice.
@@ -95,6 +97,12 @@ func addProviderEnvVars(envVars []corev1.EnvVar, cfg providerEnvConfig) []corev1
 	}
 	if cfg.MaxTokens != nil {
 		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_MAX_TOKENS", Value: fmt.Sprintf("%d", *cfg.MaxTokens)})
+	}
+	if cfg.ContextWindow != nil {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_CONTEXT_WINDOW", Value: fmt.Sprintf("%d", *cfg.ContextWindow)})
+	}
+	if cfg.TruncationStrategy != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_TRUNCATION_STRATEGY", Value: string(cfg.TruncationStrategy)})
 	}
 	if cfg.InputCost != nil {
 		envVars = append(envVars, corev1.EnvVar{Name: "OMNIA_PROVIDER_INPUT_COST", Value: *cfg.InputCost})
@@ -128,6 +136,8 @@ func buildProviderEnvVars(provider *omniav1alpha1.ProviderConfig) []corev1.EnvVa
 		cfg.Temperature = provider.Config.Temperature
 		cfg.TopP = provider.Config.TopP
 		cfg.MaxTokens = provider.Config.MaxTokens
+		cfg.ContextWindow = provider.Config.ContextWindow
+		cfg.TruncationStrategy = provider.Config.TruncationStrategy
 	}
 	if provider.Pricing != nil {
 		cfg.InputCost = provider.Pricing.InputCostPer1K
@@ -185,6 +195,8 @@ func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvV
 		cfg.Temperature = provider.Spec.Defaults.Temperature
 		cfg.TopP = provider.Spec.Defaults.TopP
 		cfg.MaxTokens = provider.Spec.Defaults.MaxTokens
+		cfg.ContextWindow = provider.Spec.Defaults.ContextWindow
+		cfg.TruncationStrategy = provider.Spec.Defaults.TruncationStrategy
 	}
 	if provider.Spec.Pricing != nil {
 		cfg.InputCost = provider.Spec.Pricing.InputCostPer1K

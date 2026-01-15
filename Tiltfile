@@ -493,13 +493,6 @@ if ENABLE_DEMO:
         resource_deps=ollama_deps,
     )
 
-    # Label the model pull job
-    # Note: The job has its own init container to wait for Ollama, so no resource_deps needed
-    k8s_resource(
-        'ollama-pull-model',
-        labels=['demo'],
-    )
-
 if ENABLE_AUDIO_DEMO:
     # Audio demo resources (Gemini provider + audio-demo agent)
     # Note: User must create gemini-credentials secret manually before deploying

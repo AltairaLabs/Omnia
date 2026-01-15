@@ -182,8 +182,7 @@ export function useAgentConsole({
       case "connected": {
         const newSessionId = message.session_id || null;
         setSessionId(newSessionId);
-        // Add system message with session details when session ID is provided
-        if (newSessionId) addMessageToStore({ id: generateId(), role: "system", content: `Session started: ${newSessionId}`, timestamp: new Date() });
+        // Session ID is displayed in the header status bar, no need for a message
         break;
       }
 
@@ -265,15 +264,8 @@ export function useAgentConsole({
   const handleStatusChange = useCallback((newStatus: ConsoleState["status"], statusError?: string) => {
     const currentStatus = statusRef.current;
 
-    // Add system message for status changes
-    if (newStatus === "connected" && currentStatus !== "connected") {
-      addMessageToStore({
-        id: generateId(),
-        role: "system",
-        content: "Connected to agent",
-        timestamp: new Date(),
-      });
-    } else if (newStatus === "disconnected" && currentStatus === "connected") {
+    // Add system message for important status changes (not connection - shown in header)
+    if (newStatus === "disconnected" && currentStatus === "connected") {
       addMessageToStore({
         id: generateId(),
         role: "system",

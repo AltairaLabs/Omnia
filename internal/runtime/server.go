@@ -193,6 +193,28 @@ func WithMediaBasePath(path string) ServerOption {
 	}
 }
 
+// WithContextWindow sets the token budget for conversation context.
+// When set, PromptKit automatically truncates older messages when the budget is exceeded.
+func WithContextWindow(tokens int) ServerOption {
+	return func(s *Server) {
+		if tokens > 0 {
+			s.sdkOptions = append(s.sdkOptions, sdk.WithTokenBudget(tokens))
+		}
+	}
+}
+
+// WithTruncationStrategy sets the strategy for handling context overflow.
+// Valid values: "sliding" (remove oldest), "summarize" (summarize before removing),
+// "custom" (delegate to custom runtime implementation - no SDK truncation).
+func WithTruncationStrategy(strategy string) ServerOption {
+	return func(s *Server) {
+		// "custom" means the custom runtime handles it - don't set SDK truncation
+		if strategy != "" && strategy != "custom" {
+			s.sdkOptions = append(s.sdkOptions, sdk.WithTruncation(strategy))
+		}
+	}
+}
+
 // NewServer creates a new runtime server.
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{
