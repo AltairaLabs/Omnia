@@ -104,3 +104,30 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, providers.Items)
 }
+
+// handleProvider gets a specific Provider.
+func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		return
+	}
+
+	namespace, name, ok := parseNamespaceName(r.URL.Path, "/api/v1/providers")
+	if !ok {
+		s.writeError(w, http.StatusBadRequest, "invalid path, expected /api/v1/providers/{namespace}/{name}")
+		return
+	}
+
+	var provider omniav1alpha1.Provider
+	if err := s.client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &provider); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			s.writeError(w, http.StatusNotFound, "provider not found")
+			return
+		}
+		s.log.Error(err, "failed to get provider", "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, "failed to get provider")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, provider)
+}

@@ -271,8 +271,7 @@ export class LiveDataService implements DataService {
   }
 
   async getProvider(namespace: string, name: string): Promise<Provider | undefined> {
-    const providers = await this.getProviders(namespace);
-    return providers.find((p) => p.metadata?.name === name);
+    return this.operatorService.getProvider(namespace, name);
   }
 
   async getStats(): Promise<Stats> {

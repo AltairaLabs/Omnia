@@ -9,6 +9,9 @@ export interface ProviderSpec {
   baseURL?: string;
   /** defaults contains provider tuning parameters. */
   defaults?: {
+    /** contextWindow specifies the maximum context window size in tokens.
+     * Used for context management and truncation decisions. */
+    contextWindow?: number;
     /** maxTokens limits the maximum number of tokens in the response. */
     maxTokens?: number;
     /** temperature controls randomness in responses (0.0-2.0).
@@ -18,6 +21,11 @@ export interface ProviderSpec {
     /** topP controls nucleus sampling (0.0-1.0).
      * Specified as a string to support decimal values (e.g., "0.9"). */
     topP?: string;
+    /** truncationStrategy specifies how to handle context that exceeds the window.
+     * - sliding: Remove oldest messages first
+     * - summarize: Summarize older messages
+     * - custom: Use custom logic in the runtime */
+    truncationStrategy?: "sliding" | "summarize" | "custom";
   };
   /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
    * If not specified, the provider's default model is used. */
@@ -45,7 +53,7 @@ export interface ProviderSpec {
     name: string;
   };
   /** type specifies the provider type. */
-  type: "claude" | "openai" | "gemini" | "ollama" | "mock";
+  type: "anthropic" | "openai" | "bedrock" | "ollama" | "gemini" | "mock";
   /** validateCredentials enables credential validation on reconciliation.
    * When enabled, the controller attempts to verify credentials with the provider. */
   validateCredentials?: boolean;
@@ -80,7 +88,7 @@ export interface ProviderStatus {
   /** observedGeneration is the most recent generation observed by the controller. */
   observedGeneration?: number;
   /** phase represents the current lifecycle phase of the Provider. */
-  phase?: "Ready" | "Error";
+  phase?: "Pending" | "Ready" | "Error" | "Failed";
 }
 
 export interface Provider {

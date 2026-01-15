@@ -158,6 +158,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/providers/{namespace}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific Provider */
+        get: operations["getProvider"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stats": {
         parameters: {
             query?: never;
@@ -460,10 +477,30 @@ export interface components {
         };
         ProviderSpec: {
             /** @enum {string} */
-            type?: "anthropic" | "openai" | "bedrock" | "ollama";
+            type?: "anthropic" | "openai" | "bedrock" | "ollama" | "gemini" | "mock";
             model?: string;
-            secretRef?: components["schemas"]["LocalObjectReference"];
-            endpoint?: string;
+            baseURL?: string;
+            secretRef?: components["schemas"]["SecretKeyRef"];
+            defaults?: components["schemas"]["ProviderDefaults"];
+            pricing?: components["schemas"]["ProviderPricing"];
+            validateCredentials?: boolean;
+        };
+        SecretKeyRef: {
+            name: string;
+            key?: string;
+        };
+        ProviderDefaults: {
+            temperature?: string;
+            topP?: string;
+            maxTokens?: number;
+            contextWindow?: number;
+            /** @enum {string} */
+            truncationStrategy?: "sliding" | "summarize" | "custom";
+        };
+        ProviderPricing: {
+            inputCostPer1K?: string;
+            outputCostPer1K?: string;
+            cachedCostPer1K?: string;
         };
         ProviderStatus: {
             /** @enum {string} */
@@ -789,6 +826,31 @@ export interface operations {
                     "application/json": components["schemas"]["Provider"][];
                 };
             };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Provider"];
+                };
+            };
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };

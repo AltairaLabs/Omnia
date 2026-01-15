@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Provider endpoints
 	mux.HandleFunc("/api/v1/providers", corsHandler(s.handleProviders))
+	mux.HandleFunc("/api/v1/providers/", corsHandler(s.handleProvider))
 
 	// Stats endpoint
 	mux.HandleFunc("/api/v1/stats", corsHandler(s.handleStats))

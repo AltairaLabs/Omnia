@@ -224,6 +224,25 @@ export class OperatorApiService {
     return (data ?? []) as Provider[];
   }
 
+  async getProvider(
+    namespace: string,
+    name: string
+  ): Promise<Provider | undefined> {
+    const { data, error } = await this.client.GET(
+      "/api/v1/providers/{namespace}/{name}",
+      {
+        params: { path: { namespace, name } },
+      }
+    );
+    if (error) {
+      if (typeof error === "object" && "code" in error && error.code === 404) {
+        return undefined;
+      }
+      throw new Error(`Failed to fetch provider: ${JSON.stringify(error)}`);
+    }
+    return data as Provider | undefined;
+  }
+
   async getStats(): Promise<Stats> {
     const { data, error } = await this.client.GET("/api/v1/stats");
     if (error) {

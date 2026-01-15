@@ -1,5 +1,7 @@
 export { useAgents, useAgent } from "./use-agents";
 export { useProvider } from "./use-provider";
+export { useProviders } from "./use-providers";
+export { useProviderMetrics } from "./use-provider-metrics";
 export { useConsoleConfig } from "./use-console-config";
 export { usePromptPacks, usePromptPack } from "./use-prompt-packs";
 export { usePromptPackContent } from "./use-promptpack-content";
@@ -10,13 +12,15 @@ export { useAgentConsole } from "./use-agent-console";
 export { useLogs } from "./use-logs";
 export { useNamespaces } from "./use-namespaces";
 export { useReadOnly } from "./use-read-only";
-export { useRuntimeConfig, useDemoMode, useReadOnlyMode } from "./use-runtime-config";
+export { useRuntimeConfig, useDemoMode, useReadOnlyMode, useObservabilityConfig } from "./use-runtime-config";
 export { useAuth, AuthProvider } from "./use-auth";
 export { usePermissions, Permission, Permissions } from "./use-permissions";
 export {
   useGrafana,
   buildPanelUrl,
   buildDashboardUrl,
+  buildLokiExploreUrl,
+  buildTempoExploreUrl,
   GRAFANA_DASHBOARDS,
   OVERVIEW_PANELS,
   AGENT_DETAIL_PANELS,

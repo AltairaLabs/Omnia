@@ -44,7 +44,7 @@ function _createToolRegistry(name: string, namespace: string): ToolRegistry {
 }
 
 // Helper to create minimal provider
-function createProvider(name: string, namespace: string, type: "claude" | "openai" | "gemini" | "ollama" | "mock" = "claude"): Provider {
+function createProvider(name: string, namespace: string, type: "anthropic" | "openai" | "gemini" | "ollama" | "mock" = "anthropic"): Provider {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
     kind: "Provider",
@@ -124,7 +124,7 @@ describe("buildTopologyGraph", () => {
 
   describe("provider nodes", () => {
     it("creates provider nodes from Provider CRDs", () => {
-      const providers = [createProvider("claude-prod", "ns1", "claude")];
+      const providers = [createProvider("anthropic-prod", "ns1", "anthropic")];
 
       const result = buildTopologyGraph({
         agents: [],
@@ -135,12 +135,12 @@ describe("buildTopologyGraph", () => {
 
       expect(result.nodes).toHaveLength(1);
       expect(result.nodes[0]).toMatchObject({
-        id: "provider-ns1-claude-prod",
+        id: "provider-ns1-anthropic-prod",
         type: "provider",
         data: {
-          label: "claude-prod",
+          label: "anthropic-prod",
           namespace: "ns1",
-          providerType: "claude",
+          providerType: "anthropic",
           model: "test-model",
           phase: "Ready",
         },
@@ -150,10 +150,10 @@ describe("buildTopologyGraph", () => {
     it("creates edges from agents to providers via providerRef", () => {
       const agents = [
         createAgent("agent1", "ns1", {
-          providerRef: { name: "claude-prod" },
+          providerRef: { name: "anthropic-prod" },
         }),
       ];
-      const providers = [createProvider("claude-prod", "ns1", "claude")];
+      const providers = [createProvider("anthropic-prod", "ns1", "anthropic")];
 
       const result = buildTopologyGraph({
         agents,
@@ -166,7 +166,7 @@ describe("buildTopologyGraph", () => {
       expect(result.edges).toHaveLength(1);
       expect(result.edges[0]).toMatchObject({
         source: "agent-ns1-agent1",
-        target: "provider-ns1-claude-prod",
+        target: "provider-ns1-anthropic-prod",
         label: "powered by",
       });
     });
@@ -342,7 +342,7 @@ describe("buildTopologyGraph", () => {
           providerRef: { name: "shared-provider", namespace: "shared" },
         }),
       ];
-      const providers = [createProvider("shared-provider", "shared", "claude")];
+      const providers = [createProvider("shared-provider", "shared", "anthropic")];
 
       const result = buildTopologyGraph({
         agents,
