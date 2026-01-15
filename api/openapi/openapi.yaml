@@ -314,6 +314,34 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/providers/{namespace}/{name}:
+    get:
+      tags: [providers]
+      summary: Get a specific Provider
+      operationId: getProvider
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Provider'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/stats:
     get:
       tags: [stats]
@@ -846,12 +874,54 @@ components:
       properties:
         type:
           type: string
-          enum: [anthropic, openai, bedrock, ollama]
+          enum: [claude, openai, gemini, ollama, mock]
         model:
           type: string
+        baseURL:
+          type: string
+          description: Override the provider's default API endpoint
         secretRef:
-          $ref: '#/components/schemas/LocalObjectReference'
-        endpoint:
+          $ref: '#/components/schemas/SecretKeyRef'
+        defaults:
+          $ref: '#/components/schemas/ProviderDefaults'
+        pricing:
+          $ref: '#/components/schemas/ProviderPricing'
+        validateCredentials:
+          type: boolean
+          description: Enable credential validation on reconciliation
+
+    SecretKeyRef:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        key:
+          type: string
+
+    ProviderDefaults:
+      type: object
+      properties:
+        temperature:
+          type: string
+        topP:
+          type: string
+        maxTokens:
+          type: integer
+        contextWindow:
+          type: integer
+        truncationStrategy:
+          type: string
+          enum: [sliding, summarize, custom]
+
+    ProviderPricing:
+      type: object
+      properties:
+        inputCostPer1K:
+          type: string
+        outputCostPer1K:
+          type: string
+        cachedCostPer1K:
           type: string
 
     ProviderStatus:
@@ -859,11 +929,16 @@ components:
       properties:
         phase:
           type: string
-          enum: [Pending, Ready, Failed]
+          enum: [Ready, Error]
         conditions:
           type: array
           items:
             $ref: '#/components/schemas/Condition'
+        lastValidatedAt:
+          type: string
+          format: date-time
+        observedGeneration:
+          type: integer
 
     Stats:
       type: object

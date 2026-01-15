@@ -477,12 +477,14 @@ export interface components {
         };
         ProviderSpec: {
             /** @enum {string} */
-            type?: "anthropic" | "openai" | "bedrock" | "ollama" | "gemini" | "mock";
+            type?: "claude" | "openai" | "gemini" | "ollama" | "mock";
             model?: string;
+            /** @description Override the provider's default API endpoint */
             baseURL?: string;
             secretRef?: components["schemas"]["SecretKeyRef"];
             defaults?: components["schemas"]["ProviderDefaults"];
             pricing?: components["schemas"]["ProviderPricing"];
+            /** @description Enable credential validation on reconciliation */
             validateCredentials?: boolean;
         };
         SecretKeyRef: {
@@ -504,8 +506,11 @@ export interface components {
         };
         ProviderStatus: {
             /** @enum {string} */
-            phase?: "Pending" | "Ready" | "Failed";
+            phase?: "Ready" | "Error";
             conditions?: components["schemas"]["Condition"][];
+            /** Format: date-time */
+            lastValidatedAt?: string;
+            observedGeneration?: number;
         };
         Stats: {
             agents?: {
