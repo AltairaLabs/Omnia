@@ -32,10 +32,12 @@ vi.mock("@/lib/data", () => ({
   }),
 }));
 
-// Mock prometheus functions (not available in test environment)
+// Mock prometheus functions
+const mockIsPrometheusAvailable = vi.fn();
+const mockQueryPrometheus = vi.fn();
 vi.mock("@/lib/prometheus", () => ({
-  isPrometheusAvailable: vi.fn().mockResolvedValue(false),
-  queryPrometheus: vi.fn().mockResolvedValue({ status: "error" }),
+  isPrometheusAvailable: () => mockIsPrometheusAvailable(),
+  queryPrometheus: (...args: unknown[]) => mockQueryPrometheus(...args),
 }));
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
@@ -53,6 +55,8 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 describe("useStats", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetStats.mockResolvedValue(mockStats);
+    mockIsPrometheusAvailable.mockResolvedValue(false);
   });
 
   it("should fetch dashboard stats", async () => {
@@ -155,5 +159,128 @@ describe("useStats", () => {
     });
 
     expect(result.current.data?.sessions).toEqual({ active: 0, trend: null });
+  });
+
+  describe("with Prometheus available", () => {
+    beforeEach(() => {
+      mockIsPrometheusAvailable.mockResolvedValue(true);
+    });
+
+    it("should fetch session metrics from Prometheus", async () => {
+      mockQueryPrometheus.mockImplementation((query: string) => {
+        if (query.includes("offset")) {
+          return Promise.resolve({
+            status: "success",
+            data: { result: [{ value: [Date.now() / 1000, "80"] }] },
+          });
+        }
+        return Promise.resolve({
+          status: "success",
+          data: { result: [{ value: [Date.now() / 1000, "100"] }] },
+        });
+      });
+
+      const { result } = renderHook(() => useStats(), {
+        wrapper: TestWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.sessions.active).toBe(100);
+      expect(result.current.data?.sessions.trend).toBe(25); // (100-80)/80 * 100
+    });
+
+    it("should calculate 100% trend when going from 0 to positive", async () => {
+      mockQueryPrometheus.mockImplementation((query: string) => {
+        if (query.includes("offset")) {
+          return Promise.resolve({
+            status: "success",
+            data: { result: [{ value: [Date.now() / 1000, "0"] }] },
+          });
+        }
+        return Promise.resolve({
+          status: "success",
+          data: { result: [{ value: [Date.now() / 1000, "50"] }] },
+        });
+      });
+
+      const { result } = renderHook(() => useStats(), {
+        wrapper: TestWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.sessions.trend).toBe(100);
+    });
+
+    it("should calculate 0% trend when both values are 0", async () => {
+      mockQueryPrometheus.mockResolvedValue({
+        status: "success",
+        data: { result: [{ value: [Date.now() / 1000, "0"] }] },
+      });
+
+      const { result } = renderHook(() => useStats(), {
+        wrapper: TestWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.sessions.trend).toBe(0);
+    });
+
+    it("should handle Prometheus query errors gracefully", async () => {
+      mockQueryPrometheus.mockRejectedValue(new Error("Query failed"));
+
+      const { result } = renderHook(() => useStats(), {
+        wrapper: TestWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.sessions.active).toBe(0);
+      expect(result.current.data?.sessions.trend).toBeNull();
+    });
+
+    it("should handle empty Prometheus results", async () => {
+      mockQueryPrometheus.mockResolvedValue({
+        status: "success",
+        data: { result: [] },
+      });
+
+      const { result } = renderHook(() => useStats(), {
+        wrapper: TestWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.sessions.active).toBe(0);
+    });
+
+    it("should handle non-success Prometheus response", async () => {
+      mockQueryPrometheus.mockResolvedValue({
+        status: "error",
+        data: null,
+      });
+
+      const { result } = renderHook(() => useStats(), {
+        wrapper: TestWrapper,
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data?.sessions.active).toBe(0);
+    });
   });
 });
