@@ -176,7 +176,7 @@ export function useAgentConsole({
   }, [messages]);
 
   // Handle incoming messages from the connection - stable callback
-  // eslint-disable-next-line sonarjs/cognitive-complexity -- Switch statement handles multiple message types; extracting handlers would reduce clarity
+   
   const handleMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
       case "connected": {

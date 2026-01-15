@@ -60,6 +60,78 @@ function centerAspectCrop(
   );
 }
 
+interface CanvasProcessingParams {
+  img: HTMLImageElement;
+  sourceRect: { x: number; y: number; width: number; height: number };
+  maxDimensions: Dimensions;
+  preferredFormat: "image/jpeg" | "image/png" | "image/webp";
+  compressionGuidance: CompressionGuidance | undefined;
+  originalFileName: string;
+}
+
+/**
+ * Process an image region and create a new file.
+ * Shared logic for both crop and skip operations.
+ */
+async function processImageToFile({
+  img,
+  sourceRect,
+  maxDimensions,
+  preferredFormat,
+  compressionGuidance,
+  originalFileName,
+}: CanvasProcessingParams): Promise<{ blob: Blob; file: File }> {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Failed to get canvas context");
+
+  // Calculate final dimensions (fit within max, maintain aspect)
+  const finalDimensions = calculateResizedDimensions(
+    sourceRect.width,
+    sourceRect.height,
+    maxDimensions
+  );
+
+  canvas.width = finalDimensions.width;
+  canvas.height = finalDimensions.height;
+
+  // Use high-quality scaling
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // Draw the source region to canvas
+  ctx.drawImage(
+    img,
+    sourceRect.x,
+    sourceRect.y,
+    sourceRect.width,
+    sourceRect.height,
+    0,
+    0,
+    finalDimensions.width,
+    finalDimensions.height
+  );
+
+  // Convert to blob
+  const quality = getCompressionQuality(compressionGuidance);
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Failed to create blob"))),
+      preferredFormat,
+      quality
+    );
+  });
+
+  // Create a new File with the correct name and type
+  const extension = preferredFormat.split("/")[1];
+  const baseName = originalFileName.replace(/\.[^.]+$/, "");
+  const newFile = new File([blob], `${baseName}.${extension}`, {
+    type: preferredFormat,
+  });
+
+  return { blob, file: newFile };
+}
+
 export function ImageCropDialog({
   file,
   maxDimensions,
@@ -110,65 +182,26 @@ export function ImageCropDialog({
     setIsProcessing(true);
 
     try {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Failed to get canvas context");
-
       const img = imgRef.current;
       const scaleX = img.naturalWidth / img.width;
       const scaleY = img.naturalHeight / img.height;
 
       // Calculate the actual crop region in pixels
-      const cropX = completedCrop.x * scaleX;
-      const cropY = completedCrop.y * scaleY;
-      const cropWidth = completedCrop.width * scaleX;
-      const cropHeight = completedCrop.height * scaleY;
-
-      // Calculate final dimensions (fit within max, maintain aspect)
-      const finalDimensions = calculateResizedDimensions(
-        cropWidth,
-        cropHeight,
-        maxDimensions
-      );
-
-      canvas.width = finalDimensions.width;
-      canvas.height = finalDimensions.height;
-
-      // Use high-quality scaling
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-
-      // Draw the cropped region to canvas
-      ctx.drawImage(
+      const result = await processImageToFile({
         img,
-        cropX,
-        cropY,
-        cropWidth,
-        cropHeight,
-        0,
-        0,
-        finalDimensions.width,
-        finalDimensions.height
-      );
-
-      // Convert to blob
-      const quality = getCompressionQuality(compressionGuidance);
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("Failed to create blob"))),
-          preferredFormat,
-          quality
-        );
+        sourceRect: {
+          x: completedCrop.x * scaleX,
+          y: completedCrop.y * scaleY,
+          width: completedCrop.width * scaleX,
+          height: completedCrop.height * scaleY,
+        },
+        maxDimensions,
+        preferredFormat,
+        compressionGuidance,
+        originalFileName: file.name,
       });
 
-      // Create a new File with the correct name and type
-      const extension = preferredFormat.split("/")[1];
-      const baseName = file.name.replace(/\.[^.]+$/, "");
-      const newFile = new File([blob], `${baseName}.${extension}`, {
-        type: preferredFormat,
-      });
-
-      onComplete({ blob, file: newFile });
+      onComplete(result);
     } catch (error) {
       console.error("Failed to process crop:", error);
     } finally {
@@ -183,43 +216,23 @@ export function ImageCropDialog({
     setIsProcessing(true);
 
     try {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Failed to get canvas context");
-
       const img = imgRef.current;
 
-      // Calculate final dimensions (fit within max)
-      const finalDimensions = calculateResizedDimensions(
-        img.naturalWidth,
-        img.naturalHeight,
-        maxDimensions
-      );
-
-      canvas.width = finalDimensions.width;
-      canvas.height = finalDimensions.height;
-
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-
-      ctx.drawImage(img, 0, 0, finalDimensions.width, finalDimensions.height);
-
-      const quality = getCompressionQuality(compressionGuidance);
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("Failed to create blob"))),
-          preferredFormat,
-          quality
-        );
+      const result = await processImageToFile({
+        img,
+        sourceRect: {
+          x: 0,
+          y: 0,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        },
+        maxDimensions,
+        preferredFormat,
+        compressionGuidance,
+        originalFileName: file.name,
       });
 
-      const extension = preferredFormat.split("/")[1];
-      const baseName = file.name.replace(/\.[^.]+$/, "");
-      const newFile = new File([blob], `${baseName}.${extension}`, {
-        type: preferredFormat,
-      });
-
-      onComplete({ blob, file: newFile });
+      onComplete(result);
     } catch (error) {
       console.error("Failed to process image:", error);
     } finally {

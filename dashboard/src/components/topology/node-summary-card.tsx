@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { CostSparkline } from "@/components/cost";
 import { ProviderIcon } from "./provider-icons";
 import { formatCost } from "@/lib/pricing";
+import { formatTokens } from "@/lib/utils";
 import { useProvider, useAgentCost } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
@@ -47,13 +48,6 @@ function StatusBadge({ phase }: Readonly<{ phase?: string }>) {
     default:
       return <Badge variant="outline">{phase}</Badge>;
   }
-}
-
-/** Format token count with K/M suffix */
-function formatTokens(tokens: number): string {
-  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
-  return tokens.toFixed(0);
 }
 
 /** Type header styles matching topology graph nodes */
@@ -115,6 +109,63 @@ function TypeHeader({
   );
 }
 
+/** Reusable card layout for all summary card types */
+interface SummaryCardLayoutProps {
+  type: keyof typeof typeHeaderStyles;
+  name: string;
+  namespace: string;
+  phase?: string;
+  detailsHref: string;
+  onClose: () => void;
+  providerType?: ProviderType;
+  children: React.ReactNode;
+}
+
+function SummaryCardLayout({
+  type,
+  name,
+  namespace,
+  phase,
+  detailsHref,
+  onClose,
+  providerType,
+  children,
+}: Readonly<SummaryCardLayoutProps>) {
+  return (
+    <Card className="w-80 shadow-lg overflow-hidden">
+      <CardHeader className="pb-2">
+        <TypeHeader type={type} onClose={onClose} providerType={providerType} />
+        <div className="flex items-start justify-between pt-3">
+          <div>
+            <CardTitle className="text-base">{name}</CardTitle>
+            <p className="text-sm text-muted-foreground">{namespace}</p>
+          </div>
+          <StatusBadge phase={phase} />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {children}
+        <Link href={detailsHref}>
+          <Button variant="outline" size="sm" className="w-full mt-2">
+            <ExternalLink className="h-4 w-4 mr-2" />
+            View Details
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Stat item for consistent grid display */
+function StatItem({ label, value, title }: Readonly<{ label: string; value: string; title?: string }>) {
+  return (
+    <div>
+      <p className="text-muted-foreground">{label}</p>
+      <p className="font-medium truncate" title={title}>{value}</p>
+    </div>
+  );
+}
+
 /** Agent summary card */
 function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; onClose: () => void }>) {
   const { metadata, spec, status } = agent;
@@ -125,62 +176,35 @@ function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; on
   const totalCost = costData?.totalCost || 0;
   const providerType = provider?.spec?.type || spec.provider?.type;
   const sparklineColor = providerType === "openai" ? "#8B5CF6" : "#3B82F6";
+  const modelDisplay = (provider?.spec?.model || spec.provider?.model)?.split("-").slice(-2).join("-") || "-";
+  const replicaDisplay = `${status?.replicas?.ready ?? 0}/${status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}`;
 
   return (
-    <Card className="w-80 shadow-lg overflow-hidden">
-      <CardHeader className="pb-2">
-        <TypeHeader type="agent" onClose={onClose} />
-        <div className="flex items-start justify-between pt-3">
-          <div>
-            <CardTitle className="text-base">{metadata.name}</CardTitle>
-            <p className="text-sm text-muted-foreground">{metadata.namespace}</p>
-          </div>
-          <StatusBadge phase={status?.phase} />
+    <SummaryCardLayout
+      type="agent"
+      name={metadata.name}
+      namespace={metadata.namespace || "default"}
+      phase={status?.phase}
+      detailsHref={`/agents/${metadata.name}?namespace=${metadata.namespace}`}
+      onClose={onClose}
+    >
+      {/* Cost Sparkline */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Cost (24h)</span>
+          <span className="font-medium">{formatCost(totalCost)}</span>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Cost Sparkline */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Cost (24h)</span>
-            <span className="font-medium">{formatCost(totalCost)}</span>
-          </div>
-          <CostSparkline data={sparklineData} color={sparklineColor} height={28} />
-        </div>
+        <CostSparkline data={sparklineData} color={sparklineColor} height={28} />
+      </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-muted-foreground">Provider</p>
-            <p className="font-medium capitalize">{providerType || "-"}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Model</p>
-            <p className="font-medium truncate" title={provider?.spec?.model || spec.provider?.model}>
-              {(provider?.spec?.model || spec.provider?.model)?.split("-").slice(-2).join("-") || "-"}
-            </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Replicas</p>
-            <p className="font-medium">
-              {status?.replicas?.ready ?? 0}/{status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
-            </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Facade</p>
-            <p className="font-medium capitalize">{spec.facade?.type || "websocket"}</p>
-          </div>
-        </div>
-
-        {/* View Details Link */}
-        <Link href={`/agents/${metadata.name}?namespace=${metadata.namespace}`}>
-          <Button variant="outline" size="sm" className="w-full mt-2">
-            <ExternalLink className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
-        </Link>
-      </CardContent>
-    </Card>
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <StatItem label="Provider" value={providerType || "-"} />
+        <StatItem label="Model" value={modelDisplay} title={provider?.spec?.model || spec.provider?.model} />
+        <StatItem label="Replicas" value={replicaDisplay} />
+        <StatItem label="Facade" value={spec.facade?.type || "websocket"} />
+      </div>
+    </SummaryCardLayout>
   );
 }
 
@@ -199,64 +223,36 @@ function ProviderSummaryCard({ provider, onClose }: Readonly<{ provider: Provide
   };
   const sparklineColor = spec?.type ? providerColorMap[spec.type] || "#3B82F6" : "#3B82F6";
   const sparklineData = metrics?.costRate?.map(p => ({ value: p.value })) || [];
+  const requestsDisplay = metrics?.totalRequests24h ? Math.round(metrics.totalRequests24h).toLocaleString() : "-";
+  const tokensDisplay = metrics?.totalTokens24h ? formatTokens(metrics.totalTokens24h) : "-";
 
   return (
-    <Card className="w-80 shadow-lg overflow-hidden">
-      <CardHeader className="pb-2">
-        <TypeHeader type="provider" onClose={onClose} providerType={spec?.type as ProviderType} />
-        <div className="flex items-start justify-between pt-3">
-          <div>
-            <CardTitle className="text-base">{metadata?.name}</CardTitle>
-            <p className="text-sm text-muted-foreground">{metadata?.namespace}</p>
-          </div>
-          <StatusBadge phase={status?.phase} />
+    <SummaryCardLayout
+      type="provider"
+      name={metadata?.name || ""}
+      namespace={metadata?.namespace || "default"}
+      phase={status?.phase}
+      detailsHref={`/providers/${metadata?.name}?namespace=${metadata?.namespace || "default"}`}
+      onClose={onClose}
+      providerType={spec?.type as ProviderType}
+    >
+      {/* Cost Sparkline */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Cost (24h)</span>
+          <span className="font-medium">{formatCost(metrics?.totalCost24h || 0)}</span>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Cost Sparkline */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Cost (24h)</span>
-            <span className="font-medium">{formatCost(metrics?.totalCost24h || 0)}</span>
-          </div>
-          <CostSparkline data={sparklineData} color={sparklineColor} height={28} />
-        </div>
+        <CostSparkline data={sparklineData} color={sparklineColor} height={28} />
+      </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-muted-foreground">Type</p>
-            <p className="font-medium capitalize">{spec?.type || "-"}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Model</p>
-            <p className="font-medium truncate" title={spec?.model}>
-              {spec?.model || "-"}
-            </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Requests (24h)</p>
-            <p className="font-medium">
-              {metrics?.totalRequests24h ? Math.round(metrics.totalRequests24h).toLocaleString() : "-"}
-            </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Tokens (24h)</p>
-            <p className="font-medium">
-              {metrics?.totalTokens24h ? formatTokens(metrics.totalTokens24h) : "-"}
-            </p>
-          </div>
-        </div>
-
-        {/* View Details Link */}
-        <Link href={`/providers/${metadata?.name}?namespace=${metadata?.namespace || "default"}`}>
-          <Button variant="outline" size="sm" className="w-full mt-2">
-            <ExternalLink className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
-        </Link>
-      </CardContent>
-    </Card>
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <StatItem label="Type" value={spec?.type || "-"} />
+        <StatItem label="Model" value={spec?.model || "-"} title={spec?.model} />
+        <StatItem label="Requests (24h)" value={requestsDisplay} />
+        <StatItem label="Tokens (24h)" value={tokensDisplay} />
+      </div>
+    </SummaryCardLayout>
   );
 }
 
@@ -265,41 +261,23 @@ function PromptPackSummaryCard({ promptPack, onClose }: Readonly<{ promptPack: P
   const { metadata, spec, status } = promptPack;
 
   return (
-    <Card className="w-80 shadow-lg overflow-hidden">
-      <CardHeader className="pb-2">
-        <TypeHeader type="promptpack" onClose={onClose} />
-        <div className="flex items-start justify-between pt-3">
-          <div>
-            <CardTitle className="text-base">{metadata.name}</CardTitle>
-            <p className="text-sm text-muted-foreground">{metadata.namespace}</p>
-          </div>
-          <StatusBadge phase={status?.phase} />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-muted-foreground">Version</p>
-            <p className="font-medium">{spec.version || "-"}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Source</p>
-            <p className="font-medium truncate" title={spec.source?.configMapRef?.name}>
-              {spec.source?.configMapRef?.name || spec.source?.type || "-"}
-            </p>
-          </div>
-        </div>
-
-        {/* View Details Link */}
-        <Link href={`/promptpacks/${metadata.name}?namespace=${metadata.namespace}`}>
-          <Button variant="outline" size="sm" className="w-full mt-2">
-            <ExternalLink className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
-        </Link>
-      </CardContent>
-    </Card>
+    <SummaryCardLayout
+      type="promptpack"
+      name={metadata.name}
+      namespace={metadata.namespace || "default"}
+      phase={status?.phase}
+      detailsHref={`/promptpacks/${metadata.name}?namespace=${metadata.namespace}`}
+      onClose={onClose}
+    >
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <StatItem label="Version" value={spec.version || "-"} />
+        <StatItem
+          label="Source"
+          value={spec.source?.configMapRef?.name || spec.source?.type || "-"}
+          title={spec.source?.configMapRef?.name}
+        />
+      </div>
+    </SummaryCardLayout>
   );
 }
 
@@ -308,39 +286,19 @@ function ToolRegistrySummaryCard({ toolRegistry, onClose }: Readonly<{ toolRegis
   const { metadata, spec, status } = toolRegistry;
 
   return (
-    <Card className="w-80 shadow-lg overflow-hidden">
-      <CardHeader className="pb-2">
-        <TypeHeader type="tools" onClose={onClose} />
-        <div className="flex items-start justify-between pt-3">
-          <div>
-            <CardTitle className="text-base">{metadata.name}</CardTitle>
-            <p className="text-sm text-muted-foreground">{metadata.namespace}</p>
-          </div>
-          <StatusBadge phase={status?.phase} />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-muted-foreground">Tools</p>
-            <p className="font-medium">{status?.discoveredToolsCount ?? 0}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Handlers</p>
-            <p className="font-medium">{spec.handlers?.length ?? 0}</p>
-          </div>
-        </div>
-
-        {/* View Details Link */}
-        <Link href={`/tools/${metadata.name}?namespace=${metadata.namespace}`}>
-          <Button variant="outline" size="sm" className="w-full mt-2">
-            <ExternalLink className="h-4 w-4 mr-2" />
-            View Details
-          </Button>
-        </Link>
-      </CardContent>
-    </Card>
+    <SummaryCardLayout
+      type="tools"
+      name={metadata.name}
+      namespace={metadata.namespace || "default"}
+      phase={status?.phase}
+      detailsHref={`/tools/${metadata.name}?namespace=${metadata.namespace}`}
+      onClose={onClose}
+    >
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <StatItem label="Tools" value={String(status?.discoveredToolsCount ?? 0)} />
+        <StatItem label="Handlers" value={String(spec.handlers?.length ?? 0)} />
+      </div>
+    </SummaryCardLayout>
   );
 }
 

@@ -21,6 +21,7 @@ import { CostSparkline } from "@/components/cost";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { formatCost } from "@/lib/pricing";
+import { formatTokens } from "@/lib/utils";
 import { useProviders } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 import type { Provider } from "@/types";
@@ -106,16 +107,6 @@ function ProviderCard({ provider }: Readonly<{ provider: Provider }>) {
   );
 }
 
-/** Format token count with K/M suffix */
-function formatTokens(tokens: number): string {
-  if (tokens >= 1000000) {
-    return `${(tokens / 1000000).toFixed(1)}M`;
-  }
-  if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(1)}K`;
-  }
-  return tokens.toFixed(0);
-}
 
 function ProviderTable({ providers }: Readonly<{ providers: Provider[] }>) {
   return (
