@@ -201,7 +201,7 @@ function renderTokenUsageContent(
             type="monotone"
             dataKey="input"
             name="Input"
-            stroke="hsl(var(--primary))"
+            stroke="var(--primary)"
             strokeWidth={2}
             dot={false}
           />
@@ -297,7 +297,7 @@ export function AgentMetricsPanel({
           metric={metrics.requestsPerSec}
           icon={Activity}
           loading={isLoading}
-          color="hsl(var(--primary))"
+          color="var(--primary)"
           available={metrics.available}
         />
         <MetricCard
