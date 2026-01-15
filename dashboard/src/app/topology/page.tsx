@@ -121,7 +121,7 @@ export default function TopologyPage() {
     (type: string, name: string, namespace: string) => {
       // Show summary card for supported node types
       if (type === "agent" || type === "promptpack" || type === "tools" || type === "provider") {
-        setSelectedNode({ type: type as SelectedNode["type"], name, namespace });
+        setSelectedNode({ type, name, namespace });
       }
     },
     []

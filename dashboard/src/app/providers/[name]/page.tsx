@@ -9,56 +9,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { MetricSparklineCard } from "@/components/ui/sparkline";
+import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
+import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { useProvider } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 
 interface ProviderDetailPageProps {
   params: Promise<{ name: string }>;
-}
-
-function ProviderStatusBadge({ phase }: { phase?: string }) {
-  if (!phase) return <Badge variant="outline">Unknown</Badge>;
-
-  switch (phase) {
-    case "Ready":
-      return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Ready</Badge>;
-    case "Error":
-      return <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">Error</Badge>;
-    default:
-      return <Badge variant="outline">{phase}</Badge>;
-  }
-}
-
-function ProviderTypeIcon({ type }: { type?: string }) {
-  const iconMap: Record<string, string> = {
-    anthropic: "A",
-    openai: "O",
-    gemini: "G",
-    ollama: "L",
-    bedrock: "B",
-    mock: "M",
-  };
-
-  const bgColorMap: Record<string, string> = {
-    anthropic: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-    openai: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    gemini: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    ollama: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    bedrock: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-    mock: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
-  };
-
-  const icon = type ? iconMap[type] || type[0]?.toUpperCase() : "?";
-  const bgColor = type ? bgColorMap[type] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400" : "bg-gray-100";
-
-  return (
-    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${bgColor}`}>
-      {icon}
-    </div>
-  );
 }
 
 function formatDate(timestamp?: string): string {
@@ -168,7 +127,7 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-4">
-                    <ProviderTypeIcon type={spec?.type} />
+                    <ProviderTypeIcon type={spec?.type} size="lg" />
                     <div>
                       <CardTitle>{metadata?.name}</CardTitle>
                       <CardDescription>

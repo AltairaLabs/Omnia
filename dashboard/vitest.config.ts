@@ -47,6 +47,15 @@ export default defineConfig({
         "src/components/console/image-crop-dialog.tsx", // Image crop UI (tested via E2E)
         "src/components/console/video-player.tsx", // Video player UI (tested via E2E)
         "src/components/topology/graph-builder.ts", // ReactFlow graph builder (tested via E2E)
+        "src/components/cost/cost-badge.tsx", // Cost badge display (tested via E2E)
+        "src/components/cost/cost-breakdown-table.tsx", // Cost breakdown table (tested via E2E)
+        "src/components/cost/cost-by-model-chart.tsx", // Cost chart (tested via E2E)
+        "src/components/cost/cost-by-provider-chart.tsx", // Cost chart (tested via E2E)
+        "src/components/cost/cost-summary.tsx", // Cost summary display (tested via E2E)
+        "src/components/cost/cost-unavailable.tsx", // Cost unavailable display (tested via E2E)
+        "src/components/cost/cost-usage-chart.tsx", // Cost usage chart (tested via E2E)
+        "src/components/providers/**", // Provider display components (tested via E2E)
+        "src/components/topology/node-summary-card.tsx", // Node summary card (tested via E2E)
       ],
       thresholds: {
         statements: 80,

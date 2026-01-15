@@ -29,7 +29,7 @@ interface NodeSummaryCardProps {
 }
 
 /** Status badge component */
-function StatusBadge({ phase }: { phase?: string }) {
+function StatusBadge({ phase }: Readonly<{ phase?: string }>) {
   if (!phase) return <Badge variant="outline">Unknown</Badge>;
 
   switch (phase) {
@@ -85,11 +85,11 @@ function TypeHeader({
   type,
   onClose,
   providerType,
-}: {
+}: Readonly<{
   type: keyof typeof typeHeaderStyles;
   onClose: () => void;
   providerType?: ProviderType;
-}) {
+}>) {
   const style = typeHeaderStyles[type];
   const Icon = style.icon;
 
@@ -116,7 +116,7 @@ function TypeHeader({
 }
 
 /** Agent summary card */
-function AgentSummaryCard({ agent, onClose }: { agent: AgentRuntime; onClose: () => void }) {
+function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; onClose: () => void }>) {
   const { metadata, spec, status } = agent;
   const { data: provider } = useProvider(spec.providerRef?.name, metadata.namespace || "default");
   const { data: costData } = useAgentCost(metadata.namespace || "default", metadata.name);
@@ -185,7 +185,7 @@ function AgentSummaryCard({ agent, onClose }: { agent: AgentRuntime; onClose: ()
 }
 
 /** Provider summary card */
-function ProviderSummaryCard({ provider, onClose }: { provider: Provider; onClose: () => void }) {
+function ProviderSummaryCard({ provider, onClose }: Readonly<{ provider: Provider; onClose: () => void }>) {
   const { metadata, spec, status } = provider;
   const { data: metrics } = useProviderMetrics(metadata?.name || "", spec?.type);
 
@@ -261,7 +261,7 @@ function ProviderSummaryCard({ provider, onClose }: { provider: Provider; onClos
 }
 
 /** PromptPack summary card */
-function PromptPackSummaryCard({ promptPack, onClose }: { promptPack: PromptPack; onClose: () => void }) {
+function PromptPackSummaryCard({ promptPack, onClose }: Readonly<{ promptPack: PromptPack; onClose: () => void }>) {
   const { metadata, spec, status } = promptPack;
 
   return (
@@ -304,7 +304,7 @@ function PromptPackSummaryCard({ promptPack, onClose }: { promptPack: PromptPack
 }
 
 /** ToolRegistry summary card */
-function ToolRegistrySummaryCard({ toolRegistry, onClose }: { toolRegistry: ToolRegistry; onClose: () => void }) {
+function ToolRegistrySummaryCard({ toolRegistry, onClose }: Readonly<{ toolRegistry: ToolRegistry; onClose: () => void }>) {
   const { metadata, spec, status } = toolRegistry;
 
   return (

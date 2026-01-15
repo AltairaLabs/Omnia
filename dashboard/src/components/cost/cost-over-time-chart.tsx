@@ -41,8 +41,8 @@ export function CostOverTimeChart({
         providerSet.add(provider);
       }
     }
-    // Sort providers for consistent ordering
-    return Array.from(providerSet).sort();
+    // Sort providers for consistent ordering using localeCompare for reliable alphabetical sort
+    return Array.from(providerSet).sort((a, b) => a.localeCompare(b));
   }, [data]);
 
   // Format data for chart - flatten byProvider into individual keys

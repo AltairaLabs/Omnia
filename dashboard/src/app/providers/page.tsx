@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -19,6 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CostSparkline } from "@/components/cost";
+import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
+import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { formatCost } from "@/lib/pricing";
 import { useProviders } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
@@ -28,48 +29,6 @@ type ProviderPhase = "Pending" | "Ready" | "Error" | "Failed";
 
 type ViewMode = "cards" | "table";
 type FilterPhase = "all" | ProviderPhase;
-
-function ProviderStatusBadge({ phase }: { phase?: string }) {
-  if (!phase) return <Badge variant="outline">Unknown</Badge>;
-
-  switch (phase) {
-    case "Ready":
-      return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Ready</Badge>;
-    case "Error":
-      return <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">Error</Badge>;
-    default:
-      return <Badge variant="outline">{phase}</Badge>;
-  }
-}
-
-function ProviderTypeIcon({ type }: { type?: string }) {
-  const iconMap: Record<string, string> = {
-    anthropic: "A",
-    openai: "O",
-    gemini: "G",
-    ollama: "L",
-    bedrock: "B",
-    mock: "M",
-  };
-
-  const bgColorMap: Record<string, string> = {
-    anthropic: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-    openai: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    gemini: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    ollama: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    bedrock: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-    mock: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
-  };
-
-  const icon = type ? iconMap[type] || type[0]?.toUpperCase() : "?";
-  const bgColor = type ? bgColorMap[type] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400" : "bg-gray-100";
-
-  return (
-    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${bgColor}`}>
-      {icon}
-    </div>
-  );
-}
 
 /** Color mapping for provider types */
 const providerColorMap: Record<string, string> = {
@@ -81,7 +40,7 @@ const providerColorMap: Record<string, string> = {
   mock: "#6B7280",      // gray
 };
 
-function ProviderCard({ provider }: { provider: Provider }) {
+function ProviderCard({ provider }: Readonly<{ provider: Provider }>) {
   const { metadata, spec, status } = provider;
 
   // Fetch metrics for this provider
@@ -158,7 +117,7 @@ function formatTokens(tokens: number): string {
   return tokens.toFixed(0);
 }
 
-function ProviderTable({ providers }: { providers: Provider[] }) {
+function ProviderTable({ providers }: Readonly<{ providers: Provider[] }>) {
   return (
     <div className="rounded-md border">
       <Table>
