@@ -856,6 +856,9 @@ demo:
       pullPolicy: IfNotPresent
     # -- Model to pre-pull (llava for vision capabilities)
     model: llava:7b
+    # -- Additional models to pre-pull (e.g., for tool use)
+    additionalModels:
+      - llama3.2:3b
     # -- Keep model loaded in memory
     keepAlive: "24h"
     # -- Context window size (number of tokens) for Ollama server.
@@ -1037,6 +1040,37 @@ demo:
         - Identify music, sounds, or other audio content
         - Answer any specific questions about the audio content
         - If the audio quality is poor, mention it and do your best
+
+  # Tools Demo configuration (uses llama3.2 for tool calling)
+  toolsDemo:
+    # -- Enable tools demo agent
+    enabled: true
+
+    # -- Agent configuration
+    agent:
+      # -- Agent name
+      name: tools-demo
+      # -- Facade handler type
+      handler: runtime
+      # -- Number of replicas
+      replicas: 1
+      # -- Resource requirements
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+
+    # -- PromptPack configuration
+    promptPack:
+      # -- System prompt for the tools demo agent
+      systemPrompt: |
+        You are a helpful AI assistant with access to tools.
+        Use the available tools when they can help answer the user's question.
+        Always explain what you're doing when using tools.
+        Be concise and helpful in your responses.
 
   # OPA Policy Agent for model validation
   # Prevents model switching when multiple agents share an Ollama instance

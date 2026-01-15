@@ -55,7 +55,7 @@ spec:
             - /bin/sh
             - -c
             - |
-              echo "Checking if model {{ .Values.demo.ollama.model }} exists..."
+              echo "Starting model pull process..."
               # Start Ollama in the background
               ollama serve &
               OLLAMA_PID=$!
@@ -69,14 +69,26 @@ spec:
                 sleep 1
               done
 
-              # Check if model already exists
-              if ollama list | grep -q "{{ .Values.demo.ollama.model | replace ":" "\\s" }}"; then
-                echo "Model {{ .Values.demo.ollama.model }} already exists, skipping pull"
-              else
-                echo "Pulling model {{ .Values.demo.ollama.model }} (this may take several minutes)..."
-                ollama pull {{ .Values.demo.ollama.model }}
-                echo "Model pull complete!"
-              fi
+              # Function to pull a model if not exists
+              pull_model() {
+                MODEL=$1
+                MODEL_PATTERN=$(echo "$MODEL" | sed 's/:/ /')
+                if ollama list | grep -q "$MODEL_PATTERN"; then
+                  echo "Model $MODEL already exists, skipping pull"
+                else
+                  echo "Pulling model $MODEL (this may take several minutes)..."
+                  ollama pull "$MODEL"
+                  echo "Model $MODEL pull complete!"
+                fi
+              }
+
+              # Pull primary model
+              pull_model "{{ .Values.demo.ollama.model }}"
+
+              # Pull additional models
+              {{- range .Values.demo.ollama.additionalModels }}
+              pull_model "{{ . }}"
+              {{- end }}
 
               # Stop Ollama
               kill $OLLAMA_PID 2>/dev/null || true
