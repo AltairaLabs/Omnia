@@ -4,6 +4,8 @@ import {
   useGrafana,
   buildPanelUrl,
   buildDashboardUrl,
+  buildLokiExploreUrl,
+  buildTempoExploreUrl,
   GRAFANA_DASHBOARDS,
   OVERVIEW_PANELS,
   type GrafanaConfig,
@@ -242,5 +244,156 @@ describe("OVERVIEW_PANELS", () => {
     expect(OVERVIEW_PANELS.P95_LATENCY).toBe(2);
     expect(OVERVIEW_PANELS.COST_24H).toBe(3);
     expect(OVERVIEW_PANELS.TOKENS_PER_MIN).toBe(4);
+  });
+});
+
+describe("buildLokiExploreUrl", () => {
+  const enabledConfig: GrafanaConfig = {
+    enabled: true,
+    baseUrl: "https://grafana.example.com", // NOSONAR - test URL
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  const disabledConfig: GrafanaConfig = {
+    enabled: false,
+    baseUrl: null,
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  it("should return null when Grafana is disabled", () => {
+    const url = buildLokiExploreUrl(disabledConfig, "default", "my-agent");
+    expect(url).toBeNull();
+  });
+
+  it("should return null when baseUrl is not set", () => {
+    const configNoUrl: GrafanaConfig = {
+      enabled: true,
+      baseUrl: null,
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+    const url = buildLokiExploreUrl(configNoUrl, "default", "my-agent");
+    expect(url).toBeNull();
+  });
+
+  it("should build correct Loki explore URL", () => {
+    const url = buildLokiExploreUrl(enabledConfig, "default", "my-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("https://grafana.example.com/grafana/explore");
+    expect(url).toContain("orgId=1");
+    expect(url).toContain("datasource");
+    expect(url).toContain("loki");
+  });
+
+  it("should include namespace and agent in query", () => {
+    const url = buildLokiExploreUrl(enabledConfig, "production", "test-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("production");
+    expect(url).toContain("test-agent");
+  });
+
+  it("should use custom time range options", () => {
+    const url = buildLokiExploreUrl(enabledConfig, "default", "my-agent", {
+      from: "now-24h",
+      to: "now-1h",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("now-24h");
+    expect(url).toContain("now-1h");
+  });
+
+  it("should handle baseUrl with trailing slash", () => {
+    const configWithSlash: GrafanaConfig = {
+      enabled: true,
+      baseUrl: "https://grafana.example.com/", // NOSONAR - test URL
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+
+    const url = buildLokiExploreUrl(configWithSlash, "default", "my-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("https://grafana.example.com/grafana/explore");
+    expect(url).not.toContain("//grafana/");
+  });
+});
+
+describe("buildTempoExploreUrl", () => {
+  const enabledConfig: GrafanaConfig = {
+    enabled: true,
+    baseUrl: "https://grafana.example.com", // NOSONAR - test URL
+    remotePath: "/grafana/",
+    orgId: 2,
+  };
+
+  const disabledConfig: GrafanaConfig = {
+    enabled: false,
+    baseUrl: null,
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  it("should return null when Grafana is disabled", () => {
+    const url = buildTempoExploreUrl(disabledConfig, "default", "my-agent");
+    expect(url).toBeNull();
+  });
+
+  it("should return null when baseUrl is not set", () => {
+    const configNoUrl: GrafanaConfig = {
+      enabled: true,
+      baseUrl: null,
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+    const url = buildTempoExploreUrl(configNoUrl, "default", "my-agent");
+    expect(url).toBeNull();
+  });
+
+  it("should build correct Tempo explore URL", () => {
+    const url = buildTempoExploreUrl(enabledConfig, "default", "my-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("https://grafana.example.com/grafana/explore");
+    expect(url).toContain("orgId=2");
+    expect(url).toContain("datasource");
+    expect(url).toContain("tempo");
+  });
+
+  it("should include service name with namespace and agent", () => {
+    const url = buildTempoExploreUrl(enabledConfig, "production", "test-agent");
+
+    expect(url).not.toBeNull();
+    // TraceQL query includes service name as agent.namespace
+    expect(url).toContain("test-agent.production");
+  });
+
+  it("should use custom time range options", () => {
+    const url = buildTempoExploreUrl(enabledConfig, "default", "my-agent", {
+      from: "now-6h",
+      to: "now",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("now-6h");
+  });
+
+  it("should handle baseUrl with trailing slash", () => {
+    const configWithSlash: GrafanaConfig = {
+      enabled: true,
+      baseUrl: "https://grafana.example.com/", // NOSONAR - test URL
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+
+    const url = buildTempoExploreUrl(configWithSlash, "default", "my-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("https://grafana.example.com/grafana/explore");
+    expect(url).not.toContain("//grafana/");
   });
 });
