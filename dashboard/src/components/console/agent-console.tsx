@@ -259,14 +259,16 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     [processFiles]
   );
 
-  // Handle send
+  // Handle send - only sends if canSend is true
   const handleSend = useCallback(() => {
-    if ((input.trim() || attachments.length > 0) && status === "connected") {
-      sendMessage(input, attachments);
-      setInput("");
-      setAttachments([]);
-      textareaRef.current?.focus();
+    const hasContent = input.trim().length > 0 || attachments.length > 0;
+    if (!hasContent || status !== "connected") {
+      return;
     }
+    sendMessage(input, attachments);
+    setInput("");
+    setAttachments([]);
+    textareaRef.current?.focus();
   }, [input, attachments, status, sendMessage]);
 
   // Handle key press
@@ -360,6 +362,12 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     const lastMessage = messages[messages.length - 1];
     return lastMessage.role === "user";
   }, [messages, status]);
+
+  // Determine if we can send a message (text or attachments present, and connected)
+  const canSend = useMemo(() => {
+    const hasContent = input.trim().length > 0 || attachments.length > 0;
+    return hasContent && status === "connected";
+  }, [input, attachments, status]);
 
   // Status badge
   const statusBadge = {
@@ -550,7 +558,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           />
           <Button
             onClick={handleSend}
-            disabled={(!input.trim() && attachments.length === 0) || status !== "connected"}
+            disabled={!canSend}
             className="shrink-0"
             aria-label="Send message"
             data-testid="send-button"
