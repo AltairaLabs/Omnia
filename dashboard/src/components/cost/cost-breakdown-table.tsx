@@ -64,7 +64,7 @@ export function CostBreakdownTable({
           </TableHeader>
           <TableBody>
             {sortedData.map((item) => (
-              <TableRow key={`${item.namespace}/${item.agent}`}>
+              <TableRow key={`${item.namespace}/${item.agent}/${item.model}`}>
                 <TableCell>
                   <div className="flex flex-col">
                     <span className="font-medium">{item.agent}</span>
