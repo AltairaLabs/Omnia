@@ -37,7 +37,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -711,11 +713,19 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// - prometheus.istio.io/merge-metrics tells Istio to merge app metrics with Envoy stats
 	//   Istio reads prometheus.io/port and prometheus.io/path BEFORE overwriting them,
 	//   then merges app metrics into port 15020 alongside Envoy metrics
+	// - traffic.sidecar.istio.io/excludeInboundPorts excludes runtime metrics port from Istio
+	//   so Prometheus can directly scrape port 9001 without mTLS
 	podAnnotations := map[string]string{
-		"prometheus.io/scrape":              "true",
-		"prometheus.io/port":                fmt.Sprintf("%d", facadePort),
-		"prometheus.io/path":                "/metrics",
-		"prometheus.istio.io/merge-metrics": "true",
+		"prometheus.io/scrape":                         "true",
+		"prometheus.io/port":                           fmt.Sprintf("%d", facadePort),
+		"prometheus.io/path":                           "/metrics",
+		"prometheus.istio.io/merge-metrics":            "true",
+		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d", DefaultRuntimeHealthPort),
+	}
+
+	// Add extra pod annotations from CRD
+	for key, value := range agentRuntime.Spec.ExtraPodAnnotations {
+		podAnnotations[key] = value
 	}
 
 	deployment.Labels = labels
@@ -936,6 +946,11 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	// Add session config (facade needs this for session management)
 	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_STORE_URL")...)
 
+	// Add extra env vars from CRD
+	if agentRuntime.Spec.Facade.ExtraEnv != nil {
+		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
+	}
+
 	return envVars
 }
 
@@ -1050,6 +1065,11 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 				Value: "true",
 			},
 		)
+	}
+
+	// Add extra env vars from CRD
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {
+		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)
 	}
 
 	return envVars
@@ -1857,6 +1877,82 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
+		// Watch Provider changes and reconcile AgentRuntimes that reference them
+		Watches(
+			&omniav1alpha1.Provider{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForProvider),
+		).
+		// Watch PromptPack changes and reconcile AgentRuntimes that reference them
+		Watches(
+			&omniav1alpha1.PromptPack{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForPromptPack),
+		).
 		Named("agentruntime").
 		Complete(r)
+}
+
+// findAgentRuntimesForProvider returns reconcile requests for all AgentRuntimes
+// that reference the given Provider.
+func (r *AgentRuntimeReconciler) findAgentRuntimesForProvider(ctx context.Context, obj client.Object) []reconcile.Request {
+	provider := obj.(*omniav1alpha1.Provider)
+	log := logf.FromContext(ctx).WithValues("provider", provider.Name, "namespace", provider.Namespace)
+
+	// List all AgentRuntimes
+	var agentRuntimes omniav1alpha1.AgentRuntimeList
+	if err := r.List(ctx, &agentRuntimes); err != nil {
+		log.Error(err, "failed to list AgentRuntimes for Provider watch")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, ar := range agentRuntimes.Items {
+		// Check if this AgentRuntime references the changed Provider
+		if ar.Spec.ProviderRef != nil && ar.Spec.ProviderRef.Name == provider.Name {
+			// Check namespace match (same namespace or explicit namespace reference)
+			providerNS := provider.Namespace
+			arProviderNS := ar.Namespace
+			if ar.Spec.ProviderRef.Namespace != nil {
+				arProviderNS = *ar.Spec.ProviderRef.Namespace
+			}
+			if providerNS == arProviderNS {
+				log.Info("enqueueing AgentRuntime for Provider change", "agentruntime", ar.Name)
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      ar.Name,
+						Namespace: ar.Namespace,
+					},
+				})
+			}
+		}
+	}
+	return requests
+}
+
+// findAgentRuntimesForPromptPack returns reconcile requests for all AgentRuntimes
+// that reference the given PromptPack.
+func (r *AgentRuntimeReconciler) findAgentRuntimesForPromptPack(ctx context.Context, obj client.Object) []reconcile.Request {
+	promptPack := obj.(*omniav1alpha1.PromptPack)
+	log := logf.FromContext(ctx).WithValues("promptpack", promptPack.Name, "namespace", promptPack.Namespace)
+
+	// List all AgentRuntimes in the same namespace (PromptPack refs don't have namespace field)
+	var agentRuntimes omniav1alpha1.AgentRuntimeList
+	if err := r.List(ctx, &agentRuntimes, client.InNamespace(promptPack.Namespace)); err != nil {
+		log.Error(err, "failed to list AgentRuntimes for PromptPack watch")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, ar := range agentRuntimes.Items {
+		// Check if this AgentRuntime references the changed PromptPack
+		if ar.Spec.PromptPackRef.Name == promptPack.Name {
+			log.Info("enqueueing AgentRuntime for PromptPack change", "agentruntime", ar.Name)
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      ar.Name,
+					Namespace: ar.Namespace,
+				},
+			})
+		}
+	}
+	return requests
 }

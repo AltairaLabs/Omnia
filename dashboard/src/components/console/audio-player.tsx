@@ -113,10 +113,7 @@ export function AudioPlayer({ src, filename, className }: Readonly<AudioPlayerPr
   return (
     <div className={cn("rounded-lg border bg-background/50 p-3", className)} data-testid="audio-player">
       {/* Hidden audio element */}
-      <audio ref={audioRef} src={src} preload="metadata">
-        {/* Captions track - required for accessibility, empty as captions are user-provided */}
-        <track kind="captions" src="" label="Captions" default />
-      </audio>
+      <audio ref={audioRef} src={src} preload="metadata" />
 
       {/* Filename */}
       {filename && (

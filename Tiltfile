@@ -26,6 +26,18 @@ ENABLE_OBSERVABILITY = True
 # Also supports legacy ENABLE_OLLAMA for backwards compatibility
 ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() in ('true', '1', 'yes') or False
 
+# Set to True to enable Audio Demo with Gemini (requires GEMINI_API_KEY)
+# Can be set via environment: ENABLE_AUDIO_DEMO=true tilt up
+# Note: You must create the gemini-credentials secret manually:
+#   kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=$GEMINI_API_KEY
+ENABLE_AUDIO_DEMO = os.getenv('ENABLE_AUDIO_DEMO', '').lower() in ('true', '1', 'yes') or False
+
+# Set to True to build runtime with local PromptKit source for debugging
+# Can be set via environment: USE_LOCAL_PROMPTKIT=true PROMPTKIT_PATH=/path/to/PromptKit tilt up
+# This allows rapid iteration on PromptKit changes without publishing releases
+USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or False
+PROMPTKIT_PATH = os.getenv('PROMPTKIT_PATH', '../PromptKit')
+
 # Set to True to enable full production-like stack
 # Includes: Istio service mesh, Tempo (tracing), Loki (logging), Alloy (collector),
 #           Gateway API, and dashboard with builtin auth
@@ -163,18 +175,42 @@ docker_build(
 )
 
 # Build runtime image (LLM interaction and tool execution)
+# When USE_LOCAL_PROMPTKIT is enabled, includes local PromptKit source for development
+runtime_only = [
+    './cmd/runtime',
+    './internal/runtime',
+    './pkg',
+    './api/proto',
+    './go.mod',
+    './go.sum',
+]
+runtime_build_args = {}
+
+if USE_LOCAL_PROMPTKIT:
+    runtime_only.append('./promptkit-local')
+    runtime_build_args['USE_LOCAL_PROMPTKIT'] = 'true'
+
+if USE_LOCAL_PROMPTKIT:
+    # Sync local PromptKit source for development builds
+    # This copies runtime and sdk subdirectories needed by the Dockerfile
+    local_resource(
+        'sync-promptkit',
+        cmd='''
+            mkdir -p promptkit-local
+            rsync -av --delete "%s/runtime/" promptkit-local/runtime/
+            rsync -av --delete "%s/sdk/" promptkit-local/sdk/
+            echo "Synced PromptKit from %s"
+        ''' % (PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH),
+        deps=[PROMPTKIT_PATH + '/runtime', PROMPTKIT_PATH + '/sdk'],
+        labels=['dev'],
+    )
+
 docker_build(
     'omnia-runtime-dev',
     context='.',
     dockerfile='./Dockerfile.runtime',
-    only=[
-        './cmd/runtime',
-        './internal/runtime',
-        './pkg',
-        './api/proto',
-        './go.mod',
-        './go.sum',
-    ],
+    only=runtime_only,
+    build_args=runtime_build_args,
 )
 
 # ============================================================================
@@ -253,6 +289,19 @@ if ENABLE_DEMO:
         'demo.opa.mode=sidecar',
         # Use persistence for model cache
         'demo.ollama.persistence.enabled=true',
+    ])
+
+if ENABLE_AUDIO_DEMO:
+    # Audio demo requires demo namespace (creates it if ENABLE_DEMO is false)
+    if not ENABLE_DEMO:
+        namespace_create('omnia-demo')
+        helm_set.extend([
+            'demo.enabled=true',
+            'demo.namespace=omnia-demo',
+        ])
+    helm_set.extend([
+        # Enable audio demo with Gemini
+        'demo.audioDemo.enabled=true',
     ])
 
 if ENABLE_FULL_STACK:
@@ -451,6 +500,24 @@ if ENABLE_DEMO:
         labels=['demo'],
     )
 
+if ENABLE_AUDIO_DEMO:
+    # Audio demo resources (Gemini provider + audio-demo agent)
+    # Note: User must create gemini-credentials secret manually before deploying
+    audio_demo_objects = [
+        'gemini:provider',
+        'demo-audio-prompts:configmap',
+        'demo-audio-prompts:promptpack',
+        'audio-demo:agentruntime',
+    ]
+
+    k8s_resource(
+        workload='',  # No workload, just CRs (Deployment created by operator)
+        new_name='audio-demo',
+        labels=['demo'],
+        objects=audio_demo_objects,
+        resource_deps=['omnia-controller-manager'],
+    )
+
 # ============================================================================
 # Sample Resources for Development
 # ============================================================================
@@ -468,17 +535,26 @@ local_resource(
 # Restart agent pods when facade/framework images are rebuilt
 # Since AgentRuntime deployments are created by the operator (not Tilt),
 # we need to manually trigger a rollout when the source changes
+restart_agents_deps = [
+    './cmd/agent',
+    './internal/agent',
+    './internal/facade',
+    './internal/session',
+    './cmd/runtime',
+    './internal/runtime',
+]
+
+# Include promptkit-local when using local PromptKit source
+if USE_LOCAL_PROMPTKIT:
+    restart_agents_deps.append('./promptkit-local')
+
 local_resource(
     'restart-agents',
-    cmd='kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true',
-    deps=[
-        './cmd/agent',
-        './internal/agent',
-        './internal/facade',
-        './internal/session',
-        './cmd/runtime',
-        './internal/runtime',
-    ],
+    cmd='''
+        kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+        kubectl rollout restart deployment -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+    ''',
+    deps=restart_agents_deps,
     labels=['agents'],
     resource_deps=['sample-resources'],
     auto_init=False,  # Don't run on initial tilt up

@@ -90,6 +90,11 @@ type FacadeConfig struct {
 	// Use this to specify a custom facade image or private registry.
 	// +optional
 	Image string `json:"image,omitempty"`
+
+	// extraEnv defines additional environment variables for the facade container.
+	// Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.
@@ -579,6 +584,11 @@ type RuntimeConfig struct {
 	// Each mount must reference a volume defined in the volumes field.
 	// +optional
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
+	// extraEnv defines additional environment variables for the runtime container.
+	// Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
@@ -629,6 +639,11 @@ type AgentRuntimeSpec struct {
 	// Use this to customize allowed file attachment types and size limits.
 	// +optional
 	Console *ConsoleConfig `json:"console,omitempty"`
+
+	// extraPodAnnotations defines additional annotations to add to the agent pods.
+	// Use this for integrations like service meshes, logging agents, or monitoring tools.
+	// +optional
+	ExtraPodAnnotations map[string]string `json:"extraPodAnnotations,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.

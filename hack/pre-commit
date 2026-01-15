@@ -383,7 +383,8 @@ fi
 print_header "Checking Generated Code"
 
 # Run Go codegen (manifests + DeepCopy)
-make generate manifests 2>/dev/null
+# Note: controller-gen doesn't work with go.work, so we disable it for codegen
+GOWORK=off make generate manifests 2>/dev/null
 
 GO_CHANGES=$(git diff --name-only config/ api/ 2>/dev/null || true)
 if [ -n "$GO_CHANGES" ]; then
@@ -399,7 +400,7 @@ else
 fi
 
 # Sync CRDs to Helm chart
-make sync-chart-crds 2>/dev/null
+GOWORK=off make sync-chart-crds 2>/dev/null
 
 HELM_CHANGES=$(git diff --name-only charts/omnia/crds/ 2>/dev/null || true)
 if [ -n "$HELM_CHANGES" ]; then
@@ -418,7 +419,7 @@ fi
 if [ -n "$STAGED_DASHBOARD_FILES" ] || [ -n "$GO_CHANGES" ]; then
     # Generate TypeScript types from CRDs
     if command -v node &> /dev/null && [ -d "$REPO_ROOT/dashboard/node_modules" ]; then
-        make generate-dashboard-types 2>/dev/null
+        GOWORK=off make generate-dashboard-types 2>/dev/null
 
         TS_TYPE_CHANGES=$(git diff --name-only dashboard/src/types/generated/ 2>/dev/null || true)
         if [ -n "$TS_TYPE_CHANGES" ]; then

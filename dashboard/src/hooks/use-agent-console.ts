@@ -254,8 +254,7 @@ export function useAgentConsole({
       case "error": {
         // Handle error messages from the proxy or agent
         const errorMsg = message.error?.message || "Unknown error";
-        const errorCode = message.error?.code || "UNKNOWN";
-        console.error(`[useAgentConsole] Error from server: [${errorCode}] ${errorMsg}`);
+        // Error is shown to user via setStatus and logged server-side
         setStatus("error", errorMsg);
         break;
       }

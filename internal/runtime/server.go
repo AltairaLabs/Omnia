@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -1281,7 +1280,7 @@ func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 }
 
 // processAudioMedia handles audio content (base64 data or URL).
-// For base64 data, writes to a temp file since sdk.WithAudioFile requires a path.
+// For base64 data, uses sdk.WithAudioData to pass bytes directly without temp files.
 func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
 	if media.Data != "" {
 		data, err := decodeMediaData(media.Data)
@@ -1289,49 +1288,14 @@ func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 			log.Error(err, "failed to decode audio data")
 			return nil
 		}
-		// Write to temp file - sdk.WithAudioFile requires a file path
-		ext := mimeToExtension(media.MimeType)
-		tmpFile, err := os.CreateTemp("", "audio-*"+ext)
-		if err != nil {
-			log.Error(err, "failed to create temp file for audio")
-			return nil
-		}
-		if _, err := tmpFile.Write(data); err != nil {
-			log.Error(err, "failed to write audio to temp file")
-			tmpFile.Close()
-			os.Remove(tmpFile.Name())
-			return nil
-		}
-		tmpFile.Close()
-		log.V(1).Info("adding audio from temp file", "path", tmpFile.Name(), "mimeType", media.MimeType, "size", len(data))
-		// Note: temp file should be cleaned up after the request completes
-		return sdk.WithAudioFile(tmpFile.Name())
+		log.V(1).Info("adding audio from data", "mimeType", media.MimeType, "size", len(data))
+		return sdk.WithAudioData(data, media.MimeType)
 	}
 	if media.Url != "" {
 		log.V(1).Info("adding audio from URL", "url", media.Url)
 		return sdk.WithAudioFile(media.Url)
 	}
 	return nil
-}
-
-// mimeToExtension returns a file extension for common audio MIME types.
-func mimeToExtension(mimeType string) string {
-	switch mimeType {
-	case "audio/mpeg", "audio/mp3":
-		return ".mp3"
-	case "audio/wav", "audio/wave":
-		return ".wav"
-	case "audio/ogg":
-		return ".ogg"
-	case "audio/webm":
-		return ".webm"
-	case "audio/aac":
-		return ".aac"
-	case "audio/flac":
-		return ".flac"
-	default:
-		return ".audio"
-	}
 }
 
 // processFileMedia handles generic file content.

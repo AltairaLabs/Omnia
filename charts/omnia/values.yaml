@@ -407,12 +407,9 @@ prometheus:
     enabled: false
   # -- Extra scrape configs for Omnia agent metrics
   extraScrapeConfigs: |
-    # Scrape Omnia agent pods
-    # For non-Istio pods: scrapes app metrics directly via prometheus.io/* annotations
-    # For Istio pods: prometheus.istio.io/merge-metrics=true merges app metrics into port 15020
-    # The standard kubernetes-pods job handles both cases using prometheus.io/* annotations
-    # This job provides agent-specific labels for easier querying
-    - job_name: 'omnia-agents'
+    # Scrape Omnia facade containers (WebSocket connections, media uploads)
+    # Uses prometheus.io annotations which point to facade port 8080
+    - job_name: 'omnia-agents-facade'
       kubernetes_sd_configs:
         - role: pod
       relabel_configs:
@@ -437,6 +434,33 @@ prometheus:
           target_label: pod
         - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
           target_label: agent
+        - target_label: container
+          replacement: facade
+    # Scrape Omnia runtime containers (LLM metrics: tokens, cost, latency)
+    # Runtime exposes metrics on port 9001 from PromptKit EventBus
+    - job_name: 'omnia-agents-runtime'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        # Only scrape pods with omnia agent label
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
+          action: keep
+          regex: agent
+        # Target runtime container's health port (9001) for LLM metrics
+        - source_labels: [__address__]
+          action: replace
+          regex: ([^:]+)(?::\d+)?
+          replacement: $1:9001
+          target_label: __address__
+        # Add useful labels
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          target_label: agent
+        - target_label: container
+          replacement: runtime
 
 # Grafana configuration (dashboards)
 # See: https://github.com/grafana/helm-charts/tree/main/charts/grafana
@@ -869,6 +893,108 @@ demo:
       - Describe what you see clearly and objectively
       - Point out notable details or interesting elements
       - Answer any specific questions about the image content
+
+  # ============================================================================
+  # Audio Demo Agent (Gemini)
+  # Demonstrates audio capabilities using Google Gemini
+  # ============================================================================
+
+  audioDemo:
+    # -- Enable audio demo agent (requires Gemini API key)
+    enabled: false
+
+    # -- Gemini provider configuration
+    gemini:
+      # -- Gemini model to use (gemini-2.5-flash has audio support)
+      model: gemini-2.5-flash
+      # -- Gemini API base URL (SDK multimodal path appends /models/<model>)
+      # NOTE: Include /v1beta because PromptKit's multimodal path is missing it
+      baseURL: https://generativelanguage.googleapis.com/v1beta
+      # -- Name of the Kubernetes Secret containing the API key
+      # Secret must have a key named 'api-key' with your GEMINI_API_KEY
+      # Create with: kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=YOUR_API_KEY
+      secretName: gemini-credentials
+      # -- Temperature for generation
+      temperature: 0.7
+      # -- Pricing per 1K tokens (for cost tracking)
+      pricing:
+        inputCostPer1K: "0.000075"
+        outputCostPer1K: "0.0003"
+        cachedCostPer1K: "0.0000375"
+
+    # -- Agent configuration
+    agent:
+      # -- Agent name
+      name: audio-demo
+      # -- Facade handler type
+      handler: runtime
+      # -- Number of replicas
+      replicas: 1
+      # -- Log level for debugging (info, debug, warn, error)
+      logLevel: debug
+      # -- Resource requirements
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+
+    # -- Console configuration for audio uploads
+    console:
+      # -- Maximum file size in bytes (8MB for audio)
+      maxFileSize: 8388608
+      # -- Maximum number of files per message
+      maxFiles: 3
+      # -- Allowed attachment MIME types
+      allowedAttachmentTypes:
+        - "audio/mpeg"
+        - "audio/wav"
+        - "audio/ogg"
+        - "audio/flac"
+        - "audio/aac"
+        - "audio/x-m4a"
+        - "image/png"
+        - "image/jpeg"
+        - "image/webp"
+      # -- Media requirements for Gemini audio
+      mediaRequirements:
+        audio:
+          # -- Maximum duration in seconds (9.5 hours for Gemini)
+          maxDurationSeconds: 34200
+          # -- Recommended sample rate in Hz
+          recommendedSampleRate: 16000
+          # -- Supports selecting audio segments
+          supportsSegmentSelection: true
+        image:
+          # -- Maximum dimensions for images
+          maxWidth: 3072
+          maxHeight: 3072
+          # -- Recommended dimensions
+          recommendedWidth: 1024
+          recommendedHeight: 1024
+          # -- Maximum image size
+          maxSizeBytes: 8388608
+          # -- Preferred format
+          preferredFormat: "image/jpeg"
+          # -- Compression guidance
+          compressionGuidance: "lossy-medium"
+
+    # -- PromptPack configuration
+    promptPack:
+      # -- System prompt for the audio demo agent
+      systemPrompt: |
+        You are a helpful AI assistant powered by Google Gemini with advanced audio understanding capabilities.
+        You can analyze audio files and answer questions about them.
+        Be concise, friendly, and helpful in your responses.
+
+        When analyzing audio:
+        - Describe what you hear clearly and objectively
+        - If it's speech, provide accurate transcription when asked
+        - Identify music, sounds, or other audio content
+        - Answer any specific questions about the audio content
+        - If the audio quality is poor, mention it and do your best
 
   # OPA Policy Agent for model validation
   # Prevents model switching when multiple agents share an Ollama instance

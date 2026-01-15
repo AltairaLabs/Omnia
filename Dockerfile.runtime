@@ -7,14 +7,27 @@ RUN apk add --no-cache git ca-certificates tzdata
 # Set working directory
 WORKDIR /workspace
 
+# Build arg to enable local PromptKit source (for development)
+ARG USE_LOCAL_PROMPTKIT=false
+
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# NOTE: Skipping go mod download due to local replace directives for PromptKit
-# which aren't available in the Docker build context. Dependencies will be
-# downloaded during the build step instead.
-# TODO: Re-enable once PromptKit is published to a module proxy
-# RUN go mod download
+# Copy local PromptKit source if enabled (must be passed via build context)
+# When USE_LOCAL_PROMPTKIT=true, expects PromptKit source at ./promptkit-local/
+COPY promptkit-local* /workspace/promptkit-local/
+
+# Set up go.work for local PromptKit if enabled
+RUN if [ "$USE_LOCAL_PROMPTKIT" = "true" ] && [ -d "/workspace/promptkit-local/runtime" ]; then \
+        echo "go 1.25.1" > go.work && \
+        echo "" >> go.work && \
+        echo "use (" >> go.work && \
+        echo "    ." >> go.work && \
+        echo "    ./promptkit-local/runtime" >> go.work && \
+        echo "    ./promptkit-local/sdk" >> go.work && \
+        echo ")" >> go.work && \
+        cat go.work; \
+    fi
 
 # Copy source code
 COPY cmd/ cmd/
@@ -34,6 +47,10 @@ FROM scratch
 # Import CA certificates and timezone data from builder
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Create /tmp directory for temporary files (audio processing, etc.)
+# scratch doesn't have mkdir, so we copy an empty dir from builder
+COPY --from=builder /tmp /tmp
 
 # Copy the binary
 COPY --from=builder /workspace/runtime /runtime
