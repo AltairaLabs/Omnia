@@ -1543,15 +1543,9 @@ export function getMockCostSummary() {
   const totalOutputCost = mockCostAllocation.reduce((sum, item) => sum + item.outputCost, 0);
   const totalCacheSavings = mockCostAllocation.reduce((sum, item) => sum + item.cacheSavings, 0);
   const totalRequests = mockCostAllocation.reduce((sum, item) => sum + item.requests, 0);
-  const totalTokens = mockCostAllocation.reduce(
-    (sum, item) => sum + item.inputTokens + item.outputTokens,
-    0
-  );
-
-  // Calculate costs by provider
-  const byProvider = getMockCostByProvider();
-  const anthropicCost = byProvider.find((p) => p.provider === "anthropic")?.cost || 0;
-  const openaiCost = byProvider.find((p) => p.provider === "openai")?.cost || 0;
+  const inputTokens = mockCostAllocation.reduce((sum, item) => sum + item.inputTokens, 0);
+  const outputTokens = mockCostAllocation.reduce((sum, item) => sum + item.outputTokens, 0);
+  const totalTokens = inputTokens + outputTokens;
 
   // Calculate projected monthly cost (24h * 30 days)
   const projectedMonthlyCost = totalCost * 30;
@@ -1563,12 +1557,10 @@ export function getMockCostSummary() {
     totalCacheSavings,
     totalRequests,
     totalTokens,
-    anthropicCost,
-    openaiCost,
+    inputTokens,
+    outputTokens,
     projectedMonthlyCost,
     // Percentage breakdowns
-    anthropicPercent: totalCost > 0 ? (anthropicCost / totalCost) * 100 : 0,
-    openaiPercent: totalCost > 0 ? (openaiCost / totalCost) * 100 : 0,
     inputPercent: totalCost > 0 ? (totalInputCost / (totalInputCost + totalOutputCost)) * 100 : 0,
     outputPercent: totalCost > 0 ? (totalOutputCost / (totalInputCost + totalOutputCost)) * 100 : 0,
   };

@@ -155,6 +155,8 @@ export interface CostSummary {
   totalCacheSavings: number;
   totalRequests: number;
   totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
   projectedMonthlyCost: number;
   inputPercent: number;
   outputPercent: number;

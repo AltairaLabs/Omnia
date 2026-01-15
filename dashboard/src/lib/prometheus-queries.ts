@@ -320,9 +320,10 @@ export const SystemQueries = {
 
   /**
    * Tokens per minute (combined input + output).
+   * Uses increase() over 5m window for more reliable results with sparse data.
    */
-  tokensPerMinute(window = "1m"): string {
-    return `sum(rate(${LLM_METRICS.INPUT_TOKENS}[${window}]) + rate(${LLM_METRICS.OUTPUT_TOKENS}[${window}])) * 60`;
+  tokensPerMinute(): string {
+    return `sum(increase(${LLM_METRICS.INPUT_TOKENS}[5m]) + increase(${LLM_METRICS.OUTPUT_TOKENS}[5m])) / 5`;
   },
 
   /**

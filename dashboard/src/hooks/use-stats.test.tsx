@@ -32,6 +32,12 @@ vi.mock("@/lib/data", () => ({
   }),
 }));
 
+// Mock prometheus functions (not available in test environment)
+vi.mock("@/lib/prometheus", () => ({
+  isPrometheusAvailable: vi.fn().mockResolvedValue(false),
+  queryPrometheus: vi.fn().mockResolvedValue({ status: "error" }),
+}));
+
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -60,7 +66,7 @@ describe("useStats", () => {
 
     expect(result.current.data).toEqual({
       ...mockStats,
-      sessions: { active: 0 },
+      sessions: { active: 0, trend: null },
     });
   });
 
@@ -103,7 +109,7 @@ describe("useStats", () => {
         available: 0,
         degraded: 0,
       },
-      sessions: { active: 0 },
+      sessions: { active: 0, trend: null },
     });
   });
 
@@ -135,7 +141,7 @@ describe("useStats", () => {
         available: 0,
         degraded: 0,
       },
-      sessions: { active: 0 },
+      sessions: { active: 0, trend: null },
     });
   });
 
@@ -148,6 +154,6 @@ describe("useStats", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(result.current.data?.sessions).toEqual({ active: 0 });
+    expect(result.current.data?.sessions).toEqual({ active: 0, trend: null });
   });
 });

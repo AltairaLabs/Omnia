@@ -30,6 +30,8 @@ const EMPTY_SUMMARY: CostSummary = {
   totalCacheSavings: 0,
   totalRequests: 0,
   totalTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
   projectedMonthlyCost: 0,
   inputPercent: 0,
   outputPercent: 0,
@@ -234,10 +236,9 @@ export class PrometheusService {
     const totalOutputCost = byAgent.reduce((sum, item) => sum + item.outputCost, 0);
     const totalCacheSavings = byAgent.reduce((sum, item) => sum + item.cacheSavings, 0);
     const totalRequests = byAgent.reduce((sum, item) => sum + item.requests, 0);
-    const totalTokens = byAgent.reduce(
-      (sum, item) => sum + item.inputTokens + item.outputTokens,
-      0
-    );
+    const inputTokens = byAgent.reduce((sum, item) => sum + item.inputTokens, 0);
+    const outputTokens = byAgent.reduce((sum, item) => sum + item.outputTokens, 0);
+    const totalTokens = inputTokens + outputTokens;
 
     return {
       totalCost,
@@ -246,6 +247,8 @@ export class PrometheusService {
       totalCacheSavings,
       totalRequests,
       totalTokens,
+      inputTokens,
+      outputTokens,
       projectedMonthlyCost: totalCost * 30,
       inputPercent:
         totalInputCost + totalOutputCost > 0
