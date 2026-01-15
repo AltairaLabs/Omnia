@@ -192,7 +192,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.requestsPerSec ?? { current: 0, display: "--", series: [], unit: "req/s" }}
           icon={Activity}
           loading={isLoading}
-          color="hsl(var(--primary))"
+          color="var(--primary)"
           available={available}
         />
         <MetricCard

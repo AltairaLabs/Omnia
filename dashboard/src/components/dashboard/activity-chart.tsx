@@ -59,8 +59,8 @@ function ChartContent({
       <AreaChart data={data}>
         <defs>
           <linearGradient id="requests" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+            <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -92,7 +92,7 @@ function ChartContent({
         <Area
           type="monotone"
           dataKey="requests"
-          stroke="hsl(var(--primary))"
+          stroke="var(--primary)"
           strokeWidth={2}
           fillOpacity={1}
           fill="url(#requests)"
