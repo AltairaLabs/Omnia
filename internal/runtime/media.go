@@ -174,3 +174,27 @@ func IsMediaURL(url string) bool {
 func IsResolvableURL(url string) bool {
 	return strings.HasPrefix(url, schemeFile) || strings.HasPrefix(url, schemeMock)
 }
+
+// decodeMediaData decodes base64-encoded media data.
+// It handles both standard and URL-safe base64 encoding.
+func decodeMediaData(data string) ([]byte, error) {
+	// Try standard base64 first
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	// Try URL-safe base64
+	decoded, err = base64.URLEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	// Try raw (no padding) base64
+	decoded, err = base64.RawStdEncoding.DecodeString(data)
+	if err == nil {
+		return decoded, nil
+	}
+
+	return nil, fmt.Errorf("failed to decode base64 data: %w", err)
+}

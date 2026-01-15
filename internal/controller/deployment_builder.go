@@ -1,0 +1,485 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+)
+
+func (r *AgentRuntimeReconciler) reconcileDeployment(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
+) (*appsv1.Deployment, error) {
+	log := logf.FromContext(ctx)
+
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRuntime.Name,
+			Namespace: agentRuntime.Namespace,
+		},
+	}
+
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
+		// Set owner reference
+		if err := controllerutil.SetControllerReference(agentRuntime, deployment, r.Scheme); err != nil {
+			return err
+		}
+
+		// Build deployment spec
+		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, provider)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info("Deployment reconciled", "result", result)
+	return deployment, nil
+}
+
+func (r *AgentRuntimeReconciler) buildDeploymentSpec(
+	deployment *appsv1.Deployment,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
+) {
+	labels := map[string]string{
+		labelAppName:      labelValueOmniaAgent,
+		labelAppInstance:  agentRuntime.Name,
+		labelAppManagedBy: labelValueOmniaOperator,
+		labelOmniaComp:    "agent",
+	}
+
+	replicas := int32(1)
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Replicas != nil {
+		replicas = *agentRuntime.Spec.Runtime.Replicas
+	}
+
+	facadePort := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		facadePort = *agentRuntime.Spec.Facade.Port
+	}
+
+	// Build volumes (shared between containers)
+	volumes := r.buildVolumes(agentRuntime, promptPack, toolRegistry)
+
+	// Build facade container
+	facadeContainer := r.buildFacadeContainer(agentRuntime, promptPack, facadePort)
+
+	// Build runtime container
+	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry, provider)
+
+	// Build pod spec with both containers
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{facadeContainer, runtimeContainer},
+		Volumes:    volumes,
+	}
+
+	// Add scheduling constraints if specified
+	if agentRuntime.Spec.Runtime != nil {
+		if agentRuntime.Spec.Runtime.NodeSelector != nil {
+			podSpec.NodeSelector = agentRuntime.Spec.Runtime.NodeSelector
+		}
+		if agentRuntime.Spec.Runtime.Tolerations != nil {
+			podSpec.Tolerations = agentRuntime.Spec.Runtime.Tolerations
+		}
+		if agentRuntime.Spec.Runtime.Affinity != nil {
+			podSpec.Affinity = agentRuntime.Spec.Runtime.Affinity
+		}
+	}
+
+	// Prometheus scrape annotations for metrics collection
+	// - prometheus.io/* annotations tell Prometheus where to scrape (non-Istio pods use these directly)
+	// - prometheus.istio.io/merge-metrics tells Istio to merge app metrics with Envoy stats
+	//   Istio reads prometheus.io/port and prometheus.io/path BEFORE overwriting them,
+	//   then merges app metrics into port 15020 alongside Envoy metrics
+	// - traffic.sidecar.istio.io/excludeInboundPorts excludes runtime metrics port from Istio
+	//   so Prometheus can directly scrape port 9001 without mTLS
+	podAnnotations := map[string]string{
+		"prometheus.io/scrape":                         "true",
+		"prometheus.io/port":                           fmt.Sprintf("%d", facadePort),
+		"prometheus.io/path":                           "/metrics",
+		"prometheus.istio.io/merge-metrics":            "true",
+		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d", DefaultRuntimeHealthPort),
+	}
+
+	// Add extra pod annotations from CRD
+	for key, value := range agentRuntime.Spec.ExtraPodAnnotations {
+		podAnnotations[key] = value
+	}
+
+	deployment.Labels = labels
+	deployment.Spec = appsv1.DeploymentSpec{
+		Replicas: &replicas,
+		Selector: &metav1.LabelSelector{
+			MatchLabels: labels,
+		},
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels:      labels,
+				Annotations: podAnnotations,
+			},
+			Spec: podSpec,
+		},
+	}
+}
+
+// buildFacadeContainer creates the facade container spec.
+func (r *AgentRuntimeReconciler) buildFacadeContainer(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	facadePort int32,
+) corev1.Container {
+	// Check for CRD image override first, then operator default, then hardcoded default
+	facadeImage := ""
+	if agentRuntime.Spec.Facade.Image != "" {
+		facadeImage = agentRuntime.Spec.Facade.Image
+	} else if r.FacadeImage != "" {
+		facadeImage = r.FacadeImage
+	} else {
+		facadeImage = DefaultFacadeImage
+	}
+
+	// Use configured pull policy, or default to IfNotPresent
+	pullPolicy := r.FacadeImagePullPolicy
+	if pullPolicy == "" {
+		pullPolicy = corev1.PullIfNotPresent
+	}
+
+	container := corev1.Container{
+		Name:            FacadeContainerName,
+		Image:           facadeImage,
+		ImagePullPolicy: pullPolicy,
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "facade",
+				ContainerPort: facadePort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				Name:          "facade-health",
+				ContainerPort: DefaultFacadeHealthPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env: r.buildFacadeEnvVars(agentRuntime, promptPack),
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/readyz",
+					Port: intstr.FromInt32(DefaultFacadeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: healthzPath,
+					Port: intstr.FromInt32(DefaultFacadeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 15,
+			PeriodSeconds:       20,
+		},
+	}
+
+	return container
+}
+
+// buildRuntimeContainer creates the runtime container spec.
+func (r *AgentRuntimeReconciler) buildRuntimeContainer(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
+) corev1.Container {
+	// Check for CRD image override first, then operator default, then hardcoded default
+	frameworkImage := ""
+	if agentRuntime.Spec.Framework != nil && agentRuntime.Spec.Framework.Image != "" {
+		frameworkImage = agentRuntime.Spec.Framework.Image
+	} else if r.FrameworkImage != "" {
+		frameworkImage = r.FrameworkImage
+	} else {
+		frameworkImage = DefaultFrameworkImage
+	}
+
+	// Use configured pull policy, or default to IfNotPresent
+	runtimePullPolicy := r.FrameworkImagePullPolicy
+	if runtimePullPolicy == "" {
+		runtimePullPolicy = corev1.PullIfNotPresent
+	}
+
+	container := corev1.Container{
+		Name:            RuntimeContainerName,
+		Image:           frameworkImage,
+		ImagePullPolicy: runtimePullPolicy,
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "grpc",
+				ContainerPort: DefaultRuntimeGRPCPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				Name:          "runtime-health",
+				ContainerPort: DefaultRuntimeHealthPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry, provider),
+		VolumeMounts: r.buildRuntimeVolumeMounts(agentRuntime, promptPack, toolRegistry),
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: healthzPath,
+					Port: intstr.FromInt32(DefaultRuntimeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: healthzPath,
+					Port: intstr.FromInt32(DefaultRuntimeHealthPort),
+				},
+			},
+			InitialDelaySeconds: 15,
+			PeriodSeconds:       20,
+		},
+	}
+
+	// Add resources if specified
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Resources != nil {
+		container.Resources = *agentRuntime.Spec.Runtime.Resources
+	}
+
+	return container
+}
+
+// buildFacadeEnvVars creates environment variables for the facade container.
+func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+) []corev1.EnvVar {
+	port := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		port = *agentRuntime.Spec.Facade.Port
+	}
+
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "OMNIA_AGENT_NAME",
+			Value: agentRuntime.Name,
+		},
+		{
+			Name:  "OMNIA_NAMESPACE",
+			Value: agentRuntime.Namespace,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_NAME",
+			Value: promptPack.Name,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
+			Value: promptPack.Namespace,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_VERSION",
+			Value: promptPack.Spec.Version,
+		},
+		{
+			Name:  "OMNIA_FACADE_TYPE",
+			Value: string(agentRuntime.Spec.Facade.Type),
+		},
+		{
+			Name:  "OMNIA_FACADE_PORT",
+			Value: fmt.Sprintf("%d", port),
+		},
+		{
+			Name:  "OMNIA_HEALTH_PORT",
+			Value: fmt.Sprintf("%d", DefaultFacadeHealthPort),
+		},
+	}
+
+	// Determine handler mode - default to runtime if not specified
+	handlerMode := omniav1alpha1.HandlerModeRuntime
+	if agentRuntime.Spec.Facade.Handler != nil {
+		handlerMode = *agentRuntime.Spec.Facade.Handler
+	}
+
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_HANDLER_MODE",
+		Value: string(handlerMode),
+	})
+
+	// Only add runtime address if using runtime handler mode
+	if handlerMode == omniav1alpha1.HandlerModeRuntime {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_RUNTIME_ADDRESS",
+			Value: fmt.Sprintf("localhost:%d", DefaultRuntimeGRPCPort),
+		})
+	}
+
+	// Add session config (facade needs this for session management)
+	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_STORE_URL")...)
+
+	// Add extra env vars from CRD
+	if agentRuntime.Spec.Facade.ExtraEnv != nil {
+		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
+	}
+
+	return envVars
+}
+
+// buildRuntimeEnvVars creates environment variables for the runtime container.
+func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	provider *omniav1alpha1.Provider,
+) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "OMNIA_AGENT_NAME",
+			Value: agentRuntime.Name,
+		},
+		{
+			Name:  "OMNIA_NAMESPACE",
+			Value: agentRuntime.Namespace,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_NAME",
+			Value: promptPack.Name,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
+			Value: promptPack.Namespace,
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_VERSION",
+			Value: promptPack.Spec.Version,
+		},
+		// PromptPack path for the runtime to load
+		{
+			Name:  "OMNIA_PROMPTPACK_PATH",
+			Value: PromptPackMountPath + "/pack.json",
+		},
+		// Default prompt name (can be overridden per-request)
+		{
+			Name:  "OMNIA_PROMPT_NAME",
+			Value: "default",
+		},
+		// gRPC port for the runtime server
+		{
+			Name:  "OMNIA_GRPC_PORT",
+			Value: fmt.Sprintf("%d", DefaultRuntimeGRPCPort),
+		},
+		// Health check port
+		{
+			Name:  "OMNIA_HEALTH_PORT",
+			Value: fmt.Sprintf("%d", DefaultRuntimeHealthPort),
+		},
+	}
+
+	// Add provider configuration
+	// Provider CRD takes precedence over inline provider config
+	if provider != nil {
+		envVars = append(envVars, buildProviderEnvVarsFromCRD(provider)...)
+	} else {
+		envVars = append(envVars, buildProviderEnvVars(agentRuntime.Spec.Provider)...)
+	}
+
+	// Add tool registry info if present
+	if toolRegistry != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_TOOLREGISTRY_NAME",
+			Value: toolRegistry.Name,
+		})
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_TOOLREGISTRY_NAMESPACE",
+			Value: toolRegistry.Namespace,
+		})
+		// Tools config path
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_TOOLS_CONFIG_PATH",
+			Value: ToolsMountPath + "/" + ToolsConfigFileName,
+		})
+	}
+
+	// Add session config for conversation persistence
+	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_URL")...)
+
+	// Add media config for mock provider responses
+	if agentRuntime.Spec.Media != nil && agentRuntime.Spec.Media.BasePath != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_MEDIA_BASE_PATH",
+			Value: agentRuntime.Spec.Media.BasePath,
+		})
+	}
+
+	// Check for mock provider annotation (for E2E testing)
+	if mockProvider, ok := agentRuntime.Annotations[MockProviderAnnotation]; ok && mockProvider == "true" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_MOCK_PROVIDER",
+			Value: "true",
+		})
+	}
+
+	// Add tracing configuration if enabled
+	if r.TracingEnabled && r.TracingEndpoint != "" {
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_ENABLED",
+				Value: "true",
+			},
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_ENDPOINT",
+				Value: r.TracingEndpoint,
+			},
+			// Use insecure connection for in-cluster communication
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_INSECURE",
+				Value: "true",
+			},
+		)
+	}
+
+	// Add extra env vars from CRD
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {
+		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)
+	}
+
+	return envVars
+}

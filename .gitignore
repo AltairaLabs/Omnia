@@ -1,6 +1,6 @@
 # Go
 bin/
-runtime
+/runtime
 *.exe
 *.test
 *.out
