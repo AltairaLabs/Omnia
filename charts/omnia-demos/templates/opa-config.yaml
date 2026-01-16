@@ -1,4 +1,4 @@
-{{- if and .Values.demo.enabled .Values.demo.opa.enabled }}
+{{- if .Values.opa.enabled }}
 ---
 # OPA Configuration ConfigMap
 # Contains Rego policy for Ollama model validation
@@ -6,10 +6,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ollama-opa-config
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama-opa
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 data:
   # Rego policy for model validation
   policy.rego: |
@@ -20,7 +20,7 @@ data:
     default allow := false
 
     # Allowed model from Helm values
-    allowed_model := {{ .Values.demo.ollama.model | quote }}
+    allowed_model := {{ .Values.ollama.model | quote }}
 
     # Helper to check if path requires model validation
     requires_model_validation if {
