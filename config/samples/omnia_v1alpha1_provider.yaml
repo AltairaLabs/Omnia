@@ -37,11 +37,16 @@ spec:
   # validateCredentials: true
 ---
 # Sample Secret for the Provider
+# Label: omnia.altairalabs.ai/type=credentials makes it visible in the dashboard's Credentials Management UI
 apiVersion: v1
 kind: Secret
 metadata:
   name: anthropic-credentials
   namespace: omnia-system
+  labels:
+    omnia.altairalabs.ai/type: credentials
+  annotations:
+    omnia.altairalabs.ai/provider: claude
 type: Opaque
 stringData:
   ANTHROPIC_API_KEY: "sk-ant-your-api-key-here"

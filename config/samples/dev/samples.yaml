@@ -5,6 +5,90 @@ kind: Namespace
 metadata:
   name: dev-agents
 ---
+# =============================================================================
+# Credential Secrets for Providers
+# These secrets are managed by the dashboard's Credentials Management UI
+# Label: omnia.altairalabs.ai/type=credentials makes them visible in the UI
+# =============================================================================
+
+# Anthropic credentials (used by claude-provider)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-credentials
+  namespace: dev-agents
+  labels:
+    omnia.altairalabs.ai/type: credentials
+  annotations:
+    omnia.altairalabs.ai/provider: claude
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "sk-ant-demo-key-replace-with-real-key"
+---
+# OpenAI credentials (used by openai-provider)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+  namespace: dev-agents
+  labels:
+    omnia.altairalabs.ai/type: credentials
+  annotations:
+    omnia.altairalabs.ai/provider: openai
+type: Opaque
+stringData:
+  OPENAI_API_KEY: "sk-demo-key-replace-with-real-key"
+---
+# =============================================================================
+# Provider CRDs
+# Reusable LLM provider configurations that reference credential secrets
+# =============================================================================
+
+# Claude provider using Anthropic credentials
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-provider
+  namespace: dev-agents
+spec:
+  type: claude
+  model: claude-sonnet-4-20250514
+  secretRef:
+    name: anthropic-credentials
+  defaults:
+    temperature: "0.7"
+    maxTokens: 4096
+  pricing:
+    inputCostPer1K: "0.003"
+    outputCostPer1K: "0.015"
+---
+# OpenAI provider using OpenAI credentials
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: openai-provider
+  namespace: dev-agents
+spec:
+  type: openai
+  model: gpt-4o
+  secretRef:
+    name: openai-credentials
+  defaults:
+    temperature: "0.7"
+    maxTokens: 4096
+  pricing:
+    inputCostPer1K: "0.005"
+    outputCostPer1K: "0.015"
+---
+# Mock provider for testing (no credentials needed)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: mock-provider
+  namespace: dev-agents
+spec:
+  type: mock
+---
 # ConfigMap for PromptPack (must contain pack.json)
 apiVersion: v1
 kind: ConfigMap
@@ -91,7 +175,12 @@ spec:
         required: [expression]
     timeout: "5s"
 ---
-# AgentRuntime with demo handler
+# =============================================================================
+# AgentRuntime Examples
+# Demonstrates different provider configurations
+# =============================================================================
+
+# Demo agent using Claude provider (references anthropic-credentials secret)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -102,6 +191,8 @@ spec:
     name: demo-prompts
   toolRegistryRef:
     name: demo-tools
+  providerRef:
+    name: claude-provider
   facade:
     type: websocket
     port: 8080
@@ -118,11 +209,8 @@ spec:
       limits:
         cpu: "200m"
         memory: "128Mi"
-  provider:
-    type: mock
 ---
-# Runtime agent with mock provider - uses real PromptKit runtime
-# but with simulated LLM responses (no real API calls)
+# Runtime agent using OpenAI provider (references openai-credentials secret)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -133,6 +221,8 @@ spec:
     name: demo-prompts
   toolRegistryRef:
     name: demo-tools
+  providerRef:
+    name: openai-provider
   facade:
     type: websocket
     port: 8080
@@ -149,10 +239,8 @@ spec:
       limits:
         cpu: "500m"
         memory: "256Mi"
-  provider:
-    type: mock
 ---
-# Echo agent for simple testing
+# Echo agent using mock provider (no credentials needed)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -161,6 +249,8 @@ metadata:
 spec:
   promptPackRef:
     name: demo-prompts
+  providerRef:
+    name: mock-provider
   facade:
     type: websocket
     port: 8080
@@ -177,5 +267,3 @@ spec:
       limits:
         cpu: "100m"
         memory: "64Mi"
-  provider:
-    type: mock
