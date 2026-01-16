@@ -54,6 +54,10 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
   }, [namespace, name, queryClient, dataService]);
 
+  const refetchAgent = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
+  }, [namespace, name, queryClient]);
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-full">
@@ -150,6 +154,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                       autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
                       autoscalingType={spec.runtime?.autoscaling?.type}
                       onScale={handleScale}
+                      refetch={refetchAgent}
                     />
                   </div>
                   <div>

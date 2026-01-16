@@ -30,6 +30,8 @@ interface ScaleControlProps {
   autoscalingEnabled?: boolean;
   autoscalingType?: "hpa" | "keda";
   onScale: (replicas: number) => Promise<void>;
+  /** Optional refetch function to poll for updates while in optimistic mode */
+  refetch?: () => void;
   className?: string;
   compact?: boolean;
 }
@@ -185,6 +187,7 @@ export function ScaleControl({
   autoscalingEnabled = false,
   autoscalingType,
   onScale,
+  refetch,
   className,
   compact = false,
 }: Readonly<ScaleControlProps>) {
@@ -207,6 +210,17 @@ export function ScaleControl({
       setOptimisticDesired(null);
     }
   }, [desiredReplicas, optimisticDesired]);
+
+  // Poll for updates while in optimistic mode
+  useEffect(() => {
+    if (optimisticDesired === null || !refetch) return;
+
+    const interval = setInterval(() => {
+      refetch();
+    }, 1000); // Poll every second
+
+    return () => clearInterval(interval);
+  }, [optimisticDesired, refetch]);
 
   const executeScale = useCallback(async (replicas: number) => {
     // Immediately show optimistic update
