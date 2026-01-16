@@ -120,7 +120,6 @@ jobs:
           echo "Resources before uninstall:"
           kubectl get deployments -n omnia-system -o name
           kubectl get services -n omnia-system -o name
-          kubectl get crd -o name | grep omnia || true
 
           # Uninstall
           helm uninstall omnia -n omnia-system
@@ -142,12 +141,10 @@ jobs:
           fi
           echo "SUCCESS: Dashboard deployment removed"
 
-          # Check CRDs are gone
-          if kubectl get crd agentruntimes.omnia.altairalabs.ai 2>/dev/null; then
-            echo "ERROR: AgentRuntime CRD still exists"
-            exit 1
-          fi
-          echo "SUCCESS: CRDs removed"
+          # Note: CRDs are intentionally NOT deleted by helm uninstall to prevent data loss
+          # This is standard Helm behavior - CRDs must be manually deleted if needed
+          echo "INFO: CRDs are preserved (Helm standard behavior to prevent data loss)"
+          kubectl get crd -o name | grep omnia || true
 
           echo "Uninstall test passed - all Omnia resources cleaned up"
 
