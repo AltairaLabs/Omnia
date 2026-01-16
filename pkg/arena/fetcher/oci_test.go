@@ -1,0 +1,239 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package fetcher
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNewOCIFetcher(t *testing.T) {
+	tests := []struct {
+		name   string
+		config OCIFetcherConfig
+	}{
+		{
+			name: "basic config",
+			config: OCIFetcherConfig{
+				URL: "oci://ghcr.io/example/repo:latest",
+			},
+		},
+		{
+			name: "with credentials",
+			config: OCIFetcherConfig{
+				URL: "oci://ghcr.io/example/repo:v1.0.0",
+				Credentials: &OCICredentials{
+					Username: "user",
+					Password: "token",
+				},
+			},
+		},
+		{
+			name: "insecure registry",
+			config: OCIFetcherConfig{
+				URL:      "oci://localhost:5000/repo:latest",
+				Insecure: true,
+			},
+		},
+		{
+			name: "with custom timeout",
+			config: OCIFetcherConfig{
+				URL: "oci://gcr.io/project/image:tag",
+				Options: Options{
+					Timeout: 120 * time.Second,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := NewOCIFetcher(tt.config)
+			assert.NotNil(t, fetcher)
+			assert.Equal(t, "oci", fetcher.Type())
+		})
+	}
+}
+
+func TestOCIFetcher_Type(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+	assert.Equal(t, "oci", fetcher.Type())
+}
+
+func TestOCIFetcher_ParseReference(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		insecure    bool
+		expectError bool
+		expectTag   string
+	}{
+		{
+			name:      "standard tag reference",
+			url:       "oci://ghcr.io/org/repo:v1.0.0",
+			expectTag: "v1.0.0",
+		},
+		{
+			name:      "latest tag",
+			url:       "oci://docker.io/library/alpine:latest",
+			expectTag: "latest",
+		},
+		{
+			name:      "without oci prefix",
+			url:       "ghcr.io/org/repo:tag",
+			expectTag: "tag",
+		},
+		{
+			name:     "insecure localhost",
+			url:      "oci://localhost:5000/repo:latest",
+			insecure: true,
+		},
+		{
+			name:        "invalid reference",
+			url:         "oci://",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := NewOCIFetcher(OCIFetcherConfig{
+				URL:      tt.url,
+				Insecure: tt.insecure,
+			})
+
+			ref, err := fetcher.parseReference()
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.NotNil(t, ref)
+		})
+	}
+}
+
+func TestOCIFetcher_GetAuth_NilCredentials(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL:         "oci://ghcr.io/example/repo:latest",
+		Credentials: nil,
+	})
+
+	auth, err := fetcher.getAuth()
+	require.NoError(t, err)
+	assert.NotNil(t, auth) // Returns Anonymous authenticator
+}
+
+func TestOCIFetcher_GetAuth_BasicCredentials(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+		Credentials: &OCICredentials{
+			Username: "user",
+			Password: "token",
+		},
+	})
+
+	auth, err := fetcher.getAuth()
+	require.NoError(t, err)
+	assert.NotNil(t, auth)
+}
+
+func TestOCIFetcher_GetAuth_UsernameOnly(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+		Credentials: &OCICredentials{
+			Username: "user",
+		},
+	})
+
+	auth, err := fetcher.getAuth()
+	require.NoError(t, err)
+	assert.NotNil(t, auth)
+}
+
+func TestOCIFetcher_GetAuth_PasswordOnly(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+		Credentials: &OCICredentials{
+			Password: "token",
+		},
+	})
+
+	auth, err := fetcher.getAuth()
+	require.NoError(t, err)
+	assert.NotNil(t, auth)
+}
+
+func TestOCIFetcher_GetAuth_DockerConfig(t *testing.T) {
+	dockerConfig := []byte(`{"auths":{"ghcr.io":{"auth":"dXNlcjp0b2tlbg=="}}}`)
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+		Credentials: &OCICredentials{
+			DockerConfig: dockerConfig,
+		},
+	})
+
+	auth, err := fetcher.getAuth()
+	require.NoError(t, err)
+	assert.NotNil(t, auth)
+}
+
+func TestOCIFetcher_GetAuth_EmptyCredentials(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL:         "oci://ghcr.io/example/repo:latest",
+		Credentials: &OCICredentials{},
+	})
+
+	auth, err := fetcher.getAuth()
+	require.NoError(t, err)
+	assert.NotNil(t, auth) // Returns Anonymous authenticator
+}
+
+func TestOCIFetcher_FormatRevision(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:v1.0.0",
+	})
+
+	ref, err := fetcher.parseReference()
+	require.NoError(t, err)
+
+	revision := fetcher.formatRevision(ref, "sha256:abc123def456")
+	assert.Contains(t, revision, "v1.0.0")
+	assert.Contains(t, revision, "sha256:abc123def456")
+}
+
+func TestOCIFetcher_FormatRevision_DigestRef(t *testing.T) {
+	// Use a valid 64-character hex digest
+	digest := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo@" + digest,
+	})
+
+	ref, err := fetcher.parseReference()
+	require.NoError(t, err)
+
+	revision := fetcher.formatRevision(ref, digest)
+	// For digest references, should just return the digest
+	assert.Equal(t, digest, revision)
+}
