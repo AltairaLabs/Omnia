@@ -78,11 +78,13 @@ jobs:
           helm template omnia ./charts/omnia --debug > /dev/null
           echo "Template generation successful"
 
+      # ============================================================
+      # Test Group 1: Basic install, upgrade, uninstall, KEDA
+      # ============================================================
+
       - name: Test - Helm install with KEDA subchart disabled
         run: |
           echo "=== Testing basic install (keda.enabled=false) ==="
-          # Note: We don't use --wait because the container images may not be available in CI
-          # This test validates that Helm can render and apply the manifests correctly
           helm install omnia ./charts/omnia \
             --namespace omnia-system \
             --create-namespace \
@@ -110,18 +112,60 @@ jobs:
 
           echo "Upgrade successful"
 
-      - name: Test - Uninstall for next test
+      - name: Test - Uninstall Omnia resources
         run: |
+          echo "=== Testing helm uninstall cleans up Omnia resources ==="
+
+          # Record what exists before uninstall
+          echo "Resources before uninstall:"
+          kubectl get deployments -n omnia-system -o name
+          kubectl get services -n omnia-system -o name
+          kubectl get crd -o name | grep omnia || true
+
+          # Uninstall
           helm uninstall omnia -n omnia-system
-          # Give time for resources to be deleted
           sleep 5
-          kubectl delete namespace omnia-system --wait=true --timeout=60s || true
+
+          # Verify our resources are cleaned up
+          echo "Verifying Omnia resources are removed..."
+
+          # Check deployments are gone
+          if kubectl get deployment omnia-controller-manager -n omnia-system 2>/dev/null; then
+            echo "ERROR: Controller deployment still exists"
+            exit 1
+          fi
+          echo "SUCCESS: Controller deployment removed"
+
+          if kubectl get deployment omnia-dashboard -n omnia-system 2>/dev/null; then
+            echo "ERROR: Dashboard deployment still exists"
+            exit 1
+          fi
+          echo "SUCCESS: Dashboard deployment removed"
+
+          # Check CRDs are gone
+          if kubectl get crd agentruntimes.omnia.altairalabs.ai 2>/dev/null; then
+            echo "ERROR: AgentRuntime CRD still exists"
+            exit 1
+          fi
+          echo "SUCCESS: CRDs removed"
+
+          echo "Uninstall test passed - all Omnia resources cleaned up"
+
+      # Recreate cluster for KEDA tests (faster than cleaning up KEDA's resources)
+      - name: Recreate cluster for KEDA tests
+        run: |
+          kind delete cluster --name $KIND_CLUSTER
+          kind create cluster --name $KIND_CLUSTER --wait 60s
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
 
       - name: Test - KEDA conflict detection
         run: |
           echo "=== Testing KEDA conflict detection ==="
 
-          # First, install KEDA separately (with --wait since we need it running)
+          # Install KEDA separately
           echo "Installing KEDA separately..."
           helm install keda kedacore/keda \
             --namespace keda \
@@ -132,16 +176,16 @@ jobs:
           # Verify KEDA CRD exists
           kubectl get crd scaledobjects.keda.sh
 
-          # Now try to install omnia with keda.enabled=true - should FAIL
+          # Try to install omnia with keda.enabled=true - should FAIL
           echo "Attempting to install omnia with keda.enabled=true (should fail)..."
-          set +e  # Don't exit on error
+          set +e
           helm install omnia ./charts/omnia \
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=true \
             --timeout 1m 2>&1 | tee /tmp/helm-output.txt
           HELM_EXIT_CODE=${PIPESTATUS[0]}
-          set -e  # Re-enable exit on error
+          set -e
 
           if [ $HELM_EXIT_CODE -eq 0 ]; then
             echo "ERROR: Installation should have failed but succeeded!"
@@ -149,7 +193,6 @@ jobs:
           fi
           echo "Helm install failed as expected (exit code: $HELM_EXIT_CODE)"
 
-          # Verify we got the expected error message
           if grep -q "KEDA is already installed" /tmp/helm-output.txt; then
             echo "Got expected KEDA conflict error message"
           else
@@ -158,7 +201,7 @@ jobs:
             exit 1
           fi
 
-          # Now install with keda.enabled=false - should SUCCEED
+          # Install with keda.enabled=false - should SUCCEED
           echo "Installing omnia with keda.enabled=false (should succeed)..."
           helm install omnia ./charts/omnia \
             --namespace omnia-system \
@@ -172,7 +215,6 @@ jobs:
         run: |
           echo "=== Testing ScaledObject with external KEDA ==="
 
-          # Create a test ScaledObject to verify it works with external KEDA
           cat <<EOF | kubectl apply -f -
           apiVersion: keda.sh/v1alpha1
           kind: ScaledObject
@@ -191,50 +233,26 @@ jobs:
                   value: "80"
           EOF
 
-          # Verify ScaledObject was created
           kubectl get scaledobject test-scaledobject -n omnia-system
           echo "ScaledObject creation successful with external KEDA"
 
-      - name: Test - Uninstall for observability test
+      # ============================================================
+      # Test Group 2: Observability stack (fresh cluster)
+      # ============================================================
+
+      - name: Recreate cluster for observability tests
         run: |
-          helm uninstall omnia -n omnia-system || true
-          helm uninstall keda -n keda || true
-          sleep 5
-
-          # Delete namespaces
-          kubectl delete namespace omnia-system --wait=false --timeout=30s || true
-          kubectl delete namespace keda --wait=false --timeout=30s || true
-
-          # Force remove finalizers if namespace is stuck in Terminating
-          echo "Checking for stuck namespaces..."
-          for ns in omnia-system keda; do
-            if kubectl get namespace $ns 2>/dev/null | grep -q Terminating; then
-              echo "Force-removing finalizers from $ns namespace..."
-              kubectl get namespace $ns -o json | \
-                jq '.spec.finalizers = []' | \
-                kubectl replace --raw "/api/v1/namespaces/$ns/finalize" -f - || true
-            fi
-          done
-
-          # Wait for namespace to be fully terminated
-          echo "Waiting for namespaces to be fully deleted..."
-          for i in {1..60}; do
-            if ! kubectl get namespace omnia-system 2>/dev/null; then
-              echo "Namespace omnia-system deleted"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: Namespace still exists after 2 minutes, proceeding anyway"
-            fi
-            echo "Waiting for omnia-system namespace to terminate... ($i/60)"
-            sleep 2
-          done
+          kind delete cluster --name $KIND_CLUSTER
+          kind create cluster --name $KIND_CLUSTER --wait 60s
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
 
       - name: Test - Observability stack deployment
         run: |
           echo "=== Testing observability stack (Prometheus, Grafana, Loki) ==="
 
-          # Install with observability components enabled
           helm install omnia ./charts/omnia \
             --namespace omnia-system \
             --create-namespace \
@@ -259,17 +277,11 @@ jobs:
           kubectl get pods -n omnia-system -l "app.kubernetes.io/name=loki" || kubectl get pods -n omnia-system | grep loki || true
           kubectl get svc -n omnia-system | grep loki || true
 
-          # Verify key services exist
-          echo "=== Verifying key services ==="
           kubectl get svc -n omnia-system
 
-          # Check that Loki pod is not in CrashLoopBackOff (ruler fix verification)
+          # Verify Loki is not crashing
           echo "=== Verifying Loki is not crashing ==="
-          sleep 30  # Give pods time to potentially crash
-          LOKI_STATUS=$(kubectl get pods -n omnia-system -l "app.kubernetes.io/name=loki" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "unknown")
-          echo "Loki pod status: $LOKI_STATUS"
-
-          # Check for CrashLoopBackOff
+          sleep 30
           if kubectl get pods -n omnia-system | grep -i loki | grep -q "CrashLoopBackOff"; then
             echo "ERROR: Loki is in CrashLoopBackOff!"
             kubectl logs -n omnia-system -l "app.kubernetes.io/name=loki" --tail=50 || true
@@ -278,21 +290,18 @@ jobs:
 
           echo "Observability stack deployment successful!"
 
-      - name: Test - Uninstall for tracing test
-        run: |
-          helm uninstall omnia -n omnia-system || true
-          sleep 5
-          kubectl delete namespace omnia-system --wait=false --timeout=30s || true
+      # ============================================================
+      # Test Group 3: Tracing (fresh cluster)
+      # ============================================================
 
-          # Wait for namespace deletion
-          for i in {1..30}; do
-            if ! kubectl get namespace omnia-system 2>/dev/null; then
-              echo "Namespace deleted"
-              break
-            fi
-            echo "Waiting for namespace to terminate... ($i/30)"
-            sleep 2
-          done
+      - name: Recreate cluster for tracing tests
+        run: |
+          kind delete cluster --name $KIND_CLUSTER
+          kind create cluster --name $KIND_CLUSTER --wait 60s
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
 
       - name: Test - Prometheus agent scraping configuration
         run: |
@@ -408,18 +417,9 @@ jobs:
 
           echo "Tracing Helm template configuration test passed!"
 
-      - name: Test - Uninstall for Istio tracing test
-        run: |
-          helm uninstall omnia -n omnia-system || true
-          sleep 5
-          kubectl delete namespace omnia-system --wait=false --timeout=30s || true
-
-          for i in {1..30}; do
-            if ! kubectl get namespace omnia-system 2>/dev/null; then
-              break
-            fi
-            sleep 2
-          done
+      # ============================================================
+      # Test Group 4: Template-only tests (no cluster needed)
+      # ============================================================
 
       - name: Test - Istio telemetry configuration (template only)
         run: |
