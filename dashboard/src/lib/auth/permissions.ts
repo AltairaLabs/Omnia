@@ -49,6 +49,12 @@ export const Permission = {
   API_KEYS_MANAGE_OWN: "apikeys:manage:own",
   API_KEYS_VIEW_ALL: "apikeys:view:all",
   API_KEYS_MANAGE_ALL: "apikeys:manage:all",
+
+  // Provider credentials (K8s secrets for API keys)
+  CREDENTIALS_VIEW: "credentials:view",
+  CREDENTIALS_CREATE: "credentials:create",
+  CREDENTIALS_EDIT: "credentials:edit",
+  CREDENTIALS_DELETE: "credentials:delete",
 } as const;
 
 export type PermissionType = (typeof Permission)[keyof typeof Permission];
@@ -69,6 +75,8 @@ const rolePermissions: Record<UserRole, PermissionType[]> = {
     // Own API keys only
     Permission.API_KEYS_VIEW_OWN,
     Permission.API_KEYS_MANAGE_OWN,
+    // View provider credentials (secrets metadata only)
+    Permission.CREDENTIALS_VIEW,
   ],
 
   editor: [
@@ -84,6 +92,9 @@ const rolePermissions: Record<UserRole, PermissionType[]> = {
     Permission.TOOLS_EDIT,
     Permission.TOOLS_DELETE,
     Permission.SESSIONS_DELETE,
+    // Manage provider credentials
+    Permission.CREDENTIALS_CREATE,
+    Permission.CREDENTIALS_EDIT,
   ],
 
   admin: [
@@ -95,6 +106,8 @@ const rolePermissions: Record<UserRole, PermissionType[]> = {
     Permission.SETTINGS_EDIT,
     Permission.API_KEYS_VIEW_ALL,
     Permission.API_KEYS_MANAGE_ALL,
+    // Delete provider credentials
+    Permission.CREDENTIALS_DELETE,
   ],
 };
 
@@ -191,5 +204,12 @@ export const PermissionGroups = {
   ADMIN_OPS: [
     Permission.USERS_MANAGE,
     Permission.SETTINGS_EDIT,
+  ],
+
+  /** Can modify provider credentials */
+  CREDENTIALS_WRITE: [
+    Permission.CREDENTIALS_CREATE,
+    Permission.CREDENTIALS_EDIT,
+    Permission.CREDENTIALS_DELETE,
   ],
 } as const;

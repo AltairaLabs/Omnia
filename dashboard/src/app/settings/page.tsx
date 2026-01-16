@@ -1,6 +1,7 @@
 import { Metadata } from "next";
 import { Settings } from "lucide-react";
 import { ApiKeysSection } from "@/components/settings/api-keys-section";
+import { CredentialsSection } from "@/components/credentials";
 
 export const metadata: Metadata = {
   title: "Settings | Omnia Dashboard",
@@ -23,6 +24,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid gap-6">
+        <CredentialsSection />
         <ApiKeysSection />
       </div>
     </div>
