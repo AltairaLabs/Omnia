@@ -35,6 +35,10 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
   }, [metadata.namespace, metadata.name, queryClient, dataService]);
 
+  const refetchAgents = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["agents"] });
+  }, [queryClient]);
+
   // Use real sparkline data from Prometheus
   const sparklineData = costData?.timeSeries || [];
   const totalCost = costData?.totalCost || 0;
@@ -97,6 +101,7 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
                 autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
                 autoscalingType={spec.runtime?.autoscaling?.type}
                 onScale={handleScale}
+                refetch={refetchAgents}
                 compact
               />
             </div>

@@ -37,10 +37,16 @@ export default function PromptPacksPage() {
     return promptPacks.filter((p) => p.metadata.namespace && selectedNamespaces.includes(p.metadata.namespace));
   }, [promptPacks, selectedNamespaces]);
 
-  const filteredPacks =
-    filterPhase === "all"
+  // Filter by phase and sort alphabetically by name
+  const filteredPacks = useMemo(() => {
+    const filtered = filterPhase === "all"
       ? namespaceFilteredPacks
       : namespaceFilteredPacks.filter((p) => p.status?.phase === filterPhase);
+    // Sort alphabetically by name for stable ordering
+    return [...filtered].sort((a, b) =>
+      (a.metadata.name || "").localeCompare(b.metadata.name || "")
+    );
+  }, [namespaceFilteredPacks, filterPhase]);
 
   const phaseCounts = namespaceFilteredPacks.reduce(
     (acc, pack) => {

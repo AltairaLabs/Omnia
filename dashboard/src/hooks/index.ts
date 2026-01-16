@@ -1,5 +1,5 @@
 export { useAgents, useAgent } from "./use-agents";
-export { useProvider } from "./use-provider";
+export { useProvider, useUpdateProviderSecretRef } from "./use-provider";
 export { useProviders } from "./use-providers";
 export { useProviderMetrics } from "./use-provider-metrics";
 export { useConsoleConfig } from "./use-console-config";
@@ -31,6 +31,7 @@ export { useAgentActivity } from "./use-agent-activity";
 export { useAgentMetrics } from "./use-agent-metrics";
 export { useAgentEvents } from "./use-agent-events";
 export { useAgentCost } from "./use-agent-cost";
+export { useSecrets, useSecret, useCreateSecret, useDeleteSecret } from "./use-secrets";
 export type { DashboardStats } from "./use-stats";
 export type { K8sEvent } from "./use-agent-events";
 export type { ActivityDataPoint } from "./use-agent-activity";

@@ -56,10 +56,16 @@ export default function AgentsPage() {
     return agents.filter((a) => a.metadata.namespace && selectedNamespaces.includes(a.metadata.namespace));
   }, [agents, selectedNamespaces]);
 
-  const filteredAgents =
-    filterPhase === "all"
+  // Filter by phase and sort alphabetically by name
+  const filteredAgents = useMemo(() => {
+    const filtered = filterPhase === "all"
       ? namespaceFilteredAgents
       : namespaceFilteredAgents.filter((a) => a.status?.phase === filterPhase);
+    // Sort alphabetically by name for stable ordering
+    return [...filtered].sort((a, b) =>
+      (a.metadata.name || "").localeCompare(b.metadata.name || "")
+    );
+  }, [namespaceFilteredAgents, filterPhase]);
 
   const phaseCounts = namespaceFilteredAgents.reduce(
     (acc, agent) => {

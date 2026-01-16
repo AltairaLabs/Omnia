@@ -54,6 +54,10 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
   }, [namespace, name, queryClient, dataService]);
 
+  const refetchAgent = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
+  }, [namespace, name, queryClient]);
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-full">
@@ -150,6 +154,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                       autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
                       autoscalingType={spec.runtime?.autoscaling?.type}
                       onScale={handleScale}
+                      refetch={refetchAgent}
                     />
                   </div>
                   <div>
@@ -238,27 +243,30 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               </Card>
 
               {spec.providerRef?.name ? (
-                <Link href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || namespace}`}>
-                  <Card className="cursor-pointer hover:border-primary/50 transition-colors">
-                    <CardHeader>
-                      <CardTitle>Provider</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Name</span>
-                        <span className="font-medium">{spec.providerRef.name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Type</span>
-                        <span className="font-medium capitalize">{provider?.spec?.type || spec.provider?.type || "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Model</span>
-                        <span className="font-medium">{provider?.spec?.model || spec.provider?.model || "-"}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Provider</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Name</span>
+                      <Link
+                        href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || namespace}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {spec.providerRef.name}
+                      </Link>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Type</span>
+                      <span className="font-medium capitalize">{provider?.spec?.type || spec.provider?.type || "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Model</span>
+                      <span className="font-medium">{provider?.spec?.model || spec.provider?.model || "-"}</span>
+                    </div>
+                  </CardContent>
+                </Card>
               ) : (
                 <Card>
                   <CardHeader>

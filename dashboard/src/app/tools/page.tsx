@@ -37,10 +37,16 @@ export default function ToolsPage() {
     return registries.filter((r) => r.metadata.namespace && selectedNamespaces.includes(r.metadata.namespace));
   }, [registries, selectedNamespaces]);
 
-  const filteredRegistries =
-    filterPhase === "all"
+  // Filter by phase and sort alphabetically by name
+  const filteredRegistries = useMemo(() => {
+    const filtered = filterPhase === "all"
       ? namespaceFilteredRegistries
       : namespaceFilteredRegistries.filter((r) => r.status?.phase === filterPhase);
+    // Sort alphabetically by name for stable ordering
+    return [...filtered].sort((a, b) =>
+      (a.metadata.name || "").localeCompare(b.metadata.name || "")
+    );
+  }, [namespaceFilteredRegistries, filterPhase]);
 
   const phaseCounts = namespaceFilteredRegistries.reduce(
     (acc, registry) => {

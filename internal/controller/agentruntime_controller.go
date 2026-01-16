@@ -120,7 +120,9 @@ func (r *AgentRuntimeReconciler) reconcileProviderRef(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeProviderReady, "ProviderNotFound", err)
 		return nil, ctrl.Result{}, err
 	}
-	if provider.Status.Phase != omniav1alpha1.ProviderPhaseReady {
+	// Check if Provider is explicitly in Error phase. Empty phase is treated as Ready
+	// (the default state before Provider controller reconciles).
+	if provider.Status.Phase == omniav1alpha1.ProviderPhaseError {
 		r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
 			"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
@@ -441,6 +443,12 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&omniav1alpha1.PromptPack{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForPromptPack),
+		).
+		// Watch Secret changes and reconcile AgentRuntimes that use them for credentials
+		// This triggers pod rollouts when API keys are rotated
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
 		).
 		Named("agentruntime").
 		Complete(r)

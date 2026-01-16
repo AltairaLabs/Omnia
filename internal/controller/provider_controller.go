@@ -76,18 +76,24 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
 	}
 
-	// Validate the secret reference
-	if err := r.validateSecretRef(ctx, provider); err != nil {
-		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
-			"SecretNotFound", err.Error())
-		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
-		if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
+	// Validate the secret reference (if specified)
+	if provider.Spec.SecretRef != nil {
+		if err := r.validateSecretRef(ctx, provider); err != nil {
+			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+				"SecretNotFound", err.Error())
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+			if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
+				log.Error(statusErr, "Failed to update status")
+			}
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, err
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+			"SecretFound", "Referenced secret exists")
+	} else {
+		// No secret required for this provider
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+			"NoSecretRequired", "Provider does not require credentials")
 	}
-	r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
-		"SecretFound", "Referenced secret exists")
 
 	// Validate credentials if enabled
 	if provider.Spec.ValidateCredentials {
@@ -209,7 +215,7 @@ func (r *ProviderReconciler) findProvidersForSecret(ctx context.Context, obj cli
 
 	var requests []reconcile.Request
 	for _, p := range providerList.Items {
-		if p.Spec.SecretRef.Name == secret.Name {
+		if p.Spec.SecretRef != nil && p.Spec.SecretRef.Name == secret.Name {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      p.Name,

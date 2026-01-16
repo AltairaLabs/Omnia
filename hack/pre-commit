@@ -132,6 +132,114 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                 print_success "Dashboard tests passed"
             fi
         fi
+
+        # Check per-file coverage on staged files (like SonarCloud does)
+        COVERAGE_JSON="$REPO_ROOT/dashboard/coverage/coverage-final.json"
+        if [ -f "$COVERAGE_JSON" ]; then
+            print_header "Dashboard: Per-File Coverage Check"
+
+            COVERAGE_THRESHOLD=80.0
+            DASHBOARD_COVERAGE_FAILED=0
+            DASHBOARD_COVERAGE_RESULTS=()
+
+            # Check each staged dashboard file (excluding test files and excluded paths)
+            for file in $STAGED_DASHBOARD_FILES; do
+                # Get just the path relative to dashboard/
+                REL_FILE="${file#dashboard/}"
+
+                # Skip test files
+                if [[ "$REL_FILE" == *.test.ts ]] || [[ "$REL_FILE" == *.test.tsx ]]; then
+                    continue
+                fi
+
+                # Skip type definitions
+                if [[ "$REL_FILE" == *.d.ts ]]; then
+                    continue
+                fi
+
+                # Skip index files (re-exports)
+                if [[ "$REL_FILE" == */index.ts ]] || [[ "$REL_FILE" == */index.tsx ]]; then
+                    continue
+                fi
+
+                # Skip excluded paths (matching vitest.config.ts exclusions)
+                # Note: API routes are tested via integration tests, not unit coverage
+                if [[ "$REL_FILE" == src/test/* ]] || \
+                   [[ "$REL_FILE" == src/types/generated/* ]] || \
+                   [[ "$REL_FILE" == src/components/ui/* ]] || \
+                   [[ "$REL_FILE" == src/components/console/markdown.tsx ]] || \
+                   [[ "$REL_FILE" == src/lib/api/schema.d.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/prometheus-queries.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/provider-utils.ts ]] || \
+                   [[ "$REL_FILE" == src/app/*/layout.tsx ]] || \
+                   [[ "$REL_FILE" == src/app/*/page.tsx ]] || \
+                   [[ "$REL_FILE" == src/app/**/layout.tsx ]] || \
+                   [[ "$REL_FILE" == src/app/**/page.tsx ]] || \
+                   [[ "$REL_FILE" == src/app/api/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/** ]] || \
+                   [[ "$REL_FILE" == src/lib/auth/actions.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/auth/api-guard.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/auth/config.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/auth/proxy.ts ]]; then
+                    continue
+                fi
+
+                # Calculate coverage from JSON using node
+                FILE_COV_PERCENT=$(node -e "
+                    const fs = require('fs');
+                    const coverage = JSON.parse(fs.readFileSync('$COVERAGE_JSON', 'utf8'));
+                    const filePath = '$REPO_ROOT/dashboard/$REL_FILE';
+                    const data = coverage[filePath];
+                    if (data) {
+                        const statements = Object.keys(data.statementMap).length;
+                        const covered = Object.values(data.s).filter(c => c > 0).length;
+                        const pct = statements > 0 ? (covered / statements * 100) : 100;
+                        console.log(pct.toFixed(1));
+                    }
+                " 2>/dev/null)
+
+                if [ -n "$FILE_COV_PERCENT" ]; then
+                    # Check if coverage meets threshold
+                    COV_OK=$(echo "$FILE_COV_PERCENT $COVERAGE_THRESHOLD" | awk '{if ($1 >= $2) print "1"; else print "0"}')
+
+                    if [ "$COV_OK" = "1" ]; then
+                        DASHBOARD_COVERAGE_RESULTS+=("✓ $REL_FILE: ${FILE_COV_PERCENT}%")
+                    else
+                        DASHBOARD_COVERAGE_RESULTS+=("✗ $REL_FILE: ${FILE_COV_PERCENT}% (below ${COVERAGE_THRESHOLD}%)")
+                        DASHBOARD_COVERAGE_FAILED=1
+                    fi
+                else
+                    # No coverage data - file might have only types/interfaces
+                    # Check if file has any functions/components
+                    HAS_CODE=$(grep -E "(export (function|const|class)|^function )" "$REPO_ROOT/$file" 2>/dev/null | head -1 || true)
+                    if [ -n "$HAS_CODE" ]; then
+                        DASHBOARD_COVERAGE_RESULTS+=("✗ $REL_FILE: 0.0% (no coverage data)")
+                        DASHBOARD_COVERAGE_FAILED=1
+                    else
+                        DASHBOARD_COVERAGE_RESULTS+=("○ $REL_FILE: N/A (types only)")
+                    fi
+                fi
+            done
+
+            # Print results
+            if [ ${#DASHBOARD_COVERAGE_RESULTS[@]} -eq 0 ]; then
+                print_info "No non-test dashboard files to check"
+            else
+                for result in "${DASHBOARD_COVERAGE_RESULTS[@]}"; do
+                    echo "  $result"
+                done
+
+                echo ""
+                if [ $DASHBOARD_COVERAGE_FAILED -eq 1 ]; then
+                    print_error "Some dashboard files have insufficient test coverage (threshold: ${COVERAGE_THRESHOLD}%)"
+                    print_info "Add tests for the uncovered code (SonarCloud will fail the PR)"
+                    CHECKS_FAILED=1
+                else
+                    print_success "All staged dashboard files meet coverage threshold (≥${COVERAGE_THRESHOLD}%)"
+                fi
+            fi
+        fi
     fi
 fi
 

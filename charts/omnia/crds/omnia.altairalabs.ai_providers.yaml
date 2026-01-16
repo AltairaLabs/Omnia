@@ -123,7 +123,9 @@ spec:
                     type: string
                 type: object
               secretRef:
-                description: secretRef references a Secret containing API credentials.
+                description: |-
+                  secretRef references a Secret containing API credentials.
+                  Optional for providers that don't require credentials (e.g., mock, ollama).
                 properties:
                   key:
                     description: |-
@@ -156,7 +158,6 @@ spec:
                   When enabled, the controller attempts to verify credentials with the provider.
                 type: boolean
             required:
-            - secretRef
             - type
             type: object
           status:

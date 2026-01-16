@@ -104,26 +104,41 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, agent)
 }
 
-// handleAgentOrLogs routes to agent details, logs, or events based on path.
+// handleAgentOrLogs routes to agent details, logs, events, or scale based on path.
 func (s *Server) handleAgentOrLogs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
-		return
-	}
-
-	// Check if this is a logs or events request: /api/v1/agents/{namespace}/{name}/logs or /events
+	// Check if this is a logs, events, or scale request: /api/v1/agents/{namespace}/{name}/logs|events|scale
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/agents/")
 	parts := strings.Split(path, "/")
 
 	if len(parts) == 3 {
 		switch parts[2] {
 		case "logs":
+			if r.Method != http.MethodGet {
+				s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+				return
+			}
 			s.handleAgentLogs(w, r, parts[0], parts[1])
 			return
 		case "events":
+			if r.Method != http.MethodGet {
+				s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+				return
+			}
 			s.handleAgentEvents(w, r, parts[0], parts[1])
 			return
+		case "scale":
+			if r.Method != http.MethodPut {
+				s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+				return
+			}
+			s.handleAgentScale(w, r, parts[0], parts[1])
+			return
 		}
+	}
+
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, errMethodNotAllowed)
+		return
 	}
 
 	if len(parts) != 2 {
@@ -143,5 +158,60 @@ func (s *Server) handleAgentOrLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.writeJSON(w, http.StatusOK, agent)
+}
+
+// scaleRequest is the request body for scaling an agent.
+type scaleRequest struct {
+	Replicas int32 `json:"replicas"`
+}
+
+// handleAgentScale handles PUT requests to scale an agent.
+func (s *Server) handleAgentScale(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	// Decode request body
+	var req scaleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	// Validate replicas
+	if req.Replicas < 0 {
+		s.writeError(w, http.StatusBadRequest, "replicas must be >= 0")
+		return
+	}
+
+	// Get the agent
+	var agent omniav1alpha1.AgentRuntime
+	if err := s.client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &agent); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			s.writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		s.log.Error(err, "failed to get agent", "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, "failed to get agent")
+		return
+	}
+
+	// Check if autoscaling is enabled - prevent manual scaling
+	if agent.Spec.Runtime != nil && agent.Spec.Runtime.Autoscaling != nil && agent.Spec.Runtime.Autoscaling.Enabled {
+		s.writeError(w, http.StatusConflict, "cannot manually scale agent with autoscaling enabled")
+		return
+	}
+
+	// Update the replicas
+	if agent.Spec.Runtime == nil {
+		agent.Spec.Runtime = &omniav1alpha1.RuntimeConfig{}
+	}
+	agent.Spec.Runtime.Replicas = &req.Replicas
+
+	// Update the agent
+	if err := s.client.Update(r.Context(), &agent); err != nil {
+		s.log.Error(err, "failed to update agent", "namespace", namespace, "name", name)
+		s.writeError(w, http.StatusInternalServerError, "failed to scale agent: "+err.Error())
+		return
+	}
+
+	s.log.Info("scaled agent", "namespace", namespace, "name", name, "replicas", req.Replicas)
 	s.writeJSON(w, http.StatusOK, agent)
 }

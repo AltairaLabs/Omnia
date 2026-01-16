@@ -81,7 +81,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: secretName,
 					},
 				},
@@ -122,7 +122,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "nonexistent-secret",
 					},
 				},
@@ -169,7 +169,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "bad-secret",
 					},
 				},
@@ -218,7 +218,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "custom-secret",
 						Key:  &customKey,
 					},
@@ -254,6 +254,58 @@ var _ = Describe("Provider Controller", func() {
 			_ = k8sClient.Delete(ctx, customSecret)
 		})
 
+		It("should succeed when provider has no secretRef", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerName + "-nosecretref",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeMock,
+					Model: "mock-model",
+					// No SecretRef - mock provider doesn't need credentials
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify status
+			var updatedProvider omniav1alpha1.Provider
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      provider.Name,
+				Namespace: providerNamespace,
+			}, &updatedProvider)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			// Verify the NoSecretRequired condition is set
+			var foundCondition *metav1.Condition
+			for i := range updatedProvider.Status.Conditions {
+				if updatedProvider.Status.Conditions[i].Type == ProviderConditionTypeSecretFound {
+					foundCondition = &updatedProvider.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(foundCondition).NotTo(BeNil())
+			Expect(foundCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(foundCondition.Reason).To(Equal("NoSecretRequired"))
+
+			// Clean up
+			_ = k8sClient.Delete(ctx, provider)
+		})
+
 		It("should handle Provider not found", func() {
 			reconciler := &ProviderReconciler{
 				Client: k8sClient,
@@ -280,7 +332,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: secretName,
 					},
 					ValidateCredentials: true,
@@ -325,7 +377,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: secretName, // Has ANTHROPIC_API_KEY but not "nonexistent-key"
 						Key:  &customKey,
 					},
@@ -392,7 +444,7 @@ var _ = Describe("Provider Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "mapping-test-secret",
 					},
 				},
@@ -449,6 +501,24 @@ var _ = Describe("Provider Controller", func() {
 		It("should return correct keys for Gemini", func() {
 			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeGemini)
 			Expect(keys).To(ContainElement("GEMINI_API_KEY"))
+			Expect(keys).To(ContainElement("api-key"))
+		})
+
+		It("should return default keys for unknown provider types", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderType("unknown"))
+			Expect(keys).To(ContainElement("api-key"))
+			Expect(keys).To(ContainElement("ANTHROPIC_API_KEY"))
+			Expect(keys).To(ContainElement("OPENAI_API_KEY"))
+			Expect(keys).To(ContainElement("GEMINI_API_KEY"))
+		})
+
+		It("should return default keys for mock provider", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeMock)
+			Expect(keys).To(ContainElement("api-key"))
+		})
+
+		It("should return default keys for ollama provider", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeOllama)
 			Expect(keys).To(ContainElement("api-key"))
 		})
 	})

@@ -18,17 +18,24 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// Annotation key for secret hash - changes to this trigger pod rollouts
+const annotationSecretHash = "omnia.altairalabs.ai/secret-hash"
 
 func (r *AgentRuntimeReconciler) reconcileDeployment(
 	ctx context.Context,
@@ -38,6 +45,9 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 	provider *omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
+
+	// Calculate secret hash for rollout triggering
+	secretHash := r.getSecretHash(ctx, agentRuntime, provider)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -53,7 +63,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, provider)
+		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, provider, secretHash)
 		return nil
 	})
 
@@ -65,12 +75,76 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 	return deployment, nil
 }
 
+// getSecretHash calculates a hash of all secrets referenced by the agent.
+// This is used to trigger pod rollouts when secrets change.
+func (r *AgentRuntimeReconciler) getSecretHash(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	provider *omniav1alpha1.Provider,
+) string {
+	log := logf.FromContext(ctx)
+	hasher := sha256.New()
+
+	// Include provider's secret if present
+	if provider != nil && provider.Spec.SecretRef != nil {
+		secret := &corev1.Secret{}
+		secretKey := types.NamespacedName{
+			Name:      provider.Spec.SecretRef.Name,
+			Namespace: provider.Namespace,
+		}
+		if err := r.Get(ctx, secretKey, secret); err == nil {
+			// Hash the secret data in a deterministic order
+			keys := make([]string, 0, len(secret.Data))
+			for k := range secret.Data {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				hasher.Write([]byte(k))
+				hasher.Write(secret.Data[k])
+			}
+			log.V(1).Info("Included secret in hash", "secret", secretKey.String())
+		} else {
+			log.V(1).Info("Could not get secret for hash", "secret", secretKey.String(), "error", err)
+		}
+	}
+
+	// Include inline provider secret if present (legacy)
+	if agentRuntime.Spec.Provider != nil && agentRuntime.Spec.Provider.SecretRef != nil {
+		secret := &corev1.Secret{}
+		secretKey := types.NamespacedName{
+			Name:      agentRuntime.Spec.Provider.SecretRef.Name,
+			Namespace: agentRuntime.Namespace,
+		}
+		if err := r.Get(ctx, secretKey, secret); err == nil {
+			keys := make([]string, 0, len(secret.Data))
+			for k := range secret.Data {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				hasher.Write([]byte(k))
+				hasher.Write(secret.Data[k])
+			}
+			log.V(1).Info("Included inline provider secret in hash", "secret", secretKey.String())
+		}
+	}
+
+	hash := hex.EncodeToString(hasher.Sum(nil))
+	// Use first 16 chars for brevity
+	if len(hash) > 16 {
+		hash = hash[:16]
+	}
+	return hash
+}
+
 func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	deployment *appsv1.Deployment,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	provider *omniav1alpha1.Provider,
+	secretHash string,
 ) {
 	labels := map[string]string{
 		labelAppName:      labelValueOmniaAgent,
@@ -130,6 +204,11 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		"prometheus.io/path":                           "/metrics",
 		"prometheus.istio.io/merge-metrics":            "true",
 		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d", DefaultRuntimeHealthPort),
+	}
+
+	// Add secret hash annotation to trigger rollouts when secrets change
+	if secretHash != "" {
+		podAnnotations[annotationSecretHash] = secretHash
 	}
 
 	// Add extra pod annotations from CRD

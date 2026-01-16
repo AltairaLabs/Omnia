@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Minus, Plus, Loader2, Zap, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +30,8 @@ interface ScaleControlProps {
   autoscalingEnabled?: boolean;
   autoscalingType?: "hpa" | "keda";
   onScale: (replicas: number) => Promise<void>;
+  /** Optional refetch function to poll for updates while in optimistic mode */
+  refetch?: () => void;
   className?: string;
   compact?: boolean;
 }
@@ -185,6 +187,7 @@ export function ScaleControl({
   autoscalingEnabled = false,
   autoscalingType,
   onScale,
+  refetch,
   className,
   compact = false,
 }: Readonly<ScaleControlProps>) {
@@ -195,18 +198,39 @@ export function ScaleControl({
   const disabledMessage = getDisabledMessage(isReadOnly, readOnlyMessage, canScale);
 
   const [isScaling, setIsScaling] = useState(false);
-  const [pendingScale, setPendingScale] = useState<number | null>(null);
+  // Optimistic value: what we want the desired replicas to be
+  // This persists until the actual desiredReplicas prop matches it
+  const [optimisticDesired, setOptimisticDesired] = useState<number | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
+  // Clear optimistic state when the actual desiredReplicas catches up
+  useEffect(() => {
+    if (optimisticDesired !== null && desiredReplicas === optimisticDesired) {
+      setOptimisticDesired(null);
+    }
+  }, [desiredReplicas, optimisticDesired]);
+
+  // Poll for updates while in optimistic mode
+  useEffect(() => {
+    if (optimisticDesired === null || !refetch) return;
+
+    const interval = setInterval(() => {
+      refetch();
+    }, 1000); // Poll every second
+
+    return () => clearInterval(interval);
+  }, [optimisticDesired, refetch]);
+
   const executeScale = useCallback(async (replicas: number) => {
+    // Immediately show optimistic update
+    setOptimisticDesired(replicas);
     setIsScaling(true);
-    setPendingScale(replicas);
     try {
       await onScale(replicas);
     } finally {
       setIsScaling(false);
-      setPendingScale(null);
+      // Don't clear optimisticDesired here - let it persist until CRD updates
     }
   }, [onScale]);
 
@@ -243,26 +267,50 @@ export function ScaleControl({
     setConfirmAction(null);
   }, []);
 
-  const displayReplicas = pendingScale ?? desiredReplicas;
-  const canScaleDown = displayReplicas > minReplicas && !isScaling && !isDisabled;
-  const canScaleUp = displayReplicas < maxReplicas && !isScaling && !isDisabled;
-  const replicaDisplay = `${currentReplicas}/${displayReplicas}`;
+  // Use optimistic value if set, otherwise use actual desired replicas
+  const displayDesired = optimisticDesired ?? desiredReplicas;
+  const isOptimistic = optimisticDesired !== null;
+  const canScaleDown = displayDesired > minReplicas && !isScaling && !isDisabled;
+  const canScaleUp = displayDesired < maxReplicas && !isScaling && !isDisabled;
+
+  // Build the replica display with optimistic styling
+  const renderReplicaCount = (showSpinner: boolean = false) => {
+    if (showSpinner && isScaling) {
+      return <Loader2 className="h-4 w-4 animate-spin mx-auto" />;
+    }
+    return (
+      <span className="min-w-[3rem] text-center text-sm font-medium">
+        {currentReplicas}/
+        <span className={isOptimistic ? "text-muted-foreground/60" : ""}>
+          {displayDesired}
+        </span>
+      </span>
+    );
+  };
 
   // Compact view
   if (compact) {
+    // When autoscaling is enabled, show only the autoscaling indicator and replica count
+    if (autoscalingEnabled) {
+      return (
+        <TooltipProvider>
+          <div className={cn("flex items-center gap-1", className)}>
+            <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact />
+            {renderReplicaCount()}
+          </div>
+        </TooltipProvider>
+      );
+    }
+
     return (
       <TooltipProvider>
         <div className={cn("flex items-center gap-1", className)}>
-          {autoscalingEnabled && (
-            <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact />
-          )}
-
           {isDisabled ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Lock className="h-3 w-3" />
-                  <span className="min-w-[3rem] text-center text-sm font-medium">{replicaDisplay}</span>
+                  {renderReplicaCount()}
                 </div>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -271,13 +319,11 @@ export function ScaleControl({
             </Tooltip>
           ) : (
             <>
-              <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => handleScale(displayReplicas - 1)} disabled={!canScaleDown}>
+              <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => handleScale(displayDesired - 1)} disabled={!canScaleDown}>
                 <Minus className="h-3 w-3" />
               </Button>
-              <span className="min-w-[3rem] text-center text-sm font-medium">
-                {isScaling ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : replicaDisplay}
-              </span>
-              <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => handleScale(displayReplicas + 1)} disabled={!canScaleUp}>
+              {renderReplicaCount()}
+              <Button variant="outline" size="icon" className="h-6 w-6" onClick={() => handleScale(displayDesired + 1)} disabled={!canScaleUp}>
                 <Plus className="h-3 w-3" />
               </Button>
             </>
@@ -297,16 +343,38 @@ export function ScaleControl({
     );
   }
 
-  // Full view
+  // Full view - when autoscaling is enabled, show label without buttons
+  if (autoscalingEnabled) {
+    return (
+      <TooltipProvider>
+        <div className={cn("flex flex-col gap-2", className)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Replicas</span>
+              <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact={false} />
+            </div>
+            <div className="text-lg font-semibold">
+              <span>
+                {currentReplicas}
+                <span className={cn("text-muted-foreground", isOptimistic && "opacity-50")}>
+                  /{displayDesired}
+                </span>
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Scaling is managed by {autoscalingType?.toUpperCase() || "autoscaler"}</p>
+        </div>
+      </TooltipProvider>
+    );
+  }
+
+  // Full view - manual scaling
   return (
     <TooltipProvider>
       <div className={cn("flex flex-col gap-2", className)}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Replicas</span>
-            {autoscalingEnabled && (
-              <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact={false} />
-            )}
             {isDisabled && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -322,14 +390,13 @@ export function ScaleControl({
             )}
           </div>
           <div className="text-lg font-semibold">
-            {isScaling ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-muted-foreground">{pendingScale}</span>
-              </div>
-            ) : (
-              <span>{currentReplicas}<span className="text-muted-foreground">/{displayReplicas}</span></span>
-            )}
+            <span>
+              {currentReplicas}
+              <span className={cn("text-muted-foreground", isOptimistic && "opacity-50")}>
+                /{displayDesired}
+              </span>
+              {isScaling && <Loader2 className="h-4 w-4 animate-spin inline ml-2" />}
+            </span>
           </div>
         </div>
 
@@ -351,17 +418,13 @@ export function ScaleControl({
           </Tooltip>
         ) : (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="flex-1" onClick={() => handleScale(displayReplicas - 1)} disabled={!canScaleDown}>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => handleScale(displayDesired - 1)} disabled={!canScaleDown}>
               <Minus className="h-4 w-4 mr-1" />Scale Down
             </Button>
-            <Button variant="outline" size="sm" className="flex-1" onClick={() => handleScale(displayReplicas + 1)} disabled={!canScaleUp}>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => handleScale(displayDesired + 1)} disabled={!canScaleUp}>
               <Plus className="h-4 w-4 mr-1" />Scale Up
             </Button>
           </div>
-        )}
-
-        {autoscalingEnabled && (
-          <p className="text-xs text-muted-foreground">Manual scaling will be overridden by autoscaler</p>
         )}
 
         <ScaleConfirmDialog

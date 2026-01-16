@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useProvider } from "./use-provider";
+import { useProvider, useUpdateProviderSecretRef } from "./use-provider";
 
 // Mock provider data
 const mockProvider = {
@@ -143,5 +143,198 @@ describe("useProvider", () => {
 
     // Query is disabled so fetchStatus should be idle
     expect(result.current.fetchStatus).toBe("idle");
+  });
+});
+
+describe("useUpdateProviderSecretRef", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = mockFetch;
+  });
+
+  function createTestWrapper() {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+        },
+      },
+    });
+    return function Wrapper({ children }: { children: React.ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    };
+  }
+
+  it("should update provider secretRef", async () => {
+    const updatedProvider = {
+      ...mockProvider,
+      spec: { ...mockProvider.spec, secretRef: { name: "new-secret" } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ provider: updatedProvider }),
+    });
+
+    const { result } = renderHook(() => useUpdateProviderSecretRef(), {
+      wrapper: createTestWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        namespace: "production",
+        name: "openai-provider",
+        secretRef: "new-secret",
+      });
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/providers/production/openai-provider",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secretRef: "new-secret" }),
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+  });
+
+  it("should remove secretRef when passed null", async () => {
+    const updatedProvider = {
+      ...mockProvider,
+      spec: { type: "openai", model: "gpt-4" },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ provider: updatedProvider }),
+    });
+
+    const { result } = renderHook(() => useUpdateProviderSecretRef(), {
+      wrapper: createTestWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        namespace: "default",
+        name: "mock-provider",
+        secretRef: null,
+      });
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/providers/default/mock-provider",
+      expect.objectContaining({
+        body: JSON.stringify({ secretRef: null }),
+      })
+    );
+  });
+
+  it("should handle update errors", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: () => Promise.resolve({ error: "Provider not found" }),
+    });
+
+    const { result } = renderHook(() => useUpdateProviderSecretRef(), {
+      wrapper: createTestWrapper(),
+    });
+
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({
+          namespace: "default",
+          name: "non-existent",
+          secretRef: "secret",
+        });
+      } catch {
+        // Expected error
+      }
+    });
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    expect(result.current.error?.message).toBe("Provider not found");
+  });
+
+  it("should handle network errors", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
+
+    const { result } = renderHook(() => useUpdateProviderSecretRef(), {
+      wrapper: createTestWrapper(),
+    });
+
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({
+          namespace: "default",
+          name: "test-provider",
+          secretRef: "secret",
+        });
+      } catch {
+        // Expected error
+      }
+    });
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+  });
+
+  it("should handle response without error message", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      json: () => Promise.reject(new Error("Invalid JSON")),
+    });
+
+    const { result } = renderHook(() => useUpdateProviderSecretRef(), {
+      wrapper: createTestWrapper(),
+    });
+
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({
+          namespace: "default",
+          name: "test-provider",
+          secretRef: "secret",
+        });
+      } catch {
+        // Expected error
+      }
+    });
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    expect(result.current.error?.message).toBe("Failed to update provider");
+  });
+
+  it("should URL-encode namespace and name", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ provider: mockProvider }),
+    });
+
+    const { result } = renderHook(() => useUpdateProviderSecretRef(), {
+      wrapper: createTestWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        namespace: "my-namespace",
+        name: "my-provider",
+        secretRef: "secret",
+      });
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/providers/my-namespace/my-provider",
+      expect.anything()
+    );
   });
 });
