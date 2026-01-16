@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { Download, Search, X, RefreshCw } from "lucide-react";
+import { Download, Search, X, RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,7 +14,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useLogs, useDemoMode } from "@/hooks";
+import {
+  useLogs,
+  useDemoMode,
+  useObservabilityConfig,
+  useGrafana,
+  buildLokiExploreUrl,
+  buildTempoExploreUrl,
+} from "@/hooks";
 
 export interface LogEntry {
   timestamp: Date;
@@ -90,9 +97,9 @@ function LogContent({
 
   return (
     <>
-      {filteredLogs.map((log) => (
+      {filteredLogs.map((log, index) => (
         <div
-          key={`${log.timestamp.getTime()}-${log.level}-${log.container}-${log.message.slice(0, 50)}`}
+          key={`${index}-${log.timestamp.getTime()}-${log.level}-${log.container}`}
           className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
         >
           <span className="text-muted-foreground shrink-0">
@@ -124,7 +131,17 @@ export function LogViewer({
   defaultTailLines = 100,
 }: Readonly<LogViewerProps>) {
   const { isDemoMode } = useDemoMode();
+  const { lokiEnabled, tempoEnabled } = useObservabilityConfig();
+  const grafanaConfig = useGrafana();
   const [tailLines, setTailLines] = useState(defaultTailLines);
+
+  // Build Grafana Explore URLs for Loki and Tempo
+  const lokiExploreUrl = lokiEnabled
+    ? buildLokiExploreUrl(grafanaConfig, namespace, agentName)
+    : null;
+  const tempoExploreUrl = tempoEnabled
+    ? buildTempoExploreUrl(grafanaConfig, namespace, agentName)
+    : null;
 
   // Fetch logs via DataService (works in both demo and live modes)
   const { data: apiLogs, isLoading, refetch } = useLogs(namespace, agentName, {
@@ -306,6 +323,32 @@ export function LogViewer({
 
         {/* Actions */}
         <div className="flex items-center gap-1">
+          {lokiExploreUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              title="Open in Grafana Loki"
+            >
+              <a href={lokiExploreUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1" />
+                Loki
+              </a>
+            </Button>
+          )}
+          {tempoExploreUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              title="Open in Grafana Tempo"
+            >
+              <a href={tempoExploreUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1" />
+                Tempo
+              </a>
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={downloadLogs} title="Download logs">
             <Download className="h-4 w-4" />
           </Button>

@@ -72,7 +72,18 @@ export default function Home() {
           <StatCard
             title="Active Sessions"
             value={stats?.sessions.active.toLocaleString() ?? 0}
-            description="+23% from last hour"
+            description={
+              stats?.sessions.trend !== null && stats?.sessions.trend !== undefined ? (
+                <>
+                  <span className={stats.sessions.trend >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                    {stats.sessions.trend >= 0 ? "+" : ""}{stats.sessions.trend.toFixed(0)}%
+                  </span>{" "}
+                  from last hour
+                </>
+              ) : (
+                "Currently connected"
+              )
+            }
             icon={Activity}
             loading={statsLoading}
           />
@@ -103,9 +114,9 @@ export default function Home() {
               costsAvailable ? (
                 <>
                   <span className="text-blue-600 dark:text-blue-400">
-                    {(summary?.inputPercent ?? 0).toFixed(0)}%
+                    {formatTokens(summary?.inputTokens ?? 0)}
                   </span>{" "}
-                  in / {(summary?.outputPercent ?? 0).toFixed(0)}% out
+                  in / {formatTokens(summary?.outputTokens ?? 0)} out
                 </>
               ) : (
                 "Prometheus not configured"

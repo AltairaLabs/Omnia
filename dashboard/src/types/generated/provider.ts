@@ -9,6 +9,10 @@ export interface ProviderSpec {
   baseURL?: string;
   /** defaults contains provider tuning parameters. */
   defaults?: {
+    /** contextWindow is the model's maximum context size in tokens.
+     * When conversation history exceeds this budget, truncation is applied.
+     * If not specified, no automatic truncation is performed. */
+    contextWindow?: number;
     /** maxTokens limits the maximum number of tokens in the response. */
     maxTokens?: number;
     /** temperature controls randomness in responses (0.0-2.0).
@@ -18,6 +22,11 @@ export interface ProviderSpec {
     /** topP controls nucleus sampling (0.0-1.0).
      * Specified as a string to support decimal values (e.g., "0.9"). */
     topP?: string;
+    /** truncationStrategy defines how to handle context overflow.
+     * - sliding: Remove oldest messages first (default)
+     * - summarize: Summarize old messages before removing
+     * - custom: Delegate to custom runtime implementation */
+    truncationStrategy?: "sliding" | "summarize" | "custom";
   };
   /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
    * If not specified, the provider's default model is used. */

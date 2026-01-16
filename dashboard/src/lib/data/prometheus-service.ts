@@ -10,6 +10,7 @@ import {
   isPrometheusAvailable,
   matrixToTimeSeries,
 } from "../prometheus";
+import { LLM_METRICS, LABELS } from "../prometheus-queries";
 import { getModelPricing } from "../pricing";
 import type {
   CostData,
@@ -29,11 +30,9 @@ const EMPTY_SUMMARY: CostSummary = {
   totalCacheSavings: 0,
   totalRequests: 0,
   totalTokens: 0,
-  anthropicCost: 0,
-  openaiCost: 0,
+  inputTokens: 0,
+  outputTokens: 0,
   projectedMonthlyCost: 0,
-  anthropicPercent: 0,
-  openaiPercent: 0,
   inputPercent: 0,
   outputPercent: 0,
 };
@@ -73,26 +72,28 @@ export class PrometheusService {
     try {
       const namespace = options?.namespace;
 
-      // Build namespace filter for PromQL queries
-      const nsFilter = namespace ? `,namespace="${namespace}"` : "";
+      // Build label selector for PromQL queries (empty string if no filter)
+      const labelSelector = namespace ? `{namespace="${namespace}"}` : "";
 
       // Calculate time range (last 24 hours)
       const now = new Date();
       const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
       // Query current totals (instant queries)
+      // Using centralized metric names from prometheus-queries.ts
+      const byLabels = `${LABELS.AGENT}, ${LABELS.NAMESPACE}, ${LABELS.PROVIDER}, ${LABELS.MODEL}`;
       const [inputTokensResult, outputTokensResult, cacheHitsResult, requestsResult, costResult] =
         await Promise.all([
-          queryPrometheus(`sum by (agent, namespace, provider, model) (omnia_llm_input_tokens_total{${nsFilter.slice(1)}})`),
-          queryPrometheus(`sum by (agent, namespace, provider, model) (omnia_llm_output_tokens_total{${nsFilter.slice(1)}})`),
-          queryPrometheus(`sum by (agent, namespace, provider, model) (omnia_llm_cache_hits_total{${nsFilter.slice(1)}})`),
-          queryPrometheus(`sum by (agent, namespace, provider, model) (omnia_llm_requests_total{${nsFilter.slice(1)}})`),
-          queryPrometheus(`sum by (agent, namespace, provider, model) (omnia_llm_cost_usd_total{${nsFilter.slice(1)}})`),
+          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.INPUT_TOKENS}${labelSelector})`),
+          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.OUTPUT_TOKENS}${labelSelector})`),
+          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.CACHE_HITS}${labelSelector})`),
+          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.REQUESTS_TOTAL}${labelSelector})`),
+          queryPrometheus(`sum by (${byLabels}) (${LLM_METRICS.COST_USD}${labelSelector})`),
         ]);
 
       // Query time series for charts (last 24h, hourly resolution)
       const costTimeSeriesResult = await queryPrometheusRange(
-        `sum by (provider) (increase(omnia_llm_cost_usd_total{${nsFilter.slice(1)}}[1h]))`,
+        `sum by (${LABELS.PROVIDER}) (increase(${LLM_METRICS.COST_USD}${labelSelector}[1h]))`,
         start,
         now,
         "1h"
@@ -193,6 +194,20 @@ export class PrometheusService {
   ): CostAllocationItem[] {
     const agentMap = new Map<string, CostAllocationItem>();
 
+    // Log query results for debugging
+    const logResult = (name: string, result: Awaited<ReturnType<typeof queryPrometheus>>) => {
+      if (result.status !== "success") {
+        console.warn(`[PrometheusService] ${name} query failed:`, result.error || result.errorType);
+      } else if (!result.data?.result?.length) {
+        console.debug(`[PrometheusService] ${name} query returned no data`);
+      }
+    };
+    logResult("inputTokens", inputTokensResult);
+    logResult("outputTokens", outputTokensResult);
+    logResult("cacheHits", cacheHitsResult);
+    logResult("requests", requestsResult);
+    logResult("cost", costResult);
+
     this.processAgentResult(inputTokensResult, agentMap, "inputTokens");
     this.processAgentResult(outputTokensResult, agentMap, "outputTokens");
     this.processAgentResult(cacheHitsResult, agentMap, "cacheHits");
@@ -221,17 +236,9 @@ export class PrometheusService {
     const totalOutputCost = byAgent.reduce((sum, item) => sum + item.outputCost, 0);
     const totalCacheSavings = byAgent.reduce((sum, item) => sum + item.cacheSavings, 0);
     const totalRequests = byAgent.reduce((sum, item) => sum + item.requests, 0);
-    const totalTokens = byAgent.reduce(
-      (sum, item) => sum + item.inputTokens + item.outputTokens,
-      0
-    );
-
-    const anthropicCost = byAgent
-      .filter((item) => item.provider === "anthropic" || item.provider === "claude")
-      .reduce((sum, item) => sum + item.totalCost, 0);
-    const openaiCost = byAgent
-      .filter((item) => item.provider === "openai")
-      .reduce((sum, item) => sum + item.totalCost, 0);
+    const inputTokens = byAgent.reduce((sum, item) => sum + item.inputTokens, 0);
+    const outputTokens = byAgent.reduce((sum, item) => sum + item.outputTokens, 0);
+    const totalTokens = inputTokens + outputTokens;
 
     return {
       totalCost,
@@ -240,11 +247,9 @@ export class PrometheusService {
       totalCacheSavings,
       totalRequests,
       totalTokens,
-      anthropicCost,
-      openaiCost,
+      inputTokens,
+      outputTokens,
       projectedMonthlyCost: totalCost * 30,
-      anthropicPercent: totalCost > 0 ? (anthropicCost / totalCost) * 100 : 0,
-      openaiPercent: totalCost > 0 ? (openaiCost / totalCost) * 100 : 0,
       inputPercent:
         totalInputCost + totalOutputCost > 0
           ? (totalInputCost / (totalInputCost + totalOutputCost)) * 100
@@ -313,12 +318,20 @@ export class PrometheusService {
   ): CostTimeSeriesPoint[] {
     const series = matrixToTimeSeries(result);
 
-    return series.map(({ timestamp, values }) => ({
-      timestamp: timestamp.toISOString(),
-      anthropic: values.anthropic || values.claude || 0,
-      openai: values.openai || 0,
-      total: Object.values(values).reduce((sum, v) => sum + v, 0),
-    }));
+    return series.map(({ timestamp, values }) => {
+      // Normalize provider names (claude -> anthropic)
+      const byProvider: Record<string, number> = {};
+      for (const [provider, cost] of Object.entries(values)) {
+        const normalizedProvider = provider === "claude" ? "anthropic" : provider;
+        byProvider[normalizedProvider] = (byProvider[normalizedProvider] || 0) + cost;
+      }
+
+      return {
+        timestamp: timestamp.toISOString(),
+        byProvider,
+        total: Object.values(byProvider).reduce((sum, v) => sum + v, 0),
+      };
+    });
   }
 
   private getModelDisplayName(model: string): string {

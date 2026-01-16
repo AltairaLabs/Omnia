@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip } from "lucide-react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { Send, Trash2, Wifi, WifiOff, RefreshCw, Upload, Paperclip, X, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +9,28 @@ import { cn } from "@/lib/utils";
 import { useAgentConsole, useConsoleConfig } from "@/hooks";
 import { ConsoleMessage } from "./console-message";
 import { AttachmentPreview } from "./attachment-preview";
-import { isAllowedType, formatFileSize } from "./attachment-utils";
+import { ImageCropDialog } from "./image-crop-dialog";
+import { isAllowedType, formatFileSize, needsResize } from "./attachment-utils";
+import { blobToDataUrl, getImageDimensions } from "@/lib/image-processor";
 import type { FileAttachment } from "@/types/websocket";
+
+/**
+ * Animated thinking indicator shown while waiting for model response.
+ */
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+        <span className="text-xs font-medium text-primary">AI</span>
+      </div>
+      <div className="flex items-center gap-1 pt-2">
+        <span className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+        <span className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+        <span className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce" />
+      </div>
+    </div>
+  );
+}
 
 interface AgentConsoleProps {
   agentName: string;
@@ -29,17 +49,61 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+interface FileValidationResult {
+  type: "valid" | "rejected" | "needs-crop";
+  file: File;
+  reason?: string;
+}
+
+/**
+ * Validates a file against the attachment configuration.
+ */
+async function validateFile(
+  file: File,
+  config: { allowedMimeTypes: string[]; allowedExtensions: string[]; maxFileSize: number },
+  mediaRequirements?: { image?: { maxDimensions?: { width: number; height: number } } }
+): Promise<FileValidationResult> {
+  // Validate type
+  const typeCheck = isAllowedType(file, config.allowedMimeTypes, config.allowedExtensions);
+  if (!typeCheck.allowed) {
+    return { type: "rejected", file, reason: typeCheck.reason };
+  }
+
+  // Validate size
+  if (file.size > config.maxFileSize) {
+    return { type: "rejected", file, reason: `File too large (max ${formatFileSize(config.maxFileSize)})` };
+  }
+
+  // Check if image needs processing
+  if (file.type.startsWith("image/") && mediaRequirements?.image?.maxDimensions) {
+    try {
+      const dimensions = await getImageDimensions(file);
+      const maxDims = mediaRequirements.image.maxDimensions;
+      if (needsResize(dimensions.width, dimensions.height, maxDims)) {
+        return { type: "needs-crop", file };
+      }
+    } catch {
+      return { type: "rejected", file, reason: "Could not read image dimensions" };
+    }
+  }
+
+  return { type: "valid", file };
+}
+
 export function AgentConsole({ agentName, namespace, sessionId, className }: Readonly<AgentConsoleProps>) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [rejections, setRejections] = useState<string[]>([]);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
   // Get attachment config from agent's console configuration
-  const { config: attachmentConfig } = useConsoleConfig(namespace, agentName);
+  const { config: attachmentConfig, mediaRequirements } = useConsoleConfig(namespace, agentName);
 
   // Always use mock mode for now (until K8s integration)
   const {
@@ -71,39 +135,91 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   // Process dropped files
   const processFiles = useCallback(async (files: FileList) => {
     const validFiles: FileAttachment[] = [];
+    const newRejections: string[] = [];
+    const filesToCrop: File[] = [];
 
-    for (const file of Array.from(files)) {
-      // Validate type using config
-      const typeCheck = isAllowedType(
-        file,
-        attachmentConfig.allowedMimeTypes,
-        attachmentConfig.allowedExtensions
-      );
-      if (!typeCheck.allowed) continue;
+    // Validate all files
+    const validationResults = await Promise.all(
+      Array.from(files).map((file) => validateFile(file, attachmentConfig, mediaRequirements))
+    );
 
-      // Validate size using config
-      if (file.size > attachmentConfig.maxFileSize) continue;
-
-      // Convert to data URL
-      const dataUrl = await fileToDataUrl(file);
-
-      validFiles.push({
-        id: crypto.randomUUID(),
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        dataUrl,
-      });
+    // Process validation results
+    for (const result of validationResults) {
+      if (result.type === "rejected") {
+        newRejections.push(`${result.file.name}: ${result.reason}`);
+      } else if (result.type === "needs-crop") {
+        filesToCrop.push(result.file);
+      } else {
+        // Valid file - convert to data URL
+        const dataUrl = await fileToDataUrl(result.file);
+        validFiles.push({
+          id: crypto.randomUUID(),
+          name: result.file.name,
+          type: result.file.type,
+          size: result.file.size,
+          dataUrl,
+        });
+      }
     }
 
-    // Limit total files using config
-    setAttachments((prev) => [...prev, ...validFiles].slice(0, attachmentConfig.maxFiles));
-  }, [attachmentConfig]);
+    // Show rejections if any
+    if (newRejections.length > 0) {
+      setRejections(newRejections);
+    }
+
+    // If there are files to crop, show crop dialog for the first one
+    if (filesToCrop.length > 0) {
+      setCropFile(filesToCrop[0]);
+      setPendingFiles(filesToCrop.slice(1));
+    }
+
+    // Add valid files to attachments
+    if (validFiles.length > 0) {
+      setAttachments((prev) => [...prev, ...validFiles].slice(0, attachmentConfig.maxFiles));
+    }
+  }, [attachmentConfig, mediaRequirements]);
 
   // Remove attachment
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
+
+  // Clear rejections
+  const clearRejections = useCallback(() => {
+    setRejections([]);
+  }, []);
+
+  // Handle crop completion
+  const handleCropComplete = useCallback(async (result: { blob: Blob; file: File }) => {
+    const dataUrl = await blobToDataUrl(result.blob);
+
+    const attachment: FileAttachment = {
+      id: crypto.randomUUID(),
+      name: result.file.name,
+      type: result.file.type,
+      size: result.blob.size,
+      dataUrl,
+    };
+
+    setAttachments((prev) => [...prev, attachment].slice(0, attachmentConfig.maxFiles));
+    setCropFile(null);
+
+    // Process next pending file
+    if (pendingFiles.length > 0) {
+      setCropFile(pendingFiles[0]);
+      setPendingFiles((prev) => prev.slice(1));
+    }
+  }, [attachmentConfig.maxFiles, pendingFiles]);
+
+  // Handle crop cancel
+  const handleCropCancel = useCallback(() => {
+    setCropFile(null);
+    // Process next pending file
+    if (pendingFiles.length > 0) {
+      setCropFile(pendingFiles[0]);
+      setPendingFiles((prev) => prev.slice(1));
+    }
+  }, [pendingFiles]);
 
   // Drag event handlers
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -143,14 +259,16 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     [processFiles]
   );
 
-  // Handle send
+  // Handle send - only sends if canSend is true
   const handleSend = useCallback(() => {
-    if ((input.trim() || attachments.length > 0) && status === "connected") {
-      sendMessage(input, attachments);
-      setInput("");
-      setAttachments([]);
-      textareaRef.current?.focus();
+    const hasContent = input.trim().length > 0 || attachments.length > 0;
+    if (!hasContent || status !== "connected") {
+      return;
     }
+    sendMessage(input, attachments);
+    setInput("");
+    setAttachments([]);
+    textareaRef.current?.focus();
   }, [input, attachments, status, sendMessage]);
 
   // Handle key press
@@ -234,6 +352,22 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   const handleAttachmentClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
+
+  // Determine if we should show the thinking indicator
+  // Show when the last message is from the user (waiting for assistant response)
+  // Hide if there's an error or we're disconnected
+  const isWaitingForResponse = useMemo(() => {
+    if (messages.length === 0) return false;
+    if (status === "error" || status === "disconnected") return false;
+    const lastMessage = messages[messages.length - 1];
+    return lastMessage.role === "user";
+  }, [messages, status]);
+
+  // Determine if we can send a message (text or attachments present, and connected)
+  const canSend = useMemo(() => {
+    const hasContent = input.trim().length > 0 || attachments.length > 0;
+    return hasContent && status === "connected";
+  }, [input, attachments, status]);
 
   // Status badge
   const statusBadge = {
@@ -321,6 +455,32 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
         </div>
       )}
 
+      {/* File rejection feedback */}
+      {rejections.length > 0 && (
+        <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20" data-testid="rejection-feedback">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div className="flex-1 text-sm text-amber-600 dark:text-amber-400">
+              <p className="font-medium">Some files could not be added:</p>
+              <ul className="mt-1 list-disc list-inside">
+                {rejections.map((reason, index) => (
+                  <li key={index}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0"
+              onClick={clearRejections}
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 ? (
@@ -337,6 +497,8 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             {messages.map((message) => (
               <ConsoleMessage key={message.id} message={message} />
             ))}
+            {/* Thinking indicator while waiting for response */}
+            {isWaitingForResponse && <ThinkingIndicator />}
             {/* Sentinel element for auto-scroll */}
             <div ref={messagesEndRef} />
           </div>
@@ -396,7 +558,7 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           />
           <Button
             onClick={handleSend}
-            disabled={(!input.trim() && attachments.length === 0) || status !== "connected"}
+            disabled={!canSend}
             className="shrink-0"
             aria-label="Send message"
             data-testid="send-button"
@@ -405,6 +567,19 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
           </Button>
         </div>
       </div>
+
+      {/* Image crop dialog */}
+      {cropFile && mediaRequirements?.image?.maxDimensions && (
+        <ImageCropDialog
+          file={cropFile}
+          maxDimensions={mediaRequirements.image.maxDimensions}
+          preferredFormat={mediaRequirements.image.preferredFormat as "image/jpeg" | "image/png" | "image/webp" | undefined}
+          compressionGuidance={mediaRequirements.image.compressionGuidance}
+          onComplete={handleCropComplete}
+          onCancel={handleCropCancel}
+          open={!!cropFile}
+        />
+      )}
     </div>
   );
 }

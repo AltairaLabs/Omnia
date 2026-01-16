@@ -972,7 +972,7 @@ describe("useAgentConsole status change handling", () => {
     clearStoreState();
   });
 
-  it("should add system message on connect", () => {
+  it("should not add system message on connect (status shown in header)", () => {
     const { result } = renderHook(() =>
       useAgentConsole({ agentName: "status-agent", namespace: "production" })
     );
@@ -987,8 +987,10 @@ describe("useAgentConsole status change handling", () => {
       onStatusChange("connected");
     });
 
+    // Connection status is shown in the header, not as a system message
     const systemMessages = result.current.messages.filter(m => m.role === "system");
-    expect(systemMessages.some(m => m.content === "Connected to agent")).toBe(true);
+    expect(systemMessages.some(m => m.content === "Connected to agent")).toBe(false);
+    expect(result.current.status).toBe("connected");
   });
 
   it("should add system message on disconnect", () => {

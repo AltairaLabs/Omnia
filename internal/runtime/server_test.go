@@ -95,7 +95,7 @@ func TestServerOptions(t *testing.T) {
 
 	t.Run("WithMetrics", func(t *testing.T) {
 		// Create metrics and set them
-		metrics := NewMetrics("test-agent", "test-ns")
+		metrics := NewMetrics(MetricsConfig{AgentName: "test-agent", Namespace: "test-ns"})
 		server := NewServer(
 			WithMetrics(metrics),
 		)
@@ -561,7 +561,7 @@ func writeTestFile(t *testing.T, path, content string) error {
 }
 
 func TestNewMetrics(t *testing.T) {
-	metrics := NewMetrics("test-agent", "test-namespace")
+	metrics := NewMetrics(MetricsConfig{AgentName: "test-agent", Namespace: "test-namespace"})
 	require.NotNil(t, metrics)
 }
 

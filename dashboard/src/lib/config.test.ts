@@ -50,6 +50,8 @@ describe("config", () => {
         readOnlyMessage: "This dashboard is in read-only mode",
         wsProxyUrl: "",
         grafanaUrl: "",
+        lokiEnabled: false,
+        tempoEnabled: false,
       });
     });
 
@@ -69,6 +71,8 @@ describe("config", () => {
         readOnlyMessage: "This dashboard is in read-only mode",
         wsProxyUrl: "",
         grafanaUrl: "",
+        lokiEnabled: false,
+        tempoEnabled: false,
       });
     });
   });

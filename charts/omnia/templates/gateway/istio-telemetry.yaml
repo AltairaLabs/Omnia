@@ -1,12 +1,12 @@
 {{- if .Values.istio.enabled }}
-# Istio Telemetry configuration for Omnia namespace
-# Requires Istio to be installed separately in istio-system
+# Istio Telemetry configuration for mesh-wide tracing
+# Must be in istio-system (root namespace) for mesh-wide config
 # Configures tracing to Tempo and access logging for Loki
 apiVersion: telemetry.istio.io/v1
 kind: Telemetry
 metadata:
   name: {{ include "omnia.fullname" . }}-telemetry
-  namespace: {{ .Release.Namespace }}
+  namespace: istio-system
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
 spec:

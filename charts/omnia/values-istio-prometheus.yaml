@@ -1,0 +1,132 @@
+# Prometheus scrape configs for Istio metrics
+# Used when ENABLE_FULL_STACK=true in Tilt
+#
+# Scrapes:
+# - Istio control plane (istiod) metrics
+# - Envoy sidecar metrics from all pods
+# - Istio gateway metrics
+
+prometheus:
+  extraScrapeConfigs: |
+    # Scrape Omnia facade containers via Istio merged metrics
+    # prometheus.istio.io/merge-metrics=true on pods causes Istio to merge app metrics into port 15020
+    # This job uses prometheus.io/* annotations which point to 15020 for Istio pods
+    - job_name: 'omnia-agents-facade'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        # Only scrape pods with omnia agent label
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
+          action: keep
+          regex: agent
+        # Use prometheus.io annotations (15020 for Istio pods with merged metrics)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        # Add useful labels
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          target_label: agent
+        - target_label: container
+          replacement: facade
+    # Scrape Omnia runtime containers (LLM metrics: tokens, cost, latency)
+    # Runtime exposes metrics on port 9001 from PromptKit EventBus
+    # This bypasses Istio's merged metrics since runtime metrics need direct scraping
+    - job_name: 'omnia-agents-runtime'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        # Only scrape pods with omnia agent label
+        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
+          action: keep
+          regex: agent
+        # Target runtime container's health port (9001) for LLM metrics
+        - source_labels: [__address__]
+          action: replace
+          regex: ([^:]+)(?::\d+)?
+          replacement: $1:9001
+          target_label: __address__
+        # Add useful labels
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          target_label: agent
+        - target_label: container
+          replacement: runtime
+
+    # Scrape Istio control plane (istiod)
+    - job_name: 'istiod'
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+              - istio-system
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: istiod
+        - source_labels: [__meta_kubernetes_pod_container_port_name]
+          action: keep
+          regex: http-monitoring
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+
+    # Scrape Envoy sidecar metrics from all pods
+    - job_name: 'envoy-stats'
+      metrics_path: /stats/prometheus
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        # Only scrape pods with Istio sidecar
+        - source_labels: [__meta_kubernetes_pod_container_name]
+          action: keep
+          regex: istio-proxy
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: drop
+          regex: 'false'
+        # Use the sidecar's stats port (15090)
+        - source_labels: [__address__]
+          action: replace
+          regex: ([^:]+)(?::\d+)?
+          replacement: $1:15090
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          target_label: app
+
+    # Scrape Istio ingress gateway
+    - job_name: 'istio-gateway'
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+              - istio-system
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_istio]
+          action: keep
+          regex: ingressgateway
+        - source_labels: [__address__]
+          action: replace
+          regex: ([^:]+)(?::\d+)?
+          replacement: $1:15090
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod

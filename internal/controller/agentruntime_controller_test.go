@@ -3397,4 +3397,247 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("custom-key"))
 		})
 	})
+
+	Describe("Watch Handler Functions", func() {
+		var (
+			ctx        context.Context
+			reconciler *AgentRuntimeReconciler
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			reconciler = &AgentRuntimeReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+		})
+
+		Context("findAgentRuntimesForProvider", func() {
+			It("should return requests for AgentRuntimes that reference the Provider", func() {
+				// Create a test namespace
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "watch-provider-test",
+					},
+				}
+				Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, ns)
+				}()
+
+				// Create a Provider
+				provider := &omniav1alpha1.Provider{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-provider",
+						Namespace: "watch-provider-test",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:  omniav1alpha1.ProviderTypeClaude,
+						Model: "claude-sonnet-4",
+						SecretRef: omniav1alpha1.SecretKeyRef{
+							Name: "test-secret",
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, provider)
+				}()
+
+				// Create a PromptPack
+				promptPack := &omniav1alpha1.PromptPack{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pack",
+						Namespace: "watch-provider-test",
+					},
+					Spec: omniav1alpha1.PromptPackSpec{
+						Version: "1.0.0",
+						Source: omniav1alpha1.PromptPackSource{
+							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						},
+						Rollout: omniav1alpha1.RolloutStrategy{
+							Type: omniav1alpha1.RolloutStrategyImmediate,
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, promptPack)
+				}()
+
+				// Create an AgentRuntime that references the Provider
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-ar-with-provider",
+						Namespace: "watch-provider-test",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name: "test-pack",
+						},
+						ProviderRef: &omniav1alpha1.ProviderRef{
+							Name: "test-provider",
+						},
+						Facade: omniav1alpha1.FacadeConfig{
+							Type: omniav1alpha1.FacadeTypeWebSocket,
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, ar)
+				}()
+
+				// Call findAgentRuntimesForProvider
+				requests := reconciler.findAgentRuntimesForProvider(ctx, provider)
+
+				// Should return a request for the AgentRuntime
+				Expect(requests).To(HaveLen(1))
+				Expect(requests[0].Name).To(Equal("test-ar-with-provider"))
+				Expect(requests[0].Namespace).To(Equal("watch-provider-test"))
+			})
+
+			It("should return empty when no AgentRuntimes reference the Provider", func() {
+				// Create a test namespace
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "watch-provider-empty-test",
+					},
+				}
+				Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, ns)
+				}()
+
+				// Create a Provider that nothing references
+				provider := &omniav1alpha1.Provider{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "unreferenced-provider",
+						Namespace: "watch-provider-empty-test",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:  omniav1alpha1.ProviderTypeClaude,
+						Model: "claude-sonnet-4",
+						SecretRef: omniav1alpha1.SecretKeyRef{
+							Name: "test-secret",
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, provider)
+				}()
+
+				// Call findAgentRuntimesForProvider
+				requests := reconciler.findAgentRuntimesForProvider(ctx, provider)
+
+				// Should return empty
+				Expect(requests).To(BeEmpty())
+			})
+		})
+
+		Context("findAgentRuntimesForPromptPack", func() {
+			It("should return requests for AgentRuntimes that reference the PromptPack", func() {
+				// Create a test namespace
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "watch-pack-test",
+					},
+				}
+				Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, ns)
+				}()
+
+				// Create a PromptPack
+				promptPack := &omniav1alpha1.PromptPack{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "watched-pack",
+						Namespace: "watch-pack-test",
+					},
+					Spec: omniav1alpha1.PromptPackSpec{
+						Version: "1.0.0",
+						Source: omniav1alpha1.PromptPackSource{
+							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						},
+						Rollout: omniav1alpha1.RolloutStrategy{
+							Type: omniav1alpha1.RolloutStrategyImmediate,
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, promptPack)
+				}()
+
+				// Create an AgentRuntime that references the PromptPack
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-ar-with-pack",
+						Namespace: "watch-pack-test",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name: "watched-pack",
+						},
+						Facade: omniav1alpha1.FacadeConfig{
+							Type: omniav1alpha1.FacadeTypeWebSocket,
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, ar)
+				}()
+
+				// Call findAgentRuntimesForPromptPack
+				requests := reconciler.findAgentRuntimesForPromptPack(ctx, promptPack)
+
+				// Should return a request for the AgentRuntime
+				Expect(requests).To(HaveLen(1))
+				Expect(requests[0].Name).To(Equal("test-ar-with-pack"))
+				Expect(requests[0].Namespace).To(Equal("watch-pack-test"))
+			})
+
+			It("should return empty when no AgentRuntimes reference the PromptPack", func() {
+				// Create a test namespace
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "watch-pack-empty-test",
+					},
+				}
+				Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, ns)
+				}()
+
+				// Create a PromptPack that nothing references
+				promptPack := &omniav1alpha1.PromptPack{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "unreferenced-pack",
+						Namespace: "watch-pack-empty-test",
+					},
+					Spec: omniav1alpha1.PromptPackSpec{
+						Version: "1.0.0",
+						Source: omniav1alpha1.PromptPackSource{
+							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						},
+						Rollout: omniav1alpha1.RolloutStrategy{
+							Type: omniav1alpha1.RolloutStrategyImmediate,
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, promptPack)
+				}()
+
+				// Call findAgentRuntimesForPromptPack
+				requests := reconciler.findAgentRuntimesForPromptPack(ctx, promptPack)
+
+				// Should return empty
+				Expect(requests).To(BeEmpty())
+			})
+		})
+	})
 })

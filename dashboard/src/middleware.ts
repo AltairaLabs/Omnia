@@ -30,6 +30,9 @@ const PUBLIC_ROUTES = [
   "/verify-email",
   "/_next",
   "/favicon.ico",
+  // Static assets from public directory
+  "/logo.svg",
+  "/logo-dark.svg",
 ];
 
 /**

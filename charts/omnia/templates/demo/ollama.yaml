@@ -45,6 +45,65 @@ spec:
         app.kubernetes.io/name: ollama
         app.kubernetes.io/part-of: {{ include "omnia.name" . }}
     spec:
+      initContainers:
+        # Pull the model before starting the server
+        # This runs Ollama temporarily to pull the model to the shared volume
+        - name: pull-model
+          image: "{{ .Values.demo.ollama.image.repository }}:{{ .Values.demo.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.demo.ollama.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting model pull process..."
+              # Start Ollama in the background
+              ollama serve &
+              OLLAMA_PID=$!
+
+              # Wait for Ollama to be ready
+              echo "Waiting for Ollama to start..."
+              for i in $(seq 1 30); do
+                if ollama list >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 1
+              done
+
+              # Function to pull a model if not exists
+              pull_model() {
+                MODEL=$1
+                MODEL_PATTERN=$(echo "$MODEL" | sed 's/:/ /')
+                if ollama list | grep -q "$MODEL_PATTERN"; then
+                  echo "Model $MODEL already exists, skipping pull"
+                else
+                  echo "Pulling model $MODEL (this may take several minutes)..."
+                  ollama pull "$MODEL"
+                  echo "Model $MODEL pull complete!"
+                fi
+              }
+
+              # Pull primary model
+              pull_model "{{ .Values.demo.ollama.model }}"
+
+              # Pull additional models
+              {{- range .Values.demo.ollama.additionalModels }}
+              pull_model "{{ . }}"
+              {{- end }}
+
+              # Stop Ollama
+              kill $OLLAMA_PID 2>/dev/null || true
+              wait $OLLAMA_PID 2>/dev/null || true
+              echo "Init container complete"
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
       containers:
         # Ollama LLM server
         - name: ollama
@@ -63,6 +122,8 @@ spec:
           env:
             - name: OLLAMA_KEEP_ALIVE
               value: {{ .Values.demo.ollama.keepAlive | quote }}
+            - name: OLLAMA_NUM_CTX
+              value: {{ .Values.demo.ollama.numCtx | quote }}
             - name: OLLAMA_HOST
               {{- if $opaSidecar }}
               # Listen on internal port when OPA sidecar is enabled

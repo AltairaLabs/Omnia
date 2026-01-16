@@ -62,6 +62,13 @@ spec:
               defaults:
                 description: defaults contains provider tuning parameters.
                 properties:
+                  contextWindow:
+                    description: |-
+                      contextWindow is the model's maximum context size in tokens.
+                      When conversation history exceeds this budget, truncation is applied.
+                      If not specified, no automatic truncation is performed.
+                    format: int32
+                    type: integer
                   maxTokens:
                     description: maxTokens limits the maximum number of tokens in
                       the response.
@@ -77,6 +84,18 @@ spec:
                     description: |-
                       topP controls nucleus sampling (0.0-1.0).
                       Specified as a string to support decimal values (e.g., "0.9").
+                    type: string
+                  truncationStrategy:
+                    default: sliding
+                    description: |-
+                      truncationStrategy defines how to handle context overflow.
+                      - sliding: Remove oldest messages first (default)
+                      - summarize: Summarize old messages before removing
+                      - custom: Delegate to custom runtime implementation
+                    enum:
+                    - sliding
+                    - summarize
+                    - custom
                     type: string
                 type: object
               model:

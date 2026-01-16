@@ -31,6 +31,9 @@ spec:
     name: ollama-credentials
   defaults:
     temperature: "0.7"
+    # Context window budget - should match or be less than numCtx
+    contextWindow: {{ .Values.demo.ollama.contextWindow }}
+    truncationStrategy: sliding
 ---
 # ConfigMap for the demo PromptPack (vision-capable)
 apiVersion: v1
@@ -108,4 +111,263 @@ spec:
     replicas: {{ .Values.demo.agent.replicas }}
     resources:
       {{- toYaml .Values.demo.agent.resources | nindent 6 }}
+  {{- with .Values.demo.agent.console }}
+  console:
+    maxFileSize: {{ .maxFileSize | int64 }}
+    maxFiles: {{ .maxFiles }}
+    allowedAttachmentTypes:
+      {{- toYaml .allowedAttachmentTypes | nindent 6 }}
+    {{- with .mediaRequirements }}
+    mediaRequirements:
+      image:
+        maxDimensions:
+          width: {{ .image.maxWidth }}
+          height: {{ .image.maxHeight }}
+        recommendedDimensions:
+          width: {{ .image.recommendedWidth }}
+          height: {{ .image.recommendedHeight }}
+        maxSizeBytes: {{ .image.maxSizeBytes | int64 }}
+        preferredFormat: {{ .image.preferredFormat | quote }}
+        compressionGuidance: {{ .image.compressionGuidance | quote }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- /* ============================================================================ */ -}}
+{{- /* Audio Demo Resources (Gemini-based) */ -}}
+{{- /* ============================================================================ */ -}}
+{{- if and .Values.demo.enabled .Values.demo.audioDemo.enabled }}
+---
+# Provider configuration for Gemini
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: gemini
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-audio-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  type: gemini
+  model: {{ .Values.demo.audioDemo.gemini.model }}
+  baseURL: {{ .Values.demo.audioDemo.gemini.baseURL }}
+  secretRef:
+    name: {{ .Values.demo.audioDemo.gemini.secretName }}
+  defaults:
+    temperature: {{ .Values.demo.audioDemo.gemini.temperature | quote }}
+  pricing:
+    inputCostPer1K: {{ .Values.demo.audioDemo.gemini.pricing.inputCostPer1K | quote }}
+    outputCostPer1K: {{ .Values.demo.audioDemo.gemini.pricing.outputCostPer1K | quote }}
+    cachedCostPer1K: {{ .Values.demo.audioDemo.gemini.pricing.cachedCostPer1K | quote }}
+---
+# ConfigMap for the audio demo PromptPack
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-audio-prompts
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-audio-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-audio-prompts",
+      "name": "Demo Audio Prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Audio Assistant",
+          "version": "1.0.0",
+          "system_template": {{ .Values.demo.audioDemo.promptPack.systemPrompt | toJson }},
+          "parameters": {
+            "temperature": {{ .Values.demo.audioDemo.gemini.temperature }}
+          }
+        }
+      }
+    }
+---
+# PromptPack for the audio demo agent
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-audio-prompts
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-audio-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-audio-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+---
+# Audio Demo AgentRuntime using Gemini with audio capabilities
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.demo.audioDemo.agent.name }}
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-audio-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  promptPackRef:
+    name: demo-audio-prompts
+  providerRef:
+    name: gemini
+  facade:
+    type: websocket
+    port: 8080
+    handler: {{ .Values.demo.audioDemo.agent.handler }}
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.demo.audioDemo.agent.replicas }}
+    resources:
+      {{- toYaml .Values.demo.audioDemo.agent.resources | nindent 6 }}
+    {{- if .Values.demo.audioDemo.agent.logLevel }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: {{ .Values.demo.audioDemo.agent.logLevel | quote }}
+    {{- end }}
+  {{- with .Values.demo.audioDemo.console }}
+  console:
+    maxFileSize: {{ .maxFileSize | int64 }}
+    maxFiles: {{ .maxFiles }}
+    allowedAttachmentTypes:
+      {{- toYaml .allowedAttachmentTypes | nindent 6 }}
+    {{- with .mediaRequirements }}
+    mediaRequirements:
+      {{- with .audio }}
+      audio:
+        maxDurationSeconds: {{ .maxDurationSeconds }}
+        recommendedSampleRate: {{ .recommendedSampleRate }}
+        supportsSegmentSelection: {{ .supportsSegmentSelection }}
+      {{- end }}
+      {{- with .image }}
+      image:
+        maxDimensions:
+          width: {{ .maxWidth }}
+          height: {{ .maxHeight }}
+        recommendedDimensions:
+          width: {{ .recommendedWidth }}
+          height: {{ .recommendedHeight }}
+        maxSizeBytes: {{ .maxSizeBytes | int64 }}
+        preferredFormat: {{ .preferredFormat | quote }}
+        compressionGuidance: {{ .compressionGuidance | quote }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- /* ============================================================================ */ -}}
+{{- /* Tools Demo Resources (llama3.2 with tool calling) */ -}}
+{{- /* ============================================================================ */ -}}
+{{- if and .Values.demo.enabled .Values.demo.toolsDemo.enabled }}
+---
+# Provider configuration for llama3.2 (tool-capable)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: ollama-tools
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-tools-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  type: ollama
+  model: llama3.2:3b
+  baseURL: http://ollama.{{ .Values.demo.namespace }}:11434
+  secretRef:
+    name: ollama-credentials
+  defaults:
+    temperature: "0.7"
+    contextWindow: {{ .Values.demo.ollama.contextWindow }}
+    truncationStrategy: sliding
+---
+# ConfigMap for the tools demo PromptPack
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-tools-prompts
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-tools-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-tools-prompts",
+      "name": "Demo Tools Prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Tools Assistant",
+          "version": "1.0.0",
+          "system_template": {{ .Values.demo.toolsDemo.promptPack.systemPrompt | toJson }},
+          "parameters": {
+            "temperature": 0.7
+          }
+        }
+      }
+    }
+---
+# PromptPack for the tools demo agent
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-tools-prompts
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-tools-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-tools-prompts
+  version: "1.0.0"
+  rollout:
+    type: immediate
+---
+# Tools Demo AgentRuntime using llama3.2 with tool capabilities
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.demo.toolsDemo.agent.name }}
+  namespace: {{ .Values.demo.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-tools-demo
+    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+spec:
+  promptPackRef:
+    name: demo-tools-prompts
+  providerRef:
+    name: ollama-tools
+  facade:
+    type: websocket
+    port: 8080
+    handler: {{ .Values.demo.toolsDemo.agent.handler }}
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.demo.toolsDemo.agent.replicas }}
+    resources:
+      {{- toYaml .Values.demo.toolsDemo.agent.resources | nindent 6 }}
 {{- end }}

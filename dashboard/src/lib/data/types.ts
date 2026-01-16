@@ -135,16 +135,18 @@ export interface CostAllocationItem {
 
 /**
  * Cost time series data point.
+ * Uses dynamic provider keys instead of hardcoded providers.
  */
 export interface CostTimeSeriesPoint {
   timestamp: string;
-  anthropic: number;
-  openai: number;
+  /** Cost per provider (e.g., { anthropic: 0.5, openai: 0.3, mock: 0.1 }) */
+  byProvider: Record<string, number>;
   total: number;
 }
 
 /**
  * Cost summary with totals and breakdowns.
+ * Uses dynamic provider data instead of hardcoded anthropic/openai.
  */
 export interface CostSummary {
   totalCost: number;
@@ -153,11 +155,9 @@ export interface CostSummary {
   totalCacheSavings: number;
   totalRequests: number;
   totalTokens: number;
-  anthropicCost: number;
-  openaiCost: number;
+  inputTokens: number;
+  outputTokens: number;
   projectedMonthlyCost: number;
-  anthropicPercent: number;
-  openaiPercent: number;
   inputPercent: number;
   outputPercent: number;
 }

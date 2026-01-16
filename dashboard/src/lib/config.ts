@@ -12,6 +12,8 @@ export interface RuntimeConfig {
   readOnlyMessage: string;
   wsProxyUrl: string;
   grafanaUrl: string;
+  lokiEnabled: boolean;
+  tempoEnabled: boolean;
 }
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -53,6 +55,8 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
         readOnlyMessage: "This dashboard is in read-only mode",
         wsProxyUrl: "",
         grafanaUrl: "",
+        lokiEnabled: false,
+        tempoEnabled: false,
       };
     })
     .finally(() => {

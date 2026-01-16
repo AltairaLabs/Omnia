@@ -46,7 +46,13 @@ spec:
             {{- end }}
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             - --facade-image={{ .Values.facade.image.repository }}:{{ .Values.facade.image.tag | default .Chart.AppVersion }}
+            - --facade-image-pull-policy={{ .Values.facade.image.pullPolicy }}
             - --framework-image={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
+            - --framework-image-pull-policy={{ .Values.framework.image.pullPolicy }}
+            {{- if .Values.tracing.enabled }}
+            - --tracing-enabled=true
+            - --tracing-endpoint={{ .Values.tracing.endpoint }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}

@@ -1,8 +1,12 @@
 # Go
 bin/
+/runtime
 *.exe
 *.test
 *.out
+go.work
+go.work.sum
+promptkit-local/
 
 # Node
 node_modules/
@@ -40,3 +44,5 @@ charts/*/Chart.lock
 
 # Local backlog (not for public repo)
 docs/local-backlog/
+
+.mcp.json

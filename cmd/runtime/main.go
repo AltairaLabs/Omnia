@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/go-logr/zapr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -41,8 +43,18 @@ import (
 )
 
 func main() {
-	// Create logger
-	zapLog, err := zap.NewProduction()
+	// Create logger with configurable log level
+	var zapLog *zap.Logger
+	var err error
+
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "debug" || logLevel == "trace" {
+		cfg := zap.NewDevelopmentConfig()
+		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+		zapLog, err = cfg.Build()
+	} else {
+		zapLog, err = zap.NewProduction()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
 		os.Exit(1)
@@ -67,7 +79,9 @@ func main() {
 		"providerType", cfg.ProviderType,
 		"model", cfg.Model,
 		"baseURL", cfg.BaseURL,
-		"mockProvider", cfg.MockProvider)
+		"mockProvider", cfg.MockProvider,
+		"toolsConfigPath", cfg.ToolsConfigPath,
+		"tracingEnabled", cfg.TracingEnabled)
 
 	// Create state store for conversation persistence
 	var store statestore.Store
@@ -124,8 +138,31 @@ func main() {
 	}
 
 	// Create Prometheus metrics
-	metrics := pkruntime.NewMetrics(cfg.AgentName, cfg.Namespace)
+	metrics := pkruntime.NewMetrics(pkruntime.MetricsConfig{
+		AgentName:            cfg.AgentName,
+		Namespace:            cfg.Namespace,
+		PromptPackName:       cfg.PromptPackName,
+		PromptPackNamespace:  cfg.PromptPackNamespace,
+		ProviderRefName:      cfg.ProviderRefName,
+		ProviderRefNamespace: cfg.ProviderRefNamespace,
+	})
 	runtimeMetrics := pkruntime.NewRuntimeMetrics(cfg.AgentName, cfg.Namespace)
+
+	// Debug: Log metric creation and create a test gauge
+	log.Info("prometheus metrics created",
+		"metricsNil", metrics == nil,
+		"runtimeMetricsNil", runtimeMetrics == nil)
+
+	// Test gauge to verify Prometheus registration is working
+	testGauge := promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "omnia_runtime_info",
+		Help: "Runtime information gauge (always 1)",
+		ConstLabels: prometheus.Labels{
+			"agent":     cfg.AgentName,
+			"namespace": cfg.Namespace,
+		},
+	})
+	testGauge.Set(1)
 
 	// Create runtime server
 	serverOpts := []pkruntime.ServerOption{
@@ -141,6 +178,8 @@ func main() {
 		pkruntime.WithRuntimeMetrics(runtimeMetrics),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 		pkruntime.WithBaseURL(cfg.BaseURL),
+		pkruntime.WithContextWindow(cfg.ContextWindow),
+		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
@@ -148,7 +187,7 @@ func main() {
 	runtimeServer := pkruntime.NewServer(serverOpts...)
 	defer func() { _ = runtimeServer.Close() }()
 
-	// Initialize tools from config
+	// Initialize tools from config (optional - no tools config means tools are disabled)
 	if cfg.ToolsConfigPath != "" {
 		initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := runtimeServer.InitializeTools(initCtx); err != nil {
@@ -159,6 +198,8 @@ func main() {
 			initCancel()
 			log.Info("tools initialized", "configPath", cfg.ToolsConfigPath)
 		}
+	} else {
+		log.V(1).Info("tools disabled (no config path specified)")
 	}
 
 	// Create gRPC server with increased message size for multimodal content

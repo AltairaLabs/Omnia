@@ -77,8 +77,96 @@ export interface AgentRuntimeSpec {
       };
     };
   };
+  /** extraPodAnnotations defines additional annotations to add to the agent pods.
+   * Use this for integrations like service meshes, logging agents, or monitoring tools. */
+  extraPodAnnotations?: Record<string, string>;
   /** facade configures the client-facing connection interface. */
   facade: {
+    /** extraEnv defines additional environment variables for the facade container.
+     * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
+    extraEnv?: {
+      /** Name of the environment variable.
+       * May consist of any printable ASCII characters except '='. */
+      name: string;
+      /** Variable references $(VAR_NAME) are expanded
+       * using the previously defined environment variables in the container and
+       * any service environment variables. If a variable cannot be resolved,
+       * the reference in the input string will be unchanged. Double $$ are reduced
+       * to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+       * "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+       * Escaped references will never be expanded, regardless of whether the variable
+       * exists or not.
+       * Defaults to "". */
+      value?: string;
+      /** Source for the environment variable's value. Cannot be used if value is not empty. */
+      valueFrom?: {
+        /** Selects a key of a ConfigMap. */
+        configMapKeyRef?: {
+          /** The key to select. */
+          key: string;
+          /** Name of the referent.
+           * This field is effectively required, but due to backwards compatibility is
+           * allowed to be empty. Instances of this type with an empty value here are
+           * almost certainly wrong.
+           * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+          name?: string;
+          /** Specify whether the ConfigMap or its key must be defined */
+          optional?: boolean;
+        };
+        /** Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+         * spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs. */
+        fieldRef?: {
+          /** Version of the schema the FieldPath is written in terms of, defaults to "v1". */
+          apiVersion?: string;
+          /** Path of the field to select in the specified API version. */
+          fieldPath: string;
+        };
+        /** FileKeyRef selects a key of the env file.
+         * Requires the EnvFiles feature gate to be enabled. */
+        fileKeyRef?: {
+          /** The key within the env file. An invalid key will prevent the pod from starting.
+           * The keys defined within a source may consist of any printable ASCII characters except '='.
+           * During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters. */
+          key: string;
+          /** Specify whether the file or its key must be defined. If the file or key
+           * does not exist, then the env var is not published.
+           * If optional is set to true and the specified key does not exist,
+           * the environment variable will not be set in the Pod's containers.
+           * 
+           * If optional is set to false and the specified key does not exist,
+           * an error will be returned during Pod creation. */
+          optional?: boolean;
+          /** The path within the volume from which to select the file.
+           * Must be relative and may not contain the '..' path or start with '..'. */
+          path: string;
+          /** The name of the volume mount containing the env file. */
+          volumeName: string;
+        };
+        /** Selects a resource of the container: only resources limits and requests
+         * (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported. */
+        resourceFieldRef?: {
+          /** Container name: required for volumes, optional for env vars */
+          containerName?: string;
+          /** Specifies the output format of the exposed resources, defaults to "1" */
+          divisor?: unknown;
+          /** Required: resource to select */
+          resource: string;
+        };
+        /** Selects a key of a secret in the pod's namespace */
+        secretKeyRef?: {
+          /** The key of the secret to select from.  Must be a valid secret key. */
+          key: string;
+          /** Name of the referent.
+           * This field is effectively required, but due to backwards compatibility is
+           * allowed to be empty. Instances of this type with an empty value here are
+           * almost certainly wrong.
+           * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+          name?: string;
+          /** Specify whether the Secret or its key must be defined */
+          optional?: boolean;
+        };
+      };
+    }[];
     /** handler specifies the message handler mode.
      * "echo" returns input messages back (for testing connectivity).
      * "demo" provides streaming responses with simulated tool calls (for demos).
@@ -136,6 +224,10 @@ export interface AgentRuntimeSpec {
     baseURL?: string;
     /** config contains provider tuning parameters. */
     config?: {
+      /** contextWindow is the model's maximum context size in tokens.
+       * When conversation history exceeds this budget, truncation is applied.
+       * If not specified, no automatic truncation is performed. */
+      contextWindow?: number;
       /** maxTokens limits the maximum number of tokens in the response. */
       maxTokens?: number;
       /** temperature controls randomness in responses (0.0-2.0).
@@ -145,6 +237,11 @@ export interface AgentRuntimeSpec {
       /** topP controls nucleus sampling (0.0-1.0).
        * Specified as a string to support decimal values (e.g., "0.9"). */
       topP?: string;
+      /** truncationStrategy defines how to handle context overflow.
+       * - sliding: Remove oldest messages first (default)
+       * - summarize: Summarize old messages before removing
+       * - custom: Delegate to custom runtime implementation */
+      truncationStrategy?: "sliding" | "summarize" | "custom";
     };
     /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
      * If not specified, the provider's default model is used. */
@@ -676,6 +773,91 @@ export interface AgentRuntimeSpec {
        * Use "keda" for advanced scaling (scale to zero, Prometheus metrics, cron). */
       type?: "hpa" | "keda";
     };
+    /** extraEnv defines additional environment variables for the runtime container.
+     * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
+    extraEnv?: {
+      /** Name of the environment variable.
+       * May consist of any printable ASCII characters except '='. */
+      name: string;
+      /** Variable references $(VAR_NAME) are expanded
+       * using the previously defined environment variables in the container and
+       * any service environment variables. If a variable cannot be resolved,
+       * the reference in the input string will be unchanged. Double $$ are reduced
+       * to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+       * "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+       * Escaped references will never be expanded, regardless of whether the variable
+       * exists or not.
+       * Defaults to "". */
+      value?: string;
+      /** Source for the environment variable's value. Cannot be used if value is not empty. */
+      valueFrom?: {
+        /** Selects a key of a ConfigMap. */
+        configMapKeyRef?: {
+          /** The key to select. */
+          key: string;
+          /** Name of the referent.
+           * This field is effectively required, but due to backwards compatibility is
+           * allowed to be empty. Instances of this type with an empty value here are
+           * almost certainly wrong.
+           * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+          name?: string;
+          /** Specify whether the ConfigMap or its key must be defined */
+          optional?: boolean;
+        };
+        /** Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+         * spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs. */
+        fieldRef?: {
+          /** Version of the schema the FieldPath is written in terms of, defaults to "v1". */
+          apiVersion?: string;
+          /** Path of the field to select in the specified API version. */
+          fieldPath: string;
+        };
+        /** FileKeyRef selects a key of the env file.
+         * Requires the EnvFiles feature gate to be enabled. */
+        fileKeyRef?: {
+          /** The key within the env file. An invalid key will prevent the pod from starting.
+           * The keys defined within a source may consist of any printable ASCII characters except '='.
+           * During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters. */
+          key: string;
+          /** Specify whether the file or its key must be defined. If the file or key
+           * does not exist, then the env var is not published.
+           * If optional is set to true and the specified key does not exist,
+           * the environment variable will not be set in the Pod's containers.
+           * 
+           * If optional is set to false and the specified key does not exist,
+           * an error will be returned during Pod creation. */
+          optional?: boolean;
+          /** The path within the volume from which to select the file.
+           * Must be relative and may not contain the '..' path or start with '..'. */
+          path: string;
+          /** The name of the volume mount containing the env file. */
+          volumeName: string;
+        };
+        /** Selects a resource of the container: only resources limits and requests
+         * (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported. */
+        resourceFieldRef?: {
+          /** Container name: required for volumes, optional for env vars */
+          containerName?: string;
+          /** Specifies the output format of the exposed resources, defaults to "1" */
+          divisor?: unknown;
+          /** Required: resource to select */
+          resource: string;
+        };
+        /** Selects a key of a secret in the pod's namespace */
+        secretKeyRef?: {
+          /** The key of the secret to select from.  Must be a valid secret key. */
+          key: string;
+          /** Name of the referent.
+           * This field is effectively required, but due to backwards compatibility is
+           * allowed to be empty. Instances of this type with an empty value here are
+           * almost certainly wrong.
+           * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+          name?: string;
+          /** Specify whether the Secret or its key must be defined */
+          optional?: boolean;
+        };
+      };
+    }[];
     /** nodeSelector is a map of node labels for pod scheduling. */
     nodeSelector?: Record<string, string>;
     /** replicas is the desired number of agent runtime pods.

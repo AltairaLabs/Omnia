@@ -11,6 +11,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCost, formatTokens } from "@/lib/pricing";
+import { getProviderDisplayName, getProviderColor } from "@/lib/provider-utils";
 import type { CostAllocationItem } from "@/lib/data/types";
 
 interface CostBreakdownTableProps {
@@ -63,7 +64,7 @@ export function CostBreakdownTable({
           </TableHeader>
           <TableBody>
             {sortedData.map((item) => (
-              <TableRow key={`${item.namespace}/${item.agent}`}>
+              <TableRow key={`${item.namespace}/${item.agent}/${item.model}`}>
                 <TableCell>
                   <div className="flex flex-col">
                     <span className="font-medium">{item.agent}</span>
@@ -73,20 +74,16 @@ export function CostBreakdownTable({
                 <TableCell>
                   <Badge
                     variant="outline"
-                    className={
-                      item.provider === "anthropic"
-                        ? "border-orange-500 text-orange-600 dark:text-orange-400"
-                        : "border-green-500 text-green-600 dark:text-green-400"
-                    }
+                    style={{
+                      borderColor: getProviderColor(item.provider),
+                      color: getProviderColor(item.provider),
+                    }}
                   >
-                    {item.provider === "anthropic" ? "Anthropic" : "OpenAI"}
+                    {getProviderDisplayName(item.provider)}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
-                  {item.model.includes("sonnet") && "Sonnet 4"}
-                  {item.model.includes("opus") && "Opus 4"}
-                  {item.model.includes("gpt-4-turbo") && "GPT-4 Turbo"}
-                  {item.model.includes("gpt-3.5") && "GPT-3.5"}
+                  {item.model}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
                   {formatTokens(item.inputTokens + item.outputTokens)}

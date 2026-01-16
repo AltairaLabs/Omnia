@@ -277,6 +277,50 @@ func TestDefaultLLMDurationBuckets(t *testing.T) {
 	}
 }
 
+func TestLLMMetrics_Initialize(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	cfg := LLMMetricsConfig{
+		AgentName: "test-agent",
+		Namespace: "test-ns",
+	}
+
+	m := newLLMMetricsWithRegistry(cfg, reg)
+
+	// Initialize metrics with provider and model
+	m.Initialize("anthropic", "claude-sonnet-4")
+
+	// Verify metrics were pre-registered by gathering them
+	metrics, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	// Check that we have metrics registered
+	if len(metrics) == 0 {
+		t.Error("No metrics gathered after Initialize")
+	}
+
+	// Verify specific metric families exist with the initialized labels
+	metricNames := make(map[string]bool)
+	for _, mf := range metrics {
+		metricNames[mf.GetName()] = true
+	}
+
+	expectedNames := []string{
+		"omnia_llm_input_tokens_total",
+		"omnia_llm_output_tokens_total",
+		"omnia_llm_cache_hits_total",
+		"omnia_llm_requests_total",
+		"omnia_llm_cost_usd_total",
+	}
+
+	for _, name := range expectedNames {
+		if !metricNames[name] {
+			t.Errorf("Expected metric %q not found after Initialize", name)
+		}
+	}
+}
+
 // newLLMMetricsWithRegistry creates LLM metrics with a custom registry for testing.
 // This avoids conflicts with the global prometheus registry during tests.
 func newLLMMetricsWithRegistry(cfg LLMMetricsConfig, reg *prometheus.Registry) *LLMMetrics {

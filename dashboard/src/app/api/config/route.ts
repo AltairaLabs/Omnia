@@ -17,5 +17,8 @@ export async function GET() {
     wsProxyUrl: process.env.NEXT_PUBLIC_WS_PROXY_URL || "",
     // Grafana URL for metrics dashboards (runtime config for K8s/Tilt deployments)
     grafanaUrl: process.env.NEXT_PUBLIC_GRAFANA_URL || "",
+    // Loki/Tempo enabled flags (for showing links to log/trace explorers)
+    lokiEnabled: process.env.NEXT_PUBLIC_LOKI_ENABLED === "true",
+    tempoEnabled: process.env.NEXT_PUBLIC_TEMPO_ENABLED === "true",
   });
 }

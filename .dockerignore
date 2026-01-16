@@ -12,3 +12,6 @@
 
 # Re-include embedded schema files for go:embed
 !internal/schema/*.json
+
+# Re-include local PromptKit source for development builds
+!promptkit-local/**

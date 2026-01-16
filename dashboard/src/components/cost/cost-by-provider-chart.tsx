@@ -10,6 +10,7 @@ import {
   Tooltip,
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
+import { getProviderColor } from "@/lib/provider-utils";
 
 interface ProviderCostData {
   name: string;
@@ -24,12 +25,6 @@ interface CostByProviderChartProps {
   title?: string;
   description?: string;
 }
-
-// Chart colors matching globals.css
-const COLORS: Record<string, string> = {
-  anthropic: "#3B82F6", // blue - chart-1
-  openai: "#8B5CF6", // purple - chart-2
-};
 
 export function CostByProviderChart({
   data,
@@ -72,10 +67,10 @@ export function CostByProviderChart({
                 dataKey="cost"
                 nameKey="name"
               >
-                {chartData.map((entry) => (
+                {chartData.map((entry, index) => (
                   <Cell
                     key={`cell-${entry.provider}`}
-                    fill={COLORS[entry.provider] || "#06B6D4"}
+                    fill={getProviderColor(entry.provider, index)}
                   />
                 ))}
               </Pie>

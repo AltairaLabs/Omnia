@@ -90,6 +90,11 @@ type FacadeConfig struct {
 	// Use this to specify a custom facade image or private registry.
 	// +optional
 	Image string `json:"image,omitempty"`
+
+	// extraEnv defines additional environment variables for the facade container.
+	// Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.
@@ -261,6 +266,19 @@ const (
 	ProviderTypeMock ProviderType = "mock"
 )
 
+// TruncationStrategy defines how to handle context overflow.
+// +kubebuilder:validation:Enum=sliding;summarize;custom
+type TruncationStrategy string
+
+const (
+	// TruncationStrategySliding removes oldest messages first (default).
+	TruncationStrategySliding TruncationStrategy = "sliding"
+	// TruncationStrategySummarize summarizes old messages before removing.
+	TruncationStrategySummarize TruncationStrategy = "summarize"
+	// TruncationStrategyCustom delegates to custom runtime implementation.
+	TruncationStrategyCustom TruncationStrategy = "custom"
+)
+
 // ProviderDefaults defines tuning parameters for the LLM provider.
 type ProviderDefaults struct {
 	// temperature controls randomness in responses (0.0-2.0).
@@ -277,6 +295,20 @@ type ProviderDefaults struct {
 	// maxTokens limits the maximum number of tokens in the response.
 	// +optional
 	MaxTokens *int32 `json:"maxTokens,omitempty"`
+
+	// contextWindow is the model's maximum context size in tokens.
+	// When conversation history exceeds this budget, truncation is applied.
+	// If not specified, no automatic truncation is performed.
+	// +optional
+	ContextWindow *int32 `json:"contextWindow,omitempty"`
+
+	// truncationStrategy defines how to handle context overflow.
+	// - sliding: Remove oldest messages first (default)
+	// - summarize: Summarize old messages before removing
+	// - custom: Delegate to custom runtime implementation
+	// +kubebuilder:default=sliding
+	// +optional
+	TruncationStrategy TruncationStrategy `json:"truncationStrategy,omitempty"`
 }
 
 // ProviderPricing defines cost tracking configuration for the provider.
@@ -579,6 +611,11 @@ type RuntimeConfig struct {
 	// Each mount must reference a volume defined in the volumes field.
 	// +optional
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
+	// extraEnv defines additional environment variables for the runtime container.
+	// Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
@@ -629,6 +666,11 @@ type AgentRuntimeSpec struct {
 	// Use this to customize allowed file attachment types and size limits.
 	// +optional
 	Console *ConsoleConfig `json:"console,omitempty"`
+
+	// extraPodAnnotations defines additional annotations to add to the agent pods.
+	// Use this for integrations like service meshes, logging agents, or monitoring tools.
+	// +optional
+	ExtraPodAnnotations map[string]string `json:"extraPodAnnotations,omitempty"`
 }
 
 // AgentRuntimePhase represents the current phase of the AgentRuntime.

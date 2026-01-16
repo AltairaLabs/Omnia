@@ -55,6 +55,15 @@ type LLMMetrics struct {
 type LLMMetricsConfig struct {
 	AgentName string
 	Namespace string
+
+	// PromptPack CRD reference (for Grafana queries)
+	PromptPackName      string
+	PromptPackNamespace string
+
+	// Provider CRD reference (for Grafana queries, only when using providerRef)
+	ProviderRefName      string
+	ProviderRefNamespace string
+
 	// Buckets for the request duration histogram.
 	// If nil, defaults to standard LLM buckets.
 	DurationBuckets []float64
@@ -67,8 +76,12 @@ var DefaultLLMDurationBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60, 120, 300}
 // NewLLMMetrics creates and registers all Prometheus metrics for LLM interactions.
 func NewLLMMetrics(cfg LLMMetricsConfig) *LLMMetrics {
 	labels := prometheus.Labels{
-		"agent":     cfg.AgentName,
-		"namespace": cfg.Namespace,
+		"agent":                  cfg.AgentName,
+		"namespace":              cfg.Namespace,
+		"promptpack_name":        cfg.PromptPackName,
+		"promptpack_namespace":   cfg.PromptPackNamespace,
+		"provider_ref_name":      cfg.ProviderRefName,
+		"provider_ref_namespace": cfg.ProviderRefNamespace,
 	}
 
 	buckets := cfg.DurationBuckets
@@ -114,6 +127,23 @@ func NewLLMMetrics(cfg LLMMetricsConfig) *LLMMetrics {
 			Buckets:     buckets,
 		}, []string{"provider", "model"}),
 	}
+}
+
+// Initialize pre-registers metrics with the given label values.
+// This ensures metrics appear in /metrics output immediately at startup,
+// even before any LLM requests are made. For CounterVec/HistogramVec,
+// Prometheus only shows metrics after they've been observed with specific label values.
+func (m *LLMMetrics) Initialize(provider, model string) {
+	// Initialize counters with zero (Add(0) registers the label combination)
+	m.InputTokensTotal.WithLabelValues(provider, model).Add(0)
+	m.OutputTokensTotal.WithLabelValues(provider, model).Add(0)
+	m.CacheHitsTotal.WithLabelValues(provider, model).Add(0)
+	m.RequestsTotal.WithLabelValues(provider, model, StatusSuccess).Add(0)
+	m.RequestsTotal.WithLabelValues(provider, model, StatusError).Add(0)
+	m.CostUSDTotal.WithLabelValues(provider, model).Add(0)
+	// Histograms are initialized by observing zero (won't affect distribution)
+	// Note: We don't observe 0 for histograms as it would add a data point
+	// The histogram will appear once first real observation is made
 }
 
 // LLMRequestMetrics contains the metrics for a single LLM request.

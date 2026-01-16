@@ -10,11 +10,39 @@ import {
   CostUnavailableBanner,
 } from "@/components/cost";
 import { formatCost, formatTokens } from "@/lib/pricing";
+import { getProviderDisplayName } from "@/lib/provider-utils";
 import { DollarSign, TrendingUp, Coins, PiggyBank, Loader2 } from "lucide-react";
 import { useCosts } from "@/hooks";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { ProviderCost } from "@/lib/data/types";
 
 const NO_DATA_AVAILABLE = "No data available";
+
+/**
+ * Format provider breakdown for display.
+ * Shows top 2 providers with their costs.
+ */
+function formatProviderBreakdown(byProvider: ProviderCost[]): React.ReactNode {
+  if (byProvider.length === 0) {
+    return NO_DATA_AVAILABLE;
+  }
+
+  // Sort by cost descending and take top 2
+  const topProviders = [...byProvider].sort((a, b) => b.cost - a.cost).slice(0, 2);
+
+  return (
+    <>
+      {topProviders.map((provider, index) => (
+        <span key={provider.provider}>
+          {index > 0 && " / "}
+          <span className={index === 0 ? "text-primary" : ""}>
+            {formatCost(provider.cost)} {getProviderDisplayName(provider.provider)}
+          </span>
+        </span>
+      ))}
+    </>
+  );
+}
 
 function LoadingSkeleton() {
   return (
@@ -86,18 +114,7 @@ export default function CostsPage() {
           <StatCard
             title="Total Cost (24h)"
             value={available ? formatCost(summary.totalCost) : "--"}
-            description={
-              available ? (
-                <>
-                  <span className="text-orange-600 dark:text-orange-400">
-                    {formatCost(summary.anthropicCost)} Anthropic
-                  </span>{" "}
-                  / {formatCost(summary.openaiCost)} OpenAI
-                </>
-              ) : (
-                NO_DATA_AVAILABLE
-              )
-            }
+            description={available ? formatProviderBreakdown(byProvider) : NO_DATA_AVAILABLE}
             icon={DollarSign}
           />
 
@@ -152,8 +169,8 @@ export default function CostsPage() {
           <CostBreakdownTable data={byAgent} />
         )}
 
-        {/* Empty state when available but no data */}
-        {available && byAgent.length === 0 && (
+        {/* Empty state when available but no data anywhere */}
+        {available && byAgent.length === 0 && timeSeries.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 opacity-50" />
             <p>No cost data yet. Start using your agents to see cost metrics here.</p>

@@ -32,13 +32,11 @@ function MetricCardContent({
   loading,
   available,
   metric,
-  title,
   color,
 }: Readonly<{
   loading: boolean;
   available: boolean;
   metric: SystemMetric;
-  title: string;
   color: string;
 }>) {
   const hasData = metric.series.length > 0;
@@ -73,20 +71,14 @@ function MetricCardContent({
         {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={metric.series}>
-              <defs>
-                <linearGradient id={`gradient-${title}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={color} stopOpacity={0} />
-                </linearGradient>
-              </defs>
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
+                  backgroundColor: "var(--card)",
+                  border: "1px solid var(--border)",
                   borderRadius: "6px",
                   fontSize: "12px",
                 }}
-                labelStyle={{ color: "hsl(var(--foreground))" }}
+                labelStyle={{ color: "var(--foreground)" }}
                 formatter={(value) => {
                   const num = typeof value === "number" ? value : 0;
                   return [
@@ -102,8 +94,7 @@ function MetricCardContent({
                 dataKey="value"
                 stroke={color}
                 strokeWidth={2}
-                fillOpacity={1}
-                fill={`url(#gradient-${title})`}
+                fill="none"
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -142,7 +133,6 @@ function MetricCard({
           loading={loading ?? false}
           available={available}
           metric={metric}
-          title={title}
           color={color}
         />
       </CardContent>
@@ -192,7 +182,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.requestsPerSec ?? { current: 0, display: "--", series: [], unit: "req/s" }}
           icon={Activity}
           loading={isLoading}
-          color="hsl(var(--primary))"
+          color="#3B82F6"
           available={available}
         />
         <MetricCard
@@ -201,7 +191,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.p95Latency ?? { current: 0, display: "--", series: [], unit: "ms" }}
           icon={Clock}
           loading={isLoading}
-          color="hsl(142, 76%, 36%)"
+          color="#10B981"
           available={available}
         />
         <MetricCard
@@ -210,7 +200,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.cost24h ?? { current: 0, display: "--", series: [], unit: "$" }}
           icon={DollarSign}
           loading={isLoading}
-          color="hsl(38, 92%, 50%)"
+          color="#F59E0B"
           available={available}
         />
         <MetricCard
@@ -219,7 +209,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.tokensPerMin ?? { current: 0, display: "--", series: [], unit: "tok/min" }}
           icon={Coins}
           loading={isLoading}
-          color="hsl(262, 83%, 58%)"
+          color="#8B5CF6"
           available={available}
         />
       </div>

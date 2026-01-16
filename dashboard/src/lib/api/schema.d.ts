@@ -158,6 +158,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/providers/{namespace}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific Provider */
+        get: operations["getProvider"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stats": {
         parameters: {
             query?: never;
@@ -460,15 +477,40 @@ export interface components {
         };
         ProviderSpec: {
             /** @enum {string} */
-            type?: "anthropic" | "openai" | "bedrock" | "ollama";
+            type?: "claude" | "openai" | "gemini" | "ollama" | "mock";
             model?: string;
-            secretRef?: components["schemas"]["LocalObjectReference"];
-            endpoint?: string;
+            /** @description Override the provider's default API endpoint */
+            baseURL?: string;
+            secretRef?: components["schemas"]["SecretKeyRef"];
+            defaults?: components["schemas"]["ProviderDefaults"];
+            pricing?: components["schemas"]["ProviderPricing"];
+            /** @description Enable credential validation on reconciliation */
+            validateCredentials?: boolean;
+        };
+        SecretKeyRef: {
+            name: string;
+            key?: string;
+        };
+        ProviderDefaults: {
+            temperature?: string;
+            topP?: string;
+            maxTokens?: number;
+            contextWindow?: number;
+            /** @enum {string} */
+            truncationStrategy?: "sliding" | "summarize" | "custom";
+        };
+        ProviderPricing: {
+            inputCostPer1K?: string;
+            outputCostPer1K?: string;
+            cachedCostPer1K?: string;
         };
         ProviderStatus: {
             /** @enum {string} */
-            phase?: "Pending" | "Ready" | "Failed";
+            phase?: "Ready" | "Error";
             conditions?: components["schemas"]["Condition"][];
+            /** Format: date-time */
+            lastValidatedAt?: string;
+            observedGeneration?: number;
         };
         Stats: {
             agents?: {
@@ -789,6 +831,31 @@ export interface operations {
                     "application/json": components["schemas"]["Provider"][];
                 };
             };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                namespace: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Provider"];
+                };
+            };
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };

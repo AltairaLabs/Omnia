@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useRuntimeConfig, useDemoMode, useReadOnlyMode, useGrafanaUrl } from "./use-runtime-config";
+import {
+  useRuntimeConfig,
+  useDemoMode,
+  useReadOnlyMode,
+  useGrafanaUrl,
+  useLokiEnabled,
+  useTempoEnabled,
+  useObservabilityConfig,
+} from "./use-runtime-config";
 
 // Store original fetch
 const originalFetch = global.fetch;
@@ -12,6 +20,8 @@ describe("useRuntimeConfig", () => {
     readOnlyMessage: "Test read-only message",
     wsProxyUrl: "ws://localhost:3002",
     grafanaUrl: "http://localhost:3001",
+    lokiEnabled: true,
+    tempoEnabled: false,
   };
 
   beforeEach(() => {
@@ -92,7 +102,7 @@ describe("useDemoMode", () => {
 
   it("should return isDemoMode and loading state", () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "" }),
+      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "", lokiEnabled: false, tempoEnabled: false }),
     });
 
     const { result } = renderHook(() => useDemoMode());
@@ -105,7 +115,7 @@ describe("useDemoMode", () => {
 
   it("should reflect demo mode from config", async () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "" }),
+      json: () => Promise.resolve({ demoMode: true, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "", lokiEnabled: false, tempoEnabled: false }),
     });
 
     const { result } = renderHook(() => useDemoMode());
@@ -130,7 +140,7 @@ describe("useReadOnlyMode", () => {
 
   it("should return isReadOnly, message, and loading state", () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ demoMode: false, readOnlyMode: true, readOnlyMessage: "Custom message", wsProxyUrl: "", grafanaUrl: "" }),
+      json: () => Promise.resolve({ demoMode: false, readOnlyMode: true, readOnlyMessage: "Custom message", wsProxyUrl: "", grafanaUrl: "", lokiEnabled: false, tempoEnabled: false }),
     });
 
     const { result } = renderHook(() => useReadOnlyMode());
@@ -151,6 +161,8 @@ describe("useReadOnlyMode", () => {
         readOnlyMessage: "Managed by GitOps",
         wsProxyUrl: "",
         grafanaUrl: "",
+        lokiEnabled: false,
+        tempoEnabled: false,
       }),
     });
 
@@ -183,6 +195,8 @@ describe("useGrafanaUrl", () => {
         readOnlyMessage: "",
         wsProxyUrl: "",
         grafanaUrl: "http://localhost:3001",
+        lokiEnabled: false,
+        tempoEnabled: false,
       }),
     });
 
@@ -202,6 +216,8 @@ describe("useGrafanaUrl", () => {
         readOnlyMessage: "",
         wsProxyUrl: "",
         grafanaUrl: "http://grafana.example.com:3000",
+        lokiEnabled: false,
+        tempoEnabled: false,
       }),
     });
 
@@ -212,5 +228,167 @@ describe("useGrafanaUrl", () => {
     });
 
     expect(typeof result.current.grafanaUrl).toBe("string");
+  });
+});
+
+describe("useLokiEnabled", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("should return lokiEnabled and loading state", () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+        lokiEnabled: true,
+        tempoEnabled: false,
+      }),
+    });
+
+    const { result } = renderHook(() => useLokiEnabled());
+
+    expect(result.current).toHaveProperty("lokiEnabled");
+    expect(result.current).toHaveProperty("loading");
+    expect(typeof result.current.lokiEnabled).toBe("boolean");
+    expect(typeof result.current.loading).toBe("boolean");
+  });
+
+  it("should reflect loki enabled state from config", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+        lokiEnabled: true,
+        tempoEnabled: false,
+      }),
+    });
+
+    const { result } = renderHook(() => useLokiEnabled());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(typeof result.current.lokiEnabled).toBe("boolean");
+  });
+});
+
+describe("useTempoEnabled", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("should return tempoEnabled and loading state", () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+        lokiEnabled: false,
+        tempoEnabled: true,
+      }),
+    });
+
+    const { result } = renderHook(() => useTempoEnabled());
+
+    expect(result.current).toHaveProperty("tempoEnabled");
+    expect(result.current).toHaveProperty("loading");
+    expect(typeof result.current.tempoEnabled).toBe("boolean");
+    expect(typeof result.current.loading).toBe("boolean");
+  });
+
+  it("should reflect tempo enabled state from config", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+        lokiEnabled: false,
+        tempoEnabled: true,
+      }),
+    });
+
+    const { result } = renderHook(() => useTempoEnabled());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(typeof result.current.tempoEnabled).toBe("boolean");
+  });
+});
+
+describe("useObservabilityConfig", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("should return lokiEnabled, tempoEnabled and loading state", () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+        lokiEnabled: true,
+        tempoEnabled: true,
+      }),
+    });
+
+    const { result } = renderHook(() => useObservabilityConfig());
+
+    expect(result.current).toHaveProperty("lokiEnabled");
+    expect(result.current).toHaveProperty("tempoEnabled");
+    expect(result.current).toHaveProperty("loading");
+    expect(typeof result.current.lokiEnabled).toBe("boolean");
+    expect(typeof result.current.tempoEnabled).toBe("boolean");
+    expect(typeof result.current.loading).toBe("boolean");
+  });
+
+  it("should reflect observability config from fetched config", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({
+        demoMode: false,
+        readOnlyMode: false,
+        readOnlyMessage: "",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+        lokiEnabled: true,
+        tempoEnabled: false,
+      }),
+    });
+
+    const { result } = renderHook(() => useObservabilityConfig());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(typeof result.current.lokiEnabled).toBe("boolean");
+    expect(typeof result.current.tempoEnabled).toBe("boolean");
   });
 });

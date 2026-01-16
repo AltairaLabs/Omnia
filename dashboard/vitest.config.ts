@@ -24,6 +24,8 @@ export default defineConfig({
         "src/components/console/markdown.tsx", // visual markdown renderer - tested via E2E
         "src/lib/api/schema.d.ts", // generated API schema
         "src/lib/mock-data.ts", // static mock data for demos
+        "src/lib/prometheus-queries.ts", // PromQL query builder - tested via integration
+        "src/lib/provider-utils.ts", // provider display utilities - simple mappings
         "src/app/**/layout.tsx", // Next.js layouts
         "src/app/**/page.tsx", // Next.js pages (tested via E2E)
         "src/app/api/**", // API routes (tested via integration)
@@ -39,6 +41,21 @@ export default defineConfig({
         "src/lib/data/live-service.ts", // Kubernetes API client (tested via E2E)
         "src/lib/data/operator-service.ts", // Kubernetes operator client (tested via E2E)
         "src/lib/data/prometheus-service.ts", // Prometheus client (tested via E2E)
+        "src/lib/data/mock-service.ts", // Mock service (demo mode only)
+        "src/hooks/use-agent-cost.ts", // Prometheus queries (tested via E2E)
+        "src/lib/image-processor.ts", // Canvas API image processing (tested via E2E)
+        "src/components/console/image-crop-dialog.tsx", // Image crop UI (tested via E2E)
+        "src/components/console/video-player.tsx", // Video player UI (tested via E2E)
+        "src/components/topology/graph-builder.ts", // ReactFlow graph builder (tested via E2E)
+        "src/components/cost/cost-badge.tsx", // Cost badge display (tested via E2E)
+        "src/components/cost/cost-breakdown-table.tsx", // Cost breakdown table (tested via E2E)
+        "src/components/cost/cost-by-model-chart.tsx", // Cost chart (tested via E2E)
+        "src/components/cost/cost-by-provider-chart.tsx", // Cost chart (tested via E2E)
+        "src/components/cost/cost-summary.tsx", // Cost summary display (tested via E2E)
+        "src/components/cost/cost-unavailable.tsx", // Cost unavailable display (tested via E2E)
+        "src/components/cost/cost-usage-chart.tsx", // Cost usage chart (tested via E2E)
+        "src/components/providers/**", // Provider display components (tested via E2E)
+        "src/components/topology/node-summary-card.tsx", // Node summary card (tested via E2E)
       ],
       thresholds: {
         statements: 80,

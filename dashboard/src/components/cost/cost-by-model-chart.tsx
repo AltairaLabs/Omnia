@@ -12,6 +12,7 @@ import {
   Cell,
 } from "recharts";
 import { formatCost } from "@/lib/pricing";
+import { getProviderColor, getProviderDisplayName } from "@/lib/provider-utils";
 
 interface ModelCostData {
   model: string;
@@ -27,12 +28,6 @@ interface CostByModelChartProps {
   title?: string;
   description?: string;
 }
-
-// Chart colors matching globals.css
-const PROVIDER_COLORS: Record<string, string> = {
-  anthropic: "#3B82F6", // blue - chart-1
-  openai: "#8B5CF6", // purple - chart-2
-};
 
 export function CostByModelChart({
   data,
@@ -83,26 +78,29 @@ export function CostByModelChart({
                 labelStyle={{ color: "hsl(var(--foreground))" }}
               />
               <Bar dataKey="cost" radius={[0, 4, 4, 0]}>
-                {chartData.map((entry) => (
+                {chartData.map((entry, index) => (
                   <Cell
                     key={`cell-${entry.model}`}
-                    fill={PROVIDER_COLORS[entry.provider] || "#06B6D4"}
+                    fill={getProviderColor(entry.provider, index)}
                   />
                 ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
-        {/* Legend */}
-        <div className="flex justify-center gap-6 mt-4">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#3B82F6]" />
-            <span className="text-xs text-muted-foreground">Anthropic</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#8B5CF6]" />
-            <span className="text-xs text-muted-foreground">OpenAI</span>
-          </div>
+        {/* Legend - dynamically generated from providers in data */}
+        <div className="flex justify-center gap-6 mt-4 flex-wrap">
+          {[...new Set(chartData.map((d) => d.provider))].map((provider) => (
+            <div key={provider} className="flex items-center gap-2">
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: getProviderColor(provider) }}
+              />
+              <span className="text-xs text-muted-foreground">
+                {getProviderDisplayName(provider)}
+              </span>
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>

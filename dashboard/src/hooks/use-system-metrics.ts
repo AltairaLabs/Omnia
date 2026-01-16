@@ -16,6 +16,7 @@ import {
   type PrometheusVectorResult,
   type PrometheusMatrixResult,
 } from "@/lib/prometheus";
+import { LLMQueries, SystemQueries } from "@/lib/prometheus-queries";
 
 export interface MetricDataPoint {
   time: string;
@@ -130,6 +131,7 @@ async function fetchSystemMetrics(): Promise<SystemMetrics> {
 
   try {
     // Fetch current values and time series in parallel
+    // All queries are built using the centralized query builder
     const [
       reqRateCurrent,
       reqRateSeries,
@@ -141,41 +143,17 @@ async function fetchSystemMetrics(): Promise<SystemMetrics> {
       tokensSeries,
     ] = await Promise.all([
       // Request rate (requests per second)
-      queryPrometheus("sum(rate(omnia_llm_requests_total[5m]))"),
-      queryPrometheusRange(
-        "sum(rate(omnia_llm_requests_total[5m]))",
-        oneHourAgo,
-        now,
-        "5m"
-      ),
+      queryPrometheus(SystemQueries.totalRequestRate()),
+      queryPrometheusRange(SystemQueries.totalRequestRate(), oneHourAgo, now, "5m"),
       // P95 latency (milliseconds)
-      queryPrometheus(
-        "histogram_quantile(0.95, sum(rate(omnia_facade_request_duration_seconds_bucket[5m])) by (le)) * 1000"
-      ),
-      queryPrometheusRange(
-        "histogram_quantile(0.95, sum(rate(omnia_facade_request_duration_seconds_bucket[5m])) by (le)) * 1000",
-        oneHourAgo,
-        now,
-        "5m"
-      ),
+      queryPrometheus(SystemQueries.systemP95Latency()),
+      queryPrometheusRange(SystemQueries.systemP95Latency(), oneHourAgo, now, "5m"),
       // Cost 24h (sum of all costs)
-      queryPrometheus("sum(increase(omnia_llm_cost_usd_total[24h]))"),
-      queryPrometheusRange(
-        "sum(increase(omnia_llm_cost_usd_total[1h]))",
-        oneDayAgo,
-        now,
-        "1h"
-      ),
+      queryPrometheus(SystemQueries.cost24h()),
+      queryPrometheusRange(LLMQueries.costIncrease(undefined, "1h"), oneDayAgo, now, "1h"),
       // Tokens per minute
-      queryPrometheus(
-        "sum(rate(omnia_llm_input_tokens_total[5m]) + rate(omnia_llm_output_tokens_total[5m])) * 60"
-      ),
-      queryPrometheusRange(
-        "sum(rate(omnia_llm_input_tokens_total[5m]) + rate(omnia_llm_output_tokens_total[5m])) * 60",
-        oneHourAgo,
-        now,
-        "5m"
-      ),
+      queryPrometheus(SystemQueries.tokensPerMinute()),
+      queryPrometheusRange(SystemQueries.tokensPerMinute(), oneHourAgo, now, "5m"),
     ]);
 
     // Extract current values

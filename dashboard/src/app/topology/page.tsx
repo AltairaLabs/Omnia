@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
-import { TopologyGraph, NotesPanel } from "@/components/topology";
+import { TopologyGraph, NotesPanel, NodeSummaryCard, type SelectedNode } from "@/components/topology";
 import { NamespaceFilter } from "@/components/filters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Bot, FileText, Package, Wrench, Zap } from "lucide-react";
@@ -22,8 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 export default function TopologyPage() {
-  const router = useRouter();
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
+  const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
 
   // Notes state - initialize from localStorage
   const [notes, setNotes] = useState<NotesMap>(() => {
@@ -120,24 +119,17 @@ export default function TopologyPage() {
 
   const handleNodeClick = useCallback(
     (type: string, name: string, namespace: string) => {
-      switch (type) {
-        case "agent":
-          router.push(`/agents/${name}?namespace=${namespace}`);
-          break;
-        case "promptpack":
-          router.push(`/promptpacks/${name}?namespace=${namespace}`);
-          break;
-        case "tools":
-          router.push(`/tools/${name}?namespace=${namespace}`);
-          break;
-        case "provider":
-          // Providers don't have a detail page yet
-          // Could add router.push(`/providers/${name}?namespace=${namespace}`);
-          break;
+      // Show summary card for supported node types
+      if (type === "agent" || type === "promptpack" || type === "tools" || type === "provider") {
+        setSelectedNode({ type, name, namespace });
       }
     },
-    [router]
+    []
   );
+
+  const handleCloseCard = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
 
   // Calculate stats from filtered data
   const totalTools = filteredToolRegistries.reduce(
@@ -232,7 +224,7 @@ export default function TopologyPage() {
         </div>
 
         {/* Graph */}
-        <div className="flex-1 min-h-[600px] border rounded-lg bg-card">
+        <div className="flex-1 min-h-[600px] border rounded-lg bg-card relative">
           {isLoading ? (
             <div className="flex items-center justify-center h-full">
               <Skeleton className="w-full h-full" />
@@ -249,6 +241,20 @@ export default function TopologyPage() {
               onNoteDelete={handleNoteDelete}
               className="w-full h-[600px]"
             />
+          )}
+
+          {/* Selected Node Summary Card */}
+          {selectedNode && (
+            <div className="absolute top-4 right-4 z-50">
+              <NodeSummaryCard
+                selectedNode={selectedNode}
+                agents={filteredAgents}
+                promptPacks={filteredPromptPacks}
+                toolRegistries={filteredToolRegistries}
+                providers={filteredProviders}
+                onClose={handleCloseCard}
+              />
+            </div>
           )}
         </div>
       </div>

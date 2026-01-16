@@ -201,3 +201,83 @@ export function buildDashboardUrl(
   const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
   return `${base}${path}/d/${dashboardUid}/_?${params.toString()}`;
 }
+
+export interface ExploreQueryOptions {
+  /** Time range (e.g., "now-1h", "now-24h") */
+  from?: string;
+  to?: string;
+}
+
+/**
+ * Builds a Grafana Explore URL for Loki (logs).
+ *
+ * @param config - Grafana configuration
+ * @param namespace - Kubernetes namespace
+ * @param agentName - Agent name for filtering
+ * @param options - Optional time range
+ * @returns The Explore URL or null if Grafana is not enabled
+ */
+export function buildLokiExploreUrl(
+  config: GrafanaConfig,
+  namespace: string,
+  agentName: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-1h", to = "now" } = options;
+
+  // LogQL query to filter logs for the agent
+  const query = `{namespace="${namespace}", pod=~"${agentName}.*"}`;
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("left", JSON.stringify({
+    datasource: "loki",
+    queries: [{ refId: "A", expr: query }],
+    range: { from, to },
+  }));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/explore?${params.toString()}`;
+}
+
+/**
+ * Builds a Grafana Explore URL for Tempo (traces).
+ *
+ * @param config - Grafana configuration
+ * @param namespace - Kubernetes namespace
+ * @param agentName - Agent name for filtering
+ * @param options - Optional time range
+ * @returns The Explore URL or null if Grafana is not enabled
+ */
+export function buildTempoExploreUrl(
+  config: GrafanaConfig,
+  namespace: string,
+  agentName: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-1h", to = "now" } = options;
+
+  // TraceQL query to filter traces for the agent
+  const query = `{resource.service.name="${agentName}.${namespace}"}`;
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("left", JSON.stringify({
+    datasource: "tempo",
+    queries: [{ refId: "A", query, queryType: "traceqlSearch" }],
+    range: { from, to },
+  }));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/explore?${params.toString()}`;
+}

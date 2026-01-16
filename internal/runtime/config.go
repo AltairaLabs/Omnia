@@ -33,8 +33,10 @@ type Config struct {
 	Namespace string
 
 	// PromptPack configuration
-	PromptPackPath string // Path to the compiled .pack.json file
-	PromptName     string // Name of the prompt to use from the pack
+	PromptPackPath      string // Path to the compiled .pack.json file
+	PromptPackName      string // Name of the PromptPack CRD (for metrics)
+	PromptPackNamespace string // Namespace of the PromptPack CRD (for metrics)
+	PromptName          string // Name of the prompt to use from the pack
 
 	// Session configuration
 	SessionType string        // "memory" or "redis"
@@ -42,9 +44,15 @@ type Config struct {
 	SessionTTL  time.Duration // Session TTL
 
 	// Provider configuration
-	ProviderType string // "claude", "openai", "gemini", "ollama", "mock"
-	Model        string // Model override (e.g., "claude-3-opus")
-	BaseURL      string // Custom base URL for API calls
+	ProviderType         string // "claude", "openai", "gemini", "ollama", "mock"
+	Model                string // Model override (e.g., "claude-3-opus")
+	BaseURL              string // Custom base URL for API calls
+	ProviderRefName      string // Name of the Provider CRD (for metrics, if using providerRef)
+	ProviderRefNamespace string // Namespace of the Provider CRD (for metrics)
+
+	// Context management
+	ContextWindow      int    // Token budget for conversation context (0 = no limit)
+	TruncationStrategy string // How to handle context overflow: "sliding", "summarize", "custom"
 
 	// Mock provider configuration (for testing)
 	MockProvider   bool   // Enable mock provider instead of real LLM
@@ -70,6 +78,8 @@ const (
 	envAgentName              = "OMNIA_AGENT_NAME"
 	envNamespace              = "OMNIA_NAMESPACE"
 	envPromptPackPath         = "OMNIA_PROMPTPACK_PATH"
+	envPromptPackName         = "OMNIA_PROMPTPACK_NAME"
+	envPromptPackNamespace    = "OMNIA_PROMPTPACK_NAMESPACE"
 	envPromptName             = "OMNIA_PROMPT_NAME"
 	envSessionType            = "OMNIA_SESSION_TYPE"
 	envSessionURL             = "OMNIA_SESSION_URL"
@@ -77,6 +87,10 @@ const (
 	envProviderType           = "OMNIA_PROVIDER_TYPE"
 	envProviderModel          = "OMNIA_PROVIDER_MODEL"
 	envProviderBaseURL        = "OMNIA_PROVIDER_BASE_URL"
+	envProviderRefName        = "OMNIA_PROVIDER_REF_NAME"
+	envProviderRefNamespace   = "OMNIA_PROVIDER_REF_NAMESPACE"
+	envContextWindow          = "OMNIA_CONTEXT_WINDOW"
+	envTruncationStrategy     = "OMNIA_TRUNCATION_STRATEGY"
 	envMockProvider           = "OMNIA_MOCK_PROVIDER"
 	envMockConfigPath         = "OMNIA_MOCK_CONFIG"
 	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
@@ -98,7 +112,7 @@ const (
 	defaultSessionTTL      = 24 * time.Hour
 	defaultProviderType    = "" // Provider type must be explicitly set
 	defaultMediaBasePath   = "/etc/omnia/media"
-	defaultToolsConfigPath = "/etc/omnia/tools/tools.yaml"
+	defaultToolsConfigPath = "" // Empty by default; only set when OMNIA_TOOLS_CONFIG_PATH is provided
 	defaultGRPCPort        = 9000
 	defaultHealthPort      = 9001
 )
@@ -117,26 +131,31 @@ const (
 // LoadConfig loads configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		AgentName:         os.Getenv(envAgentName),
-		Namespace:         os.Getenv(envNamespace),
-		PromptPackPath:    getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
-		PromptName:        getEnvOrDefault(envPromptName, defaultPromptName),
-		SessionType:       getEnvOrDefault(envSessionType, defaultSessionType),
-		SessionURL:        os.Getenv(envSessionURL),
-		ProviderType:      getEnvOrDefault(envProviderType, defaultProviderType),
-		Model:             os.Getenv(envProviderModel),
-		BaseURL:           os.Getenv(envProviderBaseURL),
-		MockProvider:      os.Getenv(envMockProvider) == "true",
-		MockConfigPath:    getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
-		MediaBasePath:     getEnvOrDefault(envMediaBasePath, defaultMediaBasePath),
-		ToolsConfigPath:   getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
-		TracingEnabled:    os.Getenv(envTracingEnabled) == "true",
-		TracingEndpoint:   os.Getenv(envTracingEndpoint),
-		TracingSampleRate: 1.0, // Default to sampling all traces
-		TracingInsecure:   os.Getenv(envTracingInsecure) == "true",
-		GRPCPort:          defaultGRPCPort,
-		HealthPort:        defaultHealthPort,
-		SessionTTL:        defaultSessionTTL,
+		AgentName:            os.Getenv(envAgentName),
+		Namespace:            os.Getenv(envNamespace),
+		PromptPackPath:       getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
+		PromptPackName:       os.Getenv(envPromptPackName),
+		PromptPackNamespace:  os.Getenv(envPromptPackNamespace),
+		PromptName:           getEnvOrDefault(envPromptName, defaultPromptName),
+		SessionType:          getEnvOrDefault(envSessionType, defaultSessionType),
+		SessionURL:           os.Getenv(envSessionURL),
+		ProviderType:         getEnvOrDefault(envProviderType, defaultProviderType),
+		Model:                os.Getenv(envProviderModel),
+		BaseURL:              os.Getenv(envProviderBaseURL),
+		ProviderRefName:      os.Getenv(envProviderRefName),
+		ProviderRefNamespace: os.Getenv(envProviderRefNamespace),
+		TruncationStrategy:   os.Getenv(envTruncationStrategy),
+		MockProvider:         os.Getenv(envMockProvider) == "true",
+		MockConfigPath:       getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
+		MediaBasePath:        getEnvOrDefault(envMediaBasePath, defaultMediaBasePath),
+		ToolsConfigPath:      getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
+		TracingEnabled:       os.Getenv(envTracingEnabled) == "true",
+		TracingEndpoint:      os.Getenv(envTracingEndpoint),
+		TracingSampleRate:    1.0, // Default to sampling all traces
+		TracingInsecure:      os.Getenv(envTracingInsecure) == "true",
+		GRPCPort:             defaultGRPCPort,
+		HealthPort:           defaultHealthPort,
+		SessionTTL:           defaultSessionTTL,
 	}
 
 	if err := cfg.parseEnvironmentOverrides(); err != nil {
@@ -164,7 +183,27 @@ func (cfg *Config) parseEnvironmentOverrides() error {
 	if err := cfg.parsePorts(); err != nil {
 		return err
 	}
+	if err := cfg.parseContextWindow(); err != nil {
+		return err
+	}
 	return cfg.parseSessionTTL()
+}
+
+// parseContextWindow parses the context window size from environment.
+func (cfg *Config) parseContextWindow() error {
+	ctx := os.Getenv(envContextWindow)
+	if ctx == "" {
+		return nil
+	}
+	c, err := strconv.Atoi(ctx)
+	if err != nil {
+		return fmt.Errorf(errFmtInvalidEnvVar, envContextWindow, err)
+	}
+	if c < 0 {
+		return fmt.Errorf("invalid %s: must be positive", envContextWindow)
+	}
+	cfg.ContextWindow = c
+	return nil
 }
 
 // parseTracingSampleRate parses the tracing sample rate from environment.

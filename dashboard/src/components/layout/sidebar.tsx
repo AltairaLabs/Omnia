@@ -14,6 +14,7 @@ import {
   Network,
   DollarSign,
   Terminal,
+  Cpu,
 } from "lucide-react";
 
 const navigation = [
@@ -23,6 +24,7 @@ const navigation = [
   { name: "Console", href: "/console", icon: Terminal },
   { name: "PromptPacks", href: "/promptpacks", icon: FileText },
   { name: "Tools", href: "/tools", icon: Wrench },
+  { name: "Providers", href: "/providers", icon: Cpu },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
   { name: "Costs", href: "/costs", icon: DollarSign },
 ];
