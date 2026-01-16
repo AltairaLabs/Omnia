@@ -442,6 +442,12 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&omniav1alpha1.PromptPack{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForPromptPack),
 		).
+		// Watch Secret changes and reconcile AgentRuntimes that use them for credentials
+		// This triggers pod rollouts when API keys are rotated
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
+		).
 		Named("agentruntime").
 		Complete(r)
 }

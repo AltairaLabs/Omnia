@@ -2419,7 +2419,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeClaude,
 					Model: "claude-sonnet-4-20250514",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "provider-secret",
 					},
 				},
@@ -2478,7 +2478,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				Spec: omniav1alpha1.ProviderSpec{
 					Type:  omniav1alpha1.ProviderTypeOpenAI,
 					Model: "gpt-4o",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "provider-secret",
 					},
 				},
@@ -3167,7 +3167,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					Type:    omniav1alpha1.ProviderTypeClaude,
 					Model:   "claude-sonnet-4-20250514",
 					BaseURL: "https://api.anthropic.com",
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "test-secret",
 					},
 					Defaults: &omniav1alpha1.ProviderDefaults{
@@ -3208,7 +3208,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			provider := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
 					Type: omniav1alpha1.ProviderTypeOpenAI,
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "test-secret",
 					},
 				},
@@ -3232,7 +3232,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			provider := &omniav1alpha1.Provider{
 				Spec: omniav1alpha1.ProviderSpec{
 					Type: omniav1alpha1.ProviderTypeClaude,
-					SecretRef: omniav1alpha1.SecretKeyRef{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
 						Name: "test-secret",
 						Key:  &customKey,
 					},
@@ -3434,7 +3434,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					Spec: omniav1alpha1.ProviderSpec{
 						Type:  omniav1alpha1.ProviderTypeClaude,
 						Model: "claude-sonnet-4",
-						SecretRef: omniav1alpha1.SecretKeyRef{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
 							Name: "test-secret",
 						},
 					},
@@ -3518,7 +3518,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					Spec: omniav1alpha1.ProviderSpec{
 						Type:  omniav1alpha1.ProviderTypeClaude,
 						Model: "claude-sonnet-4",
-						SecretRef: omniav1alpha1.SecretKeyRef{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
 							Name: "test-secret",
 						},
 					},

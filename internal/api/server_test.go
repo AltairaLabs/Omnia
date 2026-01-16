@@ -732,3 +732,329 @@ func TestGetAgentLogsMethodNotAllowed(t *testing.T) {
 
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
+
+const testScaleBody3 = `{"replicas": 3}`
+
+func TestScaleAgent(t *testing.T) {
+	replicas := int32(1)
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Runtime: &omniav1alpha1.RuntimeConfig{
+				Replicas: &replicas,
+			},
+		},
+	}
+
+	server := newTestServer(t, agent)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(testScaleBody3))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var result omniav1alpha1.AgentRuntime
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, int32(3), *result.Spec.Runtime.Replicas)
+}
+
+func TestScaleAgentNotFound(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/nonexistent/scale", strings.NewReader(testScaleBody3))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestScaleAgentInvalidBody(t *testing.T) {
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "default",
+		},
+	}
+
+	server := newTestServer(t, agent)
+	handler := server.Handler()
+
+	body := `invalid json`
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestScaleAgentNegativeReplicas(t *testing.T) {
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "default",
+		},
+	}
+
+	server := newTestServer(t, agent)
+	handler := server.Handler()
+
+	body := `{"replicas": -1}`
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestScaleAgentWithAutoscaling(t *testing.T) {
+	minReplicas := int32(1)
+	maxReplicas := int32(10)
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Runtime: &omniav1alpha1.RuntimeConfig{
+				Autoscaling: &omniav1alpha1.AutoscalingConfig{
+					Enabled:     true,
+					MinReplicas: &minReplicas,
+					MaxReplicas: &maxReplicas,
+				},
+			},
+		},
+	}
+
+	server := newTestServer(t, agent)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(testScaleBody3))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Should return conflict since autoscaling is enabled
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestScaleAgentMethodNotAllowed(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/default/test-agent/scale", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestScaleAgentToZero(t *testing.T) {
+	replicas := int32(2)
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Runtime: &omniav1alpha1.RuntimeConfig{
+				Replicas: &replicas,
+			},
+		},
+	}
+
+	server := newTestServer(t, agent)
+	handler := server.Handler()
+
+	body := `{"replicas": 0}`
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var result omniav1alpha1.AgentRuntime
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, int32(0), *result.Spec.Runtime.Replicas)
+}
+
+func TestCreateAgent(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	body := `{
+		"metadata": {"name": "new-agent", "namespace": "default"},
+		"spec": {"promptPackRef": {"name": "test-pack"}}
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var result omniav1alpha1.AgentRuntime
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, "new-agent", result.Name)
+	assert.Equal(t, "default", result.Namespace)
+	assert.Equal(t, "test-pack", result.Spec.PromptPackRef.Name)
+}
+
+func TestCreateAgentDefaultNamespace(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	body := `{
+		"metadata": {"name": "new-agent"},
+		"spec": {"promptPackRef": {"name": "test-pack"}}
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var result omniav1alpha1.AgentRuntime
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, "default", result.Namespace)
+}
+
+func TestCreateAgentInvalidBody(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	body := `{invalid json`
+	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestCreateAgentMissingName(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	body := `{
+		"metadata": {"namespace": "default"},
+		"spec": {"promptPackRef": {"name": "test-pack"}}
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "metadata.name is required")
+}
+
+func TestCreateAgentMissingPromptPackRef(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	body := `{
+		"metadata": {"name": "new-agent", "namespace": "default"},
+		"spec": {}
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "spec.promptPackRef.name is required")
+}
+
+func TestCreateAgentAlreadyExists(t *testing.T) {
+	existingAgent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "existing-agent",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+		},
+	}
+
+	server := newTestServer(t, existingAgent)
+	handler := server.Handler()
+
+	body := `{
+		"metadata": {"name": "existing-agent", "namespace": "default"},
+		"spec": {"promptPackRef": {"name": "test-pack"}}
+	}`
+	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "already exists")
+}
+
+func TestGetAgentEventsMethodNotAllowed(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("POST", "/api/v1/agents/default/test-agent/events", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestScaleAgentInitializeRuntime(t *testing.T) {
+	// Test scaling an agent that has no runtime config
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+			// No Runtime config
+		},
+	}
+
+	server := newTestServer(t, agent)
+	handler := server.Handler()
+
+	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(testScaleBody3))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var result omniav1alpha1.AgentRuntime
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.NotNil(t, result.Spec.Runtime)
+	assert.Equal(t, int32(3), *result.Spec.Runtime.Replicas)
+}

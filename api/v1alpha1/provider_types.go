@@ -53,8 +53,9 @@ type ProviderSpec struct {
 	BaseURL string `json:"baseURL,omitempty"`
 
 	// secretRef references a Secret containing API credentials.
-	// +kubebuilder:validation:Required
-	SecretRef SecretKeyRef `json:"secretRef"`
+	// Optional for providers that don't require credentials (e.g., mock, ollama).
+	// +optional
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
 
 	// defaults contains provider tuning parameters.
 	// +optional

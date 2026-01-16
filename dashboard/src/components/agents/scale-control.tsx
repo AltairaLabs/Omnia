@@ -250,13 +250,21 @@ export function ScaleControl({
 
   // Compact view
   if (compact) {
+    // When autoscaling is enabled, show only the autoscaling indicator and replica count
+    if (autoscalingEnabled) {
+      return (
+        <TooltipProvider>
+          <div className={cn("flex items-center gap-1", className)}>
+            <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact />
+            <span className="min-w-[3rem] text-center text-sm font-medium">{replicaDisplay}</span>
+          </div>
+        </TooltipProvider>
+      );
+    }
+
     return (
       <TooltipProvider>
         <div className={cn("flex items-center gap-1", className)}>
-          {autoscalingEnabled && (
-            <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact />
-          )}
-
           {isDisabled ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -297,16 +305,33 @@ export function ScaleControl({
     );
   }
 
-  // Full view
+  // Full view - when autoscaling is enabled, show label without buttons
+  if (autoscalingEnabled) {
+    return (
+      <TooltipProvider>
+        <div className={cn("flex flex-col gap-2", className)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Replicas</span>
+              <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact={false} />
+            </div>
+            <div className="text-lg font-semibold">
+              <span>{currentReplicas}<span className="text-muted-foreground">/{displayReplicas}</span></span>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Scaling is managed by {autoscalingType?.toUpperCase() || "autoscaler"}</p>
+        </div>
+      </TooltipProvider>
+    );
+  }
+
+  // Full view - manual scaling
   return (
     <TooltipProvider>
       <div className={cn("flex flex-col gap-2", className)}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Replicas</span>
-            {autoscalingEnabled && (
-              <AutoscalingIndicator type={autoscalingType} minReplicas={minReplicas} maxReplicas={maxReplicas} compact={false} />
-            )}
             {isDisabled && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -358,10 +383,6 @@ export function ScaleControl({
               <Plus className="h-4 w-4 mr-1" />Scale Up
             </Button>
           </div>
-        )}
-
-        {autoscalingEnabled && (
-          <p className="text-xs text-muted-foreground">Manual scaling will be overridden by autoscaler</p>
         )}
 
         <ScaleConfirmDialog

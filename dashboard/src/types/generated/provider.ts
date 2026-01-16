@@ -42,8 +42,9 @@ export interface ProviderSpec {
     /** outputCostPer1K is the cost per 1000 output tokens (e.g., "0.015"). */
     outputCostPer1K?: string;
   };
-  /** secretRef references a Secret containing API credentials. */
-  secretRef: {
+  /** secretRef references a Secret containing API credentials.
+   * Optional for providers that don't require credentials (e.g., mock, ollama). */
+  secretRef?: {
     /** key is the key within the Secret to use.
      * If not specified, the provider-appropriate key is used:
      * - ANTHROPIC_API_KEY for Claude
