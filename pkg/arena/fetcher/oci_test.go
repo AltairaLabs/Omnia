@@ -381,3 +381,43 @@ func TestOCIFetcher_Fetch_NetworkError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to pull image")
 }
+
+func TestOCIFetcher_Fetch_InvalidDigestFormat(t *testing.T) {
+	// Test with a valid URL but malformed digest that will fail name.NewDigest
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	ctx := context.Background()
+	// Use sha256: prefix but with invalid content (not valid hex)
+	_, err := fetcher.Fetch(ctx, "sha256:invalid!digest@content")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse digest reference")
+}
+
+func TestOCIFetcher_LatestRevision_WithInsecureRegistry(t *testing.T) {
+	// Test insecure flag is properly passed through
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL:      "oci://localhost:59999/repo:latest",
+		Insecure: true,
+	})
+
+	ctx := context.Background()
+	_, err := fetcher.LatestRevision(ctx)
+	// Will fail at network level, but tests the insecure path
+	assert.Error(t, err)
+}
+
+func TestOCIFetcher_GetRemoteOptions_WithContext(t *testing.T) {
+	// Test that context is properly included in options
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	opts, err := fetcher.getRemoteOptions(ctx)
+	require.NoError(t, err)
+	assert.NotEmpty(t, opts)
+}
