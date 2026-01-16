@@ -212,12 +212,14 @@ func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvV
 		corev1.EnvVar{Name: "OMNIA_PROVIDER_REF_NAMESPACE", Value: provider.Namespace},
 	)
 
-	// API key from secret
-	secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
-	if provider.Spec.SecretRef.Key != nil {
-		envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *provider.Spec.SecretRef.Key)...)
-	} else {
-		envVars = append(envVars, buildSecretEnvVars(&secretRef, provider.Spec.Type)...)
+	// API key from secret - only if SecretRef is configured
+	if provider.Spec.SecretRef != nil {
+		secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
+		if provider.Spec.SecretRef.Key != nil {
+			envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *provider.Spec.SecretRef.Key)...)
+		} else {
+			envVars = append(envVars, buildSecretEnvVars(&secretRef, provider.Spec.Type)...)
+		}
 	}
 
 	return envVars

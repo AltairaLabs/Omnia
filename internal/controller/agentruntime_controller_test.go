@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -2524,6 +2525,144 @@ var _ = Describe("AgentRuntime Controller", func() {
 			_, err := reconciler.fetchProvider(ctx, agentRuntime)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to get Provider"))
+		})
+
+		It("should set ProviderReady condition to True when Provider is Ready", func() {
+			By("creating the secret")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("test-key"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			By("creating the Provider")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerKey.Name,
+					Namespace: providerKey.Namespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "provider-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			By("setting Provider status to Ready")
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, provider)).To(Succeed())
+
+			By("creating the AgentRuntime with providerRef")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderRef: &omniav1alpha1.ProviderRef{
+						Name: providerKey.Name,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("calling reconcileProviderRef")
+			log := logf.FromContext(ctx)
+			fetchedProvider, result, err := reconciler.reconcileProviderRef(ctx, log, agentRuntime)
+
+			By("verifying Provider is returned and no requeue")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+			Expect(fetchedProvider).NotTo(BeNil())
+			Expect(fetchedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			By("verifying ProviderReady condition is True")
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal("ProviderFound"))
+		})
+
+		It("should treat Provider with empty status phase as Ready", func() {
+			By("creating the secret")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-secret-empty",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"ANTHROPIC_API_KEY": []byte("test-key"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, secret) }()
+
+			By("creating the Provider without setting status (empty phase)")
+			providerEmpty := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-empty-status",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "provider-secret-empty",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, providerEmpty)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, providerEmpty) }()
+
+			By("creating the AgentRuntime with providerRef")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-empty-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					ProviderRef: &omniav1alpha1.ProviderRef{
+						Name: "provider-empty-status",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling reconcileProviderRef")
+			log := logf.FromContext(ctx)
+			fetchedProvider, result, err := reconciler.reconcileProviderRef(ctx, log, agentRuntime)
+
+			By("verifying Provider is returned (empty phase treated as Ready)")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+			Expect(fetchedProvider).NotTo(BeNil())
+
+			By("verifying ProviderReady condition is True")
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal("ProviderFound"))
 		})
 
 	})

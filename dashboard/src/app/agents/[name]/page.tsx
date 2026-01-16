@@ -243,27 +243,30 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               </Card>
 
               {spec.providerRef?.name ? (
-                <Link href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || namespace}`}>
-                  <Card className="cursor-pointer hover:border-primary/50 transition-colors">
-                    <CardHeader>
-                      <CardTitle>Provider</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Name</span>
-                        <span className="font-medium">{spec.providerRef.name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Type</span>
-                        <span className="font-medium capitalize">{provider?.spec?.type || spec.provider?.type || "-"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Model</span>
-                        <span className="font-medium">{provider?.spec?.model || spec.provider?.model || "-"}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Provider</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Name</span>
+                      <Link
+                        href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || namespace}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {spec.providerRef.name}
+                      </Link>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Type</span>
+                      <span className="font-medium capitalize">{provider?.spec?.type || spec.provider?.type || "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Model</span>
+                      <span className="font-medium">{provider?.spec?.model || spec.provider?.model || "-"}</span>
+                    </div>
+                  </CardContent>
+                </Card>
               ) : (
                 <Card>
                   <CardHeader>

@@ -89,6 +89,16 @@ metadata:
 spec:
   type: mock
 ---
+# Mock OpenAI provider for testing (no credentials needed)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: mock-openai-provider
+  namespace: dev-agents
+spec:
+  type: mock
+  model: gpt-4o-mock
+---
 # ConfigMap for PromptPack (must contain pack.json)
 apiVersion: v1
 kind: ConfigMap
@@ -210,7 +220,7 @@ spec:
         cpu: "200m"
         memory: "128Mi"
 ---
-# Runtime agent using OpenAI provider (references openai-credentials secret)
+# Runtime agent using mock provider (no credentials needed)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -222,7 +232,7 @@ spec:
   toolRegistryRef:
     name: demo-tools
   providerRef:
-    name: openai-provider
+    name: mock-provider
   facade:
     type: websocket
     port: 8080
@@ -240,7 +250,7 @@ spec:
         cpu: "500m"
         memory: "256Mi"
 ---
-# Echo agent using mock provider (no credentials needed)
+# Echo agent using mock OpenAI provider (no credentials needed)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -250,7 +260,7 @@ spec:
   promptPackRef:
     name: demo-prompts
   providerRef:
-    name: mock-provider
+    name: mock-openai-provider
   facade:
     type: websocket
     port: 8080

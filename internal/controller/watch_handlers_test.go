@@ -616,6 +616,34 @@ func TestReconcileProviderRef(t *testing.T) {
 			expectError:    false,
 			expectRequeue:  true,
 		},
+		{
+			name: "provider with empty status phase should be treated as ready",
+			agentRuntime: &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ProviderRef:   &omniav1alpha1.ProviderRef{Name: "test-provider"},
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+				},
+			},
+			provider: &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type: "claude",
+				},
+				// Status.Phase is intentionally empty (not set) - simulating
+				// a provider that hasn't been reconciled yet
+				Status: omniav1alpha1.ProviderStatus{},
+			},
+			expectProvider: true, // Should treat empty phase as Ready
+			expectError:    false,
+			expectRequeue:  false, // Should NOT requeue
+		},
 	}
 
 	for _, tt := range tests {
