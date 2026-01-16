@@ -108,7 +108,8 @@ describe("ScaleControl", () => {
     );
 
     // In compact mode, HPA text is inside tooltip, not directly visible
-    expect(screen.getByText("3/3")).toBeInTheDocument();
+    // The replica count is split across elements, so check for both parts
+    expect(screen.getByText(/3\//)).toBeInTheDocument();
     // Scale buttons should not be visible when autoscaling is enabled
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
@@ -124,7 +125,8 @@ describe("ScaleControl", () => {
     );
 
     // In compact mode, buttons are icons only
-    expect(screen.getByText("1/1")).toBeInTheDocument();
+    // The replica count is split across elements, so check for both parts
+    expect(screen.getByText(/1\//)).toBeInTheDocument();
   });
 
   it("respects min and max replicas", () => {

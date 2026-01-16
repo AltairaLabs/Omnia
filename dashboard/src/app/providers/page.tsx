@@ -197,10 +197,16 @@ export default function ProvidersPage() {
     return providers.filter((p) => p.metadata?.namespace && selectedNamespaces.includes(p.metadata.namespace));
   }, [providers, selectedNamespaces]);
 
-  const filteredProviders =
-    filterPhase === "all"
+  // Filter by phase and sort alphabetically by name
+  const filteredProviders = useMemo(() => {
+    const filtered = filterPhase === "all"
       ? namespaceFilteredProviders
       : namespaceFilteredProviders.filter((p) => p.status?.phase === filterPhase);
+    // Sort alphabetically by name for stable ordering
+    return [...filtered].sort((a, b) =>
+      (a.metadata?.name || "").localeCompare(b.metadata?.name || "")
+    );
+  }, [namespaceFilteredProviders, filterPhase]);
 
   const phaseCounts = namespaceFilteredProviders.reduce(
     (acc, provider) => {
