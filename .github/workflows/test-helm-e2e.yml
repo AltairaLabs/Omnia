@@ -348,11 +348,11 @@ jobs:
             exit 1
           fi
 
-          # Verify the scrape job uses custom Istio-safe annotation for port
-          if echo "$PROM_CONFIG" | grep -q "omnia_altairalabs_ai_metrics_port"; then
-            echo "SUCCESS: Scrape job uses Istio-safe custom annotation for metrics port"
+          # Verify the scrape job uses prometheus.io annotations for port discovery
+          if echo "$PROM_CONFIG" | grep -q "prometheus_io_port"; then
+            echo "SUCCESS: Scrape job uses prometheus.io annotations for metrics port"
           else
-            echo "ERROR: Scrape job should use omnia.altairalabs.ai/metrics-port annotation"
+            echo "ERROR: Scrape job should use prometheus.io annotations"
             exit 1
           fi
 
