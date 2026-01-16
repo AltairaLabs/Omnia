@@ -19,7 +19,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -185,8 +184,6 @@ func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 }
 
 // processAudioMedia handles audio content (base64 data or URL).
-// For base64 data, writes to a temp file and uses sdk.WithAudioFile since the SDK
-// doesn't have a WithAudioData option. The temp file should be cleaned up by the caller.
 func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
 	if media.Data != "" {
 		data, err := decodeMediaData(media.Data)
@@ -195,56 +192,13 @@ func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 			return nil
 		}
 		log.V(1).Info("adding audio from data", "mimeType", media.MimeType, "size", len(data))
-
-		// Write audio data to a temp file since SDK doesn't have WithAudioData
-		ext := getAudioExtension(media.MimeType)
-		tmpFile, err := os.CreateTemp("", "audio-*"+ext)
-		if err != nil {
-			log.Error(err, "failed to create temp file for audio")
-			return nil
-		}
-		defer tmpFile.Close()
-
-		if _, err := tmpFile.Write(data); err != nil {
-			log.Error(err, "failed to write audio data to temp file")
-			os.Remove(tmpFile.Name())
-			return nil
-		}
-
-		log.V(1).Info("wrote audio to temp file", "path", tmpFile.Name())
-		return sdk.WithAudioFile(tmpFile.Name())
+		return sdk.WithAudioData(data, media.MimeType)
 	}
 	if media.Url != "" {
 		log.V(1).Info("adding audio from URL", "url", media.Url)
 		return sdk.WithAudioFile(media.Url)
 	}
 	return nil
-}
-
-// getAudioExtension returns the file extension for an audio MIME type.
-func getAudioExtension(mimeType string) string {
-	switch mimeType {
-	case "audio/mpeg", "audio/mp3":
-		return ".mp3"
-	case "audio/wav", "audio/x-wav":
-		return ".wav"
-	case "audio/ogg":
-		return ".ogg"
-	case "audio/webm":
-		return ".webm"
-	case "audio/flac":
-		return ".flac"
-	case "audio/aac":
-		return ".aac"
-	case "audio/m4a", "audio/x-m4a":
-		return ".m4a"
-	default:
-		// Try to extract extension from mime type (e.g., "audio/mp4" -> ".mp4")
-		if len(mimeType) > 6 && mimeType[:6] == "audio/" {
-			return "." + mimeType[6:]
-		}
-		return ".audio"
-	}
 }
 
 // processFileMedia handles generic file content.
