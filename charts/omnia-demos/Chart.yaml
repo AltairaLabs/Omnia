@@ -1,0 +1,26 @@
+apiVersion: v2
+name: omnia-demos
+description: Demo agents and providers for Omnia - showcasing vision, audio, and tool capabilities
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.26.0-0"
+home: https://github.com/AltairaLabs/Omnia
+sources:
+  - https://github.com/AltairaLabs/Omnia
+maintainers:
+  - name: AltairaLabs
+    url: https://github.com/AltairaLabs
+keywords:
+  - kubernetes
+  - ai
+  - agents
+  - llm
+  - ollama
+  - demo
+  - vision
+  - audio
+
+annotations:
+  artifacthub.io/prerelease: "true"
+  artifacthub.io/license: Apache-2.0

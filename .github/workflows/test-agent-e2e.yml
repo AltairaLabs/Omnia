@@ -135,11 +135,11 @@ jobs:
         run: |
           helm dependency build ./charts/omnia
 
-      - name: Deploy Omnia with demo mode
+      - name: Deploy Omnia operator
         run: |
-          echo "=== Deploying Omnia with demo mode (Ollama) ==="
+          echo "=== Deploying Omnia operator ==="
 
-          # Deploy with demo enabled, using locally built images
+          # Deploy main omnia chart (without demo - it's in a separate chart now)
           helm install omnia ./charts/omnia \
             --namespace omnia-system \
             --create-namespace \
@@ -150,15 +150,28 @@ jobs:
             --set framework.image.tag=$IMAGE_TAG \
             --set framework.image.pullPolicy=Never \
             --set dashboard.enabled=false \
-            --set demo.enabled=true \
-            --set demo.ollama.model=$OLLAMA_MODEL \
-            --set demo.ollama.resources.requests.memory="2Gi" \
-            --set demo.ollama.resources.limits.memory="4Gi" \
-            --set demo.ollama.persistence.enabled=false \
             --set keda.enabled=false \
             --timeout 10m
 
-          echo "Helm install complete"
+          echo "Omnia operator deployed"
+
+      - name: Deploy demo agents
+        run: |
+          echo "=== Deploying demo agents (Ollama) ==="
+
+          # Deploy the separate omnia-demos chart
+          helm install omnia-demos ./charts/omnia-demos \
+            --namespace omnia-demo \
+            --create-namespace \
+            --set ollama.model=$OLLAMA_MODEL \
+            --set ollama.resources.requests.memory="2Gi" \
+            --set ollama.resources.limits.memory="4Gi" \
+            --set ollama.persistence.enabled=false \
+            --set opa.enabled=false \
+            --set toolsDemo.enabled=false \
+            --timeout 10m
+
+          echo "Demo agents deployed"
 
       - name: Wait for Ollama to be ready
         run: |

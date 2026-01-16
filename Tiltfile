@@ -277,32 +277,9 @@ else:
         'loki.enabled=false',
     ])
 
-if ENABLE_DEMO:
-    # Create demo namespace
+# Demo mode namespace creation (demos are now in separate chart)
+if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
     namespace_create('omnia-demo')
-    helm_set.extend([
-        # Enable demo mode with Ollama
-        'demo.enabled=true',
-        'demo.namespace=omnia-demo',
-        # Enable OPA model validation (sidecar mode, no Istio required)
-        'demo.opa.enabled=true',
-        'demo.opa.mode=sidecar',
-        # Use persistence for model cache
-        'demo.ollama.persistence.enabled=true',
-    ])
-
-if ENABLE_AUDIO_DEMO:
-    # Audio demo requires demo namespace (creates it if ENABLE_DEMO is false)
-    if not ENABLE_DEMO:
-        namespace_create('omnia-demo')
-        helm_set.extend([
-            'demo.enabled=true',
-            'demo.namespace=omnia-demo',
-        ])
-    helm_set.extend([
-        # Enable audio demo with Gemini
-        'demo.audioDemo.enabled=true',
-    ])
 
 if ENABLE_FULL_STACK:
     # Full stack mode overrides some observability settings
@@ -341,12 +318,7 @@ if ENABLE_FULL_STACK:
         'grafana.grafana\\.ini.auth\\.anonymous.org_role=Admin',  # Admin for full access
     ])
 
-    # When full stack is enabled, also enable OPA in extauthz mode (uses Istio)
-    if ENABLE_DEMO:
-        # Override OPA mode to use Istio ext_authz
-        helm_set.extend([
-            'demo.opa.mode=extauthz',
-        ])
+    # Note: When full stack is enabled, OPA mode for demos is set in demos chart values
 
 # Build values files list
 helm_values = ['./charts/omnia/values-dev.yaml']
@@ -361,6 +333,40 @@ k8s_yaml(helm(
     values=helm_values,
     set=helm_set,
 ))
+
+# ============================================================================
+# Demo Charts (separate from main Omnia chart)
+# ============================================================================
+
+if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
+    # Build demo helm set values
+    demo_helm_set = [
+        'namespace=omnia-demo',
+        # Enable OPA model validation (sidecar mode by default, no Istio required)
+        'opa.enabled=true',
+        'opa.mode=sidecar',
+        # Use persistence for model cache
+        'ollama.persistence.enabled=true',
+    ]
+
+    if ENABLE_AUDIO_DEMO:
+        demo_helm_set.extend([
+            'audioDemo.enabled=true',
+        ])
+
+    if ENABLE_FULL_STACK:
+        # Override OPA mode to use Istio ext_authz
+        demo_helm_set.extend([
+            'opa.mode=extauthz',
+            'istio.enabled=true',
+        ])
+
+    k8s_yaml(helm(
+        './charts/omnia-demos',
+        name='omnia-demos',
+        namespace='omnia-demo',
+        set=demo_helm_set,
+    ))
 
 # ============================================================================
 # Resource Configuration
@@ -472,6 +478,11 @@ if ENABLE_DEMO:
         'demo-vision-prompts:configmap',
         'demo-vision-prompts:promptpack',
         'vision-demo:agentruntime',
+        # Include tools-demo CRs
+        'ollama-tools:provider',
+        'demo-tools-prompts:configmap',
+        'demo-tools-prompts:promptpack',
+        'tools-demo:agentruntime',
     ]
     # Sidecar mode uses Envoy config, extauthz mode uses EnvoyFilter
     if ENABLE_FULL_STACK:

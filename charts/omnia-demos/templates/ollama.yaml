@@ -1,25 +1,24 @@
-{{- if .Values.demo.enabled }}
-{{- $opaSidecar := and .Values.demo.opa.enabled (eq .Values.demo.opa.mode "sidecar") }}
+{{- $opaSidecar := and .Values.opa.enabled (eq .Values.opa.mode "sidecar") }}
 ---
 # PersistentVolumeClaim for Ollama model cache
-{{- if .Values.demo.ollama.persistence.enabled }}
+{{- if .Values.ollama.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: ollama-models
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   accessModes:
     - ReadWriteOnce
-  {{- if .Values.demo.ollama.persistence.storageClass }}
-  storageClassName: {{ .Values.demo.ollama.persistence.storageClass }}
+  {{- if .Values.ollama.persistence.storageClass }}
+  storageClassName: {{ .Values.ollama.persistence.storageClass }}
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.demo.ollama.persistence.size }}
+      storage: {{ .Values.ollama.persistence.size }}
 {{- end }}
 ---
 # Ollama StatefulSet
@@ -29,10 +28,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: ollama
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   serviceName: ollama
   replicas: 1
@@ -43,14 +42,14 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: ollama
-        app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+        app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
     spec:
       initContainers:
         # Pull the model before starting the server
         # This runs Ollama temporarily to pull the model to the shared volume
         - name: pull-model
-          image: "{{ .Values.demo.ollama.image.repository }}:{{ .Values.demo.ollama.image.tag }}"
-          imagePullPolicy: {{ .Values.demo.ollama.image.pullPolicy }}
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
           command:
             - /bin/sh
             - -c
@@ -83,10 +82,10 @@ spec:
               }
 
               # Pull primary model
-              pull_model "{{ .Values.demo.ollama.model }}"
+              pull_model "{{ .Values.ollama.model }}"
 
               # Pull additional models
-              {{- range .Values.demo.ollama.additionalModels }}
+              {{- range .Values.ollama.additionalModels }}
               pull_model "{{ . }}"
               {{- end }}
 
@@ -107,8 +106,8 @@ spec:
       containers:
         # Ollama LLM server
         - name: ollama
-          image: "{{ .Values.demo.ollama.image.repository }}:{{ .Values.demo.ollama.image.tag }}"
-          imagePullPolicy: {{ .Values.demo.ollama.image.pullPolicy }}
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
           ports:
             {{- if $opaSidecar }}
             # Internal port when OPA sidecar is enabled (Envoy proxies to this)
@@ -121,9 +120,9 @@ spec:
             {{- end }}
           env:
             - name: OLLAMA_KEEP_ALIVE
-              value: {{ .Values.demo.ollama.keepAlive | quote }}
+              value: {{ .Values.ollama.keepAlive | quote }}
             - name: OLLAMA_NUM_CTX
-              value: {{ .Values.demo.ollama.numCtx | quote }}
+              value: {{ .Values.ollama.numCtx | quote }}
             - name: OLLAMA_HOST
               {{- if $opaSidecar }}
               # Listen on internal port when OPA sidecar is enabled
@@ -132,7 +131,7 @@ spec:
               value: "0.0.0.0:11434"
               {{- end }}
           resources:
-            {{- toYaml .Values.demo.ollama.resources | nindent 12 }}
+            {{- toYaml .Values.ollama.resources | nindent 12 }}
           volumeMounts:
             - name: models
               mountPath: /root/.ollama
@@ -184,8 +183,8 @@ spec:
         # Envoy sidecar - entry point for all traffic
         # Buffers request body and calls OPA for authorization
         - name: envoy
-          image: "{{ .Values.demo.opa.envoy.image.repository }}:{{ .Values.demo.opa.envoy.image.tag }}"
-          imagePullPolicy: {{ .Values.demo.opa.envoy.image.pullPolicy }}
+          image: "{{ .Values.opa.envoy.image.repository }}:{{ .Values.opa.envoy.image.tag }}"
+          imagePullPolicy: {{ .Values.opa.envoy.image.pullPolicy }}
           args:
             - "-c"
             - "/etc/envoy/envoy.yaml"
@@ -197,7 +196,7 @@ spec:
             - containerPort: 9901
               name: admin
           resources:
-            {{- toYaml .Values.demo.opa.envoy.resources | nindent 12 }}
+            {{- toYaml .Values.opa.envoy.resources | nindent 12 }}
           volumeMounts:
             - name: envoy-config
               mountPath: /etc/envoy
@@ -217,8 +216,8 @@ spec:
 
         # OPA sidecar - policy engine for model validation
         - name: opa
-          image: "{{ .Values.demo.opa.image.repository }}:{{ .Values.demo.opa.image.tag }}"
-          imagePullPolicy: {{ .Values.demo.opa.image.pullPolicy }}
+          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          imagePullPolicy: {{ .Values.opa.image.pullPolicy }}
           args:
             - "run"
             - "--server"
@@ -234,7 +233,7 @@ spec:
             - containerPort: 8282
               name: diag
           resources:
-            {{- toYaml .Values.demo.opa.resources | nindent 12 }}
+            {{- toYaml .Values.opa.resources | nindent 12 }}
           volumeMounts:
             - name: opa-config
               mountPath: /config
@@ -255,7 +254,7 @@ spec:
 
       volumes:
         - name: models
-          {{- if .Values.demo.ollama.persistence.enabled }}
+          {{- if .Values.ollama.persistence.enabled }}
           persistentVolumeClaim:
             claimName: ollama-models
           {{- else }}
@@ -275,10 +274,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: ollama
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   selector:
     app.kubernetes.io/name: ollama
@@ -287,4 +286,3 @@ spec:
       targetPort: http
       name: http
   type: ClusterIP
-{{- end }}

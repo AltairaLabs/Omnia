@@ -1,4 +1,4 @@
-{{- if and .Values.demo.enabled .Values.demo.opa.enabled (eq .Values.demo.opa.mode "sidecar") }}
+{{- if and .Values.opa.enabled (eq .Values.opa.mode "sidecar") }}
 ---
 # Envoy Configuration for OPA Sidecar Mode
 # Envoy acts as the entry point, calls OPA for authorization, then proxies to Ollama
@@ -6,10 +6,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ollama-envoy-config
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama-envoy
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 data:
   envoy.yaml: |
     static_resources:
@@ -45,7 +45,7 @@ data:
                       - name: envoy.filters.http.buffer
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
-                          max_request_bytes: {{ int (.Values.demo.opa.maxRequestBytes | default 26214400) }}  # 25MB default for multimodal
+                          max_request_bytes: {{ int (.Values.opa.maxRequestBytes | default 26214400) }}  # 25MB default for multimodal
                       # External authorization via OPA
                       - name: envoy.filters.http.ext_authz
                         typed_config:
@@ -54,12 +54,12 @@ data:
                           grpc_service:
                             envoy_grpc:
                               cluster_name: opa_cluster
-                            timeout: {{ .Values.demo.opa.extauthz.timeout | default "5s" }}
+                            timeout: {{ .Values.opa.extauthz.timeout | default "5s" }}
                           with_request_body:
                             max_request_bytes: 65536  # Send up to 64KB of body to OPA
                             allow_partial_message: true
                             pack_as_bytes: false
-                          failure_mode_allow: {{ eq (.Values.demo.opa.extauthz.failureMode | default "DENY") "ALLOW" }}
+                          failure_mode_allow: {{ eq (.Values.opa.extauthz.failureMode | default "DENY") "ALLOW" }}
                           status_on_error:
                             code: ServiceUnavailable
                       # Router must be last

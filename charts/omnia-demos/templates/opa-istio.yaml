@@ -1,4 +1,4 @@
-{{- if and .Values.demo.enabled .Values.demo.opa.enabled (eq .Values.demo.opa.mode "extauthz") .Values.istio.enabled }}
+{{- if and .Values.opa.enabled (eq .Values.opa.mode "extauthz") .Values.istio.enabled }}
 ---
 # OPA Deployment for Istio ext_authz mode
 # Runs as a separate service that Istio's Envoy sidecar calls for authorization
@@ -6,10 +6,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ollama-opa
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama-opa
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   replicas: 1
   selector:
@@ -19,20 +19,20 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: ollama-opa
-        app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+        app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
         # Disable Istio sidecar injection for OPA itself
         sidecar.istio.io/inject: "false"
     spec:
       containers:
         - name: opa
-          image: "{{ .Values.demo.opa.image.repository }}:{{ .Values.demo.opa.image.tag }}"
-          imagePullPolicy: {{ .Values.demo.opa.image.pullPolicy }}
+          image: "{{ .Values.opa.image.repository }}:{{ .Values.opa.image.tag }}"
+          imagePullPolicy: {{ .Values.opa.image.pullPolicy }}
           args:
             - "run"
             - "--server"
             - "--addr=0.0.0.0:8181"
             - "--diagnostic-addr=0.0.0.0:8282"
-            - "--set=plugins.envoy_ext_authz_grpc.addr=:{{ .Values.demo.opa.extauthz.port }}"
+            - "--set=plugins.envoy_ext_authz_grpc.addr=:{{ .Values.opa.extauthz.port }}"
             - "--set=plugins.envoy_ext_authz_grpc.path=envoy/authz/allow"
             - "--set=decision_logs.console=true"
             - "/config/policy.rego"
@@ -41,10 +41,10 @@ spec:
               name: http
             - containerPort: 8282
               name: diag
-            - containerPort: {{ .Values.demo.opa.extauthz.port }}
+            - containerPort: {{ .Values.opa.extauthz.port }}
               name: grpc
           resources:
-            {{- toYaml .Values.demo.opa.resources | nindent 12 }}
+            {{- toYaml .Values.opa.resources | nindent 12 }}
           volumeMounts:
             - name: opa-config
               mountPath: /config
@@ -71,15 +71,15 @@ apiVersion: v1
 kind: Service
 metadata:
   name: ollama-opa
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama-opa
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   selector:
     app.kubernetes.io/name: ollama-opa
   ports:
-    - port: {{ .Values.demo.opa.extauthz.port }}
+    - port: {{ .Values.opa.extauthz.port }}
       targetPort: grpc
       name: grpc
     - port: 8181
@@ -92,10 +92,10 @@ apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
   name: ollama-opa-ext-authz
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: ollama-opa
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   workloadSelector:
     labels:
@@ -138,13 +138,13 @@ spec:
             transport_api_version: V3
             grpc_service:
               envoy_grpc:
-                cluster_name: outbound|{{ .Values.demo.opa.extauthz.port }}||ollama-opa.{{ .Values.demo.namespace }}.svc.cluster.local
-              timeout: {{ .Values.demo.opa.extauthz.timeout | default "5s" }}
+                cluster_name: outbound|{{ .Values.opa.extauthz.port }}||ollama-opa.{{ .Values.namespace }}.svc.cluster.local
+              timeout: {{ .Values.opa.extauthz.timeout | default "5s" }}
             with_request_body:
               max_request_bytes: 65536  # Send up to 64KB of body to OPA
               allow_partial_message: true
               pack_as_bytes: false
-            failure_mode_allow: {{ eq (.Values.demo.opa.extauthz.failureMode | default "DENY") "ALLOW" }}
+            failure_mode_allow: {{ eq (.Values.opa.extauthz.failureMode | default "DENY") "ALLOW" }}
             status_on_error:
               code: ServiceUnavailable
 {{- end }}

@@ -1,14 +1,13 @@
-{{- if .Values.demo.enabled }}
 ---
 # Dummy secret for Ollama (Ollama doesn't require an API key)
 apiVersion: v1
 kind: Secret
 metadata:
   name: ollama-credentials
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: omnia-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 type: Opaque
 stringData:
   # Ollama doesn't require an API key, but Provider requires a secretRef
@@ -19,20 +18,20 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
   name: ollama
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: omnia-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   type: ollama
-  model: {{ .Values.demo.ollama.model }}
-  baseURL: http://ollama.{{ .Values.demo.namespace }}:11434
+  model: {{ .Values.ollama.model }}
+  baseURL: http://ollama.{{ .Values.namespace }}:11434
   secretRef:
     name: ollama-credentials
   defaults:
     temperature: "0.7"
     # Context window budget - should match or be less than numCtx
-    contextWindow: {{ .Values.demo.ollama.contextWindow }}
+    contextWindow: {{ .Values.ollama.contextWindow }}
     truncationStrategy: sliding
 ---
 # ConfigMap for the demo PromptPack (vision-capable)
@@ -40,10 +39,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: demo-vision-prompts
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: omnia-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 data:
   pack.json: |
     {
@@ -60,7 +59,7 @@ data:
           "id": "default",
           "name": "Vision Assistant",
           "version": "1.0.0",
-          "system_template": {{ .Values.demo.promptPack.systemPrompt | toJson }},
+          "system_template": {{ .Values.promptPack.systemPrompt | toJson }},
           "parameters": {
             "temperature": 0.7
           }
@@ -73,10 +72,10 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
 metadata:
   name: demo-vision-prompts
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: omnia-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   source:
     type: configmap
@@ -90,11 +89,11 @@ spec:
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
-  name: {{ .Values.demo.agent.name }}
-  namespace: {{ .Values.demo.namespace }}
+  name: {{ .Values.agent.name }}
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: omnia-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   promptPackRef:
     name: demo-vision-prompts
@@ -103,15 +102,15 @@ spec:
   facade:
     type: websocket
     port: 8080
-    handler: {{ .Values.demo.agent.handler }}
+    handler: {{ .Values.agent.handler }}
   session:
     type: memory
     ttl: "1h"
   runtime:
-    replicas: {{ .Values.demo.agent.replicas }}
+    replicas: {{ .Values.agent.replicas }}
     resources:
-      {{- toYaml .Values.demo.agent.resources | nindent 6 }}
-  {{- with .Values.demo.agent.console }}
+      {{- toYaml .Values.agent.resources | nindent 6 }}
+  {{- with .Values.agent.console }}
   console:
     maxFileSize: {{ .maxFileSize | int64 }}
     maxFiles: {{ .maxFiles }}
@@ -131,43 +130,42 @@ spec:
         compressionGuidance: {{ .image.compressionGuidance | quote }}
     {{- end }}
   {{- end }}
-{{- end }}
 {{- /* ============================================================================ */ -}}
 {{- /* Audio Demo Resources (Gemini-based) */ -}}
 {{- /* ============================================================================ */ -}}
-{{- if and .Values.demo.enabled .Values.demo.audioDemo.enabled }}
+{{- if .Values.audioDemo.enabled }}
 ---
 # Provider configuration for Gemini
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
   name: gemini
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-audio-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   type: gemini
-  model: {{ .Values.demo.audioDemo.gemini.model }}
-  baseURL: {{ .Values.demo.audioDemo.gemini.baseURL }}
+  model: {{ .Values.audioDemo.gemini.model }}
+  baseURL: {{ .Values.audioDemo.gemini.baseURL }}
   secretRef:
-    name: {{ .Values.demo.audioDemo.gemini.secretName }}
+    name: {{ .Values.audioDemo.gemini.secretName }}
   defaults:
-    temperature: {{ .Values.demo.audioDemo.gemini.temperature | quote }}
+    temperature: {{ .Values.audioDemo.gemini.temperature | quote }}
   pricing:
-    inputCostPer1K: {{ .Values.demo.audioDemo.gemini.pricing.inputCostPer1K | quote }}
-    outputCostPer1K: {{ .Values.demo.audioDemo.gemini.pricing.outputCostPer1K | quote }}
-    cachedCostPer1K: {{ .Values.demo.audioDemo.gemini.pricing.cachedCostPer1K | quote }}
+    inputCostPer1K: {{ .Values.audioDemo.gemini.pricing.inputCostPer1K | quote }}
+    outputCostPer1K: {{ .Values.audioDemo.gemini.pricing.outputCostPer1K | quote }}
+    cachedCostPer1K: {{ .Values.audioDemo.gemini.pricing.cachedCostPer1K | quote }}
 ---
 # ConfigMap for the audio demo PromptPack
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: demo-audio-prompts
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-audio-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 data:
   pack.json: |
     {
@@ -184,9 +182,9 @@ data:
           "id": "default",
           "name": "Audio Assistant",
           "version": "1.0.0",
-          "system_template": {{ .Values.demo.audioDemo.promptPack.systemPrompt | toJson }},
+          "system_template": {{ .Values.audioDemo.promptPack.systemPrompt | toJson }},
           "parameters": {
-            "temperature": {{ .Values.demo.audioDemo.gemini.temperature }}
+            "temperature": {{ .Values.audioDemo.gemini.temperature }}
           }
         }
       }
@@ -197,10 +195,10 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
 metadata:
   name: demo-audio-prompts
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-audio-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   source:
     type: configmap
@@ -214,11 +212,11 @@ spec:
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
-  name: {{ .Values.demo.audioDemo.agent.name }}
-  namespace: {{ .Values.demo.namespace }}
+  name: {{ .Values.audioDemo.agent.name }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-audio-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   promptPackRef:
     name: demo-audio-prompts
@@ -227,20 +225,20 @@ spec:
   facade:
     type: websocket
     port: 8080
-    handler: {{ .Values.demo.audioDemo.agent.handler }}
+    handler: {{ .Values.audioDemo.agent.handler }}
   session:
     type: memory
     ttl: "1h"
   runtime:
-    replicas: {{ .Values.demo.audioDemo.agent.replicas }}
+    replicas: {{ .Values.audioDemo.agent.replicas }}
     resources:
-      {{- toYaml .Values.demo.audioDemo.agent.resources | nindent 6 }}
-    {{- if .Values.demo.audioDemo.agent.logLevel }}
+      {{- toYaml .Values.audioDemo.agent.resources | nindent 6 }}
+    {{- if .Values.audioDemo.agent.logLevel }}
     extraEnv:
       - name: LOG_LEVEL
-        value: {{ .Values.demo.audioDemo.agent.logLevel | quote }}
+        value: {{ .Values.audioDemo.agent.logLevel | quote }}
     {{- end }}
-  {{- with .Values.demo.audioDemo.console }}
+  {{- with .Values.audioDemo.console }}
   console:
     maxFileSize: {{ .maxFileSize | int64 }}
     maxFiles: {{ .maxFiles }}
@@ -272,26 +270,26 @@ spec:
 {{- /* ============================================================================ */ -}}
 {{- /* Tools Demo Resources (llama3.2 with tool calling) */ -}}
 {{- /* ============================================================================ */ -}}
-{{- if and .Values.demo.enabled .Values.demo.toolsDemo.enabled }}
+{{- if .Values.toolsDemo.enabled }}
 ---
 # Provider configuration for llama3.2 (tool-capable)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
   name: ollama-tools
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-tools-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   type: ollama
   model: llama3.2:3b
-  baseURL: http://ollama.{{ .Values.demo.namespace }}:11434
+  baseURL: http://ollama.{{ .Values.namespace }}:11434
   secretRef:
     name: ollama-credentials
   defaults:
     temperature: "0.7"
-    contextWindow: {{ .Values.demo.ollama.contextWindow }}
+    contextWindow: {{ .Values.ollama.contextWindow }}
     truncationStrategy: sliding
 ---
 # ConfigMap for the tools demo PromptPack
@@ -299,10 +297,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: demo-tools-prompts
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-tools-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 data:
   pack.json: |
     {
@@ -319,7 +317,7 @@ data:
           "id": "default",
           "name": "Tools Assistant",
           "version": "1.0.0",
-          "system_template": {{ .Values.demo.toolsDemo.promptPack.systemPrompt | toJson }},
+          "system_template": {{ .Values.toolsDemo.promptPack.systemPrompt | toJson }},
           "parameters": {
             "temperature": 0.7
           }
@@ -332,10 +330,10 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
 metadata:
   name: demo-tools-prompts
-  namespace: {{ .Values.demo.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-tools-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   source:
     type: configmap
@@ -349,11 +347,11 @@ spec:
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
-  name: {{ .Values.demo.toolsDemo.agent.name }}
-  namespace: {{ .Values.demo.namespace }}
+  name: {{ .Values.toolsDemo.agent.name }}
+  namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-tools-demo
-    app.kubernetes.io/part-of: {{ include "omnia.name" . }}
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   promptPackRef:
     name: demo-tools-prompts
@@ -362,12 +360,12 @@ spec:
   facade:
     type: websocket
     port: 8080
-    handler: {{ .Values.demo.toolsDemo.agent.handler }}
+    handler: {{ .Values.toolsDemo.agent.handler }}
   session:
     type: memory
     ttl: "1h"
   runtime:
-    replicas: {{ .Values.demo.toolsDemo.agent.replicas }}
+    replicas: {{ .Values.toolsDemo.agent.replicas }}
     resources:
-      {{- toYaml .Values.demo.toolsDemo.agent.resources | nindent 6 }}
+      {{- toYaml .Values.toolsDemo.agent.resources | nindent 6 }}
 {{- end }}
