@@ -55,6 +55,10 @@ export const Permission = {
   CREDENTIALS_CREATE: "credentials:create",
   CREDENTIALS_EDIT: "credentials:edit",
   CREDENTIALS_DELETE: "credentials:delete",
+
+  // Provider CRD management
+  PROVIDERS_VIEW: "providers:view",
+  PROVIDERS_EDIT: "providers:edit",
 } as const;
 
 export type PermissionType = (typeof Permission)[keyof typeof Permission];
@@ -77,6 +81,8 @@ const rolePermissions: Record<UserRole, PermissionType[]> = {
     Permission.API_KEYS_MANAGE_OWN,
     // View provider credentials (secrets metadata only)
     Permission.CREDENTIALS_VIEW,
+    // View providers
+    Permission.PROVIDERS_VIEW,
   ],
 
   editor: [
@@ -95,6 +101,8 @@ const rolePermissions: Record<UserRole, PermissionType[]> = {
     // Manage provider credentials
     Permission.CREDENTIALS_CREATE,
     Permission.CREDENTIALS_EDIT,
+    // Edit providers (e.g., change secretRef)
+    Permission.PROVIDERS_EDIT,
   ],
 
   admin: [

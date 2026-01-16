@@ -1,9 +1,9 @@
 "use client";
 
-import { use, useCallback } from "react";
+import { use, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Activity, Settings, Zap, DollarSign, FileText } from "lucide-react";
+import { ArrowLeft, Activity, Settings, Zap, DollarSign, FileText, AlertCircle, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,9 +11,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { MetricSparklineCard } from "@/components/ui/sparkline";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
-import { useProvider } from "@/hooks";
+import { useProvider, useUpdateProviderSecretRef, useSecrets } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 
 interface ProviderDetailPageProps {
@@ -45,6 +52,39 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
 
   const { data: provider, isLoading } = useProvider(name, namespace);
   const { data: metrics, isLoading: metricsLoading } = useProviderMetrics(name, provider?.spec?.type);
+  const { data: secrets, isLoading: secretsLoading } = useSecrets({ namespace });
+  const updateSecretRef = useUpdateProviderSecretRef();
+
+  // Determine current secret status
+  const currentSecretRef = provider?.spec?.secretRef?.name;
+  const secretExists = useMemo(() => {
+    if (!currentSecretRef) return true; // No secret configured
+    if (!secrets) return undefined; // Still loading
+    return secrets.some((s) => s.name === currentSecretRef);
+  }, [currentSecretRef, secrets]);
+
+  // Handle secret selection change
+  const handleSecretChange = useCallback(
+    async (value: string) => {
+      if (!provider) return;
+      const providerName = provider.metadata?.name;
+      const providerNamespace = provider.metadata?.namespace;
+      if (!providerName || !providerNamespace) return;
+
+      const newSecretRef = value === "__none__" ? null : value;
+
+      try {
+        await updateSecretRef.mutateAsync({
+          namespace: providerNamespace,
+          name: providerName,
+          secretRef: newSecretRef,
+        });
+      } catch (error) {
+        console.error("Failed to update provider:", error);
+      }
+    },
+    [provider, updateSecretRef]
+  );
 
   const handleTabChange = useCallback((tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -169,11 +209,68 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
                     <FileText className="h-5 w-5" />
                     Credentials
                   </CardTitle>
+                  <CardDescription>
+                    API credentials for this provider
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Secret</span>
-                    <span className="font-medium">{spec?.secretRef?.name || "-"}</span>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm text-muted-foreground">Secret</label>
+                    {secretsLoading ? (
+                      <Skeleton className="h-10 w-full" />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={currentSecretRef || "__none__"}
+                          onValueChange={handleSecretChange}
+                          disabled={updateSecretRef.isPending}
+                        >
+                          <SelectTrigger className="w-full">
+                            {updateSecretRef.isPending ? (
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Updating...</span>
+                              </div>
+                            ) : (
+                              <SelectValue placeholder="Select a secret" />
+                            )}
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">
+                              <span className="text-muted-foreground">None (no credentials)</span>
+                            </SelectItem>
+                            {/* Show missing secret if configured but doesn't exist */}
+                            {currentSecretRef && secretExists === false && (
+                              <SelectItem value={currentSecretRef} disabled>
+                                <div className="flex items-center gap-2 text-destructive">
+                                  <AlertCircle className="h-4 w-4" />
+                                  <span>{currentSecretRef} (missing)</span>
+                                </div>
+                              </SelectItem>
+                            )}
+                            {/* Available secrets */}
+                            {secrets?.map((secret) => (
+                              <SelectItem key={secret.name} value={secret.name}>
+                                <div className="flex items-center gap-2">
+                                  <span>{secret.name}</span>
+                                  {secret.annotations?.["omnia.altairalabs.ai/provider"] && (
+                                    <span className="text-xs text-muted-foreground">
+                                      ({secret.annotations["omnia.altairalabs.ai/provider"]})
+                                    </span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {/* Warning if secret is missing */}
+                        {currentSecretRef && secretExists === false && (
+                          <div className="text-destructive" title="Secret not found">
+                            <AlertCircle className="h-5 w-5" />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {spec?.secretRef?.key && (
                     <div className="flex justify-between">
