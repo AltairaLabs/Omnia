@@ -24,6 +24,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -420,4 +426,101 @@ func TestOCIFetcher_GetRemoteOptions_WithContext(t *testing.T) {
 	opts, err := fetcher.getRemoteOptions(ctx)
 	require.NoError(t, err)
 	assert.NotEmpty(t, opts)
+}
+
+// mockRemoteClient implements remoteClient for testing.
+type mockRemoteClient struct {
+	headFunc  func(ref name.Reference, opts ...remote.Option) (*v1.Descriptor, error)
+	imageFunc func(ref name.Reference, opts ...remote.Option) (v1.Image, error)
+}
+
+func (m *mockRemoteClient) Head(ref name.Reference, opts ...remote.Option) (*v1.Descriptor, error) {
+	if m.headFunc != nil {
+		return m.headFunc(ref, opts...)
+	}
+	return nil, nil
+}
+
+func (m *mockRemoteClient) Image(ref name.Reference, opts ...remote.Option) (v1.Image, error) {
+	if m.imageFunc != nil {
+		return m.imageFunc(ref, opts...)
+	}
+	return nil, nil
+}
+
+func TestOCIFetcher_LatestRevision_WithMock(t *testing.T) {
+	expectedDigest := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	// Replace with mock client
+	fetcher.client = &mockRemoteClient{
+		headFunc: func(ref name.Reference, opts ...remote.Option) (*v1.Descriptor, error) {
+			hash, _ := v1.NewHash(expectedDigest)
+			return &v1.Descriptor{
+				Digest:    hash,
+				MediaType: types.OCIManifestSchema1,
+				Size:      1234,
+			}, nil
+		},
+	}
+
+	ctx := context.Background()
+	revision, err := fetcher.LatestRevision(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, expectedDigest, revision)
+}
+
+func TestOCIFetcher_Fetch_WithMock(t *testing.T) {
+	// Create a minimal valid image for testing
+	img := mutate.MediaType(empty.Image, types.OCIManifestSchema1)
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:v1.0.0",
+	})
+
+	// Replace with mock client
+	fetcher.client = &mockRemoteClient{
+		imageFunc: func(ref name.Reference, opts ...remote.Option) (v1.Image, error) {
+			return img, nil
+		},
+	}
+
+	ctx := context.Background()
+	artifact, err := fetcher.Fetch(ctx, "v1.0.0")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(artifact.Path) }()
+
+	assert.NotEmpty(t, artifact.Path)
+	assert.NotEmpty(t, artifact.Revision)
+	assert.True(t, strings.HasPrefix(artifact.Checksum, "sha256:"))
+	assert.Greater(t, artifact.Size, int64(0))
+}
+
+func TestOCIFetcher_Fetch_WithDigestRevision_Mock(t *testing.T) {
+	// Create a minimal valid image for testing
+	img := mutate.MediaType(empty.Image, types.OCIManifestSchema1)
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	// Replace with mock client
+	fetcher.client = &mockRemoteClient{
+		imageFunc: func(ref name.Reference, opts ...remote.Option) (v1.Image, error) {
+			return img, nil
+		},
+	}
+
+	ctx := context.Background()
+	// Use a valid digest revision
+	revision := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	artifact, err := fetcher.Fetch(ctx, revision)
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(artifact.Path) }()
+
+	assert.NotEmpty(t, artifact.Path)
+	assert.NotEmpty(t, artifact.Revision)
 }

@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
@@ -61,9 +62,27 @@ type OCIFetcherConfig struct {
 	Options Options
 }
 
+// remoteClient abstracts OCI registry operations for testing.
+type remoteClient interface {
+	Head(ref name.Reference, opts ...remote.Option) (*v1.Descriptor, error)
+	Image(ref name.Reference, opts ...remote.Option) (v1.Image, error)
+}
+
+// defaultRemoteClient uses the real go-containerregistry remote package.
+type defaultRemoteClient struct{}
+
+func (d *defaultRemoteClient) Head(ref name.Reference, opts ...remote.Option) (*v1.Descriptor, error) {
+	return remote.Head(ref, opts...)
+}
+
+func (d *defaultRemoteClient) Image(ref name.Reference, opts ...remote.Option) (v1.Image, error) {
+	return remote.Image(ref, opts...)
+}
+
 // OCIFetcher implements the Fetcher interface for OCI registries.
 type OCIFetcher struct {
 	config OCIFetcherConfig
+	client remoteClient // For testing; defaults to real client
 }
 
 // NewOCIFetcher creates a new OCI fetcher with the given configuration.
@@ -71,7 +90,10 @@ func NewOCIFetcher(config OCIFetcherConfig) *OCIFetcher {
 	if config.Options.Timeout == 0 {
 		config.Options = DefaultOptions()
 	}
-	return &OCIFetcher{config: config}
+	return &OCIFetcher{
+		config: config,
+		client: &defaultRemoteClient{},
+	}
 }
 
 // Type returns the source type.
@@ -91,7 +113,7 @@ func (f *OCIFetcher) LatestRevision(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	desc, err := remote.Head(ref, opts...)
+	desc, err := f.client.Head(ref, opts...)
 	if err != nil {
 		return "", fmt.Errorf("failed to get image manifest: %w", err)
 	}
@@ -120,7 +142,7 @@ func (f *OCIFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 		return nil, err
 	}
 
-	img, err := remote.Image(ref, opts...)
+	img, err := f.client.Image(ref, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
