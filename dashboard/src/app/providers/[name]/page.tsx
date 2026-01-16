@@ -278,10 +278,6 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
                       <span className="font-medium">{spec.secretRef.key}</span>
                     </div>
                   )}
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Validate</span>
-                    <span className="font-medium">{spec?.validateCredentials ? "Yes" : "No"}</span>
-                  </div>
                 </CardContent>
               </Card>
 
