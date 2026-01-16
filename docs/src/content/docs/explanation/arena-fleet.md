@@ -126,10 +126,11 @@ metadata:
 spec:
   sourceRef:
     name: my-prompts
-  providerRef:
-    name: claude-provider
-  workers: 4
-  timeout: 5m
+  providers:
+    - name: claude-provider
+  evaluation:
+    timeout: 5m
+    concurrency: 4
 ```
 
 ### 3. Run Jobs
