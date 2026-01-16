@@ -17,6 +17,10 @@ limitations under the License.
 package fetcher
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,4 +240,144 @@ func TestOCIFetcher_FormatRevision_DigestRef(t *testing.T) {
 	revision := fetcher.formatRevision(ref, digest)
 	// For digest references, should just return the digest
 	assert.Equal(t, digest, revision)
+}
+
+func TestOCIFetcher_GetRemoteOptions(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      OCIFetcherConfig
+		expectError bool
+	}{
+		{
+			name: "no credentials",
+			config: OCIFetcherConfig{
+				URL: "oci://ghcr.io/example/repo:latest",
+			},
+		},
+		{
+			name: "with basic auth",
+			config: OCIFetcherConfig{
+				URL: "oci://ghcr.io/example/repo:latest",
+				Credentials: &OCICredentials{
+					Username: "user",
+					Password: "token",
+				},
+			},
+		},
+		{
+			name: "with docker config",
+			config: OCIFetcherConfig{
+				URL: "oci://ghcr.io/example/repo:latest",
+				Credentials: &OCICredentials{
+					DockerConfig: []byte(`{"auths":{}}`),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := NewOCIFetcher(tt.config)
+			opts, err := fetcher.getRemoteOptions(context.Background())
+
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.NotEmpty(t, opts)
+		})
+	}
+}
+
+func TestOCIFetcher_CalculateChecksum(t *testing.T) {
+	// Create a temporary file with known content
+	tmpDir, err := os.MkdirTemp("", "oci-test-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	testContent := "test content for checksum"
+	testFile := filepath.Join(tmpDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte(testContent), 0644))
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	checksum, size, err := fetcher.calculateChecksum(testFile)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(testContent)), size)
+	assert.True(t, strings.HasPrefix(checksum, "sha256:"))
+	assert.Len(t, checksum, 7+64) // "sha256:" + 64 hex chars
+}
+
+func TestOCIFetcher_CalculateChecksum_FileNotFound(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	_, _, err := fetcher.calculateChecksum("/nonexistent/file.txt")
+	assert.Error(t, err)
+}
+
+func TestOCIFetcher_LatestRevision_InvalidReference(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://",
+	})
+
+	ctx := context.Background()
+	_, err := fetcher.LatestRevision(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse OCI reference")
+}
+
+func TestOCIFetcher_Fetch_InvalidReference(t *testing.T) {
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://",
+	})
+
+	ctx := context.Background()
+	_, err := fetcher.Fetch(ctx, "sha256:abc123")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse OCI reference")
+}
+
+func TestOCIFetcher_Fetch_WithDigestRevision(t *testing.T) {
+	// Test that a valid digest revision is parsed correctly
+	// This won't connect to registry but tests the digest parsing path
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://ghcr.io/example/repo:latest",
+	})
+
+	ctx := context.Background()
+	// Use a properly formatted sha256 digest
+	_, err := fetcher.Fetch(ctx, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	// This will fail at the remote.Image call but we're testing the digest parsing path
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to pull image")
+}
+
+func TestOCIFetcher_LatestRevision_NetworkError(t *testing.T) {
+	// Test with a valid reference but unreachable registry
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://localhost:59999/nonexistent/repo:latest",
+	})
+
+	ctx := context.Background()
+	_, err := fetcher.LatestRevision(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get image manifest")
+}
+
+func TestOCIFetcher_Fetch_NetworkError(t *testing.T) {
+	// Test with a valid reference but unreachable registry
+	fetcher := NewOCIFetcher(OCIFetcherConfig{
+		URL: "oci://localhost:59999/nonexistent/repo:latest",
+	})
+
+	ctx := context.Background()
+	_, err := fetcher.Fetch(ctx, "v1.0.0")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to pull image")
 }
