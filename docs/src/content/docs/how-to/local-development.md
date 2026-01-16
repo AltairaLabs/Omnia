@@ -194,14 +194,17 @@ For faster inference:
 
 ### Demo Mode with Helm
 
-For production-like demos, enable demo mode in the Helm chart:
+For production-like demos, deploy both the main Omnia chart and the separate demos chart:
 
 ```bash
-helm install omnia charts/omnia -n omnia-system --create-namespace \
-  --set demo.enabled=true
+# Install the Omnia operator
+helm install omnia charts/omnia -n omnia-system --create-namespace
+
+# Install the demo agents (Ollama + vision/tools demos)
+helm install omnia-demos charts/omnia-demos -n omnia-demo --create-namespace
 ```
 
-This deploys Ollama with a pre-configured vision agent.
+This deploys Ollama with pre-configured vision and tools demo agents. The demos chart is separate from the main chart for cleaner production deployments.
 
 ## Deploy Redis (Optional)
 

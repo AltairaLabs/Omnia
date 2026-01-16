@@ -552,49 +552,65 @@ keda:
     serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"
 ```
 
-## Demo Mode
+## Demo Mode (Separate Chart)
 
-Demo mode deploys Ollama (local LLM) with a vision-capable agent, allowing users to try Omnia without external API keys:
+Demo agents are now deployed via a separate `omnia-demos` chart. This provides a cleaner separation between the core operator and demo/example resources.
+
+### Installing Demo Agents
+
+```bash
+# First, install the main Omnia operator
+helm install omnia oci://ghcr.io/altairalabs/omnia \
+  --namespace omnia-system \
+  --create-namespace
+
+# Then, install the demo agents
+helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+  --namespace omnia-demo \
+  --create-namespace
+```
+
+### Demo Chart Configuration
+
+The `omnia-demos` chart has its own values. Key options include:
 
 ```yaml
-demo:
+# Namespace for demo resources
+namespace: omnia-demo
+
+# Ollama configuration
+ollama:
+  model: llava:7b  # Vision-capable model
+  additionalModels:
+    - llama3.2:3b  # For tools demo
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "16Gi"
+      cpu: "8"
+  persistence:
+    enabled: true
+    size: 20Gi
+
+# Vision demo agent
+agent:
+  name: vision-demo
+  handler: runtime
+
+# Tools demo agent (uses llama3.2 for tool calling)
+toolsDemo:
+  enabled: true
+
+# Audio demo (requires Gemini API key)
+audioDemo:
   enabled: false
-  namespace: omnia-demo
 
-  ollama:
-    image:
-      repository: ollama/ollama
-      tag: latest
-      pullPolicy: IfNotPresent
-    model: llava:7b  # Vision-capable model
-    keepAlive: "24h"
-    resources:
-      requests:
-        memory: "4Gi"
-        cpu: "2"
-      limits:
-        memory: "16Gi"
-        cpu: "8"
-    persistence:
-      enabled: true
-      size: 20Gi
-      storageClass: ""
-
-  agent:
-    name: vision-demo
-    handler: runtime
-    replicas: 1
-    resources:
-      requests:
-        cpu: "100m"
-        memory: "128Mi"
-      limits:
-        cpu: "500m"
-        memory: "256Mi"
-
-  promptPack:
-    systemPrompt: |
-      You are a helpful vision-capable AI assistant...
+# OPA policy validation (prevents model switching)
+opa:
+  enabled: false
+  mode: sidecar  # or "extauthz" with Istio
 ```
 
 ### Requirements
@@ -603,16 +619,9 @@ demo:
 - **Disk**: ~10GB for the llava:7b model
 - **CPU**: 4+ cores (GPU optional but significantly faster)
 
-### Usage
-
-```bash
-helm install omnia oci://ghcr.io/altairalabs/omnia \
-  --namespace omnia-system \
-  --create-namespace \
-  --set demo.enabled=true
-```
-
-Once deployed, the demo agent is accessible at `vision-demo.omnia-demo.svc:8080`.
+Once deployed, demo agents are accessible at:
+- `vision-demo.omnia-demo.svc:8080`
+- `tools-demo.omnia-demo.svc:8080` (if enabled)
 
 ## Example Configurations
 
@@ -718,16 +727,16 @@ keda:
 
 ### Demo Mode (Try Without API Keys)
 
-Quick-start demo with local Ollama LLM:
+Quick-start demo with local Ollama LLM. Deploy using two separate charts:
 
-```yaml
-demo:
-  enabled: true
-  ollama:
-    persistence:
-      enabled: true
-      size: 20Gi
+```bash
+# Main chart with dashboard
+helm install omnia oci://ghcr.io/altairalabs/omnia \
+  -n omnia-system --create-namespace \
+  --set dashboard.enabled=true
 
-dashboard:
-  enabled: true
+# Demo agents chart
+helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+  -n omnia-demo --create-namespace \
+  --set ollama.persistence.enabled=true
 ```

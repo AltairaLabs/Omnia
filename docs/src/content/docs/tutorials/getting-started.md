@@ -18,13 +18,17 @@ Before you begin, ensure you have:
 - An LLM provider API key (OpenAI, Anthropic, etc.) — *or use Demo Mode below*
 
 :::tip[No API Key? Try Demo Mode]
-If you don't have an API key yet, you can try Omnia with the built-in demo mode that uses Ollama (a local LLM):
+If you don't have an API key yet, you can try Omnia with the demo charts that use Ollama (a local LLM):
 
 ```bash
+# Install the Omnia operator with dashboard
 helm install omnia oci://ghcr.io/altairalabs/omnia \
   -n omnia-system --create-namespace \
-  --set demo.enabled=true \
   --set dashboard.enabled=true
+
+# Install the demo agents (separate chart)
+helm install omnia-demos oci://ghcr.io/altairalabs/omnia-demos \
+  -n omnia-demo --create-namespace
 ```
 
 This deploys a vision-capable agent using the llava:7b model running locally. No API keys required!
