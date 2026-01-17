@@ -498,6 +498,283 @@ data:
             }
           ],
           "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 12
+          },
+          "id": 7,
+          "panels": [],
+          "title": "Arena Queue",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "${datasource}"
+          },
+          "description": "Total pending items across all Arena jobs",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 100
+                  },
+                  {
+                    "color": "red",
+                    "value": 500
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 13
+          },
+          "id": 8,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "command": "cli",
+              "datasource": {
+                "type": "redis-datasource",
+                "uid": "${datasource}"
+              },
+              "query": "EVAL \"local sum=0; for _,k in ipairs(redis.call('KEYS','arena:job:*:pending')) do sum=sum+redis.call('LLEN',k) end; return sum\" 0",
+              "refId": "A",
+              "type": "command"
+            }
+          ],
+          "title": "Pending Items",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "${datasource}"
+          },
+          "description": "Total items currently being processed across all Arena jobs",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 50
+                  },
+                  {
+                    "color": "red",
+                    "value": 100
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 13
+          },
+          "id": 9,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "command": "cli",
+              "datasource": {
+                "type": "redis-datasource",
+                "uid": "${datasource}"
+              },
+              "query": "EVAL \"local sum=0; for _,k in ipairs(redis.call('KEYS','arena:job:*:processing_zset')) do sum=sum+redis.call('ZCARD',k) end; return sum\" 0",
+              "refId": "A",
+              "type": "command"
+            }
+          ],
+          "title": "Processing Items",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "${datasource}"
+          },
+          "description": "Total completed items across all Arena jobs",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 13
+          },
+          "id": 10,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "command": "cli",
+              "datasource": {
+                "type": "redis-datasource",
+                "uid": "${datasource}"
+              },
+              "query": "EVAL \"local sum=0; for _,k in ipairs(redis.call('KEYS','arena:job:*:completed')) do sum=sum+redis.call('SCARD',k) end; return sum\" 0",
+              "refId": "A",
+              "type": "command"
+            }
+          ],
+          "title": "Completed Items",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "${datasource}"
+          },
+          "description": "Total failed items across all Arena jobs",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 10
+                  },
+                  {
+                    "color": "red",
+                    "value": 50
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 13
+          },
+          "id": 11,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "command": "cli",
+              "datasource": {
+                "type": "redis-datasource",
+                "uid": "${datasource}"
+              },
+              "query": "EVAL \"local sum=0; for _,k in ipairs(redis.call('KEYS','arena:job:*:failed')) do sum=sum+redis.call('SCARD',k) end; return sum\" 0",
+              "refId": "A",
+              "type": "command"
+            }
+          ],
+          "title": "Failed Items",
+          "type": "stat"
         }
       ],
       "refresh": "5s",
