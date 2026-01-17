@@ -76,3 +76,31 @@ gateway:
 
 internalGateway:
   enabled: false
+
+# Enable Redis for Arena queue development (Bitnami Redis)
+redis:
+  enabled: true
+  architecture: standalone
+  image:
+    tag: latest  # Use latest for dev to avoid version mismatch issues
+  auth:
+    enabled: false  # No auth for dev
+  master:
+    persistence:
+      enabled: false  # No persistence for dev
+    resources:
+      limits:
+        cpu: 100m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+# Arena queue configuration
+arena:
+  queue:
+    type: redis
+    redis:
+      # Auto-configured to use the Bitnami Redis subchart
+      host: "omnia-redis-master"
+      port: 6379

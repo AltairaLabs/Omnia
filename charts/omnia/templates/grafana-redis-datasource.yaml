@@ -1,0 +1,34 @@
+{{- if and .Values.grafana.enabled .Values.redis.enabled }}
+---
+# Redis datasource for Grafana
+# Auto-configured when both grafana.enabled and redis.enabled are true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-grafana-redis-datasource
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    grafana_datasource: "1"
+data:
+  redis-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Redis
+        type: redis-datasource
+        access: proxy
+        url: redis://{{ include "omnia.fullname" . }}-redis-master:6379
+        isDefault: false
+        editable: true
+        jsonData:
+          client: standalone
+          {{- if .Values.redis.auth.enabled }}
+          acl: true
+          {{- else }}
+          acl: false
+          {{- end }}
+        {{- if .Values.redis.auth.enabled }}
+        secureJsonData:
+          password: $REDIS_PASSWORD
+        {{- end }}
+{{- end }}

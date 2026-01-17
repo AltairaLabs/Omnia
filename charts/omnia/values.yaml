@@ -392,6 +392,37 @@ arena:
       # -- Volume size
       size: 10Gi
 
+  # Work queue configuration for job distribution
+  queue:
+    # -- Queue backend type: memory (dev) or redis (prod)
+    type: memory
+
+    # Redis configuration (when type: redis)
+    # Uses the Bitnami Redis subchart when redis.enabled=true
+    # Or connect to external Redis via arena.queue.external
+    redis:
+      # -- Redis host (auto-configured when redis.enabled=true)
+      host: ""
+      # -- Redis port
+      port: 6379
+
+    # External Redis configuration (BYOD - Bring Your Own Database)
+    external:
+      # -- External Redis URL (e.g., redis://host:6379, rediss://host:6379 for TLS)
+      # Supports: ElastiCache, Memorystore, Azure Cache, or any Redis 6+
+      url: ""
+      # -- Reference to existing secret containing Redis URL
+      # Secret must have a key specified by urlKey
+      secretRef:
+        name: ""
+        key: "redis-url"
+      # -- Redis password (if not using URL with password)
+      password: ""
+      # -- Reference to existing secret containing Redis password
+      passwordSecretRef:
+        name: ""
+        key: "redis-password"
+
 # Facade container configuration (used by AgentRuntime)
 facade:
   image:
@@ -539,6 +570,10 @@ grafana:
     # Allow embedding in iframes
     security:
       allow_embedding: true
+  # -- Grafana plugins to install
+  # Redis plugin provides Redis datasource for monitoring and visualization
+  plugins:
+    - redis-datasource
   # Sidecar configuration for auto-loading dashboards/datasources
   sidecar:
     dashboards:
@@ -891,6 +926,42 @@ keda:
     # -- Prometheus server address for KEDA triggers
     # This is the default when using the Prometheus subchart
     serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"
+
+# ============================================================================
+# Redis (Bitnami)
+# Optional Redis deployment for Arena queue, sessions, caching, etc.
+# See: https://github.com/bitnami/charts/tree/main/bitnami/redis
+# ============================================================================
+
+redis:
+  # -- Enable Redis subchart (Bitnami Redis)
+  # Use this for development or when you want a managed Redis instance
+  enabled: false
+
+  # -- Subchart values for Bitnami Redis
+  # See: https://github.com/bitnami/charts/tree/main/bitnami/redis
+  # Architecture: standalone (1 master) or replication (master + replicas)
+  architecture: standalone
+
+  auth:
+    # -- Disable auth for development (enable and set password for production)
+    enabled: false
+
+  master:
+    persistence:
+      # -- Disable persistence for development
+      enabled: false
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  replica:
+    # -- Number of replicas (only used when architecture: replication)
+    replicaCount: 0
 
 # ============================================================================
 # Demo Mode (Separate Chart)
