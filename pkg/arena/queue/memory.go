@@ -294,5 +294,61 @@ func (q *MemoryQueue) getOrCreateJobState(jobID string) *jobState {
 	return state
 }
 
+// GetCompletedItems returns all completed work items for a job.
+func (q *MemoryQueue) GetCompletedItems(ctx context.Context, jobID string) ([]*WorkItem, error) {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return nil, ErrQueueClosed
+	}
+
+	state, exists := q.jobs[jobID]
+	q.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrJobNotFound
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	items := make([]*WorkItem, 0, len(state.completed))
+	for _, item := range state.completed {
+		// Return a copy to prevent external modification
+		itemCopy := *item
+		items = append(items, &itemCopy)
+	}
+
+	return items, nil
+}
+
+// GetFailedItems returns all failed work items for a job.
+func (q *MemoryQueue) GetFailedItems(ctx context.Context, jobID string) ([]*WorkItem, error) {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return nil, ErrQueueClosed
+	}
+
+	state, exists := q.jobs[jobID]
+	q.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrJobNotFound
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	items := make([]*WorkItem, 0, len(state.failed))
+	for _, item := range state.failed {
+		// Return a copy to prevent external modification
+		itemCopy := *item
+		items = append(items, &itemCopy)
+	}
+
+	return items, nil
+}
+
 // Ensure MemoryQueue implements WorkQueue interface.
 var _ WorkQueue = (*MemoryQueue)(nil)

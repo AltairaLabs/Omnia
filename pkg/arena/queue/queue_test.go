@@ -252,6 +252,20 @@ func (m *mockQueue) Close() error {
 	return nil
 }
 
+func (m *mockQueue) GetCompletedItems(_ context.Context, _ string) ([]*WorkItem, error) {
+	if m.closed {
+		return nil, ErrQueueClosed
+	}
+	return nil, ErrJobNotFound
+}
+
+func (m *mockQueue) GetFailedItems(_ context.Context, _ string) ([]*WorkItem, error) {
+	if m.closed {
+		return nil, ErrQueueClosed
+	}
+	return nil, ErrJobNotFound
+}
+
 // Compile-time check that mockQueue implements WorkQueue.
 var _ WorkQueue = (*mockQueue)(nil)
 

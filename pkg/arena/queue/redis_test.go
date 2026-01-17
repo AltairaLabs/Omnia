@@ -30,6 +30,7 @@ import (
 
 // getTestRedisClient returns a Redis client for testing.
 // It skips the test if Redis is not available.
+// It also cleans up any stale arena keys from previous test runs.
 func getTestRedisClient(t *testing.T) *redis.Client {
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
@@ -45,6 +46,12 @@ func getTestRedisClient(t *testing.T) *redis.Client {
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skipf("Redis not available at %s: %v", addr, err)
+	}
+
+	// Clean up stale keys from previous test runs
+	keys, err := client.Keys(ctx, "arena:*").Result()
+	if err == nil && len(keys) > 0 {
+		_ = client.Del(ctx, keys...)
 	}
 
 	return client
@@ -606,4 +613,146 @@ func TestRedisQueue_Push_Empty(t *testing.T) {
 	// Push empty slice should succeed without error
 	err := q.Push(ctx, jobID, []WorkItem{})
 	require.NoError(t, err)
+}
+
+func TestRedisQueue_GetCompletedItems(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-completed-items"
+
+	// Push and complete some items
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "scenario-1", ProviderID: "provider-1"},
+		{ID: "item-2", ScenarioID: "scenario-2", ProviderID: "provider-1"},
+		{ID: "item-3", ScenarioID: "scenario-3", ProviderID: "provider-1"},
+	}
+	err := q.Push(ctx, jobID, items)
+	require.NoError(t, err)
+
+	// Complete 2 items
+	item1, _ := q.Pop(ctx, jobID)
+	item2, _ := q.Pop(ctx, jobID)
+	_ = q.Ack(ctx, jobID, item1.ID, []byte(`{"result": "success"}`))
+	_ = q.Ack(ctx, jobID, item2.ID, []byte(`{"result": "ok"}`))
+
+	// Get completed items
+	completed, err := q.GetCompletedItems(ctx, jobID)
+	require.NoError(t, err)
+	assert.Len(t, completed, 2)
+
+	// Verify results are preserved
+	for _, item := range completed {
+		assert.Equal(t, ItemStatusCompleted, item.Status)
+		assert.NotNil(t, item.Result)
+	}
+}
+
+func TestRedisQueue_GetCompletedItems_Empty(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-completed-empty"
+
+	// Push but don't complete any items
+	items := []WorkItem{{ID: "item-1"}}
+	err := q.Push(ctx, jobID, items)
+	require.NoError(t, err)
+
+	// Get completed items should return empty slice
+	completed, err := q.GetCompletedItems(ctx, jobID)
+	require.NoError(t, err)
+	assert.Empty(t, completed)
+}
+
+func TestRedisQueue_GetCompletedItems_JobNotFound(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+
+	_, err := q.GetCompletedItems(ctx, "nonexistent-job")
+	assert.Equal(t, ErrJobNotFound, err)
+}
+
+func TestRedisQueue_GetFailedItems(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{MaxRetries: 1})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-failed-items"
+
+	// Push and fail some items
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "scenario-1", ProviderID: "provider-1"},
+		{ID: "item-2", ScenarioID: "scenario-2", ProviderID: "provider-1"},
+	}
+	err := q.Push(ctx, jobID, items)
+	require.NoError(t, err)
+
+	// Fail 2 items (max retries = 1, so first nack fails them)
+	item1, _ := q.Pop(ctx, jobID)
+	item2, _ := q.Pop(ctx, jobID)
+	_ = q.Nack(ctx, jobID, item1.ID, errors.New("error 1"))
+	_ = q.Nack(ctx, jobID, item2.ID, errors.New("error 2"))
+
+	// Get failed items
+	failed, err := q.GetFailedItems(ctx, jobID)
+	require.NoError(t, err)
+	assert.Len(t, failed, 2)
+
+	// Verify error is preserved
+	for _, item := range failed {
+		assert.Equal(t, ItemStatusFailed, item.Status)
+		assert.NotEmpty(t, item.Error)
+	}
+}
+
+func TestRedisQueue_GetFailedItems_JobNotFound(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+
+	_, err := q.GetFailedItems(ctx, "nonexistent-job")
+	assert.Equal(t, ErrJobNotFound, err)
+}
+
+func TestRedisQueue_GetItems_Closed(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	_ = q.Close()
+
+	ctx := context.Background()
+
+	_, err := q.GetCompletedItems(ctx, "job-1")
+	assert.Equal(t, ErrQueueClosed, err)
+
+	_, err = q.GetFailedItems(ctx, "job-1")
+	assert.Equal(t, ErrQueueClosed, err)
 }

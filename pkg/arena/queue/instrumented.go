@@ -127,5 +127,17 @@ func (q *InstrumentedQueue) Close() error {
 	return q.queue.Close()
 }
 
+// GetCompletedItems returns all completed work items for a job.
+// This is a read-only operation and does not record operation metrics.
+func (q *InstrumentedQueue) GetCompletedItems(ctx context.Context, jobID string) ([]*WorkItem, error) {
+	return q.queue.GetCompletedItems(ctx, jobID)
+}
+
+// GetFailedItems returns all failed work items for a job.
+// This is a read-only operation and does not record operation metrics.
+func (q *InstrumentedQueue) GetFailedItems(ctx context.Context, jobID string) ([]*WorkItem, error) {
+	return q.queue.GetFailedItems(ctx, jobID)
+}
+
 // Ensure InstrumentedQueue implements WorkQueue interface.
 var _ WorkQueue = (*InstrumentedQueue)(nil)

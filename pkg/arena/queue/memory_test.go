@@ -413,3 +413,158 @@ func TestMemoryQueueNackWithNilError(t *testing.T) {
 		t.Errorf("Failed = %d, want 1", progress.Failed)
 	}
 }
+
+func TestMemoryQueueGetCompletedItems(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "scenario-1"},
+		{ID: "item-2", ScenarioID: "scenario-2"},
+		{ID: "item-3", ScenarioID: "scenario-3"},
+	}
+	_ = q.Push(ctx, "job-1", items)
+
+	// Complete two items
+	item1, _ := q.Pop(ctx, "job-1")
+	item2, _ := q.Pop(ctx, "job-1")
+	result1 := []byte(`{"score": 0.95}`)
+	result2 := []byte(`{"score": 0.85}`)
+	_ = q.Ack(ctx, "job-1", item1.ID, result1)
+	_ = q.Ack(ctx, "job-1", item2.ID, result2)
+
+	// Get completed items
+	completed, err := q.GetCompletedItems(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetCompletedItems() error = %v", err)
+	}
+
+	if len(completed) != 2 {
+		t.Errorf("GetCompletedItems() returned %d items, want 2", len(completed))
+	}
+
+	// Verify result data is preserved
+	foundResults := make(map[string]bool)
+	for _, item := range completed {
+		if item.Result != nil {
+			foundResults[string(item.Result)] = true
+		}
+		if item.Status != ItemStatusCompleted {
+			t.Errorf("Item status = %s, want %s", item.Status, ItemStatusCompleted)
+		}
+	}
+	if !foundResults[`{"score": 0.95}`] || !foundResults[`{"score": 0.85}`] {
+		t.Error("Result data not preserved in completed items")
+	}
+}
+
+func TestMemoryQueueGetCompletedItemsNotFound(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	_, err := q.GetCompletedItems(ctx, "nonexistent-job")
+	if err != ErrJobNotFound {
+		t.Errorf("GetCompletedItems() error = %v, want ErrJobNotFound", err)
+	}
+}
+
+func TestMemoryQueueGetCompletedItemsClosed(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	_ = q.Close()
+	_, err := q.GetCompletedItems(ctx, "job-1")
+	if err != ErrQueueClosed {
+		t.Errorf("GetCompletedItems() error = %v, want ErrQueueClosed", err)
+	}
+}
+
+func TestMemoryQueueGetFailedItems(t *testing.T) {
+	q := NewMemoryQueue(Options{MaxRetries: 1})
+	ctx := context.Background()
+
+	items := []WorkItem{
+		{ID: "item-1", ScenarioID: "scenario-1"},
+		{ID: "item-2", ScenarioID: "scenario-2"},
+		{ID: "item-3", ScenarioID: "scenario-3"},
+	}
+	_ = q.Push(ctx, "job-1", items)
+
+	// Fail two items (max retries = 1, so first Nack fails them)
+	item1, _ := q.Pop(ctx, "job-1")
+	item2, _ := q.Pop(ctx, "job-1")
+	err1 := errors.New("error 1")
+	err2 := errors.New("error 2")
+	_ = q.Nack(ctx, "job-1", item1.ID, err1)
+	_ = q.Nack(ctx, "job-1", item2.ID, err2)
+
+	// Get failed items
+	failed, err := q.GetFailedItems(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetFailedItems() error = %v", err)
+	}
+
+	if len(failed) != 2 {
+		t.Errorf("GetFailedItems() returned %d items, want 2", len(failed))
+	}
+
+	// Verify error data is preserved
+	foundErrors := make(map[string]bool)
+	for _, item := range failed {
+		if item.Error != "" {
+			foundErrors[item.Error] = true
+		}
+		if item.Status != ItemStatusFailed {
+			t.Errorf("Item status = %s, want %s", item.Status, ItemStatusFailed)
+		}
+	}
+	if !foundErrors["error 1"] || !foundErrors["error 2"] {
+		t.Error("Error data not preserved in failed items")
+	}
+}
+
+func TestMemoryQueueGetFailedItemsNotFound(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	_, err := q.GetFailedItems(ctx, "nonexistent-job")
+	if err != ErrJobNotFound {
+		t.Errorf("GetFailedItems() error = %v, want ErrJobNotFound", err)
+	}
+}
+
+func TestMemoryQueueGetFailedItemsClosed(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	_ = q.Close()
+	_, err := q.GetFailedItems(ctx, "job-1")
+	if err != ErrQueueClosed {
+		t.Errorf("GetFailedItems() error = %v, want ErrQueueClosed", err)
+	}
+}
+
+func TestMemoryQueueGetItemsEmpty(t *testing.T) {
+	q := NewMemoryQueueWithDefaults()
+	ctx := context.Background()
+
+	// Push items but don't complete any
+	_ = q.Push(ctx, "job-1", []WorkItem{{ID: "item-1"}})
+
+	// Should return empty slice, not error
+	completed, err := q.GetCompletedItems(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetCompletedItems() error = %v", err)
+	}
+	if len(completed) != 0 {
+		t.Errorf("GetCompletedItems() returned %d items, want 0", len(completed))
+	}
+
+	failed, err := q.GetFailedItems(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetFailedItems() error = %v", err)
+	}
+	if len(failed) != 0 {
+		t.Errorf("GetFailedItems() returned %d items, want 0", len(failed))
+	}
+}
