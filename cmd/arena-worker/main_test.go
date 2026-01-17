@@ -354,6 +354,55 @@ func createMaliciousTarGz(path string) error {
 	return nil
 }
 
+func TestSanitizeSymlinkTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	destDir := filepath.Join(tmpDir, "dest")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		t.Fatalf("failed to create dest dir: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		symlinkPath string
+		linkTarget  string
+		wantErr     bool
+	}{
+		{
+			name:        "valid relative symlink",
+			symlinkPath: filepath.Join(destDir, "link.txt"),
+			linkTarget:  "target.txt",
+			wantErr:     false,
+		},
+		{
+			name:        "valid relative symlink in subdir",
+			symlinkPath: filepath.Join(destDir, "subdir", "link.txt"),
+			linkTarget:  "../target.txt",
+			wantErr:     false,
+		},
+		{
+			name:        "absolute symlink target",
+			symlinkPath: filepath.Join(destDir, "link.txt"),
+			linkTarget:  "/etc/passwd",
+			wantErr:     true,
+		},
+		{
+			name:        "symlink escaping destination",
+			symlinkPath: filepath.Join(destDir, "link.txt"),
+			linkTarget:  "../../../etc/passwd",
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := sanitizeSymlinkTarget(destDir, tt.symlinkPath, tt.linkTarget)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("sanitizeSymlinkTarget() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func createTarGzWithSymlink(path, linkName, linkTarget string) error {
 	file, err := os.Create(path)
 	if err != nil {

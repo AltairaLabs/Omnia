@@ -213,25 +213,15 @@ func extractTarGz(tarPath, destDir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
-			// Validate symlink target to prevent symlink escape attacks
-			// Reject absolute symlinks
-			if filepath.IsAbs(header.Linkname) {
-				return fmt.Errorf("invalid symlink target (absolute path): %s", header.Linkname)
-			}
-			// Resolve symlink target relative to the symlink's directory
-			linkDir := filepath.Dir(target)
-			resolvedLink := filepath.Join(linkDir, header.Linkname)
-			resolvedLink = filepath.Clean(resolvedLink)
-			// Verify resolved path stays within destDir
-			if !strings.HasPrefix(resolvedLink, filepath.Clean(destDir)+string(os.PathSeparator)) &&
-				resolvedLink != filepath.Clean(destDir) {
-				return fmt.Errorf("invalid symlink target (escapes destination): %s -> %s",
-					header.Name, header.Linkname)
+			// Validate and sanitize symlink target to prevent symlink escape attacks
+			safeLinkTarget, err := sanitizeSymlinkTarget(destDir, target, header.Linkname)
+			if err != nil {
+				return fmt.Errorf("invalid symlink in archive: %w", err)
 			}
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
-			if err := os.Symlink(header.Linkname, target); err != nil {
+			if err := os.Symlink(safeLinkTarget, target); err != nil {
 				return err
 			}
 		}
@@ -252,6 +242,36 @@ func extractRegularFile(target string, tr *tar.Reader, mode int64) error {
 
 	_, err = io.Copy(outFile, tr)
 	return err
+}
+
+// sanitizeSymlinkTarget validates a symlink target from an archive and returns
+// a safe relative path. This prevents symlink escape attacks (CWE-22).
+func sanitizeSymlinkTarget(destDir, symlinkPath, linkTarget string) (string, error) {
+	// Reject absolute symlink targets
+	if filepath.IsAbs(linkTarget) {
+		return "", fmt.Errorf("absolute symlink target not allowed: %s", linkTarget)
+	}
+
+	// Resolve the symlink target relative to the symlink's directory
+	linkDir := filepath.Dir(symlinkPath)
+	resolvedPath := filepath.Join(linkDir, linkTarget)
+	resolvedPath = filepath.Clean(resolvedPath)
+
+	// Verify resolved path stays within destDir
+	cleanDestDir := filepath.Clean(destDir)
+	if !strings.HasPrefix(resolvedPath, cleanDestDir+string(os.PathSeparator)) &&
+		resolvedPath != cleanDestDir {
+		return "", fmt.Errorf("symlink target escapes destination: %s", linkTarget)
+	}
+
+	// Compute the relative path from the symlink to the target
+	// This ensures we're not using the raw archive data
+	relPath, err := filepath.Rel(linkDir, resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to compute relative path: %w", err)
+	}
+
+	return relPath, nil
 }
 
 func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundlePath string) error {
