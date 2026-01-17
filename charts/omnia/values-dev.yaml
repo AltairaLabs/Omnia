@@ -12,10 +12,10 @@ replicaCount: 1
 resources:
   limits:
     cpu: 500m
-    memory: 256Mi
+    memory: 384Mi
   requests:
     cpu: 100m
-    memory: 128Mi
+    memory: 192Mi
 
 # Dashboard settings
 dashboard:

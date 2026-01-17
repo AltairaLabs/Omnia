@@ -166,19 +166,19 @@ func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 
 	cloneDir := filepath.Join(tmpDir, "repo")
 
-	// Clone the repository
+	// Clone the repository with shallow clone for memory efficiency
 	cloneOpts := &git.CloneOptions{
-		URL:  f.config.URL,
-		Auth: auth,
+		URL:          f.config.URL,
+		Auth:         auth,
+		Depth:        1,
+		SingleBranch: true,
 	}
 
 	// Set the reference based on config
 	if f.config.Ref.Branch != "" {
 		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(f.config.Ref.Branch)
-		cloneOpts.SingleBranch = true
 	} else if f.config.Ref.Tag != "" {
 		cloneOpts.ReferenceName = plumbing.NewTagReferenceName(f.config.Ref.Tag)
-		cloneOpts.SingleBranch = true
 	}
 
 	repo, err := git.PlainCloneContext(ctx, cloneDir, false, cloneOpts)
