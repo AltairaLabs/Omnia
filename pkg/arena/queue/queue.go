@@ -167,6 +167,14 @@ type WorkQueue interface {
 	// Returns ErrJobNotFound if the job doesn't exist.
 	Progress(ctx context.Context, jobID string) (*JobProgress, error)
 
+	// GetCompletedItems returns all completed work items for a job.
+	// Returns ErrJobNotFound if the job doesn't exist.
+	GetCompletedItems(ctx context.Context, jobID string) ([]*WorkItem, error)
+
+	// GetFailedItems returns all failed work items for a job.
+	// Returns ErrJobNotFound if the job doesn't exist.
+	GetFailedItems(ctx context.Context, jobID string) ([]*WorkItem, error)
+
 	// Close releases any resources held by the queue.
 	// After Close is called, all other methods will return ErrQueueClosed.
 	Close() error

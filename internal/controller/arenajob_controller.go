@@ -34,6 +34,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/arena/aggregator"
+	"github.com/altairalabs/omnia/pkg/arena/queue"
 )
 
 // ArenaJob condition types
@@ -67,6 +69,8 @@ type ArenaJobReconciler struct {
 	Recorder              record.EventRecorder
 	WorkerImage           string
 	WorkerImagePullPolicy corev1.PullPolicy
+	Queue                 queue.WorkQueue
+	Aggregator            *aggregator.Aggregator
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -351,6 +355,17 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseSucceeded
 				now := metav1.Now()
 				arenaJob.Status.CompletionTime = &now
+
+				// Aggregate results from queue if aggregator is available
+				if r.Aggregator != nil {
+					result, err := r.Aggregator.Aggregate(ctx, arenaJob.Name)
+					if err != nil {
+						log.Error(err, "failed to aggregate results")
+					} else {
+						arenaJob.Status.Result = r.Aggregator.ToJobResult(result)
+					}
+				}
+
 				r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
 					"JobSucceeded", "Job completed successfully")
 				r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionTrue,

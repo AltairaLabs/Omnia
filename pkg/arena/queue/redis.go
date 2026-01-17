@@ -530,5 +530,67 @@ func (q *RedisQueue) RequeueTimedOutItems(ctx context.Context, jobID string) (in
 	return requeued, nil
 }
 
+// GetCompletedItems returns all completed work items for a job.
+func (q *RedisQueue) GetCompletedItems(ctx context.Context, jobID string) ([]*WorkItem, error) {
+	return q.getItemsFromSet(ctx, jobID, q.completedKey(jobID), "completed")
+}
+
+// GetFailedItems returns all failed work items for a job.
+func (q *RedisQueue) GetFailedItems(ctx context.Context, jobID string) ([]*WorkItem, error) {
+	return q.getItemsFromSet(ctx, jobID, q.failedKey(jobID), "failed")
+}
+
+// getItemsFromSet retrieves all work items from a Redis set for a job.
+func (q *RedisQueue) getItemsFromSet(ctx context.Context, jobID, setKey, itemType string) ([]*WorkItem, error) {
+	q.mu.RLock()
+	if q.closed {
+		q.mu.RUnlock()
+		return nil, ErrQueueClosed
+	}
+	q.mu.RUnlock()
+
+	// Get all item IDs from the set
+	itemIDs, err := q.client.SMembers(ctx, setKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %s items: %w", itemType, err)
+	}
+
+	// If no items, check if job exists by looking for any job-related keys
+	if len(itemIDs) == 0 {
+		// Check for metadata, pending items, processing items, or items in either set
+		pipe := q.client.Pipeline()
+		metaExists := pipe.Exists(ctx, q.metaKey(jobID))
+		pendingExists := pipe.Exists(ctx, q.pendingKey(jobID))
+		processingExists := pipe.Exists(ctx, q.processingKey(jobID))
+		completedExists := pipe.Exists(ctx, q.completedKey(jobID))
+		failedExists := pipe.Exists(ctx, q.failedKey(jobID))
+
+		_, err := pipe.Exec(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check job existence: %w", err)
+		}
+
+		// If none of the job keys exist, the job doesn't exist
+		if metaExists.Val() == 0 && pendingExists.Val() == 0 && processingExists.Val() == 0 &&
+			completedExists.Val() == 0 && failedExists.Val() == 0 {
+			return nil, ErrJobNotFound
+		}
+		return []*WorkItem{}, nil
+	}
+
+	// Load full item data for each item
+	items := make([]*WorkItem, 0, len(itemIDs))
+	for _, itemID := range itemIDs {
+		item, err := q.getItem(ctx, itemID)
+		if err != nil {
+			// Skip items that can't be loaded (may have been cleaned up)
+			continue
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
 // Ensure RedisQueue implements WorkQueue interface.
 var _ WorkQueue = (*RedisQueue)(nil)

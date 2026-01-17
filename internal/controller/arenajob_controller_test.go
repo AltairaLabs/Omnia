@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/arena/aggregator"
+	"github.com/altairalabs/omnia/pkg/arena/queue"
 )
 
 var _ = Describe("ArenaJob Controller", func() {
@@ -1251,6 +1253,175 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			// Should have progress tracking
 			Expect(updatedJob.Status.Progress).NotTo(BeNil())
+		})
+	})
+
+	Context("When updating status from completed K8s Job with aggregator", func() {
+		It("should aggregate results and populate JobResult", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "aggregator-test-job",
+					Namespace: arenaJobNamespace,
+				},
+				Status: omniav1alpha1.ArenaJobStatus{
+					Phase: omniav1alpha1.ArenaJobPhaseRunning,
+				},
+			}
+
+			completions := int32(3)
+			k8sJob := &batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Completions: &completions,
+				},
+				Status: batchv1.JobStatus{
+					Active:    0,
+					Succeeded: 3,
+					Failed:    0,
+					Conditions: []batchv1.JobCondition{
+						{
+							Type:   batchv1.JobComplete,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			}
+
+			// Create a memory queue with completed items
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			queueCtx := context.Background()
+			items := []queue.WorkItem{
+				{ID: "item-1", ScenarioID: "scenario-1", ProviderID: "provider-1"},
+				{ID: "item-2", ScenarioID: "scenario-1", ProviderID: "provider-2"},
+				{ID: "item-3", ScenarioID: "scenario-2", ProviderID: "provider-1"},
+			}
+			Expect(memQueue.Push(queueCtx, "aggregator-test-job", items)).To(Succeed())
+
+			// Pop and ack all items with results
+			for range 3 {
+				item, err := memQueue.Pop(queueCtx, "aggregator-test-job")
+				Expect(err).NotTo(HaveOccurred())
+				result := []byte(`{"status": "pass", "durationMs": 100, "metrics": {"tokens": 50, "cost": 0.01}}`)
+				Expect(memQueue.Ack(queueCtx, "aggregator-test-job", item.ID, result)).To(Succeed())
+			}
+
+			// Create aggregator
+			agg := aggregator.New(memQueue)
+
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler := &ArenaJobReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   fakeRecorder,
+				Queue:      memQueue,
+				Aggregator: agg,
+			}
+
+			reconciler.updateStatusFromJob(ctx, arenaJob, k8sJob)
+
+			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseSucceeded))
+			Expect(arenaJob.Status.Result).NotTo(BeNil())
+			Expect(arenaJob.Status.Result.Summary).NotTo(BeNil())
+			Expect(arenaJob.Status.Result.Summary["passRate"]).To(Equal("100.0"))
+			Expect(arenaJob.Status.Result.Summary["totalItems"]).To(Equal("3"))
+			Expect(arenaJob.Status.Result.Summary["passedItems"]).To(Equal("3"))
+			Expect(arenaJob.Status.Result.Summary["failedItems"]).To(Equal("0"))
+			Expect(arenaJob.Status.Result.Summary["totalTokens"]).To(Equal("150"))
+		})
+
+		It("should handle aggregator errors gracefully", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "aggregator-error-job",
+					Namespace: arenaJobNamespace,
+				},
+				Status: omniav1alpha1.ArenaJobStatus{
+					Phase: omniav1alpha1.ArenaJobPhaseRunning,
+				},
+			}
+
+			completions := int32(1)
+			k8sJob := &batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Completions: &completions,
+				},
+				Status: batchv1.JobStatus{
+					Active:    0,
+					Succeeded: 1,
+					Failed:    0,
+					Conditions: []batchv1.JobCondition{
+						{
+							Type:   batchv1.JobComplete,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			}
+
+			// Create a memory queue WITHOUT the job (will cause ErrJobNotFound)
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			agg := aggregator.New(memQueue)
+
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler := &ArenaJobReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   fakeRecorder,
+				Queue:      memQueue,
+				Aggregator: agg,
+			}
+
+			// Should not panic, should just log error and continue
+			reconciler.updateStatusFromJob(ctx, arenaJob, k8sJob)
+
+			// Job should still be marked as succeeded even if aggregation fails
+			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseSucceeded))
+			// Result should be nil since aggregation failed
+			Expect(arenaJob.Status.Result).To(BeNil())
+		})
+
+		It("should work without aggregator configured", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-aggregator-job",
+					Namespace: arenaJobNamespace,
+				},
+				Status: omniav1alpha1.ArenaJobStatus{
+					Phase: omniav1alpha1.ArenaJobPhaseRunning,
+				},
+			}
+
+			completions := int32(1)
+			k8sJob := &batchv1.Job{
+				Spec: batchv1.JobSpec{
+					Completions: &completions,
+				},
+				Status: batchv1.JobStatus{
+					Active:    0,
+					Succeeded: 1,
+					Failed:    0,
+					Conditions: []batchv1.JobCondition{
+						{
+							Type:   batchv1.JobComplete,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			}
+
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler := &ArenaJobReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
+				// No Queue or Aggregator configured
+			}
+
+			reconciler.updateStatusFromJob(ctx, arenaJob, k8sJob)
+
+			// Job should be marked as succeeded
+			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseSucceeded))
+			// Result should be nil since no aggregator
+			Expect(arenaJob.Status.Result).To(BeNil())
 		})
 	})
 })

@@ -542,3 +542,57 @@ func TestInstrumentedQueueWithNoOpMetrics(t *testing.T) {
 		t.Errorf("Completed = %d, want 1", progress.Completed)
 	}
 }
+
+func TestInstrumentedQueueGetCompletedItems(t *testing.T) {
+	innerQueue := NewMemoryQueueWithDefaults()
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+	items := []WorkItem{{ID: "item-1"}, {ID: "item-2"}}
+	_ = innerQueue.Push(ctx, testJobID, items)
+
+	// Complete one item
+	item, _ := innerQueue.Pop(ctx, testJobID)
+	_ = innerQueue.Ack(ctx, testJobID, item.ID, []byte(`{"result": "success"}`))
+
+	completed, err := q.GetCompletedItems(ctx, testJobID)
+	if err != nil {
+		t.Fatalf("GetCompletedItems() error = %v", err)
+	}
+	if len(completed) != 1 {
+		t.Errorf("GetCompletedItems() returned %d items, want 1", len(completed))
+	}
+
+	// Read-only operations should not record metrics
+	if len(metrics.operations) != 0 {
+		t.Errorf("Expected 0 operations, got %d", len(metrics.operations))
+	}
+}
+
+func TestInstrumentedQueueGetFailedItems(t *testing.T) {
+	innerQueue := NewMemoryQueue(Options{MaxRetries: 1})
+	metrics := newMockMetrics()
+	q := NewInstrumentedQueue(innerQueue, metrics)
+
+	ctx := context.Background()
+	items := []WorkItem{{ID: "item-1"}}
+	_ = innerQueue.Push(ctx, testJobID, items)
+
+	// Fail one item
+	item, _ := innerQueue.Pop(ctx, testJobID)
+	_ = innerQueue.Nack(ctx, testJobID, item.ID, errors.New("test error"))
+
+	failed, err := q.GetFailedItems(ctx, testJobID)
+	if err != nil {
+		t.Fatalf("GetFailedItems() error = %v", err)
+	}
+	if len(failed) != 1 {
+		t.Errorf("GetFailedItems() returned %d items, want 1", len(failed))
+	}
+
+	// Read-only operations should not record metrics
+	if len(metrics.operations) != 0 {
+		t.Errorf("Expected 0 operations, got %d", len(metrics.operations))
+	}
+}
