@@ -256,6 +256,44 @@ func TestExtractTarGz(t *testing.T) {
 			t.Error("extractTarGz() should reject path traversal")
 		}
 	})
+
+	t.Run("rejects absolute symlink targets", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tarPath := filepath.Join(tmpDir, "symlink-absolute.tar.gz")
+		destDir := filepath.Join(tmpDir, "extracted")
+
+		if err := createTarGzWithSymlink(tarPath, "link.txt", "/etc/passwd"); err != nil {
+			t.Fatalf("failed to create tar.gz with symlink: %v", err)
+		}
+
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			t.Fatalf("failed to create dest dir: %v", err)
+		}
+
+		err := extractTarGz(tarPath, destDir)
+		if err == nil {
+			t.Error("extractTarGz() should reject absolute symlink targets")
+		}
+	})
+
+	t.Run("rejects symlink escaping destination", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		tarPath := filepath.Join(tmpDir, "symlink-escape.tar.gz")
+		destDir := filepath.Join(tmpDir, "extracted")
+
+		if err := createTarGzWithSymlink(tarPath, "link.txt", "../../../etc/passwd"); err != nil {
+			t.Fatalf("failed to create tar.gz with symlink: %v", err)
+		}
+
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			t.Fatalf("failed to create dest dir: %v", err)
+		}
+
+		err := extractTarGz(tarPath, destDir)
+		if err == nil {
+			t.Error("extractTarGz() should reject symlink escape attempts")
+		}
+	})
 }
 
 func createTestTarGz(path string) error {
@@ -314,6 +352,28 @@ func createMaliciousTarGz(path string) error {
 	}
 
 	return nil
+}
+
+func createTarGzWithSymlink(path, linkName, linkTarget string) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	gw := gzip.NewWriter(file)
+	defer func() { _ = gw.Close() }()
+
+	tw := tar.NewWriter(gw)
+	defer func() { _ = tw.Close() }()
+
+	hdr := &tar.Header{
+		Name:     linkName,
+		Mode:     0777,
+		Typeflag: tar.TypeSymlink,
+		Linkname: linkTarget,
+	}
+	return tw.WriteHeader(hdr)
 }
 
 func TestProcessWorkItems(t *testing.T) {

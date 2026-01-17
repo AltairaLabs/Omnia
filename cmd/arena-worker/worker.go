@@ -213,6 +213,21 @@ func extractTarGz(tarPath, destDir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
+			// Validate symlink target to prevent symlink escape attacks
+			// Reject absolute symlinks
+			if filepath.IsAbs(header.Linkname) {
+				return fmt.Errorf("invalid symlink target (absolute path): %s", header.Linkname)
+			}
+			// Resolve symlink target relative to the symlink's directory
+			linkDir := filepath.Dir(target)
+			resolvedLink := filepath.Join(linkDir, header.Linkname)
+			resolvedLink = filepath.Clean(resolvedLink)
+			// Verify resolved path stays within destDir
+			if !strings.HasPrefix(resolvedLink, filepath.Clean(destDir)+string(os.PathSeparator)) &&
+				resolvedLink != filepath.Clean(destDir) {
+				return fmt.Errorf("invalid symlink target (escapes destination): %s -> %s",
+					header.Name, header.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
