@@ -57,6 +57,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - keda.sh
   resources:
   - scaledobjects
@@ -73,6 +85,7 @@ rules:
   resources:
   - agentruntimes
   - arenaconfigs
+  - arenajobs
   - arenasources
   - promptpacks
   - providers
@@ -90,6 +103,7 @@ rules:
   resources:
   - agentruntimes/finalizers
   - arenaconfigs/finalizers
+  - arenajobs/finalizers
   - arenasources/finalizers
   - promptpacks/finalizers
   - providers/finalizers
@@ -101,6 +115,7 @@ rules:
   resources:
   - agentruntimes/status
   - arenaconfigs/status
+  - arenajobs/status
   - arenasources/status
   - promptpacks/status
   - providers/status
