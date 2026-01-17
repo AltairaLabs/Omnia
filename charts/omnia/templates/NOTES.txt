@@ -49,6 +49,11 @@ The Omnia operator is running and watching for:
   - PromptPacks
   - ToolRegistries
   - Providers
+{{- if .Values.arena.enabled }}
+  - ArenaSources
+  - ArenaConfigs
+  - ArenaJobs
+{{- end }}
 
 To verify the operator is running:
 
@@ -82,6 +87,61 @@ Grafana is enabled. Access dashboards at:
 {{- end }}
 
 Default credentials: admin / {{ .Values.grafana.adminPassword }}
+
+{{- end }}
+
+{{- if .Values.arena.enabled }}
+
+=== Arena Fleet ===
+
+Arena Fleet is enabled for distributed prompt testing and evaluation.
+
+To create your first Arena test:
+
+1. Define a source for your PromptKit bundles:
+
+  kubectl apply -f - <<EOF
+  apiVersion: omnia.altairalabs.ai/v1alpha1
+  kind: ArenaSource
+  metadata:
+    name: my-prompts
+  spec:
+    type: git
+    interval: 5m
+    git:
+      url: https://github.com/your-org/prompts
+      ref:
+        branch: main
+  EOF
+
+2. Create a test configuration:
+
+  kubectl apply -f - <<EOF
+  apiVersion: omnia.altairalabs.ai/v1alpha1
+  kind: ArenaConfig
+  metadata:
+    name: my-config
+  spec:
+    sourceRef:
+      name: my-prompts
+    providers:
+      - name: my-provider
+  EOF
+
+3. Run a job:
+
+  kubectl apply -f - <<EOF
+  apiVersion: omnia.altairalabs.ai/v1alpha1
+  kind: ArenaJob
+  metadata:
+    name: my-eval
+  spec:
+    configRef:
+      name: my-config
+    type: evaluation
+  EOF
+
+Worker image: {{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
 
 {{- end }}
 

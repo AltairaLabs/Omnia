@@ -218,6 +218,67 @@ framework:
     tag: ""  # Defaults to Chart appVersion
 ```
 
+## Arena Fleet Configuration
+
+Arena Fleet provides distributed testing for PromptKit bundles.
+
+### Basic Settings
+
+```yaml
+arena:
+  enabled: true  # Enable Arena Fleet controllers
+
+  worker:
+    image:
+      repository: ghcr.io/altairalabs/arena-worker
+      tag: ""  # Defaults to Chart appVersion
+      pullPolicy: IfNotPresent
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+```
+
+### Source Configuration
+
+```yaml
+arena:
+  source:
+    defaultInterval: 5m  # Interval between source checks
+    fetchTimeout: 2m     # Timeout for fetching sources
+```
+
+### Result Storage
+
+```yaml
+arena:
+  storage:
+    type: memory  # memory (testing), s3, or pvc
+
+    # S3 configuration (when type: s3)
+    s3:
+      bucket: ""
+      region: ""
+      endpoint: ""      # For S3-compatible storage
+      secretRef: ""     # Secret with AWS credentials
+
+    # PVC configuration (when type: pvc)
+    pvc:
+      claimName: ""
+      storageClass: ""
+      size: 10Gi
+```
+
+When Arena Fleet is enabled, the operator will watch for:
+- **ArenaSource**: Git, OCI, or ConfigMap sources for PromptKit bundles
+- **ArenaConfig**: Test configuration referencing sources and providers
+- **ArenaJob**: Job execution with worker pods
+
+See the [Arena Fleet documentation](/explanation/arena-fleet/) for architecture details.
+
 ## Dashboard Configuration
 
 The Omnia Dashboard provides a web UI for monitoring and managing agents.

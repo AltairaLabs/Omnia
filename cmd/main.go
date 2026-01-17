@@ -77,6 +77,8 @@ func main() {
 	var frameworkImagePullPolicy string
 	var tracingEnabled bool
 	var tracingEndpoint string
+	var arenaWorkerImage string
+	var arenaWorkerImagePullPolicy string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -92,6 +94,10 @@ func main() {
 		"Enable distributed tracing for agent runtime containers")
 	flag.StringVar(&tracingEndpoint, "tracing-endpoint", "",
 		"OTLP endpoint for traces (e.g., tempo.omnia-system.svc.cluster.local:4317)")
+	flag.StringVar(&arenaWorkerImage, "arena-worker-image", "",
+		"The image to use for Arena worker containers. If not set, defaults to ghcr.io/altairalabs/arena-worker:latest")
+	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
+		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent. Default: IfNotPresent")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -241,6 +247,34 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Provider")
+		os.Exit(1)
+	}
+
+	// Arena Fleet controllers
+	if err := (&controller.ArenaSourceReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("arenasource-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
+		os.Exit(1)
+	}
+	if err := (&controller.ArenaConfigReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("arenaconfig-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaConfig")
+		os.Exit(1)
+	}
+	if err := (&controller.ArenaJobReconciler{
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
+		WorkerImage:           arenaWorkerImage,
+		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
