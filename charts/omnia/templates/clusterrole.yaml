@@ -38,14 +38,16 @@ rules:
     verbs:
       - get
       - list
-  # Events for dashboard events panel
+  # Events for dashboard events panel and controller event recording
   - apiGroups:
       - ""
     resources:
       - events
     verbs:
+      - create
       - get
       - list
+      - patch
       - watch
   # Services for agent facade
   - apiGroups:

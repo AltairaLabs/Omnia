@@ -252,9 +252,11 @@ func main() {
 
 	// Arena Fleet controllers
 	if err := (&controller.ArenaSourceReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("arenasource-controller"),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        mgr.GetEventRecorderFor("arenasource-controller"),
+		ArtifactDir:     "/tmp/arena-artifacts",
+		ArtifactBaseURL: "http://localhost:8082/artifacts", // Served by operator API
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)

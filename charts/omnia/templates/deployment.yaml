@@ -100,6 +100,16 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.arena.enabled }}
+          volumeMounts:
+            - name: arena-artifacts
+              mountPath: /tmp/arena-artifacts
+          {{- end }}
+      {{- if .Values.arena.enabled }}
+      volumes:
+        - name: arena-artifacts
+          emptyDir: {}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
