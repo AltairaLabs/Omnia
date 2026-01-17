@@ -63,8 +63,10 @@ const (
 // ArenaJobReconciler reconciles an ArenaJob object
 type ArenaJobReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme                *runtime.Scheme
+	Recorder              record.EventRecorder
+	WorkerImage           string
+	WorkerImagePullPolicy corev1.PullPolicy
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -205,6 +207,22 @@ func (r *ArenaJobReconciler) getJobName(arenaJob *omniav1alpha1.ArenaJob) string
 	return fmt.Sprintf("%s-worker", arenaJob.Name)
 }
 
+// getWorkerImage returns the worker image to use, with fallback to default.
+func (r *ArenaJobReconciler) getWorkerImage() string {
+	if r.WorkerImage != "" {
+		return r.WorkerImage
+	}
+	return DefaultWorkerImage
+}
+
+// getWorkerImagePullPolicy returns the worker image pull policy, with fallback to IfNotPresent.
+func (r *ArenaJobReconciler) getWorkerImagePullPolicy() corev1.PullPolicy {
+	if r.WorkerImagePullPolicy != "" {
+		return r.WorkerImagePullPolicy
+	}
+	return corev1.PullIfNotPresent
+}
+
 // createWorkerJob creates a K8s Job for the Arena workers.
 func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig) error {
 	log := logf.FromContext(ctx)
@@ -275,9 +293,10 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:  "worker",
-							Image: DefaultWorkerImage,
-							Env:   env,
+							Name:            "worker",
+							Image:           r.getWorkerImage(),
+							ImagePullPolicy: r.getWorkerImagePullPolicy(),
+							Env:             env,
 						},
 					},
 				},

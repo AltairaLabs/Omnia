@@ -64,6 +64,10 @@ spec:
             {{- if .Values.api.enabled }}
             - --api-bind-address=:{{ .Values.api.port }}
             {{- end }}
+            {{- if .Values.arena.enabled }}
+            - --arena-worker-image={{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
+            - --arena-worker-image-pull-policy={{ .Values.arena.worker.image.pullPolicy }}
+            {{- end }}
           ports:
             {{- if .Values.api.enabled }}
             - name: api
@@ -96,6 +100,16 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.arena.enabled }}
+          volumeMounts:
+            - name: arena-artifacts
+              mountPath: /tmp/arena-artifacts
+          {{- end }}
+      {{- if .Values.arena.enabled }}
+      volumes:
+        - name: arena-artifacts
+          emptyDir: {}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

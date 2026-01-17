@@ -454,6 +454,34 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
+	Context("When testing getWorkerImage helper", func() {
+		It("should return configured image when set", func() {
+			reconciler := &ArenaJobReconciler{
+				WorkerImage: "custom/worker:v1.0",
+			}
+			Expect(reconciler.getWorkerImage()).To(Equal("custom/worker:v1.0"))
+		})
+
+		It("should return default image when not set", func() {
+			reconciler := &ArenaJobReconciler{}
+			Expect(reconciler.getWorkerImage()).To(Equal(DefaultWorkerImage))
+		})
+	})
+
+	Context("When testing getWorkerImagePullPolicy helper", func() {
+		It("should return configured pull policy when set", func() {
+			reconciler := &ArenaJobReconciler{
+				WorkerImagePullPolicy: corev1.PullAlways,
+			}
+			Expect(reconciler.getWorkerImagePullPolicy()).To(Equal(corev1.PullAlways))
+		})
+
+		It("should return IfNotPresent when not set", func() {
+			reconciler := &ArenaJobReconciler{}
+			Expect(reconciler.getWorkerImagePullPolicy()).To(Equal(corev1.PullIfNotPresent))
+		})
+	})
+
 	Context("When testing findArenaJobsForConfig", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob

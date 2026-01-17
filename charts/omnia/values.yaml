@@ -50,10 +50,10 @@ securityContext:
 resources:
   limits:
     cpu: 500m
-    memory: 128Mi
+    memory: 256Mi
   requests:
     cpu: 10m
-    memory: 64Mi
+    memory: 128Mi
 
 # -- Node selector
 nodeSelector: {}
@@ -333,6 +333,64 @@ dashboard:
     size: 1Gi
     # -- Existing PVC to use
     existingClaim: ""
+
+# ============================================================================
+# Arena Fleet Configuration
+# Distributed testing framework for evaluating PromptKit bundles
+# ============================================================================
+
+arena:
+  # -- Enable Arena Fleet controllers
+  enabled: true
+
+  # Worker configuration for ArenaJob execution
+  worker:
+    image:
+      # -- Worker image repository
+      repository: ghcr.io/altairalabs/arena-worker
+      # -- Worker image tag (defaults to Chart appVersion)
+      tag: ""
+      # -- Worker image pull policy
+      pullPolicy: IfNotPresent
+
+    # -- Default resource limits for worker pods
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  # Source fetcher configuration
+  source:
+    # -- Interval between source checks (default: 5m)
+    defaultInterval: 5m
+    # -- Timeout for fetching sources
+    fetchTimeout: 2m
+
+  # Result storage configuration (future use)
+  storage:
+    # -- Storage type: s3, pvc, or memory (memory is for testing only)
+    type: memory
+    # S3 configuration (when type: s3)
+    s3:
+      # -- S3 bucket for results
+      bucket: ""
+      # -- S3 region
+      region: ""
+      # -- S3 endpoint (for S3-compatible storage)
+      endpoint: ""
+      # -- Secret containing AWS credentials
+      secretRef: ""
+    # PVC configuration (when type: pvc)
+    pvc:
+      # -- Existing PVC for results
+      claimName: ""
+      # -- Storage class for dynamic provisioning
+      storageClass: ""
+      # -- Volume size
+      size: 10Gi
 
 # Facade container configuration (used by AgentRuntime)
 facade:

@@ -38,14 +38,16 @@ rules:
     verbs:
       - get
       - list
-  # Events for dashboard events panel
+  # Events for dashboard events panel and controller event recording
   - apiGroups:
       - ""
     resources:
       - events
     verbs:
+      - create
       - get
       - list
+      - patch
       - watch
   # Services for agent facade
   - apiGroups:
@@ -109,6 +111,54 @@ rules:
       - get
       - patch
       - update
+  {{- if .Values.arena.enabled }}
+  # Arena Fleet CRDs
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - arenaconfigs
+      - arenajobs
+      - arenasources
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - arenaconfigs/finalizers
+      - arenajobs/finalizers
+      - arenasources/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - arenaconfigs/status
+      - arenajobs/status
+      - arenasources/status
+    verbs:
+      - get
+      - patch
+      - update
+  # Batch Jobs for ArenaJob workers
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  {{- end }}
   # HorizontalPodAutoscaler for standard autoscaling
   - apiGroups:
       - autoscaling
