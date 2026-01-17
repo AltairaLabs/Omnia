@@ -72,6 +72,7 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes
+  - arenasources
   - promptpacks
   - providers
   - toolregistries
@@ -87,6 +88,7 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/finalizers
+  - arenasources/finalizers
   - promptpacks/finalizers
   - providers/finalizers
   - toolregistries/finalizers
@@ -96,6 +98,7 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/status
+  - arenasources/status
   - promptpacks/status
   - providers/status
   - toolregistries/status
