@@ -265,9 +265,10 @@ Contains summary results for completed jobs.
 
 | Type | Description |
 |------|-------------|
-| `Ready` | Job is ready to execute |
-| `Complete` | Job has finished execution |
-| `Failed` | Job encountered a failure |
+| `Ready` | Overall readiness of the job |
+| `ConfigValid` | ArenaConfig reference is valid and ready |
+| `JobCreated` | Worker K8s Job has been created |
+| `Progressing` | Job is actively executing workers |
 
 ### Timing Fields
 
