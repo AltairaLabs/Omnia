@@ -46,7 +46,7 @@ PROMPTKIT_PATH = os.getenv('PROMPTKIT_PATH', '../PromptKit')
 ENABLE_FULL_STACK = os.getenv('ENABLE_FULL_STACK', '').lower() in ('true', '1', 'yes') or False
 
 # Allow deployment to local clusters only (safety check)
-allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind'])
+allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind', 'orbstack'])
 
 # Suppress warnings for images passed as CLI args to operator (not in K8s manifests)
 update_settings(suppress_unused_image_warnings=['omnia-facade-dev', 'omnia-runtime-dev'])
@@ -64,6 +64,9 @@ if ENABLE_OBSERVABILITY or ENABLE_FULL_STACK:
 
 if ENABLE_FULL_STACK:
     helm_repo('istio', 'https://istio-release.storage.googleapis.com/charts')
+
+# Bitnami charts for Redis
+helm_repo('bitnami', 'https://charts.bitnami.com/bitnami')
 
 # ============================================================================
 # Full Stack Mode - Istio Installation via Helm
@@ -414,6 +417,17 @@ if ENABLE_OBSERVABILITY:
             '4318:4318',   # OTLP HTTP
         ],
     )
+
+# ============================================================================
+# Redis for Arena Queue (Bitnami)
+# ============================================================================
+
+# Redis master (Bitnami standalone mode)
+k8s_resource(
+    'omnia-redis-master',
+    labels=['redis'],
+    port_forwards=['6379:6379'],  # Redis port for local debugging
+)
 
 # ============================================================================
 # Full Stack Mode Resources (Istio, Tempo, Loki, Alloy)

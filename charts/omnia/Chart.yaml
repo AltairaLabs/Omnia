@@ -52,6 +52,10 @@ dependencies:
     version: "~2.16"
     repository: https://kedacore.github.io/charts
     condition: keda.enabled
+  - name: redis
+    version: "~21.0"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
 
 # NOTE: Istio should be installed separately before deploying Omnia.
 # See: https://istio.io/latest/docs/setup/install/helm/

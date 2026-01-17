@@ -279,6 +279,91 @@ When Arena Fleet is enabled, the operator will watch for:
 
 See the [Arena Fleet documentation](/explanation/arena-fleet/) for architecture details.
 
+### Arena Queue (Redis)
+
+Arena Fleet uses a work queue for distributing tasks to workers. By default, an in-memory queue is used for development. For production, use Redis.
+
+#### Queue Type
+
+```yaml
+arena:
+  queue:
+    type: memory  # memory (dev) or redis (production)
+```
+
+#### Managed Redis (Bitnami Subchart)
+
+Deploy a Redis instance using the Bitnami Redis subchart:
+
+```yaml
+redis:
+  enabled: true
+  architecture: standalone  # standalone or replication
+  auth:
+    enabled: false  # Enable and set password for production
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+arena:
+  queue:
+    type: redis
+    redis:
+      host: "omnia-redis-master"  # Auto-generated service name
+      port: 6379
+```
+
+#### Bring Your Own Redis (BYOD)
+
+Connect to an external Redis instance (ElastiCache, Memorystore, Azure Cache, etc.):
+
+```yaml
+arena:
+  queue:
+    type: redis
+    external:
+      # Option 1: Direct URL
+      url: "redis://my-redis.example.com:6379"
+
+      # Option 2: URL from secret
+      secretRef:
+        name: redis-credentials
+        key: redis-url
+
+      # Option 3: Password separate from URL
+      password: ""  # Or use passwordSecretRef
+      passwordSecretRef:
+        name: redis-credentials
+        key: redis-password
+```
+
+#### Redis Subchart Configuration
+
+See the [Bitnami Redis chart documentation](https://github.com/bitnami/charts/tree/main/bitnami/redis) for all available options.
+
+#### Redis + Grafana Integration
+
+When both `redis.enabled` and `grafana.enabled` are true, the chart automatically:
+
+1. **Installs the Redis datasource plugin** in Grafana
+2. **Configures a Redis datasource** pointing to `omnia-redis-master:6379`
+3. **Creates a Redis Overview dashboard** with:
+   - Connected clients
+   - Memory usage (current and over time)
+   - Total keys
+   - Uptime
+   - Commands per second
+
+No additional configuration is required - the integration is automatic.
+
 ## Dashboard Configuration
 
 The Omnia Dashboard provides a web UI for monitoring and managing agents.
