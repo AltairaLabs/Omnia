@@ -97,6 +97,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: docs/package-lock.json
 
+      - name: Install D2 (diagram tool)
+        run: |
+          curl -fsSL https://d2lang.com/install.sh | sh -s --
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Install dependencies
         run: npm ci
         working-directory: docs
