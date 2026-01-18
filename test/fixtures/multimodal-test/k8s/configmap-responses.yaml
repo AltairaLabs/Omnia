@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multimodal-test-responses
+  labels:
+    app.kubernetes.io/name: multimodal-test
+    app.kubernetes.io/component: mock-responses
+data:
+  responses.yaml: |
+    # Mock responses for multimodal E2E testing
+    defaultResponse: "This is a default mock response for multimodal testing."
+
+    scenarios:
+      image-analysis:
+        defaultResponse: "I can help analyze images."
+        turns:
+          1:
+            type: multimodal
+            content: "I've analyzed the image you provided. Here's what I found:"
+            parts:
+              - type: text
+                text: "The image shows a test pattern with multiple colors and shapes."
+              - type: image
+                image_url:
+                  url: "mock://annotated-response.png"
+                  detail: "high"
+                metadata:
+                  format: "PNG"
+                  width: 800
+                  height: 600
+
+      audio-transcription:
+        turns:
+          1:
+            type: text
+            content: "Transcription: Hello, this is a test recording."
+
+      audio-response:
+        turns:
+          1:
+            type: multimodal
+            content: "Here's an audio response:"
+            parts:
+              - type: text
+                text: "Click play to listen."
+              - type: audio
+                audio_url:
+                  url: "mock://test-audio-short.mp3"
+                metadata:
+                  format: "MP3"
+                  duration_seconds: 3
+
+      mixed-media:
+        turns:
+          1:
+            type: multimodal
+            content: "Here's a comprehensive response with multiple media types:"
+            parts:
+              - type: text
+                text: "Visual and audio aids below."
+              - type: image
+                image_url:
+                  url: "mock://test-image-small.png"
+                metadata:
+                  format: "PNG"
+                  width: 400
+                  height: 300
+              - type: audio
+                audio_url:
+                  url: "mock://test-audio-short.mp3"
+                metadata:
+                  format: "MP3"
+                  duration_seconds: 3
+
+      tool-with-image:
+        turns:
+          1:
+            type: tool_calls
+            content: "I'll analyze that image for you."
+            tool_calls:
+              - name: analyze_image
+                arguments:
+                  image_url: "mock://test-image-small.jpg"
+                  analysis_type: "objects"
+          2:
+            type: multimodal
+            content: "Analysis results:"
+            parts:
+              - type: text
+                text: "Objects detected: 3, Primary colors: blue, white"
+              - type: image
+                image_url:
+                  url: "mock://annotated-response.png"
+                metadata:
+                  format: "PNG"
+                  width: 800
+                  height: 600
+
+      text-only:
+        turns:
+          1: "Hello! This is a text-only response."
+          2: "I can handle multi-turn conversations."

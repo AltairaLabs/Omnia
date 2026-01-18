@@ -1,0 +1,177 @@
+# Mock responses for multimodal E2E testing
+# Each scenario demonstrates a different multimodal capability
+
+defaultResponse: "This is a default mock response for multimodal testing."
+
+scenarios:
+  # Scenario: Image analysis with text + image response
+  image-analysis:
+    defaultResponse: "I can help analyze images."
+    turns:
+      1:
+        type: multimodal
+        content: "I've analyzed the image you provided. Here's what I found:"
+        parts:
+          - type: text
+            text: "The image shows a test pattern with multiple colors and shapes. I've annotated the key elements below."
+          - type: image
+            image_url:
+              url: "mock://annotated-response.png"
+              detail: "high"
+            metadata:
+              format: "PNG"
+              width: 800
+              height: 600
+              caption: "Annotated analysis result"
+
+  # Scenario: Audio transcription (text-only response)
+  audio-transcription:
+    defaultResponse: "I can transcribe audio files."
+    turns:
+      1:
+        type: text
+        content: |
+          Transcription of the audio file:
+
+          "Hello, this is a test recording for the multimodal testing framework.
+          The audio quality is clear and the speech is easily recognizable.
+          This transcription demonstrates the audio processing capabilities."
+
+          Duration: 5 seconds
+          Language: English
+          Confidence: 98%
+
+  # Scenario: Audio response (text + audio)
+  audio-response:
+    defaultResponse: "I can respond with audio content."
+    turns:
+      1:
+        type: multimodal
+        content: "Here's an audio response to your question:"
+        parts:
+          - type: text
+            text: "I've generated an audio explanation for you. Click play to listen."
+          - type: audio
+            audio_url:
+              url: "mock://test-audio-short.mp3"
+            metadata:
+              format: "MP3"
+              duration_seconds: 3
+              bit_rate: 128000
+              channels: 2
+              caption: "Generated audio response"
+
+  # Scenario: Mixed media response (text + image + audio)
+  mixed-media:
+    defaultResponse: "I can work with multiple media types."
+    turns:
+      1:
+        type: multimodal
+        content: "Here's a comprehensive response with multiple media types:"
+        parts:
+          - type: text
+            text: "Let me explain this concept using both visual and audio aids."
+          - type: image
+            image_url:
+              url: "mock://test-image-small.png"
+              detail: "auto"
+            metadata:
+              format: "PNG"
+              width: 400
+              height: 300
+              caption: "Visual diagram"
+          - type: text
+            text: "The image above shows the key components. Listen to the audio below for a detailed explanation."
+          - type: audio
+            audio_url:
+              url: "mock://test-audio-short.mp3"
+            metadata:
+              format: "MP3"
+              duration_seconds: 3
+              caption: "Audio explanation"
+
+  # Scenario: Tool call that returns an image
+  tool-with-image:
+    defaultResponse: "I can use tools that work with images."
+    turns:
+      # First turn: AI decides to call the tool
+      1:
+        type: tool_calls
+        content: "I'll analyze that image for you using the image analysis tool."
+        tool_calls:
+          - name: analyze_image
+            arguments:
+              image_url: "mock://test-image-small.jpg"
+              analysis_type: "objects"
+      # Second turn: AI responds with tool result
+      2:
+        type: multimodal
+        content: "Based on the image analysis, here are the results:"
+        parts:
+          - type: text
+            text: |
+              Image Analysis Results:
+              - Objects detected: 3
+              - Primary colors: blue, white, gray
+              - Image quality: high
+              - Confidence: 95%
+          - type: image
+            image_url:
+              url: "mock://annotated-response.png"
+            metadata:
+              format: "PNG"
+              width: 800
+              height: 600
+              caption: "Annotated analysis showing detected objects"
+
+  # Scenario: Simple text chat (for baseline testing)
+  text-only:
+    defaultResponse: "This is a text-only scenario for baseline comparison."
+    turns:
+      1: "Hello! I'm a multimodal assistant, but this scenario only uses text responses."
+      2: "I can handle multi-turn conversations. What would you like to discuss?"
+      3: "Great question! Here's my response to continue the conversation."
+
+  # Scenario: Error handling
+  error-handling:
+    defaultResponse: "Testing error scenarios."
+    turns:
+      1:
+        type: text
+        content: "I encountered an issue processing that media file. The file format may not be supported or the file may be corrupted. Please try uploading a different file."
+
+  # Scenario: Large image response
+  large-image:
+    turns:
+      1:
+        type: multimodal
+        content: "Here's a detailed high-resolution image:"
+        parts:
+          - type: text
+            text: "This image is larger and contains more detail."
+          - type: image
+            image_url:
+              url: "mock://test-image-small.jpg"
+              detail: "high"
+            metadata:
+              format: "JPEG"
+              width: 1920
+              height: 1080
+              size_kb: 250
+              caption: "High resolution test image"
+
+# Selfplay personas for agent-vs-agent testing
+selfplay:
+  curious-user:
+    defaultResponse: "That's interesting! Tell me more."
+    turns:
+      1: "Can you show me an example image?"
+      2: "What about audio? Can you play something?"
+      3: "Now show me both together!"
+
+  technical-reviewer:
+    defaultResponse: "Please provide more technical details."
+    turns:
+      1: "What format is this image in? What are its dimensions?"
+      2: "Analyze the audio quality and provide metrics."
+      3: "Compare the image and audio quality in your response."

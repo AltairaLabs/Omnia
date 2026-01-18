@@ -1,0 +1,82 @@
+# AgentRuntime for multimodal E2E testing with mock provider
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: multimodal-test-agent
+  labels:
+    app.kubernetes.io/name: multimodal-test
+    app.kubernetes.io/component: agent
+spec:
+  # Reference to the PromptPack
+  promptPackRef:
+    name: multimodal-test-pack
+    version: "1.0.0"
+
+  # WebSocket facade for client connections
+  facade:
+    type: websocket
+    port: 8080
+
+  # Mock provider for testing without real LLM API calls
+  provider:
+    type: mock
+    additionalConfig:
+      mock_config: /etc/omnia/mock/responses.yaml
+
+  # Media configuration for mock:// URL resolution
+  media:
+    basePath: /etc/omnia/media
+
+  # Session configuration
+  session:
+    type: memory
+    ttl: "1h"
+
+  # Runtime configuration with volumes
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+    # Define volumes
+    volumes:
+      # ConfigMap containing mock response definitions
+      - name: mock-config
+        configMap:
+          name: multimodal-test-responses
+      # ConfigMap containing media files (for small test files)
+      # For larger files, use a PVC instead
+      - name: mock-media
+        configMap:
+          name: multimodal-test-media
+
+    # Mount volumes in the runtime container
+    volumeMounts:
+      - name: mock-config
+        mountPath: /etc/omnia/mock
+        readOnly: true
+      - name: mock-media
+        mountPath: /etc/omnia/media
+        readOnly: true
+---
+# PromptPack resource referencing the ConfigMap
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: multimodal-test-pack
+  labels:
+    app.kubernetes.io/name: multimodal-test
+    app.kubernetes.io/component: promptpack
+spec:
+  version: "1.0.0"
+  source:
+    type: configmap
+    configMapRef:
+      name: multimodal-test-pack
+  rollout:
+    type: immediate
