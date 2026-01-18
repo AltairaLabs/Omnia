@@ -31,7 +31,10 @@ func newTestServer(t *testing.T, objs ...client.Object) *Server {
 
 	// Pass nil for clientset since we're not testing logs functionality
 	// Pass empty string for artifactDir since we're not testing artifact serving
-	return NewServer(fakeClient, nil, zap.New(zap.UseDevMode(true)), "")
+	// Use default compat mode guardrails for existing tests
+	return NewServer(fakeClient, nil, zap.New(zap.UseDevMode(true)), "", GuardrailsConfig{
+		Mode: ProxyModeCompat,
+	})
 }
 
 func TestListAgents(t *testing.T) {
