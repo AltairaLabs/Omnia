@@ -1,0 +1,111 @@
+name: CI
+
+# This workflow runs for PRs that only affect documentation.
+# It reports the same status checks as ci.yml so docs-only PRs can be merged.
+# ci.yml has path filters for code files; this workflow handles everything else.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.github/workflows/ci-skip.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  # These jobs mirror ci.yml job names so required checks pass for docs-only PRs
+  test:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping tests - documentation only changes"
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping integration tests - documentation only changes"
+
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping SonarCloud - documentation only changes"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping lint - documentation only changes"
+
+  proto:
+    name: Proto Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping proto validation - documentation only changes"
+
+  codegen:
+    name: Verify Codegen
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping codegen verification - documentation only changes"
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping build - documentation only changes"
+
+  envtest:
+    name: Controller Tests (envtest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping envtest - documentation only changes"
+
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip - docs only
+        run: echo "Skipping dashboard tests - documentation only changes"
+
+  # Bonus: validate docs build
+  docs:
+    name: Docs Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install D2 (diagram tool)
+        run: |
+          curl -fsSL https://d2lang.com/install.sh | sh -s --
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: docs
+
+      - name: Build docs
+        run: npm run build
+        working-directory: docs
