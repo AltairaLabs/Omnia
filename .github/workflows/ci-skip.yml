@@ -12,22 +12,7 @@ on:
       - '*.md'
       - 'LICENSE'
       - '.gitignore'
-    # Exclude paths that ci.yml handles
-    paths-ignore:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Dockerfile*'
-      - 'api/**'
-      - 'cmd/**'
-      - 'config/**'
-      - 'internal/**'
-      - 'pkg/**'
-      - 'test/**'
-      - 'hack/**'
-      - 'dashboard/**'
-      - 'sonar-project.properties'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/ci-skip.yml'
 
 permissions:
   contents: read
