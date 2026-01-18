@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,6 +54,18 @@ const (
 	EventReasonArtifactStored = "ArtifactStored"
 )
 
+// fetchJob represents an in-progress fetch operation
+type fetchJob struct {
+	startTime time.Time
+	cancel    context.CancelFunc
+}
+
+// fetchResult represents the result of a completed fetch operation
+type fetchResult struct {
+	artifact *fetcher.Artifact
+	err      error
+}
+
 // ArenaSourceReconciler reconciles an ArenaSource object
 type ArenaSourceReconciler struct {
 	client.Client
@@ -64,6 +77,12 @@ type ArenaSourceReconciler struct {
 
 	// ArtifactBaseURL is the base URL for serving artifacts
 	ArtifactBaseURL string
+
+	// inProgress tracks in-progress fetch operations
+	inProgress sync.Map // map[types.NamespacedName]*fetchJob
+
+	// results stores completed fetch results
+	results sync.Map // map[types.NamespacedName]*fetchResult
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources,verbs=get;list;watch;create;update;patch;delete
@@ -83,6 +102,11 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	source := &omniav1alpha1.ArenaSource{}
 	if err := r.Get(ctx, req.NamespacedName, source); err != nil {
 		if apierrors.IsNotFound(err) {
+			// Clean up any in-progress fetch
+			if job, ok := r.inProgress.LoadAndDelete(req.NamespacedName); ok {
+				job.(*fetchJob).cancel()
+			}
+			r.results.Delete(req.NamespacedName)
 			log.Info("ArenaSource resource not found, ignoring")
 			return ctrl.Result{}, nil
 		}
@@ -101,6 +125,10 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Check if suspended
 	if source.Spec.Suspend {
 		log.Info("ArenaSource is suspended, skipping reconciliation")
+		// Cancel any in-progress fetch
+		if job, ok := r.inProgress.LoadAndDelete(req.NamespacedName); ok {
+			job.(*fetchJob).cancel()
+		}
 		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
 			"Suspended", "ArenaSource reconciliation is suspended")
 		if err := r.Status().Update(ctx, source); err != nil {
@@ -133,6 +161,93 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
+	// Check if there's a completed result waiting
+	if resultVal, ok := r.results.LoadAndDelete(req.NamespacedName); ok {
+		result := resultVal.(*fetchResult)
+		r.inProgress.Delete(req.NamespacedName)
+
+		if result.err != nil {
+			log.Error(result.err, "Fetch completed with error")
+			r.handleFetchError(ctx, source, result.err)
+			return ctrl.Result{RequeueAfter: interval}, nil
+		}
+
+		// Store the artifact
+		artifactURL, err := r.storeArtifact(source, result.artifact)
+		if err != nil {
+			log.Error(err, "Failed to store artifact")
+			r.handleFetchError(ctx, source, err)
+			// Clean up temp file
+			if result.artifact != nil && result.artifact.Path != "" {
+				_ = os.Remove(result.artifact.Path)
+			}
+			return ctrl.Result{RequeueAfter: interval}, nil
+		}
+
+		// Clean up temp file
+		if result.artifact != nil && result.artifact.Path != "" {
+			_ = os.Remove(result.artifact.Path)
+		}
+
+		// Update status with artifact info
+		source.Status.Artifact = &omniav1alpha1.Artifact{
+			Revision:       result.artifact.Revision,
+			URL:            artifactURL,
+			Checksum:       result.artifact.Checksum,
+			Size:           result.artifact.Size,
+			LastUpdateTime: metav1.Now(),
+		}
+		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+
+		r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
+			"FetchComplete", "Successfully fetched artifact")
+		r.setCondition(source, ArenaSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
+			"ArtifactAvailable", fmt.Sprintf("Artifact available at revision %s", result.artifact.Revision))
+		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
+			"Ready", "ArenaSource is ready")
+
+		nextFetch := metav1.NewTime(time.Now().Add(interval))
+		source.Status.NextFetchTime = &nextFetch
+
+		if err := r.Status().Update(ctx, source); err != nil {
+			log.Error(err, "Failed to update status")
+			return ctrl.Result{}, err
+		}
+
+		if r.Recorder != nil {
+			r.Recorder.Event(source, corev1.EventTypeNormal, EventReasonFetchSucceeded,
+				fmt.Sprintf("Successfully fetched artifact at revision %s", result.artifact.Revision))
+		}
+
+		log.Info("Successfully reconciled ArenaSource", "revision", result.artifact.Revision)
+		return ctrl.Result{RequeueAfter: interval}, nil
+	}
+
+	// Check if there's already a fetch in progress
+	if _, ok := r.inProgress.Load(req.NamespacedName); ok {
+		log.V(1).Info("Fetch already in progress, will check again later")
+		// Requeue to check for completion
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Check if we need to fetch (either no artifact or interval elapsed)
+	needsFetch := source.Status.Artifact == nil
+	if !needsFetch && source.Status.NextFetchTime != nil {
+		needsFetch = time.Now().After(source.Status.NextFetchTime.Time)
+	}
+	if !needsFetch && source.Status.Phase == omniav1alpha1.ArenaSourcePhasePending {
+		needsFetch = true
+	}
+
+	if !needsFetch {
+		// Already up to date
+		nextCheck := time.Until(source.Status.NextFetchTime.Time)
+		if nextCheck < 0 {
+			nextCheck = interval
+		}
+		return ctrl.Result{RequeueAfter: nextCheck}, nil
+	}
+
 	// Set phase to fetching
 	source.Status.Phase = omniav1alpha1.ArenaSourcePhaseFetching
 	r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionTrue,
@@ -148,105 +263,94 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.Recorder.Event(source, corev1.EventTypeNormal, EventReasonFetchStarted, "Started fetching artifact")
 	}
 
-	// Create fetcher based on source type
-	f, err := r.createFetcher(ctx, source, timeout)
-	if err != nil {
-		log.Error(err, "Failed to create fetcher")
-		r.handleFetchError(ctx, source, err)
-		return ctrl.Result{RequeueAfter: interval}, nil
+	// Start async fetch
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	job := &fetchJob{
+		startTime: time.Now(),
+		cancel:    cancel,
+	}
+	r.inProgress.Store(req.NamespacedName, job)
+
+	// Make a copy of source spec for the goroutine
+	sourceSpec := source.Spec.DeepCopy()
+	sourceNamespace := source.Namespace
+	sourceName := source.Name
+	currentRevision := ""
+	if source.Status.Artifact != nil {
+		currentRevision = source.Status.Artifact.Revision
 	}
 
-	// Get latest revision
-	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	go r.doFetchAsync(fetchCtx, req.NamespacedName, sourceSpec, sourceNamespace, sourceName, currentRevision, timeout)
 
-	revision, err := f.LatestRevision(fetchCtx)
-	if err != nil {
-		log.Error(err, "Failed to get latest revision")
-		r.handleFetchError(ctx, source, err)
-		return ctrl.Result{RequeueAfter: interval}, nil
-	}
+	// Requeue to check for completion
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
 
-	// Check if we already have this revision
-	if source.Status.Artifact != nil && source.Status.Artifact.Revision == revision {
-		log.V(1).Info("Artifact already up to date", "revision", revision)
-		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
-		r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
-			"FetchComplete", "Artifact is up to date")
-		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
-			"Ready", "Artifact available and up to date")
-		nextFetch := metav1.NewTime(time.Now().Add(interval))
-		source.Status.NextFetchTime = &nextFetch
-		if err := r.Status().Update(ctx, source); err != nil {
-			log.Error(err, "Failed to update status")
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: interval}, nil
-	}
-
-	// Fetch the artifact
-	artifact, err := f.Fetch(fetchCtx, revision)
-	if err != nil {
-		log.Error(err, "Failed to fetch artifact")
-		r.handleFetchError(ctx, source, err)
-		return ctrl.Result{RequeueAfter: interval}, nil
-	}
+// doFetchAsync performs the fetch operation asynchronously
+func (r *ArenaSourceReconciler) doFetchAsync(ctx context.Context, key types.NamespacedName, spec *omniav1alpha1.ArenaSourceSpec, namespace, name, currentRevision string, timeout time.Duration) {
+	log := logf.FromContext(ctx).WithValues("name", name, "namespace", namespace)
 	defer func() {
-		// Clean up temporary file
-		if artifact != nil && artifact.Path != "" {
-			_ = os.Remove(artifact.Path)
+		// Ensure we always store a result and clean up
+		if _, ok := r.results.Load(key); !ok {
+			// If no result stored, store an error
+			r.results.Store(key, &fetchResult{err: fmt.Errorf("fetch terminated unexpectedly")})
 		}
 	}()
 
-	// Store the artifact
-	artifactURL, err := r.storeArtifact(source, artifact)
-	if err != nil {
-		log.Error(err, "Failed to store artifact")
-		r.handleFetchError(ctx, source, err)
-		return ctrl.Result{RequeueAfter: interval}, nil
+	// Create a mock source for createFetcher
+	source := &omniav1alpha1.ArenaSource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: *spec,
 	}
 
-	// Update status with artifact info
-	source.Status.Artifact = &omniav1alpha1.Artifact{
-		Revision:       artifact.Revision,
-		URL:            artifactURL,
-		Checksum:       artifact.Checksum,
-		Size:           artifact.Size,
-		LastUpdateTime: metav1.Now(),
-	}
-	source.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
-
-	r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
-		"FetchComplete", "Successfully fetched artifact")
-	r.setCondition(source, ArenaSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
-		"ArtifactAvailable", fmt.Sprintf("Artifact available at revision %s", revision))
-	r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
-		"Ready", "ArenaSource is ready")
-
-	nextFetch := metav1.NewTime(time.Now().Add(interval))
-	source.Status.NextFetchTime = &nextFetch
-
-	if err := r.Status().Update(ctx, source); err != nil {
-		log.Error(err, "Failed to update status")
-		return ctrl.Result{}, err
-	}
-
-	if r.Recorder != nil {
-		r.Recorder.Event(source, corev1.EventTypeNormal, EventReasonFetchSucceeded,
-			fmt.Sprintf("Successfully fetched artifact at revision %s", revision))
-	}
-
-	log.Info("Successfully reconciled ArenaSource", "revision", revision)
-	return ctrl.Result{RequeueAfter: interval}, nil
-}
-
-// createFetcher creates the appropriate fetcher based on source type.
-func (r *ArenaSourceReconciler) createFetcher(ctx context.Context, source *omniav1alpha1.ArenaSource, timeout time.Duration) (fetcher.Fetcher, error) {
 	opts := fetcher.Options{
 		Timeout: timeout,
 		WorkDir: r.ArtifactDir,
 	}
 
+	f, err := r.createFetcherFromSpec(ctx, source, opts)
+	if err != nil {
+		log.Error(err, "Failed to create fetcher")
+		r.results.Store(key, &fetchResult{err: err})
+		return
+	}
+
+	// Get latest revision
+	revision, err := f.LatestRevision(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get latest revision")
+		r.results.Store(key, &fetchResult{err: err})
+		return
+	}
+
+	// Check if we already have this revision
+	if currentRevision == revision {
+		log.V(1).Info("Artifact already up to date", "revision", revision)
+		// Return a "no change" result
+		r.results.Store(key, &fetchResult{
+			artifact: &fetcher.Artifact{Revision: revision},
+			err:      nil,
+		})
+		return
+	}
+
+	// Fetch the artifact
+	artifact, err := f.Fetch(ctx, revision)
+	if err != nil {
+		log.Error(err, "Failed to fetch artifact")
+		r.results.Store(key, &fetchResult{err: err})
+		return
+	}
+
+	log.Info("Fetch completed successfully", "revision", revision)
+	r.results.Store(key, &fetchResult{artifact: artifact})
+}
+
+// createFetcherFromSpec creates the appropriate fetcher based on source spec (for async use).
+func (r *ArenaSourceReconciler) createFetcherFromSpec(ctx context.Context, source *omniav1alpha1.ArenaSource, opts fetcher.Options) (fetcher.Fetcher, error) {
 	switch source.Spec.Type {
 	case omniav1alpha1.ArenaSourceTypeGit:
 		return r.createGitFetcher(ctx, source, opts)
@@ -386,6 +490,11 @@ func (r *ArenaSourceReconciler) loadOCICredentials(ctx context.Context, namespac
 
 // storeArtifact stores the fetched artifact and returns its URL.
 func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (string, error) {
+	// If artifact has no path (no-change result), return existing URL
+	if artifact.Path == "" && source.Status.Artifact != nil {
+		return source.Status.Artifact.URL, nil
+	}
+
 	// Create artifact directory if needed
 	artifactDir := filepath.Join(r.ArtifactDir, source.Namespace, source.Name)
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
