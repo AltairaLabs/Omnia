@@ -1,0 +1,570 @@
+/**
+ * Generic CRD CRUD operations using workspace-scoped ServiceAccount tokens.
+ *
+ * Provides type-safe operations for Omnia CRDs (AgentRuntime, PromptPack, etc.)
+ * using the workspace K8s client factory for authentication.
+ *
+ * Usage:
+ * ```typescript
+ * const agents = await listCrd<AgentRuntime>({
+ *   workspace: "my-workspace",
+ *   namespace: "workspace-ns",
+ *   role: "editor",
+ * }, "agentruntimes");
+ * ```
+ */
+
+import * as k8s from "@kubernetes/client-node";
+import {
+  getWorkspaceCustomObjectsApi,
+  getWorkspaceCoreApi,
+  getWorkspaceKubeConfig,
+  withTokenRefresh,
+  type WorkspaceClientOptions,
+} from "./workspace-k8s-client-factory";
+
+const CRD_GROUP = "omnia.altairalabs.ai";
+const CRD_VERSION = "v1alpha1";
+
+/**
+ * List CRD resources in a workspace namespace.
+ *
+ * @param options - Workspace client options
+ * @param plural - CRD plural name (e.g., "agentruntimes")
+ * @returns Array of CRD resources
+ */
+export async function listCrd<T>(
+  options: WorkspaceClientOptions,
+  plural: string
+): Promise<T[]> {
+  return withTokenRefresh(options, async () => {
+    const api = await getWorkspaceCustomObjectsApi(options);
+    const result = await api.listNamespacedCustomObject({
+      group: CRD_GROUP,
+      version: CRD_VERSION,
+      namespace: options.namespace,
+      plural,
+    });
+    const list = result as { items?: T[] };
+    return (list.items || []) as T[];
+  });
+}
+
+/**
+ * Get a single CRD resource by name.
+ *
+ * @param options - Workspace client options
+ * @param plural - CRD plural name
+ * @param name - Resource name
+ * @returns The resource or null if not found
+ */
+export async function getCrd<T>(
+  options: WorkspaceClientOptions,
+  plural: string,
+  name: string
+): Promise<T | null> {
+  return withTokenRefresh(options, async () => {
+    const api = await getWorkspaceCustomObjectsApi(options);
+    try {
+      const result = await api.getNamespacedCustomObject({
+        group: CRD_GROUP,
+        version: CRD_VERSION,
+        namespace: options.namespace,
+        plural,
+        name,
+      });
+      return result as T;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  });
+}
+
+/**
+ * Create a new CRD resource.
+ *
+ * @param options - Workspace client options
+ * @param plural - CRD plural name
+ * @param resource - The resource to create (must include metadata.name)
+ * @returns The created resource
+ */
+export async function createCrd<T>(
+  options: WorkspaceClientOptions,
+  plural: string,
+  resource: T
+): Promise<T> {
+  return withTokenRefresh(options, async () => {
+    const api = await getWorkspaceCustomObjectsApi(options);
+    const result = await api.createNamespacedCustomObject({
+      group: CRD_GROUP,
+      version: CRD_VERSION,
+      namespace: options.namespace,
+      plural,
+      body: resource,
+    });
+    return result as T;
+  });
+}
+
+/**
+ * Update an existing CRD resource (full replacement).
+ *
+ * @param options - Workspace client options
+ * @param plural - CRD plural name
+ * @param name - Resource name
+ * @param resource - The updated resource
+ * @returns The updated resource
+ */
+export async function updateCrd<T>(
+  options: WorkspaceClientOptions,
+  plural: string,
+  name: string,
+  resource: T
+): Promise<T> {
+  return withTokenRefresh(options, async () => {
+    const api = await getWorkspaceCustomObjectsApi(options);
+    const result = await api.replaceNamespacedCustomObject({
+      group: CRD_GROUP,
+      version: CRD_VERSION,
+      namespace: options.namespace,
+      plural,
+      name,
+      body: resource,
+    });
+    return result as T;
+  });
+}
+
+/**
+ * Patch a CRD resource (partial update).
+ *
+ * @param options - Workspace client options
+ * @param plural - CRD plural name
+ * @param name - Resource name
+ * @param patch - The patch to apply (merge patch format)
+ * @returns The patched resource
+ */
+export async function patchCrd<T>(
+  options: WorkspaceClientOptions,
+  plural: string,
+  name: string,
+  patch: Record<string, unknown>
+): Promise<T> {
+  return withTokenRefresh(options, async () => {
+    const api = await getWorkspaceCustomObjectsApi(options);
+    const result = await api.patchNamespacedCustomObject({
+      group: CRD_GROUP,
+      version: CRD_VERSION,
+      namespace: options.namespace,
+      plural,
+      name,
+      body: patch,
+    });
+    return result as T;
+  });
+}
+
+/**
+ * Delete a CRD resource.
+ *
+ * @param options - Workspace client options
+ * @param plural - CRD plural name
+ * @param name - Resource name
+ */
+export async function deleteCrd(
+  options: WorkspaceClientOptions,
+  plural: string,
+  name: string
+): Promise<void> {
+  return withTokenRefresh(options, async () => {
+    const api = await getWorkspaceCustomObjectsApi(options);
+    await api.deleteNamespacedCustomObject({
+      group: CRD_GROUP,
+      version: CRD_VERSION,
+      namespace: options.namespace,
+      plural,
+      name,
+    });
+  });
+}
+
+type LogEntry = { timestamp: string; message: string; container?: string };
+
+/**
+ * Parse a single log line into a LogEntry.
+ * K8s log lines with timestamps have format: "2024-01-01T10:00:00.123456789Z message"
+ */
+function parseLogLine(line: string, containerName: string): LogEntry {
+  // Find the first space after timestamp (timestamp ends at first whitespace)
+  const spaceIndex = line.indexOf(" ");
+  if (spaceIndex > 0) {
+    const possibleTimestamp = line.substring(0, spaceIndex);
+    // Check if it looks like an ISO timestamp (starts with YYYY-MM-DD)
+    if (/^\d{4}-\d{2}-\d{2}T/.test(possibleTimestamp)) {
+      return {
+        timestamp: possibleTimestamp,
+        message: line.substring(spaceIndex + 1),
+        container: containerName,
+      };
+    }
+  }
+  return {
+    timestamp: new Date().toISOString(),
+    message: line,
+    container: containerName,
+  };
+}
+
+/**
+ * Fetch and parse logs for a single container.
+ */
+async function fetchContainerLogs(
+  coreApi: k8s.CoreV1Api,
+  namespace: string,
+  podName: string,
+  containerName: string,
+  tailLines?: number,
+  sinceSeconds?: number
+): Promise<LogEntry[]> {
+  try {
+    const logResponse = await coreApi.readNamespacedPodLog({
+      namespace,
+      name: podName,
+      container: containerName,
+      tailLines,
+      sinceSeconds,
+      timestamps: true,
+    });
+
+    const logText = typeof logResponse === "string" ? logResponse : "";
+    return logText
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => parseLogLine(line, containerName));
+  } catch (error) {
+    console.warn(`Failed to get logs from ${podName}/${containerName}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Get logs from a pod associated with a CRD resource.
+ *
+ * @param options - Workspace client options
+ * @param labelSelector - Label selector to find pods (e.g., "app.kubernetes.io/instance=my-agent")
+ * @param tailLines - Number of lines to return from the end
+ * @param sinceSeconds - Only return logs newer than this many seconds
+ * @param container - Container name (if pod has multiple containers)
+ * @returns Array of log entries
+ */
+export async function getPodLogs(
+  options: WorkspaceClientOptions,
+  labelSelector: string,
+  tailLines?: number,
+  sinceSeconds?: number,
+  container?: string
+): Promise<LogEntry[]> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+
+    const podsResponse = await coreApi.listNamespacedPod({
+      namespace: options.namespace,
+      labelSelector,
+    });
+
+    const pods = podsResponse.items || [];
+    if (pods.length === 0) {
+      return [];
+    }
+
+    const logPromises: Promise<LogEntry[]>[] = [];
+
+    for (const pod of pods) {
+      const podName = pod.metadata?.name;
+      if (!podName) continue;
+
+      const containers = container
+        ? [container]
+        : (pod.spec?.containers || []).map((c) => c.name);
+
+      for (const containerName of containers) {
+        logPromises.push(
+          fetchContainerLogs(coreApi, options.namespace, podName, containerName, tailLines, sinceSeconds)
+        );
+      }
+    }
+
+    const logArrays = await Promise.all(logPromises);
+    const logs = logArrays.flat();
+    logs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    return logs;
+  });
+}
+
+/**
+ * Get Kubernetes events related to a resource.
+ *
+ * @param options - Workspace client options
+ * @param resourceKind - Kind of the resource (e.g., "AgentRuntime")
+ * @param resourceName - Name of the resource
+ * @returns Array of events
+ */
+export async function getResourceEvents(
+  options: WorkspaceClientOptions,
+  resourceKind: string,
+  resourceName: string
+): Promise<
+  Array<{
+    type: "Normal" | "Warning";
+    reason: string;
+    message: string;
+    firstTimestamp: string;
+    lastTimestamp: string;
+    count: number;
+    source: { component?: string; host?: string };
+    involvedObject: { kind: string; name: string; namespace?: string };
+  }>
+> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+
+    // Field selector for events related to this resource
+    const fieldSelector = `involvedObject.kind=${resourceKind},involvedObject.name=${resourceName}`;
+
+    const eventsResponse = await coreApi.listNamespacedEvent({
+      namespace: options.namespace,
+      fieldSelector,
+    });
+
+    const events = eventsResponse.items || [];
+
+    return events.map((event) => ({
+      type: (event.type as "Normal" | "Warning") || "Normal",
+      reason: event.reason || "",
+      message: event.message || "",
+      firstTimestamp:
+        event.firstTimestamp?.toISOString() ||
+        event.eventTime?.toISOString() ||
+        "",
+      lastTimestamp:
+        event.lastTimestamp?.toISOString() ||
+        event.eventTime?.toISOString() ||
+        "",
+      count: event.count || 1,
+      source: {
+        component: event.source?.component,
+        host: event.source?.host,
+      },
+      involvedObject: {
+        kind: event.involvedObject?.kind || resourceKind,
+        name: event.involvedObject?.name || resourceName,
+        namespace: event.involvedObject?.namespace,
+      },
+    }));
+  });
+}
+
+/**
+ * List shared CRDs using system-level access.
+ * Used for cluster-wide resources like ToolRegistries and Providers.
+ *
+ * @param plural - CRD plural name
+ * @param namespace - Namespace to list from (usually omnia-system)
+ * @returns Array of CRD resources
+ */
+export async function listSharedCrd<T>(
+  plural: string,
+  namespace: string
+): Promise<T[]> {
+  const kc = new k8s.KubeConfig();
+
+  try {
+    kc.loadFromCluster();
+  } catch {
+    kc.loadFromDefault();
+  }
+
+  const api = kc.makeApiClient(k8s.CustomObjectsApi);
+
+  const result = await api.listNamespacedCustomObject({
+    group: CRD_GROUP,
+    version: CRD_VERSION,
+    namespace,
+    plural,
+  });
+
+  const list = result as { items?: T[] };
+  return (list.items || []) as T[];
+}
+
+/**
+ * Get a shared CRD resource using system-level access.
+ *
+ * @param plural - CRD plural name
+ * @param namespace - Namespace to get from
+ * @param name - Resource name
+ * @returns The resource or null if not found
+ */
+export async function getSharedCrd<T>(
+  plural: string,
+  namespace: string,
+  name: string
+): Promise<T | null> {
+  const kc = new k8s.KubeConfig();
+
+  try {
+    kc.loadFromCluster();
+  } catch {
+    kc.loadFromDefault();
+  }
+
+  const api = kc.makeApiClient(k8s.CustomObjectsApi);
+
+  try {
+    const result = await api.getNamespacedCustomObject({
+      group: CRD_GROUP,
+      version: CRD_VERSION,
+      namespace,
+      plural,
+      name,
+    });
+    return result as T;
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get the content of a ConfigMap (for PromptPack content).
+ *
+ * @param options - Workspace client options
+ * @param configMapName - Name of the ConfigMap
+ * @returns The ConfigMap data or null if not found
+ */
+export async function getConfigMapContent(
+  options: WorkspaceClientOptions,
+  configMapName: string
+): Promise<Record<string, string> | null> {
+  return withTokenRefresh(options, async () => {
+    const coreApi = await getWorkspaceCoreApi(options);
+
+    try {
+      const result = await coreApi.readNamespacedConfigMap({
+        namespace: options.namespace,
+        name: configMapName,
+      });
+      return result.data || null;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  });
+}
+
+/**
+ * Scale a deployment associated with a CRD.
+ *
+ * @param options - Workspace client options
+ * @param deploymentName - Name of the deployment
+ * @param replicas - Desired replica count
+ */
+export async function scaleDeployment(
+  options: WorkspaceClientOptions,
+  deploymentName: string,
+  replicas: number
+): Promise<void> {
+  return withTokenRefresh(options, async () => {
+    const kc = await getWorkspaceKubeConfig(options);
+    const appsApi = kc.makeApiClient(k8s.AppsV1Api);
+
+    await appsApi.patchNamespacedDeploymentScale({
+      namespace: options.namespace,
+      name: deploymentName,
+      body: {
+        spec: {
+          replicas,
+        },
+      },
+    });
+  });
+}
+
+// Helper functions
+
+function isNotFoundError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null) {
+    // Check for statusCode property
+    if (
+      "statusCode" in error &&
+      (error as { statusCode?: number }).statusCode === 404
+    ) {
+      return true;
+    }
+    // Check for response.statusCode
+    if (
+      "response" in error &&
+      typeof (error as { response: unknown }).response === "object" &&
+      (error as { response: unknown }).response !== null
+    ) {
+      const response = (error as { response: { statusCode?: number } }).response;
+      if (response?.statusCode === 404) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Extract error message from K8s API error.
+ */
+export function extractK8sErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null) {
+    if ("body" in error && typeof (error as { body: unknown }).body === "object") {
+      const body = (error as { body: { message?: string } }).body;
+      if (body?.message) {
+        return body.message;
+      }
+    }
+    if ("message" in error && typeof (error as { message: unknown }).message === "string") {
+      return (error as { message: string }).message;
+    }
+  }
+  return String(error);
+}
+
+/**
+ * Check if an error indicates insufficient permissions.
+ */
+export function isForbiddenError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null) {
+    if (
+      "statusCode" in error &&
+      (error as { statusCode?: number }).statusCode === 403
+    ) {
+      return true;
+    }
+    if (
+      "response" in error &&
+      typeof (error as { response: unknown }).response === "object" &&
+      (error as { response: unknown }).response !== null
+    ) {
+      const response = (error as { response: { statusCode?: number } }).response;
+      if (response?.statusCode === 403) {
+        return true;
+      }
+    }
+  }
+  return false;
+}

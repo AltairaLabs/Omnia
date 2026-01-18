@@ -20,18 +20,22 @@ import type { WorkspaceRole, WorkspaceAccess } from "@/types/workspace";
 import type { User } from "./types";
 
 /**
- * Route context with workspace name parameter.
+ * Base route context with workspace name parameter.
+ * Extended contexts can include additional params like agentName, packName, etc.
  */
-export interface WorkspaceRouteContext {
-  params: Promise<{ name: string }>;
+export interface WorkspaceRouteContext<
+  TParams extends { name: string } = { name: string }
+> {
+  params: Promise<TParams>;
 }
 
 /**
  * Handler function for workspace-protected routes.
+ * Generic to support routes with additional params beyond the workspace name.
  */
-type WorkspaceApiHandler = (
+type WorkspaceApiHandler<TParams extends { name: string } = { name: string }> = (
   request: NextRequest,
-  context: WorkspaceRouteContext,
+  context: WorkspaceRouteContext<TParams>,
   access: WorkspaceAccess,
   user: User
 ) => Promise<NextResponse> | NextResponse;
@@ -102,12 +106,24 @@ function forbiddenResponse(
  *   const { name } = await ctx.params;
  *   return NextResponse.json({ workspace: name, role: access.role });
  * });
+ *
+ * @example
+ * // In app/api/workspaces/[name]/agents/[agentName]/route.ts
+ * export const GET = withWorkspaceAccess<{ name: string; agentName: string }>(
+ *   "viewer",
+ *   async (req, ctx, access, user) => {
+ *     const { name, agentName } = await ctx.params;
+ *     return NextResponse.json({ workspace: name, agent: agentName });
+ *   }
+ * );
  */
-export function withWorkspaceAccess(
+export function withWorkspaceAccess<
+  TParams extends { name: string } = { name: string }
+>(
   requiredRole: WorkspaceRole,
-  handler: WorkspaceApiHandler
-): (request: NextRequest, context: WorkspaceRouteContext) => Promise<NextResponse> {
-  return async (request: NextRequest, context: WorkspaceRouteContext) => {
+  handler: WorkspaceApiHandler<TParams>
+): (request: NextRequest, context: WorkspaceRouteContext<TParams>) => Promise<NextResponse> {
+  return async (request: NextRequest, context: WorkspaceRouteContext<TParams>) => {
     const user = await getUser();
     if (user.provider === "anonymous") {
       return unauthorizedResponse();

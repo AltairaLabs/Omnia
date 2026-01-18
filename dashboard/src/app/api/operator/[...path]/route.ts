@@ -32,6 +32,18 @@ async function proxyRequest(
   const { path } = await context.params;
   const pathString = path.join("/");
 
+  // DEPRECATION WARNING: This proxy route is deprecated.
+  // Use the new workspace-scoped API routes instead:
+  //   - /api/workspaces/:name/agents
+  //   - /api/workspaces/:name/promptpacks
+  //   - /api/shared/toolregistries
+  //   - /api/shared/providers
+  // See #278 for migration details.
+  console.warn(
+    `[DEPRECATED] Operator proxy route called: ${request.method} /api/operator/${pathString}. ` +
+    `Please migrate to workspace-scoped API routes (see #278).`
+  );
+
   // Build the target URL - pathString already includes 'api/v1/...'
   const targetUrl = new URL(`/${pathString}`, OPERATOR_API_URL);
 
