@@ -106,6 +106,14 @@ api:
   enabled: true
   # -- Port for REST API
   port: 8082
+  # -- Guardrails configuration for namespace-based access control
+  guardrails:
+    # -- Proxy mode: 'compat' (log only, allow all) or 'strict' (enforce restrictions)
+    mode: compat
+    # -- List of allowed namespaces (empty = all allowed, except denied)
+    allowedNamespaces: []
+    # -- List of denied namespaces (deny takes precedence over allow)
+    deniedNamespaces: []
 
 # RBAC configuration
 rbac:

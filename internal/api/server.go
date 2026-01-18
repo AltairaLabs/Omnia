@@ -40,15 +40,17 @@ type Server struct {
 	clientset   kubernetes.Interface
 	log         logr.Logger
 	artifactDir string
+	guardrails  GuardrailsConfig
 }
 
 // NewServer creates a new API server with the given cached client and clientset.
-func NewServer(c client.Client, clientset kubernetes.Interface, log logr.Logger, artifactDir string) *Server {
+func NewServer(c client.Client, clientset kubernetes.Interface, log logr.Logger, artifactDir string, guardrails GuardrailsConfig) *Server {
 	return &Server{
 		client:      c,
 		clientset:   clientset,
 		log:         log.WithName("api-server"),
 		artifactDir: artifactDir,
+		guardrails:  guardrails,
 	}
 }
 
@@ -73,30 +75,35 @@ func (s *Server) Handler() http.Handler {
 		}
 	}
 
+	// Combined middleware: CORS + guardrails
+	wrap := func(h http.HandlerFunc) http.HandlerFunc {
+		return corsHandler(s.guardrailsHandler(h))
+	}
+
 	// AgentRuntime endpoints
-	mux.HandleFunc("/api/v1/agents", corsHandler(s.handleAgents))
+	mux.HandleFunc("/api/v1/agents", wrap(s.handleAgents))
 	// Note: /api/v1/agents/ handled by handleAgentOrLogs below for both agent details and logs
 
 	// PromptPack endpoints
-	mux.HandleFunc("/api/v1/promptpacks", corsHandler(s.handlePromptPacks))
-	mux.HandleFunc("/api/v1/promptpacks/", corsHandler(s.handlePromptPack))
+	mux.HandleFunc("/api/v1/promptpacks", wrap(s.handlePromptPacks))
+	mux.HandleFunc("/api/v1/promptpacks/", wrap(s.handlePromptPack))
 
 	// ToolRegistry endpoints
-	mux.HandleFunc("/api/v1/toolregistries", corsHandler(s.handleToolRegistries))
-	mux.HandleFunc("/api/v1/toolregistries/", corsHandler(s.handleToolRegistry))
+	mux.HandleFunc("/api/v1/toolregistries", wrap(s.handleToolRegistries))
+	mux.HandleFunc("/api/v1/toolregistries/", wrap(s.handleToolRegistry))
 
 	// Provider endpoints
-	mux.HandleFunc("/api/v1/providers", corsHandler(s.handleProviders))
-	mux.HandleFunc("/api/v1/providers/", corsHandler(s.handleProvider))
+	mux.HandleFunc("/api/v1/providers", wrap(s.handleProviders))
+	mux.HandleFunc("/api/v1/providers/", wrap(s.handleProvider))
 
 	// Stats endpoint
-	mux.HandleFunc("/api/v1/stats", corsHandler(s.handleStats))
+	mux.HandleFunc("/api/v1/stats", wrap(s.handleStats))
 
 	// Namespaces endpoint
-	mux.HandleFunc("/api/v1/namespaces", corsHandler(s.handleNamespaces))
+	mux.HandleFunc("/api/v1/namespaces", wrap(s.handleNamespaces))
 
 	// Logs endpoint
-	mux.HandleFunc("/api/v1/agents/", corsHandler(s.handleAgentOrLogs))
+	mux.HandleFunc("/api/v1/agents/", wrap(s.handleAgentOrLogs))
 
 	// Arena artifacts file server
 	if s.artifactDir != "" {
