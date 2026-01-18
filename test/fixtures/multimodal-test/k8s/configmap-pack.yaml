@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multimodal-test-pack
+  labels:
+    app.kubernetes.io/name: multimodal-test
+    app.kubernetes.io/component: promptpack
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "multimodal-test",
+      "name": "Multimodal Test Pack",
+      "version": "1.0.0",
+      "description": "Test pack for multimodal E2E testing with mock responses",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Default",
+          "version": "1.0.0",
+          "system_template": "You are a helpful multimodal assistant for testing. Respond with appropriate media content based on requests."
+        },
+        "vision": {
+          "id": "vision",
+          "name": "Vision Analysis",
+          "version": "1.0.0",
+          "system_template": "You are a vision assistant. Analyze images and describe them concisely."
+        },
+        "audio": {
+          "id": "audio",
+          "name": "Audio Processing",
+          "version": "1.0.0",
+          "system_template": "You are an audio assistant. Process audio files and respond with transcriptions or audio content."
+        },
+        "mixed": {
+          "id": "mixed",
+          "name": "Mixed Media",
+          "version": "1.0.0",
+          "system_template": "You are a multimodal assistant capable of working with text, images, audio, and video."
+        },
+        "tools": {
+          "id": "tools",
+          "name": "Tools with Media",
+          "version": "1.0.0",
+          "system_template": "You are an assistant that uses tools and can work with media content.",
+          "tools": ["analyze_image", "generate_chart"]
+        }
+      },
+      "tools": {
+        "analyze_image": {
+          "name": "analyze_image",
+          "description": "Analyze an image and return detailed information",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "image_url": {
+                "type": "string",
+                "description": "URL of the image to analyze"
+              },
+              "analysis_type": {
+                "type": "string",
+                "enum": ["objects", "text", "faces", "colors"],
+                "description": "Type of analysis to perform"
+              }
+            },
+            "required": ["image_url"]
+          }
+        },
+        "generate_chart": {
+          "name": "generate_chart",
+          "description": "Generate a chart image from data",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "chart_type": {
+                "type": "string",
+                "enum": ["bar", "line", "pie"],
+                "description": "Type of chart to generate"
+              },
+              "data": {
+                "type": "object",
+                "description": "Chart data"
+              },
+              "title": {
+                "type": "string",
+                "description": "Chart title"
+              }
+            },
+            "required": ["chart_type", "data"]
+          }
+        }
+      }
+    }
