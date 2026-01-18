@@ -30,7 +30,8 @@ func newTestServer(t *testing.T, objs ...client.Object) *Server {
 		Build()
 
 	// Pass nil for clientset since we're not testing logs functionality
-	return NewServer(fakeClient, nil, zap.New(zap.UseDevMode(true)))
+	// Pass empty string for artifactDir since we're not testing artifact serving
+	return NewServer(fakeClient, nil, zap.New(zap.UseDevMode(true)), "")
 }
 
 func TestListAgents(t *testing.T) {

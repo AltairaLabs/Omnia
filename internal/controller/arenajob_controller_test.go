@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	"github.com/alicebob/miniredis/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -1253,6 +1254,204 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			// Should have progress tracking
 			Expect(updatedJob.Status.Progress).NotTo(BeNil())
+		})
+	})
+
+	Context("When testing getOrCreateQueue", func() {
+		It("should return existing queue if already set", func() {
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			q, err := reconciler.getOrCreateQueue()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(q).To(Equal(memQueue))
+		})
+
+		It("should return nil when no Redis address configured", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				RedisAddr: "",
+			}
+
+			q, err := reconciler.getOrCreateQueue()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(q).To(BeNil())
+		})
+
+		It("should return error when Redis connection fails", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				RedisAddr: "invalid-host:12345",
+			}
+
+			q, err := reconciler.getOrCreateQueue()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to connect to Redis"))
+			Expect(q).To(BeNil())
+		})
+
+		It("should create and cache queue on successful Redis connection", func() {
+			// Start miniredis server
+			mr, err := miniredis.Run()
+			Expect(err).NotTo(HaveOccurred())
+			defer mr.Close()
+
+			reconciler := &ArenaJobReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				RedisAddr: mr.Addr(),
+			}
+
+			// First call should create the queue
+			q1, err := reconciler.getOrCreateQueue()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(q1).NotTo(BeNil())
+
+			// Queue should be cached in the reconciler
+			Expect(reconciler.Queue).NotTo(BeNil())
+
+			// Second call should return the cached queue
+			q2, err := reconciler.getOrCreateQueue()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(q2).To(Equal(q1))
+		})
+	})
+
+	Context("When testing enqueueWorkItems", func() {
+		It("should skip enqueueing when no queue configured", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-queue-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaConfig := &omniav1alpha1.ArenaConfig{
+				Status: omniav1alpha1.ArenaConfigStatus{
+					ResolvedProviders: []string{"provider-1"},
+					ResolvedSource: &omniav1alpha1.ResolvedSource{
+						URL: "http://example.com/artifact.tar.gz",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				RedisAddr: "", // No Redis configured
+			}
+
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should skip enqueueing when no providers configured", func() {
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-providers-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaConfig := &omniav1alpha1.ArenaConfig{
+				Status: omniav1alpha1.ArenaConfigStatus{
+					ResolvedProviders: []string{}, // No providers
+					ResolvedSource: &omniav1alpha1.ResolvedSource{
+						URL: "http://example.com/artifact.tar.gz",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should enqueue work items for each provider", func() {
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "enqueue-test-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaConfig := &omniav1alpha1.ArenaConfig{
+				Status: omniav1alpha1.ArenaConfigStatus{
+					ResolvedProviders: []string{"provider-1", "provider-2", "provider-3"},
+					ResolvedSource: &omniav1alpha1.ResolvedSource{
+						URL: "http://example.com/artifact.tar.gz",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify items were enqueued
+			progress, err := memQueue.Progress(ctx, "enqueue-test-job")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(progress.Total).To(Equal(3))
+			Expect(progress.Pending).To(Equal(3))
+
+			// Pop and verify the items
+			for range 3 {
+				item, err := memQueue.Pop(ctx, "enqueue-test-job")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(item.JobID).To(Equal("enqueue-test-job"))
+				Expect(item.ScenarioID).To(Equal("default"))
+				Expect(item.BundleURL).To(Equal("http://example.com/artifact.tar.gz"))
+				Expect(item.MaxAttempts).To(Equal(3))
+			}
+		})
+
+		It("should handle nil resolved source gracefully", func() {
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "nil-source-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaConfig := &omniav1alpha1.ArenaConfig{
+				Status: omniav1alpha1.ArenaConfigStatus{
+					ResolvedProviders: []string{"provider-1"},
+					ResolvedSource:    nil, // No resolved source
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify item was enqueued with empty bundle URL
+			item, err := memQueue.Pop(ctx, "nil-source-job")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(item.BundleURL).To(Equal(""))
 		})
 	})
 

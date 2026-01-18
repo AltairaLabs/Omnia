@@ -79,6 +79,10 @@ func main() {
 	var tracingEndpoint string
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
+	var artifactBaseURL string
+	var redisAddr string
+	var redisPassword string
+	var redisDB int
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -98,6 +102,14 @@ func main() {
 		"The image to use for Arena worker containers. If not set, defaults to ghcr.io/altairalabs/arena-worker:latest")
 	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent. Default: IfNotPresent")
+	flag.StringVar(&artifactBaseURL, "artifact-base-url", "http://localhost:8082/artifacts",
+		"Base URL for serving Arena artifacts to workers. In-cluster, use the service URL.")
+	flag.StringVar(&redisAddr, "redis-addr", "",
+		"Redis server address for Arena work queue (e.g., redis:6379). If empty, Arena queue features are disabled.")
+	flag.StringVar(&redisPassword, "redis-password", "",
+		"Redis password for Arena work queue (optional).")
+	flag.IntVar(&redisDB, "redis-db", 0,
+		"Redis database number for Arena work queue.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -251,12 +263,17 @@ func main() {
 	}
 
 	// Arena Fleet controllers
+	arenaArtifactDir := "/tmp/arena-artifacts"
+	if err := os.MkdirAll(arenaArtifactDir, 0755); err != nil {
+		setupLog.Error(err, "unable to create arena artifact directory")
+		os.Exit(1)
+	}
 	if err := (&controller.ArenaSourceReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        mgr.GetEventRecorderFor("arenasource-controller"),
-		ArtifactDir:     "/tmp/arena-artifacts",
-		ArtifactBaseURL: "http://localhost:8082/artifacts", // Served by operator API
+		ArtifactDir:     arenaArtifactDir,
+		ArtifactBaseURL: artifactBaseURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)
@@ -275,6 +292,10 @@ func main() {
 		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
 		WorkerImage:           arenaWorkerImage,
 		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
+		// Redis configuration for lazy connection during reconciliation
+		RedisAddr:     redisAddr,
+		RedisPassword: redisPassword,
+		RedisDB:       redisDB,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)
@@ -301,7 +322,7 @@ func main() {
 			setupLog.Error(err, "unable to create Kubernetes clientset")
 			os.Exit(1)
 		}
-		apiServer := api.NewServer(mgr.GetClient(), clientset, ctrl.Log)
+		apiServer := api.NewServer(mgr.GetClient(), clientset, ctrl.Log, arenaArtifactDir)
 		go func() {
 			if err := apiServer.Run(ctx, apiAddr); err != nil {
 				setupLog.Error(err, "problem running API server")

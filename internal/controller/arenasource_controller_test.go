@@ -187,23 +187,26 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "missing-config-source",
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
 
-			By("checking the updated status")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "missing-config-source",
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
+			By("reconciling until error is reported (async)")
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
 
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+				updatedSource := &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "missing-config-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
 		})
 	})
 
@@ -275,23 +278,30 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      arenaSourceName,
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
+
+			By("reconciling until completion (async fetch)")
+			var updatedSource *omniav1alpha1.ArenaSource
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				result, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).NotTo(BeZero())
+
+				updatedSource = &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      arenaSourceName,
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseReady))
 
 			By("checking the updated status")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      arenaSourceName,
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
-
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseReady))
 			Expect(updatedSource.Status.Artifact).NotTo(BeNil())
 			Expect(updatedSource.Status.Artifact.URL).To(ContainSubstring("http://localhost:8080/artifacts"))
 			Expect(updatedSource.Status.Artifact.Checksum).NotTo(BeEmpty())
@@ -324,33 +334,39 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      arenaSourceName,
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
+			}
 
-			By("getting the artifact revision")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      arenaSourceName,
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
-			firstRevision := updatedSource.Status.Artifact.Revision
+			By("reconciling until first fetch completes")
+			var firstRevision string
+			Eventually(func() bool {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
+
+				updatedSource := &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      arenaSourceName,
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				if updatedSource.Status.Artifact != nil {
+					firstRevision = updatedSource.Status.Artifact.Revision
+					return true
+				}
+				return false
+			}, 10*time.Second, 100*time.Millisecond).Should(BeTrue())
 
 			By("second reconciliation should skip fetch")
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      arenaSourceName,
-					Namespace: arenaSourceNamespace,
-				},
-			})
+			result, err := reconciler.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).NotTo(BeZero())
 
 			By("verifying revision hasn't changed")
+			updatedSource := &omniav1alpha1.ArenaSource{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      arenaSourceName,
 				Namespace: arenaSourceNamespace,
@@ -403,23 +419,27 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "missing-cm-source",
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
 
-			By("checking the updated status")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "missing-cm-source",
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
+			By("reconciling until error is reported (async)")
+			var updatedSource *omniav1alpha1.ArenaSource
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
 
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+				updatedSource = &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "missing-cm-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
 
 			By("checking the Ready condition")
 			condition := meta.FindStatusCondition(updatedSource.Status.Conditions, ArenaSourceConditionTypeReady)
@@ -731,23 +751,27 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "missing-secret-source",
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
 
-			By("checking the updated status")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "missing-secret-source",
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
+			By("reconciling until error is reported (async)")
+			var updatedSource *omniav1alpha1.ArenaSource
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
 
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+				updatedSource = &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "missing-secret-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
 
 			By("checking the Ready condition")
 			condition := meta.FindStatusCondition(updatedSource.Status.Conditions, ArenaSourceConditionTypeReady)
@@ -869,23 +893,26 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "oci-no-creds-source",
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
 
-			By("checking the updated status - should be Error due to unreachable registry")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "oci-no-creds-source",
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
+			By("reconciling until error is reported (async)")
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
 
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+				updatedSource := &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "oci-no-creds-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
 		})
 	})
 
@@ -934,23 +961,26 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "git-no-creds-source",
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
 
-			By("checking the updated status - should be Error due to unreachable repo")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "git-no-creds-source",
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
+			By("reconciling until error is reported (async)")
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
 
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+				updatedSource := &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "git-no-creds-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseError))
 		})
 	})
 
@@ -1021,23 +1051,26 @@ var _ = Describe("ArenaSource Controller", func() {
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
 			}
 
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "timeout-source",
 					Namespace: arenaSourceNamespace,
 				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
+			}
 
-			By("checking the updated status")
-			updatedSource := &omniav1alpha1.ArenaSource{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "timeout-source",
-				Namespace: arenaSourceNamespace,
-			}, updatedSource)).To(Succeed())
+			By("reconciling until completion (async)")
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
 
-			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseReady))
+				updatedSource := &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "timeout-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseReady))
 		})
 	})
 
@@ -1087,6 +1120,342 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(url).To(ContainSubstring("http://localhost:8080/artifacts"))
 			Expect(url).To(ContainSubstring("default/test-store"))
+		})
+	})
+
+	// Async fetch behavior tests
+	Context("When testing async fetch behavior", func() {
+		var (
+			arenaSource *omniav1alpha1.ArenaSource
+			configMap   *corev1.ConfigMap
+			reconciler  *ArenaSourceReconciler
+		)
+
+		BeforeEach(func() {
+			By("creating the ConfigMap")
+			configMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "async-test-configmap",
+					Namespace: arenaSourceNamespace,
+				},
+				Data: map[string]string{
+					"pack.json": `{"id": "test", "name": "Test Pack", "version": "1.0.0"}`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			By("creating the ArenaSource")
+			arenaSource = &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "async-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "async-test-configmap",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+
+			reconciler = &ArenaSourceReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				Recorder:        record.NewFakeRecorder(10),
+				ArtifactDir:     artifactDir,
+				ArtifactBaseURL: "http://localhost:8080/artifacts",
+			}
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			resource := &omniav1alpha1.ArenaSource{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "async-test-source",
+				Namespace: arenaSourceNamespace,
+			}, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "async-test-configmap",
+				Namespace: arenaSourceNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("should set Fetching phase on first reconcile and return quickly", func() {
+			By("doing the first reconcile")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "async-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			By("checking that phase is Fetching")
+			updatedSource := &omniav1alpha1.ArenaSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "async-test-source",
+				Namespace: arenaSourceNamespace,
+			}, updatedSource)).To(Succeed())
+
+			// After first reconcile, should be Fetching (if async) or Ready (if sync completed)
+			Expect(updatedSource.Status.Phase).To(BeElementOf(
+				omniav1alpha1.ArenaSourcePhaseFetching,
+				omniav1alpha1.ArenaSourcePhaseReady,
+			))
+		})
+
+		It("should complete fetch after multiple reconciles", func() {
+			By("reconciling until completion")
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "async-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+			}
+
+			// Reconcile multiple times to allow async fetch to complete
+			Eventually(func() omniav1alpha1.ArenaSourcePhase {
+				_, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
+
+				updatedSource := &omniav1alpha1.ArenaSource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "async-test-source",
+					Namespace: arenaSourceNamespace,
+				}, updatedSource)).To(Succeed())
+
+				return updatedSource.Status.Phase
+			}, 10*time.Second, 100*time.Millisecond).Should(Equal(omniav1alpha1.ArenaSourcePhaseReady))
+		})
+
+		It("should not start duplicate fetches for same source", func() {
+			By("doing multiple reconciles quickly")
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "async-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+			}
+
+			// First reconcile starts the fetch
+			_, err := reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that in-progress is tracked
+			key := types.NamespacedName{
+				Name:      "async-test-source",
+				Namespace: arenaSourceNamespace,
+			}
+
+			// Check status
+			updatedSource := &omniav1alpha1.ArenaSource{}
+			Expect(k8sClient.Get(ctx, key, updatedSource)).To(Succeed())
+			initialPhase := updatedSource.Status.Phase
+
+			// If still fetching, second reconcile should not start a new fetch
+			if initialPhase == omniav1alpha1.ArenaSourcePhaseFetching {
+				By("doing a second reconcile while fetch is in progress")
+				result, err := reconciler.Reconcile(ctx, req)
+				Expect(err).NotTo(HaveOccurred())
+				// Should requeue to check later
+				Expect(result.RequeueAfter).NotTo(BeZero())
+			}
+		})
+	})
+
+	Context("When testing async fetch cancellation on delete", func() {
+		var (
+			arenaSource *omniav1alpha1.ArenaSource
+			configMap   *corev1.ConfigMap
+			reconciler  *ArenaSourceReconciler
+		)
+
+		BeforeEach(func() {
+			By("creating the ConfigMap")
+			configMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cancel-test-configmap",
+					Namespace: arenaSourceNamespace,
+				},
+				Data: map[string]string{
+					"pack.json": `{"id": "test", "name": "Test Pack", "version": "1.0.0"}`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			By("creating the ArenaSource")
+			arenaSource = &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cancel-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "cancel-test-configmap",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+
+			reconciler = &ArenaSourceReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				ArtifactDir:     artifactDir,
+				ArtifactBaseURL: "http://localhost:8080/artifacts",
+			}
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			cm := &corev1.ConfigMap{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "cancel-test-configmap",
+				Namespace: arenaSourceNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("should handle deletion during fetch gracefully", func() {
+			By("starting a fetch")
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "cancel-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+			}
+
+			_, err := reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("deleting the ArenaSource")
+			Expect(k8sClient.Delete(ctx, arenaSource)).To(Succeed())
+
+			By("reconciling after deletion")
+			result, err := reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			// Should return without requeue since resource is deleted
+			Expect(result.RequeueAfter).To(BeZero())
+		})
+	})
+
+	Context("When testing async fetch with suspension", func() {
+		var (
+			arenaSource *omniav1alpha1.ArenaSource
+			configMap   *corev1.ConfigMap
+			reconciler  *ArenaSourceReconciler
+		)
+
+		BeforeEach(func() {
+			By("creating the ConfigMap")
+			configMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "suspend-test-configmap",
+					Namespace: arenaSourceNamespace,
+				},
+				Data: map[string]string{
+					"pack.json": `{"id": "test", "name": "Test Pack", "version": "1.0.0"}`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+
+			By("creating the ArenaSource (not suspended)")
+			arenaSource = &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "suspend-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					Suspend:  false,
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "suspend-test-configmap",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+
+			reconciler = &ArenaSourceReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				ArtifactDir:     artifactDir,
+				ArtifactBaseURL: "http://localhost:8080/artifacts",
+			}
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			resource := &omniav1alpha1.ArenaSource{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "suspend-test-source",
+				Namespace: arenaSourceNamespace,
+			}, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "suspend-test-configmap",
+				Namespace: arenaSourceNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("should cancel in-progress fetch when suspended", func() {
+			By("starting a fetch")
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "suspend-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+			}
+
+			_, err := reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("suspending the ArenaSource")
+			updatedSource := &omniav1alpha1.ArenaSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "suspend-test-source",
+				Namespace: arenaSourceNamespace,
+			}, updatedSource)).To(Succeed())
+
+			updatedSource.Spec.Suspend = true
+			Expect(k8sClient.Update(ctx, updatedSource)).To(Succeed())
+
+			By("reconciling after suspension")
+			result, err := reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			// Should return without requeue since suspended
+			Expect(result.RequeueAfter).To(BeZero())
+
+			By("checking status shows suspended")
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "suspend-test-source",
+				Namespace: arenaSourceNamespace,
+			}, updatedSource)).To(Succeed())
+
+			condition := meta.FindStatusCondition(updatedSource.Status.Conditions, ArenaSourceConditionTypeReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Reason).To(Equal("Suspended"))
 		})
 	})
 })

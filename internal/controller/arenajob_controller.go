@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -71,6 +72,10 @@ type ArenaJobReconciler struct {
 	WorkerImagePullPolicy corev1.PullPolicy
 	Queue                 queue.WorkQueue
 	Aggregator            *aggregator.Aggregator
+	// Redis configuration for lazy connection
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -295,12 +300,42 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: ptr(true),
+						RunAsUser:    ptr(int64(65532)), // nonroot user
+						FSGroup:      ptr(int64(65532)),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "tmp",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							},
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Name:            "worker",
 							Image:           r.getWorkerImage(),
 							ImagePullPolicy: r.getWorkerImagePullPolicy(),
 							Env:             env,
+							SecurityContext: &corev1.SecurityContext{
+								AllowPrivilegeEscalation: ptr(false),
+								ReadOnlyRootFilesystem:   ptr(true),
+								RunAsNonRoot:             ptr(true),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "tmp",
+									MountPath: "/tmp",
+								},
+							},
 						},
 					},
 				},
@@ -321,6 +356,92 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	log.Info("creating worker job", "job", job.Name, "replicas", replicas)
 	if err := r.Create(ctx, job); err != nil {
 		return fmt.Errorf("failed to create job: %w", err)
+	}
+
+	// Enqueue work items (lazily connects to queue if configured)
+	if err := r.enqueueWorkItems(ctx, arenaJob, config); err != nil {
+		log.Error(err, "failed to enqueue work items")
+		// Don't return error - job is created, workers will wait for items
+	}
+
+	return nil
+}
+
+// getOrCreateQueue returns the work queue, creating it lazily if needed.
+func (r *ArenaJobReconciler) getOrCreateQueue() (queue.WorkQueue, error) {
+	// Return existing queue if already connected
+	if r.Queue != nil {
+		return r.Queue, nil
+	}
+
+	// No Redis configured
+	if r.RedisAddr == "" {
+		return nil, nil
+	}
+
+	// Try to connect lazily
+	q, err := queue.NewRedisQueue(queue.RedisOptions{
+		Addr:     r.RedisAddr,
+		Password: r.RedisPassword,
+		DB:       r.RedisDB,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	r.Queue = q
+	return q, nil
+}
+
+// enqueueWorkItems creates and enqueues work items for the Arena job.
+// Work items are scenario × provider combinations.
+func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig) error {
+	log := logf.FromContext(ctx)
+
+	// Get queue (lazily connect if needed)
+	q, err := r.getOrCreateQueue()
+	if err != nil {
+		return err
+	}
+	if q == nil {
+		log.Info("no work queue configured, skipping work item enqueueing")
+		return nil
+	}
+
+	// Get bundle URL from resolved source
+	bundleURL := ""
+	if config.Status.ResolvedSource != nil {
+		bundleURL = config.Status.ResolvedSource.URL
+	}
+
+	// Get resolved providers
+	providers := config.Status.ResolvedProviders
+	if len(providers) == 0 {
+		log.Info("no providers configured, skipping work item enqueueing")
+		return nil
+	}
+
+	// For now, create one work item per provider with a "default" scenario
+	// In the future, this should enumerate scenarios from the bundle
+	items := make([]queue.WorkItem, 0, len(providers))
+	now := time.Now()
+	for i, provider := range providers {
+		items = append(items, queue.WorkItem{
+			ID:          fmt.Sprintf("%s-%s-%d", arenaJob.Name, provider, i),
+			JobID:       arenaJob.Name,
+			ScenarioID:  "default", // Worker will run all scenarios in the bundle
+			ProviderID:  provider,
+			BundleURL:   bundleURL,
+			Status:      queue.ItemStatusPending,
+			Attempt:     1,
+			MaxAttempts: 3,
+			CreatedAt:   now,
+		})
+	}
+
+	log.Info("enqueueing work items", "count", len(items), "providers", providers)
+	if err := q.Push(ctx, arenaJob.Name, items); err != nil {
+		return fmt.Errorf("failed to push work items to queue: %w", err)
 	}
 
 	return nil

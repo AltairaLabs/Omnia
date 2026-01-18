@@ -36,17 +36,19 @@ const (
 
 // Server provides REST API endpoints for the Omnia dashboard.
 type Server struct {
-	client    client.Client
-	clientset kubernetes.Interface
-	log       logr.Logger
+	client      client.Client
+	clientset   kubernetes.Interface
+	log         logr.Logger
+	artifactDir string
 }
 
 // NewServer creates a new API server with the given cached client and clientset.
-func NewServer(c client.Client, clientset kubernetes.Interface, log logr.Logger) *Server {
+func NewServer(c client.Client, clientset kubernetes.Interface, log logr.Logger, artifactDir string) *Server {
 	return &Server{
-		client:    c,
-		clientset: clientset,
-		log:       log.WithName("api-server"),
+		client:      c,
+		clientset:   clientset,
+		log:         log.WithName("api-server"),
+		artifactDir: artifactDir,
 	}
 }
 
@@ -95,6 +97,13 @@ func (s *Server) Handler() http.Handler {
 
 	// Logs endpoint
 	mux.HandleFunc("/api/v1/agents/", corsHandler(s.handleAgentOrLogs))
+
+	// Arena artifacts file server
+	if s.artifactDir != "" {
+		// Serve files from artifactDir at /artifacts/
+		fileServer := http.FileServer(http.Dir(s.artifactDir))
+		mux.Handle("/artifacts/", http.StripPrefix("/artifacts/", fileServer))
+	}
 
 	return mux
 }
