@@ -1,0 +1,100 @@
+# Workspace Owner ClusterRole - Full control within workspace
+#
+# This ClusterRole grants full access to Omnia resources, ConfigMaps, Secrets,
+# and read access to pods/logs for debugging. Owners can also manage workspace
+# membership via patch access to workspace resources.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: omnia
+    app.kubernetes.io/managed-by: kustomize
+    omnia.altairalabs.ai/rbac: workspace
+  name: omnia-workspace-owner
+rules:
+  # Full access to Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes
+      - promptpacks
+      - toolregistries
+      - providers
+      - arenasources
+      - arenaconfigs
+      - arenajobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Read status of Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      - toolregistries/status
+      - providers/status
+      - arenasources/status
+      - arenaconfigs/status
+      - arenajobs/status
+    verbs:
+      - get
+  # Manage workspace members (via patch access)
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+  # Full access to ConfigMaps and Secrets
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # View pods, logs for debugging
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  # View services and deployments
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
