@@ -1,0 +1,292 @@
+{{- if and .Values.rbac.create .Values.workspaces.enabled }}
+---
+# Workspace Owner ClusterRole - Full control within workspace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: omnia-workspace-owner
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    omnia.altairalabs.ai/rbac: workspace
+rules:
+  # Full access to Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes
+      - promptpacks
+      - toolregistries
+      - providers
+      {{- if .Values.arena.enabled }}
+      - arenasources
+      - arenaconfigs
+      - arenajobs
+      {{- end }}
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Read status of Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      - toolregistries/status
+      - providers/status
+      {{- if .Values.arena.enabled }}
+      - arenasources/status
+      - arenaconfigs/status
+      - arenajobs/status
+      {{- end }}
+    verbs:
+      - get
+  # Manage workspace members (via patch access)
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+  # Full access to ConfigMaps and Secrets
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # View pods, logs for debugging
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  # View services and deployments
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+---
+# Workspace Editor ClusterRole - Create/modify resources, no member management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: omnia-workspace-editor
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    omnia.altairalabs.ai/rbac: workspace
+rules:
+  # CRUD on most Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes
+      - promptpacks
+      {{- if .Values.arena.enabled }}
+      - arenasources
+      - arenaconfigs
+      - arenajobs
+      {{- end }}
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Read status of Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      {{- if .Values.arena.enabled }}
+      - arenasources/status
+      - arenaconfigs/status
+      - arenajobs/status
+      {{- end }}
+    verbs:
+      - get
+  # Read-only on shared resources (Providers, ToolRegistries)
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - toolregistries
+      - providers
+    verbs:
+      - get
+      - list
+      - watch
+  # Read status of shared resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - toolregistries/status
+      - providers/status
+    verbs:
+      - get
+  # Full access to ConfigMaps
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Read secrets (for referencing)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # View pods, logs for debugging
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  # View services and deployments
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+---
+# Workspace Viewer ClusterRole - Read-only access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: omnia-workspace-viewer
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    omnia.altairalabs.ai/rbac: workspace
+rules:
+  # Read-only on all Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes
+      - promptpacks
+      - toolregistries
+      - providers
+      {{- if .Values.arena.enabled }}
+      - arenasources
+      - arenaconfigs
+      - arenajobs
+      {{- end }}
+    verbs:
+      - get
+      - list
+      - watch
+  # Read status of Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      - toolregistries/status
+      - providers/status
+      {{- if .Values.arena.enabled }}
+      - arenasources/status
+      - arenaconfigs/status
+      - arenajobs/status
+      {{- end }}
+    verbs:
+      - get
+  # Read ConfigMaps
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  # View pods, logs for observability
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  # View services and deployments
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}
