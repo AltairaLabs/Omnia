@@ -1,0 +1,118 @@
+{{- /* ============================================================================ */ -}}
+{{- /* Arena Demo Resources */ -}}
+{{- /* Demonstrates prompt evaluation with Arena Fleet */ -}}
+{{- /* ============================================================================ */ -}}
+{{- if .Values.arenaDemo.enabled }}
+---
+# ConfigMap containing a sample PromptKit bundle with test scenarios
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-arena-bundle
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-arena-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-arena-bundle",
+      "name": "Demo Arena Bundle",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
+      "prompts": {
+        "greeting": {
+          "id": "greeting",
+          "name": "Greeting Prompt",
+          "version": "1.0.0",
+          "system_template": "You are a helpful assistant. Be concise and friendly.",
+          "user_template": "Say hello to {{"{{name}}"}}.",
+          "parameters": {
+            "temperature": 0.7
+          }
+        }
+      },
+      "scenarios": {
+        "greeting-test": {
+          "id": "greeting-test",
+          "name": "Greeting Test Scenario",
+          "prompt_ref": "greeting",
+          "variables": {
+            "name": "World"
+          },
+          "assertions": [
+            {
+              "type": "contains",
+              "value": "hello",
+              "case_insensitive": true
+            }
+          ]
+        }
+      }
+    }
+---
+# ArenaSource referencing the ConfigMap
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaSource
+metadata:
+  name: {{ .Values.arenaDemo.source.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-arena-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: configmap
+  configMap:
+    name: demo-arena-bundle
+    key: pack.json
+  interval: {{ .Values.arenaDemo.source.interval }}
+---
+# ArenaConfig using the Ollama provider (cost-free local testing)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaConfig
+metadata:
+  name: {{ .Values.arenaDemo.config.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-arena-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  sourceRef:
+    name: {{ .Values.arenaDemo.source.name }}
+  scenarios:
+    include:
+      - "*"
+  providers:
+    - name: ollama
+  evaluation:
+    timeout: {{ .Values.arenaDemo.config.evaluation.timeout | quote }}
+    maxRetries: {{ .Values.arenaDemo.config.evaluation.maxRetries }}
+    concurrency: {{ .Values.arenaDemo.config.evaluation.concurrency }}
+    metrics:
+      - latency
+      - tokens
+---
+# ArenaJob for running the evaluation
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: {{ .Values.arenaDemo.job.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-arena-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  configRef:
+    name: {{ .Values.arenaDemo.config.name }}
+  type: evaluation
+  evaluation:
+    outputFormats:
+      - json
+  workers:
+    replicas: {{ .Values.arenaDemo.job.workers.replicas }}
+  ttlSecondsAfterFinished: {{ .Values.arenaDemo.job.ttlSecondsAfterFinished }}
+{{- end }}

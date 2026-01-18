@@ -287,3 +287,39 @@ opa:
 istio:
   # -- Enable Istio integration (required for OPA extauthz mode)
   enabled: false
+
+# ============================================================================
+# Arena Demo - Prompt evaluation demonstration
+# Shows how to run LLM evaluations against test scenarios
+# ============================================================================
+
+arenaDemo:
+  # -- Enable arena demo
+  enabled: false
+
+  # -- ArenaSource configuration
+  source:
+    # -- Name of the ArenaSource
+    name: demo-arena-source
+    # -- Sync interval
+    interval: 5m
+
+  # -- ArenaConfig configuration
+  config:
+    # -- Name of the ArenaConfig
+    name: demo-arena-config
+    # -- Evaluation settings
+    evaluation:
+      timeout: "2m"
+      maxRetries: 2
+      concurrency: 1
+
+  # -- ArenaJob configuration
+  job:
+    # -- Name of the ArenaJob
+    name: demo-arena-job
+    # -- Worker configuration
+    workers:
+      replicas: 1
+    # -- TTL after job completion (1 hour)
+    ttlSecondsAfterFinished: 3600

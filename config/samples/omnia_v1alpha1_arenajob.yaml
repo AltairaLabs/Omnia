@@ -1,0 +1,34 @@
+# Sample ArenaJob - One-time evaluation job
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: assertions-eval-run
+  namespace: omnia-system
+spec:
+  configRef:
+    name: assertions-eval
+  type: evaluation
+  evaluation:
+    outputFormats:
+      - junit
+      - json
+  workers:
+    replicas: 2
+  ttlSecondsAfterFinished: 3600
+---
+# Sample ArenaJob - Scheduled evaluation
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: nightly-eval
+  namespace: omnia-system
+spec:
+  configRef:
+    name: assertions-eval
+  type: evaluation
+  workers:
+    replicas: 1
+  schedule:
+    cron: "0 2 * * *"
+    timezone: "UTC"
+    concurrencyPolicy: Forbid
