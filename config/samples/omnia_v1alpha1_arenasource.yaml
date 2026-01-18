@@ -1,0 +1,28 @@
+# Sample ArenaSource - Git repository source
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaSource
+metadata:
+  name: promptkit-examples
+  namespace: omnia-system
+spec:
+  type: git
+  git:
+    url: https://github.com/AltairaLabs/PromptKit.git
+    ref:
+      branch: main
+    path: examples/assertions-test
+  interval: 5m
+  timeout: 60s
+---
+# Sample ArenaSource - ConfigMap source (for simple bundles)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaSource
+metadata:
+  name: simple-prompts
+  namespace: omnia-system
+spec:
+  type: configmap
+  configMap:
+    name: test-prompts
+    key: pack.json
+  interval: 5m
