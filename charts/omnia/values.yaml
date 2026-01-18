@@ -343,6 +343,15 @@ dashboard:
     existingClaim: ""
 
 # ============================================================================
+# Workspace Multi-Tenancy Configuration
+# Multi-tenant workspace isolation with namespace, RBAC, and quotas
+# ============================================================================
+
+workspaces:
+  # -- Enable Workspace controller for multi-tenant isolation
+  enabled: true
+
+# ============================================================================
 # Arena Fleet Configuration
 # Distributed testing framework for evaluating PromptKit bundles
 # ============================================================================

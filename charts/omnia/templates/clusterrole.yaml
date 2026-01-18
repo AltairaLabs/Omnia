@@ -111,6 +111,71 @@ rules:
       - get
       - patch
       - update
+  {{- if .Values.workspaces.enabled }}
+  # Workspace multi-tenancy resources
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - workspaces/status
+    verbs:
+      - get
+      - patch
+      - update
+  {{- end }}
   {{- if .Values.arena.enabled }}
   # Arena Fleet CRDs
   - apiGroups:

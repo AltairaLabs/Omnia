@@ -8,6 +8,8 @@ rules:
   - ""
   resources:
   - configmaps
+  - namespaces
+  - serviceaccounts
   - services
   verbs:
   - create
@@ -90,6 +92,7 @@ rules:
   - promptpacks
   - providers
   - toolregistries
+  - workspaces
   verbs:
   - create
   - delete
@@ -108,6 +111,7 @@ rules:
   - promptpacks/finalizers
   - providers/finalizers
   - toolregistries/finalizers
+  - workspaces/finalizers
   verbs:
   - update
 - apiGroups:
@@ -120,7 +124,20 @@ rules:
   - promptpacks/status
   - providers/status
   - toolregistries/status
+  - workspaces/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

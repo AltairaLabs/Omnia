@@ -309,6 +309,15 @@ func main() {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)
 	}
+
+	// Workspace controller for multi-tenancy
+	if err := (&controller.WorkspaceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

@@ -1,0 +1,112 @@
+# Workspace Editor ClusterRole - Create/modify resources, no member management
+#
+# This ClusterRole grants CRUD access to most Omnia resources, but read-only
+# access to shared resources (Providers, ToolRegistries) and no workspace
+# member management capabilities.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: omnia
+    app.kubernetes.io/managed-by: kustomize
+    omnia.altairalabs.ai/rbac: workspace
+  name: omnia-workspace-editor
+rules:
+  # CRUD on most Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes
+      - promptpacks
+      - arenasources
+      - arenaconfigs
+      - arenajobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Read status of Omnia resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - agentruntimes/status
+      - promptpacks/status
+      - arenasources/status
+      - arenaconfigs/status
+      - arenajobs/status
+    verbs:
+      - get
+  # Read-only on shared resources (Providers, ToolRegistries)
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - toolregistries
+      - providers
+    verbs:
+      - get
+      - list
+      - watch
+  # Read status of shared resources
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - toolregistries/status
+      - providers/status
+    verbs:
+      - get
+  # Full access to ConfigMaps
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Read secrets (for referencing, not viewing values directly in dashboard)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # View pods, logs for debugging
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  # View services and deployments
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
