@@ -32,6 +32,8 @@ export { useAgentMetrics } from "./use-agent-metrics";
 export { useAgentEvents } from "./use-agent-events";
 export { useAgentCost } from "./use-agent-cost";
 export { useSecrets, useSecret, useCreateSecret, useDeleteSecret } from "./use-secrets";
+export { useSharedProviders, useSharedProvider } from "./use-shared-providers";
+export { useSharedToolRegistries, useSharedToolRegistry } from "./use-shared-tool-registries";
 export type { DashboardStats } from "./use-stats";
 export type { K8sEvent } from "./use-agent-events";
 export type { ActivityDataPoint } from "./use-agent-activity";

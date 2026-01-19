@@ -55,6 +55,11 @@ export default defineConfig({
         "src/components/cost/cost-unavailable.tsx", // Cost unavailable display (tested via E2E)
         "src/components/cost/cost-usage-chart.tsx", // Cost usage chart (tested via E2E)
         "src/components/providers/**", // Provider display components (tested via E2E)
+        "src/components/tools/**", // Tool registry display components (tested via E2E)
+        "src/components/agents/agent-metrics-panel.tsx", // Metrics panel (tested via E2E)
+        "src/components/agents/agent-table.tsx", // Agent table (tested via E2E)
+        "src/components/agents/deploy-wizard.tsx", // Deploy wizard (tested via E2E)
+        "src/components/agents/events-panel.tsx", // Events panel (tested via E2E)
         "src/components/topology/node-summary-card.tsx", // Node summary card (tested via E2E)
       ],
       thresholds: {
