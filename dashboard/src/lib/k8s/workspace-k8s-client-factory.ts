@@ -44,10 +44,29 @@ export async function getWorkspaceKubeConfig(
 
   // Create a base KubeConfig to get cluster info
   const baseKc = new k8s.KubeConfig();
+  let loadedFromCluster = false;
+
   try {
     baseKc.loadFromCluster();
+    loadedFromCluster = true;
   } catch {
-    baseKc.loadFromDefault();
+    // Not running in cluster, try default kubeconfig
+    try {
+      baseKc.loadFromDefault();
+    } catch {
+      // No kubeconfig available at all
+      throw new Error(
+        "No Kubernetes configuration found. Ensure the dashboard is running in a cluster with a ServiceAccount or has access to a kubeconfig file."
+      );
+    }
+  }
+
+  // Verify we have a valid cluster configuration
+  const currentCluster = baseKc.getCurrentCluster();
+  if (!currentCluster) {
+    throw new Error(
+      `No active Kubernetes cluster found${loadedFromCluster ? " (in-cluster config may be incomplete)" : " in kubeconfig"}`
+    );
   }
 
   // Try to get a workspace-scoped token
@@ -64,11 +83,7 @@ export async function getWorkspaceKubeConfig(
 
   // If we got a token, create a new config with it
   if (token) {
-    const currentCluster = baseKc.getCurrentCluster();
-    if (!currentCluster) {
-      throw new Error("No cluster found in kubeconfig");
-    }
-
+    // currentCluster is guaranteed to exist from earlier check
     const clusterName = currentCluster.name;
     const userName = `workspace-${workspace}-${role}`;
     const contextName = `${userName}-context`;

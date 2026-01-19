@@ -100,7 +100,7 @@ export const POST = withWorkspaceAccess(
         body.metadata?.annotations
       );
 
-      const created = await createCrd<AgentRuntime>(result.clientOptions, CRD_AGENTS, agent as AgentRuntime);
+      const created = await createCrd<AgentRuntime>(result.clientOptions, CRD_AGENTS, agent as unknown as AgentRuntime);
 
       auditSuccess(auditCtx, "create", resourceName);
       return NextResponse.json(created, { status: 201 });

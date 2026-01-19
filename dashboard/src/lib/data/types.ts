@@ -2,41 +2,116 @@
  * Data service types and interface.
  *
  * This abstraction allows swapping between mock data (for demos)
- * and real operator API data (for production) without changing
+ * and real K8s API data (for production) without changing
  * the consuming code.
  */
 
-import type { components } from "../api/schema";
 import type {
   ServerMessage,
   ConnectionStatus,
   ContentPart,
 } from "@/types/websocket";
 
-// Re-export schema types for convenience
-export type AgentRuntime = components["schemas"]["AgentRuntime"];
-export type AgentRuntimeSpec = components["schemas"]["AgentRuntimeSpec"];
-export type AgentRuntimeStatus = components["schemas"]["AgentRuntimeStatus"];
-export type PromptPack = components["schemas"]["PromptPack"];
-export type PromptPackSpec = components["schemas"]["PromptPackSpec"];
-export type PromptPackStatus = components["schemas"]["PromptPackStatus"];
-export type ToolRegistry = components["schemas"]["ToolRegistry"];
-export type ToolRegistrySpec = components["schemas"]["ToolRegistrySpec"];
-export type ToolRegistryStatus = components["schemas"]["ToolRegistryStatus"];
-export type DiscoveredTool = components["schemas"]["DiscoveredTool"];
-export type Provider = components["schemas"]["Provider"];
-export type ProviderSpec = components["schemas"]["ProviderSpec"];
-export type ProviderStatus = components["schemas"]["ProviderStatus"];
-export type Stats = components["schemas"]["Stats"];
-export type Condition = components["schemas"]["Condition"];
-export type ObjectMeta = components["schemas"]["ObjectMeta"];
-export type LogEntry = components["schemas"]["LogEntry"];
+import type { AgentRuntime as AgentRuntimeType } from "@/types/agent-runtime";
+import type { PromptPack as PromptPackType } from "@/types/prompt-pack";
+import type { ToolRegistry as ToolRegistryType } from "@/types/tool-registry";
 
-// Phase types for filtering
-export type AgentPhase = "Pending" | "Running" | "Failed";
-export type PromptPackPhase = "Pending" | "Active" | "Canary" | "Failed";
-export type ToolRegistryPhase = "Pending" | "Ready" | "Degraded" | "Failed";
+// Re-export CRD types from the centralized type definitions
+export type {
+  ObjectMeta,
+  Condition,
+} from "@/types/common";
+
+export type {
+  AgentRuntime,
+  AgentRuntimeSpec,
+  AgentRuntimeStatus,
+  AgentRuntimePhase,
+} from "@/types/agent-runtime";
+
+export type {
+  PromptPack,
+  PromptPackSpec,
+  PromptPackStatus,
+  PromptPackPhase,
+} from "@/types/prompt-pack";
+
+export type {
+  ToolRegistry,
+  ToolRegistrySpec,
+  ToolRegistryStatus,
+  ToolRegistryPhase,
+  DiscoveredTool,
+} from "@/types/tool-registry";
+
+// Provider types (not yet in dedicated file, define here)
+export interface ProviderSpec {
+  type?: string;
+  model?: string;
+  endpoint?: string;
+  secretRef?: { name: string };
+}
+
+export interface ProviderStatus {
+  phase?: string;
+  conditions?: Array<{
+    type: string;
+    status: "True" | "False" | "Unknown";
+    lastTransitionTime?: string;
+    reason?: string;
+    message?: string;
+  }>;
+  message?: string;
+}
+
+export interface Provider {
+  apiVersion?: string;
+  kind?: string;
+  metadata: {
+    name: string;
+    namespace?: string;
+    uid?: string;
+    resourceVersion?: string;
+    creationTimestamp?: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+  };
+  spec: ProviderSpec;
+  status?: ProviderStatus;
+}
+
 export type ProviderPhase = "Pending" | "Ready" | "Failed";
+
+// Log entry for agent logs
+export interface LogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  container?: string;
+}
+
+// Stats response
+export interface Stats {
+  agents: {
+    total: number;
+    running: number;
+    pending: number;
+    failed: number;
+  };
+  promptPacks: {
+    total: number;
+    active: number;
+    canary: number;
+    pending: number;
+    failed: number;
+  };
+  tools: {
+    total: number;
+    available: number;
+    degraded: number;
+    unavailable: number;
+  };
+}
 
 // PromptPack content (resolved from ConfigMap)
 export interface PromptPackContent {
@@ -239,29 +314,29 @@ export interface DataService {
   readonly isDemo: boolean;
 
   // Agents (workspace-scoped)
-  getAgents(workspace: string): Promise<AgentRuntime[]>;
-  getAgent(workspace: string, name: string): Promise<AgentRuntime | undefined>;
-  createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntime>;
-  scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntime>;
+  getAgents(workspace: string): Promise<AgentRuntimeType[]>;
+  getAgent(workspace: string, name: string): Promise<AgentRuntimeType | undefined>;
+  createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntimeType>;
+  scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntimeType>;
   getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
   getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]>;
 
   // PromptPacks (workspace-scoped)
-  getPromptPacks(workspace: string): Promise<PromptPack[]>;
-  getPromptPack(workspace: string, name: string): Promise<PromptPack | undefined>;
+  getPromptPacks(workspace: string): Promise<PromptPackType[]>;
+  getPromptPack(workspace: string, name: string): Promise<PromptPackType | undefined>;
   getPromptPackContent(workspace: string, name: string): Promise<PromptPackContent | undefined>;
 
   // ToolRegistries (workspace-scoped)
-  getToolRegistries(workspace: string): Promise<ToolRegistry[]>;
-  getToolRegistry(workspace: string, name: string): Promise<ToolRegistry | undefined>;
+  getToolRegistries(workspace: string): Promise<ToolRegistryType[]>;
+  getToolRegistry(workspace: string, name: string): Promise<ToolRegistryType | undefined>;
 
   // Providers (workspace-scoped)
   getProviders(workspace: string): Promise<Provider[]>;
   getProvider(workspace: string, name: string): Promise<Provider | undefined>;
 
   // Shared ToolRegistries (system-wide, in omnia-system namespace)
-  getSharedToolRegistries(): Promise<ToolRegistry[]>;
-  getSharedToolRegistry(name: string): Promise<ToolRegistry | undefined>;
+  getSharedToolRegistries(): Promise<ToolRegistryType[]>;
+  getSharedToolRegistry(name: string): Promise<ToolRegistryType | undefined>;
 
   // Shared Providers (system-wide, in omnia-system namespace)
   getSharedProviders(): Promise<Provider[]>;
