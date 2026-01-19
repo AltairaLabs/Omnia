@@ -9,6 +9,8 @@ import {
   logCrdDenied,
   logCrdError,
   logProxyUsage,
+  logWarn,
+  logError,
   createAuditLogger,
   methodToAction,
   isAuditLoggingEnabled,
@@ -299,6 +301,83 @@ describe("audit logger", () => {
     it("defaults unknown methods to get", () => {
       expect(methodToAction("OPTIONS")).toBe("get");
       expect(methodToAction("HEAD")).toBe("get");
+    });
+  });
+
+  describe("logWarn", () => {
+    it("logs structured warning to stderr", () => {
+      const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      logWarn("Test warning message", "test-context", { key: "value" });
+
+      expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
+      const loggedJson = JSON.parse(consoleWarnSpy.mock.calls[0][0]);
+      expect(loggedJson.level).toBe("warn");
+      expect(loggedJson.message).toBe("Test warning message");
+      expect(loggedJson.context).toBe("test-context");
+      expect(loggedJson.metadata).toEqual({ key: "value" });
+      expect(loggedJson.timestamp).toBeDefined();
+
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("logs without optional fields", () => {
+      const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      logWarn("Simple warning");
+
+      const loggedJson = JSON.parse(consoleWarnSpy.mock.calls[0][0]);
+      expect(loggedJson.message).toBe("Simple warning");
+      expect(loggedJson.context).toBeUndefined();
+      expect(loggedJson.metadata).toBeUndefined();
+
+      consoleWarnSpy.mockRestore();
+    });
+  });
+
+  describe("logError", () => {
+    it("logs structured error with Error object", () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const testError = new Error("Test error");
+
+      logError("Operation failed", testError, "test-context", { operation: "test" });
+
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+      const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(loggedJson.level).toBe("error");
+      expect(loggedJson.message).toBe("Operation failed");
+      expect(loggedJson.error).toBe("Test error");
+      expect(loggedJson.stack).toBeDefined();
+      expect(loggedJson.context).toBe("test-context");
+      expect(loggedJson.metadata).toEqual({ operation: "test" });
+      expect(loggedJson.timestamp).toBeDefined();
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it("logs structured error with string error", () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      logError("Operation failed", "String error message", "context");
+
+      const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(loggedJson.error).toBe("String error message");
+      expect(loggedJson.stack).toBeUndefined();
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it("logs without error object", () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      logError("Simple error message");
+
+      const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(loggedJson.message).toBe("Simple error message");
+      expect(loggedJson.error).toBeUndefined();
+      expect(loggedJson.context).toBeUndefined();
+
+      consoleErrorSpy.mockRestore();
     });
   });
 });

@@ -10,6 +10,8 @@ export {
   logCrdDenied,
   logCrdError,
   logProxyUsage,
+  logWarn,
+  logError,
   createAuditLogger,
   methodToAction,
   isAuditLoggingEnabled,

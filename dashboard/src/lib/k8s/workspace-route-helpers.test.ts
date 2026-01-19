@@ -129,7 +129,13 @@ describe("workspace-route-helpers", () => {
       expect(json.error).toBe("Internal Server Error");
       expect(json.message).toBe("Something went wrong");
 
-      expect(consoleSpy).toHaveBeenCalledWith("Operation failed:", error);
+      // Verify structured logging was called
+      expect(consoleSpy).toHaveBeenCalledTimes(1);
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.level).toBe("error");
+      expect(loggedJson.message).toBe("Operation failed");
+      expect(loggedJson.error).toBe("Something went wrong");
+      expect(loggedJson.context).toBe("workspace-route");
       consoleSpy.mockRestore();
     });
   });

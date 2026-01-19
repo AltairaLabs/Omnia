@@ -8,6 +8,8 @@ import { NextRequest } from "next/server";
 // Mock the audit logger before importing the route
 vi.mock("@/lib/audit", () => ({
   logProxyUsage: vi.fn(),
+  logWarn: vi.fn(),
+  logError: vi.fn(),
 }));
 
 // Store original env
@@ -105,6 +107,7 @@ describe("operator proxy route", () => {
     });
 
     it("logs warning when proxy request is blocked", async () => {
+      const { logWarn } = await import("@/lib/audit");
       const { GET } = await import("./route");
 
       const request = new NextRequest("http://localhost/api/operator/api/v1/agents");
@@ -112,8 +115,10 @@ describe("operator proxy route", () => {
 
       await GET(request, context);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[PROXY DISABLED]")
+      expect(logWarn).toHaveBeenCalledWith(
+        "Blocked proxy request - proxy is disabled",
+        "operator-proxy",
+        expect.objectContaining({ method: "GET", path: "api/v1/agents" })
       );
     });
 
@@ -271,6 +276,7 @@ describe("operator proxy route", () => {
       });
 
       vi.resetModules();
+      const { logWarn } = await import("@/lib/audit");
       const { GET } = await import("./route");
 
       const request = new NextRequest("http://localhost/api/operator/api/v1/agents");
@@ -278,8 +284,10 @@ describe("operator proxy route", () => {
 
       await GET(request, context);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[DEPRECATED]")
+      expect(logWarn).toHaveBeenCalledWith(
+        "Deprecated operator proxy route called",
+        "operator-proxy",
+        expect.objectContaining({ method: "GET", path: "api/v1/agents" })
       );
     });
 
@@ -324,6 +332,7 @@ describe("operator proxy route", () => {
       global.fetch = vi.fn().mockRejectedValue(new Error("Connection refused"));
 
       vi.resetModules();
+      const { logError } = await import("@/lib/audit");
       const { GET } = await import("./route");
 
       const request = new NextRequest("http://localhost/api/operator/api/v1/agents");
@@ -331,9 +340,11 @@ describe("operator proxy route", () => {
 
       await GET(request, context);
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Proxy error"),
-        expect.any(Error)
+      expect(logError).toHaveBeenCalledWith(
+        "Failed to connect to operator API",
+        expect.any(Error),
+        "operator-proxy",
+        expect.objectContaining({ method: "GET" })
       );
     });
 

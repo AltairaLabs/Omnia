@@ -23,7 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { logProxyUsage } from "@/lib/audit";
+import { logProxyUsage, logWarn, logError } from "@/lib/audit";
 
 // Server-side operator API URL (not exposed to browser)
 const OPERATOR_API_URL =
@@ -37,6 +37,11 @@ const OPERATOR_API_URL =
  * - "compat": Proxy is enabled with deprecation warnings (for migration period)
  */
 const PROXY_MODE = process.env.OMNIA_PROXY_MODE || "strict";
+
+/**
+ * Log context identifier for proxy operations.
+ */
+const LOG_CONTEXT = "operator-proxy";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
@@ -92,25 +97,19 @@ async function proxyRequest(
 
   // Check if proxy is enabled
   if (!isProxyEnabled()) {
-    console.warn(
-      `[PROXY DISABLED] Blocked proxy request: ${request.method} /api/operator/${pathString}. ` +
-      `OMNIA_PROXY_MODE=${PROXY_MODE}. Set OMNIA_PROXY_MODE=compat to allow during migration.`
+    logWarn(
+      "Blocked proxy request - proxy is disabled",
+      LOG_CONTEXT,
+      { method: request.method, path: pathString, proxyMode: PROXY_MODE, user }
     );
     return proxyDisabledResponse(request.method, pathString);
   }
 
-  // DEPRECATION WARNING: This proxy route is deprecated.
-  // Use the new workspace-scoped API routes instead:
-  //   - /api/workspaces/:name/agents
-  //   - /api/workspaces/:name/promptpacks
-  //   - /api/shared/toolregistries
-  //   - /api/shared/providers
-  // See #278 for migration details.
-  console.warn(
-    `[DEPRECATED] Operator proxy route called: ${request.method} /api/operator/${pathString}. ` +
-    `User: ${user}. ` +
-    `Please migrate to workspace-scoped API routes (see #278). ` +
-    `This proxy will be removed in a future release.`
+  // Log deprecation warning for compat mode usage
+  logWarn(
+    "Deprecated operator proxy route called",
+    LOG_CONTEXT,
+    { method: request.method, path: pathString, user, migrationGuide: "#278" }
   );
 
   // Build the target URL - pathString already includes 'api/v1/...'
@@ -152,7 +151,12 @@ async function proxyRequest(
       },
     });
   } catch (error) {
-    console.error(`Proxy error for ${targetUrl}:`, error);
+    logError(
+      "Failed to connect to operator API",
+      error,
+      LOG_CONTEXT,
+      { targetUrl: targetUrl.toString(), method: request.method }
+    );
     return NextResponse.json(
       {
         error: "Failed to connect to operator API",

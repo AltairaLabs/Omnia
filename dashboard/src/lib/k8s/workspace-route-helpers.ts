@@ -14,6 +14,7 @@ import {
   logCrdSuccess,
   logCrdDenied,
   logCrdError,
+  logError,
   methodToAction,
   type AuditAction,
 } from "@/lib/audit";
@@ -74,7 +75,7 @@ export function notFoundResponse(message: string): NextResponse {
  * Standard 500 Internal Server Error response.
  */
 export function serverErrorResponse(error: unknown, context: string): NextResponse {
-  console.error(`${context}:`, error);
+  logError(context, error, "workspace-route");
   return NextResponse.json(
     {
       error: "Internal Server Error",
@@ -229,6 +230,14 @@ export interface AuditContext {
 }
 
 /**
+ * Get user identifier for audit logging.
+ * Prefers email, falls back to username, then "unknown".
+ */
+function getUserIdentifier(user: User): string {
+  return user.email || user.username || "unknown";
+}
+
+/**
  * Log a successful CRD operation in a route handler.
  */
 export function auditSuccess(
@@ -243,7 +252,7 @@ export function auditSuccess(
     resourceName,
     ctx.workspace,
     ctx.namespace,
-    ctx.user.email || ctx.user.username || "unknown",
+    getUserIdentifier(ctx.user),
     ctx.role,
     metadata
   );
@@ -264,7 +273,7 @@ export function auditDenied(
     resourceName,
     ctx.workspace,
     ctx.namespace,
-    ctx.user.email || ctx.user.username || "unknown",
+    getUserIdentifier(ctx.user),
     ctx.role,
     errorMessage
   );
@@ -280,15 +289,16 @@ export function auditError(
   error?: unknown,
   statusCode?: number
 ): void {
+  const errorMessage = error instanceof Error ? error.message : String(error);
   logCrdError(
     action,
     ctx.resourceType,
     resourceName,
     ctx.workspace,
     ctx.namespace,
-    ctx.user.email || ctx.user.username || "unknown",
+    getUserIdentifier(ctx.user),
     ctx.role,
-    error instanceof Error ? error.message : String(error),
+    errorMessage,
     statusCode
   );
 }

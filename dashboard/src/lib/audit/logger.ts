@@ -262,3 +262,84 @@ export function logProxyUsage(
   // eslint-disable-next-line no-console -- Audit logs use console.log for structured output to stdout
   console.log(JSON.stringify(entry));
 }
+
+/**
+ * Structured warning log entry.
+ */
+interface WarnLogEntry {
+  timestamp: string;
+  level: "warn";
+  message: string;
+  context?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Log a structured warning message.
+ * Outputs JSON to stderr for log aggregation.
+ */
+export function logWarn(
+  message: string,
+  context?: string,
+  metadata?: Record<string, unknown>
+): void {
+  const entry: WarnLogEntry = {
+    timestamp: new Date().toISOString(),
+    level: "warn",
+    message,
+    context,
+    metadata,
+  };
+
+   
+  console.warn(JSON.stringify(entry));
+}
+
+/**
+ * Structured error log entry.
+ */
+interface ErrorLogEntry {
+  timestamp: string;
+  level: "error";
+  message: string;
+  context?: string;
+  error?: string;
+  stack?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Extract error message from an unknown error value.
+ */
+function getErrorMessage(error: unknown): string | undefined {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error) {
+    return String(error);
+  }
+  return undefined;
+}
+
+/**
+ * Log a structured error message.
+ * Outputs JSON to stderr for log aggregation.
+ */
+export function logError(
+  message: string,
+  error?: unknown,
+  context?: string,
+  metadata?: Record<string, unknown>
+): void {
+  const entry: ErrorLogEntry = {
+    timestamp: new Date().toISOString(),
+    level: "error",
+    message,
+    context,
+    error: getErrorMessage(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    metadata,
+  };
+
+  console.error(JSON.stringify(entry)); // NOSONAR - Structured logging to stderr
+}
