@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePromptPacks } from "@/hooks";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { PromptPackPhase } from "@/types";
 
 type FilterPhase = "all" | PromptPackPhase;
@@ -17,7 +18,11 @@ export default function PromptPacksPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
 
-  const { data: promptPacks, isLoading } = usePromptPacks();
+  const { isLoading: isWorkspaceLoading } = useWorkspace();
+  const { data: promptPacks, isLoading: isPacksLoading } = usePromptPacks();
+
+  // Show loading when either workspace or packs are loading
+  const isLoading = isWorkspaceLoading || isPacksLoading;
 
   // Extract unique namespaces
   const allNamespaces = useMemo(() => {
