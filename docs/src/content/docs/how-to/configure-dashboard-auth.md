@@ -633,3 +633,4 @@ env:
 - [Authentication Architecture](/explanation/authentication/) - Understand the full auth model
 - [Configure Agent Authentication](/how-to/configure-authentication/) - Secure agent endpoints
 - [Dashboard Auth Reference](/reference/dashboard-auth/) - Complete configuration reference
+- [Manage Workspaces](/how-to/manage-workspaces/) - Set up team isolation and access control
