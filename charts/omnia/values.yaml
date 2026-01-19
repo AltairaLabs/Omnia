@@ -181,6 +181,39 @@ dashboard:
   # -- Dashboard affinity rules
   affinity: {}
 
+  # -- Dashboard startup probe (optional, for slow-starting containers)
+  startupProbe: {}
+  # Example:
+  #   httpGet:
+  #     path: /api/health
+  #     port: http
+  #   initialDelaySeconds: 0
+  #   periodSeconds: 10
+  #   timeoutSeconds: 5
+  #   failureThreshold: 30
+
+  # -- Dashboard liveness probe configuration
+  livenessProbe:
+    # -- Initial delay before starting liveness probes
+    initialDelaySeconds: 10
+    # -- How often to perform the probe
+    periodSeconds: 30
+    # -- Timeout for each probe
+    timeoutSeconds: 5
+    # -- Number of failures before marking unhealthy
+    failureThreshold: 3
+
+  # -- Dashboard readiness probe configuration
+  readinessProbe:
+    # -- Initial delay before starting readiness probes
+    initialDelaySeconds: 5
+    # -- How often to perform the probe
+    periodSeconds: 10
+    # -- Timeout for each probe
+    timeoutSeconds: 5
+    # -- Number of failures before marking not ready
+    failureThreshold: 3
+
   # -- Authentication configuration
   auth:
     # -- Authentication mode: anonymous, proxy, oauth, or builtin
