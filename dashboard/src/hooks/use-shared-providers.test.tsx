@@ -8,9 +8,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useSharedProviders, useSharedProvider } from "./use-shared-providers";
 import type { ReactNode } from "react";
 
-// Mock fetch
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Mock shared provider data
+const mockProviders = [
+  { metadata: { name: "openai", namespace: "omnia-system" } },
+  { metadata: { name: "anthropic", namespace: "omnia-system" } },
+];
+
+// Mock useDataService
+const mockGetSharedProviders = vi.fn().mockResolvedValue(mockProviders);
+const mockGetSharedProvider = vi.fn();
+vi.mock("@/lib/data", () => ({
+  useDataService: () => ({
+    name: "mock",
+    getSharedProviders: mockGetSharedProviders,
+    getSharedProvider: mockGetSharedProvider,
+  }),
+}));
 
 // Create a wrapper with QueryClientProvider
 function createWrapper() {
@@ -18,6 +31,7 @@ function createWrapper() {
     defaultOptions: {
       queries: {
         retry: false,
+        gcTime: 0,
       },
     },
   });
@@ -31,18 +45,10 @@ function createWrapper() {
 describe("useSharedProviders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSharedProviders.mockResolvedValue(mockProviders);
   });
 
   it("fetches shared providers successfully", async () => {
-    const mockProviders = [
-      { metadata: { name: "openai", namespace: "omnia-system" } },
-      { metadata: { name: "anthropic", namespace: "omnia-system" } },
-    ];
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockProviders),
-    });
-
     const { result } = renderHook(() => useSharedProviders(), {
       wrapper: createWrapper(),
     });
@@ -50,14 +56,11 @@ describe("useSharedProviders", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(mockProviders);
-    expect(mockFetch).toHaveBeenCalledWith("/api/shared/providers");
+    expect(mockGetSharedProviders).toHaveBeenCalled();
   });
 
-  it("returns empty array on 401 unauthorized", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-    });
+  it("returns empty array when service returns empty", async () => {
+    mockGetSharedProviders.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useSharedProviders(), {
       wrapper: createWrapper(),
@@ -68,12 +71,8 @@ describe("useSharedProviders", () => {
     expect(result.current.data).toEqual([]);
   });
 
-  it("throws error on other failures", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-    });
+  it("handles errors from service", async () => {
+    mockGetSharedProviders.mockRejectedValueOnce(new Error("Service error"));
 
     const { result } = renderHook(() => useSharedProviders(), {
       wrapper: createWrapper(),
@@ -92,10 +91,7 @@ describe("useSharedProvider", () => {
 
   it("fetches a single shared provider", async () => {
     const mockProvider = { metadata: { name: "openai", namespace: "omnia-system" } };
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockProvider),
-    });
+    mockGetSharedProvider.mockResolvedValueOnce(mockProvider);
 
     const { result } = renderHook(() => useSharedProvider("openai"), {
       wrapper: createWrapper(),
@@ -104,14 +100,11 @@ describe("useSharedProvider", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(mockProvider);
-    expect(mockFetch).toHaveBeenCalledWith("/api/shared/providers/openai");
+    expect(mockGetSharedProvider).toHaveBeenCalledWith("openai");
   });
 
-  it("returns null on 404", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-    });
+  it("returns null when provider not found", async () => {
+    mockGetSharedProvider.mockResolvedValueOnce(null);
 
     const { result } = renderHook(() => useSharedProvider("nonexistent"), {
       wrapper: createWrapper(),
@@ -128,5 +121,6 @@ describe("useSharedProvider", () => {
     });
 
     expect(result.current.isFetching).toBe(false);
+    expect(mockGetSharedProvider).not.toHaveBeenCalled();
   });
 });

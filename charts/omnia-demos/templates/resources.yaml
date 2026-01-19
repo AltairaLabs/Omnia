@@ -94,6 +94,7 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia-demos
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
 spec:
   promptPackRef:
     name: demo-vision-prompts
@@ -217,6 +218,7 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia-audio-demo
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
 spec:
   promptPackRef:
     name: demo-audio-prompts
@@ -352,6 +354,7 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia-tools-demo
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
 spec:
   promptPackRef:
     name: demo-tools-prompts

@@ -3,6 +3,24 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useProvider, useUpdateProviderSecretRef } from "./use-provider";
 
+// Mock workspace context
+const mockCurrentWorkspace = {
+  name: "test-workspace",
+  namespace: "test-namespace",
+  role: "editor",
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: [mockCurrentWorkspace],
+    isLoading: false,
+    error: null,
+    setCurrentWorkspace: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock provider data
 const mockProvider = {
   metadata: {
@@ -46,7 +64,7 @@ describe("useProvider", () => {
     mockGetProvider.mockResolvedValue(mockProvider);
   });
 
-  it("should fetch provider by name and namespace", async () => {
+  it("should fetch provider by name (providers are shared)", async () => {
     const { result } = renderHook(
       () => useProvider("openai-provider", "production"),
       { wrapper: TestWrapper }
@@ -57,7 +75,8 @@ describe("useProvider", () => {
     });
 
     expect(result.current.data).toEqual(mockProvider);
-    expect(mockGetProvider).toHaveBeenCalledWith("production", "openai-provider");
+    // Providers are workspace-scoped
+    expect(mockGetProvider).toHaveBeenCalledWith("test-workspace", "openai-provider");
   });
 
   it("should be in loading state initially", () => {
@@ -130,7 +149,8 @@ describe("useProvider", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockGetProvider).toHaveBeenCalledWith("staging", "test-provider");
+    // Providers are workspace-scoped
+    expect(mockGetProvider).toHaveBeenCalledWith("test-workspace", "test-provider");
   });
 
   it("should return null from queryFn when name is empty string", async () => {

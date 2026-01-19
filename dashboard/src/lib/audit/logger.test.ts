@@ -8,7 +8,6 @@ import {
   logCrdSuccess,
   logCrdDenied,
   logCrdError,
-  logProxyUsage,
   logWarn,
   logError,
   createAuditLogger,
@@ -212,34 +211,6 @@ describe("audit logger", () => {
       expect(loggedJson.result).toBe("error");
       expect(loggedJson.errorMessage).toBe("Connection timeout");
       expect(loggedJson.statusCode).toBe(500);
-    });
-  });
-
-  describe("logProxyUsage", () => {
-    it("logs deprecated proxy usage", () => {
-      logProxyUsage("GET", "api/v1/agents", "user@example.com", "Mozilla/5.0");
-
-      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
-      expect(loggedJson.level).toBe("audit");
-      expect(loggedJson.action).toBe("proxy_request");
-      expect(loggedJson.deprecated).toBe(true);
-      expect(loggedJson.method).toBe("GET");
-      expect(loggedJson.path).toBe("api/v1/agents");
-      expect(loggedJson.user).toBe("user@example.com");
-      expect(loggedJson.userAgent).toBe("Mozilla/5.0");
-    });
-
-    it("uses unknown for missing user", () => {
-      logProxyUsage("POST", "api/v1/agents");
-
-      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
-      expect(loggedJson.user).toBe("unknown");
-    });
-
-    it("does not log when audit logging is disabled", () => {
-      process.env.OMNIA_AUDIT_LOGGING_ENABLED = "false";
-      logProxyUsage("GET", "api/v1/agents", "user@example.com");
-      expect(consoleSpy).not.toHaveBeenCalled();
     });
   });
 

@@ -29,22 +29,24 @@ describe("GET /api/shared/toolregistries", () => {
     vi.resetAllMocks();
   });
 
-  it("returns 401 for anonymous users", async () => {
-    const { getUser } = await import("@/lib/auth");
-    vi.mocked(getUser).mockResolvedValue({
-      id: "anonymous",
-      provider: "anonymous",
-      username: "anonymous",
-      groups: [],
-      role: "viewer",
-    });
+  it("allows anonymous users (read-only public data)", async () => {
+    const { listSharedCrd } = await import("@/lib/k8s/crd-operations");
+
+    const mockToolRegistries = [
+      {
+        metadata: { name: "default-tools", namespace: "omnia-system" },
+        spec: { tools: [] },
+      },
+    ];
+    vi.mocked(listSharedCrd).mockResolvedValue(mockToolRegistries);
 
     const { GET } = await import("./route");
     const response = await GET();
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.error).toBe("Unauthorized");
+    expect(body).toHaveLength(1);
+    expect(body[0].metadata.name).toBe("default-tools");
   });
 
   it("returns tool registries for authenticated users", async () => {

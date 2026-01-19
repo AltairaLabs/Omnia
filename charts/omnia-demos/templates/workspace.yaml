@@ -1,0 +1,25 @@
+---
+# Workspace CRD for the demo namespace
+# This allows the dashboard to discover and display demo agents
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  displayName: Demo Workspace
+  description: Demo workspace for Omnia agents showcasing vision, audio, and tool capabilities
+  environment: development
+  namespace:
+    name: {{ .Values.namespace }}
+    create: false
+  roleBindings: []
+  {{- if .Values.workspace.anonymousAccess.enabled }}
+  # Anonymous access configuration
+  # WARNING: Granting editor/owner to anonymous users allows unauthenticated write access
+  anonymousAccess:
+    enabled: true
+    role: {{ .Values.workspace.anonymousAccess.role }}
+  {{- end }}

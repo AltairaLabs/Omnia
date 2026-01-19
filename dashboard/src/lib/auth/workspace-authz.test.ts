@@ -78,6 +78,10 @@ describe("workspace-authz", () => {
           expires: "2020-01-01T00:00:00Z", // Past date
         },
       ],
+      // Anonymous access enabled with default viewer role
+      anonymousAccess: {
+        enabled: true,
+      },
     },
   };
 
@@ -90,28 +94,165 @@ describe("workspace-authz", () => {
   });
 
   describe("checkWorkspaceAccess", () => {
-    it("should deny access to anonymous users", async () => {
-      (getUser as Mock).mockResolvedValue({
-        ...mockUser,
-        provider: "anonymous",
+    describe("anonymous access", () => {
+      it("should grant viewer access to anonymous users when enabled", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+
+        const access = await checkWorkspaceAccess("test-workspace");
+
+        expect(access.granted).toBe(true);
+        expect(access.role).toBe("viewer");
       });
 
-      const access = await checkWorkspaceAccess("test-workspace");
+      it("should grant viewer access to users without email when enabled", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          email: undefined,
+        });
 
-      expect(access.granted).toBe(false);
-      expect(access.role).toBeNull();
-    });
+        const access = await checkWorkspaceAccess("test-workspace");
 
-    it("should deny access to users without email", async () => {
-      (getUser as Mock).mockResolvedValue({
-        ...mockUser,
-        email: undefined,
+        expect(access.granted).toBe(true);
+        expect(access.role).toBe("viewer");
       });
 
-      const access = await checkWorkspaceAccess("test-workspace");
+      it("should deny anonymous access when not configured", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+        (getWorkspace as Mock).mockResolvedValue({
+          ...mockWorkspace,
+          spec: {
+            ...mockWorkspace.spec,
+            anonymousAccess: undefined, // No anonymous access config
+          },
+        });
 
-      expect(access.granted).toBe(false);
-      expect(access.role).toBeNull();
+        const access = await checkWorkspaceAccess("test-workspace");
+
+        expect(access.granted).toBe(false);
+        expect(access.role).toBeNull();
+      });
+
+      it("should deny anonymous access when explicitly disabled", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+        (getWorkspace as Mock).mockResolvedValue({
+          ...mockWorkspace,
+          spec: {
+            ...mockWorkspace.spec,
+            anonymousAccess: { enabled: false },
+          },
+        });
+
+        const access = await checkWorkspaceAccess("test-workspace");
+
+        expect(access.granted).toBe(false);
+        expect(access.role).toBeNull();
+      });
+
+      it("should grant configured role to anonymous users", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+        (getWorkspace as Mock).mockResolvedValue({
+          ...mockWorkspace,
+          spec: {
+            ...mockWorkspace.spec,
+            anonymousAccess: { enabled: true, role: "editor" },
+          },
+        });
+
+        const access = await checkWorkspaceAccess("test-workspace");
+
+        expect(access.granted).toBe(true);
+        expect(access.role).toBe("editor");
+        expect(access.permissions.write).toBe(true);
+      });
+
+      it("should log warning for editor anonymous access", async () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+        (getWorkspace as Mock).mockResolvedValue({
+          ...mockWorkspace,
+          spec: {
+            ...mockWorkspace.spec,
+            anonymousAccess: { enabled: true, role: "editor" },
+          },
+        });
+
+        await checkWorkspaceAccess("test-workspace");
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("[SECURITY WARNING]")
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("EDITOR access to anonymous users")
+        );
+        warnSpy.mockRestore();
+      });
+
+      it("should log warning for owner anonymous access", async () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+        (getWorkspace as Mock).mockResolvedValue({
+          ...mockWorkspace,
+          spec: {
+            ...mockWorkspace.spec,
+            anonymousAccess: { enabled: true, role: "owner" },
+          },
+        });
+
+        await checkWorkspaceAccess("test-workspace");
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("[SECURITY WARNING]")
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("OWNER access to anonymous users")
+        );
+        warnSpy.mockRestore();
+      });
+
+      it("should not log warning for viewer anonymous access", async () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+
+        await checkWorkspaceAccess("test-workspace");
+
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
+
+      it("should respect requiredRole for anonymous users", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+
+        // Anonymous has viewer, but editor is required
+        const access = await checkWorkspaceAccess("test-workspace", "editor");
+
+        expect(access.granted).toBe(false);
+        expect(access.role).toBe("viewer");
+        expect(access.permissions.read).toBe(true);
+      });
     });
 
     it("should deny access when workspace does not exist", async () => {
@@ -280,6 +421,7 @@ describe("workspace-authz", () => {
             role: "viewer",
           },
         ],
+        anonymousAccess: undefined, // No anonymous access
       },
     };
 
@@ -298,6 +440,7 @@ describe("workspace-authz", () => {
             role: "owner",
           },
         ],
+        anonymousAccess: undefined, // No anonymous access
       },
     };
 
@@ -309,15 +452,55 @@ describe("workspace-authz", () => {
       ]);
     });
 
-    it("should return empty array for anonymous users", async () => {
+    it("should return only workspaces with anonymous access enabled for anonymous users", async () => {
       (getUser as Mock).mockResolvedValue({
         ...mockUser,
         provider: "anonymous",
       });
 
+      // Only mockWorkspace has anonymousAccess enabled
       const result = await getAccessibleWorkspaces();
 
-      expect(result).toEqual([]);
+      // Anonymous users only get access to workspaces with anonymousAccess enabled
+      expect(result).toHaveLength(1);
+      expect(result[0].workspace.metadata.name).toBe("test-workspace");
+      expect(result[0].access.granted).toBe(true);
+      expect(result[0].access.role).toBe("viewer");
+    });
+
+    it("should respect configured anonymous role when listing workspaces", async () => {
+      (getUser as Mock).mockResolvedValue({
+        ...mockUser,
+        provider: "anonymous",
+      });
+      // Add anonymousAccess with editor role to workspace2
+      const workspace2WithAnon = {
+        ...workspace2,
+        spec: {
+          ...workspace2.spec,
+          anonymousAccess: { enabled: true, role: "editor" as WorkspaceRole },
+        },
+      };
+      (listWorkspaces as Mock).mockResolvedValue([
+        mockWorkspace,
+        workspace2WithAnon,
+        workspace3,
+      ]);
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const result = await getAccessibleWorkspaces();
+
+      expect(result).toHaveLength(2);
+
+      const testWs = result.find(r => r.workspace.metadata.name === "test-workspace");
+      expect(testWs?.access.role).toBe("viewer");
+
+      const ws2 = result.find(r => r.workspace.metadata.name === "workspace-2");
+      expect(ws2?.access.role).toBe("editor");
+
+      // Should have logged warning for editor access
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
 
     it("should return workspaces user has access to", async () => {

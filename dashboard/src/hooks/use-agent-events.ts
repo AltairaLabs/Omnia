@@ -14,18 +14,18 @@ export type { K8sEvent } from "@/lib/data";
  * Hook to fetch K8s events for a specific agent.
  *
  * In demo mode, returns realistic mock events.
- * In live mode, queries the operator API for real K8s events.
+ * In live mode, queries the workspace API for real K8s events.
  *
  * @param agentName - Name of the agent
- * @param namespace - Namespace of the agent
+ * @param workspace - Workspace name (not K8s namespace)
  */
-export function useAgentEvents(agentName: string, namespace: string) {
+export function useAgentEvents(agentName: string, workspace: string) {
   const dataService = useDataService();
 
   return useQuery({
-    queryKey: ["agent-events", namespace, agentName],
-    queryFn: () => dataService.getAgentEvents(namespace, agentName),
-    enabled: !!agentName && !!namespace,
+    queryKey: ["agent-events", workspace, agentName],
+    queryFn: () => dataService.getAgentEvents(workspace, agentName),
+    enabled: !!agentName && !!workspace,
     refetchInterval: 30000, // Refresh every 30 seconds
     staleTime: 15000,
   });

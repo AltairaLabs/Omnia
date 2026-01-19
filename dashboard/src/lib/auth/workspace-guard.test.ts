@@ -88,19 +88,22 @@ describe("workspace-guard", () => {
       params: Promise.resolve({ name }),
     });
 
-    it("should return 401 for anonymous users", async () => {
+    it("should allow anonymous users with viewer access from checkWorkspaceAccess", async () => {
       (getUser as Mock).mockResolvedValue(mockAnonymousUser);
+      // checkWorkspaceAccess now grants viewer access to anonymous users
+      (checkWorkspaceAccess as Mock).mockResolvedValue({
+        granted: true,
+        role: "viewer",
+        permissions: { read: true, write: false, delete: false, manageMembers: false },
+      });
 
       const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
       const wrapped = withWorkspaceAccess("viewer", handler);
 
       const response = await wrapped(createMockRequest(), createMockContext());
-      const body = await response.json();
 
-      expect(response.status).toBe(401);
-      expect(body.error).toBe("Unauthorized");
-      expect(body.message).toBe("Authentication required");
-      expect(handler).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
     });
 
     it("should return 403 when user has no role in workspace", async () => {
@@ -179,18 +182,22 @@ describe("workspace-guard", () => {
       return new NextRequest(url);
     };
 
-    it("should return 401 for anonymous users", async () => {
+    it("should allow anonymous users with viewer access from checkWorkspaceAccess", async () => {
       (getUser as Mock).mockResolvedValue(mockAnonymousUser);
+      // checkWorkspaceAccess now grants viewer access to anonymous users
+      (checkWorkspaceAccess as Mock).mockResolvedValue({
+        granted: true,
+        role: "viewer",
+        permissions: { read: true, write: false, delete: false, manageMembers: false },
+      });
 
       const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
       const wrapped = withWorkspaceQuery("viewer", handler);
 
       const response = await wrapped(createMockRequest("test-ws"));
-      const body = await response.json();
 
-      expect(response.status).toBe(401);
-      expect(body.error).toBe("Unauthorized");
-      expect(handler).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(handler).toHaveBeenCalled();
     });
 
     it("should return 400 when workspace query param is missing", async () => {

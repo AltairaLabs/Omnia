@@ -20,7 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useReadOnly, usePermissions, Permission } from "@/hooks";
+import { useReadOnly, usePermissions, Permission, useWorkspacePermissions } from "@/hooks";
 
 interface ScaleControlProps {
   currentReplicas: number;
@@ -42,9 +42,15 @@ interface ConfirmAction {
 }
 
 /** Helper to compute the disabled message */
-function getDisabledMessage(isReadOnly: boolean, readOnlyMessage: string, canScale: boolean): string {
+function getDisabledMessage(
+  isReadOnly: boolean,
+  readOnlyMessage: string,
+  hasGlobalPermission: boolean,
+  hasWorkspacePermission: boolean
+): string {
   if (isReadOnly) return readOnlyMessage;
-  if (!canScale) return "You don't have permission to scale agents";
+  if (!hasGlobalPermission) return "You don't have permission to scale agents";
+  if (!hasWorkspacePermission) return "You don't have write access to this workspace";
   return "";
 }
 
@@ -193,9 +199,12 @@ export function ScaleControl({
 }: Readonly<ScaleControlProps>) {
   const { isReadOnly, message: readOnlyMessage } = useReadOnly();
   const { can } = usePermissions();
-  const canScale = can(Permission.AGENTS_SCALE);
+  const { canWrite: hasWorkspacePermission } = useWorkspacePermissions();
+  const hasGlobalPermission = can(Permission.AGENTS_SCALE);
+  // Both global and workspace permissions required
+  const canScale = hasGlobalPermission && hasWorkspacePermission;
   const isDisabled = isReadOnly || !canScale;
-  const disabledMessage = getDisabledMessage(isReadOnly, readOnlyMessage, canScale);
+  const disabledMessage = getDisabledMessage(isReadOnly, readOnlyMessage, hasGlobalPermission, hasWorkspacePermission);
 
   const [isScaling, setIsScaling] = useState(false);
   // Optimistic value: what we want the desired replicas to be

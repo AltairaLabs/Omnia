@@ -14,6 +14,7 @@ vi.mock("@/hooks", () => ({
     can: () => true,
     hasRole: () => true,
   })),
+  useWorkspacePermissions: vi.fn(() => ({ canWrite: true })),
   Permission: {
     AGENTS_SCALE: "agents:scale",
   },
@@ -88,15 +89,20 @@ const mockDataService: DataService = {
   getPromptPacks: vi.fn().mockResolvedValue([]),
   getPromptPack: vi.fn().mockResolvedValue(undefined),
   getPromptPackContent: vi.fn().mockResolvedValue(undefined),
-  // ToolRegistries
+  // ToolRegistries (workspace-scoped)
   getToolRegistries: vi.fn().mockResolvedValue([]),
   getToolRegistry: vi.fn().mockResolvedValue(undefined),
-  // Providers
+  // Providers (workspace-scoped)
   getProviders: vi.fn().mockResolvedValue([]),
   getProvider: vi.fn().mockResolvedValue(undefined),
-  // Stats & Namespaces
+  // Shared ToolRegistries
+  getSharedToolRegistries: vi.fn().mockResolvedValue([]),
+  getSharedToolRegistry: vi.fn().mockResolvedValue(undefined),
+  // Shared Providers
+  getSharedProviders: vi.fn().mockResolvedValue([]),
+  getSharedProvider: vi.fn().mockResolvedValue(undefined),
+  // Stats
   getStats: vi.fn().mockResolvedValue({ agents: 0, providers: 0, tools: 0, promptPacks: 0 }),
-  getNamespaces: vi.fn().mockResolvedValue([]),
   // Costs
   getCosts: vi.fn().mockResolvedValue({ items: [], summary: { totalCost: 0, totalTokens: 0 } }),
   // Agent connections

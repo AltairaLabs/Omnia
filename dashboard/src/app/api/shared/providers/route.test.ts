@@ -29,22 +29,24 @@ describe("GET /api/shared/providers", () => {
     vi.resetAllMocks();
   });
 
-  it("returns 401 for anonymous users", async () => {
-    const { getUser } = await import("@/lib/auth");
-    vi.mocked(getUser).mockResolvedValue({
-      id: "anonymous",
-      provider: "anonymous",
-      username: "anonymous",
-      groups: [],
-      role: "viewer",
-    });
+  it("allows anonymous users (read-only public data)", async () => {
+    const { listSharedCrd } = await import("@/lib/k8s/crd-operations");
+
+    const mockProviders = [
+      {
+        metadata: { name: "openai", namespace: "omnia-system" },
+        spec: { type: "openai" },
+      },
+    ];
+    vi.mocked(listSharedCrd).mockResolvedValue(mockProviders);
 
     const { GET } = await import("./route");
     const response = await GET();
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.error).toBe("Unauthorized");
+    expect(body).toHaveLength(1);
+    expect(body[0].metadata.name).toBe("openai");
   });
 
   it("returns providers for authenticated users", async () => {

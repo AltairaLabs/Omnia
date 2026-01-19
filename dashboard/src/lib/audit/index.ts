@@ -9,7 +9,6 @@ export {
   logCrdSuccess,
   logCrdDenied,
   logCrdError,
-  logProxyUsage,
   logWarn,
   logError,
   createAuditLogger,
