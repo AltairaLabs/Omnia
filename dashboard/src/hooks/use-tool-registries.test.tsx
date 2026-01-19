@@ -8,7 +8,7 @@ const mockToolRegistries = [
   {
     metadata: {
       name: "github-tools",
-      namespace: "production",
+      namespace: "omnia-system",
       uid: "uid-1",
     },
     spec: {
@@ -21,7 +21,7 @@ const mockToolRegistries = [
   {
     metadata: {
       name: "slack-tools",
-      namespace: "production",
+      namespace: "omnia-system",
       uid: "uid-2",
     },
     spec: {
@@ -34,7 +34,7 @@ const mockToolRegistries = [
   {
     metadata: {
       name: "jira-tools",
-      namespace: "staging",
+      namespace: "omnia-system",
       uid: "uid-3",
     },
     spec: {
@@ -52,6 +52,7 @@ const mockGetToolRegistry = vi.fn().mockResolvedValue(mockToolRegistries[0]);
 vi.mock("@/lib/data", () => ({
   useDataService: () => ({
     name: "mock",
+    isDemo: true,
     getToolRegistries: mockGetToolRegistries,
     getToolRegistry: mockGetToolRegistry,
   }),
@@ -94,10 +95,8 @@ describe("useToolRegistries", () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it("should filter by namespace", async () => {
-    mockGetToolRegistries.mockResolvedValueOnce(mockToolRegistries.filter(r => r.metadata.namespace === "production"));
-
-    const { result } = renderHook(() => useToolRegistries({ namespace: "production" }), {
+  it("should call getToolRegistries without namespace (shared resources)", async () => {
+    const { result } = renderHook(() => useToolRegistries(), {
       wrapper: TestWrapper,
     });
 
@@ -105,7 +104,8 @@ describe("useToolRegistries", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockGetToolRegistries).toHaveBeenCalledWith("production");
+    // Tool registries are shared - called without namespace
+    expect(mockGetToolRegistries).toHaveBeenCalledWith();
   });
 
   it("should filter by phase on client-side", async () => {
@@ -155,7 +155,7 @@ describe("useToolRegistry", () => {
   });
 
   it("should fetch a single tool registry", async () => {
-    const { result } = renderHook(() => useToolRegistry("github-tools", "production"), {
+    const { result } = renderHook(() => useToolRegistry("github-tools"), {
       wrapper: TestWrapper,
     });
 
@@ -166,7 +166,7 @@ describe("useToolRegistry", () => {
     expect(result.current.data).toEqual(mockToolRegistries[0]);
   });
 
-  it("should use default namespace when not provided", async () => {
+  it("should call getToolRegistry with name only (shared resources)", async () => {
     renderHook(() => useToolRegistry("github-tools"), {
       wrapper: TestWrapper,
     });
@@ -175,7 +175,8 @@ describe("useToolRegistry", () => {
       expect(mockGetToolRegistry).toHaveBeenCalled();
     });
 
-    expect(mockGetToolRegistry).toHaveBeenCalledWith("production", "github-tools");
+    // Tool registries are shared - called with name only
+    expect(mockGetToolRegistry).toHaveBeenCalledWith("github-tools");
   });
 
   it("should not fetch when name is empty", () => {
@@ -189,7 +190,7 @@ describe("useToolRegistry", () => {
   it("should return null when tool registry not found", async () => {
     mockGetToolRegistry.mockResolvedValueOnce(null);
 
-    const { result } = renderHook(() => useToolRegistry("non-existent", "production"), {
+    const { result } = renderHook(() => useToolRegistry("non-existent"), {
       wrapper: TestWrapper,
     });
 

@@ -169,17 +169,29 @@ export async function checkWorkspaceAccess(
   // Get current user
   const user = await getUser();
 
-  // Anonymous users cannot access workspaces
-  if (user.provider === "anonymous") {
-    return DENIED_ACCESS;
-  }
+  // For anonymous users (no auth configured), grant viewer access to any existing workspace
+  // This allows the dashboard to work in development/testing without requiring auth setup
+  if (user.provider === "anonymous" || !user.email) {
+    // Check if workspace exists
+    const workspace = await getWorkspace(workspaceName);
+    if (!workspace) {
+      return DENIED_ACCESS;
+    }
 
-  // Email is required for workspace authorization
-  if (!user.email) {
-    console.warn(
-      `User ${user.username} has no email - cannot authorize workspace access`
-    );
-    return DENIED_ACCESS;
+    // Check if minimum role requirement blocks anonymous access
+    if (requiredRole && !meetsRoleRequirement("viewer", requiredRole)) {
+      return {
+        granted: false,
+        role: "viewer",
+        permissions: ROLE_PERMISSIONS.viewer,
+      };
+    }
+
+    return {
+      granted: true,
+      role: "viewer",
+      permissions: ROLE_PERMISSIONS.viewer,
+    };
   }
 
   // Check cache first (before K8s API call)
@@ -234,9 +246,24 @@ export async function getAccessibleWorkspaces(
 ): Promise<Array<{ workspace: Workspace; access: WorkspaceAccess }>> {
   const user = await getUser();
 
-  // Anonymous users cannot access workspaces
+  // For anonymous users (no auth configured), list all workspaces with viewer permissions
+  // This allows the dashboard to work in development/testing without requiring auth setup
   if (user.provider === "anonymous" || !user.email) {
-    return [];
+    // Check if minimum role requirement blocks anonymous access
+    if (minimumRole && !meetsRoleRequirement("viewer", minimumRole)) {
+      return [];
+    }
+
+    // Fetch all workspaces and grant viewer access
+    const workspaces = await listWorkspaces();
+    return workspaces.map((workspace) => ({
+      workspace,
+      access: {
+        granted: true,
+        role: "viewer" as WorkspaceRole,
+        permissions: ROLE_PERMISSIONS.viewer,
+      },
+    }));
   }
 
   // Fetch all workspaces

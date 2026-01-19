@@ -1,22 +1,26 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useDataService } from "@/lib/data";
+import { useDataService, type ToolRegistry as ServiceToolRegistry } from "@/lib/data";
 import type { ToolRegistry, ToolRegistryPhase } from "@/types";
 
 interface UseToolRegistriesOptions {
-  namespace?: string;
   phase?: ToolRegistryPhase;
 }
 
+/**
+ * Fetch shared tool registries.
+ * Tool registries are shared/system-wide resources, not workspace-scoped.
+ * The DataService handles whether to use mock data (demo mode) or real API (live mode).
+ */
 export function useToolRegistries(options: UseToolRegistriesOptions = {}) {
   const service = useDataService();
 
   return useQuery({
     queryKey: ["toolRegistries", options, service.name],
     queryFn: async (): Promise<ToolRegistry[]> => {
-      const response = await service.getToolRegistries(options.namespace);
-      let registries = response as unknown as ToolRegistry[];
+      // DataService handles demo vs live mode internally
+      let registries = await service.getToolRegistries() as unknown as ToolRegistry[];
 
       // Client-side filtering for phase
       if (options.phase) {
@@ -28,14 +32,22 @@ export function useToolRegistries(options: UseToolRegistriesOptions = {}) {
   });
 }
 
-export function useToolRegistry(name: string, namespace: string = "production") {
+/**
+ * Fetch a single tool registry by name.
+ * Tool registries are shared/system-wide resources, not workspace-scoped.
+ *
+ * @param name - Tool registry name
+ * @param _namespace - Deprecated parameter, kept for backwards compatibility.
+ */
+export function useToolRegistry(name: string, _namespace?: string) {
   const service = useDataService();
 
   return useQuery({
-    queryKey: ["toolRegistry", namespace, name, service.name],
+    queryKey: ["toolRegistry", name, service.name],
     queryFn: async (): Promise<ToolRegistry | null> => {
-      const response = await service.getToolRegistry(namespace, name);
-      return (response as unknown as ToolRegistry) || null;
+      // DataService handles demo vs live mode internally
+      const registry = await service.getToolRegistry(name) as ServiceToolRegistry | undefined;
+      return (registry as unknown as ToolRegistry) || null;
     },
     enabled: !!name,
   });

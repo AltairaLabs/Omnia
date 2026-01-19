@@ -14,6 +14,7 @@ vi.mock("@/hooks", () => ({
     can: () => true,
     hasRole: () => true,
   })),
+  useWorkspacePermissions: vi.fn(() => ({ canWrite: true })),
   Permission: {
     AGENTS_SCALE: "agents:scale",
   },
@@ -94,9 +95,8 @@ const mockDataService: DataService = {
   // Providers
   getProviders: vi.fn().mockResolvedValue([]),
   getProvider: vi.fn().mockResolvedValue(undefined),
-  // Stats & Namespaces
+  // Stats
   getStats: vi.fn().mockResolvedValue({ agents: 0, providers: 0, tools: 0, promptPacks: 0 }),
-  getNamespaces: vi.fn().mockResolvedValue([]),
   // Costs
   getCosts: vi.fn().mockResolvedValue({ items: [], summary: { totalCost: 0, totalTokens: 0 } }),
   // Agent connections

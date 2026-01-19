@@ -90,7 +90,7 @@ describe("workspace-authz", () => {
   });
 
   describe("checkWorkspaceAccess", () => {
-    it("should deny access to anonymous users", async () => {
+    it("should grant viewer access to anonymous users", async () => {
       (getUser as Mock).mockResolvedValue({
         ...mockUser,
         provider: "anonymous",
@@ -98,11 +98,12 @@ describe("workspace-authz", () => {
 
       const access = await checkWorkspaceAccess("test-workspace");
 
-      expect(access.granted).toBe(false);
-      expect(access.role).toBeNull();
+      // Anonymous users get viewer access to existing workspaces
+      expect(access.granted).toBe(true);
+      expect(access.role).toBe("viewer");
     });
 
-    it("should deny access to users without email", async () => {
+    it("should grant viewer access to users without email", async () => {
       (getUser as Mock).mockResolvedValue({
         ...mockUser,
         email: undefined,
@@ -110,8 +111,9 @@ describe("workspace-authz", () => {
 
       const access = await checkWorkspaceAccess("test-workspace");
 
-      expect(access.granted).toBe(false);
-      expect(access.role).toBeNull();
+      // Users without email are treated as anonymous
+      expect(access.granted).toBe(true);
+      expect(access.role).toBe("viewer");
     });
 
     it("should deny access when workspace does not exist", async () => {
@@ -309,7 +311,7 @@ describe("workspace-authz", () => {
       ]);
     });
 
-    it("should return empty array for anonymous users", async () => {
+    it("should return all workspaces with viewer access for anonymous users", async () => {
       (getUser as Mock).mockResolvedValue({
         ...mockUser,
         provider: "anonymous",
@@ -317,7 +319,12 @@ describe("workspace-authz", () => {
 
       const result = await getAccessibleWorkspaces();
 
-      expect(result).toEqual([]);
+      // Anonymous users get viewer access to all workspaces
+      expect(result).toHaveLength(3);
+      result.forEach((r) => {
+        expect(r.access.granted).toBe(true);
+        expect(r.access.role).toBe("viewer");
+      });
     });
 
     it("should return workspaces user has access to", async () => {

@@ -5,6 +5,7 @@ import { LayoutGrid, List, Plus } from "lucide-react";
 import { Header } from "@/components/layout";
 import { AgentCard, AgentTable, DeployWizard } from "@/components/agents";
 import { NamespaceFilter } from "@/components/filters";
+import { RequirePermission } from "@/components/require-permission";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -134,10 +135,12 @@ export default function AgentsPage() {
                 <List className="h-4 w-4" />
               </Button>
             </div>
-            <Button size="sm" onClick={() => setWizardOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Agent
-            </Button>
+            <RequirePermission permission="write" fallback="disable">
+              <Button size="sm" onClick={() => setWizardOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                New Agent
+              </Button>
+            </RequirePermission>
           </div>
         </div>
 
@@ -160,10 +163,12 @@ export default function AgentsPage() {
         {!isLoading && filteredAgents?.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-muted-foreground">No agents found</p>
-            <Button variant="outline" className="mt-4" onClick={() => setWizardOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Create your first agent
-            </Button>
+            <RequirePermission permission="write" fallback="disable">
+              <Button variant="outline" className="mt-4" onClick={() => setWizardOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create your first agent
+              </Button>
+            </RequirePermission>
           </div>
         )}
       </div>

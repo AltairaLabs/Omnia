@@ -1,22 +1,31 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useDataService } from "@/lib/data";
+import { useDataService, type PromptPack as ServicePromptPack } from "@/lib/data";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { PromptPack, PromptPackPhase } from "@/types";
 
 interface UsePromptPacksOptions {
-  namespace?: string;
   phase?: PromptPackPhase;
 }
 
+/**
+ * Fetch prompt packs for the current workspace.
+ * The DataService handles whether to use mock data (demo mode) or real API (live mode).
+ */
 export function usePromptPacks(options: UsePromptPacksOptions = {}) {
   const service = useDataService();
+  const { currentWorkspace } = useWorkspace();
 
   return useQuery({
-    queryKey: ["promptPacks", options, service.name],
+    queryKey: ["promptPacks", currentWorkspace?.name, options, service.name],
     queryFn: async (): Promise<PromptPack[]> => {
-      const response = await service.getPromptPacks(options.namespace);
-      let packs = response as unknown as PromptPack[];
+      if (!currentWorkspace) {
+        return [];
+      }
+
+      // DataService handles demo vs live mode internally
+      let packs = await service.getPromptPacks(currentWorkspace.name) as unknown as PromptPack[];
 
       // Client-side filtering for phase
       if (options.phase) {
@@ -25,18 +34,32 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
 
       return packs;
     },
+    enabled: !!currentWorkspace,
   });
 }
 
-export function usePromptPack(name: string, namespace: string = "production") {
+/**
+ * Fetch a single prompt pack by name.
+ * Uses current workspace context.
+ *
+ * @param name - Prompt pack name
+ * @param _namespace - Deprecated parameter, kept for backwards compatibility. Use workspace context instead.
+ */
+export function usePromptPack(name: string, _namespace?: string) {
   const service = useDataService();
+  const { currentWorkspace } = useWorkspace();
 
   return useQuery({
-    queryKey: ["promptPack", namespace, name, service.name],
+    queryKey: ["promptPack", currentWorkspace?.name, name, service.name],
     queryFn: async (): Promise<PromptPack | null> => {
-      const response = await service.getPromptPack(namespace, name);
-      return (response as unknown as PromptPack) || null;
+      if (!currentWorkspace) {
+        return null;
+      }
+
+      // DataService handles demo vs live mode internally
+      const pack = await service.getPromptPack(currentWorkspace.name, name) as ServicePromptPack | undefined;
+      return (pack as unknown as PromptPack) || null;
     },
-    enabled: !!name,
+    enabled: !!name && !!currentWorkspace,
   });
 }

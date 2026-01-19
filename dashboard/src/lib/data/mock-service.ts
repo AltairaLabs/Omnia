@@ -278,35 +278,40 @@ function generateMockLogs(count: number): LogEntry[] {
 /**
  * Mock data service that returns sample data.
  * Used when DEMO_MODE is enabled.
+ *
+ * For mock data, workspace name is used as the namespace
+ * (workspace name = namespace in demo mode).
  */
 export class MockDataService implements DataService {
   readonly name = "MockDataService";
   readonly isDemo = true;
 
-  async getAgents(namespace?: string): Promise<AgentRuntime[]> {
+  async getAgents(workspace: string): Promise<AgentRuntime[]> {
     await delay();
     const agents = mockAgentRuntimes as unknown as AgentRuntime[];
-    if (namespace) {
-      return agents.filter((a) => a.metadata?.namespace === namespace);
-    }
-    return agents;
+    // In demo mode, workspace name = namespace
+    return agents.filter((a) => a.metadata?.namespace === workspace);
   }
 
-  async getAgent(namespace: string, name: string): Promise<AgentRuntime | undefined> {
+  async getAgent(workspace: string, name: string): Promise<AgentRuntime | undefined> {
     await delay();
     const agents = mockAgentRuntimes as unknown as AgentRuntime[];
+    // In demo mode, workspace name = namespace
     return agents.find(
-      (a) => a.metadata?.namespace === namespace && a.metadata?.name === name
+      (a) => a.metadata?.namespace === workspace && a.metadata?.name === name
     );
   }
 
-  async createAgent(spec: Record<string, unknown>): Promise<AgentRuntime> {
+  async createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntime> {
     await delay(500);
     // Return a mock agent in demo mode
     return {
       apiVersion: "omnia.altairalabs.ai/v1alpha1",
       kind: "AgentRuntime",
-      metadata: spec.metadata as ObjectMeta,
+      metadata: {
+        ...(spec.metadata as ObjectMeta),
+        namespace: workspace,
+      },
       spec: (spec.spec as AgentRuntimeSpec) || {},
       status: {
         phase: "Pending",
@@ -315,14 +320,15 @@ export class MockDataService implements DataService {
   }
 
   async scaleAgent(
-    namespace: string,
+    workspace: string,
     name: string,
     replicas: number
   ): Promise<AgentRuntime> {
     await delay(500);
     // Find the mock agent and return updated version
+    // In demo mode, workspace name = namespace
     const agent = mockAgentRuntimes.find(
-      (a) => a.metadata.namespace === namespace && a.metadata.name === name
+      (a) => a.metadata.namespace === workspace && a.metadata.name === name
     );
     if (agent) {
       // Return updated copy (mock doesn't persist)
@@ -338,11 +344,11 @@ export class MockDataService implements DataService {
         },
       } as unknown as AgentRuntime;
     }
-    throw new Error(`Agent ${namespace}/${name} not found`);
+    throw new Error(`Agent ${workspace}/${name} not found`);
   }
 
   async getAgentLogs(
-    _namespace: string,
+    _workspace: string,
     _name: string,
     options?: LogOptions
   ): Promise<LogEntry[]> {
@@ -351,11 +357,14 @@ export class MockDataService implements DataService {
     return generateMockLogs(options?.tailLines || 100);
   }
 
-  async getAgentEvents(namespace: string, name: string): Promise<K8sEvent[]> {
+  async getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]> {
     await delay();
     const now = new Date();
     const minutesAgo = (mins: number) =>
       new Date(now.getTime() - mins * 60 * 1000).toISOString();
+
+    // In demo mode, workspace name = namespace
+    const namespace = workspace;
 
     // Generate realistic mock events for this agent
     const events: K8sEvent[] = [
@@ -447,23 +456,22 @@ export class MockDataService implements DataService {
     );
   }
 
-  async getPromptPacks(namespace?: string): Promise<PromptPack[]> {
+  async getPromptPacks(workspace: string): Promise<PromptPack[]> {
     await delay();
     const packs = mockPromptPacks as PromptPack[];
-    if (namespace) {
-      return packs.filter((p) => p.metadata?.namespace === namespace);
-    }
-    return packs;
+    // In demo mode, workspace name = namespace
+    return packs.filter((p) => p.metadata?.namespace === workspace);
   }
 
-  async getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined> {
+  async getPromptPack(workspace: string, name: string): Promise<PromptPack | undefined> {
     await delay();
+    // In demo mode, workspace name = namespace
     return mockPromptPacks.find(
-      (p) => p.metadata?.namespace === namespace && p.metadata?.name === name
+      (p) => p.metadata?.namespace === workspace && p.metadata?.name === name
     ) as PromptPack | undefined;
   }
 
-  async getPromptPackContent(_namespace: string, _name: string): Promise<PromptPackContent | undefined> {
+  async getPromptPackContent(_workspace: string, _name: string): Promise<PromptPackContent | undefined> {
     await delay();
     // Return mock content
     return {
@@ -487,32 +495,28 @@ export class MockDataService implements DataService {
     };
   }
 
-  async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {
+  async getToolRegistries(): Promise<ToolRegistry[]> {
     await delay();
-    const registries = mockToolRegistries as ToolRegistry[];
-    if (namespace) {
-      return registries.filter((r) => r.metadata?.namespace === namespace);
-    }
-    return registries;
+    // Tool registries are shared/system-wide resources
+    return mockToolRegistries as ToolRegistry[];
   }
 
-  async getToolRegistry(
-    namespace: string,
-    name: string
-  ): Promise<ToolRegistry | undefined> {
+  async getToolRegistry(name: string): Promise<ToolRegistry | undefined> {
     await delay();
+    // Tool registries are shared/system-wide resources
     return mockToolRegistries.find(
-      (r) => r.metadata?.namespace === namespace && r.metadata?.name === name
+      (r) => r.metadata?.name === name
     ) as ToolRegistry | undefined;
   }
 
-  async getProviders(_namespace?: string): Promise<Provider[]> {
+  async getProviders(): Promise<Provider[]> {
     await delay();
+    // Providers are shared/system-wide resources
     // No mock providers
     return [];
   }
 
-  async getProvider(_namespace: string, _name: string): Promise<Provider | undefined> {
+  async getProvider(_name: string): Promise<Provider | undefined> {
     await delay();
     return undefined;
   }
@@ -520,11 +524,6 @@ export class MockDataService implements DataService {
   async getStats(): Promise<Stats> {
     await delay();
     return getMockStats() as unknown as Stats;
-  }
-
-  async getNamespaces(): Promise<string[]> {
-    await delay();
-    return ["default", "production", "staging", "demo"];
   }
 
   async getCosts(_options?: CostOptions): Promise<CostData> {

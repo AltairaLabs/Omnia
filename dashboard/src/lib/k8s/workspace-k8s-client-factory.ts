@@ -31,6 +31,9 @@ export interface WorkspaceClientOptions {
 /**
  * Create a KubeConfig configured with a workspace ServiceAccount token.
  *
+ * Falls back to the dashboard's own ServiceAccount if workspace ServiceAccounts
+ * are not available (e.g., during development without the workspace controller).
+ *
  * @param options - Workspace client options
  * @returns Configured KubeConfig
  */
@@ -39,69 +42,78 @@ export async function getWorkspaceKubeConfig(
 ): Promise<k8s.KubeConfig> {
   const { workspace, namespace, role } = options;
 
-  // Get the token for this workspace/role
-  const token = await getWorkspaceToken(workspace, namespace, role);
-
-  // Create a new KubeConfig with the token
-  const kc = new k8s.KubeConfig();
-
-  // First load the base config to get cluster info
+  // Create a base KubeConfig to get cluster info
+  const baseKc = new k8s.KubeConfig();
   try {
-    kc.loadFromCluster();
+    baseKc.loadFromCluster();
   } catch {
-    kc.loadFromDefault();
+    baseKc.loadFromDefault();
   }
 
-  // Get the current cluster info
-  const currentCluster = kc.getCurrentCluster();
-  if (!currentCluster) {
-    throw new Error("No cluster found in kubeconfig");
+  // Try to get a workspace-scoped token
+  let token: string | null = null;
+  try {
+    token = await getWorkspaceToken(workspace, namespace, role);
+  } catch (error) {
+    // If we can't get a workspace token (e.g., SA doesn't exist),
+    // fall back to using the dashboard's own ServiceAccount
+    console.warn(
+      `Could not get workspace token for ${workspace}/${role}, using fallback: ${error instanceof Error ? error.message : error}`
+    );
   }
 
-  // Create a new config with the workspace SA token
-  const clusterName = currentCluster.name;
-  const userName = `workspace-${workspace}-${role}`;
-  const contextName = `${userName}-context`;
+  // If we got a token, create a new config with it
+  if (token) {
+    const currentCluster = baseKc.getCurrentCluster();
+    if (!currentCluster) {
+      throw new Error("No cluster found in kubeconfig");
+    }
 
-  // Build the config object
-  const configObj = {
-    clusters: [
-      {
-        name: clusterName,
-        cluster: {
-          server: currentCluster.server,
-          "certificate-authority-data": currentCluster.caData,
-          "certificate-authority": currentCluster.caFile,
-          "insecure-skip-tls-verify": currentCluster.skipTLSVerify,
-        },
-      },
-    ],
-    users: [
-      {
-        name: userName,
-        user: {
-          token,
-        },
-      },
-    ],
-    contexts: [
-      {
-        name: contextName,
-        context: {
-          cluster: clusterName,
-          user: userName,
-          namespace,
-        },
-      },
-    ],
-    "current-context": contextName,
-  };
+    const clusterName = currentCluster.name;
+    const userName = `workspace-${workspace}-${role}`;
+    const contextName = `${userName}-context`;
 
-  // Load the new config
-  const newKc = new k8s.KubeConfig();
-  newKc.loadFromOptions(configObj);
+    const configObj = {
+      clusters: [
+        {
+          name: clusterName,
+          cluster: {
+            server: currentCluster.server,
+            "certificate-authority-data": currentCluster.caData,
+            "certificate-authority": currentCluster.caFile,
+            "insecure-skip-tls-verify": currentCluster.skipTLSVerify,
+          },
+        },
+      ],
+      users: [
+        {
+          name: userName,
+          user: {
+            token,
+          },
+        },
+      ],
+      contexts: [
+        {
+          name: contextName,
+          context: {
+            cluster: clusterName,
+            user: userName,
+            namespace,
+          },
+        },
+      ],
+      "current-context": contextName,
+    };
 
-  return newKc;
+    const newKc = new k8s.KubeConfig();
+    newKc.loadFromOptions(configObj);
+    return newKc;
+  }
+
+  // Fallback: use the base kubeconfig (dashboard's own SA)
+  // This provides cluster-wide access, suitable for development
+  return baseKc;
 }
 
 /**

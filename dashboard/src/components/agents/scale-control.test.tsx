@@ -6,10 +6,12 @@ import { ScaleControl } from "./scale-control";
 // Mock hooks
 const mockUseReadOnly = vi.fn(() => ({ isReadOnly: false as boolean, message: "" }));
 const mockUsePermissions = vi.fn(() => ({ can: () => true as boolean }));
+const mockUseWorkspacePermissions = vi.fn(() => ({ canWrite: true as boolean }));
 
 vi.mock("@/hooks", () => ({
   useReadOnly: () => mockUseReadOnly(),
   usePermissions: () => mockUsePermissions(),
+  useWorkspacePermissions: () => mockUseWorkspacePermissions(),
   Permission: { AGENTS_SCALE: "agents.scale" },
 }));
 
@@ -20,6 +22,7 @@ describe("ScaleControl", () => {
     vi.clearAllMocks();
     mockUseReadOnly.mockReturnValue({ isReadOnly: false, message: "" });
     mockUsePermissions.mockReturnValue({ can: () => true });
+    mockUseWorkspacePermissions.mockReturnValue({ canWrite: true });
   });
 
   it("renders replica count", () => {

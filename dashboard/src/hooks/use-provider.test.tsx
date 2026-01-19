@@ -46,7 +46,7 @@ describe("useProvider", () => {
     mockGetProvider.mockResolvedValue(mockProvider);
   });
 
-  it("should fetch provider by name and namespace", async () => {
+  it("should fetch provider by name (providers are shared)", async () => {
     const { result } = renderHook(
       () => useProvider("openai-provider", "production"),
       { wrapper: TestWrapper }
@@ -57,7 +57,8 @@ describe("useProvider", () => {
     });
 
     expect(result.current.data).toEqual(mockProvider);
-    expect(mockGetProvider).toHaveBeenCalledWith("production", "openai-provider");
+    // Providers are shared - namespace param is deprecated/ignored
+    expect(mockGetProvider).toHaveBeenCalledWith("openai-provider");
   });
 
   it("should be in loading state initially", () => {
@@ -130,7 +131,8 @@ describe("useProvider", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockGetProvider).toHaveBeenCalledWith("staging", "test-provider");
+    // Providers are shared - namespace param is deprecated/ignored
+    expect(mockGetProvider).toHaveBeenCalledWith("test-provider");
   });
 
   it("should return null from queryFn when name is empty string", async () => {

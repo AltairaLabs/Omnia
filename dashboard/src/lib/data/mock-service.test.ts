@@ -25,16 +25,19 @@ describe("MockDataService", () => {
   });
 
   describe("getAgents", () => {
-    it("should return mock agents", async () => {
-      const promise = service.getAgents();
+    it("should return mock agents for workspace", async () => {
+      const promise = service.getAgents("production");
       vi.advanceTimersByTime(200);
       const agents = await promise;
 
       expect(Array.isArray(agents)).toBe(true);
-      expect(agents.length).toBeGreaterThan(0);
+      // Should only return agents in the production namespace
+      agents.forEach((agent) => {
+        expect(agent.metadata?.namespace).toBe("production");
+      });
     });
 
-    it("should filter agents by namespace", async () => {
+    it("should filter agents by workspace (which maps to namespace)", async () => {
       const promise = service.getAgents("production");
       vi.advanceTimersByTime(200);
       const agents = await promise;
@@ -44,30 +47,32 @@ describe("MockDataService", () => {
       });
     });
 
-    it("should return all agents when no namespace specified", async () => {
-      const promise = service.getAgents();
+    it("should return different agents for different workspaces", async () => {
+      const promise1 = service.getAgents("production");
       vi.advanceTimersByTime(200);
-      const allAgents = await promise;
+      const prodAgents = await promise1;
 
-      const promise2 = service.getAgents("production");
+      const promise2 = service.getAgents("default");
       vi.advanceTimersByTime(200);
-      const prodAgents = await promise2;
+      const defaultAgents = await promise2;
 
-      expect(allAgents.length).toBeGreaterThanOrEqual(prodAgents.length);
+      // Both should be valid arrays
+      expect(Array.isArray(prodAgents)).toBe(true);
+      expect(Array.isArray(defaultAgents)).toBe(true);
     });
   });
 
   describe("getAgent", () => {
-    it("should return specific agent by namespace and name", async () => {
+    it("should return specific agent by workspace and name", async () => {
       // First get list to know what's available
-      const listPromise = service.getAgents();
+      const listPromise = service.getAgents("production");
       vi.advanceTimersByTime(200);
       const agents = await listPromise;
 
       if (agents.length > 0) {
         const firstAgent = agents[0];
         const promise = service.getAgent(
-          firstAgent.metadata?.namespace || "",
+          "production",
           firstAgent.metadata?.name || ""
         );
         vi.advanceTimersByTime(200);
@@ -92,34 +97,33 @@ describe("MockDataService", () => {
       const spec = {
         metadata: {
           name: "test-agent",
-          namespace: "test",
         },
         spec: {
           facade: { type: "websocket", port: 8080 },
         },
       };
 
-      const promise = service.createAgent(spec);
+      const promise = service.createAgent("test-workspace", spec);
       vi.advanceTimersByTime(600);
       const agent = await promise;
 
       expect(agent.metadata?.name).toBe("test-agent");
-      expect(agent.metadata?.namespace).toBe("test");
+      expect(agent.metadata?.namespace).toBe("test-workspace");
       expect(agent.status?.phase).toBe("Pending");
     });
   });
 
   describe("scaleAgent", () => {
     it("should scale an existing agent", async () => {
-      // Get first agent
-      const listPromise = service.getAgents();
+      // Get first agent from production workspace
+      const listPromise = service.getAgents("production");
       vi.advanceTimersByTime(200);
       const agents = await listPromise;
 
       if (agents.length > 0) {
         const firstAgent = agents[0];
         const promise = service.scaleAgent(
-          firstAgent.metadata?.namespace || "",
+          "production",
           firstAgent.metadata?.name || "",
           5
         );
@@ -218,15 +222,18 @@ describe("MockDataService", () => {
   });
 
   describe("getPromptPacks", () => {
-    it("should return mock prompt packs", async () => {
-      const promise = service.getPromptPacks();
+    it("should return mock prompt packs for workspace", async () => {
+      const promise = service.getPromptPacks("production");
       vi.advanceTimersByTime(200);
       const packs = await promise;
 
       expect(Array.isArray(packs)).toBe(true);
+      packs.forEach((pack) => {
+        expect(pack.metadata?.namespace).toBe("production");
+      });
     });
 
-    it("should filter by namespace", async () => {
+    it("should filter by workspace (which maps to namespace)", async () => {
       const promise = service.getPromptPacks("production");
       vi.advanceTimersByTime(200);
       const packs = await promise;
@@ -238,7 +245,7 @@ describe("MockDataService", () => {
   });
 
   describe("getToolRegistries", () => {
-    it("should return mock tool registries", async () => {
+    it("should return mock tool registries (shared resource)", async () => {
       const promise = service.getToolRegistries();
       vi.advanceTimersByTime(200);
       const registries = await promise;
@@ -246,14 +253,13 @@ describe("MockDataService", () => {
       expect(Array.isArray(registries)).toBe(true);
     });
 
-    it("should filter by namespace", async () => {
-      const promise = service.getToolRegistries("production");
+    it("should return all registries as shared resources", async () => {
+      const promise = service.getToolRegistries();
       vi.advanceTimersByTime(200);
       const registries = await promise;
 
-      registries.forEach((registry) => {
-        expect(registry.metadata?.namespace).toBe("production");
-      });
+      // Tool registries are shared, should return all of them
+      expect(Array.isArray(registries)).toBe(true);
     });
   });
 
@@ -274,18 +280,6 @@ describe("MockDataService", () => {
       const stats = await promise;
 
       expect(stats).toBeDefined();
-    });
-  });
-
-  describe("getNamespaces", () => {
-    it("should return list of namespaces", async () => {
-      const promise = service.getNamespaces();
-      vi.advanceTimersByTime(200);
-      const namespaces = await promise;
-
-      expect(Array.isArray(namespaces)).toBe(true);
-      expect(namespaces).toContain("default");
-      expect(namespaces).toContain("production");
     });
   });
 

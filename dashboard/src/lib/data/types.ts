@@ -226,6 +226,10 @@ export interface LogOptions {
 /**
  * Data service interface.
  * Implementations provide either mock data or real API data.
+ *
+ * All workspace-scoped methods take a `workspace` parameter which is:
+ * - In demo mode: used to filter mock data by namespace (workspace name = namespace)
+ * - In live mode: used to call workspace-scoped API routes
  */
 export interface DataService {
   /** Service name for debugging */
@@ -234,35 +238,34 @@ export interface DataService {
   /** Whether this is a mock/demo service */
   readonly isDemo: boolean;
 
-  // Agents
-  getAgents(namespace?: string): Promise<AgentRuntime[]>;
-  getAgent(namespace: string, name: string): Promise<AgentRuntime | undefined>;
-  createAgent(spec: Record<string, unknown>): Promise<AgentRuntime>;
-  scaleAgent(namespace: string, name: string, replicas: number): Promise<AgentRuntime>;
-  getAgentLogs(namespace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
-  getAgentEvents(namespace: string, name: string): Promise<K8sEvent[]>;
+  // Agents (workspace-scoped)
+  getAgents(workspace: string): Promise<AgentRuntime[]>;
+  getAgent(workspace: string, name: string): Promise<AgentRuntime | undefined>;
+  createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntime>;
+  scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntime>;
+  getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
+  getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]>;
 
-  // PromptPacks
-  getPromptPacks(namespace?: string): Promise<PromptPack[]>;
-  getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined>;
-  getPromptPackContent(namespace: string, name: string): Promise<PromptPackContent | undefined>;
+  // PromptPacks (workspace-scoped)
+  getPromptPacks(workspace: string): Promise<PromptPack[]>;
+  getPromptPack(workspace: string, name: string): Promise<PromptPack | undefined>;
+  getPromptPackContent(workspace: string, name: string): Promise<PromptPackContent | undefined>;
 
-  // ToolRegistries
-  getToolRegistries(namespace?: string): Promise<ToolRegistry[]>;
-  getToolRegistry(namespace: string, name: string): Promise<ToolRegistry | undefined>;
+  // ToolRegistries (shared/system-wide, not workspace-scoped)
+  getToolRegistries(): Promise<ToolRegistry[]>;
+  getToolRegistry(name: string): Promise<ToolRegistry | undefined>;
 
-  // Providers
-  getProviders(namespace?: string): Promise<Provider[]>;
-  getProvider(namespace: string, name: string): Promise<Provider | undefined>;
+  // Providers (shared/system-wide, not workspace-scoped)
+  getProviders(): Promise<Provider[]>;
+  getProvider(name: string): Promise<Provider | undefined>;
 
-  // Stats & Namespaces
+  // Stats
   getStats(): Promise<Stats>;
-  getNamespaces(): Promise<string[]>;
 
   // Costs
   getCosts(options?: CostOptions): Promise<CostData>;
 
-  // Agent WebSocket connections
+  // Agent WebSocket connections (uses namespace from workspace)
   createAgentConnection(namespace: string, name: string): AgentConnection;
 }
 
