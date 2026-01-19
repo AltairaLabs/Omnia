@@ -22,25 +22,10 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - serviceaccounts/token
-  verbs:
-  - create
-- apiGroups:
-  - ""
-  resources:
   - events
   verbs:
   - create
   - patch
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  - pods/log
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - ""
   resources:
@@ -60,14 +45,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - replicasets
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - autoscaling
