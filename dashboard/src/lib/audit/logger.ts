@@ -235,35 +235,6 @@ export function methodToAction(method: string): AuditAction {
 }
 
 /**
- * Log proxy usage for deprecation tracking.
- */
-export function logProxyUsage(
-  method: string,
-  path: string,
-  user?: string,
-  userAgent?: string
-): void {
-  if (!isAuditLoggingEnabled()) {
-    return;
-  }
-
-  const entry = {
-    timestamp: new Date().toISOString(),
-    level: "audit",
-    action: "proxy_request",
-    deprecated: true,
-    method,
-    path,
-    user: user || "unknown",
-    userAgent,
-    message: "Deprecated operator proxy used. Migrate to workspace-scoped API routes.",
-  };
-
-  // eslint-disable-next-line no-console -- Audit logs use console.log for structured output to stdout
-  console.log(JSON.stringify(entry));
-}
-
-/**
  * Structured warning log entry.
  */
 interface WarnLogEntry {
