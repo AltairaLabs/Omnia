@@ -406,6 +406,15 @@ graph TB
 | External IPs (0.0.0.0/0) | Egress | Allow LLM API calls |
 | Private IPs (10.x, 172.16.x, 192.168.x) | Blocked | Prevent cross-tenant access |
 
+:::tip[Why these IP ranges?]
+The blocked private IP ranges are [RFC 1918](https://datatracker.ietf.org/doc/html/rfc1918) addresses:
+- `10.0.0.0/8` - Class A private network
+- `172.16.0.0/12` - Class B private networks
+- `192.168.0.0/16` - Class C private networks
+
+These ranges are used internally by Kubernetes clusters. Blocking them prevents workspaces from accessing other tenants' pods, services, or internal infrastructure while still allowing external API calls.
+:::
+
 #### Customizing Network Rules
 
 For fine-grained control, add custom ingress and egress rules:

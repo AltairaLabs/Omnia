@@ -289,7 +289,12 @@ Network isolation settings for the workspace. When enabled, automatically genera
 - **DNS**: Always allows egress to `kube-system` on port 53 (UDP/TCP)
 - **Same namespace**: Allows all ingress/egress within the workspace namespace
 - **Shared namespaces**: Allows ingress/egress to namespaces labeled `omnia.altairalabs.ai/shared: true`
-- **External APIs**: Allows egress to `0.0.0.0/0` excluding private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+- **External APIs**: Allows egress to `0.0.0.0/0` excluding [RFC 1918](https://datatracker.ietf.org/doc/html/rfc1918) private IP ranges:
+  - `10.0.0.0/8` - Class A private network
+  - `172.16.0.0/12` - Class B private networks
+  - `192.168.0.0/16` - Class C private networks
+
+This allows agents to reach external LLM APIs while blocking access to other tenants' pods and internal cluster services.
 
 #### Basic Isolation
 
