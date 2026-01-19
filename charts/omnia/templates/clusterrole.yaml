@@ -137,6 +137,13 @@ rules:
       - patch
       - update
       - watch
+  # ServiceAccount token creation for workspace-scoped K8s API access
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts/token
+    verbs:
+      - create
   - apiGroups:
       - rbac.authorization.k8s.io
     resources:
