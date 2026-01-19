@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { UserMenu } from "./user-menu";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 interface HeaderProps {
   title: React.ReactNode;
@@ -23,6 +24,7 @@ export function Header({ title, description, children }: Readonly<HeaderProps>) 
         )}
       </div>
       <div className="flex items-center gap-3">
+        <WorkspaceSwitcher />
         {children}
         <Button variant="ghost" size="icon">
           <RefreshCw className="h-4 w-4" />
