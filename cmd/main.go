@@ -28,7 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -83,9 +82,6 @@ func main() {
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
-	var apiProxyMode string
-	var apiAllowedNamespaces string
-	var apiDeniedNamespaces string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -113,12 +109,6 @@ func main() {
 		"Redis password for Arena work queue (optional).")
 	flag.IntVar(&redisDB, "redis-db", 0,
 		"Redis database number for Arena work queue.")
-	flag.StringVar(&apiProxyMode, "api-proxy-mode", "compat",
-		"API proxy guardrail mode: 'compat' (log only) or 'strict' (enforce restrictions)")
-	flag.StringVar(&apiAllowedNamespaces, "api-allowed-namespaces", "",
-		"Comma-separated list of allowed namespaces for API access")
-	flag.StringVar(&apiDeniedNamespaces, "api-denied-namespaces", "",
-		"Comma-separated list of denied namespaces for API access")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -332,23 +322,12 @@ func main() {
 	// Setup signal handler once (can only be called once)
 	ctx := ctrl.SetupSignalHandler()
 
-	// Start the REST API server for dashboard access
+	// Start the artifact server for Arena artifacts
 	if apiAddr != "" && apiAddr != "0" {
-		// Create a Kubernetes clientset for pod logs (not supported by controller-runtime client)
-		clientset, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
-		if err != nil {
-			setupLog.Error(err, "unable to create Kubernetes clientset")
-			os.Exit(1)
-		}
-		guardrailsConfig := api.GuardrailsConfig{
-			Mode:              api.ProxyMode(apiProxyMode),
-			AllowedNamespaces: api.ParseNamespaceList(apiAllowedNamespaces),
-			DeniedNamespaces:  api.ParseNamespaceList(apiDeniedNamespaces),
-		}
-		apiServer := api.NewServer(mgr.GetClient(), clientset, ctrl.Log, arenaArtifactDir, guardrailsConfig)
+		apiServer := api.NewServer(ctrl.Log, arenaArtifactDir)
 		go func() {
 			if err := apiServer.Run(ctx, apiAddr); err != nil {
-				setupLog.Error(err, "problem running API server")
+				setupLog.Error(err, "problem running artifact server")
 			}
 		}()
 	}
