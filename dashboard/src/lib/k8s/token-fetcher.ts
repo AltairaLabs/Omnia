@@ -54,7 +54,7 @@ function loadInClusterConfig(): k8s.KubeConfig {
   // Read ServiceAccount token and CA
   let token: string;
   let caData: string;
-  let namespace: string;
+  let _namespace: string;
 
   try {
     token = fs.readFileSync(SA_TOKEN_PATH, "utf8").trim();
@@ -69,9 +69,9 @@ function loadInClusterConfig(): k8s.KubeConfig {
   }
 
   try {
-    namespace = fs.readFileSync(SA_NAMESPACE_PATH, "utf8").trim();
+    _namespace = fs.readFileSync(SA_NAMESPACE_PATH, "utf8").trim();
   } catch {
-    namespace = "default";
+    _namespace = "default";
   }
 
   const clusterName = "in-cluster";

@@ -137,7 +137,7 @@ export function LogViewer({
 
   // Build Grafana Explore URLs for Loki and Tempo
   // Note: These need the K8s namespace, not workspace name - using workspace for now
-  // TODO: Get actual namespace from workspace or agent metadata
+  // Future: Get actual namespace from workspace or agent metadata
   const lokiExploreUrl = lokiEnabled
     ? buildLokiExploreUrl(grafanaConfig, workspace, agentName)
     : null;
