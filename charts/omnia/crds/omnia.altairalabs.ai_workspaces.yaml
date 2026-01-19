@@ -206,6 +206,184 @@ spec:
                 required:
                 - name
                 type: object
+              networkPolicy:
+                description: networkPolicy defines network isolation settings for
+                  this workspace.
+                properties:
+                  allowExternalAPIs:
+                    description: |-
+                      allowExternalAPIs enables egress to external IPs (0.0.0.0/0 except private ranges).
+                      Defaults to true when isolate is enabled.
+                    type: boolean
+                  allowFrom:
+                    description: allowFrom defines additional ingress rules.
+                    items:
+                      description: NetworkPolicyRule defines a single ingress or egress
+                        rule.
+                      properties:
+                        peers:
+                          description: peers is a list of sources (for ingress) or
+                            destinations (for egress).
+                          items:
+                            description: NetworkPolicyPeer describes a peer to allow
+                              traffic to/from.
+                            properties:
+                              ipBlock:
+                                description: ipBlock defines CIDR ranges to allow
+                                  traffic to/from.
+                                properties:
+                                  cidr:
+                                    description: cidr is a string representing the
+                                      IP block (e.g., "192.168.1.0/24" or "0.0.0.0/0").
+                                    type: string
+                                  except:
+                                    description: except is a list of CIDRs that should
+                                      not be included within the IP block.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - cidr
+                                type: object
+                              namespaceSelector:
+                                description: namespaceSelector selects namespaces
+                                  by label.
+                                properties:
+                                  matchLabels:
+                                    additionalProperties:
+                                      type: string
+                                    description: matchLabels is a map of key-value
+                                      pairs for label matching.
+                                    type: object
+                                type: object
+                              podSelector:
+                                description: podSelector selects pods by label within
+                                  the selected namespaces.
+                                properties:
+                                  matchLabels:
+                                    additionalProperties:
+                                      type: string
+                                    description: matchLabels is a map of key-value
+                                      pairs for label matching.
+                                    type: object
+                                type: object
+                            type: object
+                          type: array
+                        ports:
+                          description: ports is a list of ports to allow.
+                          items:
+                            description: NetworkPolicyPort describes a port to allow
+                              traffic on.
+                            properties:
+                              port:
+                                description: port is the port number or name.
+                                format: int32
+                                type: integer
+                              protocol:
+                                default: TCP
+                                description: protocol is the protocol (TCP, UDP, or
+                                  SCTP).
+                                enum:
+                                - TCP
+                                - UDP
+                                - SCTP
+                                type: string
+                            required:
+                            - port
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                  allowSharedNamespaces:
+                    description: |-
+                      allowSharedNamespaces enables traffic to/from namespaces labeled omnia.altairalabs.ai/shared: true.
+                      Defaults to true when isolate is enabled.
+                    type: boolean
+                  allowTo:
+                    description: allowTo defines additional egress rules.
+                    items:
+                      description: NetworkPolicyRule defines a single ingress or egress
+                        rule.
+                      properties:
+                        peers:
+                          description: peers is a list of sources (for ingress) or
+                            destinations (for egress).
+                          items:
+                            description: NetworkPolicyPeer describes a peer to allow
+                              traffic to/from.
+                            properties:
+                              ipBlock:
+                                description: ipBlock defines CIDR ranges to allow
+                                  traffic to/from.
+                                properties:
+                                  cidr:
+                                    description: cidr is a string representing the
+                                      IP block (e.g., "192.168.1.0/24" or "0.0.0.0/0").
+                                    type: string
+                                  except:
+                                    description: except is a list of CIDRs that should
+                                      not be included within the IP block.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - cidr
+                                type: object
+                              namespaceSelector:
+                                description: namespaceSelector selects namespaces
+                                  by label.
+                                properties:
+                                  matchLabels:
+                                    additionalProperties:
+                                      type: string
+                                    description: matchLabels is a map of key-value
+                                      pairs for label matching.
+                                    type: object
+                                type: object
+                              podSelector:
+                                description: podSelector selects pods by label within
+                                  the selected namespaces.
+                                properties:
+                                  matchLabels:
+                                    additionalProperties:
+                                      type: string
+                                    description: matchLabels is a map of key-value
+                                      pairs for label matching.
+                                    type: object
+                                type: object
+                            type: object
+                          type: array
+                        ports:
+                          description: ports is a list of ports to allow.
+                          items:
+                            description: NetworkPolicyPort describes a port to allow
+                              traffic on.
+                            properties:
+                              port:
+                                description: port is the port number or name.
+                                format: int32
+                                type: integer
+                              protocol:
+                                default: TCP
+                                description: protocol is the protocol (TCP, UDP, or
+                                  SCTP).
+                                enum:
+                                - TCP
+                                - UDP
+                                - SCTP
+                                type: string
+                            required:
+                            - port
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                  isolate:
+                    description: |-
+                      isolate enables network isolation for the workspace namespace.
+                      When true, a NetworkPolicy is created to restrict traffic.
+                    type: boolean
+                type: object
               quotas:
                 description: quotas defines resource quotas for this workspace.
                 properties:
@@ -440,6 +618,21 @@ spec:
                   name:
                     description: name is the name of the namespace.
                     type: string
+                type: object
+              networkPolicy:
+                description: networkPolicy tracks the status of the workspace NetworkPolicy.
+                properties:
+                  enabled:
+                    description: enabled indicates whether network isolation is active.
+                    type: boolean
+                  name:
+                    description: name is the name of the generated NetworkPolicy.
+                    type: string
+                  rulesCount:
+                    description: rulesCount is the total number of ingress and egress
+                      rules.
+                    format: int32
+                    type: integer
                 type: object
               observedGeneration:
                 description: observedGeneration is the most recent generation observed

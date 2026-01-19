@@ -235,6 +235,104 @@ type CostControls struct {
 	AlertThresholds []CostAlertThreshold `json:"alertThresholds,omitempty"`
 }
 
+// IPBlock describes a CIDR block with optional exceptions.
+type IPBlock struct {
+	// cidr is a string representing the IP block (e.g., "192.168.1.0/24" or "0.0.0.0/0").
+	// +kubebuilder:validation:Required
+	CIDR string `json:"cidr"`
+
+	// except is a list of CIDRs that should not be included within the IP block.
+	// +optional
+	Except []string `json:"except,omitempty"`
+}
+
+// LabelSelector represents a label selector for namespace or pod selection.
+type LabelSelector struct {
+	// matchLabels is a map of key-value pairs for label matching.
+	// +optional
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
+}
+
+// NetworkPolicyPeer describes a peer to allow traffic to/from.
+type NetworkPolicyPeer struct {
+	// namespaceSelector selects namespaces by label.
+	// +optional
+	NamespaceSelector *LabelSelector `json:"namespaceSelector,omitempty"`
+
+	// podSelector selects pods by label within the selected namespaces.
+	// +optional
+	PodSelector *LabelSelector `json:"podSelector,omitempty"`
+
+	// ipBlock defines CIDR ranges to allow traffic to/from.
+	// +optional
+	IPBlock *IPBlock `json:"ipBlock,omitempty"`
+}
+
+// NetworkPolicyPort describes a port to allow traffic on.
+type NetworkPolicyPort struct {
+	// protocol is the protocol (TCP, UDP, or SCTP).
+	// +kubebuilder:validation:Enum=TCP;UDP;SCTP
+	// +kubebuilder:default=TCP
+	// +optional
+	Protocol string `json:"protocol,omitempty"`
+
+	// port is the port number or name.
+	// +kubebuilder:validation:Required
+	Port int32 `json:"port"`
+}
+
+// NetworkPolicyRule defines a single ingress or egress rule.
+type NetworkPolicyRule struct {
+	// peers is a list of sources (for ingress) or destinations (for egress).
+	// +optional
+	Peers []NetworkPolicyPeer `json:"peers,omitempty"`
+
+	// ports is a list of ports to allow.
+	// +optional
+	Ports []NetworkPolicyPort `json:"ports,omitempty"`
+}
+
+// WorkspaceNetworkPolicy defines network isolation settings for a workspace.
+type WorkspaceNetworkPolicy struct {
+	// isolate enables network isolation for the workspace namespace.
+	// When true, a NetworkPolicy is created to restrict traffic.
+	// +optional
+	Isolate bool `json:"isolate,omitempty"`
+
+	// allowFrom defines additional ingress rules.
+	// +optional
+	AllowFrom []NetworkPolicyRule `json:"allowFrom,omitempty"`
+
+	// allowTo defines additional egress rules.
+	// +optional
+	AllowTo []NetworkPolicyRule `json:"allowTo,omitempty"`
+
+	// allowExternalAPIs enables egress to external IPs (0.0.0.0/0 except private ranges).
+	// Defaults to true when isolate is enabled.
+	// +optional
+	AllowExternalAPIs *bool `json:"allowExternalAPIs,omitempty"`
+
+	// allowSharedNamespaces enables traffic to/from namespaces labeled omnia.altairalabs.ai/shared: true.
+	// Defaults to true when isolate is enabled.
+	// +optional
+	AllowSharedNamespaces *bool `json:"allowSharedNamespaces,omitempty"`
+}
+
+// NetworkPolicyStatus tracks the status of the workspace NetworkPolicy.
+type NetworkPolicyStatus struct {
+	// name is the name of the generated NetworkPolicy.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// enabled indicates whether network isolation is active.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// rulesCount is the total number of ingress and egress rules.
+	// +optional
+	RulesCount int32 `json:"rulesCount,omitempty"`
+}
+
 // WorkspaceQuotas defines resource quotas for a workspace.
 type WorkspaceQuotas struct {
 	// compute defines compute resource quotas.
@@ -301,6 +399,10 @@ type WorkspaceSpec struct {
 	// costControls defines budget and cost control settings.
 	// +optional
 	CostControls *CostControls `json:"costControls,omitempty"`
+
+	// networkPolicy defines network isolation settings for this workspace.
+	// +optional
+	NetworkPolicy *WorkspaceNetworkPolicy `json:"networkPolicy,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.
@@ -399,6 +501,10 @@ type WorkspaceStatus struct {
 	// costUsage tracks the current cost usage for this workspace.
 	// +optional
 	CostUsage *CostUsage `json:"costUsage,omitempty"`
+
+	// networkPolicy tracks the status of the workspace NetworkPolicy.
+	// +optional
+	NetworkPolicy *NetworkPolicyStatus `json:"networkPolicy,omitempty"`
 
 	// conditions represent the current state of the Workspace resource.
 	// +listType=map

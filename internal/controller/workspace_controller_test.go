@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -460,6 +461,404 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(updated.Status.Members.Viewers).To(Equal(int32(1)))
 		})
 
+	})
+
+	Context("Network Isolation", func() {
+		var (
+			ctx           context.Context
+			workspaceKey  types.NamespacedName
+			namespaceName string
+			reconciler    *WorkspaceReconciler
+			testID        string
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			testID = fmt.Sprintf("%d", atomic.AddUint64(&testCounter, 1))
+			workspaceKey = types.NamespacedName{
+				Name: "test-np-" + testID,
+			}
+			namespaceName = "np-test-" + testID
+			reconciler = &WorkspaceReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+		})
+
+		AfterEach(func() {
+			workspace := &omniav1alpha1.Workspace{}
+			err := k8sClient.Get(ctx, workspaceKey, workspace)
+			if err == nil {
+				workspace.Finalizers = nil
+				_ = k8sClient.Update(ctx, workspace)
+				_ = k8sClient.Delete(ctx, workspace)
+			}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, workspaceKey, &omniav1alpha1.Workspace{})
+				return errors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
+
+			ns := &corev1.Namespace{}
+			err = k8sClient.Get(ctx, client.ObjectKey{Name: namespaceName}, ns)
+			if err == nil {
+				_ = k8sClient.Delete(ctx, ns)
+			}
+		})
+
+		It("should not create NetworkPolicy when isolation is disabled (default)", func() {
+			By("creating a Workspace without networkPolicy configured")
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "No Isolation Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling the Workspace")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying no NetworkPolicy was created")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			By("verifying status.networkPolicy is nil")
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			Expect(updated.Status.NetworkPolicy).To(BeNil())
+		})
+
+		It("should create NetworkPolicy with default rules when isolate is true", func() {
+			By("creating a Workspace with network isolation enabled")
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Isolated Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling the Workspace")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy was created")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			By("verifying NetworkPolicy labels")
+			Expect(np.Labels[labelWorkspace]).To(Equal(workspaceKey.Name))
+			Expect(np.Labels[labelWorkspaceManaged]).To(Equal("true"))
+
+			By("verifying policy types")
+			Expect(np.Spec.PolicyTypes).To(ContainElements(
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			))
+
+			By("verifying ingress rules include shared namespaces and same namespace")
+			Expect(len(np.Spec.Ingress)).To(BeNumerically(">=", 2))
+
+			By("verifying egress rules include DNS, shared namespaces, same namespace, and external")
+			Expect(len(np.Spec.Egress)).To(BeNumerically(">=", 4))
+
+			By("verifying status is updated")
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			Expect(updated.Status.NetworkPolicy).NotTo(BeNil())
+			Expect(updated.Status.NetworkPolicy.Name).To(Equal(npName))
+			Expect(updated.Status.NetworkPolicy.Enabled).To(BeTrue())
+			Expect(updated.Status.NetworkPolicy.RulesCount).To(BeNumerically(">", 0))
+		})
+
+		It("should apply custom ingress and egress rules", func() {
+			By("creating a Workspace with custom network rules")
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Custom Rules Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate: true,
+						AllowFrom: []omniav1alpha1.NetworkPolicyRule{
+							{
+								Peers: []omniav1alpha1.NetworkPolicyPeer{
+									{
+										NamespaceSelector: &omniav1alpha1.LabelSelector{
+											MatchLabels: map[string]string{
+												"kubernetes.io/metadata.name": "ingress-nginx",
+											},
+										},
+									},
+								},
+							},
+						},
+						AllowTo: []omniav1alpha1.NetworkPolicyRule{
+							{
+								Peers: []omniav1alpha1.NetworkPolicyPeer{
+									{
+										IPBlock: &omniav1alpha1.IPBlock{
+											CIDR: "10.0.0.0/8",
+										},
+									},
+								},
+								Ports: []omniav1alpha1.NetworkPolicyPort{
+									{
+										Protocol: "TCP",
+										Port:     5432,
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling the Workspace")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy includes custom rules")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			// Check that custom ingress rule exists (from ingress-nginx namespace)
+			foundIngressRule := false
+			for _, rule := range np.Spec.Ingress {
+				for _, from := range rule.From {
+					if from.NamespaceSelector != nil &&
+						from.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] == "ingress-nginx" {
+						foundIngressRule = true
+						break
+					}
+				}
+			}
+			Expect(foundIngressRule).To(BeTrue(), "Custom ingress rule for ingress-nginx not found")
+
+			// Check that custom egress rule exists (to 10.0.0.0/8 on port 5432)
+			foundEgressRule := false
+			for _, rule := range np.Spec.Egress {
+				for _, to := range rule.To {
+					if to.IPBlock != nil && to.IPBlock.CIDR == "10.0.0.0/8" {
+						foundEgressRule = true
+						break
+					}
+				}
+			}
+			Expect(foundEgressRule).To(BeTrue(), "Custom egress rule for 10.0.0.0/8 not found")
+		})
+
+		It("should not include external APIs rule when allowExternalAPIs is false", func() {
+			By("creating a Workspace with external APIs disabled")
+			allowExternalAPIs := false
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "No External APIs Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate:           true,
+						AllowExternalAPIs: &allowExternalAPIs,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling the Workspace")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy does not have 0.0.0.0/0 egress rule")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			foundExternalRule := false
+			for _, rule := range np.Spec.Egress {
+				for _, to := range rule.To {
+					if to.IPBlock != nil && to.IPBlock.CIDR == "0.0.0.0/0" {
+						foundExternalRule = true
+						break
+					}
+				}
+			}
+			Expect(foundExternalRule).To(BeFalse(), "Should not have 0.0.0.0/0 egress rule when allowExternalAPIs is false")
+		})
+
+		It("should delete NetworkPolicy when isolate changes from true to false", func() {
+			By("creating a Workspace with network isolation enabled")
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Cleanup Test Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling to create the NetworkPolicy")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy exists")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			By("disabling isolation")
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			updated.Spec.NetworkPolicy.Isolate = false
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			By("reconciling to delete the NetworkPolicy")
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy was deleted")
+			err = k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			By("verifying status.networkPolicy is nil")
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			Expect(updated.Status.NetworkPolicy).To(BeNil())
+		})
+
+		It("should delete NetworkPolicy when workspace is deleted", func() {
+			By("creating a Workspace with network isolation enabled")
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Deletion Test Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling to create the NetworkPolicy")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy exists")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			By("deleting the workspace")
+			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
+
+			By("reconciling the deletion")
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy was deleted")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, client.ObjectKey{
+					Name:      npName,
+					Namespace: namespaceName,
+				}, np)
+				return errors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
+		})
 	})
 })
 
