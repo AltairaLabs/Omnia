@@ -4,6 +4,7 @@
  * Provides functions to check user access to workspaces based on:
  * - Group membership (roleBindings)
  * - Individual user grants (directGrants)
+ * - Anonymous access configuration (anonymousAccess)
  *
  * Implements role hierarchy: owner > editor > viewer
  */
@@ -20,6 +21,7 @@ import {
   type WorkspaceAccess,
   type RoleBinding,
   type DirectGrant,
+  type AnonymousAccessConfig,
 } from "@/types/workspace";
 
 /** Access result for denied requests */
@@ -147,6 +149,61 @@ function buildAccess(
 }
 
 /**
+ * Get anonymous access configuration for a workspace.
+ *
+ * Logs warnings for elevated permissions (editor/owner) as these
+ * grant anonymous users write access to resources.
+ *
+ * @param workspace - The workspace to check
+ * @param requiredRole - Optional minimum role required
+ * @returns WorkspaceAccess for anonymous users, or null if anonymous access disabled
+ */
+function getAnonymousAccess(
+  workspace: Workspace,
+  requiredRole?: WorkspaceRole
+): WorkspaceAccess | null {
+  const config: AnonymousAccessConfig | undefined = workspace.spec.anonymousAccess;
+
+  // If no config or not enabled, anonymous users have no access
+  if (!config?.enabled) {
+    return null;
+  }
+
+  // Default to viewer if role not specified
+  const role: WorkspaceRole = config.role ?? "viewer";
+
+  // Log warnings for elevated anonymous permissions
+  if (role === "owner") {
+    console.warn(
+      `[SECURITY WARNING] Workspace "${workspace.metadata.name}" grants OWNER access to anonymous users. ` +
+      `Anonymous users can manage resources and workspace membership. ` +
+      `This should only be used in isolated development environments.`
+    );
+  } else if (role === "editor") {
+    console.warn(
+      `[SECURITY WARNING] Workspace "${workspace.metadata.name}" grants EDITOR access to anonymous users. ` +
+      `Anonymous users can create, modify, and delete resources. ` +
+      `This should only be used in isolated development environments.`
+    );
+  }
+
+  // Check if minimum role requirement is met
+  if (requiredRole && !meetsRoleRequirement(role, requiredRole)) {
+    return {
+      granted: false,
+      role,
+      permissions: ROLE_PERMISSIONS[role],
+    };
+  }
+
+  return {
+    granted: true,
+    role,
+    permissions: ROLE_PERMISSIONS[role],
+  };
+}
+
+/**
  * Check if the current user has access to a workspace.
  *
  * Authorization flow:
@@ -169,8 +226,7 @@ export async function checkWorkspaceAccess(
   // Get current user
   const user = await getUser();
 
-  // For anonymous users (no auth configured), grant viewer access to any existing workspace
-  // This allows the dashboard to work in development/testing without requiring auth setup
+  // For anonymous users, check the workspace's anonymousAccess configuration
   if (user.provider === "anonymous" || !user.email) {
     // Check if workspace exists
     const workspace = await getWorkspace(workspaceName);
@@ -178,20 +234,14 @@ export async function checkWorkspaceAccess(
       return DENIED_ACCESS;
     }
 
-    // Check if minimum role requirement blocks anonymous access
-    if (requiredRole && !meetsRoleRequirement("viewer", requiredRole)) {
-      return {
-        granted: false,
-        role: "viewer",
-        permissions: ROLE_PERMISSIONS.viewer,
-      };
+    // Check workspace's anonymous access configuration
+    const anonymousAccess = getAnonymousAccess(workspace, requiredRole);
+    if (anonymousAccess) {
+      return anonymousAccess;
     }
 
-    return {
-      granted: true,
-      role: "viewer",
-      permissions: ROLE_PERMISSIONS.viewer,
-    };
+    // No anonymous access configured for this workspace
+    return DENIED_ACCESS;
   }
 
   // Check cache first (before K8s API call)
@@ -246,24 +296,19 @@ export async function getAccessibleWorkspaces(
 ): Promise<Array<{ workspace: Workspace; access: WorkspaceAccess }>> {
   const user = await getUser();
 
-  // For anonymous users (no auth configured), list all workspaces with viewer permissions
-  // This allows the dashboard to work in development/testing without requiring auth setup
+  // For anonymous users, check each workspace's anonymousAccess configuration
   if (user.provider === "anonymous" || !user.email) {
-    // Check if minimum role requirement blocks anonymous access
-    if (minimumRole && !meetsRoleRequirement("viewer", minimumRole)) {
-      return [];
+    const workspaces = await listWorkspaces();
+    const accessible: Array<{ workspace: Workspace; access: WorkspaceAccess }> = [];
+
+    for (const workspace of workspaces) {
+      const anonymousAccess = getAnonymousAccess(workspace, minimumRole);
+      if (anonymousAccess?.granted) {
+        accessible.push({ workspace, access: anonymousAccess });
+      }
     }
 
-    // Fetch all workspaces and grant viewer access
-    const workspaces = await listWorkspaces();
-    return workspaces.map((workspace) => ({
-      workspace,
-      access: {
-        granted: true,
-        role: "viewer" as WorkspaceRole,
-        permissions: ROLE_PERMISSIONS.viewer,
-      },
-    }));
+    return accessible;
   }
 
   // Fetch all workspaces

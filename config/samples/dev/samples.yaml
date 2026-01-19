@@ -17,7 +17,11 @@ spec:
   environment: development
   namespace:
     name: dev-agents
-  # No roleBindings/directGrants - anonymous users get viewer access
+  # Enable anonymous access with viewer role for development
+  # WARNING: Only use viewer/none in production. editor/owner grants write access.
+  anonymousAccess:
+    enabled: true
+    role: viewer
 ---
 # =============================================================================
 # Credential Secrets for Providers
