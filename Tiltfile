@@ -546,9 +546,13 @@ if ENABLE_AUDIO_DEMO:
 
 # Apply sample resources using local_resource for better control
 # Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples
+# After applying, patch the workspace to grant anonymous users owner access for local dev
 local_resource(
     'sample-resources',
-    cmd='kubectl apply -f config/samples/dev/',
+    cmd='''
+        kubectl apply -f config/samples/dev/
+        kubectl patch workspace dev-agents --type=merge -p '{"spec":{"anonymousAccess":{"enabled":true,"role":"owner"}}}'
+    ''',
     deps=['config/samples/dev'],
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],
