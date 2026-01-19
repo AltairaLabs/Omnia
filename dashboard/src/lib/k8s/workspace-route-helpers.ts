@@ -2,13 +2,21 @@
  * Shared helpers for workspace API routes.
  *
  * Reduces duplication across workspace-scoped API routes by providing
- * common patterns for workspace validation, error responses, and CRD operations.
+ * common patterns for workspace validation, error responses, CRD operations,
+ * and audit logging.
  */
 
 import { NextResponse } from "next/server";
 import { getWorkspace } from "./workspace-client";
 import { extractK8sErrorMessage, isForbiddenError } from "./crd-operations";
 import { getUser } from "@/lib/auth";
+import {
+  logCrdSuccess,
+  logCrdDenied,
+  logCrdError,
+  methodToAction,
+  type AuditAction,
+} from "@/lib/audit";
 import type { Workspace, WorkspaceRole } from "@/types/workspace";
 import type { WorkspaceClientOptions } from "./workspace-k8s-client-factory";
 import type { User } from "@/lib/auth/types";
@@ -208,3 +216,95 @@ export function buildCrdResource(
     spec,
   };
 }
+
+/**
+ * Audit logging context for route handlers.
+ */
+export interface AuditContext {
+  workspace: string;
+  namespace: string;
+  user: User;
+  role: WorkspaceRole;
+  resourceType: string;
+}
+
+/**
+ * Log a successful CRD operation in a route handler.
+ */
+export function auditSuccess(
+  ctx: AuditContext,
+  action: AuditAction,
+  resourceName?: string,
+  metadata?: Record<string, unknown>
+): void {
+  logCrdSuccess(
+    action,
+    ctx.resourceType,
+    resourceName,
+    ctx.workspace,
+    ctx.namespace,
+    ctx.user.email || ctx.user.username || "unknown",
+    ctx.role,
+    metadata
+  );
+}
+
+/**
+ * Log a denied CRD operation in a route handler.
+ */
+export function auditDenied(
+  ctx: AuditContext,
+  action: AuditAction,
+  resourceName?: string,
+  errorMessage?: string
+): void {
+  logCrdDenied(
+    action,
+    ctx.resourceType,
+    resourceName,
+    ctx.workspace,
+    ctx.namespace,
+    ctx.user.email || ctx.user.username || "unknown",
+    ctx.role,
+    errorMessage
+  );
+}
+
+/**
+ * Log a failed CRD operation in a route handler.
+ */
+export function auditError(
+  ctx: AuditContext,
+  action: AuditAction,
+  resourceName?: string,
+  error?: unknown,
+  statusCode?: number
+): void {
+  logCrdError(
+    action,
+    ctx.resourceType,
+    resourceName,
+    ctx.workspace,
+    ctx.namespace,
+    ctx.user.email || ctx.user.username || "unknown",
+    ctx.role,
+    error instanceof Error ? error.message : String(error),
+    statusCode
+  );
+}
+
+/**
+ * Create an audit context from route handler parameters.
+ */
+export function createAuditContext(
+  workspace: string,
+  namespace: string,
+  user: User,
+  role: WorkspaceRole,
+  resourceType: string
+): AuditContext {
+  return { workspace, namespace, user, role, resourceType };
+}
+
+// Re-export methodToAction for convenience
+export { methodToAction };

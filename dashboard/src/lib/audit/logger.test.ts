@@ -1,0 +1,304 @@
+/**
+ * Tests for audit logger.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  logAudit,
+  logCrdSuccess,
+  logCrdDenied,
+  logCrdError,
+  logProxyUsage,
+  createAuditLogger,
+  methodToAction,
+  isAuditLoggingEnabled,
+} from "./logger";
+
+describe("audit logger", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  const originalEnv = process.env.OMNIA_AUDIT_LOGGING_ENABLED;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    // Reset env var for each test
+    delete process.env.OMNIA_AUDIT_LOGGING_ENABLED;
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    if (originalEnv !== undefined) {
+      process.env.OMNIA_AUDIT_LOGGING_ENABLED = originalEnv;
+    } else {
+      delete process.env.OMNIA_AUDIT_LOGGING_ENABLED;
+    }
+  });
+
+  describe("isAuditLoggingEnabled", () => {
+    it("returns true by default", () => {
+      expect(isAuditLoggingEnabled()).toBe(true);
+    });
+
+    it("returns false when explicitly disabled", () => {
+      process.env.OMNIA_AUDIT_LOGGING_ENABLED = "false";
+      expect(isAuditLoggingEnabled()).toBe(false);
+    });
+
+    it("returns true when set to true", () => {
+      process.env.OMNIA_AUDIT_LOGGING_ENABLED = "true";
+      expect(isAuditLoggingEnabled()).toBe(true);
+    });
+  });
+
+  describe("logAudit", () => {
+    it("logs audit entry as JSON to console", () => {
+      logAudit({
+        action: "create",
+        resourceType: "AgentRuntime",
+        resourceName: "my-agent",
+        workspace: "test-workspace",
+        namespace: "test-ns",
+        user: "user@example.com",
+        result: "success",
+      });
+
+      expect(consoleSpy).toHaveBeenCalledTimes(1);
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.level).toBe("audit");
+      expect(loggedJson.action).toBe("create");
+      expect(loggedJson.resourceType).toBe("AgentRuntime");
+      expect(loggedJson.resourceName).toBe("my-agent");
+      expect(loggedJson.workspace).toBe("test-workspace");
+      expect(loggedJson.namespace).toBe("test-ns");
+      expect(loggedJson.user).toBe("user@example.com");
+      expect(loggedJson.result).toBe("success");
+      expect(loggedJson.timestamp).toBeDefined();
+    });
+
+    it("does not log when audit logging is disabled", () => {
+      process.env.OMNIA_AUDIT_LOGGING_ENABLED = "false";
+
+      logAudit({
+        action: "create",
+        resourceType: "AgentRuntime",
+        workspace: "test",
+        namespace: "test-ns",
+        user: "user@example.com",
+        result: "success",
+      });
+
+      expect(consoleSpy).not.toHaveBeenCalled();
+    });
+
+    it("includes optional fields when provided", () => {
+      logAudit({
+        action: "delete",
+        resourceType: "PromptPack",
+        resourceName: "my-pack",
+        workspace: "prod",
+        namespace: "prod-ns",
+        user: "admin@example.com",
+        role: "owner",
+        authProvider: "oauth",
+        result: "success",
+        path: "/api/workspaces/prod/promptpacks/my-pack",
+        method: "DELETE",
+        metadata: { reason: "cleanup" },
+      });
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.role).toBe("owner");
+      expect(loggedJson.authProvider).toBe("oauth");
+      expect(loggedJson.path).toBe("/api/workspaces/prod/promptpacks/my-pack");
+      expect(loggedJson.method).toBe("DELETE");
+      expect(loggedJson.metadata).toEqual({ reason: "cleanup" });
+    });
+
+    it("includes error fields for failed operations", () => {
+      logAudit({
+        action: "update",
+        resourceType: "AgentRuntime",
+        resourceName: "broken-agent",
+        workspace: "dev",
+        namespace: "dev-ns",
+        user: "user@example.com",
+        result: "error",
+        errorMessage: "Resource not found",
+        statusCode: 404,
+      });
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.result).toBe("error");
+      expect(loggedJson.errorMessage).toBe("Resource not found");
+      expect(loggedJson.statusCode).toBe(404);
+    });
+  });
+
+  describe("logCrdSuccess", () => {
+    it("logs successful CRD operation", () => {
+      logCrdSuccess(
+        "create",
+        "AgentRuntime",
+        "my-agent",
+        "workspace",
+        "namespace",
+        "user@example.com",
+        "editor"
+      );
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.action).toBe("create");
+      expect(loggedJson.resourceType).toBe("AgentRuntime");
+      expect(loggedJson.resourceName).toBe("my-agent");
+      expect(loggedJson.result).toBe("success");
+      expect(loggedJson.role).toBe("editor");
+    });
+
+    it("includes metadata when provided", () => {
+      logCrdSuccess(
+        "list",
+        "PromptPack",
+        undefined,
+        "workspace",
+        "namespace",
+        "user@example.com",
+        "viewer",
+        { count: 5 }
+      );
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.metadata).toEqual({ count: 5 });
+    });
+  });
+
+  describe("logCrdDenied", () => {
+    it("logs denied CRD operation with 403 status", () => {
+      logCrdDenied(
+        "delete",
+        "AgentRuntime",
+        "protected-agent",
+        "workspace",
+        "namespace",
+        "viewer@example.com",
+        "viewer",
+        "Insufficient permissions"
+      );
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.action).toBe("delete");
+      expect(loggedJson.result).toBe("denied");
+      expect(loggedJson.statusCode).toBe(403);
+      expect(loggedJson.errorMessage).toBe("Insufficient permissions");
+    });
+  });
+
+  describe("logCrdError", () => {
+    it("logs failed CRD operation with error details", () => {
+      logCrdError(
+        "update",
+        "PromptPack",
+        "broken-pack",
+        "workspace",
+        "namespace",
+        "user@example.com",
+        "editor",
+        "Connection timeout",
+        500
+      );
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.action).toBe("update");
+      expect(loggedJson.result).toBe("error");
+      expect(loggedJson.errorMessage).toBe("Connection timeout");
+      expect(loggedJson.statusCode).toBe(500);
+    });
+  });
+
+  describe("logProxyUsage", () => {
+    it("logs deprecated proxy usage", () => {
+      logProxyUsage("GET", "api/v1/agents", "user@example.com", "Mozilla/5.0");
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.level).toBe("audit");
+      expect(loggedJson.action).toBe("proxy_request");
+      expect(loggedJson.deprecated).toBe(true);
+      expect(loggedJson.method).toBe("GET");
+      expect(loggedJson.path).toBe("api/v1/agents");
+      expect(loggedJson.user).toBe("user@example.com");
+      expect(loggedJson.userAgent).toBe("Mozilla/5.0");
+    });
+
+    it("uses unknown for missing user", () => {
+      logProxyUsage("POST", "api/v1/agents");
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.user).toBe("unknown");
+    });
+
+    it("does not log when audit logging is disabled", () => {
+      process.env.OMNIA_AUDIT_LOGGING_ENABLED = "false";
+      logProxyUsage("GET", "api/v1/agents", "user@example.com");
+      expect(consoleSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createAuditLogger", () => {
+    it("creates a logger with bound context", () => {
+      const log = createAuditLogger({
+        workspace: "my-workspace",
+        namespace: "my-namespace",
+        user: "user@example.com",
+        role: "editor",
+        authProvider: "oauth",
+        path: "/api/workspaces/my-workspace/agents",
+        method: "GET",
+      });
+
+      log({
+        action: "list",
+        resourceType: "AgentRuntime",
+        result: "success",
+      });
+
+      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(loggedJson.workspace).toBe("my-workspace");
+      expect(loggedJson.namespace).toBe("my-namespace");
+      expect(loggedJson.user).toBe("user@example.com");
+      expect(loggedJson.role).toBe("editor");
+      expect(loggedJson.authProvider).toBe("oauth");
+      expect(loggedJson.action).toBe("list");
+      expect(loggedJson.resourceType).toBe("AgentRuntime");
+    });
+  });
+
+  describe("methodToAction", () => {
+    it("maps GET to get", () => {
+      expect(methodToAction("GET")).toBe("get");
+    });
+
+    it("maps POST to create", () => {
+      expect(methodToAction("POST")).toBe("create");
+    });
+
+    it("maps PUT to update", () => {
+      expect(methodToAction("PUT")).toBe("update");
+    });
+
+    it("maps PATCH to patch", () => {
+      expect(methodToAction("PATCH")).toBe("patch");
+    });
+
+    it("maps DELETE to delete", () => {
+      expect(methodToAction("DELETE")).toBe("delete");
+    });
+
+    it("handles lowercase methods", () => {
+      expect(methodToAction("get")).toBe("get");
+      expect(methodToAction("post")).toBe("create");
+    });
+
+    it("defaults unknown methods to get", () => {
+      expect(methodToAction("OPTIONS")).toBe("get");
+      expect(methodToAction("HEAD")).toBe("get");
+    });
+  });
+});
