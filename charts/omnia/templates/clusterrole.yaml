@@ -29,7 +29,7 @@ rules:
       - patch
       - update
       - watch
-  # Pods and logs for dashboard API
+  # Pods and logs for dashboard API and workspace role grants
   - apiGroups:
       - ""
     resources:
@@ -38,6 +38,7 @@ rules:
     verbs:
       - get
       - list
+      - watch
   # Events for dashboard events panel and controller event recording
   - apiGroups:
       - ""
@@ -74,6 +75,15 @@ rules:
       - list
       - patch
       - update
+      - watch
+  # ReplicaSets for dashboard status and workspace role grants
+  - apiGroups:
+      - apps
+    resources:
+      - replicasets
+    verbs:
+      - get
+      - list
       - watch
   # Omnia CRDs
   - apiGroups:
