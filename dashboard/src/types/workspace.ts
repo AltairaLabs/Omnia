@@ -63,6 +63,35 @@ export interface AnonymousAccessConfig {
 }
 
 /**
+ * Action to take when budget is exceeded.
+ */
+export type BudgetExceededAction = "warn" | "pauseJobs" | "block";
+
+/**
+ * Threshold for cost alerts.
+ */
+export interface CostAlertThreshold {
+  /** Percentage of budget at which to trigger the alert (1-100) */
+  percent: number;
+  /** Email addresses to notify when threshold is reached */
+  notify?: string[];
+}
+
+/**
+ * Cost control settings for a workspace.
+ */
+export interface CostControls {
+  /** Maximum daily spending limit in USD (e.g., "100.00") */
+  dailyBudget?: string;
+  /** Maximum monthly spending limit in USD (e.g., "2000.00") */
+  monthlyBudget?: string;
+  /** Action to take when budget is exceeded */
+  budgetExceededAction?: BudgetExceededAction;
+  /** Thresholds for cost alerts */
+  alertThresholds?: CostAlertThreshold[];
+}
+
+/**
  * Workspace specification from the Workspace CRD.
  */
 export interface WorkspaceSpec {
@@ -88,6 +117,24 @@ export interface WorkspaceSpec {
    * If omitted, anonymous users have no access to this workspace.
    */
   anonymousAccess?: AnonymousAccessConfig;
+  /** Cost control settings for budget and alerts */
+  costControls?: CostControls;
+}
+
+/**
+ * Current cost usage for a workspace.
+ */
+export interface CostUsage {
+  /** Current day's spending in USD */
+  dailySpend?: string;
+  /** Configured daily budget in USD */
+  dailyBudget?: string;
+  /** Current month's spending in USD */
+  monthlySpend?: string;
+  /** Configured monthly budget in USD */
+  monthlyBudget?: string;
+  /** Timestamp of the last cost calculation */
+  lastUpdated?: string;
 }
 
 /**
@@ -96,6 +143,8 @@ export interface WorkspaceSpec {
 export interface WorkspaceStatus {
   /** Current phase of the workspace */
   phase?: "Active" | "Terminating" | "Pending";
+  /** Cost usage tracking */
+  costUsage?: CostUsage;
   /** Conditions describing workspace state */
   conditions?: Array<{
     type: string;

@@ -190,6 +190,51 @@ type AgentQuotas struct {
 	MaxReplicasPerAgent *int32 `json:"maxReplicasPerAgent,omitempty"`
 }
 
+// BudgetExceededAction defines what action to take when budget is exceeded.
+// +kubebuilder:validation:Enum=warn;pauseJobs;block
+type BudgetExceededAction string
+
+const (
+	// BudgetExceededActionWarn only logs warnings when budget is exceeded.
+	BudgetExceededActionWarn BudgetExceededAction = "warn"
+	// BudgetExceededActionPauseJobs pauses Arena jobs when budget is exceeded.
+	BudgetExceededActionPauseJobs BudgetExceededAction = "pauseJobs"
+	// BudgetExceededActionBlock blocks new API requests when budget is exceeded.
+	BudgetExceededActionBlock BudgetExceededAction = "block"
+)
+
+// CostAlertThreshold defines a threshold for cost alerts.
+type CostAlertThreshold struct {
+	// percent is the percentage of budget at which to trigger the alert.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	Percent int32 `json:"percent"`
+
+	// notify is a list of email addresses to notify when threshold is reached.
+	// +optional
+	Notify []string `json:"notify,omitempty"`
+}
+
+// CostControls defines budget and cost control settings for a workspace.
+type CostControls struct {
+	// dailyBudget is the maximum daily spending limit in USD (e.g., "100.00").
+	// +optional
+	DailyBudget string `json:"dailyBudget,omitempty"`
+
+	// monthlyBudget is the maximum monthly spending limit in USD (e.g., "2000.00").
+	// +optional
+	MonthlyBudget string `json:"monthlyBudget,omitempty"`
+
+	// budgetExceededAction defines what action to take when budget is exceeded.
+	// +kubebuilder:default=warn
+	// +optional
+	BudgetExceededAction BudgetExceededAction `json:"budgetExceededAction,omitempty"`
+
+	// alertThresholds defines thresholds for cost alerts.
+	// +optional
+	AlertThresholds []CostAlertThreshold `json:"alertThresholds,omitempty"`
+}
+
 // WorkspaceQuotas defines resource quotas for a workspace.
 type WorkspaceQuotas struct {
 	// compute defines compute resource quotas.
@@ -252,6 +297,10 @@ type WorkspaceSpec struct {
 	// quotas defines resource quotas for this workspace.
 	// +optional
 	Quotas *WorkspaceQuotas `json:"quotas,omitempty"`
+
+	// costControls defines budget and cost control settings.
+	// +optional
+	CostControls *CostControls `json:"costControls,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.
@@ -302,6 +351,29 @@ type MemberCount struct {
 	Viewers int32 `json:"viewers,omitempty"`
 }
 
+// CostUsage tracks the current cost usage for a workspace.
+type CostUsage struct {
+	// dailySpend is the current day's spending in USD.
+	// +optional
+	DailySpend string `json:"dailySpend,omitempty"`
+
+	// dailyBudget is the configured daily budget in USD.
+	// +optional
+	DailyBudget string `json:"dailyBudget,omitempty"`
+
+	// monthlySpend is the current month's spending in USD.
+	// +optional
+	MonthlySpend string `json:"monthlySpend,omitempty"`
+
+	// monthlyBudget is the configured monthly budget in USD.
+	// +optional
+	MonthlyBudget string `json:"monthlyBudget,omitempty"`
+
+	// lastUpdated is the timestamp of the last cost calculation.
+	// +optional
+	LastUpdated *metav1.Time `json:"lastUpdated,omitempty"`
+}
+
 // WorkspaceStatus defines the observed state of Workspace.
 type WorkspaceStatus struct {
 	// phase represents the current lifecycle phase of the Workspace.
@@ -323,6 +395,10 @@ type WorkspaceStatus struct {
 	// members tracks the count of members by role.
 	// +optional
 	Members *MemberCount `json:"members,omitempty"`
+
+	// costUsage tracks the current cost usage for this workspace.
+	// +optional
+	CostUsage *CostUsage `json:"costUsage,omitempty"`
 
 	// conditions represent the current state of the Workspace resource.
 	// +listType=map
