@@ -234,6 +234,110 @@ spec:
 
 These tags are applied to all resources created in the workspace.
 
+## Configure Network Isolation
+
+Network isolation restricts traffic to and from your workspace namespace using Kubernetes NetworkPolicies. This provides defense-in-depth for multi-tenant environments.
+
+### Enable Basic Isolation
+
+Add network isolation to restrict traffic:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+```
+
+This automatically creates a NetworkPolicy that:
+- Allows DNS queries to `kube-system`
+- Allows all traffic within the workspace namespace
+- Allows traffic to/from namespaces labeled `omnia.altairalabs.ai/shared: true`
+- Allows egress to external IPs (for LLM APIs) but blocks other private IP ranges
+
+### Verify NetworkPolicy
+
+Check that the NetworkPolicy was created:
+
+```bash
+kubectl get networkpolicy -n omnia-customer-support
+```
+
+You should see:
+
+```
+NAME                                   POD-SELECTOR   AGE
+workspace-customer-support-isolation   <none>         1m
+```
+
+### Allow Ingress from Load Balancer
+
+If agents need to receive traffic from an ingress controller:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowFrom:
+      - peers:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+```
+
+### Allow Egress to Internal Services
+
+To allow agents to connect to internal databases or services:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowTo:
+      - peers:
+          - ipBlock:
+              cidr: 10.0.0.0/8  # Internal network
+        ports:
+          - protocol: TCP
+            port: 5432  # PostgreSQL
+          - protocol: TCP
+            port: 6379  # Redis
+```
+
+### Restrict External API Access
+
+For high-security environments, disable external API access:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowExternalAPIs: false
+    allowTo:
+      # Only allow specific external endpoints
+      - peers:
+          - ipBlock:
+              cidr: 104.18.0.0/16  # Example: specific API provider
+        ports:
+          - protocol: TCP
+            port: 443
+```
+
+:::caution
+Disabling `allowExternalAPIs` blocks agents from reaching LLM provider APIs unless you explicitly allow them. Make sure to add egress rules for any external services your agents need.
+:::
+
+### Disable Isolation
+
+To remove network restrictions, either delete the `networkPolicy` section or set `isolate: false`:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: false
+```
+
+The controller will automatically delete the NetworkPolicy.
+
 ## Deploy Resources to a Workspace
 
 Once your workspace is ready, deploy agents to its namespace:
@@ -338,6 +442,21 @@ spec:
     arena:
       maxConcurrentJobs: 10
       maxJobsPerDay: 100
+
+  networkPolicy:
+    isolate: true
+    allowFrom:
+      - peers:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+    allowTo:
+      - peers:
+          - ipBlock:
+              cidr: 10.0.0.0/8
+        ports:
+          - protocol: TCP
+            port: 5432
 ```
 
 ## Troubleshooting
@@ -377,6 +496,40 @@ spec:
 1. View current usage: `kubectl describe resourcequota -n omnia-customer-support`
 2. Review workspace quota settings
 3. Clean up unused resources or increase quotas
+
+### Network Connectivity Issues
+
+**Symptom:** Agents can't reach external APIs or internal services
+
+**Check:**
+1. Verify NetworkPolicy exists: `kubectl get networkpolicy -n omnia-customer-support`
+2. Check if `allowExternalAPIs: false` is blocking external traffic
+3. Inspect the NetworkPolicy rules: `kubectl describe networkpolicy workspace-customer-support-isolation -n omnia-customer-support`
+4. Add custom `allowTo` rules for required services
+
+**Debug with a test pod:**
+```bash
+kubectl run -n omnia-customer-support debug --rm -it --image=busybox -- sh
+# Inside the pod:
+nslookup api.anthropic.com  # Test DNS
+wget -qO- https://api.anthropic.com  # Test external access
+```
+
+### Agents Not Receiving Traffic
+
+**Symptom:** Ingress traffic doesn't reach agents
+
+**Check:**
+1. Ensure ingress controller namespace is allowed in `allowFrom`:
+   ```yaml
+   allowFrom:
+     - peers:
+         - namespaceSelector:
+             matchLabels:
+               kubernetes.io/metadata.name: ingress-nginx
+   ```
+2. Verify the ingress controller namespace has the correct labels
+3. Check that the NetworkPolicy allows the required ports
 
 ## Next Steps
 
