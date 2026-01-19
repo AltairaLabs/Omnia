@@ -22,11 +22,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -58,6 +60,12 @@ const (
 	ConditionTypeNamespaceReady       = "NamespaceReady"
 	ConditionTypeServiceAccountsReady = "ServiceAccountsReady"
 	ConditionTypeRoleBindingsReady    = "RoleBindingsReady"
+	ConditionTypeNetworkPolicyReady   = "NetworkPolicyReady"
+)
+
+// Network policy constants
+const (
+	labelSharedNamespace = "omnia.altairalabs.ai/shared"
 )
 
 // WorkspaceReconciler reconciles a Workspace object
@@ -72,6 +80,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -150,6 +159,19 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	r.setCondition(workspace, ConditionTypeRoleBindingsReady, metav1.ConditionTrue,
 		"RoleBindingsReady", "RoleBindings are ready")
 
+	// Reconcile NetworkPolicy
+	if err := r.reconcileNetworkPolicy(ctx, workspace); err != nil {
+		r.setCondition(workspace, ConditionTypeNetworkPolicyReady, metav1.ConditionFalse,
+			"NetworkPolicyFailed", err.Error())
+		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
+		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return ctrl.Result{}, err
+	}
+	r.setCondition(workspace, ConditionTypeNetworkPolicyReady, metav1.ConditionTrue,
+		"NetworkPolicyReady", "NetworkPolicy is ready")
+
 	// Update member count
 	r.updateMemberCount(workspace)
 
@@ -171,6 +193,17 @@ func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *om
 	log.Info("Handling deletion of Workspace")
 
 	namespaceName := workspace.Spec.Namespace.Name
+
+	// Clean up NetworkPolicies in the namespace
+	networkPolicies := &networkingv1.NetworkPolicyList{}
+	if err := r.List(ctx, networkPolicies, client.InNamespace(namespaceName),
+		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: "true"}); err == nil {
+		for i := range networkPolicies.Items {
+			if err := r.Delete(ctx, &networkPolicies.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "Failed to delete NetworkPolicy", "name", networkPolicies.Items[i].Name)
+			}
+		}
+	}
 
 	// Clean up RoleBindings in the namespace
 	roleBindings := &rbacv1.RoleBindingList{}
@@ -474,6 +507,267 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, workspa
 	}
 
 	return nil
+}
+
+func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
+	log := logf.FromContext(ctx)
+	namespaceName := workspace.Spec.Namespace.Name
+	npName := fmt.Sprintf("workspace-%s-isolation", workspace.Name)
+
+	// If network policy is not configured or isolation is disabled, delete existing NetworkPolicy
+	if workspace.Spec.NetworkPolicy == nil || !workspace.Spec.NetworkPolicy.Isolate {
+		np := &networkingv1.NetworkPolicy{}
+		err := r.Get(ctx, client.ObjectKey{Name: npName, Namespace: namespaceName}, np)
+		if err == nil {
+			// NetworkPolicy exists, delete it
+			if err := r.Delete(ctx, np); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete NetworkPolicy %s: %w", npName, err)
+			}
+			log.Info("Deleted NetworkPolicy (isolation disabled)", "name", npName)
+		}
+		// Clear status
+		workspace.Status.NetworkPolicy = nil
+		return nil
+	}
+
+	// Build the NetworkPolicy
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      npName,
+			Namespace: namespaceName,
+		},
+	}
+
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, np, func() error {
+		np.Labels = map[string]string{
+			labelWorkspace:        workspace.Name,
+			labelWorkspaceManaged: "true",
+		}
+
+		// Build ingress rules
+		ingressRules := r.buildIngressRules(workspace)
+
+		// Build egress rules
+		egressRules := r.buildEgressRules(workspace)
+
+		np.Spec = networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{}, // Select all pods in namespace
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			},
+			Ingress: ingressRules,
+			Egress:  egressRules,
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to create/update NetworkPolicy %s: %w", npName, err)
+	}
+
+	if result != controllerutil.OperationResultNone {
+		log.Info("NetworkPolicy reconciled", "name", npName, "result", result)
+	}
+
+	// Update status
+	rulesCount := int32(len(np.Spec.Ingress) + len(np.Spec.Egress))
+	workspace.Status.NetworkPolicy = &omniav1alpha1.NetworkPolicyStatus{
+		Name:       npName,
+		Enabled:    true,
+		RulesCount: rulesCount,
+	}
+
+	return nil
+}
+
+// buildIngressRules builds the ingress rules for the NetworkPolicy
+func (r *WorkspaceReconciler) buildIngressRules(workspace *omniav1alpha1.Workspace) []networkingv1.NetworkPolicyIngressRule {
+	policy := workspace.Spec.NetworkPolicy
+	// Pre-allocate: 1 for same namespace + 1 for shared (if enabled) + custom rules
+	capacity := 1 + len(policy.AllowFrom)
+	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
+		capacity++
+	}
+	rules := make([]networkingv1.NetworkPolicyIngressRule, 0, capacity)
+
+	// Allow from shared namespaces (default true)
+	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
+		rules = append(rules, networkingv1.NetworkPolicyIngressRule{
+			From: []networkingv1.NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelSharedNamespace: "true",
+						},
+					},
+				},
+			},
+		})
+	}
+
+	// Allow from same namespace
+	rules = append(rules, networkingv1.NetworkPolicyIngressRule{
+		From: []networkingv1.NetworkPolicyPeer{
+			{
+				PodSelector: &metav1.LabelSelector{}, // All pods in same namespace
+			},
+		},
+	})
+
+	// Add custom allowFrom rules
+	for _, rule := range policy.AllowFrom {
+		ingressRule := networkingv1.NetworkPolicyIngressRule{
+			From:  convertPeers(rule.Peers),
+			Ports: convertPorts(rule.Ports),
+		}
+		rules = append(rules, ingressRule)
+	}
+
+	return rules
+}
+
+// buildEgressRules builds the egress rules for the NetworkPolicy
+func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspace) []networkingv1.NetworkPolicyEgressRule {
+	policy := workspace.Spec.NetworkPolicy
+	// Pre-allocate: 1 for DNS + 1 for same namespace + 1 for shared (if enabled) + 1 for external (if enabled) + custom rules
+	capacity := 2 + len(policy.AllowTo)
+	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
+		capacity++
+	}
+	if policy.AllowExternalAPIs == nil || *policy.AllowExternalAPIs {
+		capacity++
+	}
+	rules := make([]networkingv1.NetworkPolicyEgressRule, 0, capacity)
+
+	// Always allow DNS to kube-system
+	dnsPort53 := intstr.FromInt32(53)
+	protocolUDP := corev1.ProtocolUDP
+	protocolTCP := corev1.ProtocolTCP
+	rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+		To: []networkingv1.NetworkPolicyPeer{
+			{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/metadata.name": "kube-system",
+					},
+				},
+			},
+		},
+		Ports: []networkingv1.NetworkPolicyPort{
+			{Protocol: &protocolUDP, Port: &dnsPort53},
+			{Protocol: &protocolTCP, Port: &dnsPort53},
+		},
+	})
+
+	// Allow to shared namespaces (default true)
+	if policy.AllowSharedNamespaces == nil || *policy.AllowSharedNamespaces {
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To: []networkingv1.NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelSharedNamespace: "true",
+						},
+					},
+				},
+			},
+		})
+	}
+
+	// Allow to same namespace
+	rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+		To: []networkingv1.NetworkPolicyPeer{
+			{
+				PodSelector: &metav1.LabelSelector{}, // All pods in same namespace
+			},
+		},
+	})
+
+	// Allow external APIs (default true) - 0.0.0.0/0 excluding private IP ranges
+	if policy.AllowExternalAPIs == nil || *policy.AllowExternalAPIs {
+		ipBlock := &networkingv1.IPBlock{
+			CIDR: "0.0.0.0/0",
+		}
+		// Only exclude private networks if allowPrivateNetworks is not explicitly true
+		if policy.AllowPrivateNetworks == nil || !*policy.AllowPrivateNetworks {
+			ipBlock.Except = []string{
+				"10.0.0.0/8",
+				"172.16.0.0/12",
+				"192.168.0.0/16",
+			}
+		}
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To: []networkingv1.NetworkPolicyPeer{
+				{
+					IPBlock: ipBlock,
+				},
+			},
+		})
+	}
+
+	// Add custom allowTo rules
+	for _, rule := range policy.AllowTo {
+		egressRule := networkingv1.NetworkPolicyEgressRule{
+			To:    convertPeers(rule.Peers),
+			Ports: convertPorts(rule.Ports),
+		}
+		rules = append(rules, egressRule)
+	}
+
+	return rules
+}
+
+// convertPeers converts API peers to networking v1 peers
+func convertPeers(peers []omniav1alpha1.NetworkPolicyPeer) []networkingv1.NetworkPolicyPeer {
+	result := make([]networkingv1.NetworkPolicyPeer, 0, len(peers))
+	for _, peer := range peers {
+		npPeer := networkingv1.NetworkPolicyPeer{}
+
+		if peer.NamespaceSelector != nil {
+			npPeer.NamespaceSelector = &metav1.LabelSelector{
+				MatchLabels: peer.NamespaceSelector.MatchLabels,
+			}
+		}
+
+		if peer.PodSelector != nil {
+			npPeer.PodSelector = &metav1.LabelSelector{
+				MatchLabels: peer.PodSelector.MatchLabels,
+			}
+		}
+
+		if peer.IPBlock != nil {
+			npPeer.IPBlock = &networkingv1.IPBlock{
+				CIDR:   peer.IPBlock.CIDR,
+				Except: peer.IPBlock.Except,
+			}
+		}
+
+		result = append(result, npPeer)
+	}
+	return result
+}
+
+// convertPorts converts API ports to networking v1 ports
+func convertPorts(ports []omniav1alpha1.NetworkPolicyPort) []networkingv1.NetworkPolicyPort {
+	result := make([]networkingv1.NetworkPolicyPort, 0, len(ports))
+	for _, port := range ports {
+		npPort := networkingv1.NetworkPolicyPort{}
+
+		if port.Protocol != "" {
+			protocol := corev1.Protocol(port.Protocol)
+			npPort.Protocol = &protocol
+		}
+
+		if port.Port != 0 {
+			portVal := intstr.FromInt32(port.Port)
+			npPort.Port = &portVal
+		}
+
+		result = append(result, npPort)
+	}
+	return result
 }
 
 func (r *WorkspaceReconciler) getClusterRoleForRole(role omniav1alpha1.WorkspaceRole) string {

@@ -272,6 +272,161 @@ spec:
       maxReplicasPerAgent: 10
 ```
 
+### `networkPolicy`
+
+Network isolation settings for the workspace. When enabled, automatically generates a Kubernetes NetworkPolicy to restrict traffic.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `networkPolicy.isolate` | boolean | false | No |
+| `networkPolicy.allowExternalAPIs` | boolean | true | No |
+| `networkPolicy.allowSharedNamespaces` | boolean | true | No |
+| `networkPolicy.allowPrivateNetworks` | boolean | false | No |
+| `networkPolicy.allowFrom` | []NetworkPolicyRule | [] | No |
+| `networkPolicy.allowTo` | []NetworkPolicyRule | [] | No |
+
+#### Default Behavior (when `isolate: true`)
+
+- **DNS**: Always allows egress to `kube-system` on port 53 (UDP/TCP)
+- **Same namespace**: Allows all ingress/egress within the workspace namespace
+- **Shared namespaces**: Allows ingress/egress to namespaces labeled `omnia.altairalabs.ai/shared: true`
+- **External APIs**: Allows egress to `0.0.0.0/0` excluding [RFC 1918](https://datatracker.ietf.org/doc/html/rfc1918) private IP ranges:
+  - `10.0.0.0/8` - Class A private network
+  - `172.16.0.0/12` - Class B private networks
+  - `192.168.0.0/16` - Class C private networks
+
+This allows agents to reach external LLM APIs while blocking access to other tenants' pods and internal cluster services.
+
+#### Basic Isolation
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+```
+
+This creates a NetworkPolicy named `workspace-{name}-isolation` with default rules.
+
+#### Restrict External Access
+
+Disable external API access (blocks internet egress except DNS):
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowExternalAPIs: false
+```
+
+#### Allow Private Networks (Local Development)
+
+For local development or when agents need to access services on private networks (e.g., local LLM servers), enable `allowPrivateNetworks` to remove the RFC 1918 exclusions:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowPrivateNetworks: true  # Allows 10.x, 172.16.x, 192.168.x
+```
+
+:::caution
+Enabling `allowPrivateNetworks` reduces tenant isolation. Only use this in development environments or when you explicitly need agents to access private network services.
+:::
+
+#### Custom Ingress Rules
+
+Allow traffic from specific namespaces (e.g., ingress controller):
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowFrom:
+      - peers:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+```
+
+#### Custom Egress Rules
+
+Allow egress to internal databases:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowTo:
+      - peers:
+          - ipBlock:
+              cidr: 10.0.0.0/8  # Internal network
+        ports:
+          - protocol: TCP
+            port: 5432  # PostgreSQL
+          - protocol: TCP
+            port: 6379  # Redis
+```
+
+#### NetworkPolicyRule Structure
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `peers` | []NetworkPolicyPeer | Sources (ingress) or destinations (egress) |
+| `ports` | []NetworkPolicyPort | Ports to allow (optional, all ports if omitted) |
+
+#### NetworkPolicyPeer Structure
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `namespaceSelector.matchLabels` | map[string]string | Select namespaces by label |
+| `podSelector.matchLabels` | map[string]string | Select pods by label |
+| `ipBlock.cidr` | string | IP block in CIDR notation |
+| `ipBlock.except` | []string | CIDRs to exclude from the block |
+
+#### NetworkPolicyPort Structure
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `protocol` | string | TCP, UDP, or SCTP (default: TCP) |
+| `port` | integer | Port number |
+
+### `costControls`
+
+Budget and cost control settings for the workspace.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `costControls.dailyBudget` | string | - | No |
+| `costControls.monthlyBudget` | string | - | No |
+| `costControls.budgetExceededAction` | string | warn | No |
+| `costControls.alertThresholds` | []CostAlertThreshold | [] | No |
+
+Budget values are in USD (e.g., "100.00", "2000.00").
+
+#### Budget Exceeded Actions
+
+| Value | Description |
+|-------|-------------|
+| `warn` | Log warnings when budget is exceeded |
+| `pauseJobs` | Pause Arena jobs when budget is exceeded |
+| `block` | Block new API requests when budget is exceeded |
+
+```yaml
+spec:
+  costControls:
+    dailyBudget: "100.00"
+    monthlyBudget: "2000.00"
+    budgetExceededAction: pauseJobs
+    alertThresholds:
+      - percent: 80
+        notify:
+          - "team-lead@acme.com"
+      - percent: 95
+        notify:
+          - "team-lead@acme.com"
+          - "finance@acme.com"
+```
+
 ## Status Fields
 
 ### `phase`
@@ -318,14 +473,37 @@ Member count by role.
 | `status.members.editors` | Count of editor members |
 | `status.members.viewers` | Count of viewer members |
 
+### `networkPolicy`
+
+NetworkPolicy status information.
+
+| Field | Description |
+|-------|-------------|
+| `status.networkPolicy.name` | Name of the generated NetworkPolicy |
+| `status.networkPolicy.enabled` | Whether network isolation is active |
+| `status.networkPolicy.rulesCount` | Total number of ingress and egress rules |
+
+### `costUsage`
+
+Current cost tracking information.
+
+| Field | Description |
+|-------|-------------|
+| `status.costUsage.dailySpend` | Current day's spending in USD |
+| `status.costUsage.dailyBudget` | Configured daily budget in USD |
+| `status.costUsage.monthlySpend` | Current month's spending in USD |
+| `status.costUsage.monthlyBudget` | Configured monthly budget in USD |
+| `status.costUsage.lastUpdated` | Timestamp of last cost calculation |
+
 ### `conditions`
 
 | Type | Description |
 |------|-------------|
 | `Ready` | Overall workspace readiness |
 | `NamespaceReady` | Namespace is created and configured |
-| `RBACReady` | RBAC resources are configured |
-| `QuotaReady` | Resource quotas are applied |
+| `ServiceAccountsReady` | ServiceAccounts are created |
+| `RoleBindingsReady` | RBAC resources are configured |
+| `NetworkPolicyReady` | NetworkPolicy is configured (if enabled) |
 
 ## Complete Example
 
@@ -391,6 +569,31 @@ spec:
     agents:
       maxAgentRuntimes: 20
       maxReplicasPerAgent: 10
+
+  # Network isolation
+  networkPolicy:
+    isolate: true
+    allowFrom:
+      - peers:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+    allowTo:
+      - peers:
+          - ipBlock:
+              cidr: 10.0.0.0/8
+        ports:
+          - protocol: TCP
+            port: 5432
+
+  # Cost controls
+  costControls:
+    monthlyBudget: "5000.00"
+    budgetExceededAction: warn
+    alertThresholds:
+      - percent: 80
+        notify:
+          - "cs-admins@acme.com"
 ```
 
 ## Dashboard Integration

@@ -14,6 +14,7 @@ Workspaces provide logical isolation for teams sharing an Omnia cluster. Each wo
 - **Dedicated namespace** - Kubernetes namespace for resource isolation
 - **Role-based access** - Three roles (owner, editor, viewer) with scoped permissions
 - **Resource quotas** - Limits on compute, objects, and Omnia-specific resources
+- **Network isolation** - Automatic NetworkPolicy generation to restrict cross-tenant traffic
 - **Cost attribution** - Tags for tracking spend by team
 
 ```mermaid
@@ -24,6 +25,7 @@ graph TB
             sa1[ServiceAccounts]
             rb1[RoleBindings]
             q1[ResourceQuota]
+            np1[NetworkPolicy]
             a1[Agents]
         end
 
@@ -32,6 +34,7 @@ graph TB
             sa2[ServiceAccounts]
             rb2[RoleBindings]
             q2[ResourceQuota]
+            np2[NetworkPolicy]
             a2[Agents]
         end
 
@@ -359,33 +362,116 @@ Application-layer auth with IdP groups provides:
 
 ### Network Isolation
 
-For enhanced isolation, add NetworkPolicies:
+Workspaces can automatically generate NetworkPolicies to enforce network boundaries between tenants. When enabled, the controller creates a NetworkPolicy that restricts traffic while allowing essential communication.
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: workspace-isolation
-  namespace: omnia-customer-support
 spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              omnia.altairalabs.ai/shared: "true"
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              omnia.altairalabs.ai/shared: "true"
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0  # Allow external LLM APIs
+  networkPolicy:
+    isolate: true
 ```
+
+#### Generated NetworkPolicy
+
+The controller creates a NetworkPolicy named `workspace-{name}-isolation` with these default rules:
+
+```mermaid
+graph TB
+    subgraph workspace["Workspace Namespace"]
+        pods[All Pods]
+    end
+
+    subgraph defaults["Default Allowed Traffic"]
+        dns[DNS to kube-system]
+        same[Same Namespace]
+        shared[Shared Namespaces]
+        external[External APIs]
+    end
+
+    pods --> dns
+    pods <--> same
+    pods <--> shared
+    pods --> external
+
+    style dns fill:#90EE90
+    style same fill:#90EE90
+    style shared fill:#90EE90
+    style external fill:#90EE90
+```
+
+| Default Rule | Direction | Purpose |
+|--------------|-----------|---------|
+| DNS (port 53) | Egress | Allow pods to resolve DNS |
+| Same namespace | Both | Allow intra-workspace communication |
+| Shared namespaces | Both | Allow access to shared Providers/Tools |
+| External IPs (0.0.0.0/0) | Egress | Allow LLM API calls |
+| Private IPs (10.x, 172.16.x, 192.168.x) | Blocked | Prevent cross-tenant access |
+
+:::tip[Why these IP ranges?]
+The blocked private IP ranges are [RFC 1918](https://datatracker.ietf.org/doc/html/rfc1918) addresses:
+- `10.0.0.0/8` - Class A private network
+- `172.16.0.0/12` - Class B private networks
+- `192.168.0.0/16` - Class C private networks
+
+These ranges are used internally by Kubernetes clusters. Blocking them prevents workspaces from accessing other tenants' pods, services, or internal infrastructure while still allowing external API calls.
+:::
+
+#### Customizing Network Rules
+
+For fine-grained control, add custom ingress and egress rules:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowExternalAPIs: true      # Default: true
+    allowSharedNamespaces: true  # Default: true
+    allowFrom:
+      - peers:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+    allowTo:
+      - peers:
+          - ipBlock:
+              cidr: 10.0.0.0/8  # Internal database network
+        ports:
+          - protocol: TCP
+            port: 5432
+```
+
+#### High-Security Mode
+
+For maximum isolation, disable external API access and explicitly allow only required endpoints:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowExternalAPIs: false
+    allowTo:
+      # Only allow specific LLM provider
+      - peers:
+          - ipBlock:
+              cidr: 104.18.0.0/16  # Anthropic API
+        ports:
+          - protocol: TCP
+            port: 443
+```
+
+This approach provides defense-in-depth: even if application-layer authorization is compromised, network-layer controls prevent unauthorized data exfiltration or cross-tenant access.
+
+#### Local Development Mode
+
+For local development where agents need to access services on private networks (e.g., local Ollama):
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowPrivateNetworks: true  # Removes RFC 1918 exclusions
+```
+
+This is useful when running LLM providers locally or accessing internal development services. Do not use in production.
 
 ## Scaling Considerations
 
