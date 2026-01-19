@@ -21,6 +21,9 @@ EXPOSE 3000 3002
 ENV NODE_ENV=development
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME="0.0.0.0"
+# Limit V8 heap size to prevent OOM kills (75% of 2Gi container limit)
+# Node.js doesn't automatically respect cgroup memory limits
+ENV NODE_OPTIONS="--max-old-space-size=1536"
 
 # Entrypoint ensures .next exists before starting dev server
 # (Tilt sync can remove it)

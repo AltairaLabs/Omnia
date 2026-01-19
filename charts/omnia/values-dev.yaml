@@ -29,6 +29,28 @@ dashboard:
     requests:
       cpu: 200m
       memory: 1Gi
+  # Startup probe gives Next.js time to compile before liveness checks start
+  # Turbopack initial compilation can take 30-60 seconds
+  startupProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 30  # 5s * 30 = 150s max startup time
+  # More lenient liveness probe for dev (compilation spikes can cause delays)
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+  # Readiness probe for dev
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 3
   # Relaxed security for dev (Next.js needs to write .next/)
   podSecurityContext:
     runAsNonRoot: false
