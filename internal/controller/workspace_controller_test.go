@@ -807,6 +807,59 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(updated.Status.NetworkPolicy).To(BeNil())
 		})
 
+		It("should allow private networks when allowPrivateNetworks is true", func() {
+			By("creating a Workspace with private networks allowed")
+			allowPrivateNetworks := true
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: workspaceKey.Name,
+				},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Private Networks Workspace",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: true,
+					},
+					NetworkPolicy: &omniav1alpha1.WorkspaceNetworkPolicy{
+						Isolate:              true,
+						AllowPrivateNetworks: &allowPrivateNetworks,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling the Workspace")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying NetworkPolicy has 0.0.0.0/0 without exceptions")
+			npName := fmt.Sprintf("workspace-%s-isolation", workspaceKey.Name)
+			np := &networkingv1.NetworkPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      npName,
+				Namespace: namespaceName,
+			}, np)).To(Succeed())
+
+			// Find the external APIs rule (0.0.0.0/0)
+			foundExternalRule := false
+			for _, rule := range np.Spec.Egress {
+				for _, to := range rule.To {
+					if to.IPBlock != nil && to.IPBlock.CIDR == "0.0.0.0/0" {
+						foundExternalRule = true
+						// Should have NO exceptions when allowPrivateNetworks is true
+						Expect(to.IPBlock.Except).To(BeEmpty(), "Should not have RFC 1918 exceptions when allowPrivateNetworks is true")
+						break
+					}
+				}
+			}
+			Expect(foundExternalRule).To(BeTrue(), "Should have 0.0.0.0/0 egress rule")
+		})
+
 		It("should delete NetworkPolicy when workspace is deleted", func() {
 			By("creating a Workspace with network isolation enabled")
 			workspace := &omniav1alpha1.Workspace{

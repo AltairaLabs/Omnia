@@ -326,6 +326,23 @@ spec:
 Disabling `allowExternalAPIs` blocks agents from reaching LLM provider APIs unless you explicitly allow them. Make sure to add egress rules for any external services your agents need.
 :::
 
+### Allow Private Networks (Local Development)
+
+For local development or when agents need to access services on private networks (e.g., a local Ollama instance):
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowPrivateNetworks: true
+```
+
+This removes the RFC 1918 private IP exclusions (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), allowing agents to reach services on your local network.
+
+:::caution
+Only enable `allowPrivateNetworks` in development environments. In production, use specific `allowTo` rules for required internal services instead.
+:::
+
 ### Disable Isolation
 
 To remove network restrictions, either delete the `networkPolicy` section or set `isolate: false`:

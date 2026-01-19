@@ -294,6 +294,12 @@ spec:
                           type: array
                       type: object
                     type: array
+                  allowPrivateNetworks:
+                    description: |-
+                      allowPrivateNetworks removes the RFC 1918 private IP exclusions (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+                      from the external APIs rule. Use this for local development or when agents need to access
+                      services on private networks. Defaults to false for security.
+                    type: boolean
                   allowSharedNamespaces:
                     description: |-
                       allowSharedNamespaces enables traffic to/from namespaces labeled omnia.altairalabs.ai/shared: true.

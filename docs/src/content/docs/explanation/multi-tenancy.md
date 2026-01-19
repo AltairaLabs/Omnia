@@ -460,6 +460,19 @@ spec:
 
 This approach provides defense-in-depth: even if application-layer authorization is compromised, network-layer controls prevent unauthorized data exfiltration or cross-tenant access.
 
+#### Local Development Mode
+
+For local development where agents need to access services on private networks (e.g., local Ollama):
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowPrivateNetworks: true  # Removes RFC 1918 exclusions
+```
+
+This is useful when running LLM providers locally or accessing internal development services. Do not use in production.
+
 ## Scaling Considerations
 
 ### Small Deployments (<50 users)

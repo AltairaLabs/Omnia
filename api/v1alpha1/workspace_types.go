@@ -316,6 +316,12 @@ type WorkspaceNetworkPolicy struct {
 	// Defaults to true when isolate is enabled.
 	// +optional
 	AllowSharedNamespaces *bool `json:"allowSharedNamespaces,omitempty"`
+
+	// allowPrivateNetworks removes the RFC 1918 private IP exclusions (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+	// from the external APIs rule. Use this for local development or when agents need to access
+	// services on private networks. Defaults to false for security.
+	// +optional
+	AllowPrivateNetworks *bool `json:"allowPrivateNetworks,omitempty"`
 }
 
 // NetworkPolicyStatus tracks the status of the workspace NetworkPolicy.

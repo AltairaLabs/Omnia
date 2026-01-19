@@ -687,17 +687,21 @@ func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspac
 
 	// Allow external APIs (default true) - 0.0.0.0/0 excluding private IP ranges
 	if policy.AllowExternalAPIs == nil || *policy.AllowExternalAPIs {
+		ipBlock := &networkingv1.IPBlock{
+			CIDR: "0.0.0.0/0",
+		}
+		// Only exclude private networks if allowPrivateNetworks is not explicitly true
+		if policy.AllowPrivateNetworks == nil || !*policy.AllowPrivateNetworks {
+			ipBlock.Except = []string{
+				"10.0.0.0/8",
+				"172.16.0.0/12",
+				"192.168.0.0/16",
+			}
+		}
 		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
 			To: []networkingv1.NetworkPolicyPeer{
 				{
-					IPBlock: &networkingv1.IPBlock{
-						CIDR: "0.0.0.0/0",
-						Except: []string{
-							"10.0.0.0/8",
-							"172.16.0.0/12",
-							"192.168.0.0/16",
-						},
-					},
+					IPBlock: ipBlock,
 				},
 			},
 		})

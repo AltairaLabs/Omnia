@@ -281,6 +281,7 @@ Network isolation settings for the workspace. When enabled, automatically genera
 | `networkPolicy.isolate` | boolean | false | No |
 | `networkPolicy.allowExternalAPIs` | boolean | true | No |
 | `networkPolicy.allowSharedNamespaces` | boolean | true | No |
+| `networkPolicy.allowPrivateNetworks` | boolean | false | No |
 | `networkPolicy.allowFrom` | []NetworkPolicyRule | [] | No |
 | `networkPolicy.allowTo` | []NetworkPolicyRule | [] | No |
 
@@ -316,6 +317,21 @@ spec:
     isolate: true
     allowExternalAPIs: false
 ```
+
+#### Allow Private Networks (Local Development)
+
+For local development or when agents need to access services on private networks (e.g., local LLM servers), enable `allowPrivateNetworks` to remove the RFC 1918 exclusions:
+
+```yaml
+spec:
+  networkPolicy:
+    isolate: true
+    allowPrivateNetworks: true  # Allows 10.x, 172.16.x, 192.168.x
+```
+
+:::caution
+Enabling `allowPrivateNetworks` reduces tenant isolation. Only use this in development environments or when you explicitly need agents to access private network services.
+:::
 
 #### Custom Ingress Rules
 
