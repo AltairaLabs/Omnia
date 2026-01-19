@@ -239,6 +239,11 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
+    # Increase dashboard resources for HMR compilation
+    'dashboard.resources.limits.cpu=2000m',
+    'dashboard.resources.limits.memory=2Gi',
+    'dashboard.resources.requests.cpu=500m',
+    'dashboard.resources.requests.memory=1Gi',
 ]
 
 if ENABLE_OBSERVABILITY:

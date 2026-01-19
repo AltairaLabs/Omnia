@@ -245,27 +245,39 @@ describe("MockDataService", () => {
   });
 
   describe("getToolRegistries", () => {
-    it("should return mock tool registries (shared resource)", async () => {
-      const promise = service.getToolRegistries();
+    it("should return workspace-scoped tool registries (filtered by namespace)", async () => {
+      const promise = service.getToolRegistries("test-workspace");
       vi.advanceTimersByTime(200);
       const registries = await promise;
 
       expect(Array.isArray(registries)).toBe(true);
     });
+  });
 
-    it("should return all registries as shared resources", async () => {
-      const promise = service.getToolRegistries();
+  describe("getSharedToolRegistries", () => {
+    it("should return all shared tool registries", async () => {
+      const promise = service.getSharedToolRegistries();
       vi.advanceTimersByTime(200);
       const registries = await promise;
 
-      // Tool registries are shared, should return all of them
+      // Shared tool registries return all
       expect(Array.isArray(registries)).toBe(true);
     });
   });
 
   describe("getProviders", () => {
-    it("should return empty array (no mock providers)", async () => {
-      const promise = service.getProviders();
+    it("should return empty array for workspace-scoped providers", async () => {
+      const promise = service.getProviders("test-workspace");
+      vi.advanceTimersByTime(200);
+      const providers = await promise;
+
+      expect(providers).toEqual([]);
+    });
+  });
+
+  describe("getSharedProviders", () => {
+    it("should return empty array (no mock shared providers)", async () => {
+      const promise = service.getSharedProviders();
       vi.advanceTimersByTime(200);
       const providers = await promise;
 
@@ -274,8 +286,8 @@ describe("MockDataService", () => {
   });
 
   describe("getStats", () => {
-    it("should return mock stats", async () => {
-      const promise = service.getStats();
+    it("should return mock stats for workspace", async () => {
+      const promise = service.getStats("test-workspace");
       vi.advanceTimersByTime(200);
       const stats = await promise;
 

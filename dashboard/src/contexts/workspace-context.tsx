@@ -20,30 +20,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/use-workspaces";
-
-/**
- * Query key prefixes for workspace-scoped data.
- * These queries are invalidated when the workspace changes.
- */
-const WORKSPACE_SCOPED_QUERY_KEYS = [
-  "agents",
-  "agent",
-  "promptpacks",
-  "promptpack",
-  "providers",
-  "provider",
-  "toolregistries",
-  "toolregistry",
-  "secrets",
-  "namespaces",
-  "costs",
-  "stats",
-  "logs",
-  "events",
-  "metrics",
-];
 
 const STORAGE_KEY = "omnia-selected-workspace";
 
@@ -80,10 +57,11 @@ interface WorkspaceProviderProps {
 /**
  * Workspace provider - manages workspace selection state.
  * Persists the selected workspace to localStorage.
- * Invalidates workspace-scoped queries when the workspace changes.
+ *
+ * Note: UI refresh on workspace change is handled by WorkspaceContent
+ * using React's key prop to remount the content tree.
  */
 export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>) {
-  const queryClient = useQueryClient();
   const { data: workspaces = [], isLoading, error, refetch } = useWorkspaces();
   // Initialize state with stored value (lazy initializer runs once on mount)
   const [selectedWorkspaceName, setSelectedWorkspaceName] = useState<string | null>(
@@ -116,8 +94,6 @@ export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>
   }, [effectiveWorkspaceName, workspaces]);
 
   const setCurrentWorkspace = useCallback((workspaceName: string | null) => {
-    const wasChanged = workspaceName !== selectedWorkspaceName;
-
     setSelectedWorkspaceName(workspaceName);
     if (typeof window !== "undefined") {
       if (workspaceName) {
@@ -126,15 +102,7 @@ export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>
         localStorage.removeItem(STORAGE_KEY);
       }
     }
-
-    // Only reset queries if the workspace actually changed
-    if (wasChanged) {
-      // Reset workspace-scoped queries: clears cache and refetches active ones
-      WORKSPACE_SCOPED_QUERY_KEYS.forEach((key) => {
-        queryClient.resetQueries({ queryKey: [key] });
-      });
-    }
-  }, [selectedWorkspaceName, queryClient]);
+  }, []);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({

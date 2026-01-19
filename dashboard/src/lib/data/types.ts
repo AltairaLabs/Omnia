@@ -251,16 +251,24 @@ export interface DataService {
   getPromptPack(workspace: string, name: string): Promise<PromptPack | undefined>;
   getPromptPackContent(workspace: string, name: string): Promise<PromptPackContent | undefined>;
 
-  // ToolRegistries (shared/system-wide, not workspace-scoped)
-  getToolRegistries(): Promise<ToolRegistry[]>;
-  getToolRegistry(name: string): Promise<ToolRegistry | undefined>;
+  // ToolRegistries (workspace-scoped)
+  getToolRegistries(workspace: string): Promise<ToolRegistry[]>;
+  getToolRegistry(workspace: string, name: string): Promise<ToolRegistry | undefined>;
 
-  // Providers (shared/system-wide, not workspace-scoped)
-  getProviders(): Promise<Provider[]>;
-  getProvider(name: string): Promise<Provider | undefined>;
+  // Providers (workspace-scoped)
+  getProviders(workspace: string): Promise<Provider[]>;
+  getProvider(workspace: string, name: string): Promise<Provider | undefined>;
 
-  // Stats
-  getStats(): Promise<Stats>;
+  // Shared ToolRegistries (system-wide, in omnia-system namespace)
+  getSharedToolRegistries(): Promise<ToolRegistry[]>;
+  getSharedToolRegistry(name: string): Promise<ToolRegistry | undefined>;
+
+  // Shared Providers (system-wide, in omnia-system namespace)
+  getSharedProviders(): Promise<Provider[]>;
+  getSharedProvider(name: string): Promise<Provider | undefined>;
+
+  // Stats (workspace-scoped)
+  getStats(workspace: string): Promise<Stats>;
 
   // Costs
   getCosts(options?: CostOptions): Promise<CostData>;

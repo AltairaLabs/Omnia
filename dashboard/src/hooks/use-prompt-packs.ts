@@ -17,8 +17,11 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
   const service = useDataService();
   const { currentWorkspace } = useWorkspace();
 
+  // Extract phase for stable query key (avoid object comparison issues)
+  const { phase } = options;
+
   return useQuery({
-    queryKey: ["promptPacks", currentWorkspace?.name, options, service.name],
+    queryKey: ["promptPacks", currentWorkspace?.name, phase, service.name],
     queryFn: async (): Promise<PromptPack[]> => {
       if (!currentWorkspace) {
         return [];
@@ -28,13 +31,16 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
       let packs = await service.getPromptPacks(currentWorkspace.name) as unknown as PromptPack[];
 
       // Client-side filtering for phase
-      if (options.phase) {
-        packs = packs.filter((p) => p.status?.phase === options.phase);
+      if (phase) {
+        packs = packs.filter((p) => p.status?.phase === phase);
       }
 
       return packs;
     },
     enabled: !!currentWorkspace,
+    // Ensure fresh data on workspace change
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
@@ -61,5 +67,7 @@ export function usePromptPack(name: string, _namespace?: string) {
       return (pack as unknown as PromptPack) || null;
     },
     enabled: !!name && !!currentWorkspace,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }

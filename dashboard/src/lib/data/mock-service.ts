@@ -495,33 +495,61 @@ export class MockDataService implements DataService {
     };
   }
 
-  async getToolRegistries(): Promise<ToolRegistry[]> {
+  // Workspace-scoped ToolRegistries (filter by namespace)
+  async getToolRegistries(workspace: string): Promise<ToolRegistry[]> {
     await delay();
-    // Tool registries are shared/system-wide resources
+    // In demo mode, filter by namespace (workspace name = namespace)
+    return (mockToolRegistries as ToolRegistry[]).filter(
+      (r) => r.metadata?.namespace === workspace
+    );
+  }
+
+  async getToolRegistry(workspace: string, name: string): Promise<ToolRegistry | undefined> {
+    await delay();
+    return (mockToolRegistries as ToolRegistry[]).find(
+      (r) => r.metadata?.namespace === workspace && r.metadata?.name === name
+    );
+  }
+
+  // Workspace-scoped Providers (filter by namespace)
+  async getProviders(_workspace: string): Promise<Provider[]> {
+    await delay();
+    // No workspace-scoped mock providers
+    return [];
+  }
+
+  async getProvider(_workspace: string, _name: string): Promise<Provider | undefined> {
+    await delay();
+    return undefined;
+  }
+
+  // Shared ToolRegistries (system-wide)
+  async getSharedToolRegistries(): Promise<ToolRegistry[]> {
+    await delay();
+    // Return all tool registries as shared (in demo mode)
     return mockToolRegistries as ToolRegistry[];
   }
 
-  async getToolRegistry(name: string): Promise<ToolRegistry | undefined> {
+  async getSharedToolRegistry(name: string): Promise<ToolRegistry | undefined> {
     await delay();
-    // Tool registries are shared/system-wide resources
     return mockToolRegistries.find(
       (r) => r.metadata?.name === name
     ) as ToolRegistry | undefined;
   }
 
-  async getProviders(): Promise<Provider[]> {
+  // Shared Providers (system-wide)
+  async getSharedProviders(): Promise<Provider[]> {
     await delay();
-    // Providers are shared/system-wide resources
     // No mock providers
     return [];
   }
 
-  async getProvider(_name: string): Promise<Provider | undefined> {
+  async getSharedProvider(_name: string): Promise<Provider | undefined> {
     await delay();
     return undefined;
   }
 
-  async getStats(): Promise<Stats> {
+  async getStats(_workspace: string): Promise<Stats> {
     await delay();
     return getMockStats() as unknown as Stats;
   }

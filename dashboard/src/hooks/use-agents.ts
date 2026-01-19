@@ -17,8 +17,11 @@ export function useAgents(options: UseAgentsOptions = {}) {
   const service = useDataService();
   const { currentWorkspace } = useWorkspace();
 
+  // Extract phase for stable query key (avoid object comparison issues)
+  const { phase } = options;
+
   return useQuery({
-    queryKey: ["agents", currentWorkspace?.name, options, service.name],
+    queryKey: ["agents", currentWorkspace?.name, phase, service.name],
     queryFn: async (): Promise<AgentRuntime[]> => {
       if (!currentWorkspace) {
         return [];
@@ -28,13 +31,16 @@ export function useAgents(options: UseAgentsOptions = {}) {
       let agents = await service.getAgents(currentWorkspace.name) as unknown as AgentRuntime[];
 
       // Client-side filtering for phase
-      if (options.phase) {
-        agents = agents.filter((a) => a.status?.phase === options.phase);
+      if (phase) {
+        agents = agents.filter((a) => a.status?.phase === phase);
       }
 
       return agents;
     },
     enabled: !!currentWorkspace,
+    // Ensure fresh data on workspace change
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
@@ -61,5 +67,7 @@ export function useAgent(name: string, _namespace?: string) {
       return (agent as unknown as AgentRuntime) || null;
     },
     enabled: !!name && !!currentWorkspace,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }

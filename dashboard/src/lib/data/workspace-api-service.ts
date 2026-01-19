@@ -18,6 +18,7 @@ import type {
   LogEntry,
   LogOptions,
   K8sEvent,
+  Stats,
 } from "./types";
 
 /**
@@ -162,13 +163,13 @@ export class WorkspaceApiService {
   }
 
   // ============================================================
-  // Shared resources (read-only, system-wide)
+  // Workspace-scoped ToolRegistries
   // ============================================================
 
-  async getToolRegistries(): Promise<ToolRegistry[]> {
-    const response = await fetch("/api/shared/toolregistries");
+  async getToolRegistries(workspace: string): Promise<ToolRegistry[]> {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/toolregistries`);
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
         return [];
       }
       throw new Error(`Failed to fetch tool registries: ${response.statusText}`);
@@ -176,8 +177,10 @@ export class WorkspaceApiService {
     return response.json();
   }
 
-  async getToolRegistry(name: string): Promise<ToolRegistry | undefined> {
-    const response = await fetch(`/api/shared/toolregistries/${encodeURIComponent(name)}`);
+  async getToolRegistry(workspace: string, name: string): Promise<ToolRegistry | undefined> {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspace)}/toolregistries/${encodeURIComponent(name)}`
+    );
     if (!response.ok) {
       if (response.status === 404) {
         return undefined;
@@ -187,10 +190,14 @@ export class WorkspaceApiService {
     return response.json();
   }
 
-  async getProviders(): Promise<Provider[]> {
-    const response = await fetch("/api/shared/providers");
+  // ============================================================
+  // Workspace-scoped Providers
+  // ============================================================
+
+  async getProviders(workspace: string): Promise<Provider[]> {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/providers`);
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
         return [];
       }
       throw new Error(`Failed to fetch providers: ${response.statusText}`);
@@ -198,13 +205,83 @@ export class WorkspaceApiService {
     return response.json();
   }
 
-  async getProvider(name: string): Promise<Provider | undefined> {
-    const response = await fetch(`/api/shared/providers/${encodeURIComponent(name)}`);
+  async getProvider(workspace: string, name: string): Promise<Provider | undefined> {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspace)}/providers/${encodeURIComponent(name)}`
+    );
     if (!response.ok) {
       if (response.status === 404) {
         return undefined;
       }
       throw new Error(`Failed to fetch provider: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  // ============================================================
+  // Shared resources (read-only, system-wide)
+  // ============================================================
+
+  async getSharedToolRegistries(): Promise<ToolRegistry[]> {
+    const response = await fetch("/api/shared/toolregistries");
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        return [];
+      }
+      throw new Error(`Failed to fetch shared tool registries: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getSharedToolRegistry(name: string): Promise<ToolRegistry | undefined> {
+    const response = await fetch(`/api/shared/toolregistries/${encodeURIComponent(name)}`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return undefined;
+      }
+      throw new Error(`Failed to fetch shared tool registry: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getSharedProviders(): Promise<Provider[]> {
+    const response = await fetch("/api/shared/providers");
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        return [];
+      }
+      throw new Error(`Failed to fetch shared providers: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getSharedProvider(name: string): Promise<Provider | undefined> {
+    const response = await fetch(`/api/shared/providers/${encodeURIComponent(name)}`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return undefined;
+      }
+      throw new Error(`Failed to fetch shared provider: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  // ============================================================
+  // Stats
+  // ============================================================
+
+  async getStats(workspace: string): Promise<Stats> {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace)}/stats`);
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        // Return empty stats if no access
+        return {
+          agents: { total: 0, running: 0, pending: 0, failed: 0 },
+          promptPacks: { total: 0, active: 0, canary: 0 },
+          tools: { total: 0, available: 0, degraded: 0 },
+        };
+      }
+      throw new Error(`Failed to fetch stats: ${response.statusText}`);
     }
     return response.json();
   }

@@ -3,6 +3,24 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useProviders, useProvider } from "./use-providers";
 
+// Mock workspace context
+const mockCurrentWorkspace = {
+  name: "test-workspace",
+  namespace: "test-namespace",
+  role: "editor",
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: [mockCurrentWorkspace],
+    isLoading: false,
+    error: null,
+    setCurrentWorkspace: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock provider data
 const mockProviders = [
   {
@@ -89,8 +107,8 @@ describe("useProviders", () => {
     });
 
     expect(result.current.data).toEqual(mockProviders);
-    // Providers are shared - called without namespace
-    expect(mockGetProviders).toHaveBeenCalledWith();
+    // Providers are workspace-scoped
+    expect(mockGetProviders).toHaveBeenCalledWith("test-workspace");
   });
 
   it("should be in loading state initially", () => {
@@ -187,11 +205,11 @@ describe("useProvider", () => {
     });
 
     expect(result.current.data).toEqual(mockProvider);
-    // Providers are shared - called with name only
-    expect(mockGetProvider).toHaveBeenCalledWith("openai-provider");
+    // Providers are workspace-scoped
+    expect(mockGetProvider).toHaveBeenCalledWith("test-workspace", "openai-provider");
   });
 
-  it("should accept deprecated namespace parameter", async () => {
+  it("should accept deprecated namespace parameter (ignored)", async () => {
     const mockProvider = mockProviders[0];
     mockGetProvider.mockResolvedValue(mockProvider);
 
@@ -204,8 +222,8 @@ describe("useProvider", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    // Namespace is ignored - called with name only
-    expect(mockGetProvider).toHaveBeenCalledWith("openai-provider");
+    // Legacy namespace param is ignored - uses workspace from context
+    expect(mockGetProvider).toHaveBeenCalledWith("test-workspace", "openai-provider");
   });
 
   it("should return null when provider not found", async () => {

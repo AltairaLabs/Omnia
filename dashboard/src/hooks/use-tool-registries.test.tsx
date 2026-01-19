@@ -3,6 +3,24 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useToolRegistries, useToolRegistry } from "./use-tool-registries";
 
+// Mock workspace context
+const mockCurrentWorkspace = {
+  name: "test-workspace",
+  namespace: "test-namespace",
+  role: "editor",
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: [mockCurrentWorkspace],
+    isLoading: false,
+    error: null,
+    setCurrentWorkspace: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock tool registry data
 const mockToolRegistries = [
   {
@@ -95,7 +113,7 @@ describe("useToolRegistries", () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it("should call getToolRegistries without namespace (shared resources)", async () => {
+  it("should call getToolRegistries with workspace name", async () => {
     const { result } = renderHook(() => useToolRegistries(), {
       wrapper: TestWrapper,
     });
@@ -104,8 +122,8 @@ describe("useToolRegistries", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    // Tool registries are shared - called without namespace
-    expect(mockGetToolRegistries).toHaveBeenCalledWith();
+    // Tool registries are workspace-scoped
+    expect(mockGetToolRegistries).toHaveBeenCalledWith("test-workspace");
   });
 
   it("should filter by phase on client-side", async () => {
@@ -166,7 +184,7 @@ describe("useToolRegistry", () => {
     expect(result.current.data).toEqual(mockToolRegistries[0]);
   });
 
-  it("should call getToolRegistry with name only (shared resources)", async () => {
+  it("should call getToolRegistry with workspace and name", async () => {
     renderHook(() => useToolRegistry("github-tools"), {
       wrapper: TestWrapper,
     });
@@ -175,8 +193,8 @@ describe("useToolRegistry", () => {
       expect(mockGetToolRegistry).toHaveBeenCalled();
     });
 
-    // Tool registries are shared - called with name only
-    expect(mockGetToolRegistry).toHaveBeenCalledWith("github-tools");
+    // Tool registries are workspace-scoped
+    expect(mockGetToolRegistry).toHaveBeenCalledWith("test-workspace", "github-tools");
   });
 
   it("should not fetch when name is empty", () => {

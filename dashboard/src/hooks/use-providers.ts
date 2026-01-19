@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useDataService, type Provider as ServiceProvider } from "@/lib/data";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { Provider } from "@/types";
 
 type ProviderPhase = "Ready" | "Error";
@@ -11,46 +12,57 @@ interface UseProvidersOptions {
 }
 
 /**
- * Fetch shared providers.
- * Providers are shared/system-wide resources, not workspace-scoped.
+ * Fetch workspace-scoped providers.
+ * Uses current workspace context.
  * The DataService handles whether to use mock data (demo mode) or real API (live mode).
  */
 export function useProviders(options: UseProvidersOptions = {}) {
   const service = useDataService();
+  const { currentWorkspace } = useWorkspace();
+  const { phase } = options;
 
   return useQuery({
-    queryKey: ["providers", options, service.name],
+    queryKey: ["providers", currentWorkspace?.name, phase, service.name],
     queryFn: async (): Promise<Provider[]> => {
-      const response = await service.getProviders();
-      let providers = response as unknown as Provider[];
+      if (!currentWorkspace) {
+        return [];
+      }
+
+      let providers = await service.getProviders(currentWorkspace.name) as unknown as Provider[];
 
       // Client-side filtering for phase
-      if (options.phase) {
-        providers = providers.filter((p) => p.status?.phase === options.phase);
+      if (phase) {
+        providers = providers.filter((p) => p.status?.phase === phase);
       }
 
       return providers;
     },
+    enabled: !!currentWorkspace,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
 /**
- * Fetch a single provider by name.
- * Providers are shared/system-wide resources, not workspace-scoped.
+ * Fetch a single workspace-scoped provider by name.
+ * Uses current workspace context.
  *
  * @param name - Provider name (can be undefined)
  * @param _namespace - Deprecated parameter, kept for backwards compatibility.
  */
 export function useProvider(name: string | undefined, _namespace?: string) {
   const service = useDataService();
+  const { currentWorkspace } = useWorkspace();
 
   return useQuery({
-    queryKey: ["provider", name, service.name],
+    queryKey: ["provider", currentWorkspace?.name, name, service.name],
     queryFn: async (): Promise<Provider | null> => {
-      if (!name) return null;
-      const response = await service.getProvider(name) as ServiceProvider | undefined;
-      return (response as unknown as Provider) || null;
+      if (!name || !currentWorkspace) return null;
+      const provider = await service.getProvider(currentWorkspace.name, name) as ServiceProvider | undefined;
+      return (provider as unknown as Provider) || null;
     },
-    enabled: !!name,
+    enabled: !!name && !!currentWorkspace,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }

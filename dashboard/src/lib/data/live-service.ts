@@ -260,32 +260,47 @@ export class LiveDataService implements DataService {
   }
 
   // ============================================================
-  // Shared/system-wide resources - delegated to WorkspaceApiService
+  // Workspace-scoped ToolRegistries and Providers
   // ============================================================
 
-  async getToolRegistries(): Promise<ToolRegistry[]> {
-    return this.workspaceService.getToolRegistries();
+  async getToolRegistries(workspace: string): Promise<ToolRegistry[]> {
+    return this.workspaceService.getToolRegistries(workspace);
   }
 
-  async getToolRegistry(name: string): Promise<ToolRegistry | undefined> {
-    return this.workspaceService.getToolRegistry(name);
+  async getToolRegistry(workspace: string, name: string): Promise<ToolRegistry | undefined> {
+    return this.workspaceService.getToolRegistry(workspace, name);
   }
 
-  async getProviders(): Promise<Provider[]> {
-    return this.workspaceService.getProviders();
+  async getProviders(workspace: string): Promise<Provider[]> {
+    return this.workspaceService.getProviders(workspace);
   }
 
-  async getProvider(name: string): Promise<Provider | undefined> {
-    return this.workspaceService.getProvider(name);
+  async getProvider(workspace: string, name: string): Promise<Provider | undefined> {
+    return this.workspaceService.getProvider(workspace, name);
   }
 
-  async getStats(): Promise<Stats> {
-    // Stats endpoint - returns cluster-wide stats
-    const response = await fetch("/api/stats");
-    if (!response.ok) {
-      throw new Error(`Failed to fetch stats: ${response.statusText}`);
-    }
-    return response.json();
+  // ============================================================
+  // Shared/system-wide resources
+  // ============================================================
+
+  async getSharedToolRegistries(): Promise<ToolRegistry[]> {
+    return this.workspaceService.getSharedToolRegistries();
+  }
+
+  async getSharedToolRegistry(name: string): Promise<ToolRegistry | undefined> {
+    return this.workspaceService.getSharedToolRegistry(name);
+  }
+
+  async getSharedProviders(): Promise<Provider[]> {
+    return this.workspaceService.getSharedProviders();
+  }
+
+  async getSharedProvider(name: string): Promise<Provider | undefined> {
+    return this.workspaceService.getSharedProvider(name);
+  }
+
+  async getStats(workspace: string): Promise<Stats> {
+    return this.workspaceService.getStats(workspace);
   }
 
   // ============================================================
