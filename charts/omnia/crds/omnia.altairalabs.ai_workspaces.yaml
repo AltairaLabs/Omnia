@@ -81,6 +81,50 @@ spec:
                 required:
                 - enabled
                 type: object
+              costControls:
+                description: costControls defines budget and cost control settings.
+                properties:
+                  alertThresholds:
+                    description: alertThresholds defines thresholds for cost alerts.
+                    items:
+                      description: CostAlertThreshold defines a threshold for cost
+                        alerts.
+                      properties:
+                        notify:
+                          description: notify is a list of email addresses to notify
+                            when threshold is reached.
+                          items:
+                            type: string
+                          type: array
+                        percent:
+                          description: percent is the percentage of budget at which
+                            to trigger the alert.
+                          format: int32
+                          maximum: 100
+                          minimum: 1
+                          type: integer
+                      required:
+                      - percent
+                      type: object
+                    type: array
+                  budgetExceededAction:
+                    default: warn
+                    description: budgetExceededAction defines what action to take
+                      when budget is exceeded.
+                    enum:
+                    - warn
+                    - pauseJobs
+                    - block
+                    type: string
+                  dailyBudget:
+                    description: dailyBudget is the maximum daily spending limit in
+                      USD (e.g., "100.00").
+                    type: string
+                  monthlyBudget:
+                    description: monthlyBudget is the maximum monthly spending limit
+                      in USD (e.g., "2000.00").
+                    type: string
+                type: object
               defaultTags:
                 additionalProperties:
                   type: string
@@ -349,6 +393,27 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              costUsage:
+                description: costUsage tracks the current cost usage for this workspace.
+                properties:
+                  dailyBudget:
+                    description: dailyBudget is the configured daily budget in USD.
+                    type: string
+                  dailySpend:
+                    description: dailySpend is the current day's spending in USD.
+                    type: string
+                  lastUpdated:
+                    description: lastUpdated is the timestamp of the last cost calculation.
+                    format: date-time
+                    type: string
+                  monthlyBudget:
+                    description: monthlyBudget is the configured monthly budget in
+                      USD.
+                    type: string
+                  monthlySpend:
+                    description: monthlySpend is the current month's spending in USD.
+                    type: string
+                type: object
               members:
                 description: members tracks the count of members by role.
                 properties:

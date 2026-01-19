@@ -35,6 +35,8 @@ export { useSecrets, useSecret, useCreateSecret, useDeleteSecret } from "./use-s
 export { useSharedProviders, useSharedProvider } from "./use-shared-providers";
 export { useSharedToolRegistries, useSharedToolRegistry } from "./use-shared-tool-registries";
 export { useWorkspacePermissions } from "./use-workspace-permissions";
+export { useWorkspaceCosts } from "./use-workspace-costs";
+export type { WorkspaceCostData } from "./use-workspace-costs";
 export type { DashboardStats } from "./use-stats";
 export type { K8sEvent } from "./use-agent-events";
 export type { ActivityDataPoint } from "./use-agent-activity";

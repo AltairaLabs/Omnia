@@ -371,6 +371,27 @@ export const mockPromptPacks: PromptPack[] = [
       lastUpdated: hoursAgo(1),
     },
   },
+  // E2E test prompt pack - must have namespace "default" to match default workspace
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "PromptPack",
+    metadata: {
+      name: "e2e-test-prompts",
+      namespace: "default",
+      creationTimestamp: hoursAgo(1),
+      uid: "pack-e2e-001",
+    },
+    spec: {
+      source: { type: "configmap", configMapRef: { name: "e2e-test-prompts-v1.0.0" } },
+      version: "1.0.0",
+      rollout: { type: "immediate" },
+    },
+    status: {
+      phase: "Active",
+      activeVersion: "1.0.0",
+      lastUpdated: hoursAgo(0.5),
+    },
+  },
 ];
 
 // Mock ToolRegistries

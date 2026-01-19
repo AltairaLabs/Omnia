@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAgents } from "@/hooks";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntimePhase } from "@/types";
 
 type ViewMode = "cards" | "table";
@@ -37,7 +38,11 @@ export default function AgentsPage() {
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
 
-  const { data: agents, isLoading } = useAgents();
+  const { isLoading: isWorkspaceLoading } = useWorkspace();
+  const { data: agents, isLoading: isAgentsLoading } = useAgents();
+
+  // Show loading when either workspace or agents are loading
+  const isLoading = isWorkspaceLoading || isAgentsLoading;
 
   // Extract unique namespaces
   const allNamespaces = useMemo(() => {

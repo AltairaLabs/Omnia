@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToolRegistries, useSharedToolRegistries } from "@/hooks";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { ToolRegistry, ToolRegistryPhase } from "@/types";
 
 type FilterPhase = "all" | ToolRegistryPhase;
@@ -22,10 +23,12 @@ export default function ToolsPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
 
-  const { data: workspaceRegistries, isLoading: isLoadingWorkspace } = useToolRegistries();
+  const { isLoading: isWorkspaceLoading } = useWorkspace();
+  const { data: workspaceRegistries, isLoading: isLoadingRegistries } = useToolRegistries();
   const { data: sharedRegistries, isLoading: isLoadingShared } = useSharedToolRegistries();
 
-  const isLoading = isLoadingWorkspace || isLoadingShared;
+  // Show loading when workspace, workspace registries, or shared registries are loading
+  const isLoading = isWorkspaceLoading || isLoadingRegistries || isLoadingShared;
 
   // Combine shared and workspace registries, marking shared ones
   const registries = useMemo((): ToolRegistryWithSource[] => {
