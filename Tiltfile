@@ -350,6 +350,10 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
         'opa.mode=sidecar',
         # Use persistence for model cache
         'ollama.persistence.enabled=true',
+        # Grant anonymous users owner access for local development
+        # WARNING: This allows unauthenticated write access - only for dev
+        'workspace.anonymousAccess.enabled=true',
+        'workspace.anonymousAccess.role=owner',
     ]
 
     if ENABLE_AUDIO_DEMO:

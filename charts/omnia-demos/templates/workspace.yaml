@@ -16,3 +16,10 @@ spec:
     name: {{ .Values.namespace }}
     create: false
   roleBindings: []
+  {{- if .Values.workspace.anonymousAccess.enabled }}
+  # Anonymous access configuration
+  # WARNING: Granting editor/owner to anonymous users allows unauthenticated write access
+  anonymousAccess:
+    enabled: true
+    role: {{ .Values.workspace.anonymousAccess.role }}
+  {{- end }}
