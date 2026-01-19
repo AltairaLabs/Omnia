@@ -32,7 +32,7 @@ export interface LogEntry {
 
 interface LogViewerProps {
   agentName: string;
-  namespace: string;
+  workspace: string;
   containers?: string[];
   className?: string;
   defaultTailLines?: number;
@@ -125,7 +125,7 @@ function LogContent({
 
 export function LogViewer({
   agentName,
-  namespace,
+  workspace,
   containers = ["facade", "runtime"],
   className,
   defaultTailLines = 100,
@@ -136,15 +136,17 @@ export function LogViewer({
   const [tailLines, setTailLines] = useState(defaultTailLines);
 
   // Build Grafana Explore URLs for Loki and Tempo
+  // Note: These need the K8s namespace, not workspace name - using workspace for now
+  // TODO: Get actual namespace from workspace or agent metadata
   const lokiExploreUrl = lokiEnabled
-    ? buildLokiExploreUrl(grafanaConfig, namespace, agentName)
+    ? buildLokiExploreUrl(grafanaConfig, workspace, agentName)
     : null;
   const tempoExploreUrl = tempoEnabled
-    ? buildTempoExploreUrl(grafanaConfig, namespace, agentName)
+    ? buildTempoExploreUrl(grafanaConfig, workspace, agentName)
     : null;
 
   // Fetch logs via DataService (works in both demo and live modes)
-  const { data: apiLogs, isLoading, refetch } = useLogs(namespace, agentName, {
+  const { data: apiLogs, isLoading, refetch } = useLogs(workspace, agentName, {
     tailLines,
     sinceSeconds: 3600,
   });
@@ -212,10 +214,10 @@ export function LogViewer({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${agentName}-${namespace}-logs.txt`;
+    a.download = `${agentName}-${workspace}-logs.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [filteredLogs, agentName, namespace]);
+  }, [filteredLogs, agentName, workspace]);
 
   const formatTimestamp = (date: Date) => {
     return date.toLocaleTimeString([], {
@@ -388,7 +390,7 @@ export function LogViewer({
           {filteredLogs.length} / {logs.length} entries
         </span>
         <span>
-          {getStatusText(isDemoMode, isLoading)} • {agentName}.{namespace}
+          {getStatusText(isDemoMode, isLoading)} • {agentName}.{workspace}
         </span>
       </div>
     </div>

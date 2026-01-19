@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 interface EventsPanelProps {
   agentName: string;
-  namespace: string;
+  workspace: string;
 }
 
 /**
@@ -144,10 +144,10 @@ function renderEventsPanelContent(
 /**
  * Events panel showing Kubernetes events for an agent.
  */
-export function EventsPanel({ agentName, namespace }: Readonly<EventsPanelProps>) {
+export function EventsPanel({ agentName, workspace }: Readonly<EventsPanelProps>) {
   const { data: events, isLoading, error, refetch, isFetching } = useAgentEvents(
     agentName,
-    namespace
+    workspace
   );
 
   return (
