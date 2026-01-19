@@ -33,7 +33,7 @@ export const GET = withWorkspaceAccess<RouteParams>(
       const { searchParams } = new URL(request.url);
       const lines = parseInt(searchParams.get("lines") || "100", 10);
 
-      const logs = await getPodLogs(result.clientOptions, `app.kubernetes.io/name=${agentName}`, lines);
+      const logs = await getPodLogs(result.clientOptions, `app.kubernetes.io/instance=${agentName}`, lines);
 
       return NextResponse.json(logs);
     } catch (error) {
