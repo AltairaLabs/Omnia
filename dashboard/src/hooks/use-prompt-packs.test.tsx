@@ -46,12 +46,34 @@ const mockPromptPacks = [
   },
 ];
 
+// Mock workspace context
+const mockWorkspace = {
+  name: "test-workspace",
+  namespace: "production",
+  displayName: "Test Workspace",
+  environment: "development" as const,
+  role: "owner" as const,
+  permissions: { view: true, create: true, edit: true, delete: true, scale: true },
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockWorkspace,
+    workspaces: [mockWorkspace],
+    setCurrentWorkspace: vi.fn(),
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock useDataService
 const mockGetPromptPacks = vi.fn().mockResolvedValue(mockPromptPacks);
 const mockGetPromptPack = vi.fn().mockResolvedValue(mockPromptPacks[0]);
 vi.mock("@/lib/data", () => ({
   useDataService: () => ({
     name: "mock",
+    isDemo: true,
     getPromptPacks: mockGetPromptPacks,
     getPromptPack: mockGetPromptPack,
   }),
@@ -94,10 +116,8 @@ describe("usePromptPacks", () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it("should filter by namespace", async () => {
-    mockGetPromptPacks.mockResolvedValueOnce(mockPromptPacks.filter(p => p.metadata.namespace === "production"));
-
-    const { result } = renderHook(() => usePromptPacks({ namespace: "production" }), {
+  it("should use workspace name for fetching", async () => {
+    const { result } = renderHook(() => usePromptPacks(), {
       wrapper: TestWrapper,
     });
 
@@ -105,7 +125,8 @@ describe("usePromptPacks", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockGetPromptPacks).toHaveBeenCalledWith("production");
+    // Uses workspace name from context
+    expect(mockGetPromptPacks).toHaveBeenCalledWith("test-workspace");
   });
 
   it("should filter by phase on client-side", async () => {
@@ -155,7 +176,7 @@ describe("usePromptPack", () => {
   });
 
   it("should fetch a single prompt pack", async () => {
-    const { result } = renderHook(() => usePromptPack("customer-support-v1", "production"), {
+    const { result } = renderHook(() => usePromptPack("customer-support-v1"), {
       wrapper: TestWrapper,
     });
 
@@ -166,7 +187,7 @@ describe("usePromptPack", () => {
     expect(result.current.data).toEqual(mockPromptPacks[0]);
   });
 
-  it("should use default namespace when not provided", async () => {
+  it("should use workspace name from context", async () => {
     renderHook(() => usePromptPack("customer-support-v1"), {
       wrapper: TestWrapper,
     });
@@ -175,7 +196,8 @@ describe("usePromptPack", () => {
       expect(mockGetPromptPack).toHaveBeenCalled();
     });
 
-    expect(mockGetPromptPack).toHaveBeenCalledWith("production", "customer-support-v1");
+    // Uses workspace name from context
+    expect(mockGetPromptPack).toHaveBeenCalledWith("test-workspace", "customer-support-v1");
   });
 
   it("should not fetch when name is empty", () => {
@@ -189,7 +211,7 @@ describe("usePromptPack", () => {
   it("should return null when prompt pack not found", async () => {
     mockGetPromptPack.mockResolvedValueOnce(null);
 
-    const { result } = renderHook(() => usePromptPack("non-existent", "production"), {
+    const { result } = renderHook(() => usePromptPack("non-existent"), {
       wrapper: TestWrapper,
     });
 

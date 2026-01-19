@@ -10,6 +10,7 @@ import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel } from "@/com
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { useDataService } from "@/lib/data";
+import { useWorkspace } from "@/contexts/workspace-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,14 +33,16 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const namespace = searchParams.get("namespace") || "production";
+  const { currentWorkspace } = useWorkspace();
+  // Use workspace name for API calls (not K8s namespace)
+  const workspace = currentWorkspace?.name || "demo";
   const currentTab = searchParams.get("tab") || "overview";
   const queryClient = useQueryClient();
   const dataService = useDataService();
 
-  const { data: agent, isLoading } = useAgent(name, namespace);
-  const { data: provider } = useProvider(agent?.spec?.providerRef?.name, namespace);
-  const { data: promptPack } = usePromptPack(agent?.spec?.promptPackRef?.name || "", namespace);
+  const { data: agent, isLoading } = useAgent(name, workspace);
+  const { data: provider } = useProvider(agent?.spec?.providerRef?.name, workspace);
+  const { data: promptPack } = usePromptPack(agent?.spec?.promptPackRef?.name || "", workspace);
 
   const handleTabChange = useCallback((tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -48,15 +51,15 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
   }, [searchParams, router, pathname]);
 
   const handleScale = useCallback(async (replicas: number) => {
-    await dataService.scaleAgent(namespace, name, replicas);
+    await dataService.scaleAgent(workspace, name, replicas);
     // Invalidate queries to refresh data
-    await queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
+    await queryClient.invalidateQueries({ queryKey: ["agent", workspace, name] });
     await queryClient.invalidateQueries({ queryKey: ["agents"] });
-  }, [namespace, name, queryClient, dataService]);
+  }, [workspace, name, queryClient, dataService]);
 
   const refetchAgent = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["agent", namespace, name] });
-  }, [namespace, name, queryClient]);
+    queryClient.invalidateQueries({ queryKey: ["agent", workspace, name] });
+  }, [workspace, name, queryClient]);
 
   if (isLoading) {
     return (
@@ -77,7 +80,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
         <div className="flex-1 p-6">
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-muted-foreground">
-              Agent &quot;{name}&quot; not found in namespace &quot;{namespace}&quot;
+              Agent &quot;{name}&quot; not found in workspace &quot;{workspace}&quot;
             </p>
             <Link href="/agents">
               <Button variant="outline" className="mt-4">
@@ -251,7 +254,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Name</span>
                       <Link
-                        href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || namespace}`}
+                        href={`/providers/${spec.providerRef.name}?namespace=${spec.providerRef.namespace || metadata.namespace}`}
                         className="font-medium text-primary hover:underline"
                       >
                         {spec.providerRef.name}
@@ -317,7 +320,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Name</span>
                     <Link
-                      href={`/promptpacks/${spec.promptPackRef?.name}?namespace=${namespace}`}
+                      href={`/promptpacks/${spec.promptPackRef?.name}?namespace=${metadata.namespace}`}
                       className="font-medium text-primary hover:underline"
                     >
                       {spec.promptPackRef?.name || "-"}
@@ -368,7 +371,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
           <TabsContent value="logs" className="mt-4">
             <LogViewer
               agentName={metadata.name}
-              namespace={metadata.namespace || "default"}
+              workspace={workspace}
             />
           </TabsContent>
 
@@ -394,7 +397,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
           <TabsContent value="events" className="mt-4">
             <EventsPanel
               agentName={metadata.name}
-              namespace={metadata.namespace || "default"}
+              workspace={workspace}
             />
           </TabsContent>
         </Tabs>

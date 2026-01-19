@@ -5,6 +5,24 @@ kind: Namespace
 metadata:
   name: dev-agents
 ---
+# Workspace CRD - maps to dev-agents namespace
+# This makes the namespace visible in the dashboard
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: dev-agents
+spec:
+  displayName: Development Agents
+  description: Development workspace for agent testing
+  environment: development
+  namespace:
+    name: dev-agents
+  # Enable anonymous access with viewer role for development
+  # WARNING: Only use viewer/none in production. editor/owner grants write access.
+  anonymousAccess:
+    enabled: true
+    role: viewer
+---
 # =============================================================================
 # Credential Secrets for Providers
 # These secrets are managed by the dashboard's Credentials Management UI

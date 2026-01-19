@@ -4,12 +4,13 @@
  * GET /api/shared/providers/:providerName - Get provider details
  *
  * Providers are cluster-wide resources that define available LLM providers.
- * Any authenticated user can view shared providers.
+ * Accessible to all users (including anonymous) - these are read-only
+ * configuration resources.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSharedCrd } from "@/lib/k8s/crd-operations";
-import { requireAuth, notFoundResponse, serverErrorResponse, SYSTEM_NAMESPACE } from "@/lib/k8s/workspace-route-helpers";
+import { notFoundResponse, serverErrorResponse, SYSTEM_NAMESPACE } from "@/lib/k8s/workspace-route-helpers";
 import type { Provider } from "@/lib/data/types";
 
 interface RouteContext {
@@ -20,16 +21,13 @@ interface RouteContext {
  * GET /api/shared/providers/:providerName
  *
  * Get a specific shared provider by name.
- * Requires authentication (any role).
+ * No authentication required - read-only configuration data.
  */
 export async function GET(
   _request: NextRequest,
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const auth = await requireAuth();
-    if (!auth.ok) return auth.response;
-
     const { providerName } = await context.params;
 
     const provider = await getSharedCrd<Provider>(

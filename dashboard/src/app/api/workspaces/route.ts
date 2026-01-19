@@ -10,9 +10,51 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { getAccessibleWorkspaces } from "@/lib/auth/workspace-authz";
-import type { WorkspaceRole } from "@/types/workspace";
+import { ROLE_PERMISSIONS, type WorkspaceRole } from "@/types/workspace";
+
+/**
+ * Check if demo mode is enabled.
+ */
+function isDemoMode(): boolean {
+  return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+}
+
+/**
+ * Mock workspaces for demo mode.
+ */
+const MOCK_WORKSPACES = [
+  {
+    name: "default",
+    displayName: "Default Workspace",
+    description: "Default development workspace for demo",
+    environment: "development" as const,
+    namespace: "default",
+    role: "owner" as WorkspaceRole,
+    permissions: ROLE_PERMISSIONS.owner,
+    createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    name: "production",
+    displayName: "Production",
+    description: "Production environment workspace",
+    environment: "production" as const,
+    namespace: "production",
+    role: "editor" as WorkspaceRole,
+    permissions: { view: true, create: true, edit: true, delete: false, scale: true },
+    createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    name: "staging",
+    displayName: "Staging",
+    description: "Staging environment for testing",
+    environment: "staging" as const,
+    namespace: "staging",
+    role: "viewer" as WorkspaceRole,
+    permissions: { view: true, create: false, edit: false, delete: false, scale: false },
+    createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+];
 
 /**
  * Validate role query parameter.
@@ -26,20 +68,16 @@ function isValidRole(role: string | null): role is WorkspaceRole {
  *
  * List all workspaces the current user has access to.
  * Filters based on group membership (roleBindings) and individual grants (directGrants).
+ * In demo mode, returns mock workspaces.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser();
-
-    // Check authentication
-    if (user.provider === "anonymous") {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-          message: "Authentication required",
-        },
-        { status: 401 }
-      );
+    // In demo mode, return mock workspaces (no K8s connection needed)
+    if (isDemoMode()) {
+      return NextResponse.json({
+        workspaces: MOCK_WORKSPACES,
+        count: MOCK_WORKSPACES.length,
+      });
     }
 
     // Parse optional minRole filter

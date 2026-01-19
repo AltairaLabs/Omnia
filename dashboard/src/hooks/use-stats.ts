@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useDataService } from "@/lib/data";
+import { useWorkspace } from "@/contexts/workspace-context";
 import { queryPrometheus, isPrometheusAvailable } from "@/lib/prometheus";
 import { AgentQueries } from "@/lib/prometheus-queries";
 
@@ -31,11 +32,21 @@ export interface DashboardStats {
 
 export function useStats() {
   const service = useDataService();
+  const { currentWorkspace } = useWorkspace();
 
   return useQuery({
-    queryKey: ["stats", service.name],
+    queryKey: ["stats", currentWorkspace?.name, service.name],
     queryFn: async (): Promise<DashboardStats> => {
-      const stats = await service.getStats();
+      if (!currentWorkspace) {
+        return {
+          agents: { total: 0, running: 0, pending: 0, failed: 0 },
+          promptPacks: { total: 0, active: 0, canary: 0 },
+          tools: { total: 0, available: 0, degraded: 0 },
+          sessions: { active: 0, trend: null },
+        };
+      }
+
+      const stats = await service.getStats(currentWorkspace.name);
 
       // Fetch session metrics from Prometheus
       let sessionActive = 0;
@@ -93,6 +104,9 @@ export function useStats() {
         },
       };
     },
+    enabled: !!currentWorkspace,
     refetchInterval: 30000, // Refetch every 30 seconds
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }

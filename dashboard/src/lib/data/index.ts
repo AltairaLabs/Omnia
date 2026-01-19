@@ -9,22 +9,21 @@
  *   DataService (interface)
  *   ├── MockDataService       - Mock data for demo mode
  *   └── LiveDataService       - Production data (composes:)
- *       ├── OperatorApiService  - CRD + K8s data (agents, logs, events, etc.)
+ *       ├── WorkspaceApiService - Workspace-scoped K8s data via ServiceAccount tokens
  *       └── PrometheusService   - Metrics/cost data from Prometheus
  *
- * The operator acts as the gateway to K8s data - the dashboard never
- * talks directly to K8s. All CRD operations, logs, events, and namespaces
- * go through the operator API.
+ * The dashboard uses workspace-scoped ServiceAccount tokens to access K8s data
+ * directly, with RBAC enforced at the K8s level.
  *
  * Usage:
  *   import { useDataService } from "@/lib/data";
  *   const service = useDataService();
- *   const agents = await service.getAgents();
+ *   const agents = await service.getAgents("my-workspace");
  */
 
 export * from "./types";
 export { MockDataService, MockAgentConnection } from "./mock-service";
-export { OperatorApiService } from "./operator-service";
+export { WorkspaceApiService } from "./workspace-api-service";
 export { PrometheusService } from "./prometheus-service";
 export { LiveDataService, LiveAgentConnection } from "./live-service";
 export { DataServiceProvider, useDataService, createDataService } from "./provider";

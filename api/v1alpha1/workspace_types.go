@@ -114,6 +114,22 @@ type DirectGrant struct {
 	Expires *metav1.Time `json:"expires,omitempty"`
 }
 
+// AnonymousAccess configures access for unauthenticated users.
+// WARNING: Granting editor or owner access allows anonymous users to modify resources.
+// Only use in isolated development environments.
+type AnonymousAccess struct {
+	// enabled specifies whether anonymous users can access this workspace.
+	// If false or omitted, anonymous users have no access.
+	// +kubebuilder:validation:Required
+	Enabled bool `json:"enabled"`
+
+	// role is the workspace role granted to anonymous users.
+	// Defaults to viewer if enabled is true but role is not specified.
+	// WARNING: editor and owner grant write access to anonymous users.
+	// +optional
+	Role WorkspaceRole `json:"role,omitempty"`
+}
+
 // ComputeQuotas defines compute resource quotas.
 type ComputeQuotas struct {
 	// requestsCPU is the total CPU requests allowed (e.g., "50").
@@ -226,6 +242,12 @@ type WorkspaceSpec struct {
 	// directGrants are direct user grants for exceptions (use sparingly).
 	// +optional
 	DirectGrants []DirectGrant `json:"directGrants,omitempty"`
+
+	// anonymousAccess configures access for unauthenticated users.
+	// If omitted, anonymous users have no access to this workspace.
+	// WARNING: Granting editor or owner allows anonymous users to modify resources.
+	// +optional
+	AnonymousAccess *AnonymousAccess `json:"anonymousAccess,omitempty"`
 
 	// quotas defines resource quotas for this workspace.
 	// +optional

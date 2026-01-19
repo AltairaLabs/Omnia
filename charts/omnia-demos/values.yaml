@@ -4,6 +4,18 @@
 # -- Namespace for demo resources
 namespace: omnia-demo
 
+# -- Workspace configuration
+workspace:
+  # -- Anonymous access configuration
+  # Controls what access unauthenticated users have to this workspace
+  anonymousAccess:
+    # -- Enable anonymous access to this workspace
+    # If false, anonymous users cannot access resources in this workspace
+    enabled: false
+    # -- Role granted to anonymous users: viewer, editor, or owner
+    # WARNING: editor/owner grants write access - only use in dev environments
+    role: viewer
+
 # Ollama configuration (local LLM server)
 ollama:
   # -- Ollama image

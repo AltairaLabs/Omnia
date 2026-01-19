@@ -57,6 +57,9 @@ interface WorkspaceProviderProps {
 /**
  * Workspace provider - manages workspace selection state.
  * Persists the selected workspace to localStorage.
+ *
+ * Note: UI refresh on workspace change is handled by WorkspaceContent
+ * using React's key prop to remount the content tree.
  */
 export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>) {
   const { data: workspaces = [], isLoading, error, refetch } = useWorkspaces();

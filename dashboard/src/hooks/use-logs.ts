@@ -14,19 +14,23 @@ export interface UseLogsOptions {
  * Hook to fetch logs for an agent.
  *
  * In demo mode: MockDataService returns generated mock logs.
- * In live mode: OperatorApiService fetches real logs from K8s pods.
+ * In live mode: WorkspaceApiService fetches real logs from K8s pods.
+ *
+ * @param workspace - Workspace name (not K8s namespace)
+ * @param name - Agent name
+ * @param options - Log fetch options
  */
 export function useLogs(
-  namespace: string,
+  workspace: string,
   name: string,
   options: UseLogsOptions = {}
 ) {
   const service = useDataService();
 
   return useQuery({
-    queryKey: ["logs", namespace, name, options, service.name],
+    queryKey: ["logs", workspace, name, options, service.name],
     queryFn: async () => {
-      const logs = await service.getAgentLogs(namespace, name, {
+      const logs = await service.getAgentLogs(workspace, name, {
         tailLines: options.tailLines || 200,
         sinceSeconds: options.sinceSeconds || 3600,
         container: options.container,

@@ -51,16 +51,6 @@ type WorkspaceApiHandlerSimple = (
 ) => Promise<NextResponse> | NextResponse;
 
 /**
- * Returns 401 Unauthorized response for anonymous users.
- */
-function unauthorizedResponse(): NextResponse {
-  return NextResponse.json(
-    { error: "Unauthorized", message: "Authentication required" },
-    { status: 401 }
-  );
-}
-
-/**
  * Returns 403 Forbidden response for workspace access denial.
  */
 function forbiddenResponse(
@@ -125,11 +115,10 @@ export function withWorkspaceAccess<
 ): (request: NextRequest, context: WorkspaceRouteContext<TParams>) => Promise<NextResponse> {
   return async (request: NextRequest, context: WorkspaceRouteContext<TParams>) => {
     const user = await getUser();
-    if (user.provider === "anonymous") {
-      return unauthorizedResponse();
-    }
-
     const { name: workspaceName } = await context.params;
+
+    // checkWorkspaceAccess handles both authenticated and anonymous users
+    // Anonymous users get viewer access to existing workspaces
     const access = await checkWorkspaceAccess(workspaceName, requiredRole);
 
     if (!access.granted) {
@@ -162,9 +151,6 @@ export function withWorkspaceQuery(
 ): (request: NextRequest) => Promise<NextResponse> {
   return async (request: NextRequest) => {
     const user = await getUser();
-    if (user.provider === "anonymous") {
-      return unauthorizedResponse();
-    }
 
     const workspaceName = request.nextUrl.searchParams.get("workspace");
     if (!workspaceName) {
@@ -174,6 +160,8 @@ export function withWorkspaceQuery(
       );
     }
 
+    // checkWorkspaceAccess handles both authenticated and anonymous users
+    // Anonymous users get viewer access to existing workspaces
     const access = await checkWorkspaceAccess(workspaceName, requiredRole);
     if (!access.granted) {
       return forbiddenResponse(workspaceName, access, requiredRole);

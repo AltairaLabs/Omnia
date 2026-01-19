@@ -18,8 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { usePromptPacks, useToolRegistries, useNamespaces, useReadOnly, usePermissions, Permission } from "@/hooks";
+import { usePromptPacks, useToolRegistries, useReadOnly, usePermissions, Permission } from "@/hooks";
 import { useDataService } from "@/lib/data";
+import { useWorkspace } from "@/contexts/workspace-context";
 import {
   ChevronLeft,
   ChevronRight,
@@ -43,7 +44,6 @@ type SessionType = "memory" | "redis";
 interface WizardFormData {
   // Step 1: Basic Info
   name: string;
-  namespace: string;
   // Step 2: Framework
   framework: FrameworkType;
   frameworkVersion: string;
@@ -72,7 +72,6 @@ interface WizardFormData {
 
 const INITIAL_FORM_DATA: WizardFormData = {
   name: "",
-  namespace: "default",
   framework: "promptkit",
   frameworkVersion: "",
   customImage: "",
@@ -95,7 +94,7 @@ const INITIAL_FORM_DATA: WizardFormData = {
 };
 
 const STEPS = [
-  { title: "Basic Info", description: "Name and namespace" },
+  { title: "Basic Info", description: "Name" },
   { title: "Framework", description: "Agent framework" },
   { title: "PromptPack", description: "Select prompts" },
   { title: "Provider", description: "LLM configuration" },
@@ -183,10 +182,10 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
   const disabledMessage = getDisabledMessage(isReadOnly, canDeploy, readOnlyMessage);
   const queryClient = useQueryClient();
   const dataService = useDataService();
-  const { data: namespaces } = useNamespaces();
-  // Filter PromptPacks by selected namespace (PromptPackRef has no namespace field)
-  const { data: promptPacks } = usePromptPacks({ namespace: formData.namespace });
-  // Get all ToolRegistries (cross-namespace is allowed)
+  const { currentWorkspace } = useWorkspace();
+  // Get PromptPacks from current workspace
+  const { data: promptPacks } = usePromptPacks();
+  // Get all ToolRegistries (shared resources)
   const { data: toolRegistries } = useToolRegistries();
 
   const updateField = useCallback(<K extends keyof WizardFormData>(
@@ -223,7 +222,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
       kind: "AgentRuntime",
       metadata: {
         name: formData.name,
-        namespace: formData.namespace,
+        namespace: currentWorkspace?.namespace || "default",
       },
       spec: {
         promptPackRef: {
@@ -291,15 +290,20 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
     }
 
     return yaml;
-  }, [formData]);
+  }, [formData, currentWorkspace]);
 
   const handleSubmit = async () => {
+    if (!currentWorkspace) {
+      setError("No workspace selected");
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
     try {
       const agentSpec = generateYaml();
-      await dataService.createAgent(agentSpec);
+      await dataService.createAgent(currentWorkspace.name, agentSpec);
       setSuccess(true);
       queryClient.invalidateQueries({ queryKey: ["agents"] });
 
@@ -345,26 +349,13 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="namespace">Namespace</Label>
-              <Select
-                value={formData.namespace}
-                onValueChange={(v) => {
-                  updateField("namespace", v);
-                  // Clear promptPackName when namespace changes since PromptPacks are namespace-scoped
-                  updateField("promptPackName", "");
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select namespace" />
-                </SelectTrigger>
-                <SelectContent>
-                  {namespaces?.map((ns) => (
-                    <SelectItem key={ns} value={ns}>
-                      {ns}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Workspace</Label>
+              <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">
+                {currentWorkspace?.displayName || currentWorkspace?.name || "No workspace selected"}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Agent will be deployed to the {currentWorkspace?.namespace || "default"} namespace
+              </p>
             </div>
           </div>
         );
@@ -420,7 +411,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
             <div className="space-y-2">
               <Label>PromptPack</Label>
               <p className="text-xs text-muted-foreground mb-2">
-                Showing PromptPacks in {formData.namespace} namespace
+                Showing PromptPacks in {currentWorkspace?.namespace} namespace
               </p>
               <Select
                 value={formData.promptPackName}
@@ -539,7 +530,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                 Cross-namespace references are supported
               </p>
               <Select
-                value={formData.toolRegistryName ? `${formData.toolRegistryNamespace || formData.namespace}/${formData.toolRegistryName}` : "__none__"}
+                value={formData.toolRegistryName ? `${formData.toolRegistryNamespace || currentWorkspace?.namespace}/${formData.toolRegistryName}` : "__none__"}
                 onValueChange={(v) => {
                   if (v === "__none__") {
                     updateField("toolRegistryName", "");
@@ -548,7 +539,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                     const [ns, name] = v.split("/");
                     updateField("toolRegistryName", name);
                     // Only set namespace if different from agent namespace
-                    updateField("toolRegistryNamespace", ns === formData.namespace ? "" : ns);
+                    updateField("toolRegistryNamespace", ns === currentWorkspace?.namespace ? "" : ns);
                   }
                 }}
               >
@@ -560,7 +551,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                   {toolRegistries?.map((registry) => {
                     const ns = registry.metadata.namespace || "default";
                     const name = registry.metadata.name;
-                    const isSameNamespace = ns === formData.namespace;
+                    const isSameNamespace = ns === currentWorkspace?.namespace;
                     return (
                       <SelectItem key={registry.metadata.uid} value={`${ns}/${name}`}>
                         <div className="flex items-center gap-2">
@@ -707,7 +698,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                 </div>
                 <h3 className="text-lg font-semibold">Agent Created!</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {formData.name} is being deployed to {formData.namespace}
+                  {formData.name} is being deployed to {currentWorkspace?.namespace}
                 </p>
               </div>
             ) : (
@@ -715,7 +706,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                 <div className="flex items-center justify-between">
                   <h3 className="font-medium">Review Configuration</h3>
                   <Badge variant="outline">
-                    {formData.namespace}/{formData.name}
+                    {currentWorkspace?.namespace}/{formData.name}
                   </Badge>
                 </div>
 

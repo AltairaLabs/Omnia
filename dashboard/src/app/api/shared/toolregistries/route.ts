@@ -4,25 +4,23 @@
  * GET /api/shared/toolregistries - List all shared tool registries
  *
  * Tool registries are cluster-wide resources that define available tools.
- * Any authenticated user can list shared tool registries.
+ * Accessible to all users (including anonymous) - these are read-only
+ * configuration resources.
  */
 
 import { NextResponse } from "next/server";
 import { listSharedCrd } from "@/lib/k8s/crd-operations";
-import { requireAuth, serverErrorResponse, SYSTEM_NAMESPACE } from "@/lib/k8s/workspace-route-helpers";
+import { serverErrorResponse, SYSTEM_NAMESPACE } from "@/lib/k8s/workspace-route-helpers";
 import type { ToolRegistry } from "@/lib/data/types";
 
 /**
  * GET /api/shared/toolregistries
  *
  * List all shared tool registries in the system namespace.
- * Requires authentication (any role).
+ * No authentication required - read-only configuration data.
  */
 export async function GET(): Promise<NextResponse> {
   try {
-    const auth = await requireAuth();
-    if (!auth.ok) return auth.response;
-
     const toolRegistries = await listSharedCrd<ToolRegistry>(
       "toolregistries",
       SYSTEM_NAMESPACE

@@ -31,9 +31,19 @@ export const GET = withWorkspaceAccess<RouteParams>(
       if (!result.ok) return result.response;
 
       const { searchParams } = new URL(request.url);
-      const lines = parseInt(searchParams.get("lines") || "100", 10);
+      const tailLines = parseInt(searchParams.get("tailLines") || searchParams.get("lines") || "100", 10);
+      const sinceSeconds = searchParams.get("sinceSeconds")
+        ? parseInt(searchParams.get("sinceSeconds")!, 10)
+        : undefined;
+      const container = searchParams.get("container") || undefined;
 
-      const logs = await getPodLogs(result.clientOptions, `app.kubernetes.io/name=${agentName}`, lines);
+      const logs = await getPodLogs(
+        result.clientOptions,
+        `app.kubernetes.io/instance=${agentName}`,
+        tailLines,
+        sinceSeconds,
+        container
+      );
 
       return NextResponse.json(logs);
     } catch (error) {

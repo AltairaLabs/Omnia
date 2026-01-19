@@ -61,6 +61,11 @@ export default defineConfig({
         "src/components/agents/deploy-wizard.tsx", // Deploy wizard (tested via E2E)
         "src/components/agents/events-panel.tsx", // Events panel (tested via E2E)
         "src/components/topology/node-summary-card.tsx", // Node summary card (tested via E2E)
+        "src/lib/k8s/token-fetcher.ts", // K8s in-cluster auth (requires K8s env, tested via integration)
+        "src/lib/k8s/workspace-k8s-client-factory.ts", // K8s client factory (requires K8s env, tested via integration)
+        "src/lib/data/workspace-api-service.ts", // API service (tested via E2E)
+        "src/hooks/use-agents.ts", // Agent hooks (tested via E2E)
+        "src/hooks/use-namespaces.ts", // Namespace hooks (tested via E2E)
       ],
       thresholds: {
         statements: 80,

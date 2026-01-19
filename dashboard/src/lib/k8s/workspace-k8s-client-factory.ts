@@ -13,8 +13,80 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
+import * as fs from "fs";
 import type { WorkspaceRole } from "@/types/workspace";
 import { getWorkspaceToken, refreshWorkspaceToken } from "./token-fetcher";
+
+// In-cluster paths
+const SA_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token";
+const SA_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
+const SA_NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace";
+
+/**
+ * Check if we're running in a Kubernetes cluster and can use in-cluster config.
+ */
+function isInCluster(): boolean {
+  const host = process.env.KUBERNETES_SERVICE_HOST;
+  const port = process.env.KUBERNETES_SERVICE_PORT;
+  return !!(host && port);
+}
+
+/**
+ * Manually construct in-cluster KubeConfig.
+ * This is a workaround for when loadFromCluster() doesn't work properly
+ * (e.g., in Next.js/Turbopack environments).
+ */
+function loadInClusterConfig(): k8s.KubeConfig {
+  const host = process.env.KUBERNETES_SERVICE_HOST;
+  const port = process.env.KUBERNETES_SERVICE_PORT;
+
+  if (!host || !port) {
+    throw new Error("Not running in cluster: KUBERNETES_SERVICE_HOST/PORT not set");
+  }
+
+  // Read ServiceAccount token and CA
+  let token: string;
+  let caData: string;
+  let _namespace: string;
+
+  try {
+    token = fs.readFileSync(SA_TOKEN_PATH, "utf8").trim();
+  } catch (err) {
+    throw new Error(`Failed to read SA token from ${SA_TOKEN_PATH}: ${err}`);
+  }
+
+  try {
+    caData = fs.readFileSync(SA_CA_PATH, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to read CA cert from ${SA_CA_PATH}: ${err}`);
+  }
+
+  try {
+    _namespace = fs.readFileSync(SA_NAMESPACE_PATH, "utf8").trim();
+  } catch {
+    _namespace = "default";
+  }
+
+  const clusterName = "in-cluster";
+  const userName = "in-cluster-user";
+
+  // Use loadFromClusterAndUser for proper in-cluster setup
+  const kc = new k8s.KubeConfig();
+  kc.loadFromClusterAndUser(
+    {
+      name: clusterName,
+      server: `https://${host}:${port}`,
+      caData: Buffer.from(caData).toString("base64"),
+      skipTLSVerify: false,
+    },
+    {
+      name: userName,
+      token,
+    }
+  );
+
+  return kc;
+}
 
 /**
  * Options for creating workspace K8s clients.
@@ -29,7 +101,42 @@ export interface WorkspaceClientOptions {
 }
 
 /**
+ * Load base KubeConfig from cluster or local environment.
+ * Returns the config and whether it was loaded from in-cluster.
+ */
+function loadBaseKubeConfig(): { config: k8s.KubeConfig; fromCluster: boolean } {
+  // Try manual in-cluster loader first (more reliable in Next.js)
+  if (isInCluster()) {
+    try {
+      return { config: loadInClusterConfig(), fromCluster: true };
+    } catch (err) {
+      console.warn(`Manual in-cluster config failed: ${err}`);
+    }
+  }
+
+  // Try library methods
+  const kc = new k8s.KubeConfig();
+  try {
+    kc.loadFromCluster();
+    return { config: kc, fromCluster: true };
+  } catch {
+    // Not in cluster, try default kubeconfig
+    try {
+      kc.loadFromDefault();
+      return { config: kc, fromCluster: false };
+    } catch {
+      throw new Error(
+        "No Kubernetes configuration found. Ensure the dashboard is running in a cluster with a ServiceAccount or has access to a kubeconfig file."
+      );
+    }
+  }
+}
+
+/**
  * Create a KubeConfig configured with a workspace ServiceAccount token.
+ *
+ * Falls back to the dashboard's own ServiceAccount if workspace ServiceAccounts
+ * are not available (e.g., during development without the workspace controller).
  *
  * @param options - Workspace client options
  * @returns Configured KubeConfig
@@ -39,69 +146,49 @@ export async function getWorkspaceKubeConfig(
 ): Promise<k8s.KubeConfig> {
   const { workspace, namespace, role } = options;
 
-  // Get the token for this workspace/role
-  const token = await getWorkspaceToken(workspace, namespace, role);
+  const { config: baseKc, fromCluster } = loadBaseKubeConfig();
 
-  // Create a new KubeConfig with the token
-  const kc = new k8s.KubeConfig();
-
-  // First load the base config to get cluster info
-  try {
-    kc.loadFromCluster();
-  } catch {
-    kc.loadFromDefault();
-  }
-
-  // Get the current cluster info
-  const currentCluster = kc.getCurrentCluster();
+  // Verify we have a valid cluster configuration
+  const currentCluster = baseKc.getCurrentCluster();
   if (!currentCluster) {
-    throw new Error("No cluster found in kubeconfig");
+    const context = fromCluster ? " (in-cluster config may be incomplete)" : " in kubeconfig";
+    throw new Error(`No active Kubernetes cluster found${context}`);
   }
 
-  // Create a new config with the workspace SA token
-  const clusterName = currentCluster.name;
-  const userName = `workspace-${workspace}-${role}`;
-  const contextName = `${userName}-context`;
+  // Try to get a workspace-scoped token
+  let token: string | null = null;
+  try {
+    token = await getWorkspaceToken(workspace, namespace, role);
+  } catch (error) {
+    // If we can't get a workspace token (e.g., SA doesn't exist),
+    // fall back to using the dashboard's own ServiceAccount
+    console.warn(
+      `Could not get workspace token for ${workspace}/${role}, using fallback: ${error instanceof Error ? error.message : error}`
+    );
+  }
 
-  // Build the config object
-  const configObj = {
-    clusters: [
+  // If we got a token, create a new config with it
+  if (token) {
+    const newKc = new k8s.KubeConfig();
+    newKc.loadFromClusterAndUser(
       {
-        name: clusterName,
-        cluster: {
-          server: currentCluster.server,
-          "certificate-authority-data": currentCluster.caData,
-          "certificate-authority": currentCluster.caFile,
-          "insecure-skip-tls-verify": currentCluster.skipTLSVerify,
-        },
+        name: currentCluster.name,
+        server: currentCluster.server,
+        caData: currentCluster.caData,
+        caFile: currentCluster.caFile,
+        skipTLSVerify: currentCluster.skipTLSVerify ?? false,
       },
-    ],
-    users: [
       {
-        name: userName,
-        user: {
-          token,
-        },
-      },
-    ],
-    contexts: [
-      {
-        name: contextName,
-        context: {
-          cluster: clusterName,
-          user: userName,
-          namespace,
-        },
-      },
-    ],
-    "current-context": contextName,
-  };
+        name: `workspace-${workspace}-${role}`,
+        token,
+      }
+    );
+    return newKc;
+  }
 
-  // Load the new config
-  const newKc = new k8s.KubeConfig();
-  newKc.loadFromOptions(configObj);
-
-  return newKc;
+  // Fallback: use the base kubeconfig (dashboard's own SA)
+  // This provides cluster-wide access, suitable for development
+  return baseKc;
 }
 
 /**

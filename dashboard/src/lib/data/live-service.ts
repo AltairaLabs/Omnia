@@ -3,7 +3,8 @@
  *
  * This is the main data service used in production (non-demo) mode.
  * It delegates to:
- * - OperatorApiService for CRD data (agents, promptpacks, toolregistries)
+ * - WorkspaceApiService for workspace-scoped CRD data (agents, promptpacks)
+ * - Shared API endpoints for system-wide resources (toolregistries, providers)
  * - PrometheusService for cost/metrics data
  */
 
@@ -28,7 +29,7 @@ import type {
   ClientMessage,
   ContentPart,
 } from "@/types/websocket";
-import { OperatorApiService } from "./operator-service";
+import { WorkspaceApiService } from "./workspace-api-service";
 import { PrometheusService } from "./prometheus-service";
 import { getWsProxyUrl } from "@/lib/config";
 
@@ -210,76 +211,96 @@ export class LiveDataService implements DataService {
   readonly name = "LiveDataService";
   readonly isDemo = false;
 
-  private readonly operatorService: OperatorApiService;
+  private readonly workspaceService: WorkspaceApiService;
   private readonly prometheusService: PrometheusService;
 
   constructor() {
-    this.operatorService = new OperatorApiService();
+    this.workspaceService = new WorkspaceApiService();
     this.prometheusService = new PrometheusService();
   }
 
   // ============================================================
-  // CRD data - delegated to OperatorApiService
+  // Workspace-scoped data - delegated to WorkspaceApiService
   // ============================================================
 
-  async getAgents(namespace?: string): Promise<AgentRuntime[]> {
-    return this.operatorService.getAgents(namespace);
+  async getAgents(workspace: string): Promise<AgentRuntime[]> {
+    return this.workspaceService.getAgents(workspace);
   }
 
-  async getAgent(namespace: string, name: string): Promise<AgentRuntime | undefined> {
-    return this.operatorService.getAgent(namespace, name);
+  async getAgent(workspace: string, name: string): Promise<AgentRuntime | undefined> {
+    return this.workspaceService.getAgent(workspace, name);
   }
 
-  async createAgent(spec: Record<string, unknown>): Promise<AgentRuntime> {
-    return this.operatorService.createAgent(spec);
+  async createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntime> {
+    return this.workspaceService.createAgent(workspace, spec);
   }
 
-  async scaleAgent(namespace: string, name: string, replicas: number): Promise<AgentRuntime> {
-    return this.operatorService.scaleAgent(namespace, name, replicas);
+  async scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntime> {
+    return this.workspaceService.scaleAgent(workspace, name, replicas);
   }
 
-  async getAgentLogs(namespace: string, name: string, options?: LogOptions): Promise<LogEntry[]> {
-    return this.operatorService.getAgentLogs(namespace, name, options);
+  async getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]> {
+    return this.workspaceService.getAgentLogs(workspace, name, options);
   }
 
-  async getAgentEvents(namespace: string, name: string): Promise<K8sEvent[]> {
-    return this.operatorService.getAgentEvents(namespace, name);
+  async getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]> {
+    return this.workspaceService.getAgentEvents(workspace, name);
   }
 
-  async getPromptPacks(namespace?: string): Promise<PromptPack[]> {
-    return this.operatorService.getPromptPacks(namespace);
+  async getPromptPacks(workspace: string): Promise<PromptPack[]> {
+    return this.workspaceService.getPromptPacks(workspace);
   }
 
-  async getPromptPack(namespace: string, name: string): Promise<PromptPack | undefined> {
-    return this.operatorService.getPromptPack(namespace, name);
+  async getPromptPack(workspace: string, name: string): Promise<PromptPack | undefined> {
+    return this.workspaceService.getPromptPack(workspace, name);
   }
 
-  async getPromptPackContent(namespace: string, name: string): Promise<PromptPackContent | undefined> {
-    return this.operatorService.getPromptPackContent(namespace, name);
+  async getPromptPackContent(workspace: string, name: string): Promise<PromptPackContent | undefined> {
+    return this.workspaceService.getPromptPackContent(workspace, name);
   }
 
-  async getToolRegistries(namespace?: string): Promise<ToolRegistry[]> {
-    return this.operatorService.getToolRegistries(namespace);
+  // ============================================================
+  // Workspace-scoped ToolRegistries and Providers
+  // ============================================================
+
+  async getToolRegistries(workspace: string): Promise<ToolRegistry[]> {
+    return this.workspaceService.getToolRegistries(workspace);
   }
 
-  async getToolRegistry(namespace: string, name: string): Promise<ToolRegistry | undefined> {
-    return this.operatorService.getToolRegistry(namespace, name);
+  async getToolRegistry(workspace: string, name: string): Promise<ToolRegistry | undefined> {
+    return this.workspaceService.getToolRegistry(workspace, name);
   }
 
-  async getProviders(namespace?: string): Promise<Provider[]> {
-    return this.operatorService.getProviders(namespace);
+  async getProviders(workspace: string): Promise<Provider[]> {
+    return this.workspaceService.getProviders(workspace);
   }
 
-  async getProvider(namespace: string, name: string): Promise<Provider | undefined> {
-    return this.operatorService.getProvider(namespace, name);
+  async getProvider(workspace: string, name: string): Promise<Provider | undefined> {
+    return this.workspaceService.getProvider(workspace, name);
   }
 
-  async getStats(): Promise<Stats> {
-    return this.operatorService.getStats();
+  // ============================================================
+  // Shared/system-wide resources
+  // ============================================================
+
+  async getSharedToolRegistries(): Promise<ToolRegistry[]> {
+    return this.workspaceService.getSharedToolRegistries();
   }
 
-  async getNamespaces(): Promise<string[]> {
-    return this.operatorService.getNamespaces();
+  async getSharedToolRegistry(name: string): Promise<ToolRegistry | undefined> {
+    return this.workspaceService.getSharedToolRegistry(name);
+  }
+
+  async getSharedProviders(): Promise<Provider[]> {
+    return this.workspaceService.getSharedProviders();
+  }
+
+  async getSharedProvider(name: string): Promise<Provider | undefined> {
+    return this.workspaceService.getSharedProvider(name);
+  }
+
+  async getStats(workspace: string): Promise<Stats> {
+    return this.workspaceService.getStats(workspace);
   }
 
   // ============================================================

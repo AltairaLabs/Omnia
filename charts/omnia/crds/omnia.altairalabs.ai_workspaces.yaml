@@ -57,6 +57,30 @@ spec:
           spec:
             description: spec defines the desired state of Workspace
             properties:
+              anonymousAccess:
+                description: |-
+                  anonymousAccess configures access for unauthenticated users.
+                  If omitted, anonymous users have no access to this workspace.
+                  WARNING: Granting editor or owner allows anonymous users to modify resources.
+                properties:
+                  enabled:
+                    description: |-
+                      enabled specifies whether anonymous users can access this workspace.
+                      If false or omitted, anonymous users have no access.
+                    type: boolean
+                  role:
+                    description: |-
+                      role is the workspace role granted to anonymous users.
+                      Defaults to viewer if enabled is true but role is not specified.
+                      WARNING: editor and owner grant write access to anonymous users.
+                    enum:
+                    - owner
+                    - editor
+                    - viewer
+                    type: string
+                required:
+                - enabled
+                type: object
               defaultTags:
                 additionalProperties:
                   type: string

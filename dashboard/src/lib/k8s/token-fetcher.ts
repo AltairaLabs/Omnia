@@ -10,6 +10,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
+import * as fs from "fs";
 import type { WorkspaceRole } from "@/types/workspace";
 import {
   getCachedToken,
@@ -20,14 +21,96 @@ import {
 /** Token expiration time in seconds (1 hour) */
 const TOKEN_EXPIRATION_SECONDS = 3600;
 
+// In-cluster paths
+const SA_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token";
+const SA_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
+const SA_NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace";
+
 /** Singleton KubeConfig */
 let kubeConfig: k8s.KubeConfig | null = null;
+
+/**
+ * Check if we're running in a Kubernetes cluster.
+ */
+function isInCluster(): boolean {
+  const host = process.env.KUBERNETES_SERVICE_HOST;
+  const port = process.env.KUBERNETES_SERVICE_PORT;
+  return !!(host && port);
+}
+
+/**
+ * Manually construct in-cluster KubeConfig.
+ * This is a workaround for when loadFromCluster() doesn't work properly
+ * (e.g., in Next.js/Turbopack environments).
+ */
+function loadInClusterConfig(): k8s.KubeConfig {
+  const host = process.env.KUBERNETES_SERVICE_HOST;
+  const port = process.env.KUBERNETES_SERVICE_PORT;
+
+  if (!host || !port) {
+    throw new Error("Not running in cluster: KUBERNETES_SERVICE_HOST/PORT not set");
+  }
+
+  // Read ServiceAccount token and CA
+  let token: string;
+  let caData: string;
+  let _namespace: string;
+
+  try {
+    token = fs.readFileSync(SA_TOKEN_PATH, "utf8").trim();
+  } catch (err) {
+    throw new Error(`Failed to read SA token from ${SA_TOKEN_PATH}: ${err}`);
+  }
+
+  try {
+    caData = fs.readFileSync(SA_CA_PATH, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to read CA cert from ${SA_CA_PATH}: ${err}`);
+  }
+
+  try {
+    _namespace = fs.readFileSync(SA_NAMESPACE_PATH, "utf8").trim();
+  } catch {
+    _namespace = "default";
+  }
+
+  const clusterName = "in-cluster";
+  const userName = "in-cluster-user";
+
+  // Use loadFromClusterAndUser for proper in-cluster setup
+  const kc = new k8s.KubeConfig();
+  kc.loadFromClusterAndUser(
+    {
+      name: clusterName,
+      server: `https://${host}:${port}`,
+      caData: Buffer.from(caData).toString("base64"),
+      skipTLSVerify: false,
+    },
+    {
+      name: userName,
+      token,
+    }
+  );
+
+  return kc;
+}
 
 /**
  * Get or create the KubeConfig.
  */
 function getKubeConfig(): k8s.KubeConfig {
   if (!kubeConfig) {
+    // First, check if we're in a cluster and try our manual loader
+    if (isInCluster()) {
+      try {
+        kubeConfig = loadInClusterConfig();
+        return kubeConfig;
+      } catch (err) {
+        console.warn(`Manual in-cluster config failed: ${err}`);
+      }
+    }
+
+    // Fall back to library methods
     kubeConfig = new k8s.KubeConfig();
     try {
       // Try in-cluster config first (when running in K8s)
