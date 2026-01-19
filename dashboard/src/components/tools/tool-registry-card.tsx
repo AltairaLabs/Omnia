@@ -5,10 +5,12 @@ import { Wrench, Globe, Server, Clock, CheckCircle, XCircle, AlertCircle, Termin
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/agents";
+import { SharedBadge } from "@/components/shared";
 import type { ToolRegistry, DiscoveredTool } from "@/types";
 
 interface ToolRegistryCardProps {
   registry: ToolRegistry;
+  isShared?: boolean;
 }
 
 function formatRelativeTime(timestamp?: string): string {
@@ -51,7 +53,7 @@ function ToolStatusIcon({ status }: Readonly<{ status: DiscoveredTool["status"] 
   }
 }
 
-export function ToolRegistryCard({ registry }: Readonly<ToolRegistryCardProps>) {
+export function ToolRegistryCard({ registry, isShared }: Readonly<ToolRegistryCardProps>) {
   const { metadata, spec, status } = registry;
   const tools = status?.discoveredTools || [];
   const availableCount = tools.filter((t) => t.status === "Available").length;
@@ -71,6 +73,7 @@ export function ToolRegistryCard({ registry }: Readonly<ToolRegistryCardProps>) 
             <div className="flex items-center gap-2 min-w-0">
               <Wrench className="h-4 w-4 text-muted-foreground shrink-0" />
               <CardTitle className="text-base truncate">{metadata.name}</CardTitle>
+              {isShared && <SharedBadge />}
             </div>
             <StatusBadge phase={status?.phase} />
           </div>

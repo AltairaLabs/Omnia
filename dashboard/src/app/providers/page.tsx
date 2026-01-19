@@ -20,11 +20,17 @@ import {
 import { CostSparkline } from "@/components/cost";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
+import { SharedBadge } from "@/components/shared";
 import { formatCost } from "@/lib/pricing";
 import { formatTokens } from "@/lib/utils";
-import { useProviders } from "@/hooks";
+import { useProviders, useSharedProviders } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 import type { Provider } from "@/types";
+
+/** Extended provider type with shared flag */
+interface ProviderWithSource extends Provider {
+  _isShared?: boolean;
+}
 
 type ProviderPhase = "Pending" | "Ready" | "Error" | "Failed";
 
@@ -41,8 +47,8 @@ const providerColorMap: Record<string, string> = {
   mock: "#6B7280",      // gray
 };
 
-function ProviderCard({ provider }: Readonly<{ provider: Provider }>) {
-  const { metadata, spec, status } = provider;
+function ProviderCard({ provider }: Readonly<{ provider: ProviderWithSource }>) {
+  const { metadata, spec, status, _isShared } = provider;
 
   // Fetch metrics for this provider
   const { data: metrics } = useProviderMetrics(metadata?.name || "", spec?.type);
@@ -60,7 +66,10 @@ function ProviderCard({ provider }: Readonly<{ provider: Provider }>) {
           <div className="flex items-center gap-3">
             <ProviderTypeIcon type={spec?.type} />
             <div className="flex-1 min-w-0">
-              <CardTitle className="text-lg truncate">{metadata?.name}</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-lg truncate">{metadata?.name}</CardTitle>
+                {_isShared && <SharedBadge />}
+              </div>
               <p className="text-sm text-muted-foreground">{metadata?.namespace}</p>
             </div>
             <ProviderStatusBadge phase={status?.phase} />
@@ -108,7 +117,7 @@ function ProviderCard({ provider }: Readonly<{ provider: Provider }>) {
 }
 
 
-function ProviderTable({ providers }: Readonly<{ providers: Provider[] }>) {
+function ProviderTable({ providers }: Readonly<{ providers: ProviderWithSource[] }>) {
   return (
     <div className="rounded-md border">
       <Table>
@@ -126,12 +135,15 @@ function ProviderTable({ providers }: Readonly<{ providers: Provider[] }>) {
           {providers.map((provider) => (
             <TableRow key={provider.metadata?.uid}>
               <TableCell>
-                <Link
-                  href={`/providers/${provider.metadata?.name}?namespace=${provider.metadata?.namespace || "default"}`}
-                  className="font-medium hover:underline"
-                >
-                  {provider.metadata?.name}
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/providers/${provider.metadata?.name}?namespace=${provider.metadata?.namespace || "default"}`}
+                    className="font-medium hover:underline"
+                  >
+                    {provider.metadata?.name}
+                  </Link>
+                  {provider._isShared && <SharedBadge />}
+                </div>
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {provider.metadata?.namespace}
@@ -177,7 +189,23 @@ export default function ProvidersPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
 
-  const { data: providers, isLoading } = useProviders();
+  const { data: workspaceProviders, isLoading: isLoadingWorkspace } = useProviders();
+  const { data: sharedProviders, isLoading: isLoadingShared } = useSharedProviders();
+
+  const isLoading = isLoadingWorkspace || isLoadingShared;
+
+  // Combine shared and workspace providers, marking shared ones
+  const providers = useMemo((): ProviderWithSource[] => {
+    const shared: ProviderWithSource[] = (sharedProviders || []).map((p) => ({
+      ...p,
+      _isShared: true,
+    }));
+    const workspace: ProviderWithSource[] = (workspaceProviders || []).map((p) => ({
+      ...p,
+      _isShared: false,
+    }));
+    return [...shared, ...workspace];
+  }, [sharedProviders, workspaceProviders]);
 
   // Extract unique namespaces
   const allNamespaces = useMemo(() => {

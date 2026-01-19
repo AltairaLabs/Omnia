@@ -8,16 +8,37 @@ import { NamespaceFilter } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToolRegistries } from "@/hooks";
-import type { ToolRegistryPhase } from "@/types";
+import { useToolRegistries, useSharedToolRegistries } from "@/hooks";
+import type { ToolRegistry, ToolRegistryPhase } from "@/types";
 
 type FilterPhase = "all" | ToolRegistryPhase;
+
+/** Extended tool registry type with shared flag */
+interface ToolRegistryWithSource extends ToolRegistry {
+  _isShared?: boolean;
+}
 
 export default function ToolsPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
 
-  const { data: registries, isLoading } = useToolRegistries();
+  const { data: workspaceRegistries, isLoading: isLoadingWorkspace } = useToolRegistries();
+  const { data: sharedRegistries, isLoading: isLoadingShared } = useSharedToolRegistries();
+
+  const isLoading = isLoadingWorkspace || isLoadingShared;
+
+  // Combine shared and workspace registries, marking shared ones
+  const registries = useMemo((): ToolRegistryWithSource[] => {
+    const shared: ToolRegistryWithSource[] = (sharedRegistries || []).map((r) => ({
+      ...r,
+      _isShared: true,
+    }));
+    const workspace: ToolRegistryWithSource[] = (workspaceRegistries || []).map((r) => ({
+      ...r,
+      _isShared: false,
+    }));
+    return [...shared, ...workspace];
+  }, [sharedRegistries, workspaceRegistries]);
 
   // Extract unique namespaces
   const allNamespaces = useMemo(() => {
@@ -122,7 +143,11 @@ export default function ToolsPage() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filteredRegistries?.map((registry) => (
-              <ToolRegistryCard key={registry.metadata.uid} registry={registry} />
+              <ToolRegistryCard
+                key={registry.metadata.uid}
+                registry={registry}
+                isShared={registry._isShared}
+              />
             ))}
           </div>
         )}
