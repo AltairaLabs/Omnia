@@ -63,13 +63,6 @@ spec:
             {{- end }}
             {{- if .Values.api.enabled }}
             - --api-bind-address=:{{ .Values.api.port }}
-            - --api-proxy-mode={{ .Values.api.guardrails.mode | default "compat" }}
-            {{- if .Values.api.guardrails.allowedNamespaces }}
-            - --api-allowed-namespaces={{ .Values.api.guardrails.allowedNamespaces | join "," }}
-            {{- end }}
-            {{- if .Values.api.guardrails.deniedNamespaces }}
-            - --api-denied-namespaces={{ .Values.api.guardrails.deniedNamespaces | join "," }}
-            {{- end }}
             {{- end }}
             {{- if .Values.arena.enabled }}
             - --arena-worker-image={{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
