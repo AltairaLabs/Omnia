@@ -8,9 +8,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useSharedToolRegistries, useSharedToolRegistry } from "./use-shared-tool-registries";
 import type { ReactNode } from "react";
 
-// Mock fetch
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Mock shared tool registry data
+const mockRegistries = [
+  { metadata: { name: "default-tools", namespace: "omnia-system" } },
+  { metadata: { name: "custom-tools", namespace: "omnia-system" } },
+];
+
+// Mock useDataService
+const mockGetSharedToolRegistries = vi.fn().mockResolvedValue(mockRegistries);
+const mockGetSharedToolRegistry = vi.fn();
+vi.mock("@/lib/data", () => ({
+  useDataService: () => ({
+    name: "mock",
+    getSharedToolRegistries: mockGetSharedToolRegistries,
+    getSharedToolRegistry: mockGetSharedToolRegistry,
+  }),
+}));
 
 // Create a wrapper with QueryClientProvider
 function createWrapper() {
@@ -18,6 +31,7 @@ function createWrapper() {
     defaultOptions: {
       queries: {
         retry: false,
+        gcTime: 0,
       },
     },
   });
@@ -31,18 +45,10 @@ function createWrapper() {
 describe("useSharedToolRegistries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSharedToolRegistries.mockResolvedValue(mockRegistries);
   });
 
   it("fetches shared tool registries successfully", async () => {
-    const mockRegistries = [
-      { metadata: { name: "default-tools", namespace: "omnia-system" } },
-      { metadata: { name: "custom-tools", namespace: "omnia-system" } },
-    ];
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockRegistries),
-    });
-
     const { result } = renderHook(() => useSharedToolRegistries(), {
       wrapper: createWrapper(),
     });
@@ -50,14 +56,11 @@ describe("useSharedToolRegistries", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(mockRegistries);
-    expect(mockFetch).toHaveBeenCalledWith("/api/shared/toolregistries");
+    expect(mockGetSharedToolRegistries).toHaveBeenCalled();
   });
 
-  it("returns empty array on 401 unauthorized", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-    });
+  it("returns empty array when service returns empty", async () => {
+    mockGetSharedToolRegistries.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useSharedToolRegistries(), {
       wrapper: createWrapper(),
@@ -68,12 +71,8 @@ describe("useSharedToolRegistries", () => {
     expect(result.current.data).toEqual([]);
   });
 
-  it("throws error on other failures", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-    });
+  it("handles errors from service", async () => {
+    mockGetSharedToolRegistries.mockRejectedValueOnce(new Error("Service error"));
 
     const { result } = renderHook(() => useSharedToolRegistries(), {
       wrapper: createWrapper(),
@@ -92,10 +91,7 @@ describe("useSharedToolRegistry", () => {
 
   it("fetches a single shared tool registry", async () => {
     const mockRegistry = { metadata: { name: "default-tools", namespace: "omnia-system" } };
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockRegistry),
-    });
+    mockGetSharedToolRegistry.mockResolvedValueOnce(mockRegistry);
 
     const { result } = renderHook(() => useSharedToolRegistry("default-tools"), {
       wrapper: createWrapper(),
@@ -104,14 +100,11 @@ describe("useSharedToolRegistry", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(mockRegistry);
-    expect(mockFetch).toHaveBeenCalledWith("/api/shared/toolregistries/default-tools");
+    expect(mockGetSharedToolRegistry).toHaveBeenCalledWith("default-tools");
   });
 
-  it("returns null on 404", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-    });
+  it("returns null when registry not found", async () => {
+    mockGetSharedToolRegistry.mockResolvedValueOnce(null);
 
     const { result } = renderHook(() => useSharedToolRegistry("nonexistent"), {
       wrapper: createWrapper(),
@@ -128,5 +121,6 @@ describe("useSharedToolRegistry", () => {
     });
 
     expect(result.current.isFetching).toBe(false);
+    expect(mockGetSharedToolRegistry).not.toHaveBeenCalled();
   });
 });

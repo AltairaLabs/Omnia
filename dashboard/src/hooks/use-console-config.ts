@@ -33,20 +33,19 @@ export interface ConsoleConfigResult {
  * Hook to get console configuration from an agent's spec.
  * Falls back to default values when agent has no console config.
  * Also resolves media requirements based on the provider type.
+ *
+ * @param _namespace - Deprecated, uses workspace context instead
+ * @param agentName - The agent name
  */
 export function useConsoleConfig(
-  namespace: string,
+  _namespace: string,
   agentName: string
 ): ConsoleConfigResult {
-  const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(agentName, namespace);
+  const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(agentName);
 
   // Resolve provider from ProviderRef if specified
   const providerRefName = agent?.spec?.providerRef?.name;
-  const providerRefNamespace = agent?.spec?.providerRef?.namespace ?? namespace;
-  const { data: providerCRD, isLoading: providerLoading } = useProvider(
-    providerRefName,
-    providerRefNamespace
-  );
+  const { data: providerCRD, isLoading: providerLoading } = useProvider(providerRefName);
 
   const attachmentConfig: AttachmentConfig = useMemo(() => {
     return buildAttachmentConfig(agent?.spec?.console);

@@ -3,6 +3,24 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useStats } from "./use-stats";
 
+// Mock workspace context
+const mockCurrentWorkspace = {
+  name: "test-workspace",
+  namespace: "test-namespace",
+  role: "editor",
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: [mockCurrentWorkspace],
+    isLoading: false,
+    error: null,
+    setCurrentWorkspace: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock stats data
 const mockStats = {
   agents: {

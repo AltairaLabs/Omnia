@@ -5,6 +5,8 @@
  * POST /api/workspaces/:name/agents - Create a new agent
  *
  * Protected by workspace access checks.
+ * These routes always talk to the real K8s API - mock data is handled
+ * by the MockDataService on the client side (in demo mode).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -98,7 +100,7 @@ export const POST = withWorkspaceAccess(
         body.metadata?.annotations
       );
 
-      const created = await createCrd<AgentRuntime>(result.clientOptions, CRD_AGENTS, agent as AgentRuntime);
+      const created = await createCrd<AgentRuntime>(result.clientOptions, CRD_AGENTS, agent as unknown as AgentRuntime);
 
       auditSuccess(auditCtx, "create", resourceName);
       return NextResponse.json(created, { status: 201 });

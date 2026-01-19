@@ -1,22 +1,10 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useDataService } from "@/lib/data";
-import type { Provider } from "@/types";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useProvider as useProviderBase } from "./use-providers";
 
-export function useProvider(name: string | undefined, namespace: string) {
-  const service = useDataService();
-
-  return useQuery({
-    queryKey: ["provider", namespace, name, service.name],
-    queryFn: async (): Promise<Provider | null> => {
-      if (!name) return null;
-      const response = await service.getProvider(namespace, name);
-      return (response as Provider) || null;
-    },
-    enabled: !!name,
-  });
-}
+// Re-export useProvider from use-providers.ts
+export const useProvider = useProviderBase;
 
 /**
  * Hook for updating a provider's secretRef.
@@ -52,7 +40,7 @@ export function useUpdateProviderSecretRef() {
     },
     onSuccess: (_, variables) => {
       // Invalidate provider queries to refetch
-      queryClient.invalidateQueries({ queryKey: ["provider", variables.namespace, variables.name] });
+      queryClient.invalidateQueries({ queryKey: ["provider", variables.name] });
       queryClient.invalidateQueries({ queryKey: ["providers"] });
     },
   });

@@ -40,6 +40,29 @@ export interface DirectGrant {
 }
 
 /**
+ * Anonymous access configuration for a workspace.
+ *
+ * Controls what access anonymous (unauthenticated) users have to this workspace.
+ * Use with caution - granting editor or owner access to anonymous users
+ * is a security risk and should only be used in isolated development environments.
+ */
+export interface AnonymousAccessConfig {
+  /**
+   * Whether anonymous users can access this workspace.
+   * If false or omitted, anonymous users have no access.
+   */
+  enabled: boolean;
+  /**
+   * Role granted to anonymous users.
+   * Defaults to "viewer" if enabled is true but role is not specified.
+   *
+   * WARNING: Setting this to "editor" or "owner" grants anonymous users
+   * write access to resources. Only use in isolated dev environments.
+   */
+  role?: WorkspaceRole;
+}
+
+/**
  * Workspace specification from the Workspace CRD.
  */
 export interface WorkspaceSpec {
@@ -54,12 +77,17 @@ export interface WorkspaceSpec {
     /** Namespace name */
     name: string;
     /** Whether to create the namespace if it doesn't exist */
-    create: boolean;
+    create?: boolean;
   };
   /** Group-based role bindings */
-  roleBindings: RoleBinding[];
+  roleBindings?: RoleBinding[];
   /** Individual user grants */
   directGrants?: DirectGrant[];
+  /**
+   * Anonymous access configuration.
+   * If omitted, anonymous users have no access to this workspace.
+   */
+  anonymousAccess?: AnonymousAccessConfig;
 }
 
 /**

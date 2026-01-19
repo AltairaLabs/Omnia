@@ -1,322 +1,100 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-func newTestServer(t *testing.T, objs ...client.Object) *Server {
-	scheme := runtime.NewScheme()
-	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(objs...).
-		Build()
-
-	// Pass nil for clientset since we're not testing logs functionality
-	// Pass empty string for artifactDir since we're not testing artifact serving
-	// Use default compat mode guardrails for existing tests
-	return NewServer(fakeClient, nil, zap.New(zap.UseDevMode(true)), "", GuardrailsConfig{
-		Mode: ProxyModeCompat,
-	})
+func newTestServer(_ *testing.T, artifactDir string) *Server {
+	return NewServer(zap.New(zap.UseDevMode(true)), artifactDir)
 }
 
-func TestListAgents(t *testing.T) {
-	port := int32(8080)
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{
-				Type: "websocket",
-				Port: &port,
-			},
-		},
-		Status: omniav1alpha1.AgentRuntimeStatus{
-			Phase: "Running",
-		},
-	}
-
-	server := newTestServer(t, agent)
+func TestHealthz(t *testing.T) {
+	server := newTestServer(t, "")
 	handler := server.Handler()
 
-	req := httptest.NewRequest("GET", "/api/v1/agents", nil)
+	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var agents []omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &agents))
-	assert.Len(t, agents, 1)
-	assert.Equal(t, "test-agent", agents[0].Name)
+	assert.Equal(t, "ok", rec.Body.String())
 }
 
-func TestListAgentsWithNamespace(t *testing.T) {
-	agent1 := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "agent-1",
-			Namespace: "ns1",
-		},
-	}
-	agent2 := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "agent-2",
-			Namespace: "ns2",
-		},
-	}
+func TestArtifactServing(t *testing.T) {
+	// Create a temp directory with a test artifact
+	tmpDir := t.TempDir()
+	testContent := "test artifact content"
+	err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte(testContent), 0644)
+	require.NoError(t, err)
 
-	server := newTestServer(t, agent1, agent2)
+	server := newTestServer(t, tmpDir)
 	handler := server.Handler()
 
-	req := httptest.NewRequest("GET", "/api/v1/agents?namespace=ns1", nil)
+	req := httptest.NewRequest("GET", "/artifacts/test.txt", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var agents []omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &agents))
-	assert.Len(t, agents, 1)
-	assert.Equal(t, "agent-1", agents[0].Name)
+	assert.Equal(t, testContent, rec.Body.String())
 }
 
-func TestGetAgent(t *testing.T) {
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-	}
+func TestArtifactServingCORS(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("content"), 0644)
+	require.NoError(t, err)
 
-	server := newTestServer(t, agent)
+	server := newTestServer(t, tmpDir)
 	handler := server.Handler()
 
-	req := httptest.NewRequest("GET", "/api/v1/agents/default/test-agent", nil)
+	// Test OPTIONS request for CORS preflight
+	req := httptest.NewRequest("OPTIONS", "/artifacts/test.txt", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var result omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	assert.Equal(t, "test-agent", result.Name)
+	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "GET, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
+	assert.Equal(t, "Content-Type", rec.Header().Get("Access-Control-Allow-Headers"))
 }
 
-func TestGetAgentNotFound(t *testing.T) {
-	server := newTestServer(t)
+func TestArtifactServingCORSOnGet(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("content"), 0644)
+	require.NoError(t, err)
+
+	server := newTestServer(t, tmpDir)
 	handler := server.Handler()
 
-	req := httptest.NewRequest("GET", "/api/v1/agents/default/nonexistent", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
-func TestGetAgentInvalidPath(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/agents/invalid", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestListPromptPacks(t *testing.T) {
-	pack := &omniav1alpha1.PromptPack{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pack",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.PromptPackSpec{
-			Version: "1.0.0",
-		},
-	}
-
-	server := newTestServer(t, pack)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/promptpacks", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var packs []omniav1alpha1.PromptPack
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &packs))
-	assert.Len(t, packs, 1)
-}
-
-func TestGetPromptPack(t *testing.T) {
-	pack := &omniav1alpha1.PromptPack{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pack",
-			Namespace: "default",
-		},
-	}
-
-	server := newTestServer(t, pack)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/promptpacks/default/test-pack", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestListToolRegistries(t *testing.T) {
-	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-registry",
-			Namespace: "default",
-		},
-	}
-
-	server := newTestServer(t, registry)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/toolregistries", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var registries []omniav1alpha1.ToolRegistry
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &registries))
-	assert.Len(t, registries, 1)
-}
-
-func TestGetToolRegistry(t *testing.T) {
-	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-registry",
-			Namespace: "default",
-		},
-	}
-
-	server := newTestServer(t, registry)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/toolregistries/default/test-registry", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestListProviders(t *testing.T) {
-	provider := &omniav1alpha1.Provider{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-provider",
-			Namespace: "default",
-		},
-	}
-
-	server := newTestServer(t, provider)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/providers", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var providers []omniav1alpha1.Provider
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &providers))
-	assert.Len(t, providers, 1)
-}
-
-func TestStats(t *testing.T) {
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-		Status: omniav1alpha1.AgentRuntimeStatus{
-			Phase: "Running",
-		},
-	}
-	pack := &omniav1alpha1.PromptPack{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pack",
-			Namespace: "default",
-		},
-		Status: omniav1alpha1.PromptPackStatus{
-			Phase: "Active",
-		},
-	}
-	registry := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-registry",
-			Namespace: "default",
-		},
-		Status: omniav1alpha1.ToolRegistryStatus{
-			DiscoveredToolsCount: 2,
-			DiscoveredTools: []omniav1alpha1.DiscoveredTool{
-				{Name: "tool1", Status: "Available"},
-				{Name: "tool2", Status: "Unavailable"},
-			},
-		},
-	}
-
-	server := newTestServer(t, agent, pack, registry)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/stats", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var stats Stats
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &stats))
-	assert.Equal(t, 1, stats.Agents.Total)
-	assert.Equal(t, 1, stats.Agents.Running)
-	assert.Equal(t, 1, stats.PromptPacks.Total)
-	assert.Equal(t, 1, stats.PromptPacks.Active)
-	assert.Equal(t, 2, stats.Tools.Total)
-	assert.Equal(t, 1, stats.Tools.Available)
-	assert.Equal(t, 1, stats.Tools.Degraded)
-}
-
-func TestCORSHeaders(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("OPTIONS", "/api/v1/agents", nil)
+	// Test GET request includes CORS headers
+	req := httptest.NewRequest("GET", "/artifacts/test.txt", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -325,20 +103,36 @@ func TestCORSHeaders(t *testing.T) {
 	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
-func TestMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
+func TestArtifactNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	server := newTestServer(t, tmpDir)
 	handler := server.Handler()
 
-	req := httptest.NewRequest("DELETE", "/api/v1/agents", nil)
+	req := httptest.NewRequest("GET", "/artifacts/nonexistent.txt", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestNoArtifactDir(t *testing.T) {
+	// When artifactDir is empty, artifacts endpoint should not be registered
+	server := newTestServer(t, "")
+	handler := server.Handler()
+
+	req := httptest.NewRequest("GET", "/artifacts/test.txt", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Should 404 because the handler isn't registered
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestServerRun(t *testing.T) {
-	server := newTestServer(t)
+	server := newTestServer(t, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -356,709 +150,25 @@ func TestServerRun(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestGetPromptPackNotFound(t *testing.T) {
-	server := newTestServer(t)
+func TestNestedArtifactServing(t *testing.T) {
+	// Create a temp directory with nested artifacts
+	tmpDir := t.TempDir()
+	nestedDir := filepath.Join(tmpDir, "job-123", "output")
+	err := os.MkdirAll(nestedDir, 0755)
+	require.NoError(t, err)
+
+	testContent := "nested artifact content"
+	err = os.WriteFile(filepath.Join(nestedDir, "result.json"), []byte(testContent), 0644)
+	require.NoError(t, err)
+
+	server := newTestServer(t, tmpDir)
 	handler := server.Handler()
 
-	req := httptest.NewRequest("GET", "/api/v1/promptpacks/default/nonexistent", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
-func TestGetPromptPackInvalidPath(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/promptpacks/invalid", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestGetToolRegistryNotFound(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/toolregistries/default/nonexistent", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
-func TestGetToolRegistryInvalidPath(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/toolregistries/invalid", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestListPromptPacksWithNamespace(t *testing.T) {
-	pack1 := &omniav1alpha1.PromptPack{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pack-1",
-			Namespace: "ns1",
-		},
-	}
-	pack2 := &omniav1alpha1.PromptPack{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pack-2",
-			Namespace: "ns2",
-		},
-	}
-
-	server := newTestServer(t, pack1, pack2)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/promptpacks?namespace=ns1", nil)
+	req := httptest.NewRequest("GET", "/artifacts/job-123/output/result.json", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var packs []omniav1alpha1.PromptPack
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &packs))
-	assert.Len(t, packs, 1)
-	assert.Equal(t, "pack-1", packs[0].Name)
-}
-
-func TestListToolRegistriesWithNamespace(t *testing.T) {
-	reg1 := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "reg-1",
-			Namespace: "ns1",
-		},
-	}
-	reg2 := &omniav1alpha1.ToolRegistry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "reg-2",
-			Namespace: "ns2",
-		},
-	}
-
-	server := newTestServer(t, reg1, reg2)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/toolregistries?namespace=ns1", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var regs []omniav1alpha1.ToolRegistry
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &regs))
-	assert.Len(t, regs, 1)
-	assert.Equal(t, "reg-1", regs[0].Name)
-}
-
-func TestListProvidersWithNamespace(t *testing.T) {
-	prov1 := &omniav1alpha1.Provider{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "prov-1",
-			Namespace: "ns1",
-		},
-	}
-	prov2 := &omniav1alpha1.Provider{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "prov-2",
-			Namespace: "ns2",
-		},
-	}
-
-	server := newTestServer(t, prov1, prov2)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/providers?namespace=ns1", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var provs []omniav1alpha1.Provider
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &provs))
-	assert.Len(t, provs, 1)
-	assert.Equal(t, "prov-1", provs[0].Name)
-}
-
-func TestPromptPacksMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/promptpacks", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestToolRegistriesMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/toolregistries", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestProvidersMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/providers", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestStatsMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/stats", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestGetPromptPackMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/promptpacks/default/test", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestGetToolRegistryMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/toolregistries/default/test", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestParseLogLine(t *testing.T) {
-	tests := []struct {
-		name          string
-		line          string
-		containerName string
-		wantLevel     string
-		wantMessage   string
-	}{
-		{
-			name:          "plain text log",
-			line:          "2026-01-05T12:00:00.000000000Z simple message",
-			containerName: "facade",
-			wantLevel:     "info",
-			wantMessage:   "simple message",
-		},
-		{
-			name:          "json zap log",
-			line:          `2026-01-05T12:00:00.000000000Z {"level":"info","ts":1767616635.642715,"caller":"main.go:195","msg":"health server starting"}`,
-			containerName: "runtime",
-			wantLevel:     "info",
-			wantMessage:   "[main.go:195] health server starting",
-		},
-		{
-			name:          "json error log",
-			line:          `2026-01-05T12:00:00.000000000Z {"level":"error","ts":1767616635.0,"caller":"server.go:50","msg":"connection failed","error":"timeout"}`,
-			containerName: "facade",
-			wantLevel:     "error",
-			wantMessage:   "[server.go:50] connection failed error: timeout",
-		},
-		{
-			name:          "plain error log",
-			line:          "2026-01-05T12:00:00.000000000Z error: something went wrong",
-			containerName: "facade",
-			wantLevel:     "error",
-			wantMessage:   "error: something went wrong",
-		},
-		{
-			name:          "plain warning log",
-			line:          "2026-01-05T12:00:00.000000000Z warning: low memory",
-			containerName: "runtime",
-			wantLevel:     "warn",
-			wantMessage:   "warning: low memory",
-		},
-		{
-			name:          "plain debug log",
-			line:          "2026-01-05T12:00:00.000000000Z debug: processing request",
-			containerName: "runtime",
-			wantLevel:     "debug",
-			wantMessage:   "debug: processing request",
-		},
-		{
-			name:          "json log with logger name",
-			line:          `2026-01-05T12:00:00.000000000Z {"level":"info","ts":1767616635.0,"logger":"websocket-server","caller":"server.go:188","msg":"new connection","agent":"test-agent","namespace":"default"}`,
-			containerName: "facade",
-			wantLevel:     "info",
-			wantMessage:   "[websocket-server] [server.go:188] new connection (agent=test-agent, namespace=default)",
-		},
-		{
-			name:          "json log with shorter timestamp",
-			line:          `2026-01-05T12:00:00.123Z {"level":"info","ts":1767616635.0,"msg":"short timestamp test"}`,
-			containerName: "facade",
-			wantLevel:     "info",
-			wantMessage:   "short timestamp test",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			entry := parseLogLine(tt.line, tt.containerName)
-			assert.Equal(t, tt.wantLevel, entry.Level)
-			assert.Equal(t, tt.wantMessage, entry.Message)
-			assert.Equal(t, tt.containerName, entry.Container)
-		})
-	}
-}
-
-func TestSortLogsByTimestamp(t *testing.T) {
-	now := time.Now()
-	logs := []LogEntry{
-		{Timestamp: now.Add(-1 * time.Hour), Message: "oldest"},
-		{Timestamp: now, Message: "newest"},
-		{Timestamp: now.Add(-30 * time.Minute), Message: "middle"},
-	}
-
-	sortLogsByTimestamp(logs)
-
-	assert.Equal(t, "newest", logs[0].Message)
-	assert.Equal(t, "middle", logs[1].Message)
-	assert.Equal(t, "oldest", logs[2].Message)
-}
-
-func TestGetAgentLogsInvalidPath(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	// Test with only one path component (invalid)
-	req := httptest.NewRequest("GET", "/api/v1/agents/invalid", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestGetAgentLogsNoClientset(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	// Request logs endpoint - should fail because clientset is nil
-	req := httptest.NewRequest("GET", "/api/v1/agents/default/test-agent/logs", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	// Should return 500 error since clientset is nil
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
-func TestParseLogStream(t *testing.T) {
-	server := newTestServer(t)
-	input := `2026-01-05T12:00:00.000000000Z {"level":"info","ts":1767616635.0,"caller":"main.go:100","msg":"starting"}
-2026-01-05T12:00:01.000000000Z {"level":"error","ts":1767616636.0,"caller":"main.go:200","msg":"failed","error":"timeout"}
-2026-01-05T12:00:02.000000000Z plain log message`
-
-	reader := strings.NewReader(input)
-	logs := server.parseLogStream(reader, "test-container")
-
-	require.Len(t, logs, 3)
-
-	// First log
-	assert.Equal(t, "info", logs[0].Level)
-	assert.Equal(t, "[main.go:100] starting", logs[0].Message)
-	assert.Equal(t, "test-container", logs[0].Container)
-
-	// Second log (error with error field)
-	assert.Equal(t, "error", logs[1].Level)
-	assert.Equal(t, "[main.go:200] failed error: timeout", logs[1].Message)
-
-	// Third log (plain text)
-	assert.Equal(t, "info", logs[2].Level)
-	assert.Equal(t, "plain log message", logs[2].Message)
-}
-
-func TestParseLogLineWithoutTimestamp(t *testing.T) {
-	// Test log line without timestamp prefix
-	entry := parseLogLine("plain message without timestamp", "facade")
-	assert.Equal(t, "info", entry.Level)
-	assert.Equal(t, "plain message without timestamp", entry.Message)
-	assert.Equal(t, "facade", entry.Container)
-}
-
-func TestParseLogLineJSONWithoutCaller(t *testing.T) {
-	// Test JSON log without caller field
-	line := `2026-01-05T12:00:00.000000000Z {"level":"warn","ts":1767616635.0,"msg":"warning message"}`
-	entry := parseLogLine(line, "runtime")
-	assert.Equal(t, "warn", entry.Level)
-	assert.Equal(t, "warning message", entry.Message)
-}
-
-func TestGetAgentLogsMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/agents/default/test-agent/logs", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-const testScaleBody3 = `{"replicas": 3}`
-
-func TestScaleAgent(t *testing.T) {
-	replicas := int32(1)
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Runtime: &omniav1alpha1.RuntimeConfig{
-				Replicas: &replicas,
-			},
-		},
-	}
-
-	server := newTestServer(t, agent)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(testScaleBody3))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var result omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	assert.Equal(t, int32(3), *result.Spec.Runtime.Replicas)
-}
-
-func TestScaleAgentNotFound(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/nonexistent/scale", strings.NewReader(testScaleBody3))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
-func TestScaleAgentInvalidBody(t *testing.T) {
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-	}
-
-	server := newTestServer(t, agent)
-	handler := server.Handler()
-
-	body := `invalid json`
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestScaleAgentNegativeReplicas(t *testing.T) {
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-	}
-
-	server := newTestServer(t, agent)
-	handler := server.Handler()
-
-	body := `{"replicas": -1}`
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestScaleAgentWithAutoscaling(t *testing.T) {
-	minReplicas := int32(1)
-	maxReplicas := int32(10)
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Runtime: &omniav1alpha1.RuntimeConfig{
-				Autoscaling: &omniav1alpha1.AutoscalingConfig{
-					Enabled:     true,
-					MinReplicas: &minReplicas,
-					MaxReplicas: &maxReplicas,
-				},
-			},
-		},
-	}
-
-	server := newTestServer(t, agent)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(testScaleBody3))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	// Should return conflict since autoscaling is enabled
-	assert.Equal(t, http.StatusConflict, rec.Code)
-}
-
-func TestScaleAgentMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("GET", "/api/v1/agents/default/test-agent/scale", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestScaleAgentToZero(t *testing.T) {
-	replicas := int32(2)
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Runtime: &omniav1alpha1.RuntimeConfig{
-				Replicas: &replicas,
-			},
-		},
-	}
-
-	server := newTestServer(t, agent)
-	handler := server.Handler()
-
-	body := `{"replicas": 0}`
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var result omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	assert.Equal(t, int32(0), *result.Spec.Runtime.Replicas)
-}
-
-func TestCreateAgent(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	body := `{
-		"metadata": {"name": "new-agent", "namespace": "default"},
-		"spec": {"promptPackRef": {"name": "test-pack"}}
-	}`
-	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusCreated, rec.Code)
-
-	var result omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	assert.Equal(t, "new-agent", result.Name)
-	assert.Equal(t, "default", result.Namespace)
-	assert.Equal(t, "test-pack", result.Spec.PromptPackRef.Name)
-}
-
-func TestCreateAgentDefaultNamespace(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	body := `{
-		"metadata": {"name": "new-agent"},
-		"spec": {"promptPackRef": {"name": "test-pack"}}
-	}`
-	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusCreated, rec.Code)
-
-	var result omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	assert.Equal(t, "default", result.Namespace)
-}
-
-func TestCreateAgentInvalidBody(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	body := `{invalid json`
-	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestCreateAgentMissingName(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	body := `{
-		"metadata": {"namespace": "default"},
-		"spec": {"promptPackRef": {"name": "test-pack"}}
-	}`
-	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "metadata.name is required")
-}
-
-func TestCreateAgentMissingPromptPackRef(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	body := `{
-		"metadata": {"name": "new-agent", "namespace": "default"},
-		"spec": {}
-	}`
-	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "spec.promptPackRef.name is required")
-}
-
-func TestCreateAgentAlreadyExists(t *testing.T) {
-	existingAgent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "existing-agent",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-		},
-	}
-
-	server := newTestServer(t, existingAgent)
-	handler := server.Handler()
-
-	body := `{
-		"metadata": {"name": "existing-agent", "namespace": "default"},
-		"spec": {"promptPackRef": {"name": "test-pack"}}
-	}`
-	req := httptest.NewRequest("POST", "/api/v1/agents", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusConflict, rec.Code)
-	assert.Contains(t, rec.Body.String(), "already exists")
-}
-
-func TestGetAgentEventsMethodNotAllowed(t *testing.T) {
-	server := newTestServer(t)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("POST", "/api/v1/agents/default/test-agent/events", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
-
-func TestScaleAgentInitializeRuntime(t *testing.T) {
-	// Test scaling an agent that has no runtime config
-	agent := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-agent",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-			// No Runtime config
-		},
-	}
-
-	server := newTestServer(t, agent)
-	handler := server.Handler()
-
-	req := httptest.NewRequest("PUT", "/api/v1/agents/default/test-agent/scale", strings.NewReader(testScaleBody3))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	var result omniav1alpha1.AgentRuntime
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
-	assert.NotNil(t, result.Spec.Runtime)
-	assert.Equal(t, int32(3), *result.Spec.Runtime.Replicas)
+	assert.Equal(t, testContent, rec.Body.String())
 }

@@ -41,6 +41,10 @@ vi.mock("@kubernetes/client-node", () => {
     loadFromOptions(_options: unknown) {
       // Config loaded
     }
+    loadFromClusterAndUser(cluster: { name: string; server: string; caData?: string }, _user: { name: string; token?: string }) {
+      this.clusters = [cluster];
+      this.currentCluster = cluster;
+    }
     getCurrentCluster() {
       return this.currentCluster;
     }

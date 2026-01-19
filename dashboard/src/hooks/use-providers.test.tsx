@@ -3,12 +3,30 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useProviders, useProvider } from "./use-providers";
 
+// Mock workspace context
+const mockCurrentWorkspace = {
+  name: "test-workspace",
+  namespace: "test-namespace",
+  role: "editor",
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: [mockCurrentWorkspace],
+    isLoading: false,
+    error: null,
+    setCurrentWorkspace: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock provider data
 const mockProviders = [
   {
     metadata: {
       name: "openai-provider",
-      namespace: "production",
+      namespace: "omnia-system",
       uid: "uid-1",
     },
     spec: {
@@ -22,7 +40,7 @@ const mockProviders = [
   {
     metadata: {
       name: "anthropic-provider",
-      namespace: "production",
+      namespace: "omnia-system",
       uid: "uid-2",
     },
     spec: {
@@ -36,7 +54,7 @@ const mockProviders = [
   {
     metadata: {
       name: "failing-provider",
-      namespace: "staging",
+      namespace: "omnia-system",
       uid: "uid-3",
     },
     spec: {
@@ -89,7 +107,8 @@ describe("useProviders", () => {
     });
 
     expect(result.current.data).toEqual(mockProviders);
-    expect(mockGetProviders).toHaveBeenCalledWith(undefined);
+    // Providers are workspace-scoped
+    expect(mockGetProviders).toHaveBeenCalledWith("test-workspace");
   });
 
   it("should be in loading state initially", () => {
@@ -99,19 +118,6 @@ describe("useProviders", () => {
     );
 
     expect(result.current.isLoading).toBe(true);
-  });
-
-  it("should fetch providers by namespace", async () => {
-    const { result } = renderHook(
-      () => useProviders({ namespace: "production" }),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(mockGetProviders).toHaveBeenCalledWith("production");
   });
 
   it("should filter providers by phase (Ready)", async () => {
@@ -161,7 +167,7 @@ describe("useProviders", () => {
   it("should return empty array when no providers match filter", async () => {
     mockGetProviders.mockResolvedValueOnce([
       {
-        metadata: { name: "test", namespace: "test", uid: "1" },
+        metadata: { name: "test", namespace: "omnia-system", uid: "1" },
         spec: { type: "openai" },
         status: { phase: "Ready" },
       },
@@ -178,21 +184,6 @@ describe("useProviders", () => {
 
     expect(result.current.data).toHaveLength(0);
   });
-
-  it("should use correct query key with service name and options", async () => {
-    const options = { namespace: "staging", phase: "Ready" as const };
-
-    const { result } = renderHook(
-      () => useProviders(options),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(mockGetProviders).toHaveBeenCalledWith("staging");
-  });
 });
 
 describe("useProvider", () => {
@@ -200,24 +191,7 @@ describe("useProvider", () => {
     vi.clearAllMocks();
   });
 
-  it("should fetch a single provider by name and namespace", async () => {
-    const mockProvider = mockProviders[0];
-    mockGetProvider.mockResolvedValue(mockProvider);
-
-    const { result } = renderHook(
-      () => useProvider("openai-provider", "production"),
-      { wrapper: TestWrapper }
-    );
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(result.current.data).toEqual(mockProvider);
-    expect(mockGetProvider).toHaveBeenCalledWith("production", "openai-provider");
-  });
-
-  it("should use default namespace when not provided", async () => {
+  it("should fetch a single provider by name", async () => {
     const mockProvider = mockProviders[0];
     mockGetProvider.mockResolvedValue(mockProvider);
 
@@ -230,14 +204,33 @@ describe("useProvider", () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockGetProvider).toHaveBeenCalledWith("default", "openai-provider");
+    expect(result.current.data).toEqual(mockProvider);
+    // Providers are workspace-scoped
+    expect(mockGetProvider).toHaveBeenCalledWith("test-workspace", "openai-provider");
+  });
+
+  it("should accept deprecated namespace parameter (ignored)", async () => {
+    const mockProvider = mockProviders[0];
+    mockGetProvider.mockResolvedValue(mockProvider);
+
+    const { result } = renderHook(
+      () => useProvider("openai-provider", "production"),
+      { wrapper: TestWrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+
+    // Legacy namespace param is ignored - uses workspace from context
+    expect(mockGetProvider).toHaveBeenCalledWith("test-workspace", "openai-provider");
   });
 
   it("should return null when provider not found", async () => {
     mockGetProvider.mockResolvedValue(null);
 
     const { result } = renderHook(
-      () => useProvider("non-existent", "test"),
+      () => useProvider("non-existent"),
       { wrapper: TestWrapper }
     );
 
@@ -259,12 +252,23 @@ describe("useProvider", () => {
     expect(mockGetProvider).not.toHaveBeenCalled();
   });
 
+  it("should be disabled when name is undefined", () => {
+    const { result } = renderHook(
+      () => useProvider(undefined),
+      { wrapper: TestWrapper }
+    );
+
+    // Query should not be enabled
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mockGetProvider).not.toHaveBeenCalled();
+  });
+
   it("should handle fetch errors", async () => {
     const mockError = new Error("Failed to fetch provider");
     mockGetProvider.mockRejectedValue(mockError);
 
     const { result } = renderHook(
-      () => useProvider("test-provider", "test"),
+      () => useProvider("test-provider"),
       { wrapper: TestWrapper }
     );
 

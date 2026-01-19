@@ -147,7 +147,7 @@ describe("useConsoleConfig", () => {
     expect(result.current.error).toBe(mockError);
   });
 
-  it("should call useAgent with correct namespace and agent name", () => {
+  it("should call useAgent with correct agent name (namespace deprecated)", () => {
     mockUseAgent.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -159,7 +159,8 @@ describe("useConsoleConfig", () => {
       { wrapper: TestWrapper }
     );
 
-    expect(mockUseAgent).toHaveBeenCalledWith("my-agent", "staging");
+    // Namespace param is deprecated, useAgent is called with just the name
+    expect(mockUseAgent).toHaveBeenCalledWith("my-agent");
   });
 
   it("should return default config when agent data is null", async () => {

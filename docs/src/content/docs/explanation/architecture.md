@@ -361,3 +361,14 @@ The operator requires specific permissions:
 - Full access to Omnia CRDs
 - Read access to ConfigMaps and Secrets
 - Create/Update access to Deployments and Services
+
+### Multi-Tenancy
+
+For team isolation, Omnia provides Workspaces:
+
+- **Namespace isolation** - Each workspace gets a dedicated namespace
+- **Role-based access** - Owner, editor, viewer roles with scoped permissions
+- **Resource quotas** - Limits on compute, objects, and Omnia resources
+- **IdP integration** - Map identity provider groups to workspace roles
+
+See [Multi-Tenancy Architecture](/explanation/multi-tenancy/) for details.

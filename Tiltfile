@@ -239,6 +239,11 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
+    # Increase dashboard resources for HMR compilation
+    'dashboard.resources.limits.cpu=2000m',
+    'dashboard.resources.limits.memory=2Gi',
+    'dashboard.resources.requests.cpu=500m',
+    'dashboard.resources.requests.memory=1Gi',
 ]
 
 if ENABLE_OBSERVABILITY:
@@ -350,6 +355,10 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
         'opa.mode=sidecar',
         # Use persistence for model cache
         'ollama.persistence.enabled=true',
+        # Grant anonymous users owner access for local development
+        # WARNING: This allows unauthenticated write access - only for dev
+        'workspace.anonymousAccess.enabled=true',
+        'workspace.anonymousAccess.role=owner',
     ]
 
     if ENABLE_AUDIO_DEMO:
@@ -542,9 +551,13 @@ if ENABLE_AUDIO_DEMO:
 
 # Apply sample resources using local_resource for better control
 # Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples
+# After applying, patch the workspace to grant anonymous users owner access for local dev
 local_resource(
     'sample-resources',
-    cmd='kubectl apply -f config/samples/dev/',
+    cmd='''
+        kubectl apply -f config/samples/dev/
+        kubectl patch workspace dev-agents --type=merge -p '{"spec":{"anonymousAccess":{"enabled":true,"role":"owner"}}}'
+    ''',
     deps=['config/samples/dev'],
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],

@@ -98,7 +98,7 @@ export const POST = withWorkspaceAccess(
         body.metadata?.annotations
       );
 
-      const created = await createCrd<PromptPack>(result.clientOptions, CRD_PROMPTPACKS, promptPack as PromptPack);
+      const created = await createCrd<PromptPack>(result.clientOptions, CRD_PROMPTPACKS, promptPack as unknown as PromptPack);
 
       auditSuccess(auditCtx, "create", resourceName);
       return NextResponse.json(created, { status: 201 });

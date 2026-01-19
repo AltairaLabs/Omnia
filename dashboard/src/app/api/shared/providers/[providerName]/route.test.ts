@@ -30,15 +30,14 @@ describe("GET /api/shared/providers/:providerName", () => {
     vi.resetAllMocks();
   });
 
-  it("returns 401 for anonymous users", async () => {
-    const { getUser } = await import("@/lib/auth");
-    vi.mocked(getUser).mockResolvedValue({
-      id: "anonymous",
-      provider: "anonymous",
-      username: "anonymous",
-      groups: [],
-      role: "viewer",
-    });
+  it("allows anonymous users (read-only public data)", async () => {
+    const { getSharedCrd } = await import("@/lib/k8s/crd-operations");
+
+    const mockProvider = {
+      metadata: { name: "openai", namespace: "omnia-system" },
+      spec: { type: "openai", models: ["gpt-4"] },
+    };
+    vi.mocked(getSharedCrd).mockResolvedValue(mockProvider);
 
     const { GET } = await import("./route");
     const request = new NextRequest("http://localhost/api/shared/providers/openai");
@@ -46,7 +45,9 @@ describe("GET /api/shared/providers/:providerName", () => {
 
     const response = await GET(request, context);
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.metadata.name).toBe("openai");
   });
 
   it("returns provider for authenticated users", async () => {

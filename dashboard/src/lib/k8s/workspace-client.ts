@@ -70,22 +70,31 @@ export async function getWorkspace(name: string): Promise<Workspace | null> {
  * List all Workspaces in the cluster.
  *
  * @param labelSelector - Optional label selector to filter workspaces
- * @returns Array of workspace resources
+ * @returns Array of workspace resources (empty if CRD not installed)
  */
 export async function listWorkspaces(
   labelSelector?: string
 ): Promise<Workspace[]> {
   const k8sClient = getClient();
 
-  const response = await k8sClient.listClusterCustomObject({
-    group: GROUP,
-    version: VERSION,
-    plural: PLURAL,
-    labelSelector,
-  });
+  try {
+    const response = await k8sClient.listClusterCustomObject({
+      group: GROUP,
+      version: VERSION,
+      plural: PLURAL,
+      labelSelector,
+    });
 
-  const list = response as { items: Workspace[] };
-  return list.items || [];
+    const list = response as { items: Workspace[] };
+    return list.items || [];
+  } catch (error) {
+    // Return empty array if CRD doesn't exist (404) or not accessible
+    if (isNotFoundError(error)) {
+      console.warn("Workspace CRD not found - workspaces feature unavailable");
+      return [];
+    }
+    throw error;
+  }
 }
 
 /**
