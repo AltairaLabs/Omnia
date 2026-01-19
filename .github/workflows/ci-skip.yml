@@ -13,6 +13,8 @@ on:
       - 'LICENSE'
       - '.gitignore'
       - '.github/workflows/ci-skip.yml'
+      - '.github/workflows/ci-dependabot.yml'
+      - '.github/dependabot.yml'
 
 permissions:
   contents: read
