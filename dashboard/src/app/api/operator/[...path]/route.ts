@@ -1,9 +1,18 @@
 /**
  * Server-side proxy for the operator API.
  *
- * This route proxies requests from the browser to the operator API,
- * allowing the dashboard to work when deployed in-cluster without
- * exposing the operator API externally.
+ * DEPRECATED: This proxy route is deprecated and will be removed in a future release.
+ * Use the new workspace-scoped API routes instead:
+ *   - /api/workspaces/:name/agents
+ *   - /api/workspaces/:name/promptpacks
+ *   - /api/shared/toolregistries
+ *   - /api/shared/providers
+ *
+ * See #278 for migration details.
+ *
+ * Proxy Mode Configuration:
+ * - OMNIA_PROXY_MODE=strict (default): Returns 410 Gone for all proxy requests
+ * - OMNIA_PROXY_MODE=compat: Allows proxy requests with deprecation warnings
  *
  * The browser calls: /api/operator/api/v1/agents
  * This proxies to: http://operator-service:8082/api/v1/agents
@@ -14,6 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { logProxyUsage, logWarn, logError } from "@/lib/audit";
 
 // Server-side operator API URL (not exposed to browser)
 const OPERATOR_API_URL =
@@ -21,9 +31,53 @@ const OPERATOR_API_URL =
   process.env.NEXT_PUBLIC_OPERATOR_API_URL ||
   "http://localhost:8082";
 
+/**
+ * Proxy mode configuration.
+ * - "strict" (default): Proxy is disabled, returns 410 Gone
+ * - "compat": Proxy is enabled with deprecation warnings (for migration period)
+ */
+const PROXY_MODE = process.env.OMNIA_PROXY_MODE || "strict";
+
+/**
+ * Log context identifier for proxy operations.
+ */
+const LOG_CONTEXT = "operator-proxy";
+
 type RouteContext = {
   params: Promise<{ path: string[] }>;
 };
+
+/**
+ * Check if proxy mode allows requests.
+ */
+function isProxyEnabled(): boolean {
+  return PROXY_MODE === "compat";
+}
+
+/**
+ * Return 410 Gone response when proxy is disabled (strict mode).
+ */
+function proxyDisabledResponse(method: string, path: string): NextResponse {
+  return NextResponse.json(
+    {
+      error: "Gone",
+      message:
+        "The operator proxy has been deprecated and is disabled by default. " +
+        "Please migrate to workspace-scoped API routes. " +
+        "See https://github.com/AltairaLabs/Omnia/issues/278 for migration guide. " +
+        "To temporarily re-enable the proxy during migration, set OMNIA_PROXY_MODE=compat.",
+      deprecatedPath: `/api/operator/${path}`,
+      migrationGuide: "https://github.com/AltairaLabs/Omnia/issues/278",
+      alternatives: [
+        "/api/workspaces/:name/agents",
+        "/api/workspaces/:name/promptpacks",
+        "/api/shared/toolregistries",
+        "/api/shared/providers",
+      ],
+    },
+    { status: 410 }
+  );
+}
 
 async function proxyRequest(
   request: NextRequest,
@@ -32,16 +86,30 @@ async function proxyRequest(
   const { path } = await context.params;
   const pathString = path.join("/");
 
-  // DEPRECATION WARNING: This proxy route is deprecated.
-  // Use the new workspace-scoped API routes instead:
-  //   - /api/workspaces/:name/agents
-  //   - /api/workspaces/:name/promptpacks
-  //   - /api/shared/toolregistries
-  //   - /api/shared/providers
-  // See #278 for migration details.
-  console.warn(
-    `[DEPRECATED] Operator proxy route called: ${request.method} /api/operator/${pathString}. ` +
-    `Please migrate to workspace-scoped API routes (see #278).`
+  // Get user info for audit logging
+  const user = request.headers.get("x-forwarded-user") ||
+               request.headers.get("x-user-email") ||
+               "unknown";
+  const userAgent = request.headers.get("user-agent") || undefined;
+
+  // Log proxy usage for audit trail
+  logProxyUsage(request.method, pathString, user, userAgent);
+
+  // Check if proxy is enabled
+  if (!isProxyEnabled()) {
+    logWarn(
+      "Blocked proxy request - proxy is disabled",
+      LOG_CONTEXT,
+      { method: request.method, path: pathString, proxyMode: PROXY_MODE, user }
+    );
+    return proxyDisabledResponse(request.method, pathString);
+  }
+
+  // Log deprecation warning for compat mode usage
+  logWarn(
+    "Deprecated operator proxy route called",
+    LOG_CONTEXT,
+    { method: request.method, path: pathString, user, migrationGuide: "#278" }
   );
 
   // Build the target URL - pathString already includes 'api/v1/...'
@@ -72,16 +140,23 @@ async function proxyRequest(
     // Get response data
     const data = await response.text();
 
-    // Return proxied response
+    // Return proxied response with deprecation header
     return new NextResponse(data, {
       status: response.status,
       statusText: response.statusText,
       headers: {
         "Content-Type": response.headers.get("Content-Type") || "application/json",
+        "X-Deprecated": "true",
+        "X-Deprecation-Notice": "Operator proxy is deprecated. Migrate to /api/workspaces/:name/* routes.",
       },
     });
   } catch (error) {
-    console.error(`Proxy error for ${targetUrl}:`, error);
+    logError(
+      "Failed to connect to operator API",
+      error,
+      LOG_CONTEXT,
+      { targetUrl: targetUrl.toString(), method: request.method }
+    );
     return NextResponse.json(
       {
         error: "Failed to connect to operator API",
