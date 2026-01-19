@@ -1,7 +1,7 @@
 name: CI
 
-# This workflow runs for PRs that only affect documentation.
-# It reports the same status checks as ci.yml so docs-only PRs can be merged.
+# This workflow runs for PRs that only affect documentation or CI workflows.
+# It reports the same status checks as ci.yml so these PRs can be merged.
 # ci.yml has path filters for code files; this workflow handles everything else.
 
 on:
@@ -12,9 +12,7 @@ on:
       - '*.md'
       - 'LICENSE'
       - '.gitignore'
-      - '.github/workflows/ci-skip.yml'
-      - '.github/workflows/ci-dependabot.yml'
-      - '.github/dependabot.yml'
+      - '.github/**'
 
 permissions:
   contents: read
