@@ -40,6 +40,8 @@ import (
 	"github.com/altairalabs/omnia/internal/api"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
+	arenawebhook "github.com/altairalabs/omnia/internal/webhook"
+	"github.com/altairalabs/omnia/pkg/license"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -82,6 +84,7 @@ func main() {
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
+	var enableLicenseWebhooks bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -109,6 +112,8 @@ func main() {
 		"Redis password for Arena work queue (optional).")
 	flag.IntVar(&redisDB, "redis-db", 0,
 		"Redis database number for Arena work queue.")
+	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
+		"Enable license validation webhooks for Arena resources.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -267,20 +272,31 @@ func main() {
 		setupLog.Error(err, "unable to create arena artifact directory")
 		os.Exit(1)
 	}
+
+	// Create license validator for Arena Fleet
+	var licenseValidator *license.Validator
+	licenseValidator, err = license.NewValidator(mgr.GetClient())
+	if err != nil {
+		setupLog.Error(err, "unable to create license validator")
+		os.Exit(1)
+	}
+
 	if err := (&controller.ArenaSourceReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorderFor("arenasource-controller"),
-		ArtifactDir:     arenaArtifactDir,
-		ArtifactBaseURL: artifactBaseURL,
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Recorder:         mgr.GetEventRecorderFor("arenasource-controller"),
+		ArtifactDir:      arenaArtifactDir,
+		ArtifactBaseURL:  artifactBaseURL,
+		LicenseValidator: licenseValidator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)
 	}
 	if err := (&controller.ArenaConfigReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("arenaconfig-controller"),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Recorder:         mgr.GetEventRecorderFor("arenaconfig-controller"),
+		LicenseValidator: licenseValidator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaConfig")
 		os.Exit(1)
@@ -291,6 +307,7 @@ func main() {
 		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
 		WorkerImage:           arenaWorkerImage,
 		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
+		LicenseValidator:      licenseValidator,
 		// Redis configuration for lazy connection during reconciliation
 		RedisAddr:     redisAddr,
 		RedisPassword: redisPassword,
@@ -298,6 +315,19 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)
+	}
+
+	// Setup license validation webhooks for Arena resources
+	if enableLicenseWebhooks {
+		if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaSource")
+			os.Exit(1)
+		}
+		if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaJob")
+			os.Exit(1)
+		}
+		setupLog.Info("license validation webhooks enabled")
 	}
 
 	// Workspace controller for multi-tenancy

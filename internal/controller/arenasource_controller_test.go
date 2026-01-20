@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,13 +29,40 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/arena/fetcher"
+	"github.com/altairalabs/omnia/pkg/license"
 )
+
+// generateTestKeyPairForController generates an RSA key pair for testing.
+func generateTestKeyPairForController() (*rsa.PrivateKey, *rsa.PublicKey) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	return privateKey, &privateKey.PublicKey
+}
+
+// createOpenCoreLicenseValidator creates a validator that returns open-core license (no enterprise features).
+func createOpenCoreLicenseValidator(publicKey *rsa.PublicKey) (*license.Validator, error) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+
+	// No secret means open-core license
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+
+	return license.NewValidator(client, license.WithPublicKey(publicKey))
+}
 
 var _ = Describe("ArenaSource Controller", func() {
 	const (
@@ -1350,6 +1379,119 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// Should return without requeue since resource is deleted
 			Expect(result.RequeueAfter).To(BeZero())
+		})
+	})
+
+	Context("When testing storeArtifact with no-change result", func() {
+		It("should return existing URL when artifact path is empty", func() {
+			By("testing storeArtifact with empty path")
+			reconciler := &ArenaSourceReconciler{
+				ArtifactDir:     artifactDir,
+				ArtifactBaseURL: "http://localhost:8080/artifacts",
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-no-change",
+					Namespace: "default",
+				},
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						URL:      "http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz",
+						Revision: "rev1",
+					},
+				},
+			}
+
+			// Artifact with empty path indicates no change
+			artifact := &fetcher.Artifact{
+				Path:     "",
+				Revision: "rev1",
+			}
+
+			url, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(Equal("http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz"))
+		})
+	})
+
+	Context("When reconciling with license validation", func() {
+		var (
+			arenaSource *omniav1alpha1.ArenaSource
+		)
+
+		BeforeEach(func() {
+			By("creating the ArenaSource with Git type")
+			arenaSource = &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "license-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeGit,
+					Interval: "5m",
+					Git: &omniav1alpha1.GitSource{
+						URL: "https://github.com/example/repo.git",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up the ArenaSource")
+			resource := &omniav1alpha1.ArenaSource{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "license-test-source",
+				Namespace: arenaSourceNamespace,
+			}, resource)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should set Error phase when license validation fails", func() {
+			By("creating reconciler with license validator")
+			// Create a mock license validator that rejects git sources
+			_, publicKey := generateTestKeyPairForController()
+
+			licValidator, err := createOpenCoreLicenseValidator(publicKey)
+			Expect(err).NotTo(HaveOccurred())
+
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler := &ArenaSourceReconciler{
+				Client:           k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Recorder:         fakeRecorder,
+				ArtifactDir:      artifactDir,
+				ArtifactBaseURL:  "http://localhost:8080/artifacts",
+				LicenseValidator: licValidator,
+			}
+
+			By("reconciling the ArenaSource")
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "license-test-source",
+					Namespace: arenaSourceNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			By("checking that phase is Error")
+			updatedSource := &omniav1alpha1.ArenaSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "license-test-source",
+				Namespace: arenaSourceNamespace,
+			}, updatedSource)).To(Succeed())
+
+			Expect(updatedSource.Status.Phase).To(Equal(omniav1alpha1.ArenaSourcePhaseError))
+
+			By("checking the Ready condition shows license violation")
+			condition := meta.FindStatusCondition(updatedSource.Status.Conditions, ArenaSourceConditionTypeReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("LicenseViolation"))
 		})
 	})
 
