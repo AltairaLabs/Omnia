@@ -60,14 +60,14 @@ jobs:
         env:
           NEXT_PUBLIC_DEMO_MODE: 'true'
 
-      - name: Run E2E tests
+      - name: Run E2E tests with coverage
         run: |
           # Start the server in background with demo mode
           DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true npm run start &
           # Wait for server to be ready
           npx wait-on http://localhost:3000 --timeout 60000
-          # Run Playwright tests
-          PLAYWRIGHT_BASE_URL=http://localhost:3000 npx playwright test
+          # Run Playwright tests with coverage collection
+          PLAYWRIGHT_BASE_URL=http://localhost:3000 COLLECT_COVERAGE=true npx playwright test
         working-directory: dashboard
         env:
           CI: true
@@ -81,6 +81,14 @@ jobs:
             dashboard/test-results/
             dashboard/playwright-report/
             dashboard/e2e-results.xml
+          retention-days: 7
+
+      - name: Upload E2E coverage
+        uses: actions/upload-artifact@v6
+        if: success()
+        with:
+          name: dashboard-e2e-coverage
+          path: dashboard/e2e-coverage/
           retention-days: 7
 
       - name: Publish E2E Test Results

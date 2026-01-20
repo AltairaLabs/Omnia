@@ -1,8 +1,10 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/coverage';
 
 /**
  * Basic navigation tests for the Omnia Dashboard.
  * These tests verify that all main pages are accessible and render correctly.
+ *
+ * Uses coverage fixture for E2E code coverage collection.
  */
 
 // URL patterns (simple patterns to avoid slow regex)

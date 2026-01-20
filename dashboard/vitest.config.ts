@@ -17,6 +17,7 @@ export default defineConfig({
         // Standard exclusions
         "node_modules/",
         "src/test/", // Test setup files
+        "e2e/", // E2E test files (covered by Playwright)
         "**/*.d.ts", // Type definitions
         "**/index.ts", // Barrel re-exports
         "**/index.tsx",

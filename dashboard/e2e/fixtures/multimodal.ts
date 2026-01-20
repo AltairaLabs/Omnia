@@ -1,9 +1,14 @@
-import { test as base, expect, Page } from '@playwright/test';
+import { test as base, expect, Page, TestInfo } from '@playwright/test';
+import { addCoverageReport } from 'monocart-reporter';
 
 /**
  * Extended test fixture for multi-modal console E2E tests.
  * Provides helpers for interacting with the agent console.
+ *
+ * Includes coverage collection when COLLECT_COVERAGE=true.
  */
+
+const collectCoverage = process.env.COLLECT_COVERAGE === 'true';
 
 // Selectors for console elements
 export const SELECTORS = {
@@ -33,10 +38,30 @@ const NO_MESSAGE_ERROR = 'No assistant message found';
 
 /**
  * Custom test fixture with connected console page.
+ * Includes automatic coverage collection when COLLECT_COVERAGE=true.
  */
 export const test = base.extend<{
   connectedConsolePage: Page;
+  autoCollectCoverage: void;
 }>({
+  // Auto-use fixture for coverage collection
+  autoCollectCoverage: [async ({ page }: { page: Page }, use: () => Promise<void>, testInfo: TestInfo) => {
+    const isChromium = testInfo.project.name === 'chromium';
+
+    if (collectCoverage && isChromium) {
+      await page.coverage.startJSCoverage({ resetOnNavigation: false });
+    }
+
+    await use();
+
+    if (collectCoverage && isChromium) {
+      const coverageData = await page.coverage.stopJSCoverage();
+      if (coverageData.length > 0) {
+        await addCoverageReport(coverageData, testInfo);
+      }
+    }
+  }, { auto: true }],
+
   connectedConsolePage: async ({ page }, use) => {
     // Navigate to the console page for the test agent
     // Route format: /agents/[name]?namespace=...&tab=console
