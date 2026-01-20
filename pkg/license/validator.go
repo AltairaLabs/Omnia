@@ -37,7 +37,7 @@ import (
 //go:embed keys/public.pem
 var embeddedPublicKey []byte
 
-// License secret configuration.
+// License secret and ConfigMap configuration.
 const (
 	// LicenseSecretName is the name of the Secret containing the license.
 	LicenseSecretName = "arena-license"
@@ -45,6 +45,14 @@ const (
 	LicenseSecretNamespace = "omnia-system"
 	// LicenseSecretKey is the key within the Secret containing the JWT.
 	LicenseSecretKey = "license"
+
+	// PublicKeyConfigMapName is the name of the ConfigMap that can override the embedded public key.
+	// This allows key rotation without redeploying the operator.
+	PublicKeyConfigMapName = "arena-license-public-key"
+	// PublicKeyConfigMapNamespace is the namespace of the public key ConfigMap.
+	PublicKeyConfigMapNamespace = "omnia-system"
+	// PublicKeyConfigMapKey is the key within the ConfigMap containing the PEM-encoded public key.
+	PublicKeyConfigMapKey = "public.pem"
 )
 
 // Default cache TTL.
@@ -87,6 +95,8 @@ func WithDevMode() ValidatorOption {
 }
 
 // NewValidator creates a new license validator.
+// It first checks for a public key in the ConfigMap (for easy rotation),
+// then falls back to the embedded public key.
 func NewValidator(c client.Client, opts ...ValidatorOption) (*Validator, error) {
 	v := &Validator{
 		client:   c,
@@ -97,16 +107,81 @@ func NewValidator(c client.Client, opts ...ValidatorOption) (*Validator, error) 
 		opt(v)
 	}
 
-	// Parse embedded public key if not provided
-	if v.publicKey == nil {
-		key, err := parsePublicKey(embeddedPublicKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse embedded public key: %w", err)
-		}
-		v.publicKey = key
+	// If public key was explicitly provided via option, use it
+	if v.publicKey != nil {
+		return v, nil
 	}
 
+	// Try to load public key from ConfigMap first (allows rotation without redeploy)
+	if c != nil {
+		key, err := v.loadPublicKeyFromConfigMap(context.Background())
+		if err == nil && key != nil {
+			v.publicKey = key
+			return v, nil
+		}
+		// ConfigMap not found or invalid - fall back to embedded key
+	}
+
+	// Fall back to embedded public key
+	key, err := parsePublicKey(embeddedPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse embedded public key: %w", err)
+	}
+	v.publicKey = key
+
 	return v, nil
+}
+
+// loadPublicKeyFromConfigMap attempts to load the public key from a ConfigMap.
+// Returns nil, nil if the ConfigMap doesn't exist (allowing fallback to embedded key).
+func (v *Validator) loadPublicKeyFromConfigMap(ctx context.Context) (*rsa.PublicKey, error) {
+	var cm corev1.ConfigMap
+	err := v.client.Get(ctx, client.ObjectKey{
+		Namespace: PublicKeyConfigMapNamespace,
+		Name:      PublicKeyConfigMapName,
+	}, &cm)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil // ConfigMap doesn't exist, not an error
+		}
+		return nil, fmt.Errorf("failed to get public key ConfigMap: %w", err)
+	}
+
+	pemData, ok := cm.Data[PublicKeyConfigMapKey]
+	if !ok {
+		return nil, fmt.Errorf("ConfigMap %s/%s missing key %q",
+			PublicKeyConfigMapNamespace, PublicKeyConfigMapName, PublicKeyConfigMapKey)
+	}
+
+	key, err := parsePublicKey([]byte(pemData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse public key from ConfigMap: %w", err)
+	}
+
+	return key, nil
+}
+
+// RefreshPublicKey reloads the public key from the ConfigMap.
+// This can be called periodically or in response to ConfigMap updates
+// to support key rotation without restarting the operator.
+func (v *Validator) RefreshPublicKey(ctx context.Context) error {
+	key, err := v.loadPublicKeyFromConfigMap(ctx)
+	if err != nil {
+		return err
+	}
+
+	if key == nil {
+		// ConfigMap doesn't exist, keep using current key
+		return nil
+	}
+
+	v.mu.Lock()
+	v.publicKey = key
+	// Clear the license cache to force re-validation with new key
+	v.cache = nil
+	v.mu.Unlock()
+
+	return nil
 }
 
 // GetLicense returns the current license, fetching from the Secret if needed.
