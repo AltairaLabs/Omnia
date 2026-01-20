@@ -108,9 +108,11 @@ describe("LicenseExpiryBanner", () => {
   });
 
   it("should show singular 'day' when 1 day remaining", () => {
+    // Add buffer to ensure Math.floor results in exactly 1 day
+    const oneDayPlusBuffer = 1.5 * 24 * 60 * 60 * 1000;
     mockUseLicense.mockReturnValue({
       license: createMockLicense({
-        expiresAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
+        expiresAt: new Date(Date.now() + oneDayPlusBuffer).toISOString(),
       }),
       isLoading: false,
       error: undefined,
