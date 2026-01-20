@@ -172,6 +172,8 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
                    [[ "$REL_FILE" == src/lib/prometheus-queries.ts ]] || \
                    [[ "$REL_FILE" == src/lib/provider-utils.ts ]] || \
+                   [[ "$REL_FILE" == src/app/layout.tsx ]] || \
+                   [[ "$REL_FILE" == src/app/page.tsx ]] || \
                    [[ "$REL_FILE" == src/app/*/layout.tsx ]] || \
                    [[ "$REL_FILE" == src/app/*/page.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/layout.tsx ]] || \
