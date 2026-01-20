@@ -37,6 +37,7 @@ export { useSharedToolRegistries, useSharedToolRegistry } from "./use-shared-too
 export { useWorkspacePermissions } from "./use-workspace-permissions";
 export { useWorkspaceCosts } from "./use-workspace-costs";
 export { useArenaStats } from "./use-arena-stats";
+export { useArenaSources, useArenaSource, useArenaSourceMutations } from "./use-arena-sources";
 export type { WorkspaceCostData } from "./use-workspace-costs";
 export type { DashboardStats } from "./use-stats";
 export type { K8sEvent } from "./use-agent-events";
