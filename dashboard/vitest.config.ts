@@ -40,11 +40,36 @@ export default defineConfig({
 
         // Next.js framework files (tested via E2E)
         "src/app/**/layout.tsx",
-        "src/app/**/page.tsx",
+        "src/app/page.tsx", // Root page
+        "src/app/agents/**/page.tsx", // Agent pages (require full context)
+        "src/app/providers/**/page.tsx", // Provider pages (require full context)
+        "src/app/settings/**/page.tsx", // Settings pages (require full context)
+        "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)
+        "src/app/workspaces/**/page.tsx", // Workspace pages (require full context)
         "src/middleware.ts",
 
-        // API routes (require K8s infrastructure, tested via E2E)
-        "src/app/api/**",
+        // Auth API routes - require NextAuth server infrastructure
+        "src/app/api/auth/**",
+
+        // Prometheus API routes - require Prometheus server
+        "src/app/api/prometheus/**",
+
+        // License API routes - require license server
+        "src/app/api/license/**",
+
+        // Other API routes that require K8s infrastructure
+        "src/app/api/workspaces/[name]/agents/**",
+        "src/app/api/workspaces/[name]/costs/**",
+        "src/app/api/workspaces/[name]/promptpacks/**",
+        "src/app/api/workspaces/[name]/providers/**",
+        "src/app/api/workspaces/[name]/toolregistries/**",
+        "src/app/api/workspaces/[name]/stats/**",
+        "src/app/api/workspaces/[name]/route.ts",
+        "src/app/api/workspaces/route.ts",
+        "src/app/api/providers/**",
+        "src/app/api/config/**",
+        "src/app/api/health/**",
+        "src/app/api/settings/**",
 
         // Requires external infrastructure (K8s, Prometheus, etc.)
         "src/lib/data/live-service.ts", // K8s API
