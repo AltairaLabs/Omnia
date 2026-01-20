@@ -43,18 +43,22 @@ vi.mock("@/components/layout", () => ({
 }));
 
 // Mock arena components
-vi.mock("@/components/arena", () => ({
-  ArenaBreadcrumb: ({ items }: { items: { label: string }[] }) => (
-    <nav data-testid="breadcrumb">
-      {items.map((item) => (
-        <span key={item.label}>{item.label}</span>
-      ))}
-    </nav>
-  ),
-  SourceDialog: ({ open }: { open: boolean }) => (
-    open ? <div data-testid="source-dialog">Dialog</div> : null
-  ),
-}));
+vi.mock("@/components/arena", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/arena")>();
+  return {
+    ...actual,
+    ArenaBreadcrumb: ({ items }: { items: { label: string }[] }) => (
+      <nav data-testid="breadcrumb">
+        {items.map((item) => (
+          <span key={item.label}>{item.label}</span>
+        ))}
+      </nav>
+    ),
+    SourceDialog: ({ open }: { open: boolean }) => (
+      open ? <div data-testid="source-dialog">Dialog</div> : null
+    ),
+  };
+});
 
 // Mock next/link
 vi.mock("next/link", () => ({
@@ -251,10 +255,9 @@ describe("ArenaSourcesPage", () => {
     const createButton = screen.getByRole("button", { name: /create source/i });
     fireEvent.click(createButton);
 
-    // Dialog should open - check for dialog role (Radix creates this)
-    // The dialog is rendered via portal so we query the document
+    // Dialog should open - check for the mocked dialog
     await vi.waitFor(() => {
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByTestId("source-dialog")).toBeInTheDocument();
     });
   });
 

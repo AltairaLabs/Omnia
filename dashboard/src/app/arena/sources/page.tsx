@@ -15,7 +15,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -32,13 +31,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertCircle,
-  CheckCircle,
-  Clock,
   Database,
-  GitBranch,
-  Box,
-  Cloud,
-  FileText,
   Plus,
   MoreHorizontal,
   RefreshCw,
@@ -48,109 +41,16 @@ import {
   List,
 } from "lucide-react";
 import Link from "next/link";
-import { ArenaBreadcrumb } from "@/components/arena";
-import { SourceDialog } from "@/components/arena/source-dialog";
-import type { ArenaSource, ArenaSourceType } from "@/types/arena";
-
-function formatDate(dateString?: string): string {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatInterval(interval?: string): string {
-  if (!interval) return "-";
-  // Convert Go duration string (e.g., "5m", "1h") to human-readable format
-  const match = interval.match(/^(\d+)([smhd])$/);
-  if (!match) return interval;
-  const [, value, unit] = match;
-  const units: Record<string, string> = {
-    s: "sec",
-    m: "min",
-    h: "hour",
-    d: "day",
-  };
-  return `${value} ${units[unit]}${parseInt(value) > 1 ? "s" : ""}`;
-}
-
-function getSourceTypeIcon(type?: ArenaSourceType) {
-  switch (type) {
-    case "git":
-      return <GitBranch className="h-4 w-4" />;
-    case "oci":
-      return <Box className="h-4 w-4" />;
-    case "s3":
-      return <Cloud className="h-4 w-4" />;
-    case "configmap":
-      return <FileText className="h-4 w-4" />;
-    default:
-      return <Database className="h-4 w-4" />;
-  }
-}
-
-function getSourceTypeBadge(type?: ArenaSourceType) {
-  const colors: Record<ArenaSourceType, string> = {
-    git: "border-green-500 text-green-600",
-    oci: "border-blue-500 text-blue-600",
-    s3: "border-orange-500 text-orange-600",
-    configmap: "border-purple-500 text-purple-600",
-  };
-
-  return (
-    <Badge variant="outline" className={type ? colors[type] : ""}>
-      {getSourceTypeIcon(type)}
-      <span className="ml-1 capitalize">{type || "Unknown"}</span>
-    </Badge>
-  );
-}
-
-function getStatusBadge(phase?: string) {
-  switch (phase) {
-    case "Ready":
-      return (
-        <Badge variant="default" className="bg-green-500">
-          <CheckCircle className="h-3 w-3 mr-1" /> Ready
-        </Badge>
-      );
-    case "Failed":
-      return (
-        <Badge variant="destructive">
-          <AlertCircle className="h-3 w-3 mr-1" /> Failed
-        </Badge>
-      );
-    case "Pending":
-      return (
-        <Badge variant="outline">
-          <Clock className="h-3 w-3 mr-1" /> Pending
-        </Badge>
-      );
-    default:
-      return <Badge variant="outline">{phase || "Unknown"}</Badge>;
-  }
-}
-
-function getSourceUrl(source: ArenaSource): string {
-  const { spec } = source;
-  if (spec.type === "git" && spec.git) {
-    return spec.git.url;
-  }
-  if (spec.type === "oci" && spec.oci) {
-    return spec.oci.url;
-  }
-  if (spec.type === "s3" && spec.s3) {
-    const prefix = spec.s3.prefix ? "/" + spec.s3.prefix : "";
-    return `s3://${spec.s3.bucket}${prefix}`;
-  }
-  if (spec.type === "configmap" && spec.configMapRef) {
-    return spec.configMapRef.name;
-  }
-  return "-";
-}
+import {
+  ArenaBreadcrumb,
+  SourceDialog,
+  formatDate,
+  formatInterval,
+  getSourceTypeBadge,
+  getStatusBadge,
+  getSourceUrl,
+} from "@/components/arena";
+import type { ArenaSource } from "@/types/arena";
 
 interface SourceActionsProps {
   onSync: () => void;

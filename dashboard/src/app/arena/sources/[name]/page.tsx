@@ -8,7 +8,6 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -27,109 +26,32 @@ import {
 } from "@/components/ui/table";
 import {
   AlertCircle,
-  CheckCircle,
-  Clock,
-  GitBranch,
-  Box,
-  Cloud,
-  FileText,
   RefreshCw,
   Pencil,
   Trash2,
   ExternalLink,
-  Settings,
   History,
   Link as LinkIcon,
   Info,
   AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
-import { ArenaBreadcrumb, SourceDialog } from "@/components/arena";
-import type { ArenaSource, ArenaSourceType, ArenaConfig } from "@/types/arena";
+import {
+  ArenaBreadcrumb,
+  SourceDialog,
+  formatDate as formatDateBase,
+  formatInterval,
+  formatBytes,
+  getSourceTypeIcon as getSourceTypeIconBase,
+  getStatusBadge,
+  getConditionIcon,
+} from "@/components/arena";
+import type { ArenaSource, ArenaConfig } from "@/types/arena";
 import type { Condition } from "@/types/common";
 
-function formatDate(dateString?: string): string {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatInterval(interval?: string): string {
-  if (!interval) return "-";
-  const match = interval.match(/^(\d+)([smhd])$/);
-  if (!match) return interval;
-  const [, value, unit] = match;
-  const units: Record<string, string> = {
-    s: "sec",
-    m: "min",
-    h: "hour",
-    d: "day",
-  };
-  return `${value} ${units[unit]}${parseInt(value) > 1 ? "s" : ""}`;
-}
-
-function formatBytes(bytes?: number): string {
-  if (bytes === undefined || bytes === null) return "-";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function getSourceTypeIcon(type?: ArenaSourceType) {
-  switch (type) {
-    case "git":
-      return <GitBranch className="h-5 w-5" />;
-    case "oci":
-      return <Box className="h-5 w-5" />;
-    case "s3":
-      return <Cloud className="h-5 w-5" />;
-    case "configmap":
-      return <FileText className="h-5 w-5" />;
-    default:
-      return <Settings className="h-5 w-5" />;
-  }
-}
-
-function getStatusBadge(phase?: string) {
-  switch (phase) {
-    case "Ready":
-      return (
-        <Badge variant="default" className="bg-green-500">
-          <CheckCircle className="h-3 w-3 mr-1" /> Ready
-        </Badge>
-      );
-    case "Failed":
-      return (
-        <Badge variant="destructive">
-          <AlertCircle className="h-3 w-3 mr-1" /> Failed
-        </Badge>
-      );
-    case "Pending":
-      return (
-        <Badge variant="outline">
-          <Clock className="h-3 w-3 mr-1" /> Pending
-        </Badge>
-      );
-    default:
-      return <Badge variant="outline">{phase || "Unknown"}</Badge>;
-  }
-}
-
-function getConditionIcon(type: string, status: string) {
-  if (status === "True") {
-    return <CheckCircle className="h-4 w-4 text-green-500" />;
-  }
-  if (status === "False") {
-    return <AlertCircle className="h-4 w-4 text-red-500" />;
-  }
-  return <Clock className="h-4 w-4 text-yellow-500" />;
-}
+// Use the shared utilities with detail page specific defaults
+const formatDate = (dateString?: string) => formatDateBase(dateString, true);
+const getSourceTypeIcon = (type?: ArenaSource["spec"]["type"]) => getSourceTypeIconBase(type, "md");
 
 function OverviewTab({ source }: Readonly<{ source: ArenaSource }>) {
   const { spec, status } = source;
@@ -323,7 +245,7 @@ function SyncHistoryTab({ source }: Readonly<{ source: ArenaSource }>) {
               key={condition.type}
               className="flex items-start gap-3 p-3 rounded-lg border"
             >
-              {getConditionIcon(condition.type, condition.status)}
+              {getConditionIcon(condition.status)}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <p className="font-medium">{condition.type}</p>

@@ -49,18 +49,22 @@ vi.mock("@/components/layout", () => ({
 }));
 
 // Mock arena components
-vi.mock("@/components/arena", () => ({
-  ArenaBreadcrumb: ({ items }: { items: { label: string; href?: string }[] }) => (
-    <nav data-testid="breadcrumb">
-      {items.map((item) => (
-        <span key={item.label}>{item.label}</span>
-      ))}
-    </nav>
-  ),
-  SourceDialog: ({ open }: { open: boolean }) => (
-    open ? <div data-testid="source-dialog">Dialog</div> : null
-  ),
-}));
+vi.mock("@/components/arena", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/arena")>();
+  return {
+    ...actual,
+    ArenaBreadcrumb: ({ items }: { items: { label: string; href?: string }[] }) => (
+      <nav data-testid="breadcrumb">
+        {items.map((item) => (
+          <span key={item.label}>{item.label}</span>
+        ))}
+      </nav>
+    ),
+    SourceDialog: ({ open }: { open: boolean }) => (
+      open ? <div data-testid="source-dialog">Dialog</div> : null
+    ),
+  };
+});
 
 // Mock next/link
 vi.mock("next/link", () => ({
