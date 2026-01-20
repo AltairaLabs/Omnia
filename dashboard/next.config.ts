@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
 
   // Note: Grafana proxy is handled by /app/grafana/[...path]/route.ts
   // This allows us to add auth headers when proxying to Grafana
+
+  // Enable source maps in production for E2E code coverage collection.
+  // This allows monocart-reporter to map V8 coverage back to original source files.
+  // Source maps are only served when explicitly requested, so no security impact.
+  productionBrowserSourceMaps: true,
 };
 
 export default nextConfig;
