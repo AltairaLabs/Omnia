@@ -15,6 +15,18 @@ import type {
 import type { AgentRuntime as AgentRuntimeType } from "@/types/agent-runtime";
 import type { PromptPack as PromptPackType } from "@/types/prompt-pack";
 import type { ToolRegistry as ToolRegistryType } from "@/types/tool-registry";
+import type {
+  ArenaSource as ArenaSourceType,
+  ArenaSourceSpec,
+  ArenaConfig as ArenaConfigType,
+  ArenaConfigSpec,
+  ArenaJob as ArenaJobType,
+  ArenaJobSpec,
+  ArenaJobResults,
+  ArenaStats,
+  Scenario,
+} from "@/types/arena";
+import type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
 
 // Re-export CRD types from the centralized type definitions
 export type {
@@ -43,6 +55,27 @@ export type {
   ToolRegistryPhase,
   DiscoveredTool,
 } from "@/types/tool-registry";
+
+export type {
+  ArenaSource,
+  ArenaSourceSpec,
+  ArenaSourceStatus,
+  ArenaSourcePhase,
+  ArenaConfig,
+  ArenaConfigSpec,
+  ArenaConfigStatus,
+  ArenaConfigPhase,
+  ArenaJob,
+  ArenaJobSpec,
+  ArenaJobStatus,
+  ArenaJobPhase,
+  ArenaJobType,
+  ArenaJobResults,
+  ArenaStats,
+  Scenario,
+} from "@/types/arena";
+
+export type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
 
 // Provider types (not yet in dedicated file, define here)
 export interface ProviderSpec {
@@ -347,6 +380,34 @@ export interface DataService {
 
   // Costs
   getCosts(options?: CostOptions): Promise<CostData>;
+
+  // Arena Sources (workspace-scoped)
+  getArenaSources(workspace: string): Promise<ArenaSourceType[]>;
+  getArenaSource(workspace: string, name: string): Promise<ArenaSourceType | undefined>;
+  createArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSourceType>;
+  updateArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSourceType>;
+  deleteArenaSource(workspace: string, name: string): Promise<void>;
+  syncArenaSource(workspace: string, name: string): Promise<void>;
+
+  // Arena Configs (workspace-scoped)
+  getArenaConfigs(workspace: string): Promise<ArenaConfigType[]>;
+  getArenaConfig(workspace: string, name: string): Promise<ArenaConfigType | undefined>;
+  getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]>;
+  createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
+  updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
+  deleteArenaConfig(workspace: string, name: string): Promise<void>;
+
+  // Arena Jobs (workspace-scoped)
+  getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJobType[]>;
+  getArenaJob(workspace: string, name: string): Promise<ArenaJobType | undefined>;
+  getArenaJobResults(workspace: string, name: string): Promise<ArenaJobResults | undefined>;
+  getArenaJobMetrics(workspace: string, name: string): Promise<ArenaJobMetrics | undefined>;
+  createArenaJob(workspace: string, name: string, spec: ArenaJobSpec): Promise<ArenaJobType>;
+  cancelArenaJob(workspace: string, name: string): Promise<void>;
+  deleteArenaJob(workspace: string, name: string): Promise<void>;
+
+  // Arena Stats (workspace-scoped)
+  getArenaStats(workspace: string): Promise<ArenaStats>;
 
   // Agent WebSocket connections (uses namespace from workspace)
   createAgentConnection(namespace: string, name: string): AgentConnection;
