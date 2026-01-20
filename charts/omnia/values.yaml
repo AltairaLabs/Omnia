@@ -7,6 +7,15 @@ replicaCount: 1
 # -- Enable development mode with full-featured license. DO NOT USE IN PRODUCTION.
 devMode: false
 
+# License configuration
+license:
+  # -- License key (JWT). If set, creates the arena-license Secret.
+  # Generate at https://omnia.altairalabs.ai/trial or via license server.
+  key: ""
+  # -- Use an existing Secret instead of creating one.
+  # The secret must have a 'license' key containing the JWT.
+  existingSecret: ""
+
 image:
   # -- Image repository
   repository: ghcr.io/altairalabs/omnia
