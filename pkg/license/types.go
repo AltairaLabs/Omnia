@@ -56,6 +56,9 @@ type Limits struct {
 	// MaxWorkerReplicas is the maximum number of worker replicas allowed.
 	// A value of 0 means unlimited.
 	MaxWorkerReplicas int `json:"maxWorkerReplicas"`
+	// MaxActivations is the maximum number of cluster activations allowed.
+	// A value of 0 means unlimited (typically used for trial licenses).
+	MaxActivations int `json:"maxActivations,omitempty"`
 }
 
 // License represents a validated license.
@@ -164,4 +167,37 @@ func (l *License) CanUseScenarioCount(count int) bool {
 		return true
 	}
 	return count <= l.Limits.MaxScenarios
+}
+
+// ActivationState represents the activation status stored in a ConfigMap.
+// This persists the activation state to survive pod restarts.
+type ActivationState struct {
+	// ActivationID is the unique identifier returned by the activation server.
+	ActivationID string `json:"activation_id"`
+	// ClusterFingerprint is the fingerprint of this cluster.
+	ClusterFingerprint string `json:"cluster_fingerprint"`
+	// LicenseID is the ID of the activated license.
+	LicenseID string `json:"license_id"`
+	// ActivatedAt is when the license was first activated on this cluster.
+	ActivatedAt time.Time `json:"activated_at"`
+	// LastHeartbeat is the time of the last successful heartbeat.
+	LastHeartbeat time.Time `json:"last_heartbeat"`
+	// HeartbeatFailures tracks consecutive heartbeat failures for grace period.
+	HeartbeatFailures int `json:"heartbeat_failures,omitempty"`
+}
+
+// NeedsHeartbeat returns true if a heartbeat should be sent.
+func (s *ActivationState) NeedsHeartbeat(interval time.Duration) bool {
+	return time.Since(s.LastHeartbeat) >= interval
+}
+
+// IsInGracePeriod returns true if the activation is within the heartbeat grace period.
+// The grace period allows the system to continue operating during temporary network issues.
+const HeartbeatGracePeriod = 7 * 24 * time.Hour // 7 days
+
+func (s *ActivationState) IsInGracePeriod() bool {
+	if s.HeartbeatFailures == 0 {
+		return true
+	}
+	return time.Since(s.LastHeartbeat) < HeartbeatGracePeriod
 }
