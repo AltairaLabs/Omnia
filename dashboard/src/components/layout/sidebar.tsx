@@ -15,6 +15,7 @@ import {
   DollarSign,
   Terminal,
   Cpu,
+  Target,
 } from "lucide-react";
 
 const navigation = [
@@ -27,6 +28,7 @@ const navigation = [
   { name: "Providers", href: "/providers", icon: Cpu },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
   { name: "Costs", href: "/costs", icon: DollarSign },
+  { name: "Arena", href: "/arena", icon: Target },
 ];
 
 const secondaryNavigation = [
@@ -60,7 +62,10 @@ export function Sidebar() {
       {/* Primary Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navigation.map((item) => {
-          const isActive = pathname === item.href;
+          // Use startsWith for sections with nested pages (Arena)
+          const isActive = item.href === "/"
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.name}

@@ -182,7 +182,21 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/app/*/page.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/layout.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/page.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/api/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/auth/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/prometheus/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/license/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/agents/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/costs/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/promptpacks/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/providers/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/toolregistries/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/stats/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/route.ts ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/route.ts ]] || \
+                   [[ "$REL_FILE" == src/app/api/providers/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/config/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/health/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/settings/* ]] || \
                    [[ "$REL_FILE" == src/middleware.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/live-service.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/operator-service.ts ]] || \
