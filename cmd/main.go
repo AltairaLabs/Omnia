@@ -85,6 +85,7 @@ func main() {
 	var redisPassword string
 	var redisDB int
 	var enableLicenseWebhooks bool
+	var devMode bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -114,6 +115,8 @@ func main() {
 		"Redis database number for Arena work queue.")
 	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
 		"Enable license validation webhooks for Arena resources.")
+	flag.BoolVar(&devMode, "dev-mode", false,
+		"Enable development mode with a full-featured license. DO NOT USE IN PRODUCTION.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -275,7 +278,12 @@ func main() {
 
 	// Create license validator for Arena Fleet
 	var licenseValidator *license.Validator
-	licenseValidator, err = license.NewValidator(mgr.GetClient())
+	validatorOpts := []license.ValidatorOption{}
+	if devMode {
+		setupLog.Info("WARNING: Running in dev mode with full-featured license. DO NOT USE IN PRODUCTION.")
+		validatorOpts = append(validatorOpts, license.WithDevMode())
+	}
+	licenseValidator, err = license.NewValidator(mgr.GetClient(), validatorOpts...)
 	if err != nil {
 		setupLog.Error(err, "unable to create license validator")
 		os.Exit(1)

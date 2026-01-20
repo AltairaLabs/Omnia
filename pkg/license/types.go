@@ -104,6 +104,31 @@ func OpenCoreLicense() *License {
 	}
 }
 
+// DevLicense returns a full-featured development license.
+// This should ONLY be used for testing and development, never in production.
+func DevLicense() *License {
+	return &License{
+		ID:       "dev-mode",
+		Tier:     TierEnterprise,
+		Customer: "Development Mode",
+		Features: Features{
+			GitSource:          true,
+			OCISource:          true,
+			S3Source:           true,
+			LoadTesting:        true,
+			DataGeneration:     true,
+			Scheduling:         true,
+			DistributedWorkers: true,
+		},
+		Limits: Limits{
+			MaxScenarios:      0, // unlimited
+			MaxWorkerReplicas: 0, // unlimited
+		},
+		IssuedAt:  time.Now(),
+		ExpiresAt: time.Now().AddDate(100, 0, 0),
+	}
+}
+
 // IsExpired returns true if the license has expired.
 func (l *License) IsExpired() bool {
 	return time.Now().After(l.ExpiresAt)

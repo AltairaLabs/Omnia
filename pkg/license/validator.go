@@ -57,6 +57,7 @@ type Validator struct {
 	cache     *License
 	cacheExp  time.Time
 	cacheTTL  time.Duration
+	devMode   bool // When true, returns a full-featured dev license
 	mu        sync.RWMutex
 }
 
@@ -74,6 +75,14 @@ func WithCacheTTL(ttl time.Duration) ValidatorOption {
 func WithPublicKey(key *rsa.PublicKey) ValidatorOption {
 	return func(v *Validator) {
 		v.publicKey = key
+	}
+}
+
+// WithDevMode enables development mode with a full-featured license.
+// This should NEVER be used in production.
+func WithDevMode() ValidatorOption {
+	return func(v *Validator) {
+		v.devMode = true
 	}
 }
 
@@ -102,7 +111,13 @@ func NewValidator(c client.Client, opts ...ValidatorOption) (*Validator, error) 
 
 // GetLicense returns the current license, fetching from the Secret if needed.
 // Returns OpenCoreLicense if no license is found or validation fails.
+// In dev mode, returns a full-featured dev license.
 func (v *Validator) GetLicense(ctx context.Context) (*License, error) {
+	// In dev mode, always return a full-featured license
+	if v.devMode {
+		return DevLicense(), nil
+	}
+
 	// Check cache
 	v.mu.RLock()
 	if v.cache != nil && time.Now().Before(v.cacheExp) {
