@@ -67,8 +67,14 @@ const PROVIDER_TEMPLATES: Record<string, { key: string; label: string }> = {
 };
 
 interface KeyValuePair {
+  id: string;
   key: string;
   value: string;
+}
+
+let pairIdCounter = 0;
+function createPair(key = "", value = ""): KeyValuePair {
+  return { id: `pair-${++pairIdCounter}`, key, value };
 }
 
 /** Renders the loading state */
@@ -254,7 +260,7 @@ export function CredentialsSection() {
   const [secretName, setSecretName] = useState("");
   const [providerType, setProviderType] = useState("custom");
   const [keyValuePairs, setKeyValuePairs] = useState<KeyValuePair[]>([
-    { key: "", value: "" },
+    createPair(),
   ]);
 
   // Reset form state
@@ -262,7 +268,7 @@ export function CredentialsSection() {
     setNamespace("default");
     setSecretName("");
     setProviderType("custom");
-    setKeyValuePairs([{ key: "", value: "" }]);
+    setKeyValuePairs([createPair()]);
   }, []);
 
   // Handle provider template change
@@ -270,13 +276,13 @@ export function CredentialsSection() {
     setProviderType(type);
     if (type !== "custom") {
       const template = PROVIDER_TEMPLATES[type];
-      setKeyValuePairs([{ key: template.key, value: "" }]);
+      setKeyValuePairs([createPair(template.key, "")]);
     }
   }, []);
 
   // Add key-value pair
   const addKeyValuePair = useCallback(() => {
-    setKeyValuePairs((prev) => [...prev, { key: "", value: "" }]);
+    setKeyValuePairs((prev) => [...prev, createPair()]);
   }, []);
 
   // Remove key-value pair
@@ -315,7 +321,7 @@ export function CredentialsSection() {
       setProviderType("custom");
     }
     // Set existing keys with empty values (we don't have the values)
-    setKeyValuePairs(secret.keys.map((key) => ({ key, value: "" })));
+    setKeyValuePairs(secret.keys.map((key) => createPair(key, "")));
     setShowEditDialog(true);
   }, []);
 
@@ -338,7 +344,7 @@ export function CredentialsSection() {
         namespace,
         name: secretName,
         data,
-        providerType: providerType !== "custom" ? providerType : undefined,
+        providerType: providerType === "custom" ? undefined : providerType,
       });
 
       setShowCreateDialog(false);
@@ -510,7 +516,7 @@ export function CredentialsSection() {
 
               <div className="space-y-2">
                 {keyValuePairs.map((pair, index) => (
-                  <div key={index} className="flex gap-2">
+                  <div key={pair.id} className="flex gap-2">
                     <Input
                       placeholder="Key (e.g., OPENAI_API_KEY)"
                       value={pair.key}
@@ -598,7 +604,7 @@ export function CredentialsSection() {
 
               <div className="space-y-2">
                 {keyValuePairs.map((pair, index) => (
-                  <div key={index} className="flex gap-2">
+                  <div key={pair.id} className="flex gap-2">
                     <Input
                       placeholder="Key"
                       value={pair.key}

@@ -246,16 +246,16 @@ export function auditSuccess(
   resourceName?: string,
   metadata?: Record<string, unknown>
 ): void {
-  logCrdSuccess(
+  logCrdSuccess({
     action,
-    ctx.resourceType,
+    resourceType: ctx.resourceType,
     resourceName,
-    ctx.workspace,
-    ctx.namespace,
-    getUserIdentifier(ctx.user),
-    ctx.role,
-    metadata
-  );
+    workspace: ctx.workspace,
+    namespace: ctx.namespace,
+    user: getUserIdentifier(ctx.user),
+    role: ctx.role,
+    metadata,
+  });
 }
 
 /**
@@ -267,16 +267,16 @@ export function auditDenied(
   resourceName?: string,
   errorMessage?: string
 ): void {
-  logCrdDenied(
+  logCrdDenied({
     action,
-    ctx.resourceType,
+    resourceType: ctx.resourceType,
     resourceName,
-    ctx.workspace,
-    ctx.namespace,
-    getUserIdentifier(ctx.user),
-    ctx.role,
-    errorMessage
-  );
+    workspace: ctx.workspace,
+    namespace: ctx.namespace,
+    user: getUserIdentifier(ctx.user),
+    role: ctx.role,
+    errorMessage,
+  });
 }
 
 /**
@@ -290,17 +290,17 @@ export function auditError(
   statusCode?: number
 ): void {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  logCrdError(
+  logCrdError({
     action,
-    ctx.resourceType,
+    resourceType: ctx.resourceType,
     resourceName,
-    ctx.workspace,
-    ctx.namespace,
-    getUserIdentifier(ctx.user),
-    ctx.role,
+    workspace: ctx.workspace,
+    namespace: ctx.namespace,
+    user: getUserIdentifier(ctx.user),
+    role: ctx.role,
     errorMessage,
-    statusCode
-  );
+    statusCode,
+  });
 }
 
 /**

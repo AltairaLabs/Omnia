@@ -51,7 +51,7 @@ export function LicenseExpiryBanner() {
       <Alert variant="default" className="rounded-none border-x-0 border-t-0 border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
         <AlertTriangle className="h-4 w-4 text-yellow-600" />
         <AlertDescription className="text-yellow-800 dark:text-yellow-200">
-          Your enterprise license expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? "s" : ""}.
+          Your enterprise license expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? "" : "s"}.
           Please contact sales to renew your license.
         </AlertDescription>
       </Alert>

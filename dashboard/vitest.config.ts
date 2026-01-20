@@ -31,7 +31,11 @@ export default defineConfig({
 
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
+        "src/components/console/**",
         "src/components/cost/**",
+        "src/components/credentials/**",
+        "src/components/layout/**",
+        "src/components/logs/**",
         "src/components/topology/**",
 
         // Next.js framework files (tested via E2E)

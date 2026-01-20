@@ -463,8 +463,8 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
             <div className="flex-1 text-sm text-amber-600 dark:text-amber-400">
               <p className="font-medium">Some files could not be added:</p>
               <ul className="mt-1 list-disc list-inside">
-                {rejections.map((reason, index) => (
-                  <li key={index}>{reason}</li>
+                {rejections.map((reason) => (
+                  <li key={reason}>{reason}</li>
                 ))}
               </ul>
             </div>

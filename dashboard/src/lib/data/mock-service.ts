@@ -1044,7 +1044,7 @@ export class MockDataService implements DataService {
     const job = mockArenaJobs.find(
       (j) => j.metadata?.namespace === workspace && j.metadata?.name === name
     );
-    if (job && job.status) {
+    if (job?.status) {
       job.status.phase = "Cancelled";
     }
   }
