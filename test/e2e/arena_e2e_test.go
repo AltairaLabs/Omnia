@@ -57,6 +57,13 @@ var _ = Describe("Arena Fleet", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
+		By("patching the controller-manager to enable dev mode for testing")
+		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+			"-n", namespace, "--type=json",
+			"-p", `[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--dev-mode"}]`)
+		_, err = utils.Run(patchCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with dev mode")
+
 		By("waiting for controller-manager to be ready")
 		verifyControllerReady := func(g Gomega) {
 			cmd := exec.Command("kubectl", "get", "deployment", "omnia-controller-manager",

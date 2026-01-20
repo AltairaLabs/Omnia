@@ -4,6 +4,9 @@
 # -- Number of operator replicas
 replicaCount: 1
 
+# -- Enable development mode with full-featured license. DO NOT USE IN PRODUCTION.
+devMode: false
+
 image:
   # -- Image repository
   repository: ghcr.io/altairalabs/omnia

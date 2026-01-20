@@ -192,6 +192,19 @@ rules:
       - get
       - patch
       - update
+  # NetworkPolicies for workspace network isolation
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   {{- end }}
   {{- if .Values.arena.enabled }}
   # Arena Fleet CRDs

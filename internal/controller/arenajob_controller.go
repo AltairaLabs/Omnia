@@ -37,6 +37,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
+	"github.com/altairalabs/omnia/pkg/license"
 )
 
 // ArenaJob condition types
@@ -72,6 +73,8 @@ type ArenaJobReconciler struct {
 	WorkerImagePullPolicy corev1.PullPolicy
 	Queue                 queue.WorkQueue
 	Aggregator            *aggregator.Aggregator
+	// LicenseValidator validates license for job types/replicas/scheduling (defense in depth)
+	LicenseValidator *license.Validator
 	// Redis configuration for lazy connection
 	RedisAddr     string
 	RedisPassword string
@@ -117,6 +120,35 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Update observed generation
 	arenaJob.Status.ObservedGeneration = arenaJob.Generation
+
+	// License check (defense in depth - webhooks are primary enforcement)
+	if r.LicenseValidator != nil {
+		jobType := string(arenaJob.Spec.Type)
+		if jobType == "" {
+			jobType = "evaluation"
+		}
+		replicas := 1
+		if arenaJob.Spec.Workers != nil && arenaJob.Spec.Workers.Replicas > 0 {
+			replicas = int(arenaJob.Spec.Workers.Replicas)
+		}
+		hasSchedule := arenaJob.Spec.Schedule != nil && arenaJob.Spec.Schedule.Cron != ""
+
+		if err := r.LicenseValidator.ValidateArenaJob(ctx, jobType, replicas, hasSchedule); err != nil {
+			log.Info("Job configuration not allowed by license",
+				"type", jobType, "replicas", replicas, "hasSchedule", hasSchedule, "error", err)
+			arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
+			r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+				"LicenseViolation", err.Error())
+			if r.Recorder != nil {
+				r.Recorder.Event(arenaJob, corev1.EventTypeWarning, "LicenseViolation",
+					fmt.Sprintf("Job configuration requires Enterprise license: %s", err.Error()))
+			}
+			if statusErr := r.Status().Update(ctx, arenaJob); statusErr != nil {
+				log.Error(statusErr, "failed to update status")
+			}
+			return ctrl.Result{}, nil // Don't requeue - license must change
+		}
+	}
 
 	// Validate the referenced ArenaConfig
 	config, err := r.validateConfig(ctx, arenaJob)

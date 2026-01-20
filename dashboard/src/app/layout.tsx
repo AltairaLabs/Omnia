@@ -3,7 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AuthWrapper } from "@/components/auth-wrapper";
-import { Sidebar, ReadOnlyBanner, DemoModeBanner, WorkspaceContent } from "@/components/layout";
+import { Sidebar, ReadOnlyBanner, DemoModeBanner, LicenseExpiryBanner, WorkspaceContent } from "@/components/layout";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -40,6 +40,7 @@ export default function RootLayout({
               <div className="flex-1 flex flex-col overflow-hidden">
                 <DemoModeBanner />
                 <ReadOnlyBanner />
+                <LicenseExpiryBanner />
                 <main className="flex-1 overflow-auto bg-background">
                   <WorkspaceContent>
                     {children}

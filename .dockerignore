@@ -13,5 +13,11 @@
 # Re-include embedded schema files for go:embed
 !internal/schema/*.json
 
+# Re-include embedded license public key for go:embed
+!pkg/
+!pkg/license/
+!pkg/license/keys/
+!pkg/license/keys/public.pem
+
 # Re-include local PromptKit source for development builds
 !promptkit-local/**

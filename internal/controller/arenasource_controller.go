@@ -37,6 +37,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/arena/fetcher"
+	"github.com/altairalabs/omnia/pkg/license"
 )
 
 // ArenaSource condition types
@@ -77,6 +78,9 @@ type ArenaSourceReconciler struct {
 
 	// ArtifactBaseURL is the base URL for serving artifacts
 	ArtifactBaseURL string
+
+	// LicenseValidator validates license for source types (defense in depth)
+	LicenseValidator *license.Validator
 
 	// inProgress tracks in-progress fetch operations
 	inProgress sync.Map // map[types.NamespacedName]*fetchJob
@@ -136,6 +140,25 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// License check (defense in depth - webhooks are primary enforcement)
+	if r.LicenseValidator != nil {
+		sourceType := string(source.Spec.Type)
+		if err := r.LicenseValidator.ValidateArenaSource(ctx, sourceType); err != nil {
+			log.Info("Source type not allowed by license", "type", sourceType, "error", err)
+			source.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
+			r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+				"LicenseViolation", err.Error())
+			if r.Recorder != nil {
+				r.Recorder.Event(source, corev1.EventTypeWarning, "LicenseViolation",
+					fmt.Sprintf("Source type %s requires Enterprise license", sourceType))
+			}
+			if statusErr := r.Status().Update(ctx, source); statusErr != nil {
+				log.Error(statusErr, "Failed to update status")
+			}
+			return ctrl.Result{}, nil // Don't requeue - license must change
+		}
 	}
 
 	// Parse interval duration

@@ -68,6 +68,9 @@ spec:
             - --arena-worker-image={{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.arena.worker.image.pullPolicy }}
             {{- end }}
+            {{- if .Values.devMode }}
+            - --dev-mode
+            {{- end }}
           ports:
             {{- if .Values.api.enabled }}
             - name: api

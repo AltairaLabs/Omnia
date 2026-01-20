@@ -33,6 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/license"
 )
 
 // ArenaConfig condition types
@@ -60,6 +61,8 @@ type ArenaConfigReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	// LicenseValidator validates license for scenario counts (defense in depth)
+	LicenseValidator *license.Validator
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenaconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -164,6 +167,27 @@ func (r *ArenaConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		r.setCondition(config, ArenaConfigConditionTypeToolRegsValid, metav1.ConditionTrue,
 			"ToolRegistriesValid", fmt.Sprintf("All %d tool registries validated", len(config.Spec.ToolRegistries)))
+	}
+
+	// License check for scenario count (defense in depth)
+	if r.LicenseValidator != nil && config.Status.ResolvedSource != nil {
+		scenarioCount := int(config.Status.ResolvedSource.ScenarioCount)
+		if scenarioCount > 0 {
+			if err := r.LicenseValidator.ValidateScenarioCount(ctx, scenarioCount); err != nil {
+				log.Info("Scenario count exceeds license limit", "count", scenarioCount, "error", err)
+				config.Status.Phase = omniav1alpha1.ArenaConfigPhaseInvalid
+				r.setCondition(config, ArenaConfigConditionTypeReady, metav1.ConditionFalse,
+					"LicenseViolation", err.Error())
+				if r.Recorder != nil {
+					r.Recorder.Event(config, corev1.EventTypeWarning, "LicenseViolation",
+						fmt.Sprintf("Scenario count %d exceeds license limit", scenarioCount))
+				}
+				if statusErr := r.Status().Update(ctx, config); statusErr != nil {
+					log.Error(statusErr, "Failed to update status")
+				}
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	// All validations passed - set Ready

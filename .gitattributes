@@ -1,0 +1,12 @@
+# Default behavior - auto detect text files
+* text=auto
+
+# Ensure PEM files maintain LF line endings and are not modified
+*.pem text eol=lf
+
+# Binary files that should never be modified
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
