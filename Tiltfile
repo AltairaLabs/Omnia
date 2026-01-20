@@ -154,6 +154,8 @@ docker_build(
         './pkg',
         './go.mod',
         './go.sum',
+        # Embedded files for go:embed directives
+        './pkg/license/keys',
     ],
 )
 
