@@ -318,6 +318,14 @@ describe("ArenaService", () => {
 
       expect(await service.getArenaConfig("test-ws", "not-found")).toBeUndefined();
     });
+
+    it("should throw on server errors", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
+
+      await expect(service.getArenaConfig("test-ws", "test-config")).rejects.toThrow(
+        "Failed to fetch arena config: Internal Server Error"
+      );
+    });
   });
 
   describe("getArenaConfigScenarios", () => {
@@ -344,6 +352,14 @@ describe("ArenaService", () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
 
       expect(await service.getArenaConfigScenarios("test-ws", "not-found")).toEqual([]);
+    });
+
+    it("should throw on server errors", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
+
+      await expect(service.getArenaConfigScenarios("test-ws", "test-config")).rejects.toThrow(
+        "Failed to fetch arena config scenarios: Internal Server Error"
+      );
     });
   });
 
@@ -375,6 +391,28 @@ describe("ArenaService", () => {
       });
       expect(result).toEqual(mockConfig);
     });
+
+    it("should throw on failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Config name already exists"),
+      });
+
+      await expect(
+        service.createArenaConfig("test-ws", "existing-config", { sourceRef: { name: "source" } })
+      ).rejects.toThrow("Config name already exists");
+    });
+
+    it("should throw default message on failure with empty response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve(""),
+      });
+
+      await expect(
+        service.createArenaConfig("test-ws", "bad-config", { sourceRef: { name: "source" } })
+      ).rejects.toThrow("Failed to create arena config");
+    });
   });
 
   describe("updateArenaConfig", () => {
@@ -394,6 +432,28 @@ describe("ArenaService", () => {
         body: JSON.stringify({ spec: { sourceRef: { name: "updated-source" } } }),
       });
     });
+
+    it("should throw on failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Invalid config spec"),
+      });
+
+      await expect(
+        service.updateArenaConfig("test-ws", "test-config", { sourceRef: { name: "bad" } })
+      ).rejects.toThrow("Invalid config spec");
+    });
+
+    it("should throw default message on failure with empty response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve(""),
+      });
+
+      await expect(
+        service.updateArenaConfig("test-ws", "test-config", { sourceRef: { name: "bad" } })
+      ).rejects.toThrow("Failed to update arena config");
+    });
   });
 
   describe("deleteArenaConfig", () => {
@@ -405,6 +465,28 @@ describe("ArenaService", () => {
       expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/configs/test-config", {
         method: "DELETE",
       });
+    });
+
+    it("should throw on failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Config is in use"),
+      });
+
+      await expect(service.deleteArenaConfig("test-ws", "test-config")).rejects.toThrow(
+        "Config is in use"
+      );
+    });
+
+    it("should throw default message on failure with empty response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve(""),
+      });
+
+      await expect(service.deleteArenaConfig("test-ws", "test-config")).rejects.toThrow(
+        "Failed to delete arena config"
+      );
     });
   });
 
@@ -474,6 +556,14 @@ describe("ArenaService", () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
       expect(await service.getArenaJobs("test-ws")).toEqual([]);
     });
+
+    it("should throw on server errors", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
+
+      await expect(service.getArenaJobs("test-ws")).rejects.toThrow(
+        "Failed to fetch arena jobs: Internal Server Error"
+      );
+    });
   });
 
   describe("getArenaJob", () => {
@@ -499,6 +589,14 @@ describe("ArenaService", () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
 
       expect(await service.getArenaJob("test-ws", "not-found")).toBeUndefined();
+    });
+
+    it("should throw on server errors", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
+
+      await expect(service.getArenaJob("test-ws", "test-job")).rejects.toThrow(
+        "Failed to fetch arena job: Internal Server Error"
+      );
     });
   });
 
@@ -528,6 +626,14 @@ describe("ArenaService", () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
 
       expect(await service.getArenaJobResults("test-ws", "not-found")).toBeUndefined();
+    });
+
+    it("should throw on server errors", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
+
+      await expect(service.getArenaJobResults("test-ws", "test-job")).rejects.toThrow(
+        "Failed to fetch arena job results: Internal Server Error"
+      );
     });
   });
 
@@ -560,6 +666,14 @@ describe("ArenaService", () => {
 
       expect(await service.getArenaJobMetrics("test-ws", "not-found")).toBeUndefined();
     });
+
+    it("should throw on server errors", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
+
+      await expect(service.getArenaJobMetrics("test-ws", "test-job")).rejects.toThrow(
+        "Failed to fetch arena job metrics: Internal Server Error"
+      );
+    });
   });
 
   describe("createArenaJob", () => {
@@ -590,6 +704,34 @@ describe("ArenaService", () => {
         }),
       });
       expect(result).toEqual(mockJob);
+    });
+
+    it("should throw on failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Invalid job configuration"),
+      });
+
+      await expect(
+        service.createArenaJob("test-ws", "bad-job", {
+          configRef: { name: "invalid" },
+          type: "evaluation",
+        })
+      ).rejects.toThrow("Invalid job configuration");
+    });
+
+    it("should throw default message on failure with empty response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve(""),
+      });
+
+      await expect(
+        service.createArenaJob("test-ws", "bad-job", {
+          configRef: { name: "invalid" },
+          type: "evaluation",
+        })
+      ).rejects.toThrow("Failed to create arena job");
     });
   });
 
@@ -626,6 +768,28 @@ describe("ArenaService", () => {
       expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/jobs/test-job", {
         method: "DELETE",
       });
+    });
+
+    it("should throw on failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Job is still running"),
+      });
+
+      await expect(service.deleteArenaJob("test-ws", "test-job")).rejects.toThrow(
+        "Job is still running"
+      );
+    });
+
+    it("should throw default message on failure with empty response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve(""),
+      });
+
+      await expect(service.deleteArenaJob("test-ws", "test-job")).rejects.toThrow(
+        "Failed to delete arena job"
+      );
     });
   });
 
