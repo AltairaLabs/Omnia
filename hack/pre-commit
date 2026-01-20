@@ -186,7 +186,6 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/lib/auth/proxy.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/live-service.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/mock-service.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/data/arena-service.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/types.ts ]]; then
                     continue
                 fi

@@ -42,7 +42,6 @@ export default defineConfig({
         "src/lib/data/operator-service.ts", // Kubernetes operator client (tested via E2E)
         "src/lib/data/prometheus-service.ts", // Prometheus client (tested via E2E)
         "src/lib/data/mock-service.ts", // Mock service (demo mode only)
-        "src/lib/data/arena-service.ts", // Arena API client (tested via E2E)
         "src/lib/data/types.ts", // Type definitions and re-exports
         "src/hooks/use-agent-cost.ts", // Prometheus queries (tested via E2E)
         "src/lib/image-processor.ts", // Canvas API image processing (tested via E2E)
