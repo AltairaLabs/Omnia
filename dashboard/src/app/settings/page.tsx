@@ -1,11 +1,11 @@
 import { Metadata } from "next";
 import { Settings } from "lucide-react";
-import { ApiKeysSection } from "@/components/settings/api-keys-section";
+import { ApiKeysSection, LicenseSection, ActivationSection } from "@/components/settings";
 import { CredentialsSection } from "@/components/credentials";
 
 export const metadata: Metadata = {
   title: "Settings | Omnia Dashboard",
-  description: "Manage your dashboard settings and API keys",
+  description: "Manage your dashboard settings, license, and API keys",
 };
 
 export default function SettingsPage() {
@@ -18,12 +18,14 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your dashboard settings and API keys
+            Manage your dashboard settings, license, and API keys
           </p>
         </div>
       </div>
 
       <div className="grid gap-6">
+        <LicenseSection />
+        <ActivationSection />
         <CredentialsSection />
         <ApiKeysSection />
       </div>
