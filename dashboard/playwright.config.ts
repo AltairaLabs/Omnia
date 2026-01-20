@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, type ReporterDescription } from '@playwright/test';
 
 /**
  * Playwright configuration for Omnia Dashboard.
@@ -8,20 +8,64 @@ import { defineConfig, devices } from '@playwright/test';
  * - screenshots: Screenshot capture (npm run screenshots)
  * - video-capture: Video capture for GIFs (npm run videos)
  *
+ * Coverage:
+ * - Uses monocart-reporter to collect V8 coverage during E2E tests
+ * - Outputs lcov format for SonarCloud integration
+ * - Enable with: COLLECT_COVERAGE=true npm run test:e2e
+ *
  * See https://playwright.dev/docs/test-configuration.
  */
+
+const collectCoverage = process.env.COLLECT_COVERAGE === 'true';
+const isCI = !!process.env.CI;
+
+/**
+ * Get the reporter configuration based on environment.
+ */
+function getReporterConfig(): ReporterDescription[] {
+  if (collectCoverage) {
+    return [
+      ['monocart-reporter', {
+        name: 'Omnia Dashboard E2E Coverage Report',
+        outputFile: './e2e-coverage/report.html',
+        coverage: {
+          reportPath: './e2e-coverage/coverage',
+          reports: ['v8', 'lcovonly', 'console-summary'],
+          lcov: {
+            outputFile: './e2e-coverage/lcov.info',
+          },
+          entryFilter: (entry: { url: string }) => {
+            return entry.url.includes('localhost:3000') || entry.url.includes('127.0.0.1:3000');
+          },
+          sourceFilter: (sourcePath: string) => {
+            if (sourcePath.includes('node_modules')) return false;
+            if (sourcePath.includes('_next/static')) return false;
+            if (sourcePath.includes('.next')) return false;
+            return sourcePath.includes('/src/');
+          },
+        },
+      }],
+      ['html', { open: 'never' }],
+    ];
+  }
+
+  if (isCI) {
+    return [['junit', { outputFile: 'e2e-results.xml' }], ['html', { open: 'never' }]];
+  }
+
+  return [['html', { open: 'on-failure' }]];
+}
+
 export default defineConfig({
   testDir: './e2e',
   /* Fail the build on CI if you accidentally left test.only in the source code */
-  forbidOnly: !!process.env.CI,
+  forbidOnly: isCI,
   /* Retry failed tests on CI */
-  retries: process.env.CI ? 2 : 0,
+  retries: isCI ? 2 : 0,
   /* Limit parallel workers on CI to avoid resource issues */
-  workers: process.env.CI ? 1 : undefined,
+  workers: isCI ? 1 : undefined,
   /* Reporter to use */
-  reporter: process.env.CI
-    ? [['junit', { outputFile: 'e2e-results.xml' }], ['html', { open: 'never' }]]
-    : [['html', { open: 'on-failure' }]],
+  reporter: getReporterConfig(),
   /* Shared settings for all projects */
   use: {
     /* Base URL for the app */

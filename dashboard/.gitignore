@@ -21,6 +21,9 @@
 /playwright/.cache/
 e2e-results.xml
 
+# e2e coverage
+/e2e-coverage/
+
 # next.js
 /.next/
 /out/
