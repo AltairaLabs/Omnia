@@ -136,7 +136,7 @@ func TestActivationClient_Activate(t *testing.T) {
 		})
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "activation request failed")
+		assert.Contains(t, err.Error(), "activation failed")
 	})
 }
 
@@ -401,7 +401,8 @@ func TestActivationClient_Activate_ServerErrorNoBody(t *testing.T) {
 	})
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "activation failed with status 500")
+	assert.Contains(t, err.Error(), "activation failed")
+	assert.Contains(t, err.Error(), "status 500")
 }
 
 func TestActivationClient_Deactivate_ServerErrorWithMessage(t *testing.T) {

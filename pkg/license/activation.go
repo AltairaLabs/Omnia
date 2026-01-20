@@ -133,6 +133,41 @@ func NewActivationClient(opts ...ActivationClientOption) *ActivationClient {
 	return c
 }
 
+// doRequest performs an HTTP request and handles common response processing.
+// It returns the response body bytes or an error if the request failed.
+func (c *ActivationClient) doRequest(ctx context.Context, method, url string, body io.Reader) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("request failed: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
 // Activate registers this cluster with the license server.
 // Returns an error if the activation limit has been reached or the license is invalid.
 func (c *ActivationClient) Activate(ctx context.Context, req ActivationRequest) (*ActivationResponse, error) {
@@ -141,32 +176,9 @@ func (c *ActivationClient) Activate(ctx context.Context, req ActivationRequest) 
 		return nil, fmt.Errorf("failed to marshal activation request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.serverURL+"/v1/licenses/activate", bytes.NewReader(body))
+	respBody, err := c.doRequest(ctx, http.MethodPost, c.serverURL+"/v1/licenses/activate", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create activation request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("activation request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read activation response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("activation failed: %s", errResp.Error)
-		}
-		return nil, fmt.Errorf("activation failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("activation failed: %w", err)
 	}
 
 	var activationResp ActivationResponse
@@ -184,30 +196,10 @@ func (c *ActivationClient) Deactivate(
 	licenseID, fingerprint string,
 ) (*DeactivationResponse, error) {
 	url := fmt.Sprintf("%s/v1/licenses/%s/activations/%s", c.serverURL, licenseID, fingerprint)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create deactivation request: %w", err)
-	}
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.doRequest(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("deactivation request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read deactivation response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("deactivation failed: %s", errResp.Error)
-		}
-		return nil, fmt.Errorf("deactivation failed with status %d", resp.StatusCode)
+		return nil, fmt.Errorf("deactivation failed: %w", err)
 	}
 
 	var deactivationResp DeactivationResponse
@@ -231,31 +223,9 @@ func (c *ActivationClient) Heartbeat(
 	}
 
 	url := fmt.Sprintf("%s/v1/licenses/%s/heartbeat", c.serverURL, licenseID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	respBody, err := c.doRequest(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create heartbeat request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("heartbeat request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read heartbeat response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("heartbeat failed: %s", errResp.Error)
-		}
-		return nil, fmt.Errorf("heartbeat failed with status %d", resp.StatusCode)
+		return nil, fmt.Errorf("heartbeat failed: %w", err)
 	}
 
 	var heartbeatResp HeartbeatResponse
@@ -269,24 +239,10 @@ func (c *ActivationClient) Heartbeat(
 // GetActivations retrieves the list of active clusters for a license.
 func (c *ActivationClient) GetActivations(ctx context.Context, licenseID string) ([]ActivationInfo, error) {
 	url := fmt.Sprintf("%s/v1/licenses/%s/activations", c.serverURL, licenseID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create get activations request: %w", err)
-	}
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("get activations request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read activations response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get activations failed with status %d", resp.StatusCode)
+		return nil, fmt.Errorf("get activations failed: %w", err)
 	}
 
 	var activations struct {
