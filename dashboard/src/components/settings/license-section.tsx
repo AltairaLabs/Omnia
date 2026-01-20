@@ -45,7 +45,7 @@ function LicenseStatus({ isExpired, daysUntilExpiry }: LicenseStatusProps) {
     return (
       <Badge variant="outline" className="gap-1 border-yellow-500 text-yellow-600">
         <AlertTriangle className="h-3 w-3" />
-        Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? "s" : ""}
+        Expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? "" : "s"}
       </Badge>
     );
   }

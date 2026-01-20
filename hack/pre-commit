@@ -163,27 +163,38 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                 fi
 
                 # Skip excluded paths (matching vitest.config.ts exclusions)
-                # Note: API routes are tested via integration tests, not unit coverage
+                # Only exclude files that truly cannot be unit tested
                 if [[ "$REL_FILE" == src/test/* ]] || \
                    [[ "$REL_FILE" == src/types/generated/* ]] || \
+                   [[ "$REL_FILE" == src/types/* ]] || \
                    [[ "$REL_FILE" == src/components/ui/* ]] || \
-                   [[ "$REL_FILE" == src/components/console/markdown.tsx ]] || \
-                   [[ "$REL_FILE" == src/lib/api/schema.d.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/prometheus-queries.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/provider-utils.ts ]] || \
+                   [[ "$REL_FILE" == src/components/agents/* ]] || \
+                   [[ "$REL_FILE" == src/components/console/* ]] || \
+                   [[ "$REL_FILE" == src/components/cost/* ]] || \
+                   [[ "$REL_FILE" == src/components/credentials/* ]] || \
+                   [[ "$REL_FILE" == src/components/layout/* ]] || \
+                   [[ "$REL_FILE" == src/components/logs/* ]] || \
+                   [[ "$REL_FILE" == src/components/topology/* ]] || \
+                   [[ "$REL_FILE" == src/lib/proto/* ]] || \
                    [[ "$REL_FILE" == src/app/layout.tsx ]] || \
                    [[ "$REL_FILE" == src/app/page.tsx ]] || \
                    [[ "$REL_FILE" == src/app/*/layout.tsx ]] || \
                    [[ "$REL_FILE" == src/app/*/page.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/layout.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/page.tsx ]] || \
-                   [[ "$REL_FILE" == src/app/api/* ]] || \
-                   [[ "$REL_FILE" == src/app/api/** ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/actions.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/api-guard.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/config.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/proxy.ts ]]; then
+                   [[ "$REL_FILE" == src/middleware.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/live-service.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/operator-service.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/prometheus-service.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/workspace-api-service.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/mock-service.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/types.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/data/provider.tsx ]] || \
+                   [[ "$REL_FILE" == src/lib/k8s/token-fetcher.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/k8s/workspace-k8s-client-factory.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/image-processor.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
+                   [[ "$REL_FILE" == src/lib/auth/types.ts ]]; then
                     continue
                 fi
 

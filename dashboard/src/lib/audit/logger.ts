@@ -134,28 +134,27 @@ export function createAuditLogger(
 }
 
 /**
+ * Common options for CRD audit logging.
+ */
+export interface CrdAuditOptions {
+  action: AuditAction;
+  resourceType: string;
+  resourceName?: string;
+  workspace: string;
+  namespace: string;
+  user: string;
+  role?: string;
+}
+
+/**
  * Log a successful CRD operation.
  */
 export function logCrdSuccess(
-  action: AuditAction,
-  resourceType: string,
-  resourceName: string | undefined,
-  workspace: string,
-  namespace: string,
-  user: string,
-  role?: string,
-  metadata?: Record<string, unknown>
+  options: CrdAuditOptions & { metadata?: Record<string, unknown> }
 ): void {
   logAudit({
-    action,
-    resourceType,
-    resourceName,
-    workspace,
-    namespace,
-    user,
-    role,
+    ...options,
     result: "success",
-    metadata,
   });
 }
 
@@ -163,25 +162,11 @@ export function logCrdSuccess(
  * Log a denied CRD operation (authorization failure).
  */
 export function logCrdDenied(
-  action: AuditAction,
-  resourceType: string,
-  resourceName: string | undefined,
-  workspace: string,
-  namespace: string,
-  user: string,
-  role?: string,
-  errorMessage?: string
+  options: CrdAuditOptions & { errorMessage?: string }
 ): void {
   logAudit({
-    action,
-    resourceType,
-    resourceName,
-    workspace,
-    namespace,
-    user,
-    role,
+    ...options,
     result: "denied",
-    errorMessage,
     statusCode: 403,
   });
 }
@@ -190,27 +175,11 @@ export function logCrdDenied(
  * Log a failed CRD operation (error).
  */
 export function logCrdError(
-  action: AuditAction,
-  resourceType: string,
-  resourceName: string | undefined,
-  workspace: string,
-  namespace: string,
-  user: string,
-  role?: string,
-  errorMessage?: string,
-  statusCode?: number
+  options: CrdAuditOptions & { errorMessage?: string; statusCode?: number }
 ): void {
   logAudit({
-    action,
-    resourceType,
-    resourceName,
-    workspace,
-    namespace,
-    user,
-    role,
+    ...options,
     result: "error",
-    errorMessage,
-    statusCode,
   });
 }
 

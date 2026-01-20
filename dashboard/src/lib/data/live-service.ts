@@ -22,7 +22,19 @@ import type {
   CostOptions,
   K8sEvent,
   AgentConnection,
+  ArenaJobListOptions,
 } from "./types";
+import type {
+  ArenaSource,
+  ArenaSourceSpec,
+  ArenaConfig,
+  ArenaConfigSpec,
+  ArenaJob,
+  ArenaJobSpec,
+  ArenaJobResults,
+  ArenaStats,
+  Scenario,
+} from "@/types/arena";
 import type {
   ServerMessage,
   ConnectionStatus,
@@ -31,6 +43,7 @@ import type {
 } from "@/types/websocket";
 import { WorkspaceApiService } from "./workspace-api-service";
 import { PrometheusService } from "./prometheus-service";
+import { ArenaService, type ArenaJobMetrics } from "./arena-service";
 import { getWsProxyUrl } from "@/lib/config";
 
 /**
@@ -213,10 +226,12 @@ export class LiveDataService implements DataService {
 
   private readonly workspaceService: WorkspaceApiService;
   private readonly prometheusService: PrometheusService;
+  private readonly arenaService: ArenaService;
 
   constructor() {
     this.workspaceService = new WorkspaceApiService();
     this.prometheusService = new PrometheusService();
+    this.arenaService = new ArenaService();
   }
 
   // ============================================================
@@ -309,6 +324,90 @@ export class LiveDataService implements DataService {
 
   async getCosts(options?: CostOptions): Promise<CostData> {
     return this.prometheusService.getCosts(options);
+  }
+
+  // ============================================================
+  // Arena Fleet - delegated to ArenaService
+  // ============================================================
+
+  async getArenaSources(workspace: string): Promise<ArenaSource[]> {
+    return this.arenaService.getArenaSources(workspace);
+  }
+
+  async getArenaSource(workspace: string, name: string): Promise<ArenaSource | undefined> {
+    return this.arenaService.getArenaSource(workspace, name);
+  }
+
+  async createArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSource> {
+    return this.arenaService.createArenaSource(workspace, name, spec);
+  }
+
+  async updateArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSource> {
+    return this.arenaService.updateArenaSource(workspace, name, spec);
+  }
+
+  async deleteArenaSource(workspace: string, name: string): Promise<void> {
+    return this.arenaService.deleteArenaSource(workspace, name);
+  }
+
+  async syncArenaSource(workspace: string, name: string): Promise<void> {
+    return this.arenaService.syncArenaSource(workspace, name);
+  }
+
+  async getArenaConfigs(workspace: string): Promise<ArenaConfig[]> {
+    return this.arenaService.getArenaConfigs(workspace);
+  }
+
+  async getArenaConfig(workspace: string, name: string): Promise<ArenaConfig | undefined> {
+    return this.arenaService.getArenaConfig(workspace, name);
+  }
+
+  async getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]> {
+    return this.arenaService.getArenaConfigScenarios(workspace, name);
+  }
+
+  async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
+    return this.arenaService.createArenaConfig(workspace, name, spec);
+  }
+
+  async updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
+    return this.arenaService.updateArenaConfig(workspace, name, spec);
+  }
+
+  async deleteArenaConfig(workspace: string, name: string): Promise<void> {
+    return this.arenaService.deleteArenaConfig(workspace, name);
+  }
+
+  async getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJob[]> {
+    return this.arenaService.getArenaJobs(workspace, options);
+  }
+
+  async getArenaJob(workspace: string, name: string): Promise<ArenaJob | undefined> {
+    return this.arenaService.getArenaJob(workspace, name);
+  }
+
+  async getArenaJobResults(workspace: string, name: string): Promise<ArenaJobResults | undefined> {
+    return this.arenaService.getArenaJobResults(workspace, name);
+  }
+
+  async getArenaJobMetrics(workspace: string, name: string): Promise<ArenaJobMetrics | undefined> {
+    return this.arenaService.getArenaJobMetrics(workspace, name);
+  }
+
+  async createArenaJob(workspace: string, name: string, spec: ArenaJobSpec): Promise<ArenaJob> {
+    return this.arenaService.createArenaJob(workspace, name, spec);
+  }
+
+  async cancelArenaJob(workspace: string, name: string): Promise<void> {
+    return this.arenaService.cancelArenaJob(workspace, name);
+  }
+
+  async deleteArenaJob(workspace: string, name: string): Promise<void> {
+    return this.arenaService.deleteArenaJob(workspace, name);
+  }
+
+  async getArenaStats(workspace: string): Promise<ArenaStats> {
+    return this.arenaService.getArenaStats(workspace);
   }
 
   // ============================================================

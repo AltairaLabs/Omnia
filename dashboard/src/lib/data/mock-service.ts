@@ -20,7 +20,20 @@ import type {
   K8sEvent,
   AgentConnection,
   CostAllocationItem,
+  ArenaJobListOptions,
 } from "./types";
+import type {
+  ArenaSource,
+  ArenaSourceSpec,
+  ArenaConfig,
+  ArenaConfigSpec,
+  ArenaJob,
+  ArenaJobSpec,
+  ArenaJobResults,
+  ArenaStats,
+  Scenario,
+} from "@/types/arena";
+import type { ArenaJobMetrics } from "./arena-service";
 
 import type {
   ServerMessage,
@@ -40,6 +53,246 @@ import {
   getMockCostByModel,
 } from "../mock-data";
 import { LiveAgentConnection } from "./live-service";
+
+// Mock Arena data
+const mockArenaSources: ArenaSource[] = [
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaSource",
+    metadata: {
+      name: "customer-support-scenarios",
+      namespace: "demo-workspace",
+      uid: "arena-source-1",
+      creationTimestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      type: "configmap",
+      interval: "5m",
+      configMapRef: { name: "support-scenarios-v1" },
+    },
+    status: {
+      phase: "Ready",
+      artifact: {
+        revision: "v1.0.0",
+        url: "http://arena-artifacts/customer-support-scenarios/v1.0.0.tar.gz",
+        checksum: "sha256:abc123",
+        lastUpdateTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      },
+      conditions: [
+        {
+          type: "Ready",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+          reason: "Succeeded",
+          message: "Artifact fetched successfully",
+        },
+      ],
+    },
+  },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaSource",
+    metadata: {
+      name: "sales-eval-suite",
+      namespace: "demo-workspace",
+      uid: "arena-source-2",
+      creationTimestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      type: "configmap",
+      interval: "10m",
+      configMapRef: { name: "sales-scenarios-v2" },
+    },
+    status: {
+      phase: "Ready",
+      artifact: {
+        revision: "v2.1.0",
+        url: "http://arena-artifacts/sales-eval-suite/v2.1.0.tar.gz",
+        checksum: "sha256:def456",
+        lastUpdateTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      },
+      conditions: [
+        {
+          type: "Ready",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          reason: "Succeeded",
+          message: "Artifact fetched successfully",
+        },
+      ],
+    },
+  },
+];
+
+const mockArenaConfigs: ArenaConfig[] = [
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaConfig",
+    metadata: {
+      name: "support-eval-config",
+      namespace: "demo-workspace",
+      uid: "arena-config-1",
+      creationTimestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      sourceRef: { name: "customer-support-scenarios" },
+      providers: [{ name: "anthropic-claude" }],
+      defaults: { temperature: 0.7, concurrency: 4, timeout: "5m" },
+    },
+    status: {
+      phase: "Ready",
+      sourceRevision: "v1.0.0",
+      scenarioCount: 8,
+      providers: [{ name: "anthropic-claude", status: "Ready" }],
+      conditions: [
+        {
+          type: "Ready",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+          reason: "Succeeded",
+          message: "Configuration validated",
+        },
+      ],
+    },
+  },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaConfig",
+    metadata: {
+      name: "sales-eval-config",
+      namespace: "demo-workspace",
+      uid: "arena-config-2",
+      creationTimestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      sourceRef: { name: "sales-eval-suite" },
+      providers: [{ name: "openai-gpt4" }],
+      defaults: { temperature: 0.5, concurrency: 2, timeout: "10m" },
+    },
+    status: {
+      phase: "Ready",
+      sourceRevision: "v2.1.0",
+      scenarioCount: 12,
+      providers: [{ name: "openai-gpt4", status: "Ready" }],
+      conditions: [
+        {
+          type: "Ready",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+          reason: "Succeeded",
+          message: "Configuration validated",
+        },
+      ],
+    },
+  },
+];
+
+const mockArenaJobs: ArenaJob[] = [
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaJob",
+    metadata: {
+      name: "support-eval-20240115",
+      namespace: "demo-workspace",
+      uid: "arena-job-1",
+      creationTimestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      configRef: { name: "support-eval-config" },
+      type: "evaluation",
+      evaluation: { outputFormats: ["json", "junit"], passingThreshold: 0.8 },
+    },
+    status: {
+      phase: "Completed",
+      startTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      completionTime: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+      totalTasks: 8,
+      completedTasks: 8,
+      failedTasks: 1,
+      resultsUrl: "/results/support-eval-20240115",
+      conditions: [
+        {
+          type: "Complete",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+          reason: "JobCompleted",
+          message: "Job completed successfully",
+        },
+      ],
+    },
+  },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaJob",
+    metadata: {
+      name: "sales-eval-running",
+      namespace: "demo-workspace",
+      uid: "arena-job-2",
+      creationTimestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      configRef: { name: "sales-eval-config" },
+      type: "evaluation",
+      evaluation: { outputFormats: ["json"], passingThreshold: 0.75 },
+    },
+    status: {
+      phase: "Running",
+      startTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      totalTasks: 12,
+      completedTasks: 7,
+      failedTasks: 0,
+      workers: { desired: 2, active: 2 },
+      conditions: [
+        {
+          type: "Running",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          reason: "JobRunning",
+          message: "Job is running",
+        },
+      ],
+    },
+  },
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "ArenaJob",
+    metadata: {
+      name: "support-eval-failed",
+      namespace: "demo-workspace",
+      uid: "arena-job-3",
+      creationTimestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    },
+    spec: {
+      configRef: { name: "support-eval-config" },
+      type: "evaluation",
+      evaluation: { outputFormats: ["json"], passingThreshold: 0.9 },
+    },
+    status: {
+      phase: "Failed",
+      startTime: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      completionTime: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+      totalTasks: 8,
+      completedTasks: 3,
+      failedTasks: 5,
+      conditions: [
+        {
+          type: "Failed",
+          status: "True",
+          lastTransitionTime: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+          reason: "JobFailed",
+          message: "Too many failed scenarios",
+        },
+      ],
+    },
+  },
+];
+
+const mockScenarios: Scenario[] = [
+  { name: "greeting", displayName: "Greeting Test", description: "Tests greeting handling", tags: ["basic"], path: "scenarios/greeting.yaml" },
+  { name: "refund-request", displayName: "Refund Request", description: "Tests refund handling", tags: ["support", "financial"], path: "scenarios/refund.yaml" },
+  { name: "product-inquiry", displayName: "Product Inquiry", description: "Tests product questions", tags: ["support", "sales"], path: "scenarios/product.yaml" },
+  { name: "escalation", displayName: "Escalation Test", description: "Tests escalation flow", tags: ["support", "critical"], path: "scenarios/escalation.yaml" },
+];
 
 // Simulate network delay for realistic demo experience
 function delay(ms = 100): Promise<void> {
@@ -564,6 +817,276 @@ export class MockDataService implements DataService {
       byModel: getMockCostByModel(),
       timeSeries: mockCostTimeSeries,
       grafanaUrl: undefined, // No Grafana in demo mode
+    };
+  }
+
+  // ============================================================
+  // Arena Fleet mock methods
+  // ============================================================
+
+  async getArenaSources(workspace: string): Promise<ArenaSource[]> {
+    await delay();
+    return mockArenaSources.filter((s) => s.metadata?.namespace === workspace);
+  }
+
+  async getArenaSource(workspace: string, name: string): Promise<ArenaSource | undefined> {
+    await delay();
+    return mockArenaSources.find(
+      (s) => s.metadata?.namespace === workspace && s.metadata?.name === name
+    );
+  }
+
+  async createArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSource> {
+    await delay(500);
+    const newSource: ArenaSource = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "ArenaSource",
+      metadata: {
+        name,
+        namespace: workspace,
+        uid: `arena-source-${generateId()}`,
+        creationTimestamp: new Date().toISOString(),
+      },
+      spec,
+      status: { phase: "Pending" },
+    };
+    mockArenaSources.push(newSource);
+    return newSource;
+  }
+
+  async updateArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSource> {
+    await delay(500);
+    const source = mockArenaSources.find(
+      (s) => s.metadata?.namespace === workspace && s.metadata?.name === name
+    );
+    if (!source) {
+      throw new Error(`ArenaSource ${workspace}/${name} not found`);
+    }
+    source.spec = spec;
+    return source;
+  }
+
+  async deleteArenaSource(workspace: string, name: string): Promise<void> {
+    await delay(500);
+    const index = mockArenaSources.findIndex(
+      (s) => s.metadata?.namespace === workspace && s.metadata?.name === name
+    );
+    if (index !== -1) {
+      mockArenaSources.splice(index, 1);
+    }
+  }
+
+  async syncArenaSource(_workspace: string, _name: string): Promise<void> {
+    await delay(500);
+    // Mock sync does nothing
+  }
+
+  async getArenaConfigs(workspace: string): Promise<ArenaConfig[]> {
+    await delay();
+    return mockArenaConfigs.filter((c) => c.metadata?.namespace === workspace);
+  }
+
+  async getArenaConfig(workspace: string, name: string): Promise<ArenaConfig | undefined> {
+    await delay();
+    return mockArenaConfigs.find(
+      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
+    );
+  }
+
+  async getArenaConfigScenarios(_workspace: string, _name: string): Promise<Scenario[]> {
+    await delay();
+    return mockScenarios;
+  }
+
+  async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
+    await delay(500);
+    const newConfig: ArenaConfig = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "ArenaConfig",
+      metadata: {
+        name,
+        namespace: workspace,
+        uid: `arena-config-${generateId()}`,
+        creationTimestamp: new Date().toISOString(),
+      },
+      spec,
+      status: { phase: "Pending" },
+    };
+    mockArenaConfigs.push(newConfig);
+    return newConfig;
+  }
+
+  async updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
+    await delay(500);
+    const config = mockArenaConfigs.find(
+      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
+    );
+    if (!config) {
+      throw new Error(`ArenaConfig ${workspace}/${name} not found`);
+    }
+    config.spec = spec;
+    return config;
+  }
+
+  async deleteArenaConfig(workspace: string, name: string): Promise<void> {
+    await delay(500);
+    const index = mockArenaConfigs.findIndex(
+      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
+    );
+    if (index !== -1) {
+      mockArenaConfigs.splice(index, 1);
+    }
+  }
+
+  async getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJob[]> {
+    await delay();
+    let jobs = mockArenaJobs.filter((j) => j.metadata?.namespace === workspace);
+
+    if (options?.type) {
+      jobs = jobs.filter((j) => j.spec.type === options.type);
+    }
+    if (options?.phase) {
+      jobs = jobs.filter((j) => j.status?.phase === options.phase);
+    }
+    if (options?.configRef) {
+      jobs = jobs.filter((j) => j.spec.configRef.name === options.configRef);
+    }
+    if (options?.sort === "recent") {
+      jobs.sort((a, b) =>
+        new Date(b.metadata?.creationTimestamp || 0).getTime() -
+        new Date(a.metadata?.creationTimestamp || 0).getTime()
+      );
+    } else if (options?.sort === "oldest") {
+      jobs.sort((a, b) =>
+        new Date(a.metadata?.creationTimestamp || 0).getTime() -
+        new Date(b.metadata?.creationTimestamp || 0).getTime()
+      );
+    }
+    if (options?.limit) {
+      jobs = jobs.slice(0, options.limit);
+    }
+
+    return jobs;
+  }
+
+  async getArenaJob(workspace: string, name: string): Promise<ArenaJob | undefined> {
+    await delay();
+    return mockArenaJobs.find(
+      (j) => j.metadata?.namespace === workspace && j.metadata?.name === name
+    );
+  }
+
+  async getArenaJobResults(_workspace: string, name: string): Promise<ArenaJobResults | undefined> {
+    await delay();
+    // Return mock evaluation results for completed jobs
+    const job = mockArenaJobs.find((j) => j.metadata?.name === name);
+    if (!job || job.status?.phase !== "Completed") {
+      return undefined;
+    }
+    return {
+      jobName: name,
+      completedAt: job.status?.completionTime || new Date().toISOString(),
+      summary: {
+        total: 8,
+        passed: 7,
+        failed: 1,
+        errors: 0,
+        skipped: 0,
+        passRate: 0.875,
+        avgScore: 0.85,
+        avgDurationMs: 2500,
+      },
+      results: [
+        { scenario: "greeting", status: "pass", score: 0.95, durationMs: 1200 },
+        { scenario: "refund-request", status: "pass", score: 0.88, durationMs: 3200 },
+        { scenario: "product-inquiry", status: "pass", score: 0.92, durationMs: 2100 },
+        { scenario: "escalation", status: "fail", score: 0.45, durationMs: 4500, error: "Failed to detect urgency" },
+      ],
+    };
+  }
+
+  async getArenaJobMetrics(_workspace: string, name: string): Promise<ArenaJobMetrics | undefined> {
+    await delay();
+    const job = mockArenaJobs.find((j) => j.metadata?.name === name);
+    if (!job || job.status?.phase !== "Running") {
+      return undefined;
+    }
+    return {
+      activeWorkers: 2,
+      tasksPerSecond: 0.5,
+      latencyP50: 2100,
+      latencyP95: 4500,
+      latencyP99: 6200,
+      errorRate: 0.02,
+    };
+  }
+
+  async createArenaJob(workspace: string, name: string, spec: ArenaJobSpec): Promise<ArenaJob> {
+    await delay(500);
+    const newJob: ArenaJob = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "ArenaJob",
+      metadata: {
+        name,
+        namespace: workspace,
+        uid: `arena-job-${generateId()}`,
+        creationTimestamp: new Date().toISOString(),
+      },
+      spec,
+      status: { phase: "Pending" },
+    };
+    mockArenaJobs.push(newJob);
+    return newJob;
+  }
+
+  async cancelArenaJob(workspace: string, name: string): Promise<void> {
+    await delay(500);
+    const job = mockArenaJobs.find(
+      (j) => j.metadata?.namespace === workspace && j.metadata?.name === name
+    );
+    if (job?.status) {
+      job.status.phase = "Cancelled";
+    }
+  }
+
+  async deleteArenaJob(workspace: string, name: string): Promise<void> {
+    await delay(500);
+    const index = mockArenaJobs.findIndex(
+      (j) => j.metadata?.namespace === workspace && j.metadata?.name === name
+    );
+    if (index !== -1) {
+      mockArenaJobs.splice(index, 1);
+    }
+  }
+
+  async getArenaStats(workspace: string): Promise<ArenaStats> {
+    await delay();
+    const sources = mockArenaSources.filter((s) => s.metadata?.namespace === workspace);
+    const configs = mockArenaConfigs.filter((c) => c.metadata?.namespace === workspace);
+    const jobs = mockArenaJobs.filter((j) => j.metadata?.namespace === workspace);
+
+    return {
+      sources: {
+        total: sources.length,
+        ready: sources.filter((s) => s.status?.phase === "Ready").length,
+        failed: sources.filter((s) => s.status?.phase === "Failed").length,
+        active: sources.filter((s) => !s.spec.suspend).length,
+      },
+      configs: {
+        total: configs.length,
+        ready: configs.filter((c) => c.status?.phase === "Ready").length,
+        scenarios: configs.reduce((sum, c) => sum + (c.status?.scenarioCount || 0), 0),
+      },
+      jobs: {
+        total: jobs.length,
+        running: jobs.filter((j) => j.status?.phase === "Running").length,
+        queued: jobs.filter((j) => j.status?.phase === "Pending").length,
+        completed: jobs.filter((j) => j.status?.phase === "Completed").length,
+        failed: jobs.filter((j) => j.status?.phase === "Failed").length,
+        successRate: jobs.length > 0
+          ? jobs.filter((j) => j.status?.phase === "Completed").length / jobs.filter((j) => ["Completed", "Failed"].includes(j.status?.phase || "")).length
+          : 0,
+      },
     };
   }
 

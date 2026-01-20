@@ -64,6 +64,15 @@ const eslintConfig = defineConfig([
       "sonarjs/prefer-single-boolean-return": "error",
       "sonarjs/no-nested-template-literals": "error",
       "sonarjs/no-nested-conditional": "error",
+
+      // Additional rules to match SonarCloud (S* rules)
+      // Note: prefer-optional-chain and no-unnecessary-type-assertion require typed linting
+      // which significantly increases lint time. Fix these issues manually.
+      "@typescript-eslint/max-params": ["error", { max: 7 }], // S107
+      "no-negated-condition": "error", // S7735
+
+      // React rules to match SonarCloud
+      "react/no-array-index-key": "error", // S6479
     },
   },
   // Test files - relaxed rules

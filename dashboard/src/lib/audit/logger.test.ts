@@ -27,10 +27,10 @@ describe("audit logger", () => {
 
   afterEach(() => {
     consoleSpy.mockRestore();
-    if (originalEnv !== undefined) {
-      process.env.OMNIA_AUDIT_LOGGING_ENABLED = originalEnv;
-    } else {
+    if (originalEnv === undefined) {
       delete process.env.OMNIA_AUDIT_LOGGING_ENABLED;
+    } else {
+      process.env.OMNIA_AUDIT_LOGGING_ENABLED = originalEnv;
     }
   });
 
@@ -136,15 +136,15 @@ describe("audit logger", () => {
 
   describe("logCrdSuccess", () => {
     it("logs successful CRD operation", () => {
-      logCrdSuccess(
-        "create",
-        "AgentRuntime",
-        "my-agent",
-        "workspace",
-        "namespace",
-        "user@example.com",
-        "editor"
-      );
+      logCrdSuccess({
+        action: "create",
+        resourceType: "AgentRuntime",
+        resourceName: "my-agent",
+        workspace: "workspace",
+        namespace: "namespace",
+        user: "user@example.com",
+        role: "editor",
+      });
 
       const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
       expect(loggedJson.action).toBe("create");
@@ -155,16 +155,16 @@ describe("audit logger", () => {
     });
 
     it("includes metadata when provided", () => {
-      logCrdSuccess(
-        "list",
-        "PromptPack",
-        undefined,
-        "workspace",
-        "namespace",
-        "user@example.com",
-        "viewer",
-        { count: 5 }
-      );
+      logCrdSuccess({
+        action: "list",
+        resourceType: "PromptPack",
+        resourceName: undefined,
+        workspace: "workspace",
+        namespace: "namespace",
+        user: "user@example.com",
+        role: "viewer",
+        metadata: { count: 5 },
+      });
 
       const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
       expect(loggedJson.metadata).toEqual({ count: 5 });
@@ -173,16 +173,16 @@ describe("audit logger", () => {
 
   describe("logCrdDenied", () => {
     it("logs denied CRD operation with 403 status", () => {
-      logCrdDenied(
-        "delete",
-        "AgentRuntime",
-        "protected-agent",
-        "workspace",
-        "namespace",
-        "viewer@example.com",
-        "viewer",
-        "Insufficient permissions"
-      );
+      logCrdDenied({
+        action: "delete",
+        resourceType: "AgentRuntime",
+        resourceName: "protected-agent",
+        workspace: "workspace",
+        namespace: "namespace",
+        user: "viewer@example.com",
+        role: "viewer",
+        errorMessage: "Insufficient permissions",
+      });
 
       const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
       expect(loggedJson.action).toBe("delete");
@@ -194,17 +194,17 @@ describe("audit logger", () => {
 
   describe("logCrdError", () => {
     it("logs failed CRD operation with error details", () => {
-      logCrdError(
-        "update",
-        "PromptPack",
-        "broken-pack",
-        "workspace",
-        "namespace",
-        "user@example.com",
-        "editor",
-        "Connection timeout",
-        500
-      );
+      logCrdError({
+        action: "update",
+        resourceType: "PromptPack",
+        resourceName: "broken-pack",
+        workspace: "workspace",
+        namespace: "namespace",
+        user: "user@example.com",
+        role: "editor",
+        errorMessage: "Connection timeout",
+        statusCode: 500,
+      });
 
       const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
       expect(loggedJson.action).toBe("update");
