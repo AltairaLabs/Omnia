@@ -571,6 +571,32 @@ export interface DataGenResults {
 export type ArenaJobResults = EvaluationResults | LoadTestResults | DataGenResults;
 
 // =============================================================================
+// Metrics Types
+// =============================================================================
+
+/** Job metrics for real-time monitoring */
+export interface ArenaJobMetrics {
+  /** Progress percentage (0-100) */
+  progress?: number;
+  /** Current requests per second */
+  currentRps?: number;
+  /** Current latency percentiles */
+  latencyP50?: number;
+  latencyP95?: number;
+  latencyP99?: number;
+  /** Current error rate */
+  errorRate?: number;
+  /** Active workers */
+  activeWorkers?: number;
+  /** Tasks per second */
+  tasksPerSecond?: number;
+  /** Completed scenarios */
+  completedScenarios?: number;
+  /** Total scenarios */
+  totalScenarios?: number;
+}
+
+// =============================================================================
 // Stats Types
 // =============================================================================
 
