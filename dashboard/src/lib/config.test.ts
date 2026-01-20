@@ -75,6 +75,67 @@ describe("config", () => {
         tempoEnabled: false,
       });
     });
+
+    it("returns cached config on subsequent calls", async () => {
+      const mockConfig = {
+        demoMode: true,
+        readOnlyMode: false,
+        readOnlyMessage: "Test message",
+        wsProxyUrl: "ws://localhost:3002",
+        grafanaUrl: "http://localhost:3001",
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockConfig),
+      });
+
+      // Re-import to get fresh module with no cache
+      const { getRuntimeConfig: getConfig } = await import("./config");
+
+      // First call - fetches from API
+      const config1 = await getConfig();
+      expect(config1).toEqual(mockConfig);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Second call - returns cached value
+      const config2 = await getConfig();
+      expect(config2).toEqual(mockConfig);
+      expect(mockFetch).toHaveBeenCalledTimes(1); // Still only 1 call
+    });
+
+    it("deduplicates concurrent requests", async () => {
+      const mockConfig = {
+        demoMode: true,
+        readOnlyMode: false,
+        readOnlyMessage: "Test",
+        wsProxyUrl: "",
+        grafanaUrl: "",
+      };
+
+      // Use a delayed response to ensure concurrent calls
+      mockFetch.mockImplementationOnce(() =>
+        new Promise(resolve =>
+          setTimeout(() => resolve({
+            ok: true,
+            json: () => Promise.resolve(mockConfig),
+          }), 10)
+        )
+      );
+
+      // Re-import to get fresh module with no cache
+      const { getRuntimeConfig: getConfig } = await import("./config");
+
+      // Make concurrent calls
+      const [config1, config2] = await Promise.all([
+        getConfig(),
+        getConfig(),
+      ]);
+
+      expect(config1).toEqual(mockConfig);
+      expect(config2).toEqual(mockConfig);
+      expect(mockFetch).toHaveBeenCalledTimes(1); // Only 1 fetch despite 2 calls
+    });
   });
 
   describe("getWsProxyUrl", () => {
