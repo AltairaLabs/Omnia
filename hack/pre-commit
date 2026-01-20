@@ -182,6 +182,7 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/app/*/page.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/layout.tsx ]] || \
                    [[ "$REL_FILE" == src/app/**/page.tsx ]] || \
+                   [[ "$REL_FILE" == src/app/api/* ]] || \
                    [[ "$REL_FILE" == src/middleware.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/live-service.ts ]] || \
                    [[ "$REL_FILE" == src/lib/data/operator-service.ts ]] || \

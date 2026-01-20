@@ -18,6 +18,7 @@ import type {
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
+  ArenaJobMetrics,
   ArenaStats,
   Scenario,
 } from "@/types/arena";
@@ -38,21 +39,8 @@ export interface ArenaJobListOptions {
   sort?: "recent" | "oldest" | "name";
 }
 
-/** Job metrics for real-time monitoring */
-export interface ArenaJobMetrics {
-  /** Current requests per second */
-  currentRps?: number;
-  /** Current latency percentiles */
-  latencyP50?: number;
-  latencyP95?: number;
-  latencyP99?: number;
-  /** Current error rate */
-  errorRate?: number;
-  /** Active workers */
-  activeWorkers?: number;
-  /** Tasks per second */
-  tasksPerSecond?: number;
-}
+// Re-export ArenaJobMetrics for consumers that import from this file
+export type { ArenaJobMetrics };
 
 /**
  * Arena API service that calls workspace-scoped Arena endpoints.

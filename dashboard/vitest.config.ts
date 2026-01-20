@@ -43,6 +43,9 @@ export default defineConfig({
         "src/app/**/page.tsx",
         "src/middleware.ts",
 
+        // API routes (require K8s infrastructure, tested via E2E)
+        "src/app/api/**",
+
         // Requires external infrastructure (K8s, Prometheus, etc.)
         "src/lib/data/live-service.ts", // K8s API
         "src/lib/data/operator-service.ts", // Operator API
