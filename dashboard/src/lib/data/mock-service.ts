@@ -61,7 +61,7 @@ const mockArenaSources: ArenaSource[] = [
     kind: "ArenaSource",
     metadata: {
       name: "customer-support-scenarios",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-source-1",
       creationTimestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
     },
@@ -94,7 +94,7 @@ const mockArenaSources: ArenaSource[] = [
     kind: "ArenaSource",
     metadata: {
       name: "sales-eval-suite",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-source-2",
       creationTimestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
     },
@@ -130,7 +130,7 @@ const mockArenaConfigs: ArenaConfig[] = [
     kind: "ArenaConfig",
     metadata: {
       name: "support-eval-config",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-config-1",
       creationTimestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     },
@@ -160,7 +160,7 @@ const mockArenaConfigs: ArenaConfig[] = [
     kind: "ArenaConfig",
     metadata: {
       name: "sales-eval-config",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-config-2",
       creationTimestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     },
@@ -193,7 +193,7 @@ const mockArenaJobs: ArenaJob[] = [
     kind: "ArenaJob",
     metadata: {
       name: "support-eval-20240115",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-job-1",
       creationTimestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     },
@@ -226,7 +226,7 @@ const mockArenaJobs: ArenaJob[] = [
     kind: "ArenaJob",
     metadata: {
       name: "sales-eval-running",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-job-2",
       creationTimestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     },
@@ -258,7 +258,7 @@ const mockArenaJobs: ArenaJob[] = [
     kind: "ArenaJob",
     metadata: {
       name: "support-eval-failed",
-      namespace: "demo-workspace",
+      namespace: "default",
       uid: "arena-job-3",
       creationTimestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
     },
