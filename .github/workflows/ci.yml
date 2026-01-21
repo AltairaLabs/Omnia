@@ -168,12 +168,12 @@ jobs:
         wc -l dashboard/coverage/lcov.info
 
         # Check if E2E coverage exists and merge it
-        if [ -f dashboard/e2e-coverage/lcov.info ]; then
+        if [ -f dashboard/e2e-coverage/coverage/lcov.info ]; then
           echo "E2E coverage found, merging..."
-          wc -l dashboard/e2e-coverage/lcov.info
+          wc -l dashboard/e2e-coverage/coverage/lcov.info
 
           # Merge lcov files - append E2E coverage to unit test coverage
-          cat dashboard/e2e-coverage/lcov.info >> dashboard/coverage/lcov.info
+          cat dashboard/e2e-coverage/coverage/lcov.info >> dashboard/coverage/lcov.info
 
           echo "Merged dashboard coverage:"
           wc -l dashboard/coverage/lcov.info
