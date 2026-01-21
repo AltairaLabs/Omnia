@@ -247,6 +247,58 @@ go test ./internal/session/... -v
 - Use envtest for controller testing
 - Mock external dependencies
 
+### Dashboard Testing Strategy
+
+The dashboard uses a layered testing approach:
+
+| Layer | Tool | What to Mock |
+|-------|------|--------------|
+| Hooks | Vitest | API calls only |
+| Components | Vitest | Hooks/data fetching |
+| Pages | Playwright (E2E) | Nothing - test the real app |
+
+**Key principle: Mock at the data boundary, not the UI boundary.**
+
+```typescript
+// BAD - mocking UI components
+vi.mock("@/components/arena", async (importOriginal) => ({
+  ...await importOriginal(),
+  SourceDialog: () => <div>Mock</div>,  // Why? What does this prove?
+}))
+
+// GOOD - mock hooks/data
+vi.mock("@/hooks/use-arena-jobs", () => ({
+  useArenaJobs: () => ({ jobs: mockJobs, loading: false }),
+}))
+```
+
+**Why this matters:**
+
+1. **Mocking UI components is fragile** - Tests break when you refactor, even if behavior is unchanged
+2. **Mocking UI components tests implementation, not behavior** - We care that users can create a job, not that `JobDialog` receives specific props
+3. **`importOriginal` on barrel files causes OOM** - Coverage instrumentation loads the entire module tree, which can exceed 8GB for large barrels
+
+**When NOT to write unit tests:**
+
+- Page components that orchestrate many child components - use E2E instead
+- Components that would require mocking other UI components - use E2E instead
+- Complex user flows spanning multiple components - use E2E instead
+
+**When to write unit tests:**
+
+- Hooks with business logic
+- Utility functions
+- Individual components with clear inputs/outputs
+- Form validation logic
+- Data transformation functions
+
+**E2E tests (Playwright) cover:**
+
+- Full user journeys
+- Page-level integration
+- Real browser interactions
+- Components that are hard to unit test in isolation
+
 ### Documentation
 
 - Update README.md if adding features
