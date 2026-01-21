@@ -31,9 +31,9 @@ export const GET = withWorkspaceAccess<RouteParams>(
       if (!result.ok) return result.response;
 
       const { searchParams } = new URL(request.url);
-      const tailLines = parseInt(searchParams.get("tailLines") || searchParams.get("lines") || "100", 10);
+      const tailLines = Number.parseInt(searchParams.get("tailLines") || searchParams.get("lines") || "100", 10);
       const sinceSeconds = searchParams.get("sinceSeconds")
-        ? parseInt(searchParams.get("sinceSeconds")!, 10)
+        ? Number.parseInt(searchParams.get("sinceSeconds")!, 10)
         : undefined;
       const container = searchParams.get("container") || undefined;
 

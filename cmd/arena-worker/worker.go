@@ -282,61 +282,101 @@ func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundl
 	fmt.Printf("Processing work items for job: %s\n", jobID)
 
 	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("Shutdown signal received, exiting...")
+		if done := checkContextDone(ctx); done {
 			return nil
-		default:
 		}
 
 		// Pop next work item
 		item, err := q.Pop(ctx, jobID)
 		if err != nil {
-			if errors.Is(err, queue.ErrQueueEmpty) {
-				emptyCount++
-				if emptyCount >= maxEmptyPolls {
-					fmt.Printf("Queue empty after %d polls, checking if job is complete...\n", emptyCount)
-
-					// Check job progress
-					progress, err := q.Progress(ctx, jobID)
-					if err != nil {
-						return fmt.Errorf("failed to get job progress: %w", err)
-					}
-
-					if progress.IsComplete() {
-						fmt.Printf("Job complete: %d/%d items processed\n",
-							progress.Completed+progress.Failed, progress.Total)
-						return nil
-					}
-
-					// Items still processing, wait and retry
-					emptyCount = 0
-				}
-
-				time.Sleep(cfg.PollInterval)
-				continue
+			done, resetCount, retErr := handlePopError(ctx, err, emptyCount, maxEmptyPolls, cfg, q, jobID)
+			if retErr != nil {
+				return retErr
 			}
-			return fmt.Errorf("failed to pop work item: %w", err)
+			if done {
+				return nil
+			}
+			emptyCount = resetCount
+			continue
 		}
 
 		emptyCount = 0 // Reset on successful pop
 
-		// Execute the work item
+		// Execute and report result
 		result, execErr := executeWorkItem(ctx, cfg, item, bundlePath)
+		reportWorkItemResult(ctx, q, jobID, item, result, execErr)
+	}
+}
 
-		// Report result
-		if execErr != nil {
-			fmt.Printf("  [FAIL] %s: %v\n", item.ID, execErr)
-			if err := q.Nack(ctx, jobID, item.ID, execErr); err != nil {
-				fmt.Printf("  Warning: failed to nack item %s: %v\n", item.ID, err)
-			}
-		} else {
-			resultJSON, _ := json.Marshal(result)
-			fmt.Printf("  [%s] %s (%.0fms)\n", result.Status, item.ID, result.DurationMs)
-			if err := q.Ack(ctx, jobID, item.ID, resultJSON); err != nil {
-				fmt.Printf("  Warning: failed to ack item %s: %v\n", item.ID, err)
-			}
+// checkContextDone returns true if the context is cancelled.
+func checkContextDone(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		fmt.Println("Shutdown signal received, exiting...")
+		return true
+	default:
+		return false
+	}
+}
+
+// handlePopError handles errors from queue.Pop and returns (done, newEmptyCount, error).
+func handlePopError(
+	ctx context.Context, err error, emptyCount, maxEmptyPolls int, cfg *Config, q queue.WorkQueue, jobID string,
+) (bool, int, error) {
+	if !errors.Is(err, queue.ErrQueueEmpty) {
+		return false, emptyCount, fmt.Errorf("failed to pop work item: %w", err)
+	}
+
+	emptyCount++
+	if emptyCount >= maxEmptyPolls {
+		done, err := checkJobCompletion(ctx, q, jobID, emptyCount)
+		if err != nil {
+			return false, 0, err
 		}
+		if done {
+			return true, 0, nil
+		}
+		emptyCount = 0 // Reset for retry
+	}
+
+	time.Sleep(cfg.PollInterval)
+	return false, emptyCount, nil
+}
+
+// checkJobCompletion checks if the job is complete and returns (done, error).
+func checkJobCompletion(ctx context.Context, q queue.WorkQueue, jobID string, emptyCount int) (bool, error) {
+	fmt.Printf("Queue empty after %d polls, checking if job is complete...\n", emptyCount)
+
+	progress, err := q.Progress(ctx, jobID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get job progress: %w", err)
+	}
+
+	if progress.IsComplete() {
+		fmt.Printf("Job complete: %d/%d items processed\n",
+			progress.Completed+progress.Failed, progress.Total)
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// reportWorkItemResult reports the result of a work item execution.
+func reportWorkItemResult(
+	ctx context.Context, q queue.WorkQueue, jobID string, item *queue.WorkItem, result *ExecutionResult, execErr error,
+) {
+	if execErr != nil {
+		fmt.Printf("  [FAIL] %s: %v\n", item.ID, execErr)
+		if err := q.Nack(ctx, jobID, item.ID, execErr); err != nil {
+			fmt.Printf("  Warning: failed to nack item %s: %v\n", item.ID, err)
+		}
+		return
+	}
+
+	resultJSON, _ := json.Marshal(result)
+	fmt.Printf("  [%s] %s (%.0fms)\n", result.Status, item.ID, result.DurationMs)
+	if err := q.Ack(ctx, jobID, item.ID, resultJSON); err != nil {
+		fmt.Printf("  Warning: failed to ack item %s: %v\n", item.ID, err)
 	}
 }
 

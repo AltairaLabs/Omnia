@@ -248,24 +248,29 @@ func (q *MemoryQueue) Progress(ctx context.Context, jobID string) (*JobProgress,
 
 	// Set completion time if all items are done
 	if progress.IsComplete() && progress.Total > 0 {
-		// Find the latest completion time
-		var latestCompletion time.Time
-		for _, item := range state.completed {
-			if item.CompletedAt != nil && item.CompletedAt.After(latestCompletion) {
-				latestCompletion = *item.CompletedAt
-			}
-		}
-		for _, item := range state.failed {
-			if item.CompletedAt != nil && item.CompletedAt.After(latestCompletion) {
-				latestCompletion = *item.CompletedAt
-			}
-		}
-		if !latestCompletion.IsZero() {
-			progress.CompletedAt = &latestCompletion
-		}
+		progress.CompletedAt = findLatestCompletionTime(state.completed, state.failed)
 	}
 
 	return progress, nil
+}
+
+// findLatestCompletionTime returns a pointer to the latest completion time from the given item maps.
+func findLatestCompletionTime(completed, failed map[string]*WorkItem) *time.Time {
+	var latest time.Time
+	for _, item := range completed {
+		if item.CompletedAt != nil && item.CompletedAt.After(latest) {
+			latest = *item.CompletedAt
+		}
+	}
+	for _, item := range failed {
+		if item.CompletedAt != nil && item.CompletedAt.After(latest) {
+			latest = *item.CompletedAt
+		}
+	}
+	if latest.IsZero() {
+		return nil
+	}
+	return &latest
 }
 
 // Close releases resources and marks the queue as closed.

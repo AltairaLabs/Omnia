@@ -58,6 +58,29 @@ func ParseExecutionResult(item *queue.WorkItem) (*ExecutionResult, error) {
 		return nil, ErrNilWorkItem
 	}
 
+	result := newResultFromWorkItem(item)
+
+	// If no result data, infer status from work item status
+	if len(item.Result) == 0 {
+		inferStatusFromWorkItem(result, item)
+		return result, nil
+	}
+
+	// Try to parse as JSON
+	var jr jsonResult
+	if err := json.Unmarshal(item.Result, &jr); err != nil {
+		// If JSON parsing fails, still return a result based on item status
+		inferStatusFromWorkItem(result, item)
+		return result, nil
+	}
+
+	// Populate from JSON result
+	populateResultFromJSON(result, &jr, item)
+	return result, nil
+}
+
+// newResultFromWorkItem creates a new ExecutionResult with basic fields from a work item.
+func newResultFromWorkItem(item *queue.WorkItem) *ExecutionResult {
 	result := &ExecutionResult{
 		WorkItemID: item.ID,
 		ScenarioID: item.ScenarioID,
@@ -69,42 +92,28 @@ func ParseExecutionResult(item *queue.WorkItem) (*ExecutionResult, error) {
 		result.Duration = item.CompletedAt.Sub(*item.StartedAt)
 	}
 
-	// If no result data, infer status from work item status
-	if len(item.Result) == 0 {
-		switch item.Status {
-		case queue.ItemStatusCompleted:
-			result.Status = StatusPass
-		case queue.ItemStatusFailed:
-			result.Status = StatusFail
-			result.Error = item.Error
-		default:
-			result.Status = StatusUnknown
-		}
-		return result, nil
-	}
+	return result
+}
 
-	// Try to parse as JSON
-	var jr jsonResult
-	if err := json.Unmarshal(item.Result, &jr); err != nil {
-		// If JSON parsing fails, still return a result based on item status
-		if item.Status == queue.ItemStatusCompleted {
-			result.Status = StatusPass
-		} else {
-			result.Status = StatusFail
-			result.Error = item.Error
-		}
-		return result, nil
-	}
-
-	// Populate from JSON result
-	if jr.Status != "" {
-		result.Status = jr.Status
-	} else if item.Status == queue.ItemStatusCompleted {
+// inferStatusFromWorkItem sets the result status based on work item status.
+func inferStatusFromWorkItem(result *ExecutionResult, item *queue.WorkItem) {
+	switch item.Status {
+	case queue.ItemStatusCompleted:
 		result.Status = StatusPass
-	} else {
+	case queue.ItemStatusFailed:
 		result.Status = StatusFail
+		result.Error = item.Error
+	default:
+		result.Status = StatusUnknown
 	}
+}
 
+// populateResultFromJSON populates an ExecutionResult from a parsed JSON result.
+func populateResultFromJSON(result *ExecutionResult, jr *jsonResult, item *queue.WorkItem) {
+	// Set status from JSON or fall back to work item status
+	result.Status = determineStatus(jr.Status, item.Status)
+
+	// Set error from JSON or fall back to work item error
 	if jr.Error != "" {
 		result.Error = jr.Error
 	} else if item.Error != "" {
@@ -113,36 +122,68 @@ func ParseExecutionResult(item *queue.WorkItem) (*ExecutionResult, error) {
 
 	// Parse duration from JSON if not already set
 	if result.Duration == 0 {
-		if jr.DurationMs > 0 {
-			result.Duration = time.Duration(jr.DurationMs) * time.Millisecond
-		} else if jr.Duration != "" {
-			if d, err := time.ParseDuration(jr.Duration); err == nil {
-				result.Duration = d
-			}
-		}
+		result.Duration = parseDurationFromJSON(jr)
 	}
 
 	// Copy metrics
-	if len(jr.Metrics) > 0 {
-		result.Metrics = make(map[string]float64, len(jr.Metrics))
-		for k, v := range jr.Metrics {
-			result.Metrics[k] = v
-		}
-	}
+	copyMetrics(result, jr.Metrics)
 
 	// Copy assertions
-	if len(jr.Assertions) > 0 {
-		result.Assertions = make([]AssertionResult, len(jr.Assertions))
-		for i, a := range jr.Assertions {
-			result.Assertions[i] = AssertionResult{
-				Name:    a.Name,
-				Passed:  a.Passed,
-				Message: a.Message,
-			}
+	copyAssertions(result, jr.Assertions)
+}
+
+// determineStatus returns the appropriate status string.
+func determineStatus(jsonStatus string, itemStatus queue.ItemStatus) string {
+	if jsonStatus != "" {
+		return jsonStatus
+	}
+	if itemStatus == queue.ItemStatusCompleted {
+		return StatusPass
+	}
+	return StatusFail
+}
+
+// parseDurationFromJSON extracts duration from JSON result fields.
+func parseDurationFromJSON(jr *jsonResult) time.Duration {
+	if jr.DurationMs > 0 {
+		return time.Duration(jr.DurationMs) * time.Millisecond
+	}
+	if jr.Duration != "" {
+		if d, err := time.ParseDuration(jr.Duration); err == nil {
+			return d
 		}
 	}
+	return 0
+}
 
-	return result, nil
+// copyMetrics copies metrics from JSON result to execution result.
+func copyMetrics(result *ExecutionResult, metrics map[string]float64) {
+	if len(metrics) == 0 {
+		return
+	}
+	result.Metrics = make(map[string]float64, len(metrics))
+	for k, v := range metrics {
+		result.Metrics[k] = v
+	}
+}
+
+// copyAssertions copies assertions from JSON result to execution result.
+func copyAssertions(result *ExecutionResult, assertions []struct {
+	Name    string `json:"name"`
+	Passed  bool   `json:"passed"`
+	Message string `json:"message,omitempty"`
+}) {
+	if len(assertions) == 0 {
+		return
+	}
+	result.Assertions = make([]AssertionResult, len(assertions))
+	for i, a := range assertions {
+		result.Assertions[i] = AssertionResult{
+			Name:    a.Name,
+			Passed:  a.Passed,
+			Message: a.Message,
+		}
+	}
 }
 
 // JUnitTestSuites represents a collection of JUnit test suites.
