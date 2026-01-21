@@ -9,9 +9,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // Limit parallelism in CI to reduce memory usage during coverage
+    maxWorkers: process.env.CI ? 2 : undefined,
     coverage: {
       provider: "v8",
-      reporter: ["text", "json", "html", "lcov"],
+      // Skip HTML report in CI - it's memory intensive and we only need lcov for SonarCloud
+      reporter: process.env.CI ? ["text", "lcov"] : ["text", "json", "html", "lcov"],
       reportsDirectory: "./coverage",
       exclude: [
         // Standard exclusions
