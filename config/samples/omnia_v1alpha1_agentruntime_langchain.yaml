@@ -1,0 +1,85 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  labels:
+    app.kubernetes.io/name: omnia
+    app.kubernetes.io/managed-by: kustomize
+  name: langchain-support-agent
+spec:
+  # Use LangChain framework for the runtime
+  # This uses the omnia-langchain-runtime container
+  framework:
+    type: langchain
+    # Optionally override the default image:
+    # image: ghcr.io/altairalabs/omnia-langchain-runtime:v0.1.0
+
+  # Reference to the PromptPack containing agent prompts
+  promptPackRef:
+    name: customer-support
+    track: stable
+
+  # WebSocket facade for client connections
+  facade:
+    type: websocket
+    port: 8080
+
+  # Optional tool registry reference
+  toolRegistryRef:
+    name: support-tools
+
+  # Session configuration using in-memory store
+  session:
+    type: memory
+    ttl: "24h"
+
+  # Deployment configuration
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+
+  # Provider configuration - Claude via providerRef
+  providerRef:
+    name: claude-sonnet
+    namespace: omnia-system
+
+  # Alternative: inline provider config for OpenAI
+  # provider:
+  #   type: openai
+  #   model: gpt-4o
+  #   secretRef:
+  #     name: openai-credentials
+  #   config:
+  #     temperature: "0.7"
+  #     contextWindow: 128000
+---
+# Example Provider resource for Claude (referenced by providerRef above)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-sonnet
+  namespace: omnia-system
+spec:
+  type: claude
+  model: claude-sonnet-4-20250514
+  secretRef:
+    name: anthropic-credentials
+    key: api-key
+  config:
+    temperature: "0.7"
+    maxTokens: 4096
+---
+# Secret for Anthropic API key
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-credentials
+  namespace: omnia-system
+type: Opaque
+stringData:
+  api-key: "sk-ant-your-api-key-here"

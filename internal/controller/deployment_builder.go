@@ -303,14 +303,14 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	provider *omniav1alpha1.Provider,
 ) corev1.Container {
-	// Check for CRD image override first, then operator default, then hardcoded default
+	// Check for CRD image override first, then operator default, then framework-specific default
 	frameworkImage := ""
 	if agentRuntime.Spec.Framework != nil && agentRuntime.Spec.Framework.Image != "" {
 		frameworkImage = agentRuntime.Spec.Framework.Image
 	} else if r.FrameworkImage != "" {
 		frameworkImage = r.FrameworkImage
 	} else {
-		frameworkImage = DefaultFrameworkImage
+		frameworkImage = defaultImageForFramework(agentRuntime.Spec.Framework)
 	}
 
 	// Use configured pull policy, or default to IfNotPresent
@@ -561,4 +561,24 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	}
 
 	return envVars
+}
+
+// defaultImageForFramework returns the default container image for a framework type.
+func defaultImageForFramework(framework *omniav1alpha1.FrameworkConfig) string {
+	if framework == nil {
+		return DefaultFrameworkImage
+	}
+
+	switch framework.Type {
+	case omniav1alpha1.FrameworkTypeLangChain:
+		return DefaultLangChainImage
+	case omniav1alpha1.FrameworkTypePromptKit:
+		return DefaultFrameworkImage
+	case omniav1alpha1.FrameworkTypeCrewAI, omniav1alpha1.FrameworkTypeAutoGen:
+		// These frameworks don't have default images yet; use PromptKit as fallback
+		// Users must specify an image override for these frameworks
+		return DefaultFrameworkImage
+	default:
+		return DefaultFrameworkImage
+	}
 }
