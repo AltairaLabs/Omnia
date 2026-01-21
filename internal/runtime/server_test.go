@@ -1279,3 +1279,179 @@ func TestServer_CreateProviderFromConfig(t *testing.T) {
 		assert.Equal(t, "gemini", provider.ID())
 	})
 }
+
+func TestProcessAudioMedia(t *testing.T) {
+	log := logr.Discard()
+
+	t.Run("audio with base64 data produces send option", func(t *testing.T) {
+		// Valid base64 encoded data
+		audioBase64 := base64.StdEncoding.EncodeToString([]byte("fake audio data"))
+
+		media := &runtimev1.MediaContent{
+			MimeType: "audio/mp3",
+			Data:     audioBase64,
+		}
+		opt := processAudioMedia(media, log)
+		assert.NotNil(t, opt, "should produce send option for audio data")
+	})
+
+	t.Run("audio with URL produces send option", func(t *testing.T) {
+		media := &runtimev1.MediaContent{
+			MimeType: "audio/wav",
+			Url:      "https://example.com/audio.wav",
+		}
+		opt := processAudioMedia(media, log)
+		assert.NotNil(t, opt, "should produce send option for audio URL")
+	})
+
+	t.Run("audio without data or URL returns nil", func(t *testing.T) {
+		media := &runtimev1.MediaContent{
+			MimeType: "audio/ogg",
+		}
+		opt := processAudioMedia(media, log)
+		assert.Nil(t, opt, "should return nil without data or URL")
+	})
+
+	t.Run("audio with invalid base64 returns nil", func(t *testing.T) {
+		media := &runtimev1.MediaContent{
+			MimeType: "audio/mp3",
+			Data:     "not-valid-base64!!!",
+		}
+		opt := processAudioMedia(media, log)
+		assert.Nil(t, opt, "invalid base64 should return nil")
+	})
+}
+
+func TestProcessFileMedia(t *testing.T) {
+	log := logr.Discard()
+
+	t.Run("file with base64 data produces send option", func(t *testing.T) {
+		// Valid base64 encoded data
+		fileBase64 := base64.StdEncoding.EncodeToString([]byte("fake pdf content"))
+
+		media := &runtimev1.MediaContent{
+			MimeType: "application/pdf",
+			Data:     fileBase64,
+		}
+		opt := processFileMedia(media, log)
+		assert.NotNil(t, opt, "should produce send option for file data")
+	})
+
+	t.Run("file without data returns nil", func(t *testing.T) {
+		media := &runtimev1.MediaContent{
+			MimeType: "application/pdf",
+		}
+		opt := processFileMedia(media, log)
+		assert.Nil(t, opt, "should return nil without data")
+	})
+
+	t.Run("file with invalid base64 returns nil", func(t *testing.T) {
+		media := &runtimev1.MediaContent{
+			MimeType: "application/pdf",
+			Data:     "invalid-base64!!!",
+		}
+		opt := processFileMedia(media, log)
+		assert.Nil(t, opt, "invalid base64 should return nil")
+	})
+
+	t.Run("file with URL is not supported", func(t *testing.T) {
+		// processFileMedia only supports base64 data, URLs are not handled
+		media := &runtimev1.MediaContent{
+			MimeType: "application/pdf",
+			Url:      "https://example.com/doc.pdf",
+		}
+		opt := processFileMedia(media, log)
+		assert.Nil(t, opt, "file with URL only should return nil (data required)")
+	})
+}
+
+func TestProcessMediaPart_AllTypes(t *testing.T) {
+	log := logr.Discard()
+	validBase64 := base64.StdEncoding.EncodeToString([]byte("test content"))
+
+	testCases := []struct {
+		name     string
+		mimeType string
+		expected string // "image", "audio", or "file"
+	}{
+		{"png image", "image/png", "image"},
+		{"jpeg image", "image/jpeg", "image"},
+		{"gif image", "image/gif", "image"},
+		{"webp image", "image/webp", "image"},
+		{"mp3 audio", "audio/mp3", "audio"},
+		{"wav audio", "audio/wav", "audio"},
+		{"ogg audio", "audio/ogg", "audio"},
+		{"pdf document", "application/pdf", "file"},
+		{"text document", "text/plain", "file"},
+		{"unknown type", "application/octet-stream", "file"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			media := &runtimev1.MediaContent{
+				MimeType: tc.mimeType,
+				Data:     validBase64,
+			}
+			opt := processMediaPart(media, log)
+			assert.NotNil(t, opt, "processMediaPart should return option for %s", tc.mimeType)
+		})
+	}
+}
+
+func TestBuildSendOptions_AudioAndFile(t *testing.T) {
+	log := logr.Discard()
+	validBase64 := base64.StdEncoding.EncodeToString([]byte("test content"))
+
+	t.Run("audio with base64 data", func(t *testing.T) {
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "audio/mp3",
+					Data:     validBase64,
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Len(t, opts, 1, "should produce one send option for audio")
+	})
+
+	t.Run("file with base64 data", func(t *testing.T) {
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "application/pdf",
+					Data:     validBase64,
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Len(t, opts, 1, "should produce one send option for file")
+	})
+
+	t.Run("mixed content types", func(t *testing.T) {
+		pngBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+		parts := []*runtimev1.ContentPart{
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "image/png",
+					Data:     pngBase64,
+				},
+			},
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "audio/wav",
+					Data:     validBase64,
+				},
+			},
+			{
+				Media: &runtimev1.MediaContent{
+					MimeType: "application/pdf",
+					Data:     validBase64,
+				},
+			},
+		}
+		opts := buildSendOptions(parts, log)
+		assert.Len(t, opts, 3, "should produce three send options for mixed content")
+	})
+}
