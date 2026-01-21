@@ -32,9 +32,11 @@ export default defineConfig({
 
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
+        "src/components/arena/**", // Arena dialogs and components (complex UI)
         "src/components/console/**",
         "src/components/cost/**",
         "src/components/credentials/**",
+        "src/components/dashboard/**", // Dashboard widgets (visual components)
         "src/components/layout/**",
         "src/components/logs/**",
         "src/components/topology/**",
@@ -43,6 +45,9 @@ export default defineConfig({
         "src/app/**/layout.tsx",
         "src/app/page.tsx", // Root page
         "src/app/agents/**/page.tsx", // Agent pages (require full context)
+        "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
+        "src/app/arena/jobs/[name]/page.tsx", // Arena detail pages (complex UI)
+        "src/app/arena/sources/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/providers/**/page.tsx", // Provider pages (require full context)
         "src/app/settings/**/page.tsx", // Settings pages (require full context)
         "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)

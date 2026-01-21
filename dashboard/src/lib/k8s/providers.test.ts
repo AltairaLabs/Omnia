@@ -92,6 +92,20 @@ describe("providers", () => {
       expect(result).toBeNull();
     });
 
+    it("should return null for 404 with nested response object", async () => {
+      mockGetNamespacedCustomObject.mockRejectedValue({ response: { statusCode: 404 } });
+
+      const result = await providersModule.getProvider("default", "non-existent");
+
+      expect(result).toBeNull();
+    });
+
+    it("should throw for nested response with non-404 status", async () => {
+      mockGetNamespacedCustomObject.mockRejectedValue({ response: { statusCode: 500 } });
+
+      await expect(providersModule.getProvider("default", "test")).rejects.toEqual({ response: { statusCode: 500 } });
+    });
+
     it("should throw error for other API errors", async () => {
       mockGetNamespacedCustomObject.mockRejectedValue(new Error("API error"));
 

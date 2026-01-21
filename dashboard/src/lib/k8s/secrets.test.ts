@@ -139,6 +139,29 @@ describe("secrets", () => {
       expect(result[0].referencedBy[0].name).toBe("claude-provider");
     });
 
+    it("should handle provider fetch errors gracefully", async () => {
+      const mockSecret = createMockSecret("default", "my-secret", ["KEY"]);
+      mockListNamespacedSecret.mockResolvedValue({ items: [mockSecret] });
+
+      // Make provider fetch fail
+      mockListClusterCustomObject.mockRejectedValue(new Error("Providers unavailable"));
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = await secretsModule.listSecrets("default");
+
+      // Should still return secrets, but with empty references
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe("my-secret");
+      expect(result[0].referencedBy).toEqual([]);
+
+      // Should have logged the warning
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to fetch providers for references:",
+        expect.any(Error)
+      );
+      warnSpy.mockRestore();
+    });
+
     it("should never return secret values", async () => {
       const mockSecret = createMockSecret("default", "test-secret", ["API_KEY"]);
       mockListNamespacedSecret.mockResolvedValue({ items: [mockSecret] });
@@ -189,6 +212,14 @@ describe("secrets", () => {
       const result = await secretsModule.getSecret("default", "non-existent");
 
       expect(result).toBeNull();
+    });
+
+    it("should throw non-404 errors", async () => {
+      mockReadNamespacedSecret.mockRejectedValue(new Error("Server error"));
+
+      await expect(
+        secretsModule.getSecret("default", "test-secret")
+      ).rejects.toThrow("Server error");
     });
 
     it("should use creationTimestamp when no managedFields time exists", async () => {
@@ -299,6 +330,25 @@ describe("secrets", () => {
         })
       ).rejects.toThrow("not a managed credential secret");
     });
+
+    it("should throw if getSecret returns null after create", async () => {
+      mockReadNamespacedSecret.mockRejectedValue({ statusCode: 404 });
+      const createdSecret = createMockSecret("default", "new-secret", ["API_KEY"]);
+      mockCreateNamespacedSecret.mockResolvedValue(createdSecret);
+      // After create, getSecret returns null (edge case)
+      mockReadNamespacedSecret
+        .mockRejectedValueOnce({ statusCode: 404 }) // First call - check if exists
+        .mockRejectedValueOnce({ statusCode: 404 }); // Second call - after create also 404
+
+      await expect(
+        secretsModule.createOrUpdateSecret({
+          namespace: "default",
+          name: "new-secret",
+          data: { API_KEY: "test-value" },
+          providerType: "claude",
+        })
+      ).rejects.toThrow("Failed to read secret after create/update");
+    });
   });
 
   describe("deleteSecret", () => {
@@ -331,6 +381,31 @@ describe("secrets", () => {
       await expect(
         secretsModule.deleteSecret("default", "unmanaged")
       ).rejects.toThrow("not a managed credential secret");
+    });
+
+    it("should reject deleting secrets with no labels", async () => {
+      // Secret with undefined labels
+      const existingSecret = {
+        metadata: {
+          namespace: "default",
+          name: "no-labels-secret",
+          labels: undefined,
+        },
+        data: { KEY: Buffer.from("value").toString("base64") },
+      };
+      mockReadNamespacedSecret.mockResolvedValue(existingSecret);
+
+      await expect(
+        secretsModule.deleteSecret("default", "no-labels-secret")
+      ).rejects.toThrow("not a managed credential secret");
+    });
+
+    it("should throw non-404 errors", async () => {
+      mockReadNamespacedSecret.mockRejectedValue(new Error("Server error"));
+
+      await expect(
+        secretsModule.deleteSecret("default", "test-secret")
+      ).rejects.toThrow("Server error");
     });
   });
 
