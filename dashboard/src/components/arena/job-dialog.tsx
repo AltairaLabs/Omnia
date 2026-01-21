@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useArenaJobMutations } from "@/hooks/use-arena-jobs";
+import { useLicense } from "@/hooks/use-license";
 import {
   Dialog,
   DialogContent,
@@ -22,9 +23,12 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertCircle,
+  AlertTriangle,
   Loader2,
+  Lock,
   Settings,
 } from "lucide-react";
 import type {
@@ -33,6 +37,16 @@ import type {
   ArenaJobSpec,
   ArenaJobType,
 } from "@/types/arena";
+
+const JOB_TYPES: {
+  value: ArenaJobType;
+  label: string;
+  enterprise: boolean;
+}[] = [
+  { value: "evaluation", label: "Evaluation", enterprise: false },
+  { value: "loadtest", label: "Load Test", enterprise: true },
+  { value: "datagen", label: "Data Generation", enterprise: true },
+];
 
 interface JobDialogProps {
   open: boolean;
@@ -78,7 +92,33 @@ function getInitialFormState(preselectedConfig?: string): FormState {
   };
 }
 
-function validateForm(form: FormState): string | null {
+function validateJobTypeOptions(form: FormState): string | null {
+  switch (form.type) {
+    case "evaluation": {
+      const threshold = parseFloat(form.passingThreshold);
+      const isValidThreshold = !isNaN(threshold) && threshold >= 0 && threshold <= 1;
+      return isValidThreshold ? null : "Passing threshold must be a number between 0 and 1";
+    }
+    case "loadtest": {
+      const rps = parseInt(form.targetRPS, 10);
+      const isValidRps = !isNaN(rps) && rps >= 1;
+      return isValidRps ? null : "Target RPS must be a positive integer";
+    }
+    case "datagen": {
+      const count = parseInt(form.sampleCount, 10);
+      const isValidCount = !isNaN(count) && count >= 1;
+      return isValidCount ? null : "Sample count must be a positive integer";
+    }
+    default:
+      return null;
+  }
+}
+
+function validateForm(
+  form: FormState,
+  isEnterprise: boolean,
+  maxWorkerReplicas: number
+): string | null {
   if (!form.name.trim()) {
     return "Name is required";
   }
@@ -88,29 +128,24 @@ function validateForm(form: FormState): string | null {
   if (!form.configRef) {
     return "Config is required";
   }
+
+  // Check job type license
+  const jobType = JOB_TYPES.find((t) => t.value === form.type);
+  if (jobType?.enterprise && !isEnterprise) {
+    return `${jobType.label} requires an Enterprise license`;
+  }
+
   const workers = parseInt(form.workers, 10);
   if (isNaN(workers) || workers < 1) {
     return "Workers must be a positive integer";
   }
-  if (form.type === "evaluation") {
-    const threshold = parseFloat(form.passingThreshold);
-    if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-      return "Passing threshold must be a number between 0 and 1";
-    }
+
+  // Check worker replica limit
+  if (maxWorkerReplicas > 0 && workers > maxWorkerReplicas) {
+    return `Open Core is limited to ${maxWorkerReplicas} worker(s)`;
   }
-  if (form.type === "loadtest") {
-    const rps = parseInt(form.targetRPS, 10);
-    if (isNaN(rps) || rps < 1) {
-      return "Target RPS must be a positive integer";
-    }
-  }
-  if (form.type === "datagen") {
-    const count = parseInt(form.sampleCount, 10);
-    if (isNaN(count) || count < 1) {
-      return "Sample count must be a positive integer";
-    }
-  }
-  return null;
+
+  return validateJobTypeOptions(form);
 }
 
 function buildSpec(form: FormState): ArenaJobSpec {
@@ -155,6 +190,7 @@ export function JobDialog({
   onClose,
 }: Readonly<JobDialogProps>) {
   const { createJob, loading } = useArenaJobMutations();
+  const { license, isEnterprise } = useLicense();
 
   // Use preselectedConfig as key to reset form
   const formResetKey = `${preselectedConfig ?? "new"}-${open}`;
@@ -170,6 +206,8 @@ export function JobDialog({
         onSuccess={onSuccess}
         onClose={onClose}
         onOpenChange={onOpenChange}
+        isEnterprise={isEnterprise}
+        maxWorkerReplicas={license.limits.maxWorkerReplicas}
       />
     </Dialog>
   );
@@ -183,6 +221,8 @@ interface JobDialogFormProps {
   onSuccess?: () => void;
   onClose?: () => void;
   onOpenChange: (open: boolean) => void;
+  isEnterprise: boolean;
+  maxWorkerReplicas: number;
 }
 
 function JobDialogForm({
@@ -193,6 +233,8 @@ function JobDialogForm({
   onSuccess,
   onClose,
   onOpenChange,
+  isEnterprise,
+  maxWorkerReplicas,
 }: Readonly<JobDialogFormProps>) {
   const [formState, setFormState] = useState<FormState>(() =>
     getInitialFormState(preselectedConfig)
@@ -207,7 +249,7 @@ function JobDialogForm({
     try {
       setError(null);
 
-      const validationError = validateForm(formState);
+      const validationError = validateForm(formState, isEnterprise, maxWorkerReplicas);
       if (validationError) {
         setError(validationError);
         return;
@@ -299,9 +341,26 @@ function JobDialogForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="evaluation">Evaluation</SelectItem>
-              <SelectItem value="loadtest">Load Test</SelectItem>
-              <SelectItem value="datagen">Data Generation</SelectItem>
+              {JOB_TYPES.map((jobType) => {
+                const isLocked = jobType.enterprise && !isEnterprise;
+                return (
+                  <SelectItem
+                    key={jobType.value}
+                    value={jobType.value}
+                    disabled={isLocked}
+                  >
+                    <div className="flex items-center gap-2">
+                      {isLocked && <Lock className="h-3 w-3 text-muted-foreground" />}
+                      {jobType.label}
+                      {isLocked && (
+                        <Badge variant="outline" className="ml-1 text-xs">
+                          Enterprise
+                        </Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         </div>
@@ -314,9 +373,16 @@ function JobDialogForm({
               id="workers"
               type="number"
               min="1"
+              max={maxWorkerReplicas > 0 ? maxWorkerReplicas : undefined}
               value={formState.workers}
               onChange={(e) => updateForm("workers", e.target.value)}
             />
+            {maxWorkerReplicas > 0 && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                Limited to {maxWorkerReplicas} worker{maxWorkerReplicas === 1 ? "" : "s"} (upgrade for more)
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="timeout">Timeout</Label>
