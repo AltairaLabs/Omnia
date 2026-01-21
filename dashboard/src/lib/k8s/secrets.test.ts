@@ -182,6 +182,56 @@ describe("secrets", () => {
 
       expect(result).toBeNull();
     });
+
+    it("should return null for 404 error with nested response object", async () => {
+      mockReadNamespacedSecret.mockRejectedValue({ response: { statusCode: 404 } });
+
+      const result = await secretsModule.getSecret("default", "non-existent");
+
+      expect(result).toBeNull();
+    });
+
+    it("should use creationTimestamp when no managedFields time exists", async () => {
+      const mockSecret = {
+        metadata: {
+          namespace: "default",
+          name: "test-secret",
+          labels: { [secretsModule.CREDENTIALS_LABEL]: secretsModule.CREDENTIALS_LABEL_VALUE },
+          annotations: { [secretsModule.PROVIDER_ANNOTATION]: "claude" },
+          creationTimestamp: new Date("2024-01-15T10:00:00Z"),
+          managedFields: [], // Empty managedFields
+        },
+        data: { API_KEY: Buffer.from("mock-value").toString("base64") },
+        type: "Opaque",
+      };
+      mockReadNamespacedSecret.mockResolvedValue(mockSecret);
+
+      const result = await secretsModule.getSecret("default", "test-secret");
+
+      expect(result).not.toBeNull();
+      expect(result?.modifiedAt).toBe("2024-01-15T10:00:00.000Z");
+    });
+
+    it("should handle secret with no creationTimestamp", async () => {
+      const mockSecret = {
+        metadata: {
+          namespace: "default",
+          name: "test-secret",
+          labels: { [secretsModule.CREDENTIALS_LABEL]: secretsModule.CREDENTIALS_LABEL_VALUE },
+          annotations: { [secretsModule.PROVIDER_ANNOTATION]: "claude" },
+          managedFields: [], // Empty managedFields
+          // No creationTimestamp
+        },
+        data: { API_KEY: Buffer.from("mock-value").toString("base64") },
+        type: "Opaque",
+      };
+      mockReadNamespacedSecret.mockResolvedValue(mockSecret);
+
+      const result = await secretsModule.getSecret("default", "test-secret");
+
+      expect(result).not.toBeNull();
+      expect(result?.modifiedAt).toBe("");
+    });
   });
 
   describe("createOrUpdateSecret", () => {
