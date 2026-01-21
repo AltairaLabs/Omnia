@@ -32,7 +32,7 @@ export default defineConfig({
 
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
-        "src/components/arena/**", // Arena dialogs and components (complex UI)
+        "src/components/arena/index.ts", // Arena barrel re-export
         "src/components/console/**",
         "src/components/cost/**",
         "src/components/credentials/**",
