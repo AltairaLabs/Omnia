@@ -467,7 +467,8 @@ jobs:
       if: success()
       run: |
         if [ -f dashboard/e2e-coverage/coverage/lcov.info ]; then
-          # lcov.info has paths like "app/src/..." but SonarCloud needs "dashboard/src/..."
+          # lcov.info has paths like "[project]/src/..." or "app/src/..." but SonarCloud needs "dashboard/src/..."
+          sed -i 's|^SF:\[project\]/src/|SF:dashboard/src/|g' dashboard/e2e-coverage/coverage/lcov.info
           sed -i 's|^SF:app/src/|SF:dashboard/src/|g' dashboard/e2e-coverage/coverage/lcov.info
           sed -i 's|^SF:src/|SF:dashboard/src/|g' dashboard/e2e-coverage/coverage/lcov.info
           echo "Fixed E2E lcov.info paths:"
