@@ -73,10 +73,10 @@ export const GET = withWorkspaceAccess(
       const costControls = result.workspace.spec.costControls;
       if (costControls) {
         const dailyBudget = costControls.dailyBudget
-          ? parseFloat(costControls.dailyBudget)
+          ? Number.parseFloat(costControls.dailyBudget)
           : undefined;
         const monthlyBudget = costControls.monthlyBudget
-          ? parseFloat(costControls.monthlyBudget)
+          ? Number.parseFloat(costControls.monthlyBudget)
           : undefined;
 
         response.budget = {
