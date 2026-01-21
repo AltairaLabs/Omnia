@@ -1,5 +1,8 @@
 /**
  * Tests for useArenaConfigs, useArenaConfig, and useArenaConfigMutations hooks.
+ *
+ * These hooks use the DataService abstraction (via useDataService)
+ * to support both demo mode and live mode.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -11,9 +14,26 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: vi.fn(),
 }));
 
-// Mock fetch
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Mock data service
+const mockGetArenaConfigs = vi.fn();
+const mockGetArenaConfig = vi.fn();
+const mockGetArenaConfigScenarios = vi.fn();
+const mockGetArenaJobs = vi.fn();
+const mockCreateArenaConfig = vi.fn();
+const mockUpdateArenaConfig = vi.fn();
+const mockDeleteArenaConfig = vi.fn();
+
+vi.mock("@/lib/data/provider", () => ({
+  useDataService: () => ({
+    getArenaConfigs: mockGetArenaConfigs,
+    getArenaConfig: mockGetArenaConfig,
+    getArenaConfigScenarios: mockGetArenaConfigScenarios,
+    getArenaJobs: mockGetArenaJobs,
+    createArenaConfig: mockCreateArenaConfig,
+    updateArenaConfig: mockUpdateArenaConfig,
+    deleteArenaConfig: mockDeleteArenaConfig,
+  }),
+}));
 
 const mockWorkspace = {
   name: "test-workspace",
@@ -76,6 +96,7 @@ describe("useArenaConfigs", () => {
 
     expect(result.current.configs).toEqual([]);
     expect(result.current.error).toBeNull();
+    expect(mockGetArenaConfigs).not.toHaveBeenCalled();
   });
 
   it("fetches configs when workspace is selected", async () => {
@@ -90,11 +111,7 @@ describe("useArenaConfigs", () => {
     });
 
     const mockConfigs = [mockConfig];
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockConfigs),
-    });
+    mockGetArenaConfigs.mockResolvedValueOnce(mockConfigs);
 
     const { result } = renderHook(() => useArenaConfigs());
 
@@ -106,7 +123,7 @@ describe("useArenaConfigs", () => {
 
     expect(result.current.configs).toEqual(mockConfigs);
     expect(result.current.error).toBeNull();
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/configs");
+    expect(mockGetArenaConfigs).toHaveBeenCalledWith("test-workspace");
   });
 
   it("handles fetch error", async () => {
@@ -120,10 +137,7 @@ describe("useArenaConfigs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Internal Server Error",
-    });
+    mockGetArenaConfigs.mockRejectedValueOnce(new Error("Failed to fetch configs"));
 
     const { result } = renderHook(() => useArenaConfigs());
 
@@ -147,10 +161,7 @@ describe("useArenaConfigs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([mockConfig]),
-    });
+    mockGetArenaConfigs.mockResolvedValue([mockConfig]);
 
     const { result } = renderHook(() => useArenaConfigs());
 
@@ -158,14 +169,14 @@ describe("useArenaConfigs", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockGetArenaConfigs).toHaveBeenCalledTimes(1);
 
     act(() => {
       result.current.refetch();
     });
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockGetArenaConfigs).toHaveBeenCalledTimes(2);
     });
   });
 });
@@ -199,6 +210,7 @@ describe("useArenaConfig", () => {
     expect(result.current.config).toBeNull();
     expect(result.current.scenarios).toEqual([]);
     expect(result.current.linkedJobs).toEqual([]);
+    expect(mockGetArenaConfig).not.toHaveBeenCalled();
   });
 
   it("fetches config with scenarios and jobs", async () => {
@@ -212,19 +224,9 @@ describe("useArenaConfig", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockConfig),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([mockScenario]),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve([mockJob]),
-      });
+    mockGetArenaConfig.mockResolvedValueOnce(mockConfig);
+    mockGetArenaConfigScenarios.mockResolvedValueOnce([mockScenario]);
+    mockGetArenaJobs.mockResolvedValueOnce([mockJob]);
 
     const { result } = renderHook(() => useArenaConfig("test-config"));
 
@@ -249,10 +251,10 @@ describe("useArenaConfig", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-    });
+    // Service returns undefined when config not found
+    mockGetArenaConfig.mockResolvedValueOnce(undefined);
+    mockGetArenaConfigScenarios.mockResolvedValueOnce([]);
+    mockGetArenaJobs.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useArenaConfig("nonexistent-config"));
 
@@ -275,19 +277,9 @@ describe("useArenaConfig", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockConfig),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-      });
+    mockGetArenaConfig.mockResolvedValueOnce(mockConfig);
+    mockGetArenaConfigScenarios.mockResolvedValueOnce([]);
+    mockGetArenaJobs.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useArenaConfig("test-config"));
 
@@ -340,29 +332,15 @@ describe("useArenaConfigMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockConfig),
-    });
+    mockCreateArenaConfig.mockResolvedValueOnce(mockConfig);
 
     const { result } = renderHook(() => useArenaConfigMutations());
 
-    const created = await result.current.createConfig("test-config", {
-      sourceRef: { name: "test-source" },
-    });
+    const spec = { sourceRef: { name: "test-source" } };
+    const created = await result.current.createConfig("test-config", spec);
 
     expect(created).toEqual(mockConfig);
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/configs",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          metadata: { name: "test-config" },
-          spec: { sourceRef: { name: "test-source" } },
-        }),
-      }
-    );
+    expect(mockCreateArenaConfig).toHaveBeenCalledWith("test-workspace", "test-config", spec);
   });
 
   it("handles create error", async () => {
@@ -376,10 +354,7 @@ describe("useArenaConfigMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      text: () => Promise.resolve("Config already exists"),
-    });
+    mockCreateArenaConfig.mockRejectedValueOnce(new Error("Config already exists"));
 
     const { result } = renderHook(() => useArenaConfigMutations());
 
@@ -400,26 +375,19 @@ describe("useArenaConfigMutations", () => {
     });
 
     const updatedConfig = { ...mockConfig, spec: { ...mockConfig.spec, defaults: { temperature: 0.5 } } };
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(updatedConfig),
-    });
+    mockUpdateArenaConfig.mockResolvedValueOnce(updatedConfig);
 
     const { result } = renderHook(() => useArenaConfigMutations());
 
-    const updated = await result.current.updateConfig("test-config", {
+    const spec = {
       sourceRef: { name: "test-source" },
       defaults: { temperature: 0.5 },
-    });
+    };
+
+    const updated = await result.current.updateConfig("test-config", spec);
 
     expect(updated).toEqual(updatedConfig);
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/configs/test-config",
-      expect.objectContaining({
-        method: "PUT",
-      })
-    );
+    expect(mockUpdateArenaConfig).toHaveBeenCalledWith("test-workspace", "test-config", spec);
   });
 
   it("deletes a config successfully", async () => {
@@ -433,18 +401,13 @@ describe("useArenaConfigMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-    });
+    mockDeleteArenaConfig.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useArenaConfigMutations());
 
     await result.current.deleteConfig("test-config");
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/configs/test-config",
-      { method: "DELETE" }
-    );
+    expect(mockDeleteArenaConfig).toHaveBeenCalledWith("test-workspace", "test-config");
   });
 
   it("handles delete error", async () => {
@@ -458,10 +421,7 @@ describe("useArenaConfigMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      text: () => Promise.resolve("Config in use by jobs"),
-    });
+    mockDeleteArenaConfig.mockRejectedValueOnce(new Error("Config in use by jobs"));
 
     const { result } = renderHook(() => useArenaConfigMutations());
 

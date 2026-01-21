@@ -4,12 +4,12 @@ import type { Page } from '@playwright/test';
 /**
  * E2E tests for Arena Fleet license gating.
  *
- * NOTE: Arena pages require server-side k8s access which isn't fully mocked
- * in demo mode. These tests use API mocking to simulate license states and
- * test the client-side UI behavior.
+ * These tests verify that license-gated features in the Arena UI work correctly.
+ * The Arena pages use the DataService abstraction which provides mock data in
+ * demo mode, allowing these tests to run without k8s access.
  *
- * For full Arena page E2E tests, the server-side workspace-guard needs to
- * support demo mode for Arena routes (similar to how /agents works).
+ * Tests mock the license API to simulate both Open Core and Enterprise licenses,
+ * then verify the UI correctly enables/disables features based on license tier.
  *
  * The license gating functionality is also thoroughly tested via unit tests
  * in src/components/arena/job-dialog.test.tsx
@@ -242,21 +242,13 @@ test.describe('Arena License API', () => {
   });
 });
 
-// Note: The following tests are skipped because Arena pages require
-// server-side k8s workspace access that isn't available in demo mode.
-// The license gating UI is fully tested via unit tests.
-//
-// To enable these tests, the workspace-guard middleware needs to be
-// updated to support demo mode for Arena routes.
-
 test.describe('Arena License Gating - Open Core', () => {
   test.beforeEach(async ({ page }) => {
     await setupArenaMocks(page, OPEN_CORE_LICENSE);
   });
 
   test.describe('Job Dialog License Gating', () => {
-    // Skip: requires Arena jobs page to load which needs k8s access
-    test.skip('should disable Load Test and Data Generation job types', async ({ page }) => {
+    test('should disable Load Test and Data Generation job types', async ({ page }) => {
       await page.goto(ARENA_JOBS_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -280,8 +272,7 @@ test.describe('Arena License Gating - Open Core', () => {
       expect(badgeCount).toBe(2);
     });
 
-    // Skip: requires Arena jobs page to load
-    test.skip('should show worker limit message', async ({ page }) => {
+    test('should show worker limit message', async ({ page }) => {
       await page.goto(ARENA_JOBS_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -295,8 +286,7 @@ test.describe('Arena License Gating - Open Core', () => {
       await expect(workerLimitText).toBeVisible();
     });
 
-    // Skip: requires Arena jobs page to load
-    test.skip('should enforce max workers input limit', async ({ page }) => {
+    test('should enforce max workers input limit', async ({ page }) => {
       await page.goto(ARENA_JOBS_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -315,8 +305,7 @@ test.describe('Arena License Gating - Open Core', () => {
   });
 
   test.describe('Source Dialog License Gating', () => {
-    // Skip: requires Arena sources page to load
-    test.skip('should disable Git, OCI, and S3 source types', async ({ page }) => {
+    test('should disable Git, OCI, and S3 source types', async ({ page }) => {
       await page.goto(ARENA_SOURCES_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -347,8 +336,7 @@ test.describe('Arena License Gating - Enterprise', () => {
   });
 
   test.describe('Job Dialog - All Features Enabled', () => {
-    // Skip: requires Arena jobs page to load
-    test.skip('should enable all job types', async ({ page }) => {
+    test('should enable all job types', async ({ page }) => {
       await page.goto(ARENA_JOBS_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -375,8 +363,7 @@ test.describe('Arena License Gating - Enterprise', () => {
       expect(badgeCount).toBe(0);
     });
 
-    // Skip: requires Arena jobs page to load
-    test.skip('should not show worker limit message', async ({ page }) => {
+    test('should not show worker limit message', async ({ page }) => {
       await page.goto(ARENA_JOBS_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -390,8 +377,7 @@ test.describe('Arena License Gating - Enterprise', () => {
       await expect(workerLimitText).not.toBeVisible();
     });
 
-    // Skip: requires Arena jobs page to load
-    test.skip('should allow selecting Load Test job type', async ({ page }) => {
+    test('should allow selecting Load Test job type', async ({ page }) => {
       await page.goto(ARENA_JOBS_PATH);
       await page.waitForLoadState('networkidle');
 
@@ -413,8 +399,7 @@ test.describe('Arena License Gating - Enterprise', () => {
   });
 
   test.describe('Source Dialog - All Features Enabled', () => {
-    // Skip: requires Arena sources page to load
-    test.skip('should enable all source types', async ({ page }) => {
+    test('should enable all source types', async ({ page }) => {
       await page.goto(ARENA_SOURCES_PATH);
       await page.waitForLoadState('networkidle');
 

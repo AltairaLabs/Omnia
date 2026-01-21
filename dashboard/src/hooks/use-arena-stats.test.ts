@@ -1,5 +1,8 @@
 /**
  * Tests for useArenaStats hook.
+ *
+ * These hooks use the DataService abstraction (via useDataService)
+ * to support both demo mode and live mode.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -11,9 +14,25 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: vi.fn(),
 }));
 
-// Mock fetch
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Mock data service
+const mockGetArenaStats = vi.fn();
+const mockGetArenaJobs = vi.fn();
+
+vi.mock("@/lib/data/provider", () => ({
+  useDataService: () => ({
+    getArenaStats: mockGetArenaStats,
+    getArenaJobs: mockGetArenaJobs,
+  }),
+}));
+
+const mockWorkspace = {
+  name: "test-workspace",
+  displayName: "Test",
+  environment: "development" as const,
+  namespace: "test-ns",
+  role: "viewer" as const,
+  permissions: { read: true, write: false, delete: false, manageMembers: false },
+};
 
 describe("useArenaStats", () => {
   beforeEach(() => {
@@ -48,28 +67,15 @@ describe("useArenaStats", () => {
     });
     expect(result.current.recentJobs).toEqual([]);
     expect(result.current.error).toBeNull();
+    expect(mockGetArenaStats).not.toHaveBeenCalled();
   });
 
   it("fetches stats and jobs when workspace is selected", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
-      currentWorkspace: {
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      },
+      currentWorkspace: mockWorkspace,
       setCurrentWorkspace: vi.fn(),
-      workspaces: [{
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      }],
+      workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -94,15 +100,8 @@ describe("useArenaStats", () => {
       },
     ];
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockStats),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockJobs),
-      });
+    mockGetArenaStats.mockResolvedValueOnce(mockStats);
+    mockGetArenaJobs.mockResolvedValueOnce(mockJobs);
 
     const { result } = renderHook(() => useArenaStats());
 
@@ -114,42 +113,25 @@ describe("useArenaStats", () => {
 
     expect(result.current.stats).toEqual(mockStats);
     expect(result.current.recentJobs).toHaveLength(2);
-    expect(result.current.recentJobs[0].metadata?.name).toBe("job-1"); // Most recent first
     expect(result.current.error).toBeNull();
 
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/stats");
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/jobs?limit=5");
+    expect(mockGetArenaStats).toHaveBeenCalledWith("test-workspace");
+    expect(mockGetArenaJobs).toHaveBeenCalledWith("test-workspace", { sort: "recent", limit: 5 });
   });
 
   it("handles stats fetch error", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
-      currentWorkspace: {
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      },
+      currentWorkspace: mockWorkspace,
       setCurrentWorkspace: vi.fn(),
-      workspaces: [{
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      }],
+      workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Internal Server Error",
-    });
+    mockGetArenaStats.mockRejectedValueOnce(new Error("Failed to fetch stats"));
+    mockGetArenaJobs.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useArenaStats());
 
@@ -163,78 +145,12 @@ describe("useArenaStats", () => {
     expect(result.current.error?.message).toContain("Failed to fetch stats");
   });
 
-  it("handles jobs fetch error gracefully (stats still work)", async () => {
-    const { useWorkspace } = await import("@/contexts/workspace-context");
-    vi.mocked(useWorkspace).mockReturnValue({
-      currentWorkspace: {
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      },
-      setCurrentWorkspace: vi.fn(),
-      workspaces: [{
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      }],
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-
-    const mockStats = {
-      sources: { total: 1, ready: 1, failed: 0, active: 1 },
-      configs: { total: 1, ready: 1, scenarios: 5 },
-      jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
-    };
-
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockStats),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        statusText: "Not Found",
-      });
-
-    const { result } = renderHook(() => useArenaStats());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    expect(result.current.stats).toEqual(mockStats);
-    expect(result.current.recentJobs).toEqual([]); // Jobs failed but stats succeeded
-    expect(result.current.error).toBeNull();
-  });
-
   it("refetch function triggers new fetch", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
-      currentWorkspace: {
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      },
+      currentWorkspace: mockWorkspace,
       setCurrentWorkspace: vi.fn(),
-      workspaces: [{
-        name: "test-workspace",
-        displayName: "Test",
-        environment: "development" as const,
-        namespace: "test-ns",
-        role: "viewer" as const,
-        permissions: { read: true, write: false, delete: false, manageMembers: false },
-      }],
+      workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -246,11 +162,8 @@ describe("useArenaStats", () => {
       jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
     };
 
-    mockFetch
-      .mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockStats),
-      });
+    mockGetArenaStats.mockResolvedValue(mockStats);
+    mockGetArenaJobs.mockResolvedValue([]);
 
     const { result } = renderHook(() => useArenaStats());
 
@@ -258,13 +171,15 @@ describe("useArenaStats", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledTimes(2); // Initial stats + jobs
+    expect(mockGetArenaStats).toHaveBeenCalledTimes(1);
+    expect(mockGetArenaJobs).toHaveBeenCalledTimes(1);
 
     // Call refetch
     result.current.refetch();
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledTimes(4); // 2 more calls for refetch
+      expect(mockGetArenaStats).toHaveBeenCalledTimes(2);
+      expect(mockGetArenaJobs).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -1,7 +1,22 @@
 "use client";
 
+/**
+ * Arena Sources hooks for fetching and mutating Arena sources.
+ *
+ * DEMO MODE SUPPORT:
+ * These hooks use the DataService abstraction to support both demo mode (mock data)
+ * and live mode (real K8s API). When adding new functionality:
+ * 1. Add the method to DataService interface in src/lib/data/types.ts
+ * 2. Implement in MockDataService (src/lib/data/mock-service.ts) for demo mode
+ * 3. Implement in LiveDataService (src/lib/data/live-service.ts) for production
+ * 4. Use useDataService() in hooks to get the appropriate implementation
+ *
+ * This ensures the UI works in demo mode without requiring K8s access.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useDataService } from "@/lib/data/provider";
 import type { ArenaSource, ArenaConfig } from "@/types/arena";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
@@ -32,10 +47,13 @@ interface UseArenaSourceMutationsResult {
 
 /**
  * Hook to fetch Arena sources for the current workspace.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaSources(): UseArenaSourcesResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [sources, setSources] = useState<ArenaSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -51,11 +69,7 @@ export function useArenaSources(): UseArenaSourcesResult {
     setError(null);
 
     try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/sources`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch sources: ${response.statusText}`);
-      }
-      const data = await response.json();
+      const data = await service.getArenaSources(workspace);
       setSources(data);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -63,7 +77,7 @@ export function useArenaSources(): UseArenaSourcesResult {
     } finally {
       setLoading(false);
     }
-  }, [workspace]);
+  }, [workspace, service]);
 
   useEffect(() => {
     fetchData();
@@ -79,10 +93,13 @@ export function useArenaSources(): UseArenaSourcesResult {
 
 /**
  * Hook to fetch a single Arena source and its linked configs.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaSource(name: string | undefined): UseArenaSourceResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [source, setSource] = useState<ArenaSource | null>(null);
   const [linkedConfigs, setLinkedConfigs] = useState<ArenaConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,31 +118,22 @@ export function useArenaSource(name: string | undefined): UseArenaSourceResult {
 
     try {
       // Fetch source and configs in parallel
-      const [sourceResponse, configsResponse] = await Promise.all([
-        fetch(`/api/workspaces/${workspace}/arena/sources/${name}`),
-        fetch(`/api/workspaces/${workspace}/arena/configs`),
+      const [sourceData, configsData] = await Promise.all([
+        service.getArenaSource(workspace, name),
+        service.getArenaConfigs(workspace),
       ]);
 
-      if (!sourceResponse.ok) {
-        if (sourceResponse.status === 404) {
-          throw new Error("Source not found");
-        }
-        throw new Error(`Failed to fetch source: ${sourceResponse.statusText}`);
+      if (!sourceData) {
+        throw new Error("Source not found");
       }
 
-      const sourceData = await sourceResponse.json();
       setSource(sourceData);
 
-      if (configsResponse.ok) {
-        const configsData: ArenaConfig[] = await configsResponse.json();
-        // Filter configs that reference this source
-        const linked = configsData.filter(
-          (config) => config.spec?.sourceRef?.name === name
-        );
-        setLinkedConfigs(linked);
-      } else {
-        setLinkedConfigs([]);
-      }
+      // Filter configs that reference this source
+      const linked = configsData.filter(
+        (config) => config.spec?.sourceRef?.name === name
+      );
+      setLinkedConfigs(linked);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
       setSource(null);
@@ -133,7 +141,7 @@ export function useArenaSource(name: string | undefined): UseArenaSourceResult {
     } finally {
       setLoading(false);
     }
-  }, [workspace, name]);
+  }, [workspace, name, service]);
 
   useEffect(() => {
     fetchData();
@@ -150,10 +158,13 @@ export function useArenaSource(name: string | undefined): UseArenaSourceResult {
 
 /**
  * Hook to provide mutations for Arena sources (create, update, delete, sync).
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -167,18 +178,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/sources`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metadata: { name }, spec }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create source");
-        }
-
-        return response.json();
+        return await service.createArenaSource(workspace, name, spec);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -187,7 +187,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const updateSource = useCallback(
@@ -200,21 +200,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/sources/${name}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ spec }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to update source");
-        }
-
-        return response.json();
+        return await service.updateArenaSource(workspace, name, spec);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -223,7 +209,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const deleteSource = useCallback(
@@ -236,15 +222,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/sources/${name}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete source");
-        }
+        await service.deleteArenaSource(workspace, name);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -253,7 +231,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const syncSource = useCallback(
@@ -266,15 +244,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/sources/${name}/sync`,
-          { method: "POST" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to sync source");
-        }
+        await service.syncArenaSource(workspace, name);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -283,7 +253,7 @@ export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   return {

@@ -1,5 +1,8 @@
 /**
  * Tests for useArenaSources, useArenaSource, and useArenaSourceMutations hooks.
+ *
+ * These hooks use the DataService abstraction (via useDataService)
+ * to support both demo mode and live mode.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -11,9 +14,26 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: vi.fn(),
 }));
 
-// Mock fetch
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Mock data service
+const mockGetArenaSources = vi.fn();
+const mockGetArenaSource = vi.fn();
+const mockGetArenaConfigs = vi.fn();
+const mockCreateArenaSource = vi.fn();
+const mockUpdateArenaSource = vi.fn();
+const mockDeleteArenaSource = vi.fn();
+const mockSyncArenaSource = vi.fn();
+
+vi.mock("@/lib/data/provider", () => ({
+  useDataService: () => ({
+    getArenaSources: mockGetArenaSources,
+    getArenaSource: mockGetArenaSource,
+    getArenaConfigs: mockGetArenaConfigs,
+    createArenaSource: mockCreateArenaSource,
+    updateArenaSource: mockUpdateArenaSource,
+    deleteArenaSource: mockDeleteArenaSource,
+    syncArenaSource: mockSyncArenaSource,
+  }),
+}));
 
 const mockWorkspace = {
   name: "test-workspace",
@@ -58,6 +78,7 @@ describe("useArenaSources", () => {
 
     expect(result.current.sources).toEqual([]);
     expect(result.current.error).toBeNull();
+    expect(mockGetArenaSources).not.toHaveBeenCalled();
   });
 
   it("fetches sources when workspace is selected", async () => {
@@ -72,11 +93,7 @@ describe("useArenaSources", () => {
     });
 
     const mockSources = [mockSource];
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockSources),
-    });
+    mockGetArenaSources.mockResolvedValueOnce(mockSources);
 
     const { result } = renderHook(() => useArenaSources());
 
@@ -88,7 +105,7 @@ describe("useArenaSources", () => {
 
     expect(result.current.sources).toEqual(mockSources);
     expect(result.current.error).toBeNull();
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/sources");
+    expect(mockGetArenaSources).toHaveBeenCalledWith("test-workspace");
   });
 
   it("handles fetch error", async () => {
@@ -102,10 +119,7 @@ describe("useArenaSources", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Internal Server Error",
-    });
+    mockGetArenaSources.mockRejectedValueOnce(new Error("Failed to fetch sources"));
 
     const { result } = renderHook(() => useArenaSources());
 
@@ -129,10 +143,7 @@ describe("useArenaSources", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([mockSource]),
-    });
+    mockGetArenaSources.mockResolvedValue([mockSource]);
 
     const { result } = renderHook(() => useArenaSources());
 
@@ -140,14 +151,14 @@ describe("useArenaSources", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockGetArenaSources).toHaveBeenCalledTimes(1);
 
     act(() => {
       result.current.refetch();
     });
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockGetArenaSources).toHaveBeenCalledTimes(2);
     });
   });
 });
@@ -179,7 +190,7 @@ describe("useArenaSource", () => {
     });
 
     expect(result.current.source).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetArenaSource).not.toHaveBeenCalled();
   });
 
   it("returns null when no workspace is selected", async () => {
@@ -200,7 +211,7 @@ describe("useArenaSource", () => {
     });
 
     expect(result.current.source).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetArenaSource).not.toHaveBeenCalled();
   });
 
   it("fetches source and linked configs when name and workspace are provided", async () => {
@@ -218,15 +229,8 @@ describe("useArenaSource", () => {
       { metadata: { name: "config-1" }, spec: { sourceRef: { name: "git-source" } } },
     ];
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockSource),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockLinkedConfigs),
-      });
+    mockGetArenaSource.mockResolvedValueOnce(mockSource);
+    mockGetArenaConfigs.mockResolvedValueOnce(mockLinkedConfigs);
 
     const { result } = renderHook(() => useArenaSource("git-source"));
 
@@ -240,8 +244,8 @@ describe("useArenaSource", () => {
     expect(result.current.linkedConfigs).toEqual(mockLinkedConfigs);
     expect(result.current.error).toBeNull();
 
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/sources/git-source");
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/configs");
+    expect(mockGetArenaSource).toHaveBeenCalledWith("test-workspace", "git-source");
+    expect(mockGetArenaConfigs).toHaveBeenCalledWith("test-workspace");
   });
 
   it("handles source fetch error", async () => {
@@ -255,10 +259,8 @@ describe("useArenaSource", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Not Found",
-    });
+    mockGetArenaSource.mockResolvedValueOnce(undefined);
+    mockGetArenaConfigs.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useArenaSource("nonexistent"));
 
@@ -268,6 +270,7 @@ describe("useArenaSource", () => {
 
     expect(result.current.source).toBeNull();
     expect(result.current.error).toBeInstanceOf(Error);
+    expect(result.current.error?.message).toBe("Source not found");
   });
 });
 
@@ -280,7 +283,7 @@ describe("useArenaSourceMutations", () => {
     vi.clearAllMocks();
   });
 
-  it("createSource makes POST request", async () => {
+  it("createSource calls service method", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -291,10 +294,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockSource),
-    });
+    mockCreateArenaSource.mockResolvedValueOnce(mockSource);
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -304,14 +304,7 @@ describe("useArenaSourceMutations", () => {
       await result.current.createSource("git-source", newSpec);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/sources",
-      expect.objectContaining({
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata: { name: "git-source" }, spec: newSpec }),
-      })
-    );
+    expect(mockCreateArenaSource).toHaveBeenCalledWith("test-workspace", "git-source", newSpec);
   });
 
   it("createSource throws error when no workspace is selected", async () => {
@@ -336,7 +329,7 @@ describe("useArenaSourceMutations", () => {
     ).rejects.toThrow("No workspace selected");
   });
 
-  it("updateSource makes PUT request", async () => {
+  it("updateSource calls service method", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -347,10 +340,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockSource),
-    });
+    mockUpdateArenaSource.mockResolvedValueOnce(mockSource);
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -360,17 +350,10 @@ describe("useArenaSourceMutations", () => {
       await result.current.updateSource("git-source", updatedSpec);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/sources/git-source",
-      expect.objectContaining({
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec: updatedSpec }),
-      })
-    );
+    expect(mockUpdateArenaSource).toHaveBeenCalledWith("test-workspace", "git-source", updatedSpec);
   });
 
-  it("deleteSource makes DELETE request", async () => {
+  it("deleteSource calls service method", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -381,10 +364,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockDeleteArenaSource.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -392,15 +372,10 @@ describe("useArenaSourceMutations", () => {
       await result.current.deleteSource("git-source");
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/sources/git-source",
-      expect.objectContaining({
-        method: "DELETE",
-      })
-    );
+    expect(mockDeleteArenaSource).toHaveBeenCalledWith("test-workspace", "git-source");
   });
 
-  it("syncSource makes POST request to sync endpoint", async () => {
+  it("syncSource calls service method", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -411,10 +386,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({}),
-    });
+    mockSyncArenaSource.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -422,12 +394,7 @@ describe("useArenaSourceMutations", () => {
       await result.current.syncSource("git-source");
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/sources/git-source/sync",
-      expect.objectContaining({
-        method: "POST",
-      })
-    );
+    expect(mockSyncArenaSource).toHaveBeenCalledWith("test-workspace", "git-source");
   });
 
   it("handles mutation errors", async () => {
@@ -441,11 +408,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Bad Request",
-      text: () => Promise.resolve("Bad Request"),
-    });
+    mockDeleteArenaSource.mockRejectedValueOnce(new Error("Bad Request"));
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -529,11 +492,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Internal Server Error",
-      text: () => Promise.resolve("Sync failed"),
-    });
+    mockSyncArenaSource.mockRejectedValueOnce(new Error("Sync failed"));
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -555,11 +514,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Bad Request",
-      text: () => Promise.resolve("Update failed"),
-    });
+    mockUpdateArenaSource.mockRejectedValueOnce(new Error("Update failed"));
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -583,11 +538,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Bad Request",
-      text: () => Promise.resolve("Create failed"),
-    });
+    mockCreateArenaSource.mockRejectedValueOnce(new Error("Create failed"));
 
     const { result } = renderHook(() => useArenaSourceMutations());
 
@@ -610,7 +561,7 @@ describe("useArenaSource - configs handling", () => {
     vi.clearAllMocks();
   });
 
-  it("handles configs fetch failure gracefully", async () => {
+  it("filters configs to only those linked to the source", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -621,15 +572,14 @@ describe("useArenaSource - configs handling", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockSource),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        statusText: "Internal Server Error",
-      });
+    const allConfigs = [
+      { metadata: { name: "config-1" }, spec: { sourceRef: { name: "git-source" } } },
+      { metadata: { name: "config-2" }, spec: { sourceRef: { name: "other-source" } } },
+      { metadata: { name: "config-3" }, spec: { sourceRef: { name: "git-source" } } },
+    ];
+
+    mockGetArenaSource.mockResolvedValueOnce(mockSource);
+    mockGetArenaConfigs.mockResolvedValueOnce(allConfigs);
 
     const { result } = renderHook(() => useArenaSource("git-source"));
 
@@ -637,11 +587,10 @@ describe("useArenaSource - configs handling", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    // Source should be loaded successfully
-    expect(result.current.source).toEqual(mockSource);
-    // But linked configs should be empty due to fetch failure
-    expect(result.current.linkedConfigs).toEqual([]);
-    expect(result.current.error).toBeNull();
+    // Should only include configs that reference git-source
+    expect(result.current.linkedConfigs).toHaveLength(2);
+    expect(result.current.linkedConfigs[0].metadata?.name).toBe("config-1");
+    expect(result.current.linkedConfigs[1].metadata?.name).toBe("config-3");
   });
 
   it("handles 404 error for source", async () => {
@@ -655,11 +604,9 @@ describe("useArenaSource - configs handling", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      statusText: "Not Found",
-    });
+    // Service returns undefined for not found
+    mockGetArenaSource.mockResolvedValueOnce(undefined);
+    mockGetArenaConfigs.mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useArenaSource("nonexistent"));
 

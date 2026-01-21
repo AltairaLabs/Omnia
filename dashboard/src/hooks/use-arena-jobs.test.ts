@@ -1,5 +1,8 @@
 /**
  * Tests for useArenaJobs, useArenaJob, and useArenaJobMutations hooks.
+ *
+ * These hooks use the DataService abstraction (via useDataService)
+ * to support both demo mode and live mode.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -11,9 +14,22 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: vi.fn(),
 }));
 
-// Mock fetch
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Mock data service
+const mockGetArenaJobs = vi.fn();
+const mockGetArenaJob = vi.fn();
+const mockCreateArenaJob = vi.fn();
+const mockCancelArenaJob = vi.fn();
+const mockDeleteArenaJob = vi.fn();
+
+vi.mock("@/lib/data/provider", () => ({
+  useDataService: () => ({
+    getArenaJobs: mockGetArenaJobs,
+    getArenaJob: mockGetArenaJob,
+    createArenaJob: mockCreateArenaJob,
+    cancelArenaJob: mockCancelArenaJob,
+    deleteArenaJob: mockDeleteArenaJob,
+  }),
+}));
 
 const mockWorkspace = {
   name: "test-workspace",
@@ -70,6 +86,7 @@ describe("useArenaJobs", () => {
 
     expect(result.current.jobs).toEqual([]);
     expect(result.current.error).toBeNull();
+    expect(mockGetArenaJobs).not.toHaveBeenCalled();
   });
 
   it("fetches jobs when workspace is selected", async () => {
@@ -84,11 +101,7 @@ describe("useArenaJobs", () => {
     });
 
     const mockJobs = [mockJob];
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockJobs),
-    });
+    mockGetArenaJobs.mockResolvedValueOnce(mockJobs);
 
     const { result } = renderHook(() => useArenaJobs());
 
@@ -100,7 +113,11 @@ describe("useArenaJobs", () => {
 
     expect(result.current.jobs).toEqual(mockJobs);
     expect(result.current.error).toBeNull();
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/jobs");
+    expect(mockGetArenaJobs).toHaveBeenCalledWith("test-workspace", {
+      configRef: undefined,
+      type: undefined,
+      phase: undefined,
+    });
   });
 
   it("fetches jobs with configRef filter", async () => {
@@ -114,10 +131,7 @@ describe("useArenaJobs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([mockJob]),
-    });
+    mockGetArenaJobs.mockResolvedValueOnce([mockJob]);
 
     const { result } = renderHook(() => useArenaJobs({ configRef: "my-config" }));
 
@@ -125,9 +139,11 @@ describe("useArenaJobs", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs?configRef=my-config"
-    );
+    expect(mockGetArenaJobs).toHaveBeenCalledWith("test-workspace", {
+      configRef: "my-config",
+      type: undefined,
+      phase: undefined,
+    });
   });
 
   it("fetches jobs with type filter", async () => {
@@ -141,10 +157,7 @@ describe("useArenaJobs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([mockJob]),
-    });
+    mockGetArenaJobs.mockResolvedValueOnce([mockJob]);
 
     const { result } = renderHook(() => useArenaJobs({ type: "evaluation" }));
 
@@ -152,9 +165,11 @@ describe("useArenaJobs", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs?type=evaluation"
-    );
+    expect(mockGetArenaJobs).toHaveBeenCalledWith("test-workspace", {
+      configRef: undefined,
+      type: "evaluation",
+      phase: undefined,
+    });
   });
 
   it("fetches jobs with phase filter", async () => {
@@ -168,10 +183,7 @@ describe("useArenaJobs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([mockJob]),
-    });
+    mockGetArenaJobs.mockResolvedValueOnce([mockJob]);
 
     const { result } = renderHook(() => useArenaJobs({ phase: "Running" }));
 
@@ -179,9 +191,11 @@ describe("useArenaJobs", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs?phase=Running"
-    );
+    expect(mockGetArenaJobs).toHaveBeenCalledWith("test-workspace", {
+      configRef: undefined,
+      type: undefined,
+      phase: "Running",
+    });
   });
 
   it("handles fetch error", async () => {
@@ -195,10 +209,7 @@ describe("useArenaJobs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      statusText: "Internal Server Error",
-    });
+    mockGetArenaJobs.mockRejectedValueOnce(new Error("Failed to fetch jobs"));
 
     const { result } = renderHook(() => useArenaJobs());
 
@@ -222,10 +233,7 @@ describe("useArenaJobs", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([mockJob]),
-    });
+    mockGetArenaJobs.mockResolvedValue([mockJob]);
 
     const { result } = renderHook(() => useArenaJobs());
 
@@ -233,14 +241,14 @@ describe("useArenaJobs", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockGetArenaJobs).toHaveBeenCalledTimes(1);
 
     act(() => {
       result.current.refetch();
     });
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockGetArenaJobs).toHaveBeenCalledTimes(2);
     });
   });
 });
@@ -272,6 +280,7 @@ describe("useArenaJob", () => {
     });
 
     expect(result.current.job).toBeNull();
+    expect(mockGetArenaJob).not.toHaveBeenCalled();
   });
 
   it("fetches single job by name", async () => {
@@ -285,10 +294,7 @@ describe("useArenaJob", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockJob),
-    });
+    mockGetArenaJob.mockResolvedValueOnce(mockJob);
 
     const { result } = renderHook(() => useArenaJob("test-job"));
 
@@ -298,12 +304,10 @@ describe("useArenaJob", () => {
 
     expect(result.current.job).toEqual(mockJob);
     expect(result.current.error).toBeNull();
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs/test-job"
-    );
+    expect(mockGetArenaJob).toHaveBeenCalledWith("test-workspace", "test-job");
   });
 
-  it("handles 404 error for job not found", async () => {
+  it("handles job not found", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -314,10 +318,8 @@ describe("useArenaJob", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-    });
+    // Service returns undefined when job not found
+    mockGetArenaJob.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useArenaJob("nonexistent-job"));
 
@@ -372,35 +374,20 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockJob),
-    });
+    mockCreateArenaJob.mockResolvedValueOnce(mockJob);
 
     const { result } = renderHook(() => useArenaJobMutations());
 
-    const created = await result.current.createJob("test-job", {
+    const spec = {
       configRef: { name: "test-config" },
-      type: "evaluation",
+      type: "evaluation" as const,
       workers: { replicas: 2 },
-    });
+    };
+
+    const created = await result.current.createJob("test-job", spec);
 
     expect(created).toEqual(mockJob);
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          metadata: { name: "test-job" },
-          spec: {
-            configRef: { name: "test-config" },
-            type: "evaluation",
-            workers: { replicas: 2 },
-          },
-        }),
-      }
-    );
+    expect(mockCreateArenaJob).toHaveBeenCalledWith("test-workspace", "test-job", spec);
   });
 
   it("handles create error", async () => {
@@ -414,10 +401,7 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      text: () => Promise.resolve("Job already exists"),
-    });
+    mockCreateArenaJob.mockRejectedValueOnce(new Error("Job already exists"));
 
     const { result } = renderHook(() => useArenaJobMutations());
 
@@ -441,22 +425,16 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    const cancelledJob = { ...mockJob, status: { ...mockJob.status, phase: "Cancelled" } };
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(cancelledJob),
-    });
+    const cancelledJob = { ...mockJob, status: { ...mockJob.status, phase: "Cancelled" as const } };
+    mockCancelArenaJob.mockResolvedValueOnce(undefined);
+    mockGetArenaJob.mockResolvedValueOnce(cancelledJob);
 
     const { result } = renderHook(() => useArenaJobMutations());
 
     const cancelled = await result.current.cancelJob("test-job");
 
     expect(cancelled.status?.phase).toBe("Cancelled");
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs/test-job/cancel",
-      { method: "POST" }
-    );
+    expect(mockCancelArenaJob).toHaveBeenCalledWith("test-workspace", "test-job");
   });
 
   it("handles cancel error", async () => {
@@ -470,10 +448,7 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      text: () => Promise.resolve("Job already completed"),
-    });
+    mockCancelArenaJob.mockRejectedValueOnce(new Error("Job already completed"));
 
     const { result } = renderHook(() => useArenaJobMutations());
 
@@ -493,18 +468,13 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-    });
+    mockDeleteArenaJob.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useArenaJobMutations());
 
     await result.current.deleteJob("test-job");
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs/test-job",
-      { method: "DELETE" }
-    );
+    expect(mockDeleteArenaJob).toHaveBeenCalledWith("test-workspace", "test-job");
   });
 
   it("handles delete error", async () => {
@@ -518,10 +488,7 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      text: () => Promise.resolve("Job is still running"),
-    });
+    mockDeleteArenaJob.mockRejectedValueOnce(new Error("Job is still running"));
 
     const { result } = renderHook(() => useArenaJobMutations());
 

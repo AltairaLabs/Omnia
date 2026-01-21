@@ -1,7 +1,22 @@
 "use client";
 
+/**
+ * Arena Jobs hooks for fetching and mutating Arena jobs.
+ *
+ * DEMO MODE SUPPORT:
+ * These hooks use the DataService abstraction to support both demo mode (mock data)
+ * and live mode (real K8s API). When adding new functionality:
+ * 1. Add the method to DataService interface in src/lib/data/types.ts
+ * 2. Implement in MockDataService (src/lib/data/mock-service.ts) for demo mode
+ * 3. Implement in LiveDataService (src/lib/data/live-service.ts) for production
+ * 4. Use useDataService() in hooks to get the appropriate implementation
+ *
+ * This ensures the UI works in demo mode without requiring K8s access.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useDataService } from "@/lib/data/provider";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
@@ -37,10 +52,13 @@ interface UseArenaJobMutationsResult {
 /**
  * Hook to fetch Arena jobs for the current workspace.
  * Supports optional filtering by configRef, type, or phase.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [jobs, setJobs] = useState<ArenaJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -56,20 +74,11 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
     setError(null);
 
     try {
-      const params = new URLSearchParams();
-      if (options?.configRef) params.set("configRef", options.configRef);
-      if (options?.type) params.set("type", options.type);
-      if (options?.phase) params.set("phase", options.phase);
-
-      const queryString = params.toString();
-      const suffix = queryString ? `?${queryString}` : "";
-      const url = `/api/workspaces/${workspace}/arena/jobs${suffix}`;
-
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch jobs: ${response.statusText}`);
-      }
-      const data = await response.json();
+      const data = await service.getArenaJobs(workspace, {
+        configRef: options?.configRef,
+        type: options?.type,
+        phase: options?.phase,
+      });
       setJobs(data);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -77,7 +86,7 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
     } finally {
       setLoading(false);
     }
-  }, [workspace, options?.configRef, options?.type, options?.phase]);
+  }, [workspace, service, options?.configRef, options?.type, options?.phase]);
 
   useEffect(() => {
     fetchData();
@@ -93,10 +102,13 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
 
 /**
  * Hook to fetch a single Arena job by name.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaJob(name: string | undefined): UseArenaJobResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [job, setJob] = useState<ArenaJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -112,16 +124,10 @@ export function useArenaJob(name: string | undefined): UseArenaJobResult {
     setError(null);
 
     try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/jobs/${name}`);
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error("Job not found");
-        }
-        throw new Error(`Failed to fetch job: ${response.statusText}`);
+      const jobData = await service.getArenaJob(workspace, name);
+      if (!jobData) {
+        throw new Error("Job not found");
       }
-
-      const jobData = await response.json();
       setJob(jobData);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -129,7 +135,7 @@ export function useArenaJob(name: string | undefined): UseArenaJobResult {
     } finally {
       setLoading(false);
     }
-  }, [workspace, name]);
+  }, [workspace, name, service]);
 
   useEffect(() => {
     fetchData();
@@ -145,10 +151,13 @@ export function useArenaJob(name: string | undefined): UseArenaJobResult {
 
 /**
  * Hook to provide mutations for Arena jobs (create, cancel, delete).
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaJobMutations(): UseArenaJobMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -162,18 +171,7 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/jobs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metadata: { name }, spec }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create job");
-        }
-
-        return response.json();
+        return await service.createArenaJob(workspace, name, spec);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -182,7 +180,7 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const cancelJob = useCallback(
@@ -195,17 +193,13 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/jobs/${name}/cancel`,
-          { method: "POST" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to cancel job");
+        await service.cancelArenaJob(workspace, name);
+        // Fetch and return the updated job
+        const job = await service.getArenaJob(workspace, name);
+        if (!job) {
+          throw new Error("Job not found after cancel");
         }
-
-        return response.json();
+        return job;
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -214,7 +208,7 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const deleteJob = useCallback(
@@ -227,15 +221,7 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/jobs/${name}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete job");
-        }
+        await service.deleteArenaJob(workspace, name);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -244,7 +230,7 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   return {

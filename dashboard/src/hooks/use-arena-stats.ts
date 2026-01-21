@@ -1,7 +1,22 @@
 "use client";
 
+/**
+ * Arena Stats hook for fetching Arena statistics and recent jobs.
+ *
+ * DEMO MODE SUPPORT:
+ * These hooks use the DataService abstraction to support both demo mode (mock data)
+ * and live mode (real K8s API). When adding new functionality:
+ * 1. Add the method to DataService interface in src/lib/data/types.ts
+ * 2. Implement in MockDataService (src/lib/data/mock-service.ts) for demo mode
+ * 3. Implement in LiveDataService (src/lib/data/live-service.ts) for production
+ * 4. Use useDataService() in hooks to get the appropriate implementation
+ *
+ * This ensures the UI works in demo mode without requiring K8s access.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useDataService } from "@/lib/data/provider";
 import type { ArenaStats, ArenaJob } from "@/types/arena";
 
 interface UseArenaStatsResult {
@@ -20,10 +35,13 @@ const EMPTY_STATS: ArenaStats = {
 
 /**
  * Hook to fetch Arena statistics and recent jobs for the current workspace.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaStats(): UseArenaStatsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [stats, setStats] = useState<ArenaStats | null>(null);
   const [recentJobs, setRecentJobs] = useState<ArenaJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,32 +60,13 @@ export function useArenaStats(): UseArenaStatsResult {
 
     try {
       // Fetch stats and jobs in parallel
-      const [statsResponse, jobsResponse] = await Promise.all([
-        fetch(`/api/workspaces/${workspace}/arena/stats`),
-        fetch(`/api/workspaces/${workspace}/arena/jobs?limit=5`),
+      const [statsData, jobsData] = await Promise.all([
+        service.getArenaStats(workspace),
+        service.getArenaJobs(workspace, { sort: "recent", limit: 5 }),
       ]);
 
-      if (!statsResponse.ok) {
-        throw new Error(`Failed to fetch stats: ${statsResponse.statusText}`);
-      }
-
-      const statsData = await statsResponse.json();
       setStats(statsData);
-
-      if (jobsResponse.ok) {
-        const jobsData = await jobsResponse.json();
-        // Sort by creation time, most recent first, and take top 5
-        const sortedJobs = (jobsData as ArenaJob[])
-          .sort((a, b) => {
-            const timeA = a.metadata?.creationTimestamp || "";
-            const timeB = b.metadata?.creationTimestamp || "";
-            return timeB.localeCompare(timeA);
-          })
-          .slice(0, 5);
-        setRecentJobs(sortedJobs);
-      } else {
-        setRecentJobs([]);
-      }
+      setRecentJobs(jobsData);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
       setStats(null);
@@ -75,7 +74,7 @@ export function useArenaStats(): UseArenaStatsResult {
     } finally {
       setLoading(false);
     }
-  }, [workspace]);
+  }, [workspace, service]);
 
   useEffect(() => {
     fetchData();

@@ -1,7 +1,22 @@
 "use client";
 
+/**
+ * Arena Configs hooks for fetching and mutating Arena configs.
+ *
+ * DEMO MODE SUPPORT:
+ * These hooks use the DataService abstraction to support both demo mode (mock data)
+ * and live mode (real K8s API). When adding new functionality:
+ * 1. Add the method to DataService interface in src/lib/data/types.ts
+ * 2. Implement in MockDataService (src/lib/data/mock-service.ts) for demo mode
+ * 3. Implement in LiveDataService (src/lib/data/live-service.ts) for production
+ * 4. Use useDataService() in hooks to get the appropriate implementation
+ *
+ * This ensures the UI works in demo mode without requiring K8s access.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useDataService } from "@/lib/data/provider";
 import type { ArenaConfig, ArenaJob, Scenario } from "@/types/arena";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
@@ -32,10 +47,13 @@ interface UseArenaConfigMutationsResult {
 
 /**
  * Hook to fetch Arena configs for the current workspace.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaConfigs(): UseArenaConfigsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [configs, setConfigs] = useState<ArenaConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -51,11 +69,7 @@ export function useArenaConfigs(): UseArenaConfigsResult {
     setError(null);
 
     try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/configs`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch configs: ${response.statusText}`);
-      }
-      const data = await response.json();
+      const data = await service.getArenaConfigs(workspace);
       setConfigs(data);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -63,7 +77,7 @@ export function useArenaConfigs(): UseArenaConfigsResult {
     } finally {
       setLoading(false);
     }
-  }, [workspace]);
+  }, [workspace, service]);
 
   useEffect(() => {
     fetchData();
@@ -79,10 +93,13 @@ export function useArenaConfigs(): UseArenaConfigsResult {
 
 /**
  * Hook to fetch a single Arena config with its scenarios and linked jobs.
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaConfig(name: string | undefined): UseArenaConfigResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [config, setConfig] = useState<ArenaConfig | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [linkedJobs, setLinkedJobs] = useState<ArenaJob[]>([]);
@@ -103,35 +120,19 @@ export function useArenaConfig(name: string | undefined): UseArenaConfigResult {
 
     try {
       // Fetch config, scenarios, and jobs in parallel
-      const [configResponse, scenariosResponse, jobsResponse] = await Promise.all([
-        fetch(`/api/workspaces/${workspace}/arena/configs/${name}`),
-        fetch(`/api/workspaces/${workspace}/arena/configs/${name}/scenarios`),
-        fetch(`/api/workspaces/${workspace}/arena/jobs?configRef=${name}`),
+      const [configData, scenariosData, jobsData] = await Promise.all([
+        service.getArenaConfig(workspace, name),
+        service.getArenaConfigScenarios(workspace, name),
+        service.getArenaJobs(workspace, { configRef: name }),
       ]);
 
-      if (!configResponse.ok) {
-        if (configResponse.status === 404) {
-          throw new Error("Config not found");
-        }
-        throw new Error(`Failed to fetch config: ${configResponse.statusText}`);
+      if (!configData) {
+        throw new Error("Config not found");
       }
 
-      const configData = await configResponse.json();
       setConfig(configData);
-
-      if (scenariosResponse.ok) {
-        const scenariosData: Scenario[] = await scenariosResponse.json();
-        setScenarios(scenariosData);
-      } else {
-        setScenarios([]);
-      }
-
-      if (jobsResponse.ok) {
-        const jobsData: ArenaJob[] = await jobsResponse.json();
-        setLinkedJobs(jobsData);
-      } else {
-        setLinkedJobs([]);
-      }
+      setScenarios(scenariosData);
+      setLinkedJobs(jobsData);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
       setConfig(null);
@@ -140,7 +141,7 @@ export function useArenaConfig(name: string | undefined): UseArenaConfigResult {
     } finally {
       setLoading(false);
     }
-  }, [workspace, name]);
+  }, [workspace, name, service]);
 
   useEffect(() => {
     fetchData();
@@ -158,10 +159,13 @@ export function useArenaConfig(name: string | undefined): UseArenaConfigResult {
 
 /**
  * Hook to provide mutations for Arena configs (create, update, delete).
+ *
+ * Uses DataService for demo/live mode support.
  */
 export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const service = useDataService();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -175,18 +179,7 @@ export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/configs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metadata: { name }, spec }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create config");
-        }
-
-        return response.json();
+        return await service.createArenaConfig(workspace, name, spec);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -195,7 +188,7 @@ export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const updateConfig = useCallback(
@@ -208,21 +201,7 @@ export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/configs/${name}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ spec }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to update config");
-        }
-
-        return response.json();
+        return await service.updateArenaConfig(workspace, name, spec);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -231,7 +210,7 @@ export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   const deleteConfig = useCallback(
@@ -244,15 +223,7 @@ export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/configs/${name}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete config");
-        }
+        await service.deleteArenaConfig(workspace, name);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
@@ -261,7 +232,7 @@ export function useArenaConfigMutations(): UseArenaConfigMutationsResult {
         setLoading(false);
       }
     },
-    [workspace]
+    [workspace, service]
   );
 
   return {
