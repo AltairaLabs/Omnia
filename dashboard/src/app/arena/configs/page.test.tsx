@@ -37,14 +37,15 @@ vi.mock("@/components/layout", () => ({
   ),
 }));
 
-// Mock arena components
-vi.mock("@/components/arena", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/arena")>();
+// Mock arena components - import utils directly (lightweight), mock heavy dialog components
+vi.mock("@/components/arena", async () => {
+  // Import only the lightweight utility functions (no React components)
+  const utils = await import("@/components/arena/source-utils");
   return {
-    ...actual,
+    ...utils,
     ArenaBreadcrumb: ({ items }: { items: { label: string }[] }) => (
       <nav data-testid="breadcrumb">
-        {items.map((item) => (
+        {items.map((item: { label: string }) => (
           <span key={item.label}>{item.label}</span>
         ))}
       </nav>
@@ -52,6 +53,9 @@ vi.mock("@/components/arena", async (importOriginal) => {
     ConfigDialog: ({ open }: { open: boolean }) => (
       open ? <div data-testid="config-dialog">Dialog</div> : null
     ),
+    // Stub heavy dialog components to prevent loading their dependencies
+    SourceDialog: () => null,
+    JobDialog: () => null,
   };
 });
 
