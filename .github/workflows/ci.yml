@@ -103,7 +103,7 @@ jobs:
         fail-on-error: false
 
     - name: Upload coverage artifacts
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: coverage-report
         path: coverage.out
@@ -382,7 +382,7 @@ jobs:
         go test -v ./internal/... -coverprofile=internal-coverage.out
 
     - name: Upload internal coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: internal-coverage
         path: internal-coverage.out
@@ -445,7 +445,7 @@ jobs:
       working-directory: dashboard
 
     - name: Upload coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: dashboard-coverage
         path: dashboard/coverage/lcov.info
@@ -521,7 +521,7 @@ jobs:
         fi
 
     - name: Upload E2E coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: success()
       with:
         name: dashboard-e2e-coverage
