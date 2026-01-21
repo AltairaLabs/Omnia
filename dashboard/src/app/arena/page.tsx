@@ -3,6 +3,7 @@
 import { Header } from "@/components/layout";
 import { StatCard } from "@/components/dashboard";
 import { useArenaStats } from "@/hooks";
+import { useLicense } from "@/hooks/use-license";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -15,6 +16,13 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { UpgradeBanner } from "@/components/license/license-gate";
+import {
   Database,
   Settings,
   Play,
@@ -23,6 +31,8 @@ import {
   Loader2,
   Clock,
   Target,
+  Lock,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import type { ArenaJob } from "@/types/arena";
@@ -147,6 +157,76 @@ function LoadingSkeleton() {
   );
 }
 
+interface FeatureItemProps {
+  name: string;
+  available: boolean;
+}
+
+function FeatureItem({ name, available }: Readonly<FeatureItemProps>) {
+  if (available) {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
+        <span>{name}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Lock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+      <span>{name}</span>
+      <Badge variant="outline" className="text-xs text-amber-700 dark:text-amber-300">
+        Enterprise
+      </Badge>
+    </div>
+  );
+}
+
+function ArenaFeatureSummary() {
+  const { isEnterprise, canUseFeature, license } = useLicense();
+
+  const workerScalingLabel =
+    license.limits.maxWorkerReplicas === 0
+      ? "Worker Scaling (Unlimited)"
+      : `Worker Scaling (Max ${license.limits.maxWorkerReplicas})`;
+
+  const features: { name: string; available: boolean }[] = [
+    { name: "ConfigMap Sources", available: true },
+    { name: "Git Sources", available: canUseFeature("gitSource") },
+    { name: "OCI Sources", available: canUseFeature("ociSource") },
+    { name: "S3 Sources", available: canUseFeature("s3Source") },
+    { name: "Evaluation Jobs", available: true },
+    { name: "Load Testing", available: canUseFeature("loadTesting") },
+    { name: "Data Generation", available: canUseFeature("dataGeneration") },
+    {
+      name: workerScalingLabel,
+      available: canUseFeature("distributedWorkers"),
+    },
+    { name: "Job Scheduling", available: canUseFeature("scheduling") },
+  ];
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-medium">Available Features</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {features.map((f) => (
+            <FeatureItem key={f.name} name={f.name} available={f.available} />
+          ))}
+        </div>
+        {!isEnterprise && (
+          <div className="mt-4">
+            <UpgradeBanner compact feature="Arena Fleet" />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ArenaPage() {
   const { stats, recentJobs, loading, error } = useArenaStats();
 
@@ -220,6 +300,9 @@ export default function ArenaPage() {
             description={stats?.jobs.completed ? `${stats.jobs.completed} completed` : undefined}
           />
         </div>
+
+        {/* Feature Summary */}
+        <ArenaFeatureSummary />
 
         {/* Recent Jobs */}
         <div className="rounded-lg border bg-card p-6">

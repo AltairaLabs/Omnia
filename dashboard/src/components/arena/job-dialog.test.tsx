@@ -16,6 +16,82 @@ vi.mock("@/hooks/use-arena-jobs", () => ({
   }),
 }));
 
+// Mock the license hook with configurable values
+const mockUseLicense = vi.fn();
+vi.mock("@/hooks/use-license", () => ({
+  useLicense: () => mockUseLicense(),
+}));
+
+// Enterprise license mock
+const enterpriseLicense = {
+  license: {
+    id: "enterprise-test",
+    tier: "enterprise",
+    customer: "Test Corp",
+    features: {
+      gitSource: true,
+      ociSource: true,
+      s3Source: true,
+      loadTesting: true,
+      dataGeneration: true,
+      scheduling: true,
+      distributedWorkers: true,
+    },
+    limits: {
+      maxScenarios: 0, // unlimited
+      maxWorkerReplicas: 0, // unlimited
+    },
+    issuedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+  isEnterprise: true,
+  isLoading: false,
+  error: undefined,
+  canUseFeature: () => true,
+  canUseSourceType: () => true,
+  canUseJobType: () => true,
+  canUseScheduling: () => true,
+  canUseWorkerReplicas: () => true,
+  canUseScenarioCount: () => true,
+  isExpired: false,
+  refresh: vi.fn(),
+};
+
+// Open Core license mock
+const openCoreLicense = {
+  license: {
+    id: "open-core",
+    tier: "open-core",
+    customer: "Open Core User",
+    features: {
+      gitSource: false,
+      ociSource: false,
+      s3Source: false,
+      loadTesting: false,
+      dataGeneration: false,
+      scheduling: false,
+      distributedWorkers: false,
+    },
+    limits: {
+      maxScenarios: 10,
+      maxWorkerReplicas: 1,
+    },
+    issuedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+  },
+  isEnterprise: false,
+  isLoading: false,
+  error: undefined,
+  canUseFeature: () => false,
+  canUseSourceType: (type: string) => type === "configmap",
+  canUseJobType: (type: string) => type === "evaluation",
+  canUseScheduling: () => false,
+  canUseWorkerReplicas: (replicas: number) => replicas <= 1,
+  canUseScenarioCount: (count: number) => count <= 10,
+  isExpired: false,
+  refresh: vi.fn(),
+};
+
 // Helper to create mock configs
 function createMockConfig(name: string, phase: string = "Ready"): ArenaConfig {
   return {
@@ -31,6 +107,8 @@ describe("JobDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateJob.mockResolvedValue({ metadata: { name: "test-job" } });
+    // Default to enterprise license for most tests (backward compatibility)
+    mockUseLicense.mockReturnValue(enterpriseLicense);
   });
 
   describe("rendering", () => {
@@ -640,6 +718,192 @@ describe("JobDialog", () => {
       // There should be an option element (even with empty name)
       const options = screen.getAllByRole("option");
       expect(options.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("license gating", () => {
+    it("disables loadtest and datagen job types for Open Core users", () => {
+      mockUseLicense.mockReturnValue(openCoreLicense);
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+        />
+      );
+
+      // Open job type dropdown
+      fireEvent.click(screen.getByLabelText("Job Type"));
+
+      // Evaluation should be enabled
+      const evaluationOption = screen.getByRole("option", { name: /Evaluation/ });
+      expect(evaluationOption).not.toHaveAttribute("data-disabled");
+
+      // Load Test and Data Generation should be disabled with Enterprise badge
+      const loadTestOption = screen.getByRole("option", { name: /Load Test/ });
+      expect(loadTestOption).toHaveAttribute("data-disabled");
+
+      const dataGenOption = screen.getByRole("option", { name: /Data Generation/ });
+      expect(dataGenOption).toHaveAttribute("data-disabled");
+
+      // Both enterprise options should have Enterprise badges
+      const enterpriseBadges = screen.getAllByText("Enterprise");
+      expect(enterpriseBadges).toHaveLength(2);
+    });
+
+    it("shows worker limit message for Open Core users", () => {
+      mockUseLicense.mockReturnValue(openCoreLicense);
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+        />
+      );
+
+      expect(screen.getByText(/Limited to 1 worker/)).toBeInTheDocument();
+    });
+
+    it("does not show worker limit message for Enterprise users", () => {
+      mockUseLicense.mockReturnValue(enterpriseLicense);
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+        />
+      );
+
+      expect(screen.queryByText(/Limited to.*worker/)).not.toBeInTheDocument();
+    });
+
+    it("shows validation error when submitting enterprise job type as Open Core user", async () => {
+      // Start with enterprise to allow selecting loadtest
+      mockUseLicense.mockReturnValue(enterpriseLicense);
+
+      const { rerender } = render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+          preselectedConfig="test-config"
+        />
+      );
+
+      // Fill in name and select loadtest
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-loadtest" } });
+      fireEvent.click(screen.getByLabelText("Job Type"));
+      fireEvent.click(screen.getByRole("option", { name: /Load Test/ }));
+
+      // Switch to open core license
+      mockUseLicense.mockReturnValue(openCoreLicense);
+      rerender(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+          preselectedConfig="test-config"
+        />
+      );
+
+      // Try to submit
+      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Load Test requires an Enterprise license/)).toBeInTheDocument();
+      });
+    });
+
+    it("shows validation error when worker count exceeds limit", async () => {
+      mockUseLicense.mockReturnValue(openCoreLicense);
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+          preselectedConfig="test-config"
+        />
+      );
+
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-job" } });
+      fireEvent.change(screen.getByLabelText("Workers"), { target: { value: "5" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Open Core is limited to 1 worker/)).toBeInTheDocument();
+      });
+    });
+
+    it("shows scenario warning when config exceeds limit", () => {
+      mockUseLicense.mockReturnValue(openCoreLicense);
+
+      // Create config with high scenario count
+      const configWithManyScenarios: ArenaConfig = {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "ArenaConfig",
+        metadata: { name: "many-scenarios" },
+        spec: { sourceRef: { name: "test-source" } },
+        status: { phase: "Ready", scenarioCount: 25 },
+      };
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[configWithManyScenarios]}
+          preselectedConfig="many-scenarios"
+        />
+      );
+
+      expect(screen.getByText(/This config has 25 scenarios/)).toBeInTheDocument();
+      expect(screen.getByText(/Open Core is limited to 10 scenarios/)).toBeInTheDocument();
+    });
+
+    it("does not show scenario warning for Enterprise users", () => {
+      mockUseLicense.mockReturnValue(enterpriseLicense);
+
+      const configWithManyScenarios: ArenaConfig = {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "ArenaConfig",
+        metadata: { name: "many-scenarios" },
+        spec: { sourceRef: { name: "test-source" } },
+        status: { phase: "Ready", scenarioCount: 25 },
+      };
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[configWithManyScenarios]}
+          preselectedConfig="many-scenarios"
+        />
+      );
+
+      expect(screen.queryByText(/This config has 25 scenarios/)).not.toBeInTheDocument();
+    });
+
+    it("enables all job types for Enterprise users", () => {
+      mockUseLicense.mockReturnValue(enterpriseLicense);
+
+      render(
+        <JobDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          configs={[createMockConfig("test-config")]}
+        />
+      );
+
+      fireEvent.click(screen.getByLabelText("Job Type"));
+
+      // All options should be enabled
+      const options = screen.getAllByRole("option");
+      options.forEach((option) => {
+        expect(option).not.toHaveAttribute("data-disabled");
+      });
     });
   });
 });

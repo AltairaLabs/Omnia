@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useArenaJobMutations } from "@/hooks/use-arena-jobs";
+import { useLicense } from "@/hooks/use-license";
 import {
   Dialog,
   DialogContent,
@@ -22,10 +23,13 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertCircle,
   Loader2,
+  Lock,
   Settings,
+  AlertTriangle,
 } from "lucide-react";
 import type {
   ArenaConfig,
@@ -33,6 +37,16 @@ import type {
   ArenaJobSpec,
   ArenaJobType,
 } from "@/types/arena";
+
+const JOB_TYPES: {
+  value: ArenaJobType;
+  label: string;
+  enterprise: boolean;
+}[] = [
+  { value: "evaluation", label: "Evaluation", enterprise: false },
+  { value: "loadtest", label: "Load Test", enterprise: true },
+  { value: "datagen", label: "Data Generation", enterprise: true },
+];
 
 interface JobDialogProps {
   open: boolean;
@@ -78,20 +92,7 @@ function getInitialFormState(preselectedConfig?: string): FormState {
   };
 }
 
-function validateForm(form: FormState): string | null {
-  if (!form.name.trim()) {
-    return "Name is required";
-  }
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(form.name)) {
-    return "Name must be lowercase alphanumeric and may contain hyphens";
-  }
-  if (!form.configRef) {
-    return "Config is required";
-  }
-  const workers = parseInt(form.workers, 10);
-  if (isNaN(workers) || workers < 1) {
-    return "Workers must be a positive integer";
-  }
+function validateJobTypeOptions(form: FormState): string | null {
   if (form.type === "evaluation") {
     const threshold = parseFloat(form.passingThreshold);
     if (isNaN(threshold) || threshold < 0 || threshold > 1) {
@@ -111,6 +112,40 @@ function validateForm(form: FormState): string | null {
     }
   }
   return null;
+}
+
+function validateForm(
+  form: FormState,
+  isEnterprise: boolean,
+  maxReplicas: number
+): string | null {
+  if (!form.name.trim()) {
+    return "Name is required";
+  }
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(form.name)) {
+    return "Name must be lowercase alphanumeric and may contain hyphens";
+  }
+  if (!form.configRef) {
+    return "Config is required";
+  }
+
+  // Job type check
+  const jobTypeConfig = JOB_TYPES.find((t) => t.value === form.type);
+  if (jobTypeConfig?.enterprise && !isEnterprise) {
+    return `${jobTypeConfig.label} requires an Enterprise license`;
+  }
+
+  const workers = parseInt(form.workers, 10);
+  if (isNaN(workers) || workers < 1) {
+    return "Workers must be a positive integer";
+  }
+
+  // Worker replica limit check
+  if (maxReplicas > 0 && workers > maxReplicas) {
+    return `Open Core is limited to ${maxReplicas} worker(s)`;
+  }
+
+  return validateJobTypeOptions(form);
 }
 
 function buildSpec(form: FormState): ArenaJobSpec {
@@ -155,6 +190,7 @@ export function JobDialog({
   onClose,
 }: Readonly<JobDialogProps>) {
   const { createJob, loading } = useArenaJobMutations();
+  const { license, isEnterprise } = useLicense();
 
   // Use preselectedConfig as key to reset form
   const formResetKey = `${preselectedConfig ?? "new"}-${open}`;
@@ -170,6 +206,8 @@ export function JobDialog({
         onSuccess={onSuccess}
         onClose={onClose}
         onOpenChange={onOpenChange}
+        isEnterprise={isEnterprise}
+        maxWorkerReplicas={license.limits.maxWorkerReplicas}
       />
     </Dialog>
   );
@@ -183,6 +221,8 @@ interface JobDialogFormProps {
   onSuccess?: () => void;
   onClose?: () => void;
   onOpenChange: (open: boolean) => void;
+  isEnterprise: boolean;
+  maxWorkerReplicas: number;
 }
 
 function JobDialogForm({
@@ -193,6 +233,8 @@ function JobDialogForm({
   onSuccess,
   onClose,
   onOpenChange,
+  isEnterprise,
+  maxWorkerReplicas,
 }: Readonly<JobDialogFormProps>) {
   const [formState, setFormState] = useState<FormState>(() =>
     getInitialFormState(preselectedConfig)
@@ -207,7 +249,7 @@ function JobDialogForm({
     try {
       setError(null);
 
-      const validationError = validateForm(formState);
+      const validationError = validateForm(formState, isEnterprise, maxWorkerReplicas);
       if (validationError) {
         setError(validationError);
         return;
@@ -229,6 +271,19 @@ function JobDialogForm({
   const readyConfigs = configs.filter(
     (c) => c.status?.phase === "Ready"
   );
+
+  // Get selected config's scenario count for warning
+  const selectedConfig = configs.find(
+    (c) => c.metadata?.name === formState.configRef
+  );
+  const scenarioCount = selectedConfig?.status?.scenarioCount ?? 0;
+  const maxScenarios = 10; // Open Core limit
+  const showScenarioWarning = !isEnterprise && scenarioCount > maxScenarios;
+
+  const isTypeDisabled = (type: ArenaJobType) => {
+    const typeConfig = JOB_TYPES.find((t) => t.value === type);
+    return typeConfig?.enterprise && !isEnterprise;
+  };
 
   return (
     <DialogContent className="sm:max-w-[500px]">
@@ -299,9 +354,23 @@ function JobDialogForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="evaluation">Evaluation</SelectItem>
-              <SelectItem value="loadtest">Load Test</SelectItem>
-              <SelectItem value="datagen">Data Generation</SelectItem>
+              {JOB_TYPES.map((type) => (
+                <SelectItem
+                  key={type.value}
+                  value={type.value}
+                  disabled={isTypeDisabled(type.value)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span>{type.label}</span>
+                    {type.enterprise && !isEnterprise && (
+                      <Badge variant="outline" className="ml-2 text-xs">
+                        <Lock className="h-3 w-3 mr-1" />
+                        Enterprise
+                      </Badge>
+                    )}
+                  </div>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -314,9 +383,15 @@ function JobDialogForm({
               id="workers"
               type="number"
               min="1"
+              max={maxWorkerReplicas > 0 ? maxWorkerReplicas : undefined}
               value={formState.workers}
               onChange={(e) => updateForm("workers", e.target.value)}
             />
+            {!isEnterprise && maxWorkerReplicas > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Limited to {maxWorkerReplicas} worker (upgrade for more)
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="timeout">Timeout</Label>
@@ -328,6 +403,24 @@ function JobDialogForm({
             />
           </div>
         </div>
+
+        {/* Scenario Limit Warning */}
+        {showScenarioWarning && (
+          <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <AlertDescription className="text-amber-700 dark:text-amber-300">
+              This config has {scenarioCount} scenarios. Open Core is limited to {maxScenarios} scenarios.{" "}
+              <a
+                href="https://altairalabs.ai/enterprise"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium underline underline-offset-2 hover:no-underline"
+              >
+                Upgrade to Enterprise
+              </a>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Type-specific options */}
         {formState.type === "evaluation" && (
