@@ -359,6 +359,44 @@ describe("crd-operations", () => {
 
       expect(result).toHaveLength(0); // Should not throw, just return empty
     });
+
+    it("should handle log lines without valid timestamps", async () => {
+      mockListNamespacedPod.mockResolvedValue(mockPodList);
+      // Log lines without ISO timestamp format
+      mockReadNamespacedPodLog.mockResolvedValue(
+        "Log message without timestamp\nAnother message"
+      );
+
+      const result = await crdOperations.getPodLogs(
+        defaultOptions,
+        "app.kubernetes.io/instance=agent-1",
+        100
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result[0].message).toBe("Log message without timestamp");
+      // Should have a timestamp (current time)
+      expect(result[0].timestamp).toBeDefined();
+    });
+
+    it("should handle log lines with invalid timestamp prefix", async () => {
+      mockListNamespacedPod.mockResolvedValue(mockPodList);
+      // Log lines with space but not a valid timestamp
+      mockReadNamespacedPodLog.mockResolvedValue(
+        "INFO Log with level prefix\n01-01-2024 Wrong format"
+      );
+
+      const result = await crdOperations.getPodLogs(
+        defaultOptions,
+        "app.kubernetes.io/instance=agent-1",
+        100
+      );
+
+      expect(result).toHaveLength(2);
+      // These should fall back to using current timestamp
+      expect(result[0].timestamp).toBeDefined();
+      expect(result[1].timestamp).toBeDefined();
+    });
   });
 
   describe("getResourceEvents", () => {
@@ -442,6 +480,14 @@ describe("crd-operations", () => {
 
       expect(result).toBeNull();
     });
+
+    it("should throw for non-404 errors", async () => {
+      mockGetNamespacedCustomObject.mockRejectedValue(new Error("Server error"));
+
+      await expect(
+        crdOperations.getSharedCrd("toolregistries", "omnia-system", "test")
+      ).rejects.toThrow("Server error");
+    });
   });
 
   describe("getConfigMapContent", () => {
@@ -470,6 +516,59 @@ describe("crd-operations", () => {
       );
 
       expect(result).toBeNull();
+    });
+
+    it("should throw for non-404 errors", async () => {
+      mockReadNamespacedConfigMap.mockRejectedValue(new Error("Server error"));
+
+      await expect(
+        crdOperations.getConfigMapContent(defaultOptions, "my-config")
+      ).rejects.toThrow("Server error");
+    });
+
+    it("should return null for ConfigMap with no data", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({});
+
+      const result = await crdOperations.getConfigMapContent(
+        defaultOptions,
+        "empty-config"
+      );
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("scaleDeployment", () => {
+    it("should scale a deployment to desired replicas", async () => {
+      mockPatchNamespacedDeploymentScale.mockResolvedValue({});
+
+      await crdOperations.scaleDeployment(defaultOptions, "my-deployment", 3);
+
+      expect(mockPatchNamespacedDeploymentScale).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-deployment",
+        body: {
+          spec: {
+            replicas: 3,
+          },
+        },
+      });
+    });
+
+    it("should scale down to zero replicas", async () => {
+      mockPatchNamespacedDeploymentScale.mockResolvedValue({});
+
+      await crdOperations.scaleDeployment(defaultOptions, "my-deployment", 0);
+
+      expect(mockPatchNamespacedDeploymentScale).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        name: "my-deployment",
+        body: {
+          spec: {
+            replicas: 0,
+          },
+        },
+      });
     });
   });
 

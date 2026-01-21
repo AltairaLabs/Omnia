@@ -19,6 +19,10 @@ import {
   SYSTEM_NAMESPACE,
   CRD_AGENTS,
   CRD_PROMPTPACKS,
+  auditSuccess,
+  auditDenied,
+  auditError,
+  createAuditContext,
 } from "./workspace-route-helpers";
 import { isForbiddenError, getCrd } from "./crd-operations";
 
@@ -38,6 +42,18 @@ vi.mock("./crd-operations", () => ({
 
 vi.mock("@/lib/auth", () => ({
   getUser: vi.fn(),
+}));
+
+// Mock audit logger
+const mockLogCrdSuccess = vi.fn();
+const mockLogCrdDenied = vi.fn();
+const mockLogCrdError = vi.fn();
+const mockLogError = vi.fn();
+vi.mock("@/lib/audit/logger", () => ({
+  logCrdSuccess: (args: unknown) => mockLogCrdSuccess(args),
+  logCrdDenied: (args: unknown) => mockLogCrdDenied(args),
+  logCrdError: (args: unknown) => mockLogCrdError(args),
+  logError: (...args: unknown[]) => mockLogError(...args),
 }));
 
 import { getWorkspace } from "./workspace-client";
@@ -117,7 +133,6 @@ describe("workspace-route-helpers", () => {
 
   describe("serverErrorResponse", () => {
     it("should return a 500 response with extracted error message", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const error = new Error("Something went wrong");
 
       const response = serverErrorResponse(error, "Operation failed");
@@ -130,13 +145,7 @@ describe("workspace-route-helpers", () => {
       expect(json.message).toBe("Something went wrong");
 
       // Verify structured logging was called
-      expect(consoleSpy).toHaveBeenCalledTimes(1);
-      const loggedJson = JSON.parse(consoleSpy.mock.calls[0][0]);
-      expect(loggedJson.level).toBe("error");
-      expect(loggedJson.message).toBe("Operation failed");
-      expect(loggedJson.error).toBe("Something went wrong");
-      expect(loggedJson.context).toBe("workspace-route");
-      consoleSpy.mockRestore();
+      expect(mockLogError).toHaveBeenCalledWith("Operation failed", error, "workspace-route");
     });
   });
 
@@ -167,7 +176,6 @@ describe("workspace-route-helpers", () => {
     });
 
     it("should return 500 for non-forbidden errors", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(isForbiddenError).mockReturnValue(false);
       const error = new Error("Internal error");
 
@@ -176,7 +184,8 @@ describe("workspace-route-helpers", () => {
       expect(response.status).toBe(500);
       const json = await response.json();
       expect(json.error).toBe("Internal Server Error");
-      consoleSpy.mockRestore();
+      // Verify logging was called
+      expect(mockLogError).toHaveBeenCalled();
     });
   });
 
@@ -374,6 +383,142 @@ describe("workspace-route-helpers", () => {
 
     it("should export correct CRD_PROMPTPACKS", () => {
       expect(CRD_PROMPTPACKS).toBe("promptpacks");
+    });
+  });
+
+  describe("audit functions", () => {
+    const mockUser = {
+      id: "user-1",
+      provider: "oauth" as const,
+      email: "test@example.com",
+      username: "testuser",
+      groups: [],
+      role: "viewer" as const,
+    };
+
+    const mockUserNoEmail = {
+      id: "user-2",
+      provider: "oauth" as const,
+      email: "",
+      username: "usernameonly",
+      groups: [],
+      role: "viewer" as const,
+    };
+
+    const mockUserNoIdentifier = {
+      id: "user-3",
+      provider: "oauth" as const,
+      email: "",
+      username: "",
+      groups: [],
+      role: "viewer" as const,
+    };
+
+    describe("createAuditContext", () => {
+      it("should create an audit context", () => {
+        const ctx = createAuditContext("my-workspace", "my-namespace", mockUser, "editor", "agentruntimes");
+
+        expect(ctx.workspace).toBe("my-workspace");
+        expect(ctx.namespace).toBe("my-namespace");
+        expect(ctx.user).toBe(mockUser);
+        expect(ctx.role).toBe("editor");
+        expect(ctx.resourceType).toBe("agentruntimes");
+      });
+    });
+
+    describe("auditSuccess", () => {
+      it("should log success with user email", () => {
+        const ctx = createAuditContext("ws", "ns", mockUser, "editor", "agents");
+
+        auditSuccess(ctx, "create", "my-agent", { key: "value" });
+
+        expect(mockLogCrdSuccess).toHaveBeenCalledWith({
+          action: "create",
+          resourceType: "agents",
+          resourceName: "my-agent",
+          workspace: "ws",
+          namespace: "ns",
+          user: "test@example.com",
+          role: "editor",
+          metadata: { key: "value" },
+        });
+      });
+
+      it("should use username when email is empty", () => {
+        const ctx = createAuditContext("ws", "ns", mockUserNoEmail, "viewer", "agents");
+
+        auditSuccess(ctx, "get");
+
+        expect(mockLogCrdSuccess).toHaveBeenCalledWith(
+          expect.objectContaining({
+            user: "usernameonly",
+          })
+        );
+      });
+
+      it("should use 'unknown' when no identifier", () => {
+        const ctx = createAuditContext("ws", "ns", mockUserNoIdentifier, "viewer", "agents");
+
+        auditSuccess(ctx, "list");
+
+        expect(mockLogCrdSuccess).toHaveBeenCalledWith(
+          expect.objectContaining({
+            user: "unknown",
+          })
+        );
+      });
+    });
+
+    describe("auditDenied", () => {
+      it("should log denied action", () => {
+        const ctx = createAuditContext("ws", "ns", mockUser, "viewer", "agents");
+
+        auditDenied(ctx, "delete", "my-agent", "Permission denied");
+
+        expect(mockLogCrdDenied).toHaveBeenCalledWith({
+          action: "delete",
+          resourceType: "agents",
+          resourceName: "my-agent",
+          workspace: "ws",
+          namespace: "ns",
+          user: "test@example.com",
+          role: "viewer",
+          errorMessage: "Permission denied",
+        });
+      });
+    });
+
+    describe("auditError", () => {
+      it("should log error with Error object", () => {
+        const ctx = createAuditContext("ws", "ns", mockUser, "editor", "agents");
+        const error = new Error("Something went wrong");
+
+        auditError(ctx, "update", "my-agent", error, 500);
+
+        expect(mockLogCrdError).toHaveBeenCalledWith({
+          action: "update",
+          resourceType: "agents",
+          resourceName: "my-agent",
+          workspace: "ws",
+          namespace: "ns",
+          user: "test@example.com",
+          role: "editor",
+          errorMessage: "Something went wrong",
+          statusCode: 500,
+        });
+      });
+
+      it("should log error with string error", () => {
+        const ctx = createAuditContext("ws", "ns", mockUser, "editor", "agents");
+
+        auditError(ctx, "create", "my-agent", "String error message");
+
+        expect(mockLogCrdError).toHaveBeenCalledWith(
+          expect.objectContaining({
+            errorMessage: "String error message",
+          })
+        );
+      });
     });
   });
 });
