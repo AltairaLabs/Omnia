@@ -230,49 +230,23 @@ func (s *S3Storage) Get(ctx context.Context, jobID string) (*JobResults, error) 
 
 // List returns job IDs that match the given prefix.
 func (s *S3Storage) List(ctx context.Context, prefix string) ([]string, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, ErrStorageClosed
-	}
-	s.mu.RUnlock()
-
-	// Build the full prefix including the configured prefix
-	fullPrefix := s.config.Prefix
-	if fullPrefix != "" && !strings.HasSuffix(fullPrefix, "/") {
-		fullPrefix += "/"
-	}
-	if prefix != "" {
-		fullPrefix += prefix
+	if err := s.checkClosed(); err != nil {
+		return nil, err
 	}
 
+	fullPrefix := s.buildFullPrefix(prefix)
 	var jobIDs []string
-	var continuationToken *string
 
-	for {
-		output, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(s.config.Bucket),
-			Prefix:            aws.String(fullPrefix),
-			ContinuationToken: continuationToken,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to list results: %w", err)
+	err := s.iterateObjects(ctx, fullPrefix, func(obj types.Object) {
+		if obj.Key == nil {
+			return
 		}
-
-		for _, obj := range output.Contents {
-			if obj.Key == nil {
-				continue
-			}
-			jobID := s.jobIDFromKey(*obj.Key)
-			if jobID != "" {
-				jobIDs = append(jobIDs, jobID)
-			}
+		if jobID := s.jobIDFromKey(*obj.Key); jobID != "" {
+			jobIDs = append(jobIDs, jobID)
 		}
-
-		if output.IsTruncated == nil || !*output.IsTruncated {
-			break
-		}
-		continuationToken = output.NextContinuationToken
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	sort.Strings(jobIDs)
@@ -333,64 +307,36 @@ func (s *S3Storage) Close() error {
 
 // ListWithInfo returns result metadata for jobs matching the prefix.
 func (s *S3Storage) ListWithInfo(ctx context.Context, prefix string) ([]ResultInfo, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, ErrStorageClosed
-	}
-	s.mu.RUnlock()
-
-	// Build the full prefix including the configured prefix
-	fullPrefix := s.config.Prefix
-	if fullPrefix != "" && !strings.HasSuffix(fullPrefix, "/") {
-		fullPrefix += "/"
-	}
-	if prefix != "" {
-		fullPrefix += prefix
+	if err := s.checkClosed(); err != nil {
+		return nil, err
 	}
 
+	fullPrefix := s.buildFullPrefix(prefix)
 	var infos []ResultInfo
-	var continuationToken *string
 
-	for {
-		output, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(s.config.Bucket),
-			Prefix:            aws.String(fullPrefix),
-			ContinuationToken: continuationToken,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to list results: %w", err)
+	err := s.iterateObjects(ctx, fullPrefix, func(obj types.Object) {
+		if obj.Key == nil {
+			return
+		}
+		jobID := s.jobIDFromKey(*obj.Key)
+		if jobID == "" {
+			return
 		}
 
-		for _, obj := range output.Contents {
-			if obj.Key == nil {
-				continue
-			}
-			jobID := s.jobIDFromKey(*obj.Key)
-			if jobID == "" {
-				continue
-			}
-
-			info := ResultInfo{
-				JobID: jobID,
-			}
-			if obj.Size != nil {
-				info.SizeBytes = *obj.Size
-			}
-			if obj.LastModified != nil {
-				info.CompletedAt = *obj.LastModified
-			}
-
-			// To get full info (TotalItems, PassedItems, etc.), we'd need to
-			// fetch and parse each object. For efficiency, we only include
-			// basic info from the listing. Use Get() for full details.
-			infos = append(infos, info)
+		info := ResultInfo{JobID: jobID}
+		if obj.Size != nil {
+			info.SizeBytes = *obj.Size
 		}
-
-		if output.IsTruncated == nil || !*output.IsTruncated {
-			break
+		if obj.LastModified != nil {
+			info.CompletedAt = *obj.LastModified
 		}
-		continuationToken = output.NextContinuationToken
+		// To get full info (TotalItems, PassedItems, etc.), we'd need to
+		// fetch and parse each object. For efficiency, we only include
+		// basic info from the listing. Use Get() for full details.
+		infos = append(infos, info)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Sort by job ID for consistent ordering
@@ -425,6 +371,55 @@ func (s *S3Storage) jobIDFromKey(key string) string {
 		return ""
 	}
 	return strings.TrimSuffix(key, ".json")
+}
+
+// checkClosed returns ErrStorageClosed if the storage is closed.
+func (s *S3Storage) checkClosed() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrStorageClosed
+	}
+	return nil
+}
+
+// buildFullPrefix constructs the full S3 prefix for listing.
+func (s *S3Storage) buildFullPrefix(prefix string) string {
+	fullPrefix := s.config.Prefix
+	if fullPrefix != "" && !strings.HasSuffix(fullPrefix, "/") {
+		fullPrefix += "/"
+	}
+	if prefix != "" {
+		fullPrefix += prefix
+	}
+	return fullPrefix
+}
+
+// iterateObjects iterates over S3 objects with the given prefix, calling fn for each object.
+func (s *S3Storage) iterateObjects(ctx context.Context, prefix string, fn func(types.Object)) error {
+	var continuationToken *string
+
+	for {
+		output, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.config.Bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: continuationToken,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to list results: %w", err)
+		}
+
+		for _, obj := range output.Contents {
+			fn(obj)
+		}
+
+		if output.IsTruncated == nil || !*output.IsTruncated {
+			break
+		}
+		continuationToken = output.NextContinuationToken
+	}
+
+	return nil
 }
 
 // Ensure S3Storage implements both interfaces.

@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { useProvider, useUpdateProviderSecretRef, useSecrets } from "@/hooks";
@@ -215,7 +216,7 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">Secret</label>
+                    <Label htmlFor="secret-select" className="text-sm text-muted-foreground">Secret</Label>
                     {secretsLoading ? (
                       <Skeleton className="h-10 w-full" />
                     ) : (
@@ -225,7 +226,7 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
                           onValueChange={handleSecretChange}
                           disabled={updateSecretRef.isPending}
                         >
-                          <SelectTrigger className="w-full">
+                          <SelectTrigger id="secret-select" className="w-full">
                             {updateSecretRef.isPending ? (
                               <div className="flex items-center gap-2">
                                 <Loader2 className="h-4 w-4 animate-spin" />

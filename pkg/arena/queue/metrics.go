@@ -183,25 +183,39 @@ type QueueMetricsRecorder interface {
 }
 
 // NoOpQueueMetrics is a no-op implementation for when metrics are disabled.
+// All methods intentionally do nothing to allow code to call metrics methods
+// without nil checks, while avoiding the overhead of actual metric recording.
 type NoOpQueueMetrics struct{}
 
 // RecordOperation is a no-op implementation for disabled metrics.
-func (n *NoOpQueueMetrics) RecordOperation(_ string, _ float64, _ bool) {}
+func (n *NoOpQueueMetrics) RecordOperation(_ string, _ float64, _ bool) {
+	// Intentionally empty: metrics are disabled
+}
 
 // RecordItemStatusChange is a no-op implementation for disabled metrics.
-func (n *NoOpQueueMetrics) RecordItemStatusChange(_ string, _, _ ItemStatus) {}
+func (n *NoOpQueueMetrics) RecordItemStatusChange(_ string, _, _ ItemStatus) {
+	// Intentionally empty: metrics are disabled
+}
 
 // RecordItemsPushed is a no-op implementation for disabled metrics.
-func (n *NoOpQueueMetrics) RecordItemsPushed(_ string, _ int) {}
+func (n *NoOpQueueMetrics) RecordItemsPushed(_ string, _ int) {
+	// Intentionally empty: metrics are disabled
+}
 
 // RecordRetry is a no-op implementation for disabled metrics.
-func (n *NoOpQueueMetrics) RecordRetry(_ string) {}
+func (n *NoOpQueueMetrics) RecordRetry(_ string) {
+	// Intentionally empty: metrics are disabled
+}
 
 // IncrementActiveJobs is a no-op implementation for disabled metrics.
-func (n *NoOpQueueMetrics) IncrementActiveJobs() {}
+func (n *NoOpQueueMetrics) IncrementActiveJobs() {
+	// Intentionally empty: metrics are disabled
+}
 
 // DecrementActiveJobs is a no-op implementation for disabled metrics.
-func (n *NoOpQueueMetrics) DecrementActiveJobs() {}
+func (n *NoOpQueueMetrics) DecrementActiveJobs() {
+	// Intentionally empty: metrics are disabled
+}
 
 // Ensure implementations satisfy interfaces.
 var (

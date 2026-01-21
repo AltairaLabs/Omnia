@@ -78,7 +78,7 @@ function responseToSparkline(
 
   return series.values.map(([timestamp, value]: [number, string]) => ({
     timestamp: new Date(timestamp * 1000),
-    value: parseFloat(value) || 0,
+    value: Number.parseFloat(value) || 0,
   }));
 }
 
@@ -89,7 +89,7 @@ function extractScalar(response: PrometheusInstantResponse | null): number {
   if (!response || response.status !== "success" || !response.data?.result?.length) {
     return 0;
   }
-  return parseFloat(response.data.result[0]?.value?.[1] || "0") || 0;
+  return Number.parseFloat(response.data.result[0]?.value?.[1] || "0") || 0;
 }
 
 /**
