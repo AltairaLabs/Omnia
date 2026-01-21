@@ -360,4 +360,39 @@ describe("ArenaConfigsPage", () => {
     // Check scenario count shows 10
     expect(screen.getByText("10")).toBeInTheDocument();
   });
+
+  it("shows empty state in table view", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    // Click on table view tab
+    const tabs = screen.getAllByRole("tab");
+    fireEvent.click(tabs[1]);
+
+    // Should still show empty state
+    expect(screen.getByText("No configs found")).toBeInTheDocument();
+  });
+
 });

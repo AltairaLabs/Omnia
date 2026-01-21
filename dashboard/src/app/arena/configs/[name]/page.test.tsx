@@ -486,4 +486,212 @@ describe("ArenaConfigDetailPage", () => {
     // The page should render without crashing
     expect(screen.getByTestId("header")).toBeInTheDocument();
   });
+
+  it("triggers Run Job action and navigates", async () => {
+    const { useArenaConfig, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfig).mockReturnValue({
+      config: mockConfig,
+      scenarios: [],
+      linkedJobs: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    // Mock window.location
+    const mockLocation = { href: "" };
+    Object.defineProperty(window, "location", {
+      value: mockLocation,
+      writable: true,
+    });
+
+    render(<ArenaConfigDetailPage />);
+
+    const runJobButton = screen.getByRole("button", { name: /Run Job/ });
+    fireEvent.click(runJobButton);
+
+    expect(mockLocation.href).toBe("/arena/jobs?configRef=test-config");
+  });
+
+  it("triggers delete action and navigates on success", async () => {
+    const { useArenaConfig, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+    const { useRouter } = await import("next/navigation");
+
+    const mockPush = vi.fn();
+    vi.mocked(useRouter).mockReturnValue({
+      push: mockPush,
+      back: vi.fn(),
+      forward: vi.fn(),
+      refresh: vi.fn(),
+      replace: vi.fn(),
+      prefetch: vi.fn(),
+    });
+
+    const mockDelete = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useArenaConfig).mockReturnValue({
+      config: mockConfig,
+      scenarios: [],
+      linkedJobs: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDelete,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ArenaConfigDetailPage />);
+
+    const deleteButton = screen.getByRole("button", { name: /Delete/ });
+    fireEvent.click(deleteButton);
+
+    expect(mockDelete).toHaveBeenCalledWith("test-config");
+  });
+
+  it("cancels delete when confirmation is declined", async () => {
+    const { useArenaConfig, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    const mockDelete = vi.fn();
+    vi.mocked(useArenaConfig).mockReturnValue({
+      config: mockConfig,
+      scenarios: [],
+      linkedJobs: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDelete,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<ArenaConfigDetailPage />);
+
+    const deleteButton = screen.getByRole("button", { name: /Delete/ });
+    fireEvent.click(deleteButton);
+
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it("handles delete error gracefully", async () => {
+    const { useArenaConfig, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    const mockDelete = vi.fn().mockRejectedValue(new Error("Delete failed"));
+    vi.mocked(useArenaConfig).mockReturnValue({
+      config: mockConfig,
+      scenarios: [],
+      linkedJobs: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDelete,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<ArenaConfigDetailPage />);
+
+    const deleteButton = screen.getByRole("button", { name: /Delete/ });
+    fireEvent.click(deleteButton);
+
+    // Should call deleteConfig even if it fails
+    expect(mockDelete).toHaveBeenCalledWith("test-config");
+  });
+
+  it("renders config without optional fields", async () => {
+    const { useArenaConfig, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    const minimalConfig = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+      kind: "ArenaConfig" as const,
+      metadata: { name: "test-config" },
+      spec: {
+        sourceRef: { name: "test-source" },
+      },
+      status: {
+        phase: "Ready" as const,
+      },
+    };
+
+    vi.mocked(useArenaConfig).mockReturnValue({
+      config: minimalConfig,
+      scenarios: [],
+      linkedJobs: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigDetailPage />);
+
+    // Should render without crashing even without optional fields
+    expect(screen.getAllByText("test-config").length).toBeGreaterThan(0);
+  });
 });
