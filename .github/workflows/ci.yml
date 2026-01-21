@@ -410,7 +410,7 @@ jobs:
       run: npm run test:coverage
       working-directory: dashboard
       env:
-        NODE_OPTIONS: --max-old-space-size=4096
+        NODE_OPTIONS: --max-old-space-size=8192
 
     - name: Fix coverage paths for SonarCloud
       run: |
