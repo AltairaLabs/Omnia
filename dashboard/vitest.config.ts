@@ -9,12 +9,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
-    // Limit parallelism in CI to reduce memory usage during coverage
-    maxWorkers: process.env.CI ? 1 : undefined,
     coverage: {
       provider: "v8",
-      // Skip HTML report in CI - it's memory intensive and we only need lcov for SonarCloud
-      reporter: process.env.CI ? ["text", "lcov"] : ["text", "json", "html", "lcov"],
+      reporter: ["text", "json", "html", "lcov"],
       reportsDirectory: "./coverage",
       exclude: [
         // Standard exclusions
@@ -35,11 +32,9 @@ export default defineConfig({
 
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
-        "src/components/arena/index.ts", // Arena barrel re-export
         "src/components/console/**",
         "src/components/cost/**",
         "src/components/credentials/**",
-        "src/components/dashboard/**", // Dashboard widgets (visual components)
         "src/components/layout/**",
         "src/components/logs/**",
         "src/components/topology/**",
@@ -48,9 +43,6 @@ export default defineConfig({
         "src/app/**/layout.tsx",
         "src/app/page.tsx", // Root page
         "src/app/agents/**/page.tsx", // Agent pages (require full context)
-        "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
-        "src/app/arena/jobs/[name]/page.tsx", // Arena detail pages (complex UI)
-        "src/app/arena/sources/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/providers/**/page.tsx", // Provider pages (require full context)
         "src/app/settings/**/page.tsx", // Settings pages (require full context)
         "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)
