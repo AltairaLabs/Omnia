@@ -1,0 +1,251 @@
+name: Coverage Rebuild
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_e2e:
+        description: 'Skip E2E tests (faster)'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: coverage-rebuild
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  go-tests:
+    name: Go Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Install gotestsum
+      run: go install gotest.tools/gotestsum@latest
+
+    - name: Run unit tests with coverage
+      run: |
+        gotestsum --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/)
+        echo "Coverage report generated"
+
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-unit-coverage
+        path: coverage.out
+        retention-days: 1
+
+  go-envtest:
+    name: Go Controller Tests (envtest)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Setup envtest
+      run: |
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        setup-envtest use
+
+    - name: Run controller tests with coverage
+      run: |
+        source <(setup-envtest use -p env)
+        go test -v ./internal/... -coverprofile=internal-coverage.out
+
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: go-internal-coverage
+        path: internal-coverage.out
+        retention-days: 1
+
+  dashboard-unit:
+    name: Dashboard Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: dashboard/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run tests with coverage
+      run: npm run test:coverage
+
+    - name: Fix coverage paths for SonarCloud
+      run: |
+        sed -i 's|^SF:src/|SF:dashboard/src/|g' coverage/lcov.info
+        echo "Fixed lcov.info paths"
+
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: dashboard-unit-coverage
+        path: dashboard/coverage/lcov.info
+        retention-days: 1
+
+  dashboard-e2e:
+    name: Dashboard E2E Tests
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_e2e != 'true' }}
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: dashboard/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+
+    - name: Build dashboard
+      run: npm run build
+      env:
+        NEXT_PUBLIC_DEMO_MODE: 'true'
+
+    - name: Run E2E tests with coverage
+      run: |
+        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true npm run start &
+        sleep 10
+        npx playwright test --reporter=list
+      env:
+        CI: true
+
+    - name: Fix E2E coverage paths
+      if: success()
+      run: |
+        if [ -f e2e-coverage/coverage/lcov.info ]; then
+          sed -i 's|^SF:\[project\]/src/|SF:dashboard/src/|g' e2e-coverage/coverage/lcov.info
+          sed -i 's|^SF:app/src/|SF:dashboard/src/|g' e2e-coverage/coverage/lcov.info
+          sed -i 's|^SF:src/|SF:dashboard/src/|g' e2e-coverage/coverage/lcov.info
+        fi
+
+    - name: Upload E2E coverage
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: dashboard-e2e-coverage
+        path: dashboard/e2e-coverage/coverage/lcov.info
+        retention-days: 1
+
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    needs: [go-tests, go-envtest, dashboard-unit, dashboard-e2e]
+    if: always() && !contains(needs.*.result, 'failure')
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Download Go unit coverage
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: go-unit-coverage
+        path: coverage-unit
+
+    - name: Download Go internal coverage
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: go-internal-coverage
+        path: coverage-internal
+
+    - name: Download Dashboard unit coverage
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: dashboard-unit-coverage
+        path: dashboard/coverage
+
+    - name: Download Dashboard E2E coverage
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: dashboard-e2e-coverage
+        path: dashboard/e2e-coverage
+
+    - name: Merge Go coverage files
+      run: |
+        echo "Merging Go coverage files..."
+        if [ -f coverage-unit/coverage.out ] && [ -f coverage-internal/internal-coverage.out ]; then
+          head -1 coverage-unit/coverage.out > coverage.out
+          tail -n +2 coverage-unit/coverage.out >> coverage.out
+          tail -n +2 coverage-internal/internal-coverage.out >> coverage.out
+          echo "Merged Go coverage:"
+          wc -l coverage.out
+          go tool cover -func=coverage.out | tail -5
+        elif [ -f coverage-unit/coverage.out ]; then
+          cp coverage-unit/coverage.out coverage.out
+          echo "Using unit coverage only"
+        elif [ -f coverage-internal/internal-coverage.out ]; then
+          cp coverage-internal/internal-coverage.out coverage.out
+          echo "Using internal coverage only"
+        else
+          echo "No Go coverage files found"
+        fi
+
+    - name: Transform Go coverage paths
+      run: |
+        if [ -f coverage.out ]; then
+          sed -i 's|github.com/altairalabs/omnia/||g' coverage.out
+          head -10 coverage.out
+        fi
+
+    - name: Merge Dashboard coverage files
+      run: |
+        if [ -f dashboard/coverage/lcov.info ]; then
+          echo "Dashboard unit coverage:"
+          wc -l dashboard/coverage/lcov.info
+
+          if [ -f dashboard/e2e-coverage/lcov.info ]; then
+            echo "Merging E2E coverage..."
+            cat dashboard/e2e-coverage/lcov.info >> dashboard/coverage/lcov.info
+            echo "Merged dashboard coverage:"
+            wc -l dashboard/coverage/lcov.info
+          fi
+        else
+          echo "No dashboard coverage files found"
+        fi
+
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarqube-scan-action@v4
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
