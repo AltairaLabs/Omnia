@@ -144,53 +144,17 @@ func (f *ConfigMapFetcher) createTarball(cm *corev1.ConfigMap) (string, string, 
 		}
 	}()
 
-	// Sort keys for deterministic output
-	keys := make([]string, 0, len(cm.Data)+len(cm.BinaryData))
-	for k := range cm.Data {
-		keys = append(keys, k)
-	}
-	for k := range cm.BinaryData {
-		// Only add if not already in Data (Data takes precedence)
-		if _, exists := cm.Data[k]; !exists {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
+	// Get sorted keys for deterministic output
+	keys := getSortedConfigMapKeys(cm)
 
 	// Add each file to the tarball
-	for _, key := range keys {
-		var content []byte
-		if data, ok := cm.Data[key]; ok {
-			content = []byte(data)
-		} else if binData, ok := cm.BinaryData[key]; ok {
-			content = binData
-		}
-
-		header := &tar.Header{
-			Name:    key,
-			Mode:    0644,
-			Size:    int64(len(content)),
-			ModTime: cm.CreationTimestamp.Time,
-		}
-
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return "", "", 0, fmt.Errorf("failed to write tar header for %s: %w", key, err)
-		}
-
-		if _, err := tarWriter.Write(content); err != nil {
-			return "", "", 0, fmt.Errorf("failed to write tar content for %s: %w", key, err)
-		}
+	if err := writeConfigMapEntries(tarWriter, cm, keys); err != nil {
+		return "", "", 0, err
 	}
 
 	// Close writers to flush
-	if err := tarWriter.Close(); err != nil {
-		return "", "", 0, fmt.Errorf("failed to close tar writer: %w", err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		return "", "", 0, fmt.Errorf("failed to close gzip writer: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return "", "", 0, fmt.Errorf("failed to close temp file: %w", err)
+	if err := closeWriters(tarWriter, gzipWriter, tmpFile); err != nil {
+		return "", "", 0, err
 	}
 	closed = true
 
@@ -202,6 +166,78 @@ func (f *ConfigMapFetcher) createTarball(cm *corev1.ConfigMap) (string, string, 
 
 	checksum := "sha256:" + hex.EncodeToString(hash.Sum(nil))
 	return tmpFile.Name(), checksum, stat.Size(), nil
+}
+
+// getSortedConfigMapKeys returns sorted keys from both Data and BinaryData, with Data taking precedence.
+func getSortedConfigMapKeys(cm *corev1.ConfigMap) []string {
+	keys := make([]string, 0, len(cm.Data)+len(cm.BinaryData))
+	for k := range cm.Data {
+		keys = append(keys, k)
+	}
+	for k := range cm.BinaryData {
+		// Only add if not already in Data (Data takes precedence)
+		if _, exists := cm.Data[k]; !exists {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// writeConfigMapEntries writes ConfigMap entries to a tar archive.
+func writeConfigMapEntries(tarWriter *tar.Writer, cm *corev1.ConfigMap, keys []string) error {
+	for _, key := range keys {
+		content := getConfigMapContent(cm, key)
+		if err := writeTarEntry(tarWriter, key, content, cm.CreationTimestamp.Time); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// getConfigMapContent retrieves content for a key from ConfigMap Data or BinaryData.
+func getConfigMapContent(cm *corev1.ConfigMap, key string) []byte {
+	if data, ok := cm.Data[key]; ok {
+		return []byte(data)
+	}
+	if binData, ok := cm.BinaryData[key]; ok {
+		return binData
+	}
+	return nil
+}
+
+// writeTarEntry writes a single entry to the tar archive.
+func writeTarEntry(tarWriter *tar.Writer, name string, content []byte, modTime time.Time) error {
+	header := &tar.Header{
+		Name:    name,
+		Mode:    0644,
+		Size:    int64(len(content)),
+		ModTime: modTime,
+	}
+
+	if err := tarWriter.WriteHeader(header); err != nil {
+		return fmt.Errorf("failed to write tar header for %s: %w", name, err)
+	}
+
+	if _, err := tarWriter.Write(content); err != nil {
+		return fmt.Errorf("failed to write tar content for %s: %w", name, err)
+	}
+
+	return nil
+}
+
+// closeWriters closes all writers in order.
+func closeWriters(tarWriter *tar.Writer, gzipWriter *gzip.Writer, tmpFile *os.File) error {
+	if err := tarWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close gzip writer: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	return nil
 }
 
 // Ensure ConfigMapFetcher implements Fetcher interface.

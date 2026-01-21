@@ -29,6 +29,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -164,9 +165,56 @@ func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Clone and checkout the repository
+	repo, cloneDir, err := f.cloneAndCheckout(ctx, tmpDir, revision, auth)
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine and validate source directory
+	sourceDir, err := f.getSourceDirectory(cloneDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get commit info for metadata
+	commit, err := repo.CommitObject(plumbing.NewHash(revision))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit: %w", err)
+	}
+
+	// Create tarball and move to final location
+	return f.createArtifact(tmpDir, sourceDir, revision, commit)
+}
+
+// cloneAndCheckout clones the repository and checks out the specified revision.
+func (f *GitFetcher) cloneAndCheckout(
+	ctx context.Context, tmpDir, revision string, auth transport.AuthMethod,
+) (*git.Repository, string, error) {
 	cloneDir := filepath.Join(tmpDir, "repo")
 
-	// Clone the repository with shallow clone for memory efficiency
+	cloneOpts := f.buildCloneOptions(auth)
+
+	repo, err := git.PlainCloneContext(ctx, cloneDir, false, cloneOpts)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to clone repository: %w", err)
+	}
+
+	// Checkout the specific revision
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	if err := worktree.Checkout(&git.CheckoutOptions{Hash: plumbing.NewHash(revision)}); err != nil {
+		return nil, "", fmt.Errorf("failed to checkout revision %s: %w", revision, err)
+	}
+
+	return repo, cloneDir, nil
+}
+
+// buildCloneOptions creates git clone options based on config.
+func (f *GitFetcher) buildCloneOptions(auth transport.AuthMethod) *git.CloneOptions {
 	cloneOpts := &git.CloneOptions{
 		URL:          f.config.URL,
 		Auth:         auth,
@@ -181,39 +229,24 @@ func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 		cloneOpts.ReferenceName = plumbing.NewTagReferenceName(f.config.Ref.Tag)
 	}
 
-	repo, err := git.PlainCloneContext(ctx, cloneDir, false, cloneOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to clone repository: %w", err)
+	return cloneOpts
+}
+
+// getSourceDirectory returns the source directory for tarball creation.
+func (f *GitFetcher) getSourceDirectory(cloneDir string) (string, error) {
+	if f.config.Path == "" {
+		return cloneDir, nil
 	}
 
-	// Checkout the specific revision
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get worktree: %w", err)
+	sourceDir := filepath.Join(cloneDir, f.config.Path)
+	if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("path %s does not exist in repository", f.config.Path)
 	}
+	return sourceDir, nil
+}
 
-	err = worktree.Checkout(&git.CheckoutOptions{
-		Hash: plumbing.NewHash(revision),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to checkout revision %s: %w", revision, err)
-	}
-
-	// Determine source directory
-	sourceDir := cloneDir
-	if f.config.Path != "" {
-		sourceDir = filepath.Join(cloneDir, f.config.Path)
-		if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
-			return nil, fmt.Errorf("path %s does not exist in repository", f.config.Path)
-		}
-	}
-
-	// Get commit info for metadata
-	commit, err := repo.CommitObject(plumbing.NewHash(revision))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get commit: %w", err)
-	}
-
+// createArtifact creates the tarball and returns the final artifact.
+func (f *GitFetcher) createArtifact(tmpDir, sourceDir, revision string, commit *object.Commit) (*Artifact, error) {
 	// Create the tarball
 	tarballPath := filepath.Join(tmpDir, "artifact.tar.gz")
 	checksum, size, err := f.createTarball(sourceDir, tarballPath)
@@ -222,26 +255,16 @@ func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 	}
 
 	// Move tarball to final location
-	finalPath, err := os.CreateTemp(f.config.Options.WorkDir, "artifact-*.tar.gz")
+	finalPath, err := f.moveTarballToFinal(tarballPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create final artifact file: %w", err)
-	}
-	if err := finalPath.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tarballPath, finalPath.Name()); err != nil {
-		// If rename fails (cross-device), copy instead
-		if err := copyFile(tarballPath, finalPath.Name()); err != nil {
-			return nil, fmt.Errorf("failed to move artifact: %w", err)
-		}
+		return nil, err
 	}
 
 	// Format revision with ref info
 	revisionStr := formatRevision(f.config.Ref, revision)
 
 	return &Artifact{
-		Path:         finalPath.Name(),
+		Path:         finalPath,
 		Revision:     revisionStr,
 		Checksum:     checksum,
 		Size:         size,
@@ -249,8 +272,27 @@ func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 	}, nil
 }
 
+// moveTarballToFinal moves the tarball to its final location.
+func (f *GitFetcher) moveTarballToFinal(tarballPath string) (string, error) {
+	finalPath, err := os.CreateTemp(f.config.Options.WorkDir, "artifact-*.tar.gz")
+	if err != nil {
+		return "", fmt.Errorf("failed to create final artifact file: %w", err)
+	}
+	if err := finalPath.Close(); err != nil {
+		return "", fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	if err := os.Rename(tarballPath, finalPath.Name()); err != nil {
+		// If rename fails (cross-device), copy instead
+		if err := copyFile(tarballPath, finalPath.Name()); err != nil {
+			return "", fmt.Errorf("failed to move artifact: %w", err)
+		}
+	}
+
+	return finalPath.Name(), nil
+}
+
 // getAuth returns the appropriate transport.AuthMethod based on credentials.
-// nolint:gocyclo // Auth logic is inherently branchy but straightforward
 func (f *GitFetcher) getAuth() (transport.AuthMethod, error) {
 	if f.config.Credentials == nil {
 		return nil, nil
@@ -258,43 +300,7 @@ func (f *GitFetcher) getAuth() (transport.AuthMethod, error) {
 
 	// SSH authentication
 	if len(f.config.Credentials.PrivateKey) > 0 {
-		publicKeys, err := ssh.NewPublicKeys(
-			"git",
-			f.config.Credentials.PrivateKey,
-			f.config.Credentials.PrivateKeyPassword,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SSH auth: %w", err)
-		}
-
-		// If known_hosts is provided, write to temp file and use for host key verification
-		if len(f.config.Credentials.KnownHosts) > 0 {
-			tmpFile, err := os.CreateTemp("", "known_hosts")
-			if err != nil {
-				return nil, fmt.Errorf("failed to create known_hosts temp file: %w", err)
-			}
-			// Note: We don't defer remove here because the file needs to persist
-			// for the SSH connection. The OS will clean up temp files.
-
-			if _, err := tmpFile.Write(f.config.Credentials.KnownHosts); err != nil {
-				_ = tmpFile.Close()
-				_ = os.Remove(tmpFile.Name())
-				return nil, fmt.Errorf("failed to write known_hosts: %w", err)
-			}
-			if err := tmpFile.Close(); err != nil {
-				_ = os.Remove(tmpFile.Name())
-				return nil, fmt.Errorf("failed to close known_hosts file: %w", err)
-			}
-
-			callback, err := ssh.NewKnownHostsCallback(tmpFile.Name())
-			if err != nil {
-				_ = os.Remove(tmpFile.Name())
-				return nil, fmt.Errorf("failed to parse known_hosts: %w", err)
-			}
-			publicKeys.HostKeyCallback = callback
-		}
-
-		return publicKeys, nil
+		return f.getSSHAuth()
 	}
 
 	// HTTPS authentication
@@ -306,6 +312,56 @@ func (f *GitFetcher) getAuth() (transport.AuthMethod, error) {
 	}
 
 	return nil, nil
+}
+
+// getSSHAuth creates SSH authentication from credentials.
+func (f *GitFetcher) getSSHAuth() (transport.AuthMethod, error) {
+	publicKeys, err := ssh.NewPublicKeys(
+		"git",
+		f.config.Credentials.PrivateKey,
+		f.config.Credentials.PrivateKeyPassword,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH auth: %w", err)
+	}
+
+	// If known_hosts is provided, configure host key verification
+	if len(f.config.Credentials.KnownHosts) > 0 {
+		if err := f.configureKnownHosts(publicKeys); err != nil {
+			return nil, err
+		}
+	}
+
+	return publicKeys, nil
+}
+
+// configureKnownHosts sets up host key verification from known_hosts data.
+func (f *GitFetcher) configureKnownHosts(publicKeys *ssh.PublicKeys) error {
+	tmpFile, err := os.CreateTemp("", "known_hosts")
+	if err != nil {
+		return fmt.Errorf("failed to create known_hosts temp file: %w", err)
+	}
+	// Note: We don't defer remove here because the file needs to persist
+	// for the SSH connection. The OS will clean up temp files.
+
+	if _, err := tmpFile.Write(f.config.Credentials.KnownHosts); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to write known_hosts: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to close known_hosts file: %w", err)
+	}
+
+	callback, err := ssh.NewKnownHostsCallback(tmpFile.Name())
+	if err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return fmt.Errorf("failed to parse known_hosts: %w", err)
+	}
+	publicKeys.HostKeyCallback = callback
+
+	return nil
 }
 
 // createTarball creates a gzipped tarball of the source directory.

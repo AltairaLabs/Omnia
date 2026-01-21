@@ -162,6 +162,15 @@ jobs:
         echo "Go coverage summary:"
         go tool cover -func=coverage.out | tail -5
 
+    - name: Transform Go coverage paths for SonarCloud
+      run: |
+        echo "Transforming Go coverage paths..."
+        # SonarCloud expects paths relative to project root, not full Go module paths
+        # Strip the module prefix from coverage file
+        sed -i 's|github.com/altairalabs/omnia/||g' coverage.out
+        echo "Transformed coverage file (first 10 lines):"
+        head -10 coverage.out
+
     - name: Merge dashboard coverage files
       run: |
         echo "Dashboard unit test coverage:"
