@@ -282,7 +282,7 @@ func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundl
 	fmt.Printf("Processing work items for job: %s\n", jobID)
 
 	for {
-		if done := checkContextDone(ctx); done {
+		if checkContextDone(ctx) {
 			return nil
 		}
 
