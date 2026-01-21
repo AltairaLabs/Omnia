@@ -639,4 +639,166 @@ describe("ArenaSourcesPage", () => {
 
     expect(screen.getByText("synced-source")).toBeInTheDocument();
   });
+
+  it("renders sources in table view correctly", async () => {
+    const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [
+        { metadata: { name: "table-source" }, spec: { type: "git", interval: "10m", git: { url: "https://github.com/test/repo" } }, status: { phase: "Ready" } },
+      ] as any,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaSourceMutations).mockReturnValue({
+      createSource: vi.fn(),
+      updateSource: vi.fn(),
+      deleteSource: mockDeleteSource,
+      syncSource: mockSyncSource,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaSourcesPage />);
+
+    // Switch to table view
+    const tabs = screen.getAllByRole("tab");
+    fireEvent.click(tabs[1]);
+
+    // Source should be visible
+    expect(screen.getByText("table-source")).toBeInTheDocument();
+    expect(screen.getByText("https://github.com/test/repo")).toBeInTheDocument();
+  });
+
+  it("renders source with unknown status phase", async () => {
+    const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [
+        { metadata: { name: "unknown-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: undefined } },
+      ] as any,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaSourceMutations).mockReturnValue({
+      createSource: vi.fn(),
+      updateSource: vi.fn(),
+      deleteSource: mockDeleteSource,
+      syncSource: mockSyncSource,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaSourcesPage />);
+
+    expect(screen.getByText("unknown-source")).toBeInTheDocument();
+  });
+
+  it("renders empty state in table view when no sources", async () => {
+    const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaSourceMutations).mockReturnValue({
+      createSource: vi.fn(),
+      updateSource: vi.fn(),
+      deleteSource: mockDeleteSource,
+      syncSource: mockSyncSource,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaSourcesPage />);
+
+    // Switch to table view
+    const tabs = screen.getAllByRole("tab");
+    fireEvent.click(tabs[1]);
+
+    // Empty state should be visible
+    expect(screen.getByText("No sources found")).toBeInTheDocument();
+  });
+
+  it("renders day interval correctly", async () => {
+    const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [
+        { metadata: { name: "daily-source" }, spec: { type: "configmap", interval: "24h", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+      ] as any,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaSourceMutations).mockReturnValue({
+      createSource: vi.fn(),
+      updateSource: vi.fn(),
+      deleteSource: mockDeleteSource,
+      syncSource: mockSyncSource,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaSourcesPage />);
+
+    expect(screen.getByText("24 hours")).toBeInTheDocument();
+  });
+
+  it("renders source with no interval", async () => {
+    const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [
+        { metadata: { name: "no-interval-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+      ] as any,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaSourceMutations).mockReturnValue({
+      createSource: vi.fn(),
+      updateSource: vi.fn(),
+      deleteSource: mockDeleteSource,
+      syncSource: mockSyncSource,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaSourcesPage />);
+
+    expect(screen.getByText("no-interval-source")).toBeInTheDocument();
+  });
+
+  it("renders sources in table view with Ready and Failed statuses", async () => {
+    const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [
+        { metadata: { name: "ready-src" }, spec: { type: "configmap", configMapRef: { name: "cm1" } }, status: { phase: "Ready" } },
+        { metadata: { name: "failed-src" }, spec: { type: "configmap", configMapRef: { name: "cm2" } }, status: { phase: "Failed" } },
+      ] as any,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaSourceMutations).mockReturnValue({
+      createSource: vi.fn(),
+      updateSource: vi.fn(),
+      deleteSource: mockDeleteSource,
+      syncSource: mockSyncSource,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaSourcesPage />);
+
+    // Switch to table view
+    const tabs = screen.getAllByRole("tab");
+    fireEvent.click(tabs[1]);
+
+    // Both sources should be visible
+    expect(screen.getByText("ready-src")).toBeInTheDocument();
+    expect(screen.getByText("failed-src")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
 });

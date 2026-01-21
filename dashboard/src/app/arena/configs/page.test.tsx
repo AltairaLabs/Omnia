@@ -395,4 +395,292 @@ describe("ArenaConfigsPage", () => {
     expect(screen.getByText("No configs found")).toBeInTheDocument();
   });
 
+  it("renders configs in table view when switched", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "table-config" },
+          spec: { sourceRef: { name: "test-source" } },
+          status: { phase: "Ready", scenarioCount: 3 },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    // Click on table view tab
+    const tabs = screen.getAllByRole("tab");
+    fireEvent.click(tabs[1]);
+
+    // Config should be visible in table
+    expect(screen.getByText("table-config")).toBeInTheDocument();
+    // Scenario count should be visible in table view too
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("renders config with no providers and no tool registries", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "minimal-config" },
+          spec: { sourceRef: { name: "test-source" } },
+          status: { phase: "Ready", scenarioCount: 0 },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    // Check that 0 is displayed for providers and tool registries
+    const zeros = screen.getAllByText("0");
+    expect(zeros.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders config with Pending status", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "pending-config" },
+          spec: { sourceRef: { name: "test-source" } },
+          status: { phase: "Pending" },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+  });
+
+  it("renders config with Failed status", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "failed-config" },
+          spec: { sourceRef: { name: "test-source" } },
+          status: { phase: "Failed" },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("renders config with empty sourceRef name", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "empty-source-config" },
+          spec: { sourceRef: { name: "" } },
+          status: { phase: "Ready" },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    // Config name should be visible
+    expect(screen.getByText("empty-source-config")).toBeInTheDocument();
+    // Source should show dash when name is empty
+    expect(screen.getByText("-")).toBeInTheDocument();
+  });
+
+  it("shows config with undefined status phase", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "unknown-status-config" },
+          spec: { sourceRef: { name: "test-source" } },
+          status: { phase: undefined },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    // Config name should be visible
+    expect(screen.getByText("unknown-status-config")).toBeInTheDocument();
+  });
+
+  it("shows config in table view with sourceRef", async () => {
+    const { useArenaConfigs, useArenaConfigMutations } = await import("@/hooks/use-arena-configs");
+    const { useArenaSources } = await import("@/hooks");
+
+    vi.mocked(useArenaConfigs).mockReturnValue({
+      configs: [
+        {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1" as const,
+          kind: "ArenaConfig" as const,
+          metadata: { name: "table-view-config" },
+          spec: {
+            sourceRef: { name: "my-source" },
+            providers: [{ name: "prov1" }],
+            toolRegistries: [{ name: "reg1" }, { name: "reg2" }],
+          },
+          status: { phase: "Ready", scenarioCount: 7 },
+        },
+      ],
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaConfigMutations).mockReturnValue({
+      createConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      deleteConfig: mockDeleteConfig,
+      loading: false,
+      error: null,
+    });
+    vi.mocked(useArenaSources).mockReturnValue({
+      sources: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<ArenaConfigsPage />);
+
+    // Click on table view tab
+    const tabs = screen.getAllByRole("tab");
+    fireEvent.click(tabs[1]);
+
+    // Config should be visible
+    expect(screen.getByText("table-view-config")).toBeInTheDocument();
+    expect(screen.getByText("my-source")).toBeInTheDocument();
+    // Scenario count
+    expect(screen.getByText("7")).toBeInTheDocument();
+    // Provider count
+    expect(screen.getByText("1")).toBeInTheDocument();
+    // Tool registry count
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
 });
