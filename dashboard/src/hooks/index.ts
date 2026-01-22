@@ -10,6 +10,7 @@ export { useStats } from "./use-stats";
 export { useCosts } from "./use-costs";
 export { useAgentConsole } from "./use-agent-console";
 export { useLogs } from "./use-logs";
+export { useArenaJobLogs } from "./use-arena-job-logs";
 export { useNamespaces } from "./use-namespaces";
 export { useReadOnly } from "./use-read-only";
 export { useRuntimeConfig, useDemoMode, useReadOnlyMode, useObservabilityConfig } from "./use-runtime-config";

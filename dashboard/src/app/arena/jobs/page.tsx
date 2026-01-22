@@ -151,11 +151,11 @@ function getJobPhaseBadge(phase: ArenaJobPhase | undefined) {
           Running
         </Badge>
       );
-    case "Completed":
+    case "Succeeded":
       return (
         <Badge variant="default" className="gap-1 bg-green-500">
           <CheckCircle className="h-3 w-3" />
-          Completed
+          Succeeded
         </Badge>
       );
     case "Failed":
@@ -520,7 +520,7 @@ export default function ArenaJobsPage() {
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="Pending">Pending</SelectItem>
                 <SelectItem value="Running">Running</SelectItem>
-                <SelectItem value="Completed">Completed</SelectItem>
+                <SelectItem value="Succeeded">Succeeded</SelectItem>
                 <SelectItem value="Failed">Failed</SelectItem>
                 <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>

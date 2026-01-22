@@ -63,6 +63,7 @@ interface FormState {
   type: ArenaJobType;
   workers: string;
   timeout: string;
+  verbose: boolean;
   // Evaluation options
   continueOnFailure: boolean;
   passingThreshold: string;
@@ -82,6 +83,7 @@ function getInitialFormState(preselectedConfig?: string): FormState {
     type: "evaluation",
     workers: "2",
     timeout: "30m",
+    verbose: false,
     continueOnFailure: true,
     passingThreshold: "0.8",
     profileType: "constant",
@@ -156,6 +158,7 @@ function buildSpec(form: FormState): ArenaJobSpec {
       replicas: parseInt(form.workers, 10),
     },
     timeout: form.timeout || undefined,
+    verbose: form.verbose || undefined,
   };
 
   if (form.type === "evaluation") {
@@ -393,6 +396,21 @@ function JobDialogForm({
               onChange={(e) => updateForm("timeout", e.target.value)}
             />
           </div>
+        </div>
+
+        {/* Verbose Logging */}
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label htmlFor="verbose">Verbose Logging</Label>
+            <p className="text-xs text-muted-foreground">
+              Enable debug output from promptarena for troubleshooting
+            </p>
+          </div>
+          <Switch
+            id="verbose"
+            checked={formState.verbose}
+            onCheckedChange={(checked) => updateForm("verbose", checked)}
+          />
         </div>
 
         {/* Type-specific options */}

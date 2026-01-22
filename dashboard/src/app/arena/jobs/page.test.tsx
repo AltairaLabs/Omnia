@@ -488,7 +488,7 @@ describe("ArenaJobsPage", () => {
     const completedJob = {
       ...mockJob,
       metadata: { name: "completed-job", creationTimestamp: "2026-01-15T10:00:00Z" },
-      status: { ...mockJob.status, phase: "Completed" as const },
+      status: { ...mockJob.status, phase: "Succeeded" as const },
     };
 
     vi.mocked(useArenaJobs).mockReturnValue({
@@ -694,7 +694,7 @@ describe("ArenaJobsPage", () => {
 
     const completedJob = {
       ...mockJob,
-      status: { ...mockJob.status, phase: "Completed" as const, completedTasks: 100 },
+      status: { ...mockJob.status, phase: "Succeeded" as const, completedTasks: 100 },
     };
 
     vi.mocked(useArenaJobs).mockReturnValue({
@@ -719,7 +719,7 @@ describe("ArenaJobsPage", () => {
 
     render(<ArenaJobsPage />);
 
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
   });
 
   it("shows unknown type badge for undefined job type", async () => {
@@ -967,7 +967,7 @@ describe("ArenaJobsPage", () => {
     const completedJob = {
       ...mockJob,
       metadata: { name: "completed-job", creationTimestamp: "2026-01-15T11:00:00Z" },
-      status: { ...mockJob.status, phase: "Completed" as const },
+      status: { ...mockJob.status, phase: "Succeeded" as const },
     };
 
     vi.mocked(useArenaJobs).mockReturnValue({
@@ -1000,11 +1000,11 @@ describe("ArenaJobsPage", () => {
     const statusSelect = screen.getByText("All Status");
     fireEvent.click(statusSelect);
 
-    // Select Completed status
-    const completedOption = screen.getByRole("option", { name: "Completed" });
-    fireEvent.click(completedOption);
+    // Select Succeeded status
+    const succeededOption = screen.getByRole("option", { name: "Succeeded" });
+    fireEvent.click(succeededOption);
 
-    // Only completed job should be visible now
+    // Only succeeded job should be visible now
     expect(screen.queryByText("running-job")).not.toBeInTheDocument();
     expect(screen.getByText("completed-job")).toBeInTheDocument();
   });

@@ -136,7 +136,7 @@ describe("ArenaPage", () => {
         {
           metadata: { name: "load-job-1", creationTimestamp: "2026-01-20T09:00:00Z" },
           spec: { type: "loadtest", configRef: { name: "config-2" } },
-          status: { phase: "Completed", completedTasks: 100, totalTasks: 100 },
+          status: { phase: "Succeeded", completedTasks: 100, totalTasks: 100 },
         },
       ] as any,
       loading: false,
@@ -163,7 +163,7 @@ describe("ArenaPage", () => {
 
     // Check job statuses
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
 
     // Check progress percentages in table (use getAllByText since success rate card also shows %)
     const progressCells = screen.getAllByText(/^\d+%$/);
@@ -180,7 +180,7 @@ describe("ArenaPage", () => {
       },
       recentJobs: [
         { metadata: { name: "job-1" }, spec: { type: "evaluation", configRef: { name: "c1" } }, status: { phase: "Running" } },
-        { metadata: { name: "job-2" }, spec: { type: "evaluation", configRef: { name: "c2" } }, status: { phase: "Completed" } },
+        { metadata: { name: "job-2" }, spec: { type: "evaluation", configRef: { name: "c2" } }, status: { phase: "Succeeded" } },
         { metadata: { name: "job-3" }, spec: { type: "evaluation", configRef: { name: "c3" } }, status: { phase: "Failed" } },
         { metadata: { name: "job-4" }, spec: { type: "evaluation", configRef: { name: "c4" } }, status: { phase: "Cancelled" } },
         { metadata: { name: "job-5" }, spec: { type: "evaluation", configRef: { name: "c5" } }, status: { phase: "Pending" } },
@@ -193,7 +193,7 @@ describe("ArenaPage", () => {
     render(<ArenaPage />);
 
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();

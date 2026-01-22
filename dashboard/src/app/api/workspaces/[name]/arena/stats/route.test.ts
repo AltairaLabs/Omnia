@@ -75,8 +75,8 @@ const mockConfigs = [
 
 const mockJobs = [
   { metadata: { name: "job-1" }, status: { phase: "Running" } },
-  { metadata: { name: "job-2" }, status: { phase: "Completed" } },
-  { metadata: { name: "job-3" }, status: { phase: "Completed" } },
+  { metadata: { name: "job-2" }, status: { phase: "Succeeded" } },
+  { metadata: { name: "job-3" }, status: { phase: "Succeeded" } },
   { metadata: { name: "job-4" }, status: { phase: "Failed" } },
   { metadata: { name: "job-5" }, status: { phase: "Pending" } },
 ];

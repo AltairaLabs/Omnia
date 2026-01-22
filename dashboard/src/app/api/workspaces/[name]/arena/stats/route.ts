@@ -75,7 +75,7 @@ export const GET = withWorkspaceAccess(
       };
 
       // Calculate job stats
-      const completedJobs = jobs.filter((j) => j.status?.phase === "Completed").length;
+      const completedJobs = jobs.filter((j) => j.status?.phase === "Succeeded").length;
       const failedJobs = jobs.filter((j) => j.status?.phase === "Failed" || j.status?.phase === "Cancelled").length;
       const totalFinished = completedJobs + failedJobs;
       const successRate = totalFinished > 0 ? completedJobs / totalFinished : 0;

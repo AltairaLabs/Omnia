@@ -56,9 +56,9 @@ export const POST = withWorkspaceAccess<RouteParams>(
         CRD_KIND
       );
 
-      // Check if job is already completed or cancelled
+      // Check if job is already succeeded, failed, or cancelled
       const phase = result.resource.status?.phase;
-      if (phase === "Completed" || phase === "Failed" || phase === "Cancelled") {
+      if (phase === "Succeeded" || phase === "Failed" || phase === "Cancelled") {
         return NextResponse.json(
           { error: "Bad Request", message: `Job is already ${phase?.toLowerCase()}` },
           { status: 400 }

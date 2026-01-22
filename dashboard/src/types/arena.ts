@@ -254,7 +254,7 @@ export interface ArenaConfig {
 // =============================================================================
 
 export type ArenaJobType = "evaluation" | "loadtest" | "datagen";
-export type ArenaJobPhase = "Pending" | "Running" | "Completed" | "Failed" | "Cancelled";
+export type ArenaJobPhase = "Pending" | "Running" | "Succeeded" | "Failed" | "Cancelled";
 
 /** Worker autoscaling configuration */
 export interface WorkerAutoscaleConfig {
@@ -395,6 +395,8 @@ export interface ArenaJobSpec {
   timeout?: string;
   /** Suspend job */
   suspend?: boolean;
+  /** Enable verbose/debug logging for promptarena */
+  verbose?: boolean;
 }
 
 /** Worker status within a job */
@@ -906,35 +908,12 @@ export interface ArenaPackageTreeNode {
   type?: ArenaPackageFile["type"];
 }
 
-/** Full parsed content from ArenaConfig source (arena.yaml) */
+/** Arena pack content for file browser view */
 export interface ArenaConfigContent {
-  /** Arena metadata */
-  metadata: {
-    name: string;
-    namespace?: string;
-  };
-  /** Raw package files for file explorer view */
+  /** Package files with metadata (type, size) */
   files: ArenaPackageFile[];
   /** File tree structure for navigation */
   fileTree: ArenaPackageTreeNode[];
   /** Entry point file path (e.g., config.arena.yaml) */
   entryPoint?: string;
-  /** Prompt configs with resolved content */
-  promptConfigs: ParsedPromptConfig[];
-  /** Providers with resolved content */
-  providers: ParsedProviderConfig[];
-  /** Scenarios with resolved content */
-  scenarios: ParsedScenario[];
-  /** Tools with resolved content */
-  tools: ParsedTool[];
-  /** MCP servers configured */
-  mcpServers: Record<string, ArenaMcpServer>;
-  /** Judges configured */
-  judges: Record<string, ArenaJudge>;
-  /** Judge defaults */
-  judgeDefaults?: ArenaJudgeDefaults;
-  /** Self-play configuration */
-  selfPlay?: ArenaSelfPlayConfig;
-  /** Default configuration values */
-  defaults?: ArenaDefaultsConfig;
 }

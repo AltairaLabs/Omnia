@@ -32,7 +32,6 @@ import type {
   ArenaJobSpec,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 import type { ArenaJobMetrics } from "./arena-service";
 
@@ -204,7 +203,7 @@ const mockArenaJobs: ArenaJob[] = [
       evaluation: { outputFormats: ["json", "junit"], passingThreshold: 0.8 },
     },
     status: {
-      phase: "Completed",
+      phase: "Succeeded",
       startTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       completionTime: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
       totalTasks: 8,
@@ -288,11 +287,12 @@ const mockArenaJobs: ArenaJob[] = [
   },
 ];
 
-const mockScenarios: Scenario[] = [
-  { name: "greeting", displayName: "Greeting Test", description: "Tests greeting handling", tags: ["basic"], path: "scenarios/greeting.yaml" },
-  { name: "refund-request", displayName: "Refund Request", description: "Tests refund handling", tags: ["support", "financial"], path: "scenarios/refund.yaml" },
-  { name: "product-inquiry", displayName: "Product Inquiry", description: "Tests product questions", tags: ["support", "sales"], path: "scenarios/product.yaml" },
-  { name: "escalation", displayName: "Escalation Test", description: "Tests escalation flow", tags: ["support", "critical"], path: "scenarios/escalation.yaml" },
+/** Mock scenario data for pack content (kept for future use) */
+const _mockScenarios = [
+  { name: "greeting", displayName: "Greeting Test", description: "Tests greeting handling", tags: ["basic"] },
+  { name: "refund-request", displayName: "Refund Request", description: "Tests refund handling", tags: ["support", "financial"] },
+  { name: "product-inquiry", displayName: "Product Inquiry", description: "Tests product questions", tags: ["support", "sales"] },
+  { name: "escalation", displayName: "Escalation Test", description: "Tests escalation flow", tags: ["support", "critical"] },
 ];
 
 // Simulate network delay for realistic demo experience
@@ -504,7 +504,7 @@ const MOCK_LOG_TEMPLATES = [
 const TOOL_NAMES = ["search_database", "get_user_info", "send_email", "fetch_data"];
 const CONTAINERS = ["facade", "runtime"];
 
-function generateMockLogs(count: number): LogEntry[] {
+function generateMockLogs(count: number, containers: string[] = CONTAINERS): LogEntry[] {
   const logs: LogEntry[] = [];
   const now = Date.now();
 
@@ -522,7 +522,7 @@ function generateMockLogs(count: number): LogEntry[] {
       timestamp: new Date(now - (count - i) * 1000).toISOString(),
       level: template.level,
       message,
-      container: CONTAINERS[Math.floor(Math.random() * CONTAINERS.length)],
+      container: containers[Math.floor(Math.random() * containers.length)],
     });
   }
 
@@ -894,12 +894,7 @@ export class MockDataService implements DataService {
     );
   }
 
-  async getArenaConfigScenarios(_workspace: string, _name: string): Promise<Scenario[]> {
-    await delay();
-    return mockScenarios;
-  }
-
-  async getArenaConfigContent(_workspace: string, name: string): Promise<ArenaConfigContent> {
+  async getArenaConfigContent(_workspace: string, _name: string): Promise<ArenaConfigContent> {
     await delay();
 
     // Mock file metadata (content fetched separately via getArenaConfigFile)
@@ -946,134 +941,9 @@ export class MockDataService implements DataService {
     ];
 
     return {
-      metadata: {
-        name,
-        namespace: _workspace,
-      },
       files: mockFiles,
       fileTree,
       entryPoint: "config.arena.yaml",
-      promptConfigs: [
-        {
-          id: "support",
-          name: "Support Bot",
-          version: "1.0.0",
-          description: "Customer support chatbot with tool integration",
-          taskType: "customer-support",
-          systemTemplate: "You are a helpful customer support assistant for {{company_name}}. Support hours: {{support_hours}}. CRITICAL: You must verify customer identity before accessing account information...",
-          variables: [
-            { name: "company_name", type: "string", required: false, default: "TechCo", description: "Company name" },
-            { name: "support_hours", type: "string", required: false, default: "24/7", description: "Support hours" },
-          ],
-          allowedTools: ["get_customer_info", "get_order_history", "check_subscription_status", "create_support_ticket"],
-          validators: [
-            { type: "banned_words", config: { words: ["guarantee", "promise", "definitely"] } },
-            { type: "max_length", config: { max_chars: 2000 } },
-          ],
-          file: "prompts/support-bot.prompt.yaml",
-        },
-      ],
-      providers: [
-        {
-          id: "openai-gpt-4o-mini",
-          name: "OpenAI GPT-4o Mini",
-          type: "openai",
-          model: "gpt-4o-mini",
-          group: "default",
-          pricing: { inputPer1kTokens: 0.00015, outputPer1kTokens: 0.0006 },
-          defaults: { temperature: 0.7, maxTokens: 1500, topP: 1.0 },
-          file: "providers/openai-gpt4o-mini.provider.yaml",
-        },
-        {
-          id: "claude-3-5-haiku",
-          name: "Claude 3.5 Haiku",
-          type: "anthropic",
-          model: "claude-3-5-haiku-latest",
-          group: "default",
-          pricing: { inputPer1kTokens: 0.00025, outputPer1kTokens: 0.00125 },
-          defaults: { temperature: 0.7, maxTokens: 1500 },
-          file: "providers/claude-3-5-haiku.provider.yaml",
-        },
-        {
-          id: "mock-tool-simulation",
-          name: "Mock Tool Simulator",
-          type: "mock",
-          model: "mock-1.0",
-          group: "tools",
-          file: "providers/mock-tool-simulation.provider.yaml",
-        },
-      ],
-      scenarios: mockScenarios.map((s) => ({
-        id: s.name,
-        name: s.displayName || s.name,
-        description: s.description,
-        taskType: "customer-support",
-        turnCount: 2,
-        tags: s.tags,
-        file: `scenarios/${s.name}.scenario.yaml`,
-      })),
-      tools: [
-        {
-          name: "get_customer_info",
-          description: "Retrieve customer account details by email address",
-          mode: "mock",
-          timeout: 1000,
-          inputSchema: { type: "object", properties: { email: { type: "string" } }, required: ["email"] },
-          outputSchema: { type: "object", properties: { customer_id: { type: "string" }, name: { type: "string" }, tier: { type: "string", enum: ["basic", "premium", "enterprise"] } } },
-          hasMockData: true,
-          file: "tools/get-customer-info.tool.yaml",
-        },
-        {
-          name: "get_order_history",
-          description: "Retrieve customer order history",
-          mode: "mock",
-          timeout: 1000,
-          hasMockData: true,
-          file: "tools/get-order-history.tool.yaml",
-        },
-        {
-          name: "check_subscription_status",
-          description: "Check customer subscription status and billing",
-          mode: "mock",
-          timeout: 1000,
-          hasMockData: true,
-          file: "tools/check-subscription-status.tool.yaml",
-        },
-        {
-          name: "create_support_ticket",
-          description: "Create a new support ticket",
-          mode: "mock",
-          timeout: 2000,
-          hasMockData: true,
-          file: "tools/create-support-ticket.tool.yaml",
-        },
-      ],
-      mcpServers: {},
-      judges: {
-        quality: { provider: "openai-gpt-4o-mini" },
-        security: { provider: "claude-3-5-haiku" },
-      },
-      judgeDefaults: {
-        prompt: "Evaluate the assistant response for quality and correctness",
-        registryPath: "judges/",
-      },
-      selfPlay: {
-        enabled: true,
-        persona: "personas/social-engineer.persona.yaml",
-        provider: "openai-gpt-4o-mini",
-      },
-      defaults: {
-        temperature: 0.7,
-        maxTokens: 1000,
-        seed: 42,
-        concurrency: 3,
-        timeout: "30s",
-        output: {
-          dir: "output/",
-          formats: ["json", "html"],
-        },
-        failOn: ["assertion_failure", "provider_error"],
-      },
     };
   }
 
@@ -1256,7 +1126,7 @@ spec:
     await delay();
     // Return mock evaluation results for completed jobs
     const job = mockArenaJobs.find((j) => j.metadata?.name === name);
-    if (!job || job.status?.phase !== "Completed") {
+    if (!job || job.status?.phase !== "Succeeded") {
       return undefined;
     }
     return {
@@ -1335,6 +1205,16 @@ spec:
     }
   }
 
+  async getArenaJobLogs(
+    _workspace: string,
+    _name: string,
+    options?: LogOptions
+  ): Promise<LogEntry[]> {
+    await delay();
+    // Generate mock logs for arena job workers
+    return generateMockLogs(options?.tailLines || 100, ["worker"]);
+  }
+
   async getArenaStats(workspace: string): Promise<ArenaStats> {
     await delay();
     const sources = mockArenaSources.filter((s) => s.metadata?.namespace === workspace);
@@ -1357,10 +1237,10 @@ spec:
         total: jobs.length,
         running: jobs.filter((j) => j.status?.phase === "Running").length,
         queued: jobs.filter((j) => j.status?.phase === "Pending").length,
-        completed: jobs.filter((j) => j.status?.phase === "Completed").length,
+        completed: jobs.filter((j) => j.status?.phase === "Succeeded").length,
         failed: jobs.filter((j) => j.status?.phase === "Failed").length,
         successRate: jobs.length > 0
-          ? jobs.filter((j) => j.status?.phase === "Completed").length / jobs.filter((j) => ["Completed", "Failed"].includes(j.status?.phase || "")).length
+          ? jobs.filter((j) => j.status?.phase === "Succeeded").length / jobs.filter((j) => ["Succeeded", "Failed"].includes(j.status?.phase || "")).length
           : 0,
       },
     };

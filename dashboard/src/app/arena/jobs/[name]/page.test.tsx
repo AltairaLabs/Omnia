@@ -229,16 +229,16 @@ describe("ArenaJobDetailPage", () => {
     expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
-  it("shows delete button for completed job", async () => {
+  it("shows delete button for succeeded job", async () => {
     const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
 
-    const completedJob = {
+    const succeededJob = {
       ...mockJob,
-      status: { ...mockJob.status, phase: "Completed" as const },
+      status: { ...mockJob.status, phase: "Succeeded" as const },
     };
 
     vi.mocked(useArenaJob).mockReturnValue({
-      job: completedJob,
+      job: succeededJob,
       loading: false,
       error: null,
       refetch: mockRefetch,

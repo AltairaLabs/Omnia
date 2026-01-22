@@ -25,7 +25,6 @@ import type {
   ArenaJobSpec,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 import type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
 
@@ -73,7 +72,6 @@ export type {
   ArenaJobType,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 
 export type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
@@ -393,7 +391,6 @@ export interface DataService {
   // Arena Configs (workspace-scoped)
   getArenaConfigs(workspace: string): Promise<ArenaConfigType[]>;
   getArenaConfig(workspace: string, name: string): Promise<ArenaConfigType | undefined>;
-  getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]>;
   getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent>;
   getArenaConfigFile(workspace: string, configName: string, filePath: string): Promise<string>;
   createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
@@ -408,6 +405,7 @@ export interface DataService {
   createArenaJob(workspace: string, name: string, spec: ArenaJobSpec): Promise<ArenaJobType>;
   cancelArenaJob(workspace: string, name: string): Promise<void>;
   deleteArenaJob(workspace: string, name: string): Promise<void>;
+  getArenaJobLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
 
   // Arena Stats (workspace-scoped)
   getArenaStats(workspace: string): Promise<ArenaStats>;

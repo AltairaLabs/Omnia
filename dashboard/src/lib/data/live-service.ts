@@ -34,7 +34,6 @@ import type {
   ArenaJobSpec,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 import type {
   ServerMessage,
@@ -363,10 +362,6 @@ export class LiveDataService implements DataService {
     return this.arenaService.getArenaConfig(workspace, name);
   }
 
-  async getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]> {
-    return this.arenaService.getArenaConfigScenarios(workspace, name);
-  }
-
   async getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent> {
     return this.arenaService.getArenaConfigContent(workspace, name);
   }
@@ -413,6 +408,10 @@ export class LiveDataService implements DataService {
 
   async deleteArenaJob(workspace: string, name: string): Promise<void> {
     return this.arenaService.deleteArenaJob(workspace, name);
+  }
+
+  async getArenaJobLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]> {
+    return this.arenaService.getArenaJobLogs(workspace, name, options);
   }
 
   async getArenaStats(workspace: string): Promise<ArenaStats> {

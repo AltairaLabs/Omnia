@@ -541,11 +541,13 @@ describe("JobDialog", () => {
         />
       );
 
-      const switchElement = screen.getByRole("switch");
-      expect(switchElement).toBeChecked();
+      // Get the continue on failure switch (second switch - after verbose switch)
+      const switches = screen.getAllByRole("switch");
+      const continueOnFailureSwitch = switches[1]; // switches[0] is verbose, switches[1] is continue on failure
+      expect(continueOnFailureSwitch).toBeChecked();
 
-      fireEvent.click(switchElement);
-      expect(switchElement).not.toBeChecked();
+      fireEvent.click(continueOnFailureSwitch);
+      expect(continueOnFailureSwitch).not.toBeChecked();
     });
 
     it("changes profile type in loadtest", async () => {
@@ -599,9 +601,9 @@ describe("JobDialog", () => {
         expect(screen.getByText("Data Generation Options")).toBeInTheDocument();
       });
 
-      // Find deduplicate switch (second switch on page)
+      // Find deduplicate switch (second switch on page - after verbose switch)
       const switches = screen.getAllByRole("switch");
-      const deduplicateSwitch = switches[0]; // Only switch visible in datagen mode
+      const deduplicateSwitch = switches[1]; // switches[0] is verbose, switches[1] is deduplicate
 
       expect(deduplicateSwitch).toBeChecked();
       fireEvent.click(deduplicateSwitch);

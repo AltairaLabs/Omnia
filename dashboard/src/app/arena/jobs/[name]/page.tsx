@@ -36,6 +36,7 @@ import {
   ExternalLink,
   Timer,
   RefreshCw,
+  FileText,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -43,6 +44,7 @@ import {
   formatDate as formatDateBase,
   getConditionIcon,
 } from "@/components/arena";
+import { LogViewer } from "@/components/logs";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
 import type { Condition } from "@/types/common";
 
@@ -92,11 +94,11 @@ function getJobPhaseBadge(phase: ArenaJobPhase | undefined) {
           Running
         </Badge>
       );
-    case "Completed":
+    case "Succeeded":
       return (
         <Badge variant="default" className="gap-1 bg-green-500">
           <CheckCircle className="h-3 w-3" />
-          Completed
+          Succeeded
         </Badge>
       );
     case "Failed":
@@ -579,7 +581,7 @@ export default function ArenaJobDetailPage() {
   const [deleting, setDeleting] = useState(false);
 
   const isRunning = job?.status?.phase === "Running" || job?.status?.phase === "Pending";
-  const isFinished = job?.status?.phase === "Completed" || job?.status?.phase === "Failed" || job?.status?.phase === "Cancelled";
+  const isFinished = job?.status?.phase === "Succeeded" || job?.status?.phase === "Failed" || job?.status?.phase === "Cancelled";
 
   const handleCancel = async () => {
     if (!confirm(`Are you sure you want to cancel job "${jobName}"?`)) {
@@ -722,6 +724,10 @@ export default function ArenaJobDetailPage() {
               <Info className="h-4 w-4 mr-2" />
               Overview
             </TabsTrigger>
+            <TabsTrigger value="logs">
+              <FileText className="h-4 w-4 mr-2" />
+              Logs
+            </TabsTrigger>
             <TabsTrigger value="results">
               <BarChart3 className="h-4 w-4 mr-2" />
               Results
@@ -730,6 +736,16 @@ export default function ArenaJobDetailPage() {
 
           <TabsContent value="overview">
             <OverviewTab job={job} />
+          </TabsContent>
+
+          <TabsContent value="logs">
+            <LogViewer
+              jobName={jobName}
+              workspace={currentWorkspace?.name || ""}
+              resourceName={jobName}
+              containers={["worker"]}
+              showGrafanaLinks={false}
+            />
           </TabsContent>
 
           <TabsContent value="results">

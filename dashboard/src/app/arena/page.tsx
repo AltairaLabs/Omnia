@@ -42,8 +42,8 @@ function getJobStatusBadge(phase?: string) {
   switch (phase) {
     case "Running":
       return <Badge variant="default" className="bg-blue-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Running</Badge>;
-    case "Completed":
-      return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" /> Completed</Badge>;
+    case "Succeeded":
+      return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" /> Succeeded</Badge>;
     case "Failed":
       return <Badge variant="destructive"><AlertCircle className="h-3 w-3 mr-1" /> Failed</Badge>;
     case "Cancelled":

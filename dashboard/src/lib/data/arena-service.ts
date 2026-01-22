@@ -21,8 +21,8 @@ import type {
   ArenaJobResults,
   ArenaJobMetrics,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
+import type { LogEntry, LogOptions } from "./types";
 
 const ARENA_API_BASE = "/api/workspaces";
 
@@ -31,7 +31,7 @@ export interface ArenaJobListOptions {
   /** Filter by job type */
   type?: "evaluation" | "loadtest" | "datagen";
   /** Filter by phase */
-  phase?: "Pending" | "Running" | "Completed" | "Failed" | "Cancelled";
+  phase?: "Pending" | "Running" | "Succeeded" | "Failed" | "Cancelled";
   /** Filter by config reference */
   configRef?: string;
   /** Maximum number of results */
@@ -167,19 +167,6 @@ export class ArenaService {
         return undefined;
       }
       throw new Error(`Failed to fetch arena config: ${response.statusText}`);
-    }
-    return response.json();
-  }
-
-  async getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]> {
-    const response = await fetch(
-      `${ARENA_API_BASE}/${encodeURIComponent(workspace)}/arena/configs/${encodeURIComponent(name)}/scenarios`
-    );
-    if (!response.ok) {
-      if (response.status === 404) {
-        return [];
-      }
-      throw new Error(`Failed to fetch arena config scenarios: ${response.statusText}`);
     }
     return response.json();
   }
@@ -358,6 +345,29 @@ export class ArenaService {
       const errorText = await response.text();
       throw new Error(errorText || "Failed to delete arena job");
     }
+  }
+
+  async getArenaJobLogs(
+    workspace: string,
+    name: string,
+    options?: LogOptions
+  ): Promise<LogEntry[]> {
+    const params = new URLSearchParams();
+    if (options?.tailLines) params.set("tailLines", String(options.tailLines));
+    if (options?.sinceSeconds) params.set("sinceSeconds", String(options.sinceSeconds));
+
+    const queryString = params.toString();
+    const suffix = queryString ? "?" + queryString : "";
+    const url = `${ARENA_API_BASE}/${encodeURIComponent(workspace)}/arena/jobs/${encodeURIComponent(name)}/logs${suffix}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return [];
+      }
+      throw new Error(`Failed to fetch arena job logs: ${response.statusText}`);
+    }
+    return response.json();
   }
 
   // ============================================================

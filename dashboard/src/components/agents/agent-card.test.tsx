@@ -115,8 +115,7 @@ const mockDataService: DataService = {
   // Arena Configs
   getArenaConfigs: vi.fn().mockResolvedValue([]),
   getArenaConfig: vi.fn().mockResolvedValue(undefined),
-  getArenaConfigScenarios: vi.fn().mockResolvedValue([]),
-  getArenaConfigContent: vi.fn().mockResolvedValue({ metadata: { name: "" }, files: [], fileTree: [], promptConfigs: [], providers: [], scenarios: [], tools: [], mcpServers: {}, judges: {} }),
+  getArenaConfigContent: vi.fn().mockResolvedValue({ files: [], fileTree: [] }),
   getArenaConfigFile: vi.fn().mockResolvedValue(""),
   createArenaConfig: vi.fn().mockResolvedValue({}),
   updateArenaConfig: vi.fn().mockResolvedValue({}),
@@ -129,6 +128,7 @@ const mockDataService: DataService = {
   createArenaJob: vi.fn().mockResolvedValue({}),
   cancelArenaJob: vi.fn().mockResolvedValue(undefined),
   deleteArenaJob: vi.fn().mockResolvedValue(undefined),
+  getArenaJobLogs: vi.fn().mockResolvedValue([]),
   // Arena Stats
   getArenaStats: vi.fn().mockResolvedValue({ sources: {}, configs: {}, jobs: {} }),
   // Agent connections
