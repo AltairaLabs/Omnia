@@ -161,9 +161,21 @@ type ResolvedSource struct {
 	// +optional
 	Revision string `json:"revision,omitempty"`
 
-	// url is the artifact download URL from the source.
+	// url is the artifact download URL from the source (legacy tar.gz serving).
+	// Deprecated: Use contentPath for filesystem-based access.
 	// +optional
 	URL string `json:"url,omitempty"`
+
+	// contentPath is the filesystem path where the content is synced.
+	// This path is relative to the workspace content volume root.
+	// Workers can mount the PVC directly and access content at this path.
+	// +optional
+	ContentPath string `json:"contentPath,omitempty"`
+
+	// version is the content-addressable version hash of the synced content.
+	// Used for reproducibility and version pinning.
+	// +optional
+	Version string `json:"version,omitempty"`
 
 	// scenarioCount is the number of scenarios matching the filter.
 	// +optional

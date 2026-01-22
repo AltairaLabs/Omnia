@@ -71,7 +71,7 @@ function getInitialFormState(source?: ArenaSource | null): FormState {
       gitSpec: source.spec?.git || { url: "" },
       ociSpec: source.spec?.oci || { url: "" },
       s3Spec: source.spec?.s3 || { bucket: "" },
-      configMapSpec: source.spec?.configMapRef || { name: "" },
+      configMapSpec: source.spec?.configMap || { name: "" },
     };
   }
   return {
@@ -132,7 +132,7 @@ function buildSpec(form: FormState): ArenaSourceSpec {
       spec.s3 = form.s3Spec;
       break;
     case "configmap":
-      spec.configMapRef = form.configMapSpec;
+      spec.configMap = form.configMapSpec;
       break;
   }
 

@@ -213,7 +213,7 @@ describe("getSourceUrl", () => {
 
   it("returns configmap name for configmap source", () => {
     const source = {
-      spec: { type: "configmap", configMapRef: { name: "my-config" } },
+      spec: { type: "configmap", configMap: { name: "my-config" } },
     } as ArenaSource;
     expect(getSourceUrl(source)).toBe("my-config");
   });

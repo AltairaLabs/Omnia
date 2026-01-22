@@ -1,0 +1,108 @@
+{{- if and .Values.nfs.server.enabled .Values.nfs.server.internal }}
+# Internal NFS server for development environments
+# Uses itsthenetwork/nfs-server-alpine for a lightweight NFS v4 server
+# WARNING: Not recommended for production - use external NFS server instead
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "omnia.fullname" . }}-nfs-data
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.nfs.server.storageClass }}
+  storageClassName: {{ .Values.nfs.server.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.nfs.server.size | default "50Gi" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnia.fullname" . }}-nfs-server
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nfs-server
+  template:
+    metadata:
+      labels:
+        {{- include "omnia.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nfs-server
+    spec:
+      containers:
+        - name: nfs-server
+          image: {{ .Values.nfs.server.image.repository }}:{{ .Values.nfs.server.image.tag }}
+          imagePullPolicy: {{ .Values.nfs.server.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: nfs
+              containerPort: 2049
+              protocol: TCP
+          env:
+            - name: SHARED_DIRECTORY
+              value: /nfsshare
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: nfs-data
+              mountPath: /nfsshare
+          resources:
+            {{- toYaml .Values.nfs.server.resources | nindent 12 }}
+      volumes:
+        - name: nfs-data
+          persistentVolumeClaim:
+            claimName: {{ include "omnia.fullname" . }}-nfs-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-nfs-server
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+spec:
+  type: ClusterIP
+  {{- if .Values.nfs.server.clusterIP }}
+  clusterIP: {{ .Values.nfs.server.clusterIP }}
+  {{- end }}
+  ports:
+    - name: nfs
+      port: 2049
+      targetPort: nfs
+      protocol: TCP
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+---
+# Static PV for workspace content - uses ClusterIP which is resolvable by nodes
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "omnia.fullname" . }}-workspace-content
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workspace-content
+spec:
+  capacity:
+    storage: {{ .Values.workspaceContent.persistence.size | default "50Gi" }}
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: {{ .Values.nfs.server.clusterIP }}
+    path: /nfsshare
+  claimRef:
+    name: {{ include "omnia.fullname" . }}-workspace-content
+    namespace: {{ .Release.Namespace }}
+{{- end }}

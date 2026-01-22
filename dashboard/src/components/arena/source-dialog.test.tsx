@@ -11,7 +11,7 @@ const createMockSource = (overrides: Partial<ArenaSource> = {}): ArenaSource => 
   apiVersion: "omnia.altairalabs.ai/v1alpha1",
   kind: "ArenaSource",
   metadata: { name: "test-source" },
-  spec: { type: "configmap", interval: "5m", configMapRef: { name: "test-cm" } },
+  spec: { type: "configmap", interval: "5m", configMap: { name: "test-cm" } },
   status: { phase: "Ready" },
   ...overrides,
 });
@@ -59,7 +59,7 @@ describe("SourceDialog", () => {
   it("renders edit dialog when source is provided", () => {
     const source = createMockSource({
       metadata: { name: "existing-source" },
-      spec: { type: "configmap", interval: "5m", configMapRef: { name: "my-configmap" } },
+      spec: { type: "configmap", interval: "5m", configMap: { name: "my-configmap" } },
     });
 
     render(<SourceDialog {...defaultProps} source={source} />);
@@ -122,7 +122,7 @@ describe("SourceDialog", () => {
         expect.objectContaining({
           type: "configmap",
           interval: "5m",
-          configMapRef: { name: "my-configmap" },
+          configMap: { name: "my-configmap" },
         })
       );
     });
@@ -150,7 +150,7 @@ describe("SourceDialog", () => {
   it("disables name field when editing", () => {
     const source = createMockSource({
       metadata: { name: "existing-source" },
-      spec: { type: "configmap", interval: "5m", configMapRef: { name: "my-configmap" } },
+      spec: { type: "configmap", interval: "5m", configMap: { name: "my-configmap" } },
     });
 
     render(<SourceDialog {...defaultProps} source={source} />);
@@ -162,7 +162,7 @@ describe("SourceDialog", () => {
   it("pre-fills form when editing", () => {
     const source = createMockSource({
       metadata: { name: "existing-source" },
-      spec: { type: "configmap", interval: "10m", configMapRef: { name: "my-configmap" } },
+      spec: { type: "configmap", interval: "10m", configMap: { name: "my-configmap" } },
     });
 
     render(<SourceDialog {...defaultProps} source={source} />);
@@ -177,7 +177,7 @@ describe("SourceDialog", () => {
   it("calls updateSource when editing", async () => {
     const source = createMockSource({
       metadata: { name: "existing-source" },
-      spec: { type: "configmap", interval: "5m", configMapRef: { name: "my-configmap" } },
+      spec: { type: "configmap", interval: "5m", configMap: { name: "my-configmap" } },
     });
 
     render(<SourceDialog {...defaultProps} source={source} />);
@@ -194,7 +194,7 @@ describe("SourceDialog", () => {
         "existing-source",
         expect.objectContaining({
           type: "configmap",
-          configMapRef: { name: "updated-configmap" },
+          configMap: { name: "updated-configmap" },
         })
       );
     });
@@ -572,7 +572,7 @@ describe("SourceDialog - SecretRef handling", () => {
         expect.objectContaining({
           type: "configmap",
           interval: "5m",
-          configMapRef: { name: "my-configmap" },
+          configMap: { name: "my-configmap" },
           secretRef: { name: "my-credentials" },
         })
       );
@@ -646,7 +646,7 @@ describe("SourceDialog - Interval selection", () => {
   it("pre-fills interval from existing source", () => {
     const source = createMockSource({
       metadata: { name: "test-source" },
-      spec: { type: "configmap", interval: "30m", configMapRef: { name: "cm" } },
+      spec: { type: "configmap", interval: "30m", configMap: { name: "cm" } },
     });
 
     render(<SourceDialog {...defaultProps} source={source} />);

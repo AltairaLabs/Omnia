@@ -345,6 +345,54 @@ spec:
   rollout:
     type: immediate
 ---
+# ToolRegistry for tools demo agents
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: demo-tools
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-tools-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  handlers:
+    - name: weather
+      type: http
+      timeout: 10s
+      httpConfig:
+        endpoint: https://api.weather.example.com/v1/current
+        method: GET
+        contentType: application/json
+      tool:
+        name: get_weather
+        description: Get current weather for a location
+        inputSchema:
+          type: object
+          properties:
+            location:
+              type: string
+              description: City name or coordinates
+          required:
+            - location
+    - name: calculator
+      type: http
+      timeout: 5s
+      httpConfig:
+        endpoint: https://api.calculator.example.com/v1/compute
+        method: POST
+        contentType: application/json
+      tool:
+        name: calculate
+        description: Perform mathematical calculations
+        inputSchema:
+          type: object
+          properties:
+            expression:
+              type: string
+              description: Mathematical expression to evaluate
+          required:
+            - expression
+---
 # Tools Demo AgentRuntime using llama3.2 with tool capabilities
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
@@ -360,6 +408,8 @@ spec:
     name: demo-tools-prompts
   providerRef:
     name: ollama-tools
+  toolRegistryRef:
+    name: demo-tools
   facade:
     type: websocket
     port: 8080
@@ -371,4 +421,100 @@ spec:
     replicas: {{ .Values.toolsDemo.agent.replicas }}
     resources:
       {{- toYaml .Values.toolsDemo.agent.resources | nindent 6 }}
+{{- end }}
+{{- /* ============================================================================ */ -}}
+{{- /* LangChain Demo Resources */ -}}
+{{- /* Mirrors vision-demo and tools-demo using LangChain framework */ -}}
+{{- /* ============================================================================ */ -}}
+{{- if .Values.langchainDemo.enabled }}
+---
+# LangChain Vision Demo AgentRuntime
+# Uses the same PromptPack and Provider as vision-demo, but with LangChain framework
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.langchainDemo.visionAgent.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-langchain-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
+spec:
+  # Use LangChain framework instead of PromptKit
+  framework:
+    type: langchain
+    {{- with .Values.langchainDemo.image }}
+    image: "{{ .repository }}:{{ .tag }}"
+    {{- end }}
+  promptPackRef:
+    name: demo-vision-prompts
+  providerRef:
+    name: ollama
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.langchainDemo.visionAgent.replicas }}
+    resources:
+      {{- toYaml .Values.langchainDemo.visionAgent.resources | nindent 6 }}
+  {{- with .Values.agent.console }}
+  console:
+    maxFileSize: {{ .maxFileSize | int64 }}
+    maxFiles: {{ .maxFiles }}
+    allowedAttachmentTypes:
+      {{- toYaml .allowedAttachmentTypes | nindent 6 }}
+    {{- with .mediaRequirements }}
+    mediaRequirements:
+      image:
+        maxDimensions:
+          width: {{ .image.maxWidth }}
+          height: {{ .image.maxHeight }}
+        recommendedDimensions:
+          width: {{ .image.recommendedWidth }}
+          height: {{ .image.recommendedHeight }}
+        maxSizeBytes: {{ .image.maxSizeBytes | int64 }}
+        preferredFormat: {{ .image.preferredFormat | quote }}
+        compressionGuidance: {{ .image.compressionGuidance | quote }}
+    {{- end }}
+  {{- end }}
+---
+# LangChain Tools Demo AgentRuntime
+# Uses the same PromptPack and Provider as tools-demo, but with LangChain framework
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.langchainDemo.toolsAgent.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-langchain-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
+spec:
+  # Use LangChain framework instead of PromptKit
+  framework:
+    type: langchain
+    {{- with .Values.langchainDemo.image }}
+    image: "{{ .repository }}:{{ .tag }}"
+    {{- end }}
+  promptPackRef:
+    name: demo-tools-prompts
+  providerRef:
+    name: ollama-tools
+  toolRegistryRef:
+    name: demo-tools
+  facade:
+    type: websocket
+    port: 8080
+    handler: runtime
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.langchainDemo.toolsAgent.replicas }}
+    resources:
+      {{- toYaml .Values.langchainDemo.toolsAgent.resources | nindent 6 }}
 {{- end }}

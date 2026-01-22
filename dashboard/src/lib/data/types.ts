@@ -20,6 +20,7 @@ import type {
   ArenaSourceSpec,
   ArenaConfig as ArenaConfigType,
   ArenaConfigSpec,
+  ArenaConfigContent,
   ArenaJob as ArenaJobType,
   ArenaJobSpec,
   ArenaJobResults,
@@ -393,6 +394,8 @@ export interface DataService {
   getArenaConfigs(workspace: string): Promise<ArenaConfigType[]>;
   getArenaConfig(workspace: string, name: string): Promise<ArenaConfigType | undefined>;
   getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]>;
+  getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent>;
+  getArenaConfigFile(workspace: string, configName: string, filePath: string): Promise<string>;
   createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
   updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
   deleteArenaConfig(workspace: string, name: string): Promise<void>;

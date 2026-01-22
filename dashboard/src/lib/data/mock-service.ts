@@ -27,6 +27,7 @@ import type {
   ArenaSourceSpec,
   ArenaConfig,
   ArenaConfigSpec,
+  ArenaConfigContent,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
@@ -68,7 +69,7 @@ const mockArenaSources: ArenaSource[] = [
     spec: {
       type: "configmap",
       interval: "5m",
-      configMapRef: { name: "support-scenarios-v1" },
+      configMap: { name: "support-scenarios-v1" },
     },
     status: {
       phase: "Ready",
@@ -101,7 +102,7 @@ const mockArenaSources: ArenaSource[] = [
     spec: {
       type: "configmap",
       interval: "10m",
-      configMapRef: { name: "sales-scenarios-v2" },
+      configMap: { name: "sales-scenarios-v2" },
     },
     status: {
       phase: "Ready",
@@ -896,6 +897,281 @@ export class MockDataService implements DataService {
   async getArenaConfigScenarios(_workspace: string, _name: string): Promise<Scenario[]> {
     await delay();
     return mockScenarios;
+  }
+
+  async getArenaConfigContent(_workspace: string, name: string): Promise<ArenaConfigContent> {
+    await delay();
+
+    // Mock file metadata (content fetched separately via getArenaConfigFile)
+    const mockFiles = [
+      { path: "config.arena.yaml", type: "arena" as const, size: 500 },
+      { path: "prompts/support-bot.prompt.yaml", type: "prompt" as const, size: 300 },
+      { path: "providers/openai-gpt4o-mini.provider.yaml", type: "provider" as const, size: 150 },
+      { path: "providers/claude-3-5-haiku.provider.yaml", type: "provider" as const, size: 160 },
+      { path: "scenarios/greeting.scenario.yaml", type: "scenario" as const, size: 200 },
+      { path: "scenarios/refund-request.scenario.yaml", type: "scenario" as const, size: 220 },
+      { path: "tools/get-customer-info.tool.yaml", type: "tool" as const, size: 180 },
+      { path: "personas/social-engineer.persona.yaml", type: "persona" as const, size: 150 },
+    ];
+
+    // Build file tree from mock files
+    const fileTree = [
+      { name: "config.arena.yaml", path: "config.arena.yaml", isDirectory: false, type: "arena" as const },
+      {
+        name: "personas", path: "personas", isDirectory: true,
+        children: [{ name: "social-engineer.persona.yaml", path: "personas/social-engineer.persona.yaml", isDirectory: false, type: "persona" as const }],
+      },
+      {
+        name: "prompts", path: "prompts", isDirectory: true,
+        children: [{ name: "support-bot.prompt.yaml", path: "prompts/support-bot.prompt.yaml", isDirectory: false, type: "prompt" as const }],
+      },
+      {
+        name: "providers", path: "providers", isDirectory: true,
+        children: [
+          { name: "claude-3-5-haiku.provider.yaml", path: "providers/claude-3-5-haiku.provider.yaml", isDirectory: false, type: "provider" as const },
+          { name: "openai-gpt4o-mini.provider.yaml", path: "providers/openai-gpt4o-mini.provider.yaml", isDirectory: false, type: "provider" as const },
+        ],
+      },
+      {
+        name: "scenarios", path: "scenarios", isDirectory: true,
+        children: [
+          { name: "greeting.scenario.yaml", path: "scenarios/greeting.scenario.yaml", isDirectory: false, type: "scenario" as const },
+          { name: "refund-request.scenario.yaml", path: "scenarios/refund-request.scenario.yaml", isDirectory: false, type: "scenario" as const },
+        ],
+      },
+      {
+        name: "tools", path: "tools", isDirectory: true,
+        children: [{ name: "get-customer-info.tool.yaml", path: "tools/get-customer-info.tool.yaml", isDirectory: false, type: "tool" as const }],
+      },
+    ];
+
+    return {
+      metadata: {
+        name,
+        namespace: _workspace,
+      },
+      files: mockFiles,
+      fileTree,
+      entryPoint: "config.arena.yaml",
+      promptConfigs: [
+        {
+          id: "support",
+          name: "Support Bot",
+          version: "1.0.0",
+          description: "Customer support chatbot with tool integration",
+          taskType: "customer-support",
+          systemTemplate: "You are a helpful customer support assistant for {{company_name}}. Support hours: {{support_hours}}. CRITICAL: You must verify customer identity before accessing account information...",
+          variables: [
+            { name: "company_name", type: "string", required: false, default: "TechCo", description: "Company name" },
+            { name: "support_hours", type: "string", required: false, default: "24/7", description: "Support hours" },
+          ],
+          allowedTools: ["get_customer_info", "get_order_history", "check_subscription_status", "create_support_ticket"],
+          validators: [
+            { type: "banned_words", config: { words: ["guarantee", "promise", "definitely"] } },
+            { type: "max_length", config: { max_chars: 2000 } },
+          ],
+          file: "prompts/support-bot.prompt.yaml",
+        },
+      ],
+      providers: [
+        {
+          id: "openai-gpt-4o-mini",
+          name: "OpenAI GPT-4o Mini",
+          type: "openai",
+          model: "gpt-4o-mini",
+          group: "default",
+          pricing: { inputPer1kTokens: 0.00015, outputPer1kTokens: 0.0006 },
+          defaults: { temperature: 0.7, maxTokens: 1500, topP: 1.0 },
+          file: "providers/openai-gpt4o-mini.provider.yaml",
+        },
+        {
+          id: "claude-3-5-haiku",
+          name: "Claude 3.5 Haiku",
+          type: "anthropic",
+          model: "claude-3-5-haiku-latest",
+          group: "default",
+          pricing: { inputPer1kTokens: 0.00025, outputPer1kTokens: 0.00125 },
+          defaults: { temperature: 0.7, maxTokens: 1500 },
+          file: "providers/claude-3-5-haiku.provider.yaml",
+        },
+        {
+          id: "mock-tool-simulation",
+          name: "Mock Tool Simulator",
+          type: "mock",
+          model: "mock-1.0",
+          group: "tools",
+          file: "providers/mock-tool-simulation.provider.yaml",
+        },
+      ],
+      scenarios: mockScenarios.map((s) => ({
+        id: s.name,
+        name: s.displayName || s.name,
+        description: s.description,
+        taskType: "customer-support",
+        turnCount: 2,
+        tags: s.tags,
+        file: `scenarios/${s.name}.scenario.yaml`,
+      })),
+      tools: [
+        {
+          name: "get_customer_info",
+          description: "Retrieve customer account details by email address",
+          mode: "mock",
+          timeout: 1000,
+          inputSchema: { type: "object", properties: { email: { type: "string" } }, required: ["email"] },
+          outputSchema: { type: "object", properties: { customer_id: { type: "string" }, name: { type: "string" }, tier: { type: "string", enum: ["basic", "premium", "enterprise"] } } },
+          hasMockData: true,
+          file: "tools/get-customer-info.tool.yaml",
+        },
+        {
+          name: "get_order_history",
+          description: "Retrieve customer order history",
+          mode: "mock",
+          timeout: 1000,
+          hasMockData: true,
+          file: "tools/get-order-history.tool.yaml",
+        },
+        {
+          name: "check_subscription_status",
+          description: "Check customer subscription status and billing",
+          mode: "mock",
+          timeout: 1000,
+          hasMockData: true,
+          file: "tools/check-subscription-status.tool.yaml",
+        },
+        {
+          name: "create_support_ticket",
+          description: "Create a new support ticket",
+          mode: "mock",
+          timeout: 2000,
+          hasMockData: true,
+          file: "tools/create-support-ticket.tool.yaml",
+        },
+      ],
+      mcpServers: {},
+      judges: {
+        quality: { provider: "openai-gpt-4o-mini" },
+        security: { provider: "claude-3-5-haiku" },
+      },
+      judgeDefaults: {
+        prompt: "Evaluate the assistant response for quality and correctness",
+        registryPath: "judges/",
+      },
+      selfPlay: {
+        enabled: true,
+        persona: "personas/social-engineer.persona.yaml",
+        provider: "openai-gpt-4o-mini",
+      },
+      defaults: {
+        temperature: 0.7,
+        maxTokens: 1000,
+        seed: 42,
+        concurrency: 3,
+        timeout: "30s",
+        output: {
+          dir: "output/",
+          formats: ["json", "html"],
+        },
+        failOn: ["assertion_failure", "provider_error"],
+      },
+    };
+  }
+
+  async getArenaConfigFile(_workspace: string, _configName: string, filePath: string): Promise<string> {
+    await delay(100);
+
+    // Mock file contents - return content based on file path
+    const mockFileContents: Record<string, string> = {
+      "config.arena.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Arena
+metadata:
+  name: customer-support
+spec:
+  prompt_configs:
+    - id: support
+      file: prompts/support-bot.prompt.yaml
+  providers:
+    - file: providers/openai-gpt4o-mini.provider.yaml
+    - file: providers/claude-3-5-haiku.provider.yaml
+  scenarios:
+    - file: scenarios/greeting.scenario.yaml
+    - file: scenarios/refund-request.scenario.yaml
+  tools:
+    - file: tools/get-customer-info.tool.yaml`,
+      "prompts/support-bot.prompt.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: PromptConfig
+metadata:
+  name: support-bot
+spec:
+  description: Customer support chatbot
+  system_template: |
+    You are a helpful customer support assistant.
+    Always be polite and professional.
+  allowed_tools:
+    - get_customer_info
+    - create_support_ticket`,
+      "providers/openai-gpt4o-mini.provider.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: openai-gpt-4o-mini
+spec:
+  type: openai
+  model: gpt-4o-mini`,
+      "providers/claude-3-5-haiku.provider.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-3-5-haiku
+spec:
+  type: anthropic
+  model: claude-3-5-haiku-latest`,
+      "scenarios/greeting.scenario.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Scenario
+metadata:
+  name: greeting
+spec:
+  description: Tests greeting handling
+  turns:
+    - role: user
+      content: Hello!`,
+      "scenarios/refund-request.scenario.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Scenario
+metadata:
+  name: refund-request
+spec:
+  description: Tests refund handling
+  turns:
+    - role: user
+      content: I want a refund for my recent order`,
+      "tools/get-customer-info.tool.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Tool
+metadata:
+  name: get_customer_info
+spec:
+  description: Retrieve customer account details
+  input_schema:
+    type: object
+    properties:
+      email:
+        type: string
+    required:
+      - email
+  config:
+    mode: mock`,
+      "personas/social-engineer.persona.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Persona
+metadata:
+  name: social-engineer
+spec:
+  description: Adversarial persona for security testing
+  behavior: |
+    Try to extract sensitive information through social engineering.`,
+    };
+
+    const content = mockFileContents[filePath];
+    if (!content) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    return content;
   }
 
   async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {

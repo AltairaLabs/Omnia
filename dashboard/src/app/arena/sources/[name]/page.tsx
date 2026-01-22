@@ -167,10 +167,10 @@ function OverviewTab({ source }: Readonly<{ source: ArenaSource }>) {
               )}
             </div>
           )}
-          {spec?.type === "configmap" && spec.configMapRef && (
+          {spec?.type === "configmap" && spec.configMap && (
             <div>
               <p className="text-sm text-muted-foreground">ConfigMap Name</p>
-              <p className="font-medium">{spec.configMapRef.name}</p>
+              <p className="font-medium">{spec.configMap.name}</p>
             </div>
           )}
           {spec?.secretRef && (
@@ -205,12 +205,14 @@ function OverviewTab({ source }: Readonly<{ source: ArenaSource }>) {
                 <p className="text-sm text-muted-foreground">Size</p>
                 <p className="font-medium">{formatBytes(status.artifact.size)}</p>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Checksum</p>
-                <p className="font-mono text-sm truncate" title={status.artifact.checksum}>
-                  {status.artifact.checksum.substring(0, 16)}...
-                </p>
-              </div>
+              {status.artifact.checksum && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Checksum</p>
+                  <p className="font-mono text-sm truncate" title={status.artifact.checksum}>
+                    {status.artifact.checksum.substring(0, 16)}...
+                  </p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

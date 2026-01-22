@@ -75,6 +75,8 @@ type ArenaConfigReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+//
+//nolint:gocognit // Reconcile functions inherently have high complexity due to state machine logic
 func (r *ArenaConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.V(1).Info("reconciling ArenaConfig", "name", req.Name, "namespace", req.Namespace)
@@ -141,8 +143,10 @@ func (r *ArenaConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Update resolved source info
 	config.Status.ResolvedSource = &omniav1alpha1.ResolvedSource{
-		Revision: source.Status.Artifact.Revision,
-		URL:      source.Status.Artifact.URL,
+		Revision:    source.Status.Artifact.Revision,
+		URL:         source.Status.Artifact.URL,         // Legacy tar.gz URL
+		ContentPath: source.Status.Artifact.ContentPath, // Filesystem path (new)
+		Version:     source.Status.Artifact.Version,     // Content-addressable version (new)
 	}
 	r.setCondition(config, ArenaConfigConditionTypeSourceResolved, metav1.ConditionTrue,
 		"SourceResolved", fmt.Sprintf("ArenaSource %s resolved at revision %s", config.Spec.SourceRef.Name, source.Status.Artifact.Revision))

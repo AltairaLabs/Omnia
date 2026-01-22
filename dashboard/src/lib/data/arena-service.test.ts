@@ -33,7 +33,7 @@ describe("ArenaService", () => {
           apiVersion: "omnia.altairalabs.ai/v1alpha1",
           kind: "ArenaSource",
           metadata: { name: "test-source", namespace: "test-ws" },
-          spec: { type: "configmap", configMapRef: { name: "test-cm" } },
+          spec: { type: "configmap", configMap: { name: "test-cm" } },
         },
       ];
 
@@ -82,7 +82,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaSource",
         metadata: { name: "test-source", namespace: "test-ws" },
-        spec: { type: "configmap", configMapRef: { name: "test-cm" } },
+        spec: { type: "configmap", configMap: { name: "test-cm" } },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -119,7 +119,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaSource",
         metadata: { name: "new-source", namespace: "test-ws" },
-        spec: { type: "configmap", configMapRef: { name: "test-cm" } },
+        spec: { type: "configmap", configMap: { name: "test-cm" } },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -129,7 +129,7 @@ describe("ArenaService", () => {
 
       const result = await service.createArenaSource("test-ws", "new-source", {
         type: "configmap",
-        configMapRef: { name: "test-cm" },
+        configMap: { name: "test-cm" },
       });
 
       expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/sources", {
@@ -137,7 +137,7 @@ describe("ArenaService", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metadata: { name: "new-source" },
-          spec: { type: "configmap", configMapRef: { name: "test-cm" } },
+          spec: { type: "configmap", configMap: { name: "test-cm" } },
         }),
       });
       expect(result).toEqual(mockSource);
@@ -172,7 +172,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaSource",
         metadata: { name: "test-source", namespace: "test-ws" },
-        spec: { type: "configmap", configMapRef: { name: "updated-cm" } },
+        spec: { type: "configmap", configMap: { name: "updated-cm" } },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -182,13 +182,13 @@ describe("ArenaService", () => {
 
       const result = await service.updateArenaSource("test-ws", "test-source", {
         type: "configmap",
-        configMapRef: { name: "updated-cm" },
+        configMap: { name: "updated-cm" },
       });
 
       expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/sources/test-source", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec: { type: "configmap", configMapRef: { name: "updated-cm" } } }),
+        body: JSON.stringify({ spec: { type: "configmap", configMap: { name: "updated-cm" } } }),
       });
       expect(result).toEqual(mockSource);
     });

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
-import { useArenaConfig, useArenaConfigMutations } from "@/hooks/use-arena-configs";
+import { useArenaConfig, useArenaConfigMutations, useArenaConfigContent, useArenaConfigFile } from "@/hooks/use-arena-configs";
 import { useArenaSources } from "@/hooks";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,6 +42,14 @@ import {
   XCircle,
   Clock,
   Tag,
+  MessageSquare,
+  Package,
+  Folder,
+  FolderOpen,
+  ChevronRight,
+  ChevronDown,
+  File,
+  User,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -51,7 +59,16 @@ import {
   getStatusBadge,
   getConditionIcon,
 } from "@/components/arena";
-import type { ArenaConfig, ArenaJob, Scenario, ArenaProviderStatus, ArenaToolRegistryStatus } from "@/types/arena";
+import type {
+  ArenaConfig,
+  ArenaConfigContent,
+  ArenaJob,
+  Scenario,
+  ArenaProviderStatus,
+  ArenaToolRegistryStatus,
+  ArenaPackageFile,
+  ArenaPackageTreeNode,
+} from "@/types/arena";
 import type { Condition } from "@/types/common";
 
 // Use the shared utilities with detail page specific defaults
@@ -137,6 +154,68 @@ function OverviewTab({ config }: Readonly<{ config: ArenaConfig }>) {
         </CardContent>
       </Card>
 
+      {/* Resource References Card */}
+      {((spec?.providers && spec.providers.length > 0) || (spec?.toolRegistries && spec.toolRegistries.length > 0)) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Resource References</CardTitle>
+            <CardDescription>Providers and tool registries used by this configuration</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {spec?.providers && spec.providers.length > 0 && (
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2 flex items-center gap-1">
+                    <Cpu className="h-3 w-3" />
+                    Providers
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {spec.providers.map((ref) => (
+                      <Link
+                        key={ref.name}
+                        href={`/providers/${ref.name}`}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-muted/50 hover:bg-muted text-sm font-medium transition-colors"
+                      >
+                        <Cpu className="h-3 w-3 text-muted-foreground" />
+                        {ref.name}
+                        {ref.namespace && (
+                          <span className="text-muted-foreground text-xs">({ref.namespace})</span>
+                        )}
+                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {spec?.toolRegistries && spec.toolRegistries.length > 0 && (
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2 flex items-center gap-1">
+                    <Wrench className="h-3 w-3" />
+                    Tool Registries
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {spec.toolRegistries.map((ref) => (
+                      <Link
+                        key={ref.name}
+                        href={`/tools/${ref.name}`}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-muted/50 hover:bg-muted text-sm font-medium transition-colors"
+                      >
+                        <Wrench className="h-3 w-3 text-muted-foreground" />
+                        {ref.name}
+                        {ref.namespace && (
+                          <span className="text-muted-foreground text-xs">({ref.namespace})</span>
+                        )}
+                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Scenario Filters Card */}
       {spec?.scenarios && (spec.scenarios.include || spec.scenarios.exclude) && (
         <Card>
@@ -220,7 +299,13 @@ function OverviewTab({ config }: Readonly<{ config: ArenaConfig }>) {
             <div className="space-y-2">
               {status.providers.map((provider: ArenaProviderStatus) => (
                 <div key={provider.name} className="flex items-center justify-between p-2 rounded border">
-                  <span className="font-medium">{provider.name}</span>
+                  <Link
+                    href={`/providers/${provider.name}`}
+                    className="font-medium text-primary hover:underline flex items-center gap-1"
+                  >
+                    {provider.name}
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
                   <Badge
                     variant={provider.status === "Ready" ? "default" : "destructive"}
                     className={provider.status === "Ready" ? "bg-green-500" : ""}
@@ -248,7 +333,13 @@ function OverviewTab({ config }: Readonly<{ config: ArenaConfig }>) {
               {status.toolRegistries.map((registry: ArenaToolRegistryStatus) => (
                 <div key={registry.name} className="flex items-center justify-between p-2 rounded border">
                   <div>
-                    <span className="font-medium">{registry.name}</span>
+                    <Link
+                      href={`/tools/${registry.name}`}
+                      className="font-medium text-primary hover:underline inline-flex items-center gap-1"
+                    >
+                      {registry.name}
+                      <ExternalLink className="h-3 w-3" />
+                    </Link>
                     {registry.toolCount !== undefined && (
                       <span className="text-muted-foreground ml-2">
                         ({registry.toolCount} tools)
@@ -457,6 +548,377 @@ function JobsTab({
   );
 }
 
+/** Get icon for file type */
+function getFileTypeIcon(type: ArenaPackageFile["type"]) {
+  switch (type) {
+    case "arena":
+      return <Package className="h-4 w-4 text-purple-500" />;
+    case "prompt":
+      return <MessageSquare className="h-4 w-4 text-blue-500" />;
+    case "provider":
+      return <Cpu className="h-4 w-4 text-green-500" />;
+    case "scenario":
+      return <FileText className="h-4 w-4 text-orange-500" />;
+    case "tool":
+      return <Wrench className="h-4 w-4 text-yellow-500" />;
+    case "persona":
+      return <User className="h-4 w-4 text-pink-500" />;
+    default:
+      return <File className="h-4 w-4 text-muted-foreground" />;
+  }
+}
+
+/** Get badge color for file type */
+function getFileTypeBadge(type: ArenaPackageFile["type"]) {
+  const colors: Record<ArenaPackageFile["type"], string> = {
+    arena: "bg-purple-500/10 text-purple-700 border-purple-200",
+    prompt: "bg-blue-500/10 text-blue-700 border-blue-200",
+    provider: "bg-green-500/10 text-green-700 border-green-200",
+    scenario: "bg-orange-500/10 text-orange-700 border-orange-200",
+    tool: "bg-yellow-500/10 text-yellow-700 border-yellow-200",
+    persona: "bg-pink-500/10 text-pink-700 border-pink-200",
+    other: "bg-gray-500/10 text-gray-700 border-gray-200",
+  };
+  return colors[type];
+}
+
+/** File tree node component */
+function FileTreeNode({
+  node,
+  selectedPath,
+  expandedPaths,
+  onSelect,
+  onToggle,
+  depth = 0,
+}: Readonly<{
+  node: ArenaPackageTreeNode;
+  selectedPath: string | null;
+  expandedPaths: Set<string>;
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+  depth?: number;
+}>) {
+  const isExpanded = expandedPaths.has(node.path);
+  const isSelected = selectedPath === node.path;
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          if (node.isDirectory) {
+            onToggle(node.path);
+          } else {
+            onSelect(node.path);
+          }
+        }}
+        className={`w-full flex items-center gap-1.5 px-2 py-1 text-sm hover:bg-muted rounded transition-colors ${
+          isSelected ? "bg-muted font-medium" : ""
+        }`}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      >
+        {node.isDirectory ? (
+          <>
+            {isExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            )}
+            {isExpanded ? (
+              <FolderOpen className="h-4 w-4 text-amber-500 shrink-0" />
+            ) : (
+              <Folder className="h-4 w-4 text-amber-500 shrink-0" />
+            )}
+          </>
+        ) : (
+          <>
+            <span className="w-3.5" />
+            {getFileTypeIcon(node.type || "other")}
+          </>
+        )}
+        <span className="truncate">{node.name}</span>
+      </button>
+      {node.isDirectory && isExpanded && node.children && (
+        <div>
+          {node.children.map((child) => (
+            <FileTreeNode
+              key={child.path}
+              node={child}
+              selectedPath={selectedPath}
+              expandedPaths={expandedPaths}
+              onSelect={onSelect}
+              onToggle={onToggle}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** File content viewer component with Monaco editor */
+function FileContentViewer({
+  file,
+  isEntryPoint,
+  configName,
+}: Readonly<{
+  file: ArenaPackageFile | null;
+  isEntryPoint: boolean;
+  configName: string;
+}>) {
+  const { content, loading, error } = useArenaConfigFile(configName, file?.path ?? null);
+  const [Editor, setEditor] = useState<typeof import("@monaco-editor/react").default | null>(null);
+
+  // Dynamically import Monaco editor (it's a large bundle)
+  useState(() => {
+    import("@monaco-editor/react").then((mod) => {
+      setEditor(() => mod.default);
+    });
+  });
+
+  if (!file) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground">
+        <div className="text-center">
+          <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+          <p>Select a file to view its contents</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Determine Monaco language from file extension
+  const getLanguage = (path: string): string => {
+    if (path.endsWith(".yaml") || path.endsWith(".yml")) return "yaml";
+    if (path.endsWith(".json")) return "json";
+    return "plaintext";
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 p-3 border-b bg-muted/30">
+        {getFileTypeIcon(file.type)}
+        <span className="font-mono text-sm font-medium">{file.path}</span>
+        {isEntryPoint && (
+          <Badge variant="default" className="ml-2 text-xs">Entry Point</Badge>
+        )}
+        <Badge variant="outline" className={`ml-auto text-xs ${getFileTypeBadge(file.type)}`}>
+          {file.type}
+        </Badge>
+        <span className="text-xs text-muted-foreground">{file.size} bytes</span>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <Skeleton className="h-4 w-32" />
+          </div>
+        ) : error ? (
+          <div className="flex items-center justify-center h-full text-red-500">
+            <AlertCircle className="h-4 w-4 mr-2" />
+            {error.message}
+          </div>
+        ) : Editor && content ? (
+          <Editor
+            height="100%"
+            language={getLanguage(file.path)}
+            value={content}
+            theme="vs-dark"
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              fontSize: 12,
+              lineNumbers: "on",
+              wordWrap: "on",
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+            }}
+          />
+        ) : content ? (
+          <div className="p-4 overflow-auto h-full bg-muted/20">
+            <pre className="text-xs font-mono whitespace-pre-wrap">{content}</pre>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function PackContentTab({
+  content,
+  loading,
+  configName,
+}: Readonly<{
+  content: ArenaConfigContent | null;
+  loading: boolean;
+  configName: string;
+}>) {
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+
+  // Auto-expand all directories on initial load and select entry point
+  useState(() => {
+    if (content?.fileTree) {
+      const allDirs = new Set<string>();
+      const collectDirs = (nodes: ArenaPackageTreeNode[]) => {
+        for (const node of nodes) {
+          if (node.isDirectory) {
+            allDirs.add(node.path);
+            if (node.children) collectDirs(node.children);
+          }
+        }
+      };
+      collectDirs(content.fileTree);
+      setExpandedPaths(allDirs);
+      if (content.entryPoint) {
+        setSelectedPath(content.entryPoint);
+      }
+    }
+  });
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-[400px]" />
+      </div>
+    );
+  }
+
+  const hasContent = content && content.files && content.files.length > 0;
+
+  if (!hasContent) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
+        <p className="text-lg font-medium mb-1">No arena content found</p>
+        <p className="text-sm">
+          Content will appear here once the source is synced and files are loaded.
+        </p>
+      </div>
+    );
+  }
+
+  const selectedFile = content.files.find((f) => f.path === selectedPath) || null;
+  const isEntryPoint = selectedPath === content.entryPoint;
+
+  const handleToggle = (path: string) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  // Count files by type
+  const typeCounts = content.files.reduce(
+    (acc, file) => {
+      acc[file.type] = (acc[file.type] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Summary badges */}
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="outline" className="gap-1">
+          <Package className="h-3 w-3" />
+          {content.files.length} files
+        </Badge>
+        {Object.entries(typeCounts).map(([type, count]) => (
+          <Badge key={type} variant="outline" className={`gap-1 ${getFileTypeBadge(type as ArenaPackageFile["type"])}`}>
+            {getFileTypeIcon(type as ArenaPackageFile["type"])}
+            {count} {type}
+          </Badge>
+        ))}
+      </div>
+
+      {/* File explorer */}
+      <Card className="overflow-hidden">
+        <div className="flex h-[500px]">
+          {/* File tree sidebar */}
+          <div className="w-64 border-r bg-muted/30 overflow-auto">
+            <div className="p-2 border-b bg-muted/50">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Package Files
+              </p>
+            </div>
+            <div className="py-1">
+              {content.fileTree.map((node) => (
+                <FileTreeNode
+                  key={node.path}
+                  node={node}
+                  selectedPath={selectedPath}
+                  expandedPaths={expandedPaths}
+                  onSelect={setSelectedPath}
+                  onToggle={handleToggle}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* File content viewer */}
+          <div className="flex-1 overflow-hidden">
+            <FileContentViewer file={selectedFile} isEntryPoint={isEntryPoint} configName={configName} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Quick reference cards for key resources */}
+      {content.entryPoint && (
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Info className="h-4 w-4" />
+              Package Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="py-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Entry Point</p>
+                <p className="font-mono">{content.entryPoint}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Prompts</p>
+                <p className="font-medium">{content.promptConfigs.length}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Providers</p>
+                <p className="font-medium">{content.providers.length}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Scenarios</p>
+                <p className="font-medium">{content.scenarios.length}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Tools</p>
+                <p className="font-medium">{content.tools.length}</p>
+              </div>
+              {content.selfPlay?.enabled && (
+                <div>
+                  <p className="text-muted-foreground">Self-Play</p>
+                  <Badge variant="default" className="bg-green-500">Enabled</Badge>
+                </div>
+              )}
+              {content.judges && Object.keys(content.judges).length > 0 && (
+                <div>
+                  <p className="text-muted-foreground">Judges</p>
+                  <p className="font-medium">{Object.keys(content.judges).length}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function LoadingSkeleton() {
   return (
     <div className="flex flex-col h-full">
@@ -481,6 +943,7 @@ export default function ArenaConfigDetailPage() {
   const configName = params.name as string;
 
   const { config, scenarios, linkedJobs, loading, error, refetch } = useArenaConfig(configName);
+  const { content: packContent, loading: contentLoading } = useArenaConfigContent(configName);
   const { sources } = useArenaSources();
   const { deleteConfig } = useArenaConfigMutations();
   const { currentWorkspace } = useWorkspace();
@@ -619,6 +1082,10 @@ export default function ArenaConfigDetailPage() {
               <Info className="h-4 w-4 mr-2" />
               Overview
             </TabsTrigger>
+            <TabsTrigger value="pack">
+              <Package className="h-4 w-4 mr-2" />
+              Pack Content
+            </TabsTrigger>
             <TabsTrigger value="scenarios">
               <FileText className="h-4 w-4 mr-2" />
               Scenarios ({scenarios.length})
@@ -631,6 +1098,10 @@ export default function ArenaConfigDetailPage() {
 
           <TabsContent value="overview">
             <OverviewTab config={config} />
+          </TabsContent>
+
+          <TabsContent value="pack">
+            <PackContentTab content={packContent} loading={contentLoading} configName={configName} />
           </TabsContent>
 
           <TabsContent value="scenarios">

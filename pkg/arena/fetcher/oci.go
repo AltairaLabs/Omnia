@@ -108,10 +108,7 @@ func (f *OCIFetcher) LatestRevision(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	opts, err := f.getRemoteOptions(ctx)
-	if err != nil {
-		return "", err
-	}
+	opts := f.getRemoteOptions(ctx)
 
 	desc, err := f.client.Head(ref, opts...)
 	if err != nil {
@@ -137,10 +134,7 @@ func (f *OCIFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 		ref = digestRef
 	}
 
-	opts, err := f.getRemoteOptions(ctx)
-	if err != nil {
-		return nil, err
-	}
+	opts := f.getRemoteOptions(ctx)
 
 	img, err := f.client.Image(ref, opts...)
 	if err != nil {
@@ -211,26 +205,23 @@ func (f *OCIFetcher) parseReference() (name.Reference, error) {
 }
 
 // getRemoteOptions returns the remote options for OCI operations.
-func (f *OCIFetcher) getRemoteOptions(ctx context.Context) ([]remote.Option, error) {
+func (f *OCIFetcher) getRemoteOptions(ctx context.Context) []remote.Option {
 	opts := []remote.Option{
 		remote.WithContext(ctx),
 	}
 
-	auth, err := f.getAuth()
-	if err != nil {
-		return nil, err
-	}
+	auth := f.getAuth()
 	if auth != nil {
 		opts = append(opts, remote.WithAuth(auth))
 	}
 
-	return opts, nil
+	return opts
 }
 
 // getAuth returns the appropriate authenticator based on credentials.
-func (f *OCIFetcher) getAuth() (authn.Authenticator, error) {
+func (f *OCIFetcher) getAuth() authn.Authenticator {
 	if f.config.Credentials == nil {
-		return authn.Anonymous, nil
+		return authn.Anonymous
 	}
 
 	// Basic authentication
@@ -238,7 +229,7 @@ func (f *OCIFetcher) getAuth() (authn.Authenticator, error) {
 		return &authn.Basic{
 			Username: f.config.Credentials.Username,
 			Password: f.config.Credentials.Password,
-		}, nil
+		}
 	}
 
 	// Docker config authentication
@@ -246,10 +237,10 @@ func (f *OCIFetcher) getAuth() (authn.Authenticator, error) {
 		// Parse the docker config and extract credentials for the registry
 		// For now, return anonymous if docker config is provided but not parsed
 		// A full implementation would parse the JSON and match the registry
-		return authn.Anonymous, nil
+		return authn.Anonymous
 	}
 
-	return authn.Anonymous, nil
+	return authn.Anonymous
 }
 
 // calculateChecksum calculates the SHA256 checksum and size of a file.

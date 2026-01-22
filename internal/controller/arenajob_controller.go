@@ -79,6 +79,35 @@ type ArenaJobReconciler struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	// WorkspaceContentPath is the base path for workspace content volumes.
+	// When set, workers mount the workspace content PVC and access content directly.
+	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}
+	WorkspaceContentPath string
+	// NFSServer is the NFS server address for workspace content (optional).
+	// When set along with NFSPath, workers mount NFS directly instead of using a PVC.
+	// This enables shared access across namespaces without per-workspace PVCs.
+	NFSServer string
+	// NFSPath is the NFS export path for workspace content (optional).
+	NFSPath string
+}
+
+// getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
+// Returns the namespace name as fallback if workspace label is not found.
+func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, namespace string) string {
+	// Handle nil client (e.g., in tests that don't set up the client)
+	if r.Client == nil {
+		return namespace
+	}
+	ns := &corev1.Namespace{}
+	if err := r.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
+		// Fallback to namespace name if we can't look it up
+		return namespace
+	}
+	if workspace, ok := ns.Labels[labelWorkspace]; ok && workspace != "" {
+		return workspace
+	}
+	// Fallback to namespace name
+	return namespace
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -90,6 +119,8 @@ type ArenaJobReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+//
+//nolint:gocognit // Reconcile functions inherently have high complexity due to state machine logic
 func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.V(1).Info("reconciling ArenaJob", "name", req.Name, "namespace", req.Namespace)
@@ -293,15 +324,92 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		},
 	}
 
-	// Add source artifact URL if available
+	// Add source artifact info if available
 	if config.Status.ResolvedSource != nil {
-		env = append(env, corev1.EnvVar{
-			Name:  "ARENA_ARTIFACT_URL",
-			Value: config.Status.ResolvedSource.URL,
-		})
+		// Legacy: tar.gz URL for backwards compatibility
+		if config.Status.ResolvedSource.URL != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "ARENA_ARTIFACT_URL",
+				Value: config.Status.ResolvedSource.URL,
+			})
+		}
 		env = append(env, corev1.EnvVar{
 			Name:  "ARENA_ARTIFACT_REVISION",
 			Value: config.Status.ResolvedSource.Revision,
+		})
+		// New: filesystem-based content access
+		if config.Status.ResolvedSource.ContentPath != "" {
+			// Full path: {mount}/{workspace}/{namespace}/{contentPath}
+			workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+			fullContentPath := fmt.Sprintf("/workspace-content/%s/%s/%s",
+				workspaceName, arenaJob.Namespace, config.Status.ResolvedSource.ContentPath)
+			env = append(env, corev1.EnvVar{
+				Name:  "ARENA_CONTENT_PATH",
+				Value: fullContentPath,
+			})
+		}
+		if config.Status.ResolvedSource.Version != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "ARENA_CONTENT_VERSION",
+				Value: config.Status.ResolvedSource.Version,
+			})
+		}
+	}
+
+	// Determine if we should mount workspace content PVC
+	useWorkspaceContent := r.WorkspaceContentPath != "" &&
+		config.Status.ResolvedSource != nil &&
+		config.Status.ResolvedSource.ContentPath != ""
+
+	// Build volumes list
+	volumes := []corev1.Volume{
+		{
+			Name: "tmp",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+	}
+
+	// Build volume mounts list
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "tmp",
+			MountPath: "/tmp",
+		},
+	}
+
+	// Add workspace content volume if using filesystem mode
+	if useWorkspaceContent {
+		var volumeSource corev1.VolumeSource
+		if r.NFSServer != "" && r.NFSPath != "" {
+			// Use NFS directly - enables shared access across namespaces
+			// without requiring per-workspace PVCs
+			volumeSource = corev1.VolumeSource{
+				NFS: &corev1.NFSVolumeSource{
+					Server:   r.NFSServer,
+					Path:     r.NFSPath,
+					ReadOnly: true,
+				},
+			}
+		} else {
+			// Use per-workspace PVC (requires NFS-backed storage class for RWX)
+			pvcName := fmt.Sprintf("workspace-%s-content", arenaJob.Namespace)
+			volumeSource = corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: pvcName,
+					ReadOnly:  true, // Workers only read content
+				},
+			}
+		}
+		volumes = append(volumes, corev1.Volume{
+			Name:         "workspace-content",
+			VolumeSource: volumeSource,
+		})
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "workspace-content",
+			MountPath: "/workspace-content",
+			ReadOnly:  true,
 		})
 	}
 
@@ -340,14 +448,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 							Type: corev1.SeccompProfileTypeRuntimeDefault,
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "tmp",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
-							},
-						},
-					},
+					Volumes: volumes,
 					Containers: []corev1.Container{
 						{
 							Name:            "worker",
@@ -362,12 +463,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 									Drop: []corev1.Capability{"ALL"},
 								},
 							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "tmp",
-									MountPath: "/tmp",
-								},
-							},
+							VolumeMounts: volumeMounts,
 						},
 					},
 				},

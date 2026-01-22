@@ -116,6 +116,8 @@ const mockDataService: DataService = {
   getArenaConfigs: vi.fn().mockResolvedValue([]),
   getArenaConfig: vi.fn().mockResolvedValue(undefined),
   getArenaConfigScenarios: vi.fn().mockResolvedValue([]),
+  getArenaConfigContent: vi.fn().mockResolvedValue({ metadata: { name: "" }, files: [], fileTree: [], promptConfigs: [], providers: [], scenarios: [], tools: [], mcpServers: {}, judges: {} }),
+  getArenaConfigFile: vi.fn().mockResolvedValue(""),
   createArenaConfig: vi.fn().mockResolvedValue({}),
   updateArenaConfig: vi.fn().mockResolvedValue({}),
   deleteArenaConfig: vi.fn().mockResolvedValue(undefined),

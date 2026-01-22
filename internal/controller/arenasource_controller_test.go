@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -62,6 +64,49 @@ func createOpenCoreLicenseValidator(publicKey *rsa.PublicKey) (*license.Validato
 		Build()
 
 	return license.NewValidator(client, license.WithPublicKey(publicKey))
+}
+
+// createTestTarball creates a tar.gz file with the given files.
+func createTestTarball(path string, files map[string]string) {
+	file, err := os.Create(path)
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = file.Close() }()
+
+	gw := gzip.NewWriter(file)
+	defer func() { _ = gw.Close() }()
+
+	tw := tar.NewWriter(gw)
+	defer func() { _ = tw.Close() }()
+
+	for name, content := range files {
+		// Create directory entries if needed
+		dir := filepath.Dir(name)
+		if dir != "." {
+			hdr := &tar.Header{
+				Name:     dir + "/",
+				Mode:     0755,
+				Typeflag: tar.TypeDir,
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				panic(err)
+			}
+		}
+
+		// Create file entry
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0644,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			panic(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			panic(err)
+		}
+	}
 }
 
 var _ = Describe("ArenaSource Controller", func() {
@@ -1116,7 +1161,7 @@ var _ = Describe("ArenaSource Controller", func() {
 	})
 
 	Context("When testing storeArtifact with valid artifact", func() {
-		It("should store the artifact and return URL", func() {
+		It("should store the artifact and return URL in legacy mode", func() {
 			By("creating a temporary artifact file")
 			tmpDir, err := os.MkdirTemp("", "artifact-test-*")
 			Expect(err).NotTo(HaveOccurred())
@@ -1125,7 +1170,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			artifactPath := filepath.Join(tmpDir, "test.tar.gz")
 			Expect(os.WriteFile(artifactPath, []byte("fake tarball content"), 0644)).To(Succeed())
 
-			By("testing storeArtifact")
+			By("testing storeArtifact in legacy mode (no WorkspaceContentPath)")
 			reconciler := &ArenaSourceReconciler{
 				ArtifactDir:     tmpDir,
 				ArtifactBaseURL: "http://localhost:8080/artifacts",
@@ -1145,10 +1190,13 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     20,
 			}
 
-			url, err := reconciler.storeArtifact(source, artifact)
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(url).To(ContainSubstring("http://localhost:8080/artifacts"))
 			Expect(url).To(ContainSubstring("default/test-store"))
+			// In legacy mode, contentPath and version should be empty
+			Expect(contentPath).To(BeEmpty())
+			Expect(version).To(BeEmpty())
 		})
 	})
 
@@ -1383,7 +1431,7 @@ var _ = Describe("ArenaSource Controller", func() {
 	})
 
 	Context("When testing storeArtifact with no-change result", func() {
-		It("should return existing URL when artifact path is empty", func() {
+		It("should return existing values when artifact path is empty", func() {
 			By("testing storeArtifact with empty path")
 			reconciler := &ArenaSourceReconciler{
 				ArtifactDir:     artifactDir,
@@ -1397,8 +1445,10 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 				Status: omniav1alpha1.ArenaSourceStatus{
 					Artifact: &omniav1alpha1.Artifact{
-						URL:      "http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz",
-						Revision: "rev1",
+						URL:         "http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz",
+						ContentPath: "arena/test-no-change/.arena/versions/abc123",
+						Version:     "abc123",
+						Revision:    "rev1",
 					},
 				},
 			}
@@ -1409,9 +1459,188 @@ var _ = Describe("ArenaSource Controller", func() {
 				Revision: "rev1",
 			}
 
-			url, err := reconciler.storeArtifact(source, artifact)
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(url).To(Equal("http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz"))
+			Expect(contentPath).To(Equal("arena/test-no-change/.arena/versions/abc123"))
+			Expect(version).To(Equal("abc123"))
+		})
+	})
+
+	Context("When testing filesystem sync mode", func() {
+		It("should sync content to filesystem and create version", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "workspace-content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test tarball with content")
+			tarballDir, err := os.MkdirTemp("", "tarball-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"config.yaml":       "name: test\n",
+				"prompts/hello.txt": "Hello, world!\n",
+			})
+
+			By("testing filesystem sync")
+			reconciler := &ArenaSourceReconciler{
+				ArtifactDir:          "/tmp/artifacts",
+				ArtifactBaseURL:      "http://localhost:8080/artifacts",
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sync",
+					Namespace: "test-workspace",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					TargetPath: "arena/test-sync",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     tarballPath,
+				Revision: "test-revision",
+				Checksum: "sha256:1234567890123456789012345678901234567890123456789012345678901234",
+				Size:     100,
+			}
+
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(BeEmpty(), "URL should be empty in filesystem mode")
+			Expect(version).NotTo(BeEmpty(), "Version should be set")
+			Expect(contentPath).To(ContainSubstring(".arena/versions/"))
+
+			By("verifying content was synced correctly")
+			versionDir := filepath.Join(tmpDir, "test-workspace", "test-workspace", "arena/test-sync", ".arena", "versions", version)
+			Expect(versionDir).To(BeADirectory())
+
+			configContent, err := os.ReadFile(filepath.Join(versionDir, "config.yaml"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(configContent)).To(Equal("name: test\n"))
+
+			promptContent, err := os.ReadFile(filepath.Join(versionDir, "prompts/hello.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(promptContent)).To(Equal("Hello, world!\n"))
+
+			By("verifying HEAD was updated")
+			headContent, err := os.ReadFile(filepath.Join(tmpDir, "test-workspace", "test-workspace", "arena/test-sync", ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(headContent)).To(Equal(version))
+		})
+
+		It("should reuse existing version when content hash matches", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "workspace-content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test tarball")
+			tarballDir, err := os.MkdirTemp("", "tarball-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"config.yaml": "name: test\n",
+			})
+
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-dedup",
+					Namespace: "test-workspace",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     tarballPath,
+				Revision: "rev1",
+				Checksum: "sha256:abc123",
+				Size:     50,
+			}
+
+			By("syncing first time")
+			contentPath1, version1, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("syncing second time with same content")
+			artifact.Revision = "rev2" // Different revision but same content
+			contentPath2, version2, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying same version was returned")
+			Expect(version2).To(Equal(version1))
+			Expect(contentPath2).To(Equal(contentPath1))
+		})
+
+		It("should garbage collect old versions", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "workspace-content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 2, // Keep only 2 versions
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-gc",
+					Namespace: "test-workspace",
+				},
+			}
+
+			By("creating multiple versions")
+			versionsDir := filepath.Join(tmpDir, "test-workspace", "test-workspace", "arena/test-gc", ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 3 old versions with different timestamps
+			for i, v := range []string{"old1", "old2", "old3"} {
+				vDir := filepath.Join(versionsDir, v)
+				Expect(os.MkdirAll(vDir, 0755)).To(Succeed())
+				Expect(os.WriteFile(filepath.Join(vDir, "file.txt"), []byte("content"), 0644)).To(Succeed())
+				// Set modification time in the past
+				pastTime := time.Now().Add(time.Duration(-(i+1)*10) * time.Minute)
+				Expect(os.Chtimes(vDir, pastTime, pastTime)).To(Succeed())
+			}
+
+			By("creating a new version")
+			tarballDir, err := os.MkdirTemp("", "tarball-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"new-file.yaml": "new content\n",
+			})
+
+			artifact := &fetcher.Artifact{
+				Path:     tarballPath,
+				Revision: "new-rev",
+				Checksum: "sha256:new123",
+				Size:     50,
+			}
+
+			_, version, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying old versions were garbage collected")
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			// Should have max 2 versions: 1 old (most recent) + 1 new
+			Expect(len(entries)).To(BeNumerically("<=", 2))
+			Expect(entries).To(ContainElement(HaveField("Name()", version)))
 		})
 	})
 
@@ -1492,6 +1721,1049 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(condition.Reason).To(Equal("LicenseViolation"))
+		})
+	})
+
+	Context("When testing getWorkspaceForNamespace helper", func() {
+		It("should return workspace name from namespace label", func() {
+			By("creating a namespace with workspace label")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ws-test-namespace",
+					Labels: map[string]string{
+						"omnia.altairalabs.ai/workspace": "my-workspace",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("testing getWorkspaceForNamespace")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "ws-test-namespace")
+			Expect(result).To(Equal("my-workspace"))
+		})
+
+		It("should return namespace name when label is missing", func() {
+			By("creating a namespace without workspace label")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ws-test-no-label",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("testing getWorkspaceForNamespace")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "ws-test-no-label")
+			Expect(result).To(Equal("ws-test-no-label"))
+		})
+
+		It("should return namespace name when namespace doesn't exist", func() {
+			By("testing getWorkspaceForNamespace with nonexistent namespace")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "nonexistent-namespace")
+			Expect(result).To(Equal("nonexistent-namespace"))
+		})
+	})
+
+	Context("When testing updateHEAD helper", func() {
+		It("should create HEAD file with version", func() {
+			By("creating a temporary workspace path")
+			tmpDir, err := os.MkdirTemp("", "head-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("calling updateHEAD")
+			reconciler := &ArenaSourceReconciler{}
+			err = reconciler.updateHEAD(tmpDir, "v1.0.0")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HEAD file exists with correct content")
+			headContent, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(headContent)).To(Equal("v1.0.0"))
+		})
+
+		It("should update existing HEAD file", func() {
+			By("creating a temporary workspace path with existing HEAD")
+			tmpDir, err := os.MkdirTemp("", "head-update-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{}
+
+			By("creating first version")
+			err = reconciler.updateHEAD(tmpDir, "v1.0.0")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("updating to second version")
+			err = reconciler.updateHEAD(tmpDir, "v2.0.0")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HEAD has new version")
+			headContent, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(headContent)).To(Equal("v2.0.0"))
+		})
+	})
+
+	Context("When testing gcOldVersions helper", func() {
+		It("should not remove versions when under limit", func() {
+			By("creating workspace with fewer versions than limit")
+			tmpDir, err := os.MkdirTemp("", "gc-under-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 2 versions
+			for _, v := range []string{"v1", "v2"} {
+				Expect(os.MkdirAll(filepath.Join(versionsDir, v), 0755)).To(Succeed())
+			}
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Both versions should still exist
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(2))
+		})
+
+		It("should handle nonexistent versions directory", func() {
+			tmpDir, err := os.MkdirTemp("", "gc-nonexistent-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should remove oldest versions when exceeding limit", func() {
+			By("creating workspace with more versions than limit")
+			tmpDir, err := os.MkdirTemp("", "gc-remove-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 5 versions with different mod times
+			versions := []string{"v1", "v2", "v3", "v4", "v5"}
+			for i, v := range versions {
+				versionPath := filepath.Join(versionsDir, v)
+				Expect(os.MkdirAll(versionPath, 0755)).To(Succeed())
+				// Set different mod times to control ordering
+				modTime := time.Now().Add(time.Duration(i) * time.Hour)
+				Expect(os.Chtimes(versionPath, modTime, modTime)).To(Succeed())
+			}
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 3}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Should have 3 versions left (the newest ones)
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(3))
+
+			// v1 and v2 should be removed (oldest)
+			_, err = os.Stat(filepath.Join(versionsDir, "v1"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+			_, err = os.Stat(filepath.Join(versionsDir, "v2"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+		})
+
+		It("should use default max when not configured", func() {
+			By("creating workspace with max versions set to 0")
+			tmpDir, err := os.MkdirTemp("", "gc-default-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 5 versions
+			for _, v := range []string{"v1", "v2", "v3", "v4", "v5"} {
+				Expect(os.MkdirAll(filepath.Join(versionsDir, v), 0755)).To(Succeed())
+			}
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 0} // Should default to 10
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// All 5 should remain (under default of 10)
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(5))
+		})
+
+		It("should skip non-directory entries", func() {
+			By("creating workspace with mixed entries")
+			tmpDir, err := os.MkdirTemp("", "gc-mixed-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create directories
+			for _, v := range []string{"v1", "v2"} {
+				Expect(os.MkdirAll(filepath.Join(versionsDir, v), 0755)).To(Succeed())
+			}
+			// Create a file (should be skipped)
+			Expect(os.WriteFile(filepath.Join(versionsDir, "README.txt"), []byte("info"), 0644)).To(Succeed())
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// All entries should remain
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(3)) // v1, v2, README.txt
+		})
+	})
+
+	Context("When testing copyFile helper", func() {
+		It("should copy file content", func() {
+			By("creating source file")
+			srcDir, err := os.MkdirTemp("", "copy-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			srcFile := filepath.Join(srcDir, "source.txt")
+			Expect(os.WriteFile(srcFile, []byte("test content to copy"), 0644)).To(Succeed())
+
+			By("copying to destination")
+			dstDir, err := os.MkdirTemp("", "copy-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			dstFile := filepath.Join(dstDir, "dest.txt")
+			err = copyFile(srcFile, dstFile)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying content")
+			content, err := os.ReadFile(dstFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content)).To(Equal("test content to copy"))
+		})
+
+		It("should fail when source doesn't exist", func() {
+			dstDir, err := os.MkdirTemp("", "copy-fail-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			err = copyFile("/nonexistent/source.txt", filepath.Join(dstDir, "dest.txt"))
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail when destination cannot be created", func() {
+			By("creating source file")
+			srcDir, err := os.MkdirTemp("", "copy-fail-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			srcFile := filepath.Join(srcDir, "source.txt")
+			Expect(os.WriteFile(srcFile, []byte("content"), 0644)).To(Succeed())
+
+			err = copyFile(srcFile, "/nonexistent/dir/dest.txt")
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("When testing syncToFilesystem version caching", func() {
+		It("should skip sync when version already exists", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "sync-skip-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test tarball")
+			tarballDir, err := os.MkdirTemp("", "tarball-skip-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"config.yaml": "name: cached-test\n",
+			})
+
+			By("syncing first time to create version")
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cache-test",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					TargetPath: "arena/cache-test",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     tarballPath,
+				Revision: "rev1",
+				Checksum: "sha256:cache",
+				Size:     50,
+			}
+
+			contentPath1, version1, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version1).NotTo(BeEmpty())
+
+			By("syncing again with same content (should skip)")
+			contentPath2, version2, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version2).To(Equal(version1))
+			Expect(contentPath2).To(Equal(contentPath1))
+		})
+	})
+
+	Context("When testing updateHEAD error paths", func() {
+		It("should succeed with valid path", func() {
+			tmpDir, err := os.MkdirTemp("", "head-ok-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{}
+			err = reconciler.updateHEAD(tmpDir, "test-version")
+			Expect(err).NotTo(HaveOccurred())
+
+			content, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content)).To(Equal("test-version"))
+		})
+	})
+
+	Context("When testing extractTarEntries with various entry types", func() {
+		It("should handle error in tar.Reader.Next", func() {
+			// Create empty/invalid gzipped content
+			tmpDir, err := os.MkdirTemp("", "tar-invalid-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			// Create a gzip file with invalid tar content
+			tarPath := filepath.Join(tmpDir, "invalid.tar.gz")
+			file, err := os.Create(tarPath)
+			Expect(err).NotTo(HaveOccurred())
+			gw := gzip.NewWriter(file)
+			_, _ = gw.Write([]byte("not a valid tar"))
+			_ = gw.Close()
+			_ = file.Close()
+
+			destDir, err := os.MkdirTemp("", "tar-dest-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(destDir) }()
+
+			err = extractTarGzToDir(tarPath, destDir)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("When testing createOCIFetcher helper", func() {
+		It("should create OCI fetcher with default credentials", func() {
+			By("creating reconciler with OCI source")
+			reconciler := &ArenaSourceReconciler{
+				Client:      k8sClient,
+				ArtifactDir: "/tmp/artifacts",
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "oci-test",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type: omniav1alpha1.ArenaSourceTypeOCI,
+					OCI: &omniav1alpha1.OCISource{
+						URL: "registry.example.com/my-repo:latest",
+					},
+				},
+			}
+
+			opts := fetcher.Options{
+				Timeout: time.Minute,
+				WorkDir: "/tmp",
+			}
+
+			f, err := reconciler.createOCIFetcher(ctx, source, opts)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(f).NotTo(BeNil())
+		})
+	})
+
+	Context("When testing storeTarGzArtifact error paths", func() {
+		It("should handle short checksum gracefully", func() {
+			By("creating artifact directory")
+			artifactDir, err := os.MkdirTemp("", "artifact-short-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			tarballDir, err := os.MkdirTemp("", "tarball-short-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"file.txt": "content",
+			})
+
+			reconciler := &ArenaSourceReconciler{
+				ArtifactDir:     artifactDir,
+				ArtifactBaseURL: "http://localhost:8080/artifacts",
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "checksum-test",
+					Namespace: "default",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path: tarballPath,
+				// Use a proper long checksum
+				Checksum: "sha256:abcdef123456789012345678901234567890abcdef123456789012345678901234",
+				Size:     100,
+			}
+
+			_, _, url, err := reconciler.storeTarGzArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(ContainSubstring("abcdef123456"))
+		})
+	})
+
+	Context("When testing findNestedTarGz helper", func() {
+		It("should find tar.gz file in directory", func() {
+			By("creating directory with single tar.gz file")
+			tmpDir, err := os.MkdirTemp("", "nested-tar-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			tarPath := filepath.Join(tmpDir, "pack.tar.gz")
+			Expect(os.WriteFile(tarPath, []byte("fake tarball"), 0644)).To(Succeed())
+
+			result := findNestedTarGz(tmpDir)
+			Expect(result).To(Equal(tarPath))
+		})
+
+		It("should find tgz file in directory", func() {
+			By("creating directory with single tgz file")
+			tmpDir, err := os.MkdirTemp("", "nested-tgz-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			tarPath := filepath.Join(tmpDir, "pack.tgz")
+			Expect(os.WriteFile(tarPath, []byte("fake tarball"), 0644)).To(Succeed())
+
+			result := findNestedTarGz(tmpDir)
+			Expect(result).To(Equal(tarPath))
+		})
+
+		It("should return empty when multiple files exist", func() {
+			By("creating directory with multiple files")
+			tmpDir, err := os.MkdirTemp("", "nested-multi-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.WriteFile(filepath.Join(tmpDir, "file1.tar.gz"), []byte("content"), 0644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(tmpDir, "file2.tar.gz"), []byte("content"), 0644)).To(Succeed())
+
+			result := findNestedTarGz(tmpDir)
+			Expect(result).To(BeEmpty())
+		})
+
+		It("should return empty when entry is a directory", func() {
+			By("creating directory with a subdirectory")
+			tmpDir, err := os.MkdirTemp("", "nested-dir-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.MkdirAll(filepath.Join(tmpDir, "subdir"), 0755)).To(Succeed())
+
+			result := findNestedTarGz(tmpDir)
+			Expect(result).To(BeEmpty())
+		})
+
+		It("should return empty for non-tar.gz files", func() {
+			By("creating directory with non-tar.gz file")
+			tmpDir, err := os.MkdirTemp("", "nested-txt-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("content"), 0644)).To(Succeed())
+
+			result := findNestedTarGz(tmpDir)
+			Expect(result).To(BeEmpty())
+		})
+	})
+
+	Context("When testing extractTarGzToDir helper", func() {
+		It("should extract tar.gz to directory", func() {
+			By("creating a test tarball")
+			tarballDir, err := os.MkdirTemp("", "extract-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarPath, map[string]string{
+				"config.yaml":       "name: test\n",
+				"prompts/hello.txt": "Hello!\n",
+			})
+
+			By("extracting to destination")
+			destDir, err := os.MkdirTemp("", "extract-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(destDir) }()
+
+			err = extractTarGzToDir(tarPath, destDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying extracted files")
+			content, err := os.ReadFile(filepath.Join(destDir, "config.yaml"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content)).To(Equal("name: test\n"))
+
+			promptContent, err := os.ReadFile(filepath.Join(destDir, "prompts/hello.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(promptContent)).To(Equal("Hello!\n"))
+		})
+
+		It("should fail for nonexistent file", func() {
+			tmpDir, err := os.MkdirTemp("", "extract-fail-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			err = extractTarGzToDir("/nonexistent/path.tar.gz", tmpDir)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("When testing extractTarEntry helper", func() {
+		It("should reject path traversal attempts", func() {
+			tmpDir, err := os.MkdirTemp("", "traversal-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			header := &tar.Header{
+				Name:     "../../../etc/passwd",
+				Typeflag: tar.TypeReg,
+				Size:     10,
+			}
+
+			err = extractTarEntry(nil, header, tmpDir)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("invalid tar path"))
+		})
+
+		It("should skip macOS resource fork files", func() {
+			tmpDir, err := os.MkdirTemp("", "macos-skip-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			header := &tar.Header{
+				Name:     "._resource-fork",
+				Typeflag: tar.TypeReg,
+				Size:     10,
+			}
+
+			err = extractTarEntry(nil, header, tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// File should not exist
+			_, err = os.Stat(filepath.Join(tmpDir, "._resource-fork"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+		})
+
+		It("should create directory entries", func() {
+			tmpDir, err := os.MkdirTemp("", "dir-entry-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			header := &tar.Header{
+				Name:     "subdir/",
+				Typeflag: tar.TypeDir,
+			}
+
+			err = extractTarEntry(nil, header, tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Directory should exist
+			info, err := os.Stat(filepath.Join(tmpDir, "subdir"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.IsDir()).To(BeTrue())
+		})
+	})
+
+	Context("When testing extractSymlink helper", func() {
+		It("should create valid symlink", func() {
+			tmpDir, err := os.MkdirTemp("", "symlink-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			// Create target file first
+			Expect(os.WriteFile(filepath.Join(tmpDir, "target.txt"), []byte("content"), 0644)).To(Succeed())
+
+			header := &tar.Header{
+				Name:     "link.txt",
+				Linkname: "target.txt",
+				Typeflag: tar.TypeSymlink,
+			}
+
+			err = extractSymlink(header, filepath.Join(tmpDir, "link.txt"), tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify symlink exists
+			linkInfo, err := os.Lstat(filepath.Join(tmpDir, "link.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(linkInfo.Mode() & os.ModeSymlink).NotTo(Equal(os.FileMode(0)))
+		})
+
+		It("should reject symlink escape attempts", func() {
+			tmpDir, err := os.MkdirTemp("", "symlink-escape-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			header := &tar.Header{
+				Name:     "link.txt",
+				Linkname: "../../../etc/passwd",
+				Typeflag: tar.TypeSymlink,
+			}
+
+			err = extractSymlink(header, filepath.Join(tmpDir, "link.txt"), tmpDir)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("symlink escape attempt"))
+		})
+	})
+
+	Context("When testing copyDirectory helper", func() {
+		It("should copy directory recursively", func() {
+			By("creating source directory with files")
+			srcDir, err := os.MkdirTemp("", "copy-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			Expect(os.WriteFile(filepath.Join(srcDir, "file1.txt"), []byte("content1"), 0644)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(srcDir, "subdir"), 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(srcDir, "subdir", "file2.txt"), []byte("content2"), 0644)).To(Succeed())
+
+			By("copying to destination")
+			dstDir, err := os.MkdirTemp("", "copy-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			err = copyDirectory(srcDir, dstDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying copied files")
+			content1, err := os.ReadFile(filepath.Join(dstDir, "file1.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content1)).To(Equal("content1"))
+
+			content2, err := os.ReadFile(filepath.Join(dstDir, "subdir", "file2.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content2)).To(Equal("content2"))
+		})
+	})
+
+	Context("When testing copyFileWithMode helper", func() {
+		It("should copy file with mode", func() {
+			By("creating source file")
+			srcDir, err := os.MkdirTemp("", "copymode-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			srcFile := filepath.Join(srcDir, "source.txt")
+			Expect(os.WriteFile(srcFile, []byte("test content"), 0755)).To(Succeed())
+
+			By("copying to destination")
+			dstDir, err := os.MkdirTemp("", "copymode-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			dstFile := filepath.Join(dstDir, "dest.txt")
+			err = copyFileWithMode(srcFile, dstFile, 0755)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying content and mode")
+			content, err := os.ReadFile(dstFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content)).To(Equal("test content"))
+
+			info, err := os.Stat(dstFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Mode().Perm()).To(Equal(os.FileMode(0755)))
+		})
+
+		It("should fail when source doesn't exist", func() {
+			dstDir, err := os.MkdirTemp("", "copymode-fail-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			err = copyFileWithMode("/nonexistent/file.txt", filepath.Join(dstDir, "dest.txt"), 0644)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail when destination directory doesn't exist", func() {
+			srcDir, err := os.MkdirTemp("", "copymode-src2-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			srcFile := filepath.Join(srcDir, "source.txt")
+			Expect(os.WriteFile(srcFile, []byte("content"), 0644)).To(Succeed())
+
+			err = copyFileWithMode(srcFile, "/nonexistent/dir/dest.txt", 0644)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("When testing calculateDirectoryHash helper", func() {
+		It("should calculate hash for directory", func() {
+			By("creating directory with files")
+			tmpDir, err := os.MkdirTemp("", "hash-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("content"), 0644)).To(Succeed())
+
+			By("calculating hash")
+			hash, err := calculateDirectoryHash(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(hash).NotTo(BeEmpty())
+			Expect(hash).To(HaveLen(64)) // SHA256 hex = 64 chars
+		})
+
+		It("should return different hashes for different content", func() {
+			By("creating first directory")
+			dir1, err := os.MkdirTemp("", "hash-test1-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dir1) }()
+			Expect(os.WriteFile(filepath.Join(dir1, "file.txt"), []byte("content1"), 0644)).To(Succeed())
+
+			By("creating second directory")
+			dir2, err := os.MkdirTemp("", "hash-test2-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dir2) }()
+			Expect(os.WriteFile(filepath.Join(dir2, "file.txt"), []byte("content2"), 0644)).To(Succeed())
+
+			By("comparing hashes")
+			hash1, err := calculateDirectoryHash(dir1)
+			Expect(err).NotTo(HaveOccurred())
+
+			hash2, err := calculateDirectoryHash(dir2)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(hash1).NotTo(Equal(hash2))
+		})
+
+		It("should handle subdirectories", func() {
+			By("creating directory with subdirectories")
+			tmpDir, err := os.MkdirTemp("", "hash-subdir-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.MkdirAll(filepath.Join(tmpDir, "subdir1", "nested"), 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(tmpDir, "subdir1", "nested", "file.txt"), []byte("nested content"), 0644)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(tmpDir, "subdir2"), 0755)).To(Succeed())
+
+			By("calculating hash")
+			hash, err := calculateDirectoryHash(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(hash).NotTo(BeEmpty())
+		})
+	})
+
+	Context("When testing extractTarEntries helper", func() {
+		It("should extract multiple entries", func() {
+			By("creating tarball with multiple files")
+			tarballDir, err := os.MkdirTemp("", "entries-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarPath := filepath.Join(tarballDir, "multi.tar.gz")
+			createTestTarball(tarPath, map[string]string{
+				"file1.txt":          "content1",
+				"file2.txt":          "content2",
+				"subdir/file3.txt":   "content3",
+				"subdir/nested/a.md": "# Heading",
+			})
+
+			By("extracting to destination")
+			destDir, err := os.MkdirTemp("", "entries-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(destDir) }()
+
+			err = extractTarGzToDir(tarPath, destDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying all files extracted")
+			content1, err := os.ReadFile(filepath.Join(destDir, "file1.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content1)).To(Equal("content1"))
+
+			content2, err := os.ReadFile(filepath.Join(destDir, "file2.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content2)).To(Equal("content2"))
+
+			content3, err := os.ReadFile(filepath.Join(destDir, "subdir", "file3.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content3)).To(Equal("content3"))
+
+			contentA, err := os.ReadFile(filepath.Join(destDir, "subdir", "nested", "a.md"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(contentA)).To(Equal("# Heading"))
+		})
+	})
+
+	Context("When testing syncToFilesystem edge cases", func() {
+		It("should use default target path when not specified", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "sync-default-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test tarball")
+			tarballDir, err := os.MkdirTemp("", "tarball-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"config.yaml": "name: test\n",
+			})
+
+			By("syncing with no target path (uses default)")
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-source",
+					Namespace: "test-ws",
+				},
+				// No TargetPath specified - should default to arena/{source-name}
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     tarballPath,
+				Revision: "rev1",
+				Checksum: "sha256:abc",
+				Size:     50,
+			}
+
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(BeEmpty())
+			Expect(version).NotTo(BeEmpty())
+			Expect(contentPath).To(ContainSubstring("arena/my-source"))
+		})
+
+		It("should handle nested tar.gz in extracted content", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "nested-sync-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a nested tarball (tarball containing a tarball)")
+			innerTarDir, err := os.MkdirTemp("", "inner-tar-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(innerTarDir) }()
+
+			// First create the inner tarball
+			innerTarPath := filepath.Join(innerTarDir, "inner.tar.gz")
+			createTestTarball(innerTarPath, map[string]string{
+				"actual-config.yaml": "name: nested-content\n",
+				"prompts/test.txt":   "This is nested!\n",
+			})
+
+			// Now create outer tarball containing just the inner tarball
+			outerTarDir, err := os.MkdirTemp("", "outer-tar-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(outerTarDir) }()
+
+			// Copy inner tarball to outer directory
+			outerNestedPath := filepath.Join(outerTarDir, "pack.tar.gz")
+			innerData, err := os.ReadFile(innerTarPath)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(outerNestedPath, innerData, 0644)).To(Succeed())
+
+			// Create outer tarball
+			outerTarPath := filepath.Join(outerTarDir, "outer.tar.gz")
+			createTestTarball(outerTarPath, map[string]string{})
+
+			// Manually create outer tarball with the nested one
+			// Use tar-stream to create tarball with file entry
+			file, err := os.Create(outerTarPath)
+			Expect(err).NotTo(HaveOccurred())
+			gw := gzip.NewWriter(file)
+			tw := tar.NewWriter(gw)
+
+			// Add the inner tarball as a file entry
+			innerInfo, err := os.Stat(outerNestedPath)
+			Expect(err).NotTo(HaveOccurred())
+			hdr := &tar.Header{
+				Name: "pack.tar.gz",
+				Mode: 0644,
+				Size: innerInfo.Size(),
+			}
+			Expect(tw.WriteHeader(hdr)).To(Succeed())
+			innerContent, err := os.ReadFile(outerNestedPath)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = tw.Write(innerContent)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(tw.Close()).To(Succeed())
+			Expect(gw.Close()).To(Succeed())
+			Expect(file.Close()).To(Succeed())
+
+			By("syncing nested tarball")
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "nested-source",
+					Namespace: "test-ws",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					TargetPath: "arena/nested-source",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     outerTarPath,
+				Revision: "rev1",
+				Checksum: "sha256:nested",
+				Size:     100,
+			}
+
+			contentPath, version, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version).NotTo(BeEmpty())
+			Expect(contentPath).To(ContainSubstring(".arena/versions/"))
+
+			By("verifying nested content was extracted")
+			versionDir := filepath.Join(tmpDir, "test-ws", "test-ws", "arena/nested-source", ".arena", "versions", version)
+			actualConfigContent, err := os.ReadFile(filepath.Join(versionDir, "actual-config.yaml"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(actualConfigContent)).To(Equal("name: nested-content\n"))
+		})
+	})
+
+	Context("When testing extractRegularFile helper", func() {
+		It("should extract file with correct permissions", func() {
+			By("creating a tarball with executable file")
+			tarballDir, err := os.MkdirTemp("", "extract-perm-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarPath := filepath.Join(tarballDir, "test.tar.gz")
+			file, err := os.Create(tarPath)
+			Expect(err).NotTo(HaveOccurred())
+			gw := gzip.NewWriter(file)
+			tw := tar.NewWriter(gw)
+
+			// Add executable file
+			hdr := &tar.Header{
+				Name: "script.sh",
+				Mode: 0755,
+				Size: int64(len("#!/bin/bash\necho hello")),
+			}
+			Expect(tw.WriteHeader(hdr)).To(Succeed())
+			_, err = tw.Write([]byte("#!/bin/bash\necho hello"))
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(tw.Close()).To(Succeed())
+			Expect(gw.Close()).To(Succeed())
+			Expect(file.Close()).To(Succeed())
+
+			By("extracting")
+			destDir, err := os.MkdirTemp("", "extract-perm-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(destDir) }()
+
+			err = extractTarGzToDir(tarPath, destDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying file permissions")
+			info, err := os.Stat(filepath.Join(destDir, "script.sh"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Mode().Perm()).To(Equal(os.FileMode(0755)))
+		})
+	})
+
+	Context("When testing storeTarGzArtifact helper", func() {
+		It("should store tarball to artifact directory", func() {
+			By("creating artifact directories")
+			artifactDir, err := os.MkdirTemp("", "artifact-store-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			By("creating a test tarball")
+			tarballDir, err := os.MkdirTemp("", "tarball-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tarballDir) }()
+
+			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
+			createTestTarball(tarballPath, map[string]string{
+				"config.yaml": "test content\n",
+			})
+
+			By("storing the artifact")
+			reconciler := &ArenaSourceReconciler{
+				ArtifactDir:     artifactDir,
+				ArtifactBaseURL: "http://localhost:8080/artifacts",
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "store-test",
+					Namespace: "default",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     tarballPath,
+				Revision: "test-rev",
+				Checksum: "sha256:abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+				Size:     100,
+			}
+
+			_, _, url, err := reconciler.storeTarGzArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(ContainSubstring("http://localhost:8080/artifacts"))
+			Expect(url).To(ContainSubstring("default/store-test"))
+
+			By("verifying artifact was stored")
+			storedPath := filepath.Join(artifactDir, "default", "store-test")
+			entries, err := os.ReadDir(storedPath)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).ToNot(BeEmpty())
 		})
 	})
 

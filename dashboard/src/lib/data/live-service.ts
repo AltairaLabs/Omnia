@@ -29,6 +29,7 @@ import type {
   ArenaSourceSpec,
   ArenaConfig,
   ArenaConfigSpec,
+  ArenaConfigContent,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
@@ -364,6 +365,14 @@ export class LiveDataService implements DataService {
 
   async getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]> {
     return this.arenaService.getArenaConfigScenarios(workspace, name);
+  }
+
+  async getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent> {
+    return this.arenaService.getArenaConfigContent(workspace, name);
+  }
+
+  async getArenaConfigFile(workspace: string, configName: string, filePath: string): Promise<string> {
+    return this.arenaService.getArenaConfigFile(workspace, configName, filePath);
   }
 
   async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {

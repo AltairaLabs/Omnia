@@ -17,10 +17,17 @@ limitations under the License.
 package controller
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,11 +80,21 @@ type ArenaSourceReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	// ArtifactDir is the directory where artifacts are stored
+	// ArtifactDir is the directory where artifacts are stored (legacy tar.gz serving)
 	ArtifactDir string
 
-	// ArtifactBaseURL is the base URL for serving artifacts
+	// ArtifactBaseURL is the base URL for serving artifacts (legacy tar.gz serving)
 	ArtifactBaseURL string
+
+	// WorkspaceContentPath is the base path for workspace content volumes.
+	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/arena/{source-name}/
+	// If empty, falls back to legacy tar.gz artifact serving.
+	WorkspaceContentPath string
+
+	// MaxVersionsPerSource is the maximum number of versions to retain per source.
+	// Older versions are garbage collected when this limit is exceeded.
+	// Default is 10 if not set.
+	MaxVersionsPerSource int
 
 	// LicenseValidator validates license for source types (defense in depth)
 	LicenseValidator *license.Validator
@@ -98,6 +115,8 @@ type ArenaSourceReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+//
+//nolint:gocognit,gocyclo // Reconcile functions inherently have high complexity due to state machine logic
 func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.V(1).Info("reconciling ArenaSource", "name", req.Name, "namespace", req.Namespace)
@@ -195,8 +214,8 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{RequeueAfter: interval}, nil
 		}
 
-		// Store the artifact
-		artifactURL, err := r.storeArtifact(source, result.artifact)
+		// Store the artifact (sync to filesystem or legacy tar.gz)
+		contentPath, version, artifactURL, err := r.storeArtifact(source, result.artifact)
 		if err != nil {
 			log.Error(err, "Failed to store artifact")
 			r.handleFetchError(ctx, source, err)
@@ -215,17 +234,42 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// Update status with artifact info
 		source.Status.Artifact = &omniav1alpha1.Artifact{
 			Revision:       result.artifact.Revision,
-			URL:            artifactURL,
+			URL:            artifactURL, // Legacy: tar.gz URL (empty for filesystem mode)
+			ContentPath:    contentPath, // New: filesystem path
+			Version:        version,     // New: content-addressable hash
 			Checksum:       result.artifact.Checksum,
 			Size:           result.artifact.Size,
 			LastUpdateTime: metav1.Now(),
 		}
 		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
 
+		// Update version tracking status
+		if version != "" {
+			source.Status.LastSyncRevision = result.artifact.Revision
+			source.Status.LastVersionCreated = version
+			source.Status.HeadVersion = version
+			// Count versions
+			if r.WorkspaceContentPath != "" {
+				workspaceName := r.getWorkspaceForNamespace(ctx, source.Namespace)
+				targetPath := source.Spec.TargetPath
+				if targetPath == "" {
+					targetPath = fmt.Sprintf("arena/%s", source.Name)
+				}
+				versionsDir := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, targetPath, ".arena", "versions")
+				if entries, err := os.ReadDir(versionsDir); err == nil {
+					source.Status.VersionCount = len(entries)
+				}
+			}
+		}
+
 		r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
 			"FetchComplete", "Successfully fetched artifact")
+		availableMsg := fmt.Sprintf("Artifact available at revision %s", result.artifact.Revision)
+		if version != "" {
+			availableMsg = fmt.Sprintf("Content synced at revision %s, version %s", result.artifact.Revision, version)
+		}
 		r.setCondition(source, ArenaSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
-			"ArtifactAvailable", fmt.Sprintf("Artifact available at revision %s", result.artifact.Revision))
+			"ArtifactAvailable", availableMsg)
 		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
 			"Ready", "ArenaSource is ready")
 
@@ -511,17 +555,33 @@ func (r *ArenaSourceReconciler) loadOCICredentials(ctx context.Context, namespac
 	return creds, nil
 }
 
-// storeArtifact stores the fetched artifact and returns its URL.
-func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (string, error) {
-	// If artifact has no path (no-change result), return existing URL
+// storeArtifact stores the fetched artifact. It either syncs to the workspace
+// content filesystem (new approach) or stores as tar.gz (legacy approach).
+// Returns contentPath, version, url (url is empty for filesystem mode).
+func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
+	// If artifact has no path (no-change result), return existing values
 	if artifact.Path == "" && source.Status.Artifact != nil {
-		return source.Status.Artifact.URL, nil
+		return source.Status.Artifact.ContentPath,
+			source.Status.Artifact.Version,
+			source.Status.Artifact.URL,
+			nil
 	}
 
+	// Use filesystem sync if workspace content path is configured
+	if r.WorkspaceContentPath != "" {
+		return r.syncToFilesystem(source, artifact)
+	}
+
+	// Legacy tar.gz artifact serving
+	return r.storeTarGzArtifact(source, artifact)
+}
+
+// storeTarGzArtifact stores artifact as tar.gz (legacy mode).
+func (r *ArenaSourceReconciler) storeTarGzArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
 	// Create artifact directory if needed
 	artifactDir := filepath.Join(r.ArtifactDir, source.Namespace, source.Name)
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create artifact directory: %w", err)
+		return "", "", "", fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 
 	// Generate artifact filename
@@ -530,12 +590,431 @@ func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource,
 
 	// Copy artifact to destination
 	if err := copyFile(artifact.Path, destPath); err != nil {
-		return "", fmt.Errorf("failed to copy artifact: %w", err)
+		return "", "", "", fmt.Errorf("failed to copy artifact: %w", err)
 	}
 
 	// Generate URL
-	url := fmt.Sprintf("%s/%s/%s/%s", r.ArtifactBaseURL, source.Namespace, source.Name, filename)
-	return url, nil
+	url = fmt.Sprintf("%s/%s/%s/%s", r.ArtifactBaseURL, source.Namespace, source.Name, filename)
+	return "", "", url, nil
+}
+
+// syncToFilesystem extracts the artifact to the workspace content filesystem
+// and creates a content-addressable version.
+func (r *ArenaSourceReconciler) syncToFilesystem(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
+	ctx := context.Background()
+	log := logf.FromContext(ctx).WithValues(
+		"source", source.Name,
+		"namespace", source.Namespace,
+	)
+
+	// Get workspace name from namespace label (allows future multi-namespace workspaces)
+	workspaceName := r.getWorkspaceForNamespace(ctx, source.Namespace)
+
+	// Determine target path within workspace content
+	targetPath := source.Spec.TargetPath
+	if targetPath == "" {
+		targetPath = fmt.Sprintf("arena/%s", source.Name)
+	}
+
+	// Workspace content structure: {base}/{workspace}/{namespace}/{targetPath}
+	// This structure supports future multi-namespace workspaces
+	workspacePath := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, targetPath)
+
+	// Extract to temporary directory first
+	tempDir, err := os.MkdirTemp("", "arena-sync-*")
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	// Extract tar.gz to temp directory
+	if err := extractTarGzToDir(artifact.Path, tempDir); err != nil {
+		return "", "", "", fmt.Errorf("failed to extract artifact: %w", err)
+	}
+
+	// Handle double-wrapped archives: if extraction yields a single .tar.gz file,
+	// extract it again (e.g., ConfigMap with pre-packaged arena-pack.tar.gz)
+	if nestedTarGz := findNestedTarGz(tempDir); nestedTarGz != "" {
+		nestedTempDir, err := os.MkdirTemp("", "arena-nested-*")
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to create nested temp directory: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(nestedTempDir) }()
+
+		if err := extractTarGzToDir(nestedTarGz, nestedTempDir); err != nil {
+			return "", "", "", fmt.Errorf("failed to extract nested archive: %w", err)
+		}
+
+		// Replace tempDir contents with nested contents
+		_ = os.RemoveAll(tempDir)
+		tempDir = nestedTempDir
+	}
+
+	// Calculate content hash for versioning
+	contentHash, err := calculateDirectoryHash(tempDir)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to calculate content hash: %w", err)
+	}
+
+	// Short version for display (first 12 chars of SHA256)
+	version = contentHash[:12]
+
+	// Check if this version already exists
+	versionDir := filepath.Join(workspacePath, ".arena", "versions", version)
+	if _, err := os.Stat(versionDir); err == nil {
+		log.V(1).Info("Version already exists, skipping sync", "version", version)
+		// Version already exists, just update HEAD
+		contentPath = filepath.Join(targetPath, ".arena", "versions", version)
+		if err := r.updateHEAD(workspacePath, version); err != nil {
+			return "", "", "", fmt.Errorf("failed to update HEAD: %w", err)
+		}
+		return contentPath, version, "", nil
+	}
+
+	// Create version directory
+	if err := os.MkdirAll(versionDir, 0755); err != nil {
+		return "", "", "", fmt.Errorf("failed to create version directory: %w", err)
+	}
+
+	// Copy content to version directory
+	if err := copyDirectory(tempDir, versionDir); err != nil {
+		// Clean up on failure
+		_ = os.RemoveAll(versionDir)
+		return "", "", "", fmt.Errorf("failed to copy content to version directory: %w", err)
+	}
+
+	// Update HEAD pointer atomically
+	if err := r.updateHEAD(workspacePath, version); err != nil {
+		return "", "", "", fmt.Errorf("failed to update HEAD: %w", err)
+	}
+
+	// Garbage collect old versions
+	if err := r.gcOldVersions(workspacePath); err != nil {
+		// Log but don't fail on GC errors
+		log.Error(err, "Failed to garbage collect old versions")
+	}
+
+	log.Info("Successfully synced content to filesystem",
+		"version", version,
+		"path", versionDir,
+	)
+
+	contentPath = filepath.Join(targetPath, ".arena", "versions", version)
+	return contentPath, version, "", nil
+}
+
+// getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
+// Returns the namespace name as fallback if workspace label is not found.
+func (r *ArenaSourceReconciler) getWorkspaceForNamespace(ctx context.Context, namespace string) string {
+	// Handle nil client (e.g., in tests that don't set up the client)
+	if r.Client == nil {
+		return namespace
+	}
+	ns := &corev1.Namespace{}
+	if err := r.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
+		// Fallback to namespace name if we can't look it up
+		return namespace
+	}
+	if workspace, ok := ns.Labels[labelWorkspace]; ok && workspace != "" {
+		return workspace
+	}
+	// Fallback to namespace name
+	return namespace
+}
+
+// updateHEAD atomically updates the HEAD pointer to the given version.
+func (r *ArenaSourceReconciler) updateHEAD(workspacePath, version string) error {
+	arenaDir := filepath.Join(workspacePath, ".arena")
+	if err := os.MkdirAll(arenaDir, 0755); err != nil {
+		return err
+	}
+
+	headPath := filepath.Join(arenaDir, "HEAD")
+	tempPath := headPath + ".tmp"
+
+	// Write to temp file first
+	if err := os.WriteFile(tempPath, []byte(version), 0644); err != nil {
+		return err
+	}
+
+	// Atomic rename
+	return os.Rename(tempPath, headPath)
+}
+
+// gcOldVersions removes old versions exceeding MaxVersionsPerSource.
+func (r *ArenaSourceReconciler) gcOldVersions(workspacePath string) error {
+	versionsDir := filepath.Join(workspacePath, ".arena", "versions")
+
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	maxVersions := r.MaxVersionsPerSource
+	if maxVersions <= 0 {
+		maxVersions = 10 // Default
+	}
+
+	if len(entries) <= maxVersions {
+		return nil
+	}
+
+	// Get version directories with their mod times
+	type versionInfo struct {
+		name    string
+		modTime time.Time
+	}
+	versions := make([]versionInfo, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		versions = append(versions, versionInfo{
+			name:    entry.Name(),
+			modTime: info.ModTime(),
+		})
+	}
+
+	// Sort by mod time (oldest first)
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].modTime.Before(versions[j].modTime)
+	})
+
+	// Remove oldest versions
+	for i := 0; i < len(versions)-maxVersions; i++ {
+		versionPath := filepath.Join(versionsDir, versions[i].name)
+		if err := os.RemoveAll(versionPath); err != nil {
+			return fmt.Errorf("failed to remove old version %s: %w", versions[i].name, err)
+		}
+	}
+
+	return nil
+}
+
+// findNestedTarGz checks if a directory contains only a single .tar.gz file.
+// Returns the path to the tar.gz file if found, empty string otherwise.
+// This handles ConfigMaps that contain pre-packaged arena archives.
+func findNestedTarGz(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+
+	// Must have exactly one entry that is a .tar.gz file
+	if len(entries) != 1 {
+		return ""
+	}
+
+	entry := entries[0]
+	if entry.IsDir() {
+		return ""
+	}
+
+	name := entry.Name()
+	if strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".tgz") {
+		return filepath.Join(dir, name)
+	}
+
+	return ""
+}
+
+// extractTarGzToDir extracts a tar.gz file to a directory.
+func extractTarGzToDir(tarPath, destDir string) error {
+	file, err := os.Open(tarPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = gzr.Close() }()
+
+	tr := tar.NewReader(gzr)
+	return extractTarEntries(tr, destDir)
+}
+
+// extractTarEntries processes all entries from a tar reader.
+func extractTarEntries(tr *tar.Reader, destDir string) error {
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := extractTarEntry(tr, header, destDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// extractTarEntry extracts a single tar entry to the destination directory.
+func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
+	// Security: sanitize path to prevent directory traversal
+	target := filepath.Join(destDir, header.Name)
+	if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
+		return fmt.Errorf("invalid tar path: %s", header.Name)
+	}
+
+	// Skip macOS resource fork files (AppleDouble format)
+	if strings.HasPrefix(filepath.Base(header.Name), "._") {
+		return nil
+	}
+
+	switch header.Typeflag {
+	case tar.TypeDir:
+		return os.MkdirAll(target, 0755)
+	case tar.TypeReg:
+		return extractRegularFile(tr, target, header)
+	case tar.TypeSymlink:
+		return extractSymlink(header, target, destDir)
+	}
+	return nil
+}
+
+// extractRegularFile extracts a regular file from the tar archive.
+func extractRegularFile(tr *tar.Reader, target string, header *tar.Header) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return err
+	}
+
+	outFile, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.CopyN(outFile, tr, header.Size); err != nil && err != io.EOF {
+		_ = outFile.Close()
+		return err
+	}
+
+	if err := outFile.Close(); err != nil {
+		return err
+	}
+
+	return os.Chmod(target, os.FileMode(header.Mode))
+}
+
+// extractSymlink extracts a symlink, validating it doesn't escape the destination.
+func extractSymlink(header *tar.Header, target, destDir string) error {
+	linkTarget := header.Linkname
+	absTarget := filepath.Join(filepath.Dir(target), linkTarget)
+	if !strings.HasPrefix(filepath.Clean(absTarget), filepath.Clean(destDir)) {
+		return fmt.Errorf("symlink escape attempt: %s -> %s", header.Name, linkTarget)
+	}
+	return os.Symlink(linkTarget, target)
+}
+
+// calculateDirectoryHash calculates a SHA256 hash of directory contents.
+// This creates a content-addressable version identifier.
+func calculateDirectoryHash(dir string) (string, error) {
+	h := sha256.New()
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+
+		// Hash the path
+		_, _ = h.Write([]byte(relPath))
+
+		// Hash file mode
+		_, _ = fmt.Fprintf(h, "%d", info.Mode())
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Hash file content
+		if info.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(h, f); err != nil {
+				_ = f.Close()
+				return err
+			}
+			_ = f.Close()
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// copyDirectory recursively copies a directory.
+func copyDirectory(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		targetPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(targetPath, info.Mode())
+		}
+
+		// Copy file
+		return copyFileWithMode(path, targetPath, info.Mode())
+	})
+}
+
+// copyFileWithMode copies a file preserving its mode.
+func copyFileWithMode(src, dst string, mode os.FileMode) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sourceFile.Close() }()
+
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		_ = destFile.Close()
+		return err
+	}
+
+	if err := destFile.Sync(); err != nil {
+		_ = destFile.Close()
+		return err
+	}
+
+	return destFile.Close()
 }
 
 // copyFile copies a file from src to dst.

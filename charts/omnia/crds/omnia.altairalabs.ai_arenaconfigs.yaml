@@ -285,6 +285,12 @@ spec:
                 description: resolvedSource contains information about the resolved
                   ArenaSource.
                 properties:
+                  contentPath:
+                    description: |-
+                      contentPath is the filesystem path where the content is synced.
+                      This path is relative to the workspace content volume root.
+                      Workers can mount the PVC directly and access content at this path.
+                    type: string
                   revision:
                     description: revision is the resolved artifact revision from the
                       source.
@@ -295,7 +301,14 @@ spec:
                     format: int32
                     type: integer
                   url:
-                    description: url is the artifact download URL from the source.
+                    description: |-
+                      url is the artifact download URL from the source (legacy tar.gz serving).
+                      Deprecated: Use contentPath for filesystem-based access.
+                    type: string
+                  version:
+                    description: |-
+                      version is the content-addressable version hash of the synced content.
+                      Used for reproducibility and version pinning.
                     type: string
                 type: object
             type: object

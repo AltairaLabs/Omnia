@@ -21,6 +21,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { usePromptPack, usePromptPackContent, useAgents } from "@/hooks";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import type { PromptDefinition } from "@/lib/data/types";
 
 interface PromptPackDetailPageProps {
@@ -41,10 +42,16 @@ function promptsToArray(prompts?: Record<string, PromptDefinition>): Array<Promp
 export default function PromptPackDetailPage({ params }: Readonly<PromptPackDetailPageProps>) {
   const { name } = use(params);
   const searchParams = useSearchParams();
-  const namespace = searchParams.get("namespace") || "production";
+  const namespaceParam = searchParams.get("namespace") || "production";
 
-  const { data: promptPack, isLoading } = usePromptPack(name, namespace);
-  const { data: packContent, isLoading: isContentLoading } = usePromptPackContent(name, namespace);
+  // Find workspace by namespace - workspace.namespace is the K8s namespace
+  const { data: workspaces } = useWorkspaces();
+  const workspace = workspaces?.find(w => w.namespace === namespaceParam);
+  const workspaceName = workspace?.name || namespaceParam;
+  const namespace = workspace?.namespace || namespaceParam;
+
+  const { data: promptPack, isLoading } = usePromptPack(name, workspaceName);
+  const { data: packContent, isLoading: isContentLoading } = usePromptPackContent(name, workspaceName);
   const { data: allAgents } = useAgents();
 
   // Convert prompts Record to array for iteration

@@ -34,6 +34,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testEmptyDigest is the SHA256 digest of an empty blob, used in tests.
+const testEmptyDigest = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
 func TestNewOCIFetcher(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -149,8 +152,7 @@ func TestOCIFetcher_GetAuth_NilCredentials(t *testing.T) {
 		Credentials: nil,
 	})
 
-	auth, err := fetcher.getAuth()
-	require.NoError(t, err)
+	auth := fetcher.getAuth()
 	assert.NotNil(t, auth) // Returns Anonymous authenticator
 }
 
@@ -163,8 +165,7 @@ func TestOCIFetcher_GetAuth_BasicCredentials(t *testing.T) {
 		},
 	})
 
-	auth, err := fetcher.getAuth()
-	require.NoError(t, err)
+	auth := fetcher.getAuth()
 	assert.NotNil(t, auth)
 }
 
@@ -176,8 +177,7 @@ func TestOCIFetcher_GetAuth_UsernameOnly(t *testing.T) {
 		},
 	})
 
-	auth, err := fetcher.getAuth()
-	require.NoError(t, err)
+	auth := fetcher.getAuth()
 	assert.NotNil(t, auth)
 }
 
@@ -189,8 +189,7 @@ func TestOCIFetcher_GetAuth_PasswordOnly(t *testing.T) {
 		},
 	})
 
-	auth, err := fetcher.getAuth()
-	require.NoError(t, err)
+	auth := fetcher.getAuth()
 	assert.NotNil(t, auth)
 }
 
@@ -204,8 +203,7 @@ func TestOCIFetcher_GetAuth_DockerConfig(t *testing.T) {
 		},
 	})
 
-	auth, err := fetcher.getAuth()
-	require.NoError(t, err)
+	auth := fetcher.getAuth()
 	assert.NotNil(t, auth)
 }
 
@@ -215,8 +213,7 @@ func TestOCIFetcher_GetAuth_EmptyCredentials(t *testing.T) {
 		Credentials: &OCICredentials{},
 	})
 
-	auth, err := fetcher.getAuth()
-	require.NoError(t, err)
+	auth := fetcher.getAuth()
 	assert.NotNil(t, auth) // Returns Anonymous authenticator
 }
 
@@ -235,7 +232,7 @@ func TestOCIFetcher_FormatRevision(t *testing.T) {
 
 func TestOCIFetcher_FormatRevision_DigestRef(t *testing.T) {
 	// Use a valid 64-character hex digest
-	digest := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	digest := testEmptyDigest
 	fetcher := NewOCIFetcher(OCIFetcherConfig{
 		URL: "oci://ghcr.io/example/repo@" + digest,
 	})
@@ -250,9 +247,8 @@ func TestOCIFetcher_FormatRevision_DigestRef(t *testing.T) {
 
 func TestOCIFetcher_GetRemoteOptions(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      OCIFetcherConfig
-		expectError bool
+		name   string
+		config OCIFetcherConfig
 	}{
 		{
 			name: "no credentials",
@@ -284,14 +280,7 @@ func TestOCIFetcher_GetRemoteOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fetcher := NewOCIFetcher(tt.config)
-			opts, err := fetcher.getRemoteOptions(context.Background())
-
-			if tt.expectError {
-				assert.Error(t, err)
-				return
-			}
-
-			require.NoError(t, err)
+			opts := fetcher.getRemoteOptions(context.Background())
 			assert.NotEmpty(t, opts)
 		})
 	}
@@ -358,7 +347,7 @@ func TestOCIFetcher_Fetch_WithDigestRevision(t *testing.T) {
 
 	ctx := context.Background()
 	// Use a properly formatted sha256 digest
-	_, err := fetcher.Fetch(ctx, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	_, err := fetcher.Fetch(ctx, testEmptyDigest)
 	// This will fail at the remote.Image call but we're testing the digest parsing path
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to pull image")
@@ -423,8 +412,7 @@ func TestOCIFetcher_GetRemoteOptions_WithContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	opts, err := fetcher.getRemoteOptions(ctx)
-	require.NoError(t, err)
+	opts := fetcher.getRemoteOptions(ctx)
 	assert.NotEmpty(t, opts)
 }
 
@@ -449,7 +437,7 @@ func (m *mockRemoteClient) Image(ref name.Reference, opts ...remote.Option) (v1.
 }
 
 func TestOCIFetcher_LatestRevision_WithMock(t *testing.T) {
-	expectedDigest := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	expectedDigest := testEmptyDigest
 
 	fetcher := NewOCIFetcher(OCIFetcherConfig{
 		URL: "oci://ghcr.io/example/repo:latest",
@@ -516,7 +504,7 @@ func TestOCIFetcher_Fetch_WithDigestRevision_Mock(t *testing.T) {
 
 	ctx := context.Background()
 	// Use a valid digest revision
-	revision := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	revision := testEmptyDigest
 	artifact, err := fetcher.Fetch(ctx, revision)
 	require.NoError(t, err)
 	defer func() { _ = os.Remove(artifact.Path) }()

@@ -81,6 +81,9 @@ func main() {
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
 	var artifactBaseURL string
+	var workspaceContentPath string
+	var nfsServer string
+	var nfsPath string
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
@@ -107,6 +110,15 @@ func main() {
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent. Default: IfNotPresent")
 	flag.StringVar(&artifactBaseURL, "artifact-base-url", "http://localhost:8082/artifacts",
 		"Base URL for serving Arena artifacts to workers. In-cluster, use the service URL.")
+	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
+		"Base path for workspace content volumes. If set, ArenaSource syncs content to filesystem "+
+			"instead of serving tar.gz. Structure: {path}/{workspace}/{namespace}/arena/{source-name}/. "+
+			"Leave empty for legacy tar.gz artifact serving.")
+	flag.StringVar(&nfsServer, "nfs-server", "",
+		"NFS server address for workspace content (e.g., nfs-server.namespace.svc.cluster.local). "+
+			"When set with --nfs-path, Arena workers mount NFS directly for shared content access.")
+	flag.StringVar(&nfsPath, "nfs-path", "",
+		"NFS export path for workspace content (e.g., /nfsshare). Used with --nfs-server.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
 		"Redis server address for Arena work queue (e.g., redis:6379). If empty, Arena queue features are disabled.")
 	flag.StringVar(&redisPassword, "redis-password", "",
@@ -290,12 +302,14 @@ func main() {
 	}
 
 	if err := (&controller.ArenaSourceReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Recorder:         mgr.GetEventRecorderFor("arenasource-controller"),
-		ArtifactDir:      arenaArtifactDir,
-		ArtifactBaseURL:  artifactBaseURL,
-		LicenseValidator: licenseValidator,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Recorder:             mgr.GetEventRecorderFor("arenasource-controller"),
+		ArtifactDir:          arenaArtifactDir,
+		ArtifactBaseURL:      artifactBaseURL,
+		WorkspaceContentPath: workspaceContentPath, // If set, enables filesystem sync mode
+		MaxVersionsPerSource: 10,                   // Default version retention
+		LicenseValidator:     licenseValidator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)
@@ -317,9 +331,12 @@ func main() {
 		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
 		LicenseValidator:      licenseValidator,
 		// Redis configuration for lazy connection during reconciliation
-		RedisAddr:     redisAddr,
-		RedisPassword: redisPassword,
-		RedisDB:       redisDB,
+		RedisAddr:            redisAddr,
+		RedisPassword:        redisPassword,
+		RedisDB:              redisDB,
+		WorkspaceContentPath: workspaceContentPath, // If set, enables filesystem-based content access
+		NFSServer:            nfsServer,            // If set with NFSPath, workers mount NFS directly
+		NFSPath:              nfsPath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)

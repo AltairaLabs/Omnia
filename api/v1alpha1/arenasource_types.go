@@ -144,6 +144,18 @@ type ArenaSourceSpec struct {
 	// +kubebuilder:default="60s"
 	// +optional
 	Timeout string `json:"timeout,omitempty"`
+
+	// targetPath specifies where to sync content within the workspace content volume.
+	// The path is relative to the workspace content root: /workspace-content/{workspace}/default/
+	// If not specified, defaults to "arena/{source-name}".
+	// +optional
+	TargetPath string `json:"targetPath,omitempty"`
+
+	// createVersionOnSync controls whether to create a new version after each successful sync.
+	// Versions are content-addressable using SHA256 hashes.
+	// +kubebuilder:default=true
+	// +optional
+	CreateVersionOnSync *bool `json:"createVersionOnSync,omitempty"`
 }
 
 // Artifact represents a fetched PromptKit bundle artifact.
@@ -155,10 +167,21 @@ type Artifact struct {
 	// +kubebuilder:validation:Required
 	Revision string `json:"revision"`
 
-	// url is the URL where the artifact can be downloaded.
-	// This URL is used by Arena workers to fetch the bundle.
-	// +kubebuilder:validation:Required
-	URL string `json:"url"`
+	// url is the URL where the artifact can be downloaded (legacy tar.gz serving).
+	// Deprecated: Use contentPath for filesystem-based access.
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// contentPath is the filesystem path where the content is synced.
+	// This is relative to the workspace content volume root.
+	// Workers can mount the PVC directly and access content at this path.
+	// +optional
+	ContentPath string `json:"contentPath,omitempty"`
+
+	// version is the content-addressable version hash (SHA256).
+	// This identifies a specific immutable snapshot of the synced content.
+	// +optional
+	Version string `json:"version,omitempty"`
 
 	// checksum is the SHA256 checksum of the artifact.
 	// +optional
@@ -215,6 +238,24 @@ type ArenaSourceStatus struct {
 	// nextFetchTime is the scheduled time for the next fetch.
 	// +optional
 	NextFetchTime *metav1.Time `json:"nextFetchTime,omitempty"`
+
+	// lastSyncRevision is the revision from the source that was last synced.
+	// Used to detect when re-sync is needed.
+	// +optional
+	LastSyncRevision string `json:"lastSyncRevision,omitempty"`
+
+	// lastVersionCreated is the version hash created on the last successful sync.
+	// +optional
+	LastVersionCreated string `json:"lastVersionCreated,omitempty"`
+
+	// headVersion points to the current "latest" version.
+	// This is updated atomically after a successful sync.
+	// +optional
+	HeadVersion string `json:"headVersion,omitempty"`
+
+	// versionCount is the number of versions currently stored.
+	// +optional
+	VersionCount int `json:"versionCount,omitempty"`
 }
 
 // +kubebuilder:object:root=true

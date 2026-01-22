@@ -77,15 +77,19 @@ export interface ConfigMapSourceSpec {
 /** Artifact produced by ArenaSource reconciliation */
 export interface Artifact {
   /** Revision identifier (e.g., "main@sha1:abc123" for git) */
-  revision: string;
-  /** Internal URL to fetch the artifact */
-  url: string;
+  revision?: string;
+  /** Internal URL to fetch the artifact (legacy - tar.gz serving) */
+  url?: string;
   /** SHA256 checksum of the artifact */
   checksum: string;
   /** Size in bytes */
   size?: number;
   /** When the artifact was last updated */
   lastUpdateTime: string;
+  /** Relative path to content in workspace volume (e.g., "arena/my-source/.arena/versions/abc123") */
+  contentPath?: string;
+  /** Version identifier (short hash of checksum) */
+  version?: string;
 }
 
 /** ArenaSource specification */
@@ -101,7 +105,7 @@ export interface ArenaSourceSpec {
   /** S3 bucket configuration */
   s3?: S3SourceSpec;
   /** ConfigMap configuration */
-  configMapRef?: ConfigMapSourceSpec;
+  configMap?: ConfigMapSourceSpec;
   /** Secret containing credentials */
   secretRef?: LocalObjectReference;
   /** Suspend reconciliation */
@@ -641,4 +645,296 @@ export interface Scenario {
   assertions?: string[];
   /** File path within artifact */
   path: string;
+  /** Reference to the prompt to use */
+  promptRef?: string;
+}
+
+// =============================================================================
+// Arena.yaml Content Types (parsed from ArenaSource artifact)
+// =============================================================================
+
+/** Prompt config reference in arena.yaml */
+export interface ArenaPromptConfigRef {
+  /** Prompt ID used for reference */
+  id: string;
+  /** Path to the prompt file */
+  file: string;
+  /** Variable overrides */
+  vars?: Record<string, string>;
+}
+
+/** Provider reference in arena.yaml */
+export interface ArenaProviderRef {
+  /** Path to the provider file */
+  file: string;
+  /** Provider group (e.g., "default", "evaluation") */
+  group?: string;
+}
+
+/** Scenario reference in arena.yaml */
+export interface ArenaScenarioRef {
+  /** Path to the scenario file */
+  file: string;
+}
+
+/** Tool reference in arena.yaml */
+export interface ArenaToolRef {
+  /** Path to the tool file */
+  file: string;
+}
+
+/** MCP server configuration */
+export interface ArenaMcpServer {
+  /** Command to run the MCP server */
+  command: string;
+  /** Arguments for the command */
+  args?: string[];
+  /** Environment variables */
+  env?: Record<string, string>;
+}
+
+/** Judge configuration for LLM-as-judge evaluation */
+export interface ArenaJudge {
+  /** Provider ID to use for this judge */
+  provider: string;
+}
+
+/** Judge defaults configuration */
+export interface ArenaJudgeDefaults {
+  /** Default prompt for judge-based assertions */
+  prompt?: string;
+  /** Registry path for judge resources */
+  registryPath?: string;
+}
+
+/** Output configuration in defaults */
+export interface ArenaOutputConfig {
+  /** Output directory */
+  dir?: string;
+  /** Output formats to generate */
+  formats?: string[];
+}
+
+/** Session recording configuration */
+export interface ArenaSessionConfig {
+  /** Enable session recording */
+  enabled?: boolean;
+  /** Directory for session files */
+  dir?: string;
+}
+
+/** State management configuration */
+export interface ArenaStateConfig {
+  /** Enable state management */
+  enabled?: boolean;
+  /** Maximum history turns to retain */
+  maxHistoryTurns?: number;
+  /** Persistence backend */
+  persistence?: string;
+  /** Redis URL for persistence */
+  redisUrl?: string;
+}
+
+/** Default configuration values in arena.yaml */
+export interface ArenaDefaultsConfig {
+  /** Default temperature for LLM calls */
+  temperature?: number;
+  /** Default top_p for LLM calls */
+  topP?: number;
+  /** Default max tokens */
+  maxTokens?: number;
+  /** Random seed for reproducibility */
+  seed?: number;
+  /** Concurrency level */
+  concurrency?: number;
+  /** Timeout per scenario */
+  timeout?: string;
+  /** Maximum retries */
+  maxRetries?: number;
+  /** Output configuration */
+  output?: ArenaOutputConfig;
+  /** Session recording configuration */
+  session?: ArenaSessionConfig;
+  /** Failure behavior conditions */
+  failOn?: string[];
+  /** State management configuration */
+  state?: ArenaStateConfig;
+}
+
+/** Self-play configuration in arena.yaml */
+export interface ArenaSelfPlayConfig {
+  /** Enable self-play mode */
+  enabled: boolean;
+  /** Persona file for simulated user */
+  persona?: string;
+  /** Provider ID for simulated user */
+  provider?: string;
+}
+
+// =============================================================================
+// Parsed Content Types (fully resolved from file references)
+// =============================================================================
+
+/** Parsed prompt config from .prompt.yaml file */
+export interface ParsedPromptConfig {
+  /** Prompt ID */
+  id: string;
+  /** Human-readable name */
+  name: string;
+  /** Prompt version */
+  version?: string;
+  /** Description */
+  description?: string;
+  /** Task type */
+  taskType?: string;
+  /** System template (may be truncated for display) */
+  systemTemplate?: string;
+  /** Variables used in the template */
+  variables?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    default?: string;
+    description?: string;
+  }>;
+  /** Tool names this prompt can use */
+  allowedTools?: string[];
+  /** Validators configured */
+  validators?: Array<{
+    type: string;
+    config?: Record<string, unknown>;
+  }>;
+  /** Source file path */
+  file: string;
+}
+
+/** Parsed provider config from .provider.yaml file */
+export interface ParsedProviderConfig {
+  /** Provider ID */
+  id: string;
+  /** Provider name */
+  name: string;
+  /** Provider type (openai, anthropic, gemini, mock) */
+  type: string;
+  /** Model identifier */
+  model: string;
+  /** Provider group */
+  group?: string;
+  /** Pricing information */
+  pricing?: {
+    inputPer1kTokens?: number;
+    outputPer1kTokens?: number;
+  };
+  /** Default parameters */
+  defaults?: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+  };
+  /** Source file path */
+  file: string;
+}
+
+/** Parsed scenario from .scenario.yaml file */
+export interface ParsedScenario {
+  /** Scenario ID */
+  id: string;
+  /** Scenario name */
+  name: string;
+  /** Description */
+  description?: string;
+  /** Task type */
+  taskType?: string;
+  /** Conversation turns */
+  turns?: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+  /** Number of turns */
+  turnCount?: number;
+  /** Expected assertions/behaviors */
+  assertions?: string[];
+  /** Tags for filtering */
+  tags?: string[];
+  /** Source file path */
+  file: string;
+}
+
+/** Parsed tool from .tool.yaml file */
+export interface ParsedTool {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description: string;
+  /** Tool mode (mock, live, mcp) */
+  mode?: string;
+  /** Timeout in milliseconds */
+  timeout?: number;
+  /** Input schema (JSON Schema) */
+  inputSchema?: Record<string, unknown>;
+  /** Output schema (JSON Schema) */
+  outputSchema?: Record<string, unknown>;
+  /** Whether mock data is available */
+  hasMockData?: boolean;
+  /** Source file path */
+  file: string;
+}
+
+/** A file in the arena package */
+export interface ArenaPackageFile {
+  /** File path relative to package root */
+  path: string;
+  /** File content (YAML/JSON as string) - only populated when fetched individually */
+  content?: string;
+  /** File type based on YAML kind field */
+  type: "arena" | "prompt" | "provider" | "scenario" | "tool" | "persona" | "other";
+  /** File size in bytes */
+  size: number;
+}
+
+/** Directory structure node for file tree */
+export interface ArenaPackageTreeNode {
+  /** Node name (file or directory name) */
+  name: string;
+  /** Full path */
+  path: string;
+  /** Whether this is a directory */
+  isDirectory: boolean;
+  /** Children nodes (for directories) */
+  children?: ArenaPackageTreeNode[];
+  /** File type (for files) */
+  type?: ArenaPackageFile["type"];
+}
+
+/** Full parsed content from ArenaConfig source (arena.yaml) */
+export interface ArenaConfigContent {
+  /** Arena metadata */
+  metadata: {
+    name: string;
+    namespace?: string;
+  };
+  /** Raw package files for file explorer view */
+  files: ArenaPackageFile[];
+  /** File tree structure for navigation */
+  fileTree: ArenaPackageTreeNode[];
+  /** Entry point file path (e.g., config.arena.yaml) */
+  entryPoint?: string;
+  /** Prompt configs with resolved content */
+  promptConfigs: ParsedPromptConfig[];
+  /** Providers with resolved content */
+  providers: ParsedProviderConfig[];
+  /** Scenarios with resolved content */
+  scenarios: ParsedScenario[];
+  /** Tools with resolved content */
+  tools: ParsedTool[];
+  /** MCP servers configured */
+  mcpServers: Record<string, ArenaMcpServer>;
+  /** Judges configured */
+  judges: Record<string, ArenaJudge>;
+  /** Judge defaults */
+  judgeDefaults?: ArenaJudgeDefaults;
+  /** Self-play configuration */
+  selfPlay?: ArenaSelfPlayConfig;
+  /** Default configuration values */
+  defaults?: ArenaDefaultsConfig;
 }

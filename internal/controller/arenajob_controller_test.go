@@ -34,6 +34,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
+	"github.com/altairalabs/omnia/pkg/license"
 )
 
 var _ = Describe("ArenaJob Controller", func() {
@@ -1621,6 +1622,196 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(arenaJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseSucceeded))
 			// Result should be nil since no aggregator
 			Expect(arenaJob.Status.Result).To(BeNil())
+		})
+	})
+
+	Context("When finding ArenaJobs for config", func() {
+		It("should return nil when object is not an ArenaConfig", func() {
+			By("calling findArenaJobsForConfig with wrong object type")
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			// Pass a wrong object type (Namespace instead of ArenaConfig)
+			ns := &corev1.Namespace{}
+			result := reconciler.findArenaJobsForConfig(ctx, ns)
+			Expect(result).To(BeNil())
+		})
+	})
+
+	Context("When license validation fails", func() {
+		var (
+			arenaJob    *omniav1alpha1.ArenaJob
+			arenaConfig *omniav1alpha1.ArenaConfig
+		)
+
+		BeforeEach(func() {
+			By("creating the ArenaConfig in Ready state")
+			arenaConfig = &omniav1alpha1.ArenaConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "license-test-config",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaConfigSpec{
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: arenaSourceName,
+					},
+					Providers: []omniav1alpha1.NamespacedObjectReference{
+						{Name: "test-provider"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+
+			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhaseReady
+			arenaConfig.Status.ResolvedSource = &omniav1alpha1.ResolvedSource{
+				Revision: "v1.0.0",
+				URL:      "http://localhost:8080/artifacts/test.tar.gz",
+			}
+			arenaConfig.Status.ResolvedProviders = []string{"test-provider"}
+			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+
+			By("creating the ArenaJob with replicas that exceed license limit")
+			replicas := int32(2) // OpenCoreLicense has MaxWorkerReplicas: 1
+			arenaJob = &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "license-fail-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					ConfigRef: omniav1alpha1.LocalObjectReference{
+						Name: "license-test-config",
+					},
+					Type: omniav1alpha1.ArenaJobTypeEvaluation,
+					Workers: &omniav1alpha1.WorkerConfig{
+						Replicas: replicas,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaJob)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			job := &omniav1alpha1.ArenaJob{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "license-fail-job",
+				Namespace: arenaJobNamespace,
+			}, job)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, job)).To(Succeed())
+			}
+
+			config := &omniav1alpha1.ArenaConfig{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "license-test-config",
+				Namespace: arenaJobNamespace,
+			}, config)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+			}
+		})
+
+		It("should set Failed phase with LicenseViolation when replicas exceed limit", func() {
+			By("creating a license validator (no license secret = OpenCoreLicense)")
+			validator, err := license.NewValidator(k8sClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("reconciling the ArenaJob with license validator")
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler := &ArenaJobReconciler{
+				Client:           k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Recorder:         fakeRecorder,
+				LicenseValidator: validator,
+			}
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "license-fail-job",
+					Namespace: arenaJobNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("checking the updated status")
+			updatedJob := &omniav1alpha1.ArenaJob{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "license-fail-job",
+				Namespace: arenaJobNamespace,
+			}, updatedJob)).To(Succeed())
+
+			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
+
+			By("checking the Ready condition shows license violation")
+			condition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("LicenseViolation"))
+		})
+	})
+
+	Context("When looking up workspace for namespace", func() {
+		It("should return namespace name when client is nil", func() {
+			By("calling getWorkspaceForNamespace with nil client")
+			reconciler := &ArenaJobReconciler{
+				Client: nil,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "test-namespace")
+			Expect(result).To(Equal("test-namespace"))
+		})
+
+		It("should return workspace label when present on namespace", func() {
+			By("creating a namespace with workspace label")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ns-with-workspace-label",
+					Labels: map[string]string{
+						"omnia.altairalabs.ai/workspace": "my-workspace",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, ns)
+			})
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "ns-with-workspace-label")
+			Expect(result).To(Equal("my-workspace"))
+		})
+
+		It("should return namespace name when workspace label is missing", func() {
+			By("creating a namespace without workspace label")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ns-without-workspace-label",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, ns)
+			})
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "ns-without-workspace-label")
+			Expect(result).To(Equal("ns-without-workspace-label"))
+		})
+
+		It("should return namespace name when namespace does not exist", func() {
+			By("calling getWorkspaceForNamespace for non-existent namespace")
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "non-existent-namespace")
+			Expect(result).To(Equal("non-existent-namespace"))
 		})
 	})
 })

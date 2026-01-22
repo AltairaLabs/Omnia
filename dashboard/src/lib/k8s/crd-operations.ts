@@ -441,7 +441,57 @@ export async function getSharedCrd<T>(
 }
 
 /**
- * Get the content of a ConfigMap (for PromptPack content).
+ * Extract files from a tar.gz buffer.
+ * @param buffer - The gzipped tar buffer
+ * @returns Record of file paths to content
+ */
+async function extractTarGz(buffer: Buffer): Promise<Record<string, string>> {
+  const { gunzipSync } = await import("zlib");
+  const tar = await import("tar-stream");
+
+  const decompressed = gunzipSync(buffer);
+  const files: Record<string, string> = {};
+  const extract = tar.extract();
+
+  return new Promise((resolve) => {
+    extract.on("entry", (header, stream, next) => {
+      const chunks: Buffer[] = [];
+
+      stream.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+
+      stream.on("end", () => {
+        if (header.type === "file" && header.name) {
+          const content = Buffer.concat(chunks).toString("utf-8");
+          // Remove leading ./ or / from path
+          const cleanPath = header.name.replace(/^\.?\/?/, "");
+          if (cleanPath && !cleanPath.endsWith("/")) {
+            files[cleanPath] = content;
+          }
+        }
+        next();
+      });
+
+      stream.resume();
+    });
+
+    extract.on("finish", () => {
+      resolve(files);
+    });
+
+    extract.on("error", (err) => {
+      console.error("Tar extraction error:", err);
+      resolve({});
+    });
+
+    extract.end(decompressed);
+  });
+}
+
+/**
+ * Get the content of a ConfigMap (for PromptPack/Arena content).
+ * Supports both binaryData (tar.gz archive) and raw data keys.
  *
  * @param options - Workspace client options
  * @param configMapName - Name of the ConfigMap
@@ -459,6 +509,25 @@ export async function getConfigMapContent(
         namespace: options.namespace,
         name: configMapName,
       });
+
+      // Check for binaryData with tar.gz archive first
+      const binaryData = result.binaryData;
+      if (binaryData) {
+        // Look for any tar.gz file in binaryData
+        const tarGzKey = Object.keys(binaryData).find(
+          (key) => key.endsWith(".tar.gz") || key.endsWith(".tgz")
+        );
+        if (tarGzKey) {
+          const base64Content = binaryData[tarGzKey];
+          const buffer = Buffer.from(base64Content, "base64");
+          const files = await extractTarGz(buffer);
+          if (Object.keys(files).length > 0) {
+            return files;
+          }
+        }
+      }
+
+      // Fall back to raw data keys
       return result.data || null;
     } catch (error) {
       if (isNotFoundError(error)) {

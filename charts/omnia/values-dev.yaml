@@ -126,3 +126,30 @@ arena:
       # Auto-configured to use the Bitnami Redis subchart
       host: "omnia-redis-master"
       port: 6379
+
+# ============================================================================
+# Workspace Content Storage (RWX via hostPath)
+# ============================================================================
+# Controller and dashboard both need to mount the same PVC for Arena content.
+# For local dev, hostPath maps to a folder on your machine.
+
+nfs:
+  server:
+    enabled: false  # Using hostPath instead for local dev
+  provisioner:
+    enabled: false
+
+# Workspace content - uses hostPath for local dev (RWX on single-node clusters)
+workspaceContent:
+  enabled: true
+  # HostPath for local development - maps to folder on your machine
+  hostPath:
+    enabled: true
+    # Path on your local machine (Docker Desktop/kind mounts this into the VM)
+    # For Docker Desktop on macOS: use /tmp or a path under your home directory
+    # For kind: the path is inside the kind container, not your host
+    path: /tmp/omnia-workspace-content
+  persistence:
+    accessModes:
+      - ReadWriteMany
+    size: 10Gi

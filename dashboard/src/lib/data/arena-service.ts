@@ -15,6 +15,7 @@ import type {
   ArenaSourceSpec,
   ArenaConfig,
   ArenaConfigSpec,
+  ArenaConfigContent,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
@@ -181,6 +182,27 @@ export class ArenaService {
       throw new Error(`Failed to fetch arena config scenarios: ${response.statusText}`);
     }
     return response.json();
+  }
+
+  async getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent> {
+    const response = await fetch(
+      `${ARENA_API_BASE}/${encodeURIComponent(workspace)}/arena/configs/${encodeURIComponent(name)}/content`
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to fetch arena config content: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getArenaConfigFile(workspace: string, configName: string, filePath: string): Promise<string> {
+    const response = await fetch(
+      `${ARENA_API_BASE}/${encodeURIComponent(workspace)}/arena/configs/${encodeURIComponent(configName)}/content/file?path=${encodeURIComponent(filePath)}`
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file content: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.content;
   }
 
   async createArenaConfig(

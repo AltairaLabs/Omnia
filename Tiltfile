@@ -32,6 +32,14 @@ ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() i
 #   kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=$GEMINI_API_KEY
 ENABLE_AUDIO_DEMO = os.getenv('ENABLE_AUDIO_DEMO', '').lower() in ('true', '1', 'yes') or False
 
+# Set to True to enable LangChain runtime demos alongside PromptKit demos
+# Deploys vision-demo-langchain and tools-demo-langchain agents using the LangChain runtime
+# Can be set via environment: ENABLE_LANGCHAIN=true tilt up
+ENABLE_LANGCHAIN = os.getenv('ENABLE_LANGCHAIN', '').lower() in ('true', '1', 'yes') or False
+
+# Path to the omnia-langchain-runtime repository for local builds
+LANGCHAIN_RUNTIME_PATH = os.getenv('LANGCHAIN_RUNTIME_PATH', '../omnia-langchain-runtime')
+
 # Set to True to build runtime with local PromptKit source for debugging
 # Can be set via environment: USE_LOCAL_PROMPTKIT=true PROMPTKIT_PATH=/path/to/PromptKit tilt up
 # This allows rapid iteration on PromptKit changes without publishing releases
@@ -49,7 +57,9 @@ ENABLE_FULL_STACK = os.getenv('ENABLE_FULL_STACK', '').lower() in ('true', '1', 
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind', 'orbstack'])
 
 # Suppress warnings for images passed as CLI args to operator (not in K8s manifests)
-update_settings(suppress_unused_image_warnings=['omnia-facade-dev', 'omnia-runtime-dev'])
+# Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
+update_settings(suppress_unused_image_warnings=['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev'])
+
 
 # Create namespace if it doesn't exist
 namespace_create('omnia-system')
@@ -219,6 +229,20 @@ docker_build(
 )
 
 # ============================================================================
+# LangChain Runtime - Python-based agent framework
+# ============================================================================
+
+if ENABLE_LANGCHAIN:
+    # Build LangChain runtime from external repo using local_resource
+    # This always runs because Tilt can't detect image refs in CRD fields
+    local_resource(
+        'langchain-runtime-build',
+        cmd='docker build -t omnia-langchain-runtime-dev:latest ' + LANGCHAIN_RUNTIME_PATH,
+        deps=[LANGCHAIN_RUNTIME_PATH + '/src', LANGCHAIN_RUNTIME_PATH + '/Dockerfile', LANGCHAIN_RUNTIME_PATH + '/pyproject.toml'],
+        labels=['langchain'],
+    )
+
+# ============================================================================
 # Helm Deployment
 # ============================================================================
 
@@ -241,11 +265,23 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
+    # LangChain runtime image (used when framework.type=langchain)
+    'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
+    'langchainRuntime.image.tag=latest',
+    'langchainRuntime.image.pullPolicy=Never',
     # Increase dashboard resources for HMR compilation
-    'dashboard.resources.limits.cpu=2000m',
-    'dashboard.resources.limits.memory=2Gi',
-    'dashboard.resources.requests.cpu=500m',
-    'dashboard.resources.requests.memory=1Gi',
+    'dashboard.resources.limits.cpu=4000m',
+    'dashboard.resources.limits.memory=4Gi',
+    'dashboard.resources.requests.cpu=1000m',
+    'dashboard.resources.requests.memory=2Gi',
+    # Give dashboard more time to compile in dev mode
+    'dashboard.startupProbe.httpGet.path=/api/health',
+    'dashboard.startupProbe.httpGet.port=http',
+    'dashboard.startupProbe.initialDelaySeconds=10',
+    'dashboard.startupProbe.periodSeconds=10',
+    'dashboard.startupProbe.failureThreshold=30',  # 30 * 10s = 5 minutes to start
+    'dashboard.livenessProbe.initialDelaySeconds=60',
+    'dashboard.livenessProbe.failureThreshold=6',
 ]
 
 if ENABLE_OBSERVABILITY:
@@ -366,6 +402,15 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
     if ENABLE_AUDIO_DEMO:
         demo_helm_set.extend([
             'audioDemo.enabled=true',
+        ])
+
+    if ENABLE_LANGCHAIN:
+        demo_helm_set.extend([
+            # Enable LangChain demos (mirror of vision-demo and tools-demo)
+            'langchainDemo.enabled=true',
+            'langchainDemo.image.repository=omnia-langchain-runtime-dev',
+            'langchainDemo.image.tag=latest',
+            'langchainDemo.image.pullPolicy=Never',
         ])
 
     if ENABLE_FULL_STACK:
@@ -509,6 +554,15 @@ if ENABLE_DEMO:
         'demo-tools-prompts:promptpack',
         'tools-demo:agentruntime',
     ]
+
+    # Add LangChain demo resources when enabled
+    if ENABLE_LANGCHAIN:
+        ollama_objects.extend([
+            # LangChain vision demo (uses same PromptPack and Provider)
+            'vision-demo-langchain:agentruntime',
+            # LangChain tools demo
+            'tools-demo-langchain:agentruntime',
+        ])
     # Sidecar mode uses Envoy config, extauthz mode uses EnvoyFilter
     if ENABLE_FULL_STACK:
         ollama_objects.append('ollama-opa-ext-authz:envoyfilter')

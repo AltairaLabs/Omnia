@@ -4,7 +4,12 @@
 {{- /* ============================================================================ */ -}}
 {{- if .Values.arenaDemo.enabled }}
 ---
-# ConfigMap containing a sample PromptKit bundle with test scenarios
+# ConfigMap containing Arena pack as a tar.gz archive
+# The archive contains:
+#   - config.arena.yaml (Arena manifest)
+#   - prompts/greeting.prompt.yaml (PromptConfig)
+#   - providers/ollama.provider.yaml (Provider)
+#   - scenarios/greeting-test.scenario.yaml (Scenario)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,47 +18,10 @@ metadata:
   labels:
     app.kubernetes.io/name: omnia-arena-demo
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
-data:
-  pack.json: |
-    {
-      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
-      "id": "demo-arena-bundle",
-      "name": "Demo Arena Bundle",
-      "version": "1.0.0",
-      "template_engine": {
-        "version": "v1",
-        "syntax": "{{"{{variable}}"}}"
-      },
-      "prompts": {
-        "greeting": {
-          "id": "greeting",
-          "name": "Greeting Prompt",
-          "version": "1.0.0",
-          "system_template": "You are a helpful assistant. Be concise and friendly.",
-          "user_template": "Say hello to {{"{{name}}"}}.",
-          "parameters": {
-            "temperature": 0.7
-          }
-        }
-      },
-      "scenarios": {
-        "greeting-test": {
-          "id": "greeting-test",
-          "name": "Greeting Test Scenario",
-          "prompt_ref": "greeting",
-          "variables": {
-            "name": "World"
-          },
-          "assertions": [
-            {
-              "type": "contains",
-              "value": "hello",
-              "case_insensitive": true
-            }
-          ]
-        }
-      }
-    }
+binaryData:
+  # Base64-encoded tar.gz archive containing Arena pack files
+  arena-pack.tar.gz: H4sIAPfRcWkAA+2bT2/bNhjG1QLDMO+8nYncQ5MSKVUGenC7AQmQYlkSdOspYCU6Fqp/pegsAQrsa+y+y77gLjuNkizJcZS4di1ls/kAiiNKFClLD/nT61fwEhpdCyHkUAqKT7v8VKo+ETKJBTDFFrGo2sEBCJuYIAOgznumNMskE6or3pRNkzB8cL/fppw/vNVYOimw9X52pa++/9p4bhhvmAd+Oge/grnyMuMbtZhq+aiWfP3Pzzvk+OLibP5vXuMPtXy7tMuzpvw7L4kgS9OQw1Qk1zxmsceNZ8+Nv/45+eH3vz9t4Ry1HtQpuznizOdi6M2E4LH0A7HtNlb6H6Ml/1MHmwa42XZH2rTn/rcQiGQQ8ZfYsV1k267rQtd2LWzajj2gDjg5fjU+e310/PZHeMOkFLDNri/HPx+PP56mb86OhngyHg+IC85VpZN3j1Va8Pjgqb+HfRUcdt/GKv/nK3f9jx3HNgDtvmt77384hJdeEk+CK8jU8M/gLYseO81NpL4Pm5B1+I8SS/NfP9L8t9eCwwUC7GgcWOn/e/znYGpr/utDrfznYGRaLxDW/Lfzgp25vtEq/xNiLs//JiZ6/u9DLA3ecpEFSTwCyppRKj8EErJQskCwkL3PIAuG15iF6ZThwYcg9kdgnN8qg4hL5jPJRgMAYhbxEfB5lBwW99EgS7mXbygPOSfMLC8B4BAE6iBXgnMZxFeDkjcmQcirHmTDaiMsC4rbsjzadaBmqvpAda2yeKguIIsYrAqqepmn+iSCZKleXVy3dyh5JmFVXlZ/6ivUrXL+r7+/jtpYP/5LMKXa/71I8/9ea5H/uxoHNon/Ikvzfx9q53+LWuoBwNL8v/OCjes7iwSvH/8lCFs6/tuHcv6rObijNjbhP9PW/NeLNP/ttRb5r6txYAP+synR/NeH2vmPmpRS8kLz384LNq7/D/Gf5dhE818fmsf/8qhrZ22sz3+WTXT8vx9p/ttrLcX/OhkHNuA/y9H5n73ogd//bZu4JtX8t/OCles7zAPdgP8oMjX/9aHm+sPLtl/dt9EGWjv/03F0/K8naf7bazX+bzhw2+PASv8v85+JiY7/9aN2/jNdRBUEav7beTX+72r2X+1/at3L/6ZYv//RizbJ/zwt9ntd5HS2pIHWmZ1VEuhSuqfPM08EqSzaHIOJCHjsh7f1LvN+qD2vq54dYIggOshTOW8zyaNLtaQhk6q1T0VK57tkBpjggIEpD9PJLAQsywJ1aWMJwSsOvCT2gkxtj/26QZi3wETA3oe8zgwtTyH/O09MlbdpnioqRZOrKvjHWSC4OispZtV+Pp+wWShH4JdEhP7/ZjxbjP83TwAtebBf0Mba/K/mf+Jo//cizf97rUX/338C2M44sD7/W4oANP/3oXb+t4mNiU00/++8Fv3fzey/2v+W4yzP/yYx9fzfhzbh//P5nfEI+xe3UOsDQLll6SngQpUBOeUtzwByJuKazkWSv7c1y7iYU7fiesljRd0H5+w2Z/8wATIpGTx/XJCseevszhtnh6Dox1N//U+uxfxveNn2/tyXt7E+/6sRAGv/9yLN/3utRf83/L/dcWCl/9G9+d8hmv97kem28T+xXUpdjf+7r0X/dzP7f4b/6f3f/x39/ncv2jD+X9wgLfxf3kJ3wH9eVEXS69Uo8Xk4AsWqBc1BHUKfA3se4ueCKf5XtRB09BihpaWltU39C2sgcFwAXAAA
+
 ---
 # ArenaSource referencing the ConfigMap
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -68,7 +36,6 @@ spec:
   type: configmap
   configMap:
     name: demo-arena-bundle
-    key: pack.json
   interval: {{ .Values.arenaDemo.source.interval }}
 ---
 # ArenaConfig using the Ollama provider (cost-free local testing)

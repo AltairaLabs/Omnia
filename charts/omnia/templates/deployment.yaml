@@ -67,6 +67,16 @@ spec:
             {{- if .Values.arena.enabled }}
             - --arena-worker-image={{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.arena.worker.image.pullPolicy }}
+            {{- if .Values.api.enabled }}
+            - --artifact-base-url=http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}/artifacts
+            {{- end }}
+            {{- end }}
+            {{- if .Values.workspaceContent.enabled }}
+            - --workspace-content-path={{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
+            {{- end }}
+            {{- if or .Values.nfs.server.enabled .Values.nfs.external.server }}
+            - --nfs-server={{ include "omnia.nfsServer" . }}
+            - --nfs-path={{ include "omnia.nfsPath" . }}
             {{- end }}
             {{- if .Values.devMode }}
             - --dev-mode
@@ -103,15 +113,28 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.arena.enabled }}
+          {{- if or .Values.arena.enabled .Values.workspaceContent.enabled }}
           volumeMounts:
+            {{- if .Values.arena.enabled }}
             - name: arena-artifacts
               mountPath: /tmp/arena-artifacts
+            {{- end }}
+            {{- if .Values.workspaceContent.enabled }}
+            - name: workspace-content
+              mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
+            {{- end }}
           {{- end }}
-      {{- if .Values.arena.enabled }}
+      {{- if or .Values.arena.enabled .Values.workspaceContent.enabled }}
       volumes:
+        {{- if .Values.arena.enabled }}
         - name: arena-artifacts
           emptyDir: {}
+        {{- end }}
+        {{- if .Values.workspaceContent.enabled }}
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -114,4 +114,9 @@ data:
   OMNIA_AUTH_API_KEYS_ENABLED: {{ .Values.dashboard.apiKeys.enabled | quote }}
   OMNIA_AUTH_API_KEYS_MAX_PER_USER: {{ .Values.dashboard.apiKeys.maxPerUser | quote }}
   OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION: {{ .Values.dashboard.apiKeys.defaultExpiration | quote }}
+
+  # Workspace content storage
+  {{- if .Values.workspaceContent.enabled }}
+  WORKSPACE_CONTENT_PATH: {{ .Values.workspaceContent.mountPath | default "/workspace-content" | quote }}
+  {{- end }}
 {{- end }}

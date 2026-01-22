@@ -10,6 +10,17 @@ import ArenaConfigDetailPage from "./page";
 vi.mock("@/hooks/use-arena-configs", () => ({
   useArenaConfig: vi.fn(),
   useArenaConfigMutations: vi.fn(),
+  useArenaConfigContent: vi.fn(() => ({
+    content: null,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+  useArenaConfigFile: vi.fn(() => ({
+    content: null,
+    loading: false,
+    error: null,
+  })),
 }));
 
 vi.mock("@/hooks", () => ({

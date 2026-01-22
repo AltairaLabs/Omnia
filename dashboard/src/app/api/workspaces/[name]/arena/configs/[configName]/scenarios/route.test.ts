@@ -16,6 +16,7 @@ vi.mock("@/lib/auth/workspace-authz", () => ({
 
 vi.mock("@/lib/k8s/crd-operations", () => ({
   getCrd: vi.fn(),
+  getConfigMapContent: vi.fn(),
   extractK8sErrorMessage: vi.fn((error: unknown) =>
     error instanceof Error ? error.message : String(error)
   ),
@@ -65,8 +66,26 @@ const mockWorkspace = {
 
 const mockConfig = {
   metadata: { name: "eval-config", namespace: "test-ns" },
-  spec: { type: "evaluation", sourceRef: "git-source" },
+  spec: { type: "evaluation", sourceRef: { name: "test-source" } },
   status: { phase: "Ready", scenarioCount: 10 },
+};
+
+const mockConfigNoSource = {
+  metadata: { name: "eval-config", namespace: "test-ns" },
+  spec: { type: "evaluation" },
+  status: { phase: "Ready" },
+};
+
+const mockSource = {
+  metadata: { name: "test-source", namespace: "test-ns" },
+  spec: { configMap: { name: "test-configmap" } },
+  status: { phase: "Ready" },
+};
+
+const mockSourceNoConfigMap = {
+  metadata: { name: "test-source", namespace: "test-ns" },
+  spec: {},
+  status: { phase: "Ready" },
 };
 
 function createMockRequest(): NextRequest {
@@ -156,5 +175,376 @@ describe("GET /api/workspaces/[name]/arena/configs/[configName]/scenarios", () =
     const response = await GET(createMockRequest(), createMockContext());
 
     expect(response.status).toBe(500);
+  });
+
+  it("returns empty array when config has no source reference", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource).mockResolvedValue({
+      ok: true,
+      resource: mockConfigNoSource,
+      workspace: mockWorkspace as any,
+      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("returns empty array when source is not found", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource, notFoundResponse } = await import("@/lib/k8s/workspace-route-helpers");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        response: notFoundResponse("Arena source not found"),
+      });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("returns empty array when source has no configMap", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSourceNoConfigMap,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("returns empty array when configMap content is null", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue(null);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("returns empty array when configMap has no content key", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({ "readme.txt": "some text" });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("returns scenarios from JSON content", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({
+      "pack.json": JSON.stringify({
+        scenarios: {
+          "greeting-test": {
+            name: "Greeting Test",
+            description: "Test greeting scenario",
+            assertions: [{ type: "contains", value: "hello" }],
+          },
+        },
+      }),
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].name).toBe("greeting-test");
+    expect(body[0].displayName).toBe("Greeting Test");
+    expect(body[0].description).toBe("Test greeting scenario");
+    expect(body[0].assertions).toContain("contains: hello");
+  });
+
+  it("returns scenarios from YAML content", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({
+      "pack.yaml": `
+scenarios:
+  yaml-test:
+    name: YAML Test
+    description: Test YAML scenario
+`,
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].name).toBe("yaml-test");
+    expect(body[0].displayName).toBe("YAML Test");
+  });
+
+  it("returns empty array on parse error", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({
+      "pack.json": "invalid json {{{",
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("returns empty array when pack has no scenarios", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({
+      "pack.json": JSON.stringify({ prompts: {} }),
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual([]);
+  });
+
+  it("handles scenarios without assertions", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({
+      "pack.json": JSON.stringify({
+        scenarios: {
+          "simple-test": {
+            description: "Simple scenario without assertions",
+          },
+        },
+      }),
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].name).toBe("simple-test");
+    expect(body[0].displayName).toBe("simple-test"); // Falls back to id
+    expect(body[0].assertions).toEqual([]);
+  });
+
+  it("handles .yml extension", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getConfigMapContent } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspaceResource)
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockConfig,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        resource: mockSource,
+        workspace: mockWorkspace as any,
+        clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "viewer" },
+      });
+    vi.mocked(getConfigMapContent).mockResolvedValue({
+      "pack.yml": `
+scenarios:
+  yml-test:
+    name: YML Test
+`,
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].name).toBe("yml-test");
   });
 });

@@ -48,9 +48,14 @@ type Config struct {
 	ConfigName   string
 	JobType      string
 
-	// Artifact configuration
+	// Artifact configuration (legacy tar.gz download)
 	ArtifactURL      string
 	ArtifactRevision string
+
+	// Filesystem content configuration (new - takes precedence over ArtifactURL)
+	// Full path to mounted content (e.g., /workspace-content/ns/default/arena/name/.arena/versions/hash)
+	ContentPath    string
+	ContentVersion string // Content-addressable version hash
 
 	// Redis configuration
 	RedisAddr     string
@@ -88,6 +93,8 @@ func loadConfig() (*Config, error) {
 		JobType:          os.Getenv("ARENA_JOB_TYPE"),
 		ArtifactURL:      os.Getenv("ARENA_ARTIFACT_URL"),
 		ArtifactRevision: os.Getenv("ARENA_ARTIFACT_REVISION"),
+		ContentPath:      os.Getenv("ARENA_CONTENT_PATH"),    // New: filesystem path
+		ContentVersion:   os.Getenv("ARENA_CONTENT_VERSION"), // New: version hash
 		RedisAddr:        getEnvOrDefault("REDIS_ADDR", "redis:6379"),
 		RedisPassword:    os.Getenv("REDIS_PASSWORD"),
 		RedisDB:          0,
@@ -100,8 +107,9 @@ func loadConfig() (*Config, error) {
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
 	}
-	if cfg.ArtifactURL == "" {
-		return nil, errors.New("ARENA_ARTIFACT_URL is required")
+	// ContentPath takes precedence; ArtifactURL is only required if ContentPath is not set
+	if cfg.ContentPath == "" && cfg.ArtifactURL == "" {
+		return nil, errors.New("either ARENA_CONTENT_PATH or ARENA_ARTIFACT_URL is required")
 	}
 
 	return cfg, nil
@@ -121,6 +129,31 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 		}
 	}
 	return defaultValue
+}
+
+// getBundlePath returns the path to the content bundle.
+// If ContentPath is set (filesystem mode), it uses the mounted path directly.
+// Otherwise, it falls back to downloading and extracting the tar.gz artifact.
+func getBundlePath(ctx context.Context, cfg *Config) (string, error) {
+	// Filesystem mode: use mounted content directly
+	if cfg.ContentPath != "" {
+		// Validate that the content path exists and is accessible
+		info, err := os.Stat(cfg.ContentPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", fmt.Errorf("content path does not exist: %s", cfg.ContentPath)
+			}
+			return "", fmt.Errorf("failed to access content path: %w", err)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("content path is not a directory: %s", cfg.ContentPath)
+		}
+		// Return the mounted content path directly - no download/extraction needed
+		return cfg.ContentPath, nil
+	}
+
+	// Legacy mode: download and extract tar.gz artifact
+	return downloadAndExtract(ctx, cfg)
 }
 
 func downloadAndExtract(ctx context.Context, cfg *Config) (string, error) {

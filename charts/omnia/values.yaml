@@ -371,9 +371,10 @@ dashboard:
     enabled: false
     # -- Storage class
     storageClass: ""
-    # -- Access modes
+    # -- Access modes (ReadWriteMany required for job mounting)
+    # For development with local-path, override to: ["ReadWriteOnce"]
     accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     # -- Volume size
     size: 1Gi
     # -- Existing PVC to use
@@ -387,6 +388,120 @@ dashboard:
 workspaces:
   # -- Enable Workspace controller for multi-tenant isolation
   enabled: true
+
+  # Default storage settings for workspace PVCs
+  # These are used when Workspace.spec.storage doesn't specify values
+  storage:
+    # -- Default storage class for workspace content PVCs
+    # For production: Use NFS-backed class (efs-sc, azurefile, nfs-client)
+    # For development: Leave empty to use cluster default
+    storageClass: ""
+    # -- Default volume size for workspace content
+    size: 10Gi
+    # -- Default access modes (ReadWriteMany for jobs to mount same PVC)
+    # For development with local-path, override to: ["ReadWriteOnce"]
+    accessModes:
+      - ReadWriteMany
+
+# ============================================================================
+# Workspace Content Storage Configuration
+# Dashboard mount for browsing all workspace content
+# ============================================================================
+
+workspaceContent:
+  # -- Enable workspace content storage for dashboard
+  # This creates a root PVC that the dashboard mounts to browse all workspace content
+  enabled: true
+
+  # -- Mount path in dashboard pod
+  mountPath: /workspace-content
+
+  # HostPath storage for local development (single-node clusters only)
+  # Maps to a directory on your local machine
+  hostPath:
+    # -- Enable hostPath storage (for local dev with kind/Docker Desktop)
+    enabled: false
+    # -- Path on the node/host machine
+    path: /tmp/omnia-workspace-content
+
+  persistence:
+    # -- Storage class for dashboard's workspace content PVC
+    # For production: Use NFS-backed class that matches workspace PVCs
+    # For development: Leave empty to use cluster default
+    storageClass: ""
+    # -- Access modes for dashboard content PVC (ReadWriteMany for shared access)
+    # For development with local-path, override to: ["ReadWriteOnce"]
+    accessModes:
+      - ReadWriteMany
+    # -- Volume size for dashboard content view
+    size: 50Gi
+    # -- Use existing PVC instead of creating one
+    existingClaim: ""
+
+# ============================================================================
+# NFS Storage Configuration
+# Shared storage backend for workspace content across namespaces
+# ============================================================================
+
+nfs:
+  # Internal NFS server for development environments
+  server:
+    # -- Deploy internal NFS server (dev only, not for production)
+    enabled: false
+    # -- Use internal NFS server (when enabled, auto-configures provisioner)
+    internal: true
+    # -- Storage class for NFS server's backing storage (only for internal server)
+    storageClass: ""
+    # -- Size of NFS server's backing storage
+    size: 50Gi
+    image:
+      # -- NFS server image repository
+      repository: itsthenetwork/nfs-server-alpine
+      # -- NFS server image tag
+      tag: "12"
+      # -- Image pull policy
+      pullPolicy: IfNotPresent
+    # -- Resource limits for NFS server pod
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  # External NFS server configuration (for production)
+  external:
+    # -- External NFS server hostname or IP
+    server: ""
+    # -- Export path on NFS server
+    path: /exports/omnia
+
+  # NFS provisioner subchart configuration (nfs-subdir-external-provisioner)
+  provisioner:
+    # -- Enable NFS provisioner for dynamic PVC creation
+    enabled: false
+
+# nfs-subdir-external-provisioner subchart values (when nfs.provisioner.enabled)
+# See: https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner
+nfsprovisioner:
+  # NFS server configuration (auto-configured when nfs.server.internal is true)
+  nfs:
+    server: ""  # Set automatically if nfs.server.internal is true
+    path: /nfsshare
+  storageClass:
+    # -- Storage class name for NFS-backed PVCs
+    name: omnia-nfs
+    # -- Set as default storage class
+    defaultClass: false
+    # -- Access modes for provisioned PVCs
+    accessModes: ReadWriteMany
+    # -- Reclaim policy for provisioned PVs
+    reclaimPolicy: Delete
+    # -- Archive deleted PVCs instead of deleting
+    archiveOnDelete: false
+    # -- Path pattern for subdirectories: ${.PVC.namespace}/${.PVC.name}
+    pathPattern: "${.PVC.namespace}/${.PVC.name}"
 
 # ============================================================================
 # Arena Fleet Configuration

@@ -1,0 +1,69 @@
+# Development values with internal NFS server
+# Use with: helm install omnia ./charts/omnia -f ./charts/omnia/values-dev-nfs.yaml
+#
+# This configuration deploys an internal NFS server for development environments
+# that provides ReadWriteMany (RWX) storage for workspace content.
+#
+# WARNING: The internal NFS server is NOT suitable for production use.
+# For production, use an external NFS server or cloud-native storage.
+
+# Enable dev mode
+devMode: true
+
+# Enable internal NFS server for development
+nfs:
+  server:
+    enabled: true
+    internal: true
+    # Uses cluster default storage class for NFS server's backing storage
+    storageClass: ""
+    size: 50Gi
+
+  # Enable NFS provisioner for dynamic PVC creation
+  provisioner:
+    enabled: true
+
+# Configure the NFS provisioner subchart
+# NOTE: The server address must match the deployed NFS server service name.
+# Pattern: <fullname>-nfs-server.<namespace>.svc.cluster.local
+#
+# Fullname follows Helm conventions:
+#   - If release name contains chart name ("omnia"): fullname = release name
+#   - Otherwise: fullname = <release-name>-omnia
+#
+# Examples:
+#   helm install omnia ... -n omnia-system  -> omnia-nfs-server.omnia-system.svc.cluster.local
+#   helm install myapp ... -n default       -> myapp-omnia-nfs-server.default.svc.cluster.local
+#
+nfsprovisioner:
+  nfs:
+    # Update this if using a different release name or namespace
+    server: omnia-nfs-server.omnia-system.svc.cluster.local
+    path: /nfsshare
+  storageClass:
+    name: omnia-nfs
+    defaultClass: false
+    accessModes: ReadWriteMany
+    reclaimPolicy: Delete
+    archiveOnDelete: false
+    # Path pattern creates subdirectories per namespace/PVC
+    pathPattern: "${.PVC.namespace}/${.PVC.name}"
+
+# Workspace content uses NFS storage class automatically when provisioner is enabled
+workspaceContent:
+  enabled: true
+  persistence:
+    # Storage class is auto-set to omnia-nfs when nfs.provisioner.enabled
+    # Explicit setting here for clarity:
+    # storageClass: "omnia-nfs"
+    accessModes:
+      - ReadWriteMany
+    size: 50Gi
+
+# Arena configuration
+arena:
+  enabled: true
+  worker:
+    # Worker pods mount workspace content from NFS
+    workspaceContent:
+      enabled: true

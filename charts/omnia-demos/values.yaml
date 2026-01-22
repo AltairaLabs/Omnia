@@ -246,6 +246,51 @@ toolsDemo:
       Be concise and helpful in your responses.
 
 # ============================================================================
+# LangChain Demo Agents
+# Mirrors vision-demo and tools-demo using the LangChain runtime framework
+# ============================================================================
+
+langchainDemo:
+  # -- Enable LangChain demo agents
+  enabled: false
+
+  # -- LangChain runtime image configuration
+  image:
+    repository: ghcr.io/altairalabs/omnia-langchain-runtime
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # -- Vision demo agent configuration (LangChain)
+  visionAgent:
+    # -- Agent name
+    name: vision-demo-langchain
+    # -- Number of replicas
+    replicas: 1
+    # -- Resource requirements
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+  # -- Tools demo agent configuration (LangChain)
+  toolsAgent:
+    # -- Agent name
+    name: tools-demo-langchain
+    # -- Number of replicas
+    replicas: 1
+    # -- Resource requirements
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+# ============================================================================
 # OPA Policy Agent for model validation
 # Prevents model switching when multiple agents share an Ollama instance
 # ============================================================================
@@ -307,7 +352,7 @@ istio:
 
 arenaDemo:
   # -- Enable arena demo
-  enabled: false
+  enabled: true
 
   # -- ArenaSource configuration
   source:

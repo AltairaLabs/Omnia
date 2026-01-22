@@ -222,7 +222,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -253,7 +253,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -282,7 +282,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [
@@ -381,7 +381,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: {
           phase: "Ready",
           conditions: [
@@ -415,7 +415,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [
@@ -446,7 +446,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -474,7 +474,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -503,7 +503,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -564,7 +564,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -596,7 +596,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -629,7 +629,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],
@@ -666,7 +666,7 @@ describe("ArenaSourceDetailPage", () => {
         spec: {
           type: "configmap",
           interval: "10m",
-          configMapRef: { name: "my-config", key: "prompts.yaml" },
+          configMap: { name: "my-config", key: "prompts.yaml" },
         },
         status: { phase: "Ready" },
       } as any,
@@ -694,7 +694,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: {
           phase: "Ready",
           conditions: [
@@ -728,7 +728,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [
@@ -760,7 +760,7 @@ describe("ArenaSourceDetailPage", () => {
     vi.mocked(useArenaSource).mockReturnValue({
       source: {
         metadata: { name: "test-source" },
-        spec: { type: "configmap", configMapRef: { name: "cm" } },
+        spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
       linkedConfigs: [],

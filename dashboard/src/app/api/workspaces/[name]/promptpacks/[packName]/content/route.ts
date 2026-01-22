@@ -43,7 +43,7 @@ export const GET = withWorkspaceAccess<RouteParams>(
       if (!configMapData) return notFoundResponse(`ConfigMap not found: ${configMapName}`);
 
       const contentKey = Object.keys(configMapData).find(
-        (key) => key.endsWith(".yaml") || key.endsWith(".yml") || key === "content" || key === "pack"
+        (key) => key.endsWith(".yaml") || key.endsWith(".yml") || key.endsWith(".json") || key === "content" || key === "pack"
       );
       if (!contentKey) return notFoundResponse("No content found in ConfigMap");
 
@@ -51,8 +51,12 @@ export const GET = withWorkspaceAccess<RouteParams>(
 
       let content: PromptPackContent;
       try {
-        const yaml = await import("js-yaml");
-        content = yaml.load(rawContent) as PromptPackContent;
+        if (contentKey.endsWith(".json")) {
+          content = JSON.parse(rawContent) as PromptPackContent;
+        } else {
+          const yaml = await import("js-yaml");
+          content = yaml.load(rawContent) as PromptPackContent;
+        }
       } catch (parseError) {
         return serverErrorResponse(parseError, "Failed to parse prompt pack content");
       }
