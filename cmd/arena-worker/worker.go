@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
@@ -437,29 +438,41 @@ func executeWorkItem(
 		return nil, fmt.Errorf("arena config file not found in bundle: %s", bundlePath)
 	}
 
+	// Configure verbose logging BEFORE creating the engine
 	if cfg.Verbose {
 		fmt.Printf("  Loading arena config from: %s\n", configPath)
-		// Configure verbose logging for the PromptKit engine
-		if err := logger.Configure(&logger.LoggingConfigSpec{
-			DefaultLevel: "debug",
-			Format:       "text",
-		}); err != nil {
-			fmt.Printf("  Warning: failed to configure verbose logging: %v\n", err)
-		}
+		logger.SetVerbose(true)
+		logger.SetOutput(os.Stderr) // Ensure logs go to stderr for kubectl logs
 	}
 
-	// Create engine from config file
-	eng, err := engine.NewEngineFromConfigFile(configPath)
+	// Load configuration from file BEFORE creating engine so we can modify it
+	arenaCfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Configure settings BEFORE creating engine (media storage is created during engine init)
+	if cfg.Verbose {
+		arenaCfg.Defaults.Verbose = true
+	}
+
+	// Set output directory to a writable location
+	// The workspace content is mounted read-only, so we need a writable path for media files
+	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
+
+	// Build registries and executors from the config
+	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, err :=
+		engine.BuildEngineComponents(arenaCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build engine components: %w", err)
+	}
+
+	// Create engine with all components
+	eng, err := engine.NewEngine(arenaCfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create engine: %w", err)
 	}
 	defer func() { _ = eng.Close() }()
-
-	// Set verbose flag on the loaded config if enabled
-	arenaCfg := eng.GetConfig()
-	if cfg.Verbose {
-		arenaCfg.Defaults.Verbose = true
-	}
 
 	// Validate provider credentials before execution
 	if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
@@ -480,6 +493,7 @@ func executeWorkItem(
 		[]string{},                // no region filter
 		[]string{item.ProviderID}, // filter to this provider
 		scenarioFilter,            // scenario filter (empty = all)
+		[]string{},                // no eval filter
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate run plan: %w", err)
@@ -536,11 +550,15 @@ type runAggregator struct {
 	errors        []string
 	totalDuration time.Duration
 	assertions    []AssertionResult
+	verbose       bool
 }
 
 // processRun processes a single run's state and updates aggregated counts.
 func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaConversationState) {
 	if state.RunMetadata == nil {
+		if a.verbose {
+			fmt.Printf("    Run %s: no metadata available\n", runID)
+		}
 		return
 	}
 	meta := state.RunMetadata
@@ -549,8 +567,14 @@ func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaCon
 	if meta.Error != "" {
 		a.errors = append(a.errors, fmt.Sprintf("run %s: %s", runID, meta.Error))
 		a.failCount++
+		if a.verbose {
+			fmt.Printf("    Run %s FAILED: %s\n", runID, meta.Error)
+		}
 	} else {
 		a.passCount++
+		if a.verbose {
+			fmt.Printf("    Run %s PASSED (duration: %v)\n", runID, meta.Duration)
+		}
 	}
 
 	a.processAssertions(meta.ConversationAssertionResults)
@@ -564,6 +588,13 @@ func (a *runAggregator) processAssertions(assertions []arenastatestore.Conversat
 			Passed:  assertion.Passed,
 			Message: assertion.Message,
 		})
+		if a.verbose {
+			status := "PASS"
+			if !assertion.Passed {
+				status = "FAIL"
+			}
+			fmt.Printf("      Assertion [%s] %s: %s\n", assertion.Type, status, assertion.Message)
+		}
 		if !assertion.Passed && a.passCount > 0 {
 			a.passCount--
 			a.failCount++
@@ -584,7 +615,7 @@ func buildExecutionResult(store statestore.Store, runIDs []string, startTime tim
 		return buildFallbackResult(result, runIDs)
 	}
 
-	agg := &runAggregator{}
+	agg := &runAggregator{verbose: verbose}
 	for _, runID := range runIDs {
 		state, err := arenaStore.GetArenaState(context.Background(), runID)
 		if err != nil {

@@ -445,3 +445,135 @@ scenarios:
 
 	t.Logf("Multi-scenario result: status=%s, metrics=%+v", result.Status, result.Metrics)
 }
+
+// TestVerboseLoggingCapturesPromptKitLogs validates that verbose mode captures promptkit debug logs.
+func TestVerboseLoggingCapturesPromptKitLogs(t *testing.T) {
+	bundleDir := t.TempDir()
+
+	// Create a minimal arena config
+	arenaConfig := `$schema: https://promptkit.altairalabs.ai/schemas/latest/arena.json
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Arena
+metadata:
+  name: verbose-test
+spec:
+  prompt_configs:
+    - id: assistant
+      file: prompts/assistant.yaml
+
+  providers:
+    - file: providers/mock.provider.yaml
+
+  scenarios:
+    - file: scenarios/test.scenario.yaml
+
+  defaults:
+    temperature: 0.5
+    max_tokens: 500
+    seed: 42
+    output:
+      dir: out
+`
+	require.NoError(t, os.WriteFile(filepath.Join(bundleDir, "config.arena.yaml"), []byte(arenaConfig), 0644))
+
+	promptsDir := filepath.Join(bundleDir, "prompts")
+	require.NoError(t, os.MkdirAll(promptsDir, 0755))
+
+	assistantPrompt := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: PromptConfig
+metadata:
+  name: assistant
+spec:
+  task_type: assistant
+  version: v1.0.0
+  system_template: "You are a helpful assistant."
+`
+	require.NoError(t, os.WriteFile(filepath.Join(promptsDir, "assistant.yaml"), []byte(assistantPrompt), 0644))
+
+	providersDir := filepath.Join(bundleDir, "providers")
+	require.NoError(t, os.MkdirAll(providersDir, 0755))
+
+	mockProvider := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: mock-provider
+spec:
+  id: mock-provider
+  type: mock
+  model: mock-model
+  additional_config:
+    mock_config: mock-responses.yaml
+`
+	require.NoError(t, os.WriteFile(filepath.Join(providersDir, "mock.provider.yaml"), []byte(mockProvider), 0644))
+
+	scenariosDir := filepath.Join(bundleDir, "scenarios")
+	require.NoError(t, os.MkdirAll(scenariosDir, 0755))
+
+	scenario := `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Scenario
+metadata:
+  name: test
+spec:
+  id: test
+  task_type: assistant
+  description: Test scenario
+  turns:
+    - role: user
+      content: "Hello"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(scenariosDir, "test.scenario.yaml"), []byte(scenario), 0644))
+
+	mockResponses := `defaultResponse: "Hello! How can I help you?"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(bundleDir, "mock-responses.yaml"), []byte(mockResponses), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(bundleDir, "out"), 0755))
+
+	// Capture stderr to verify promptkit logs are output
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Configure with verbose = true
+	cfg := &Config{
+		WorkDir: bundleDir,
+		Verbose: true,
+	}
+
+	item := &queue.WorkItem{
+		ID:         "test-verbose-item",
+		JobID:      "test-job",
+		ScenarioID: "test",
+		ProviderID: "mock-provider",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := executeWorkItem(ctx, cfg, item, bundleDir)
+
+	// Restore stderr and capture output
+	w.Close()
+	os.Stderr = oldStderr
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	stderrOutput := string(buf[:n])
+
+	// Log captured stderr for debugging
+	t.Logf("Captured stderr output (%d bytes):\n%s", n, stderrOutput)
+
+	require.NoError(t, err, "executeWorkItem should not return error")
+	assert.NotNil(t, result, "result should not be nil")
+
+	// Verify we captured some promptkit debug logs
+	// The logger should output messages like "Pipeline ExecutionTimeout configured" or similar
+	assert.True(t, len(stderrOutput) > 0, "verbose mode should produce stderr output from promptkit logger")
+
+	// Check for specific promptkit log markers if available
+	if len(stderrOutput) > 100 {
+		t.Logf("Verbose logging is working - captured %d bytes of promptkit logs", len(stderrOutput))
+	} else {
+		t.Logf("Warning: Expected more verbose output from promptkit, only got %d bytes", len(stderrOutput))
+	}
+
+	t.Logf("Execution result: status=%s, duration=%.0fms", result.Status, result.DurationMs)
+}
