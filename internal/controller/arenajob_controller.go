@@ -516,20 +516,8 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		})
 	}
 
-	// Add source artifact info if available
+	// Add source content info if available (filesystem-based content access)
 	if config.Status.ResolvedSource != nil {
-		// Legacy: tar.gz URL for backwards compatibility
-		if config.Status.ResolvedSource.URL != "" {
-			env = append(env, corev1.EnvVar{
-				Name:  "ARENA_ARTIFACT_URL",
-				Value: config.Status.ResolvedSource.URL,
-			})
-		}
-		env = append(env, corev1.EnvVar{
-			Name:  "ARENA_ARTIFACT_REVISION",
-			Value: config.Status.ResolvedSource.Revision,
-		})
-		// New: filesystem-based content access
 		if config.Status.ResolvedSource.ContentPath != "" {
 			// Full path: {mount}/{workspace}/{namespace}/{contentPath}
 			workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)

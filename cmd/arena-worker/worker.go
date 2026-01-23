@@ -17,14 +17,10 @@ limitations under the License.
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,11 +50,7 @@ type Config struct {
 	ConfigName   string
 	JobType      string
 
-	// Artifact configuration (legacy tar.gz download)
-	ArtifactURL      string
-	ArtifactRevision string
-
-	// Filesystem content configuration (new - takes precedence over ArtifactURL)
+	// Filesystem content configuration
 	// Full path to mounted content (e.g., /workspace-content/ns/default/arena/name/.arena/versions/hash)
 	ContentPath    string
 	ContentVersion string // Content-addressable version hash
@@ -69,11 +61,10 @@ type Config struct {
 	RedisDB       int
 
 	// Worker configuration
-	WorkDir        string
-	PromptArenaBin string
-	PollInterval   time.Duration
-	ShutdownDelay  time.Duration
-	Verbose        bool // Enable verbose/debug output from promptarena
+	WorkDir       string
+	PollInterval  time.Duration
+	ShutdownDelay time.Duration
+	Verbose       bool // Enable verbose/debug output from promptarena
 
 	// Override configurations (resolved from CRDs by controller)
 	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
@@ -107,30 +98,26 @@ type AssertionResult struct {
 
 func loadConfig() (*Config, error) {
 	cfg := &Config{
-		JobName:          os.Getenv("ARENA_JOB_NAME"),
-		JobNamespace:     os.Getenv("ARENA_JOB_NAMESPACE"),
-		ConfigName:       os.Getenv("ARENA_CONFIG_NAME"),
-		JobType:          os.Getenv("ARENA_JOB_TYPE"),
-		ArtifactURL:      os.Getenv("ARENA_ARTIFACT_URL"),
-		ArtifactRevision: os.Getenv("ARENA_ARTIFACT_REVISION"),
-		ContentPath:      os.Getenv("ARENA_CONTENT_PATH"),    // New: filesystem path
-		ContentVersion:   os.Getenv("ARENA_CONTENT_VERSION"), // New: version hash
-		RedisAddr:        getEnvOrDefault("REDIS_ADDR", "redis:6379"),
-		RedisPassword:    os.Getenv("REDIS_PASSWORD"),
-		RedisDB:          0,
-		WorkDir:          getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
-		PromptArenaBin:   getEnvOrDefault("PROMPTARENA_BIN", "promptarena"),
-		PollInterval:     getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
-		ShutdownDelay:    getDurationEnv("ARENA_SHUTDOWN_DELAY", 5*time.Second),
-		Verbose:          os.Getenv("ARENA_VERBOSE") == "true",
+		JobName:        os.Getenv("ARENA_JOB_NAME"),
+		JobNamespace:   os.Getenv("ARENA_JOB_NAMESPACE"),
+		ConfigName:     os.Getenv("ARENA_CONFIG_NAME"),
+		JobType:        os.Getenv("ARENA_JOB_TYPE"),
+		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
+		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
+		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
+		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
+		RedisDB:        0,
+		WorkDir:        getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
+		PollInterval:   getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
+		ShutdownDelay:  getDurationEnv("ARENA_SHUTDOWN_DELAY", 5*time.Second),
+		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
 	}
-	// ContentPath takes precedence; ArtifactURL is only required if ContentPath is not set
-	if cfg.ContentPath == "" && cfg.ArtifactURL == "" {
-		return nil, errors.New("either ARENA_CONTENT_PATH or ARENA_ARTIFACT_URL is required")
+	if cfg.ContentPath == "" {
+		return nil, errors.New("ARENA_CONTENT_PATH is required")
 	}
 
 	// Parse tool overrides if provided
@@ -161,180 +148,20 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	return defaultValue
 }
 
-// getBundlePath returns the path to the content bundle.
-// If ContentPath is set (filesystem mode), it uses the mounted path directly.
-// Otherwise, it falls back to downloading and extracting the tar.gz artifact.
-func getBundlePath(ctx context.Context, cfg *Config) (string, error) {
-	// Filesystem mode: use mounted content directly
-	if cfg.ContentPath != "" {
-		// Validate that the content path exists and is accessible
-		info, err := os.Stat(cfg.ContentPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", fmt.Errorf("content path does not exist: %s", cfg.ContentPath)
-			}
-			return "", fmt.Errorf("failed to access content path: %w", err)
+// getContentPath validates and returns the mounted content path.
+func getContentPath(cfg *Config) (string, error) {
+	// Validate that the content path exists and is accessible
+	info, err := os.Stat(cfg.ContentPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("content path does not exist: %s", cfg.ContentPath)
 		}
-		if !info.IsDir() {
-			return "", fmt.Errorf("content path is not a directory: %s", cfg.ContentPath)
-		}
-		// Return the mounted content path directly - no download/extraction needed
-		return cfg.ContentPath, nil
+		return "", fmt.Errorf("failed to access content path: %w", err)
 	}
-
-	// Legacy mode: download and extract tar.gz artifact
-	return downloadAndExtract(ctx, cfg)
-}
-
-func downloadAndExtract(ctx context.Context, cfg *Config) (string, error) {
-	// Create work directory
-	bundleDir := filepath.Join(cfg.WorkDir, "bundle")
-	if err := os.MkdirAll(bundleDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create work directory: %w", err)
+	if !info.IsDir() {
+		return "", fmt.Errorf("content path is not a directory: %s", cfg.ContentPath)
 	}
-
-	// Download artifact
-	tarPath := filepath.Join(cfg.WorkDir, "bundle.tar.gz")
-	if err := downloadFile(ctx, cfg.ArtifactURL, tarPath); err != nil {
-		return "", fmt.Errorf("failed to download artifact: %w", err)
-	}
-
-	// Extract tarball
-	if err := extractTarGz(tarPath, bundleDir); err != nil {
-		return "", fmt.Errorf("failed to extract artifact: %w", err)
-	}
-
-	// Clean up tarball (ignore error, non-critical)
-	_ = os.Remove(tarPath)
-
-	return bundleDir, nil
-}
-
-func downloadFile(ctx context.Context, url, destPath string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
-
-	out, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
-
-	_, err = io.Copy(out, resp.Body)
-	return err
-}
-
-func extractTarGz(tarPath, destDir string) error {
-	file, err := os.Open(tarPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	gzr, err := gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		// Sanitize path to prevent directory traversal
-		target := filepath.Join(destDir, header.Name)
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("invalid tar path: %s", header.Name)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := extractRegularFile(target, tr, header.Mode); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			// Validate and sanitize symlink target to prevent symlink escape attacks
-			safeLinkTarget, err := sanitizeSymlinkTarget(destDir, target, header.Linkname)
-			if err != nil {
-				return fmt.Errorf("invalid symlink in archive: %w", err)
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return err
-			}
-			if err := os.Symlink(safeLinkTarget, target); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func extractRegularFile(target string, tr *tar.Reader, mode int64) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		return err
-	}
-	outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(mode))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = outFile.Close() }()
-
-	_, err = io.Copy(outFile, tr)
-	return err
-}
-
-// sanitizeSymlinkTarget validates a symlink target from an archive and returns
-// a safe relative path. This prevents symlink escape attacks (CWE-22).
-func sanitizeSymlinkTarget(destDir, symlinkPath, linkTarget string) (string, error) {
-	// Reject absolute symlink targets
-	if filepath.IsAbs(linkTarget) {
-		return "", fmt.Errorf("absolute symlink target not allowed: %s", linkTarget)
-	}
-
-	// Resolve the symlink target relative to the symlink's directory
-	linkDir := filepath.Dir(symlinkPath)
-	resolvedPath := filepath.Join(linkDir, linkTarget)
-	resolvedPath = filepath.Clean(resolvedPath)
-
-	// Verify resolved path stays within destDir
-	cleanDestDir := filepath.Clean(destDir)
-	if !strings.HasPrefix(resolvedPath, cleanDestDir+string(os.PathSeparator)) &&
-		resolvedPath != cleanDestDir {
-		return "", fmt.Errorf("symlink target escapes destination: %s", linkTarget)
-	}
-
-	// Compute the relative path from the symlink to the target
-	// This ensures we're not using the raw archive data
-	relPath, err := filepath.Rel(linkDir, resolvedPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to compute relative path: %w", err)
-	}
-
-	return relPath, nil
+	return cfg.ContentPath, nil
 }
 
 func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundlePath string) error {

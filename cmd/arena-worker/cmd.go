@@ -45,13 +45,7 @@ func run(ctx context.Context) error {
 	fmt.Printf("Arena Worker starting\n")
 	fmt.Printf("  Job: %s/%s\n", cfg.JobNamespace, cfg.JobName)
 	fmt.Printf("  Type: %s\n", cfg.JobType)
-	if cfg.ContentPath != "" {
-		// Filesystem mode: content mounted directly
-		fmt.Printf("  Content: %s (version: %s)\n", cfg.ContentPath, cfg.ContentVersion)
-	} else {
-		// Legacy mode: tar.gz download
-		fmt.Printf("  Artifact: %s (rev: %s)\n", cfg.ArtifactURL, cfg.ArtifactRevision)
-	}
+	fmt.Printf("  Content: %s (version: %s)\n", cfg.ContentPath, cfg.ContentVersion)
 
 	// Log tool registry overrides
 	logToolOverrides(cfg)
@@ -59,16 +53,12 @@ func run(ctx context.Context) error {
 	// Log provider credential overrides (detected from environment)
 	logProviderOverrides()
 
-	// Get bundle path (filesystem mode or download/extract)
-	bundlePath, err := getBundlePath(ctx, cfg)
+	// Get content path (mounted from PVC)
+	bundlePath, err := getContentPath(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to get bundle: %w", err)
+		return fmt.Errorf("failed to get content path: %w", err)
 	}
-	if cfg.ContentPath != "" {
-		fmt.Printf("  Using mounted content at: %s\n", bundlePath)
-	} else {
-		fmt.Printf("  Bundle extracted to: %s\n", bundlePath)
-	}
+	fmt.Printf("  Using mounted content at: %s\n", bundlePath)
 
 	// Connect to Redis queue
 	q, err := queue.NewRedisQueue(queue.RedisOptions{
