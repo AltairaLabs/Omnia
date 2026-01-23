@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Tool registry overrides for ArenaJob - override tools in `arena.config.yaml` with handlers from ToolRegistry CRDs using label selectors
 - Provider overrides for ArenaJob using Kubernetes label selectors - dynamically select Provider CRDs at runtime based on labels
 - Version switching in Arena dashboard - browse and switch between synced content versions
 - Reusable label selector utilities in `pkg/selector` package

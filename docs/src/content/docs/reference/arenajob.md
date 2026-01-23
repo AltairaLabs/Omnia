@@ -244,6 +244,97 @@ spec:
           role: evaluator
 ```
 
+### `toolRegistryOverride`
+
+Override tools defined in `arena.config.yaml` with handlers from ToolRegistry CRDs. This allows dynamic tool endpoint resolution at runtime based on Kubernetes label selectors.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `selector` | LabelSelector | Yes | Kubernetes label selector for ToolRegistry CRDs |
+
+When specified, all tools from matching ToolRegistry CRDs will override tools with matching names in the arena config file. This is useful for:
+
+- Switching between mock and real tool implementations
+- Routing tool calls to different endpoints per environment
+- Dynamic service discovery for tool handlers
+
+```yaml
+spec:
+  toolRegistryOverride:
+    selector:
+      matchLabels:
+        environment: production
+```
+
+#### How Tool Overrides Work
+
+1. The controller finds all ToolRegistry CRDs matching the label selector
+2. Tools are extracted from each registry's handlers and discovered tools
+3. These tools override any tools with the same name in `arena.config.yaml`
+4. The worker receives the resolved tool endpoints via configuration
+
+#### Example: Override Mock Tools with Real Implementations
+
+```yaml
+# ToolRegistry with real tool implementations
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: production-tools
+  labels:
+    environment: production
+spec:
+  handlers:
+    - name: weather-handler
+      type: http
+      tool:
+        name: get_weather
+        description: Get real weather data
+        inputSchema:
+          type: object
+          properties:
+            city:
+              type: string
+      httpConfig:
+        endpoint: http://weather-api.prod.svc:8080/weather
+---
+# ArenaJob using real tools
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: eval-with-real-tools
+spec:
+  configRef:
+    name: my-config
+  toolRegistryOverride:
+    selector:
+      matchLabels:
+        environment: production
+```
+
+#### Combining with Provider Overrides
+
+You can use both `providerOverrides` and `toolRegistryOverride` together for complete runtime configuration:
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: production-eval
+spec:
+  configRef:
+    name: my-config
+  providerOverrides:
+    default:
+      selector:
+        matchLabels:
+          tier: production
+  toolRegistryOverride:
+    selector:
+      matchLabels:
+        environment: production
+```
+
 ### `output`
 
 Configure where job results are stored.
