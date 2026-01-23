@@ -166,6 +166,14 @@ type ProviderGroupSelector struct {
 	Selector metav1.LabelSelector `json:"selector"`
 }
 
+// ToolRegistrySelector defines how to select ToolRegistry CRDs.
+type ToolRegistrySelector struct {
+	// selector is a label selector to match ToolRegistry CRDs in the workspace namespace.
+	// All tools from matching registries will override tools/mcp_servers defined in arena.config.yaml.
+	// +kubebuilder:validation:Required
+	Selector metav1.LabelSelector `json:"selector"`
+}
+
 // ScheduleConfig configures job scheduling.
 type ScheduleConfig struct {
 	// cron is a cron expression for scheduled execution.
@@ -247,6 +255,12 @@ type ArenaJobSpec struct {
 	// and Provider CRDs matching the label selector are used instead.
 	// +optional
 	ProviderOverrides map[string]ProviderGroupSelector `json:"providerOverrides,omitempty"`
+
+	// toolRegistryOverride allows overriding tools/mcp_servers from arena.config.yaml
+	// with handlers from ToolRegistry CRDs. All tools from matching registries will
+	// override tools with matching names in the arena config.
+	// +optional
+	ToolRegistryOverride *ToolRegistrySelector `json:"toolRegistryOverride,omitempty"`
 }
 
 // ArenaJobPhase represents the current phase of the ArenaJob.

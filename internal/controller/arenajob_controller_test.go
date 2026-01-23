@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -2060,6 +2061,119 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(providers).To(HaveLen(1)) // Should only have one provider despite matching both selectors
 			Expect(providers[0].Name).To(Equal("shared-provider"))
+		})
+	})
+
+	Context("Tool Registry Overrides", func() {
+		It("should return nil when no tool registry override is specified", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "job-without-tool-override",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			toolOverrides, err := reconciler.resolveToolRegistryOverride(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(toolOverrides).To(BeNil())
+		})
+
+		It("should resolve tools from matching ToolRegistry CRDs", func() {
+			By("creating a ToolRegistry with a tool")
+			endpoint := "http://weather-service:8080"
+			toolRegistry := &omniav1alpha1.ToolRegistry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-tool-registry",
+					Namespace: "default",
+					Labels: map[string]string{
+						"environment": "production",
+					},
+				},
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Handlers: []omniav1alpha1.HandlerDefinition{
+						{
+							Name: "weather-handler",
+							Type: omniav1alpha1.HandlerTypeHTTP,
+							Tool: &omniav1alpha1.ToolDefinition{
+								Name:        "get_weather",
+								Description: "Get weather data",
+								InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object","properties":{"city":{"type":"string"}}}`)},
+							},
+							HTTPConfig: &omniav1alpha1.HTTPConfig{
+								Endpoint: endpoint,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, toolRegistry)
+			})
+
+			By("creating an ArenaJob with tool registry override")
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "job-with-tool-override",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					ToolRegistryOverride: &omniav1alpha1.ToolRegistrySelector{
+						Selector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"environment": "production",
+							},
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("resolving tool registry override")
+			toolOverrides, err := reconciler.resolveToolRegistryOverride(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(toolOverrides).To(HaveLen(1))
+			Expect(toolOverrides).To(HaveKey("get_weather"))
+			Expect(toolOverrides["get_weather"].Endpoint).To(Equal(endpoint))
+			Expect(toolOverrides["get_weather"].RegistryName).To(Equal("test-tool-registry"))
+		})
+
+		It("should return empty map when no registries match selector", func() {
+			By("creating an ArenaJob with non-matching selector")
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "job-with-nonmatching-override",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					ToolRegistryOverride: &omniav1alpha1.ToolRegistrySelector{
+						Selector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"environment": "nonexistent",
+							},
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			toolOverrides, err := reconciler.resolveToolRegistryOverride(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(toolOverrides).To(BeNil())
 		})
 	})
 })

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -406,6 +407,52 @@ func (r *ArenaJobReconciler) getProviderIDsFromCRDs(providerCRDs []*omniav1alpha
 	return ids
 }
 
+// resolveToolRegistryOverride resolves tool registry CRDs based on ArenaJob's toolRegistryOverride.
+// Returns the resolved tool overrides configuration for the worker.
+func (r *ArenaJobReconciler) resolveToolRegistryOverride(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (map[string]selector.ToolOverrideConfig, error) {
+	if arenaJob.Spec.ToolRegistryOverride == nil {
+		return nil, nil
+	}
+
+	log := logf.FromContext(ctx)
+	log.Info("resolving tool registry override")
+
+	// Resolve tool registries matching the selector
+	registries, err := selector.ResolveToolRegistryOverride(ctx, r.Client, arenaJob.Namespace, arenaJob.Spec.ToolRegistryOverride)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve tool registry override: %w", err)
+	}
+
+	if len(registries) == 0 {
+		log.Info("no tool registries matched the selector")
+		return nil, nil
+	}
+
+	// Log resolved registries
+	registryNames := make([]string, len(registries))
+	for i, reg := range registries {
+		registryNames[i] = reg.Name
+	}
+	log.Info("resolved tool registries", "registries", registryNames, "count", len(registries))
+
+	// Extract tool override configurations
+	toolOverrides := selector.GetToolOverridesFromRegistries(registries)
+
+	// Log individual tool overrides
+	for toolName, config := range toolOverrides {
+		log.Info("tool override configured",
+			"tool", toolName,
+			"registry", config.RegistryName,
+			"handler", config.HandlerName,
+			"endpoint", config.Endpoint,
+			"type", config.HandlerType,
+		)
+	}
+
+	log.Info("resolved tool overrides", "totalTools", len(toolOverrides))
+	return toolOverrides, nil
+}
+
 // createWorkerJob creates a K8s Job for the Arena workers.
 func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig) error {
 	log := logf.FromContext(ctx)
@@ -419,6 +466,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	providerCRDs, err := r.resolveProviderOverrides(ctx, arenaJob)
 	if err != nil {
 		return fmt.Errorf("failed to resolve provider overrides: %w", err)
+	}
+
+	// Resolve tool registry override if specified
+	toolOverrides, err := r.resolveToolRegistryOverride(ctx, arenaJob)
+	if err != nil {
+		return fmt.Errorf("failed to resolve tool registry override: %w", err)
 	}
 
 	// Build environment variables
@@ -499,12 +552,32 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	// Use resolved CRDs if provider overrides are specified, otherwise use ArenaConfig providers
 	var providerEnvVars []corev1.EnvVar
 	if len(providerCRDs) > 0 {
-		log.V(1).Info("using provider overrides for credentials", "count", len(providerCRDs))
+		log.Info("using provider overrides for credentials", "count", len(providerCRDs))
+		for _, p := range providerCRDs {
+			log.Info("provider override",
+				"name", p.Name,
+				"type", p.Spec.Type,
+				"model", p.Spec.Model,
+			)
+		}
 		providerEnvVars = r.buildProviderEnvVarsFromCRDs(providerCRDs)
 	} else {
 		providerEnvVars = r.buildProviderEnvVars(config.Status.ResolvedProviders)
 	}
 	env = append(env, providerEnvVars...)
+
+	// Add tool registry overrides as JSON if specified
+	if len(toolOverrides) > 0 {
+		toolOverridesJSON, err := json.Marshal(toolOverrides)
+		if err != nil {
+			return fmt.Errorf("failed to marshal tool overrides: %w", err)
+		}
+		env = append(env, corev1.EnvVar{
+			Name:  "ARENA_TOOL_OVERRIDES",
+			Value: string(toolOverridesJSON),
+		})
+		log.Info("tool overrides configured", "count", len(toolOverrides))
+	}
 
 	// Determine if we should mount workspace content PVC
 	useWorkspaceContent := r.WorkspaceContentPath != "" &&

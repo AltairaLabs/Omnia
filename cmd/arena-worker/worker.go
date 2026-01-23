@@ -73,6 +73,19 @@ type Config struct {
 	PollInterval   time.Duration
 	ShutdownDelay  time.Duration
 	Verbose        bool // Enable verbose/debug output from promptarena
+
+	// Override configurations (resolved from CRDs by controller)
+	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
+}
+
+// ToolOverrideConfig contains the configuration for a tool override from ToolRegistry CRD.
+type ToolOverrideConfig struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	HandlerName  string `json:"handlerName"`
+	RegistryName string `json:"registryName"`
+	HandlerType  string `json:"handlerType,omitempty"`
 }
 
 // ExecutionResult represents the result of running a scenario.
@@ -117,6 +130,15 @@ func loadConfig() (*Config, error) {
 	// ContentPath takes precedence; ArtifactURL is only required if ContentPath is not set
 	if cfg.ContentPath == "" && cfg.ArtifactURL == "" {
 		return nil, errors.New("either ARENA_CONTENT_PATH or ARENA_ARTIFACT_URL is required")
+	}
+
+	// Parse tool overrides if provided
+	if toolOverridesJSON := os.Getenv("ARENA_TOOL_OVERRIDES"); toolOverridesJSON != "" {
+		var toolOverrides map[string]ToolOverrideConfig
+		if err := json.Unmarshal([]byte(toolOverridesJSON), &toolOverrides); err != nil {
+			return nil, fmt.Errorf("failed to parse ARENA_TOOL_OVERRIDES: %w", err)
+		}
+		cfg.ToolOverrides = toolOverrides
 	}
 
 	return cfg, nil
