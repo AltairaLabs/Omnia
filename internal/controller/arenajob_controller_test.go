@@ -1348,7 +1348,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				RedisAddr: "", // No Redis configured
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -1376,7 +1376,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Queue:  memQueue,
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -1404,7 +1404,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Queue:  memQueue,
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify items were enqueued
@@ -1446,7 +1446,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Queue:  memQueue,
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig)
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify item was enqueued with empty bundle URL
@@ -1812,6 +1812,254 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 			result := reconciler.getWorkspaceForNamespace(ctx, "non-existent-namespace")
 			Expect(result).To(Equal("non-existent-namespace"))
+		})
+	})
+
+	Context("Provider Override Functions", func() {
+		It("should resolve provider overrides using label selectors", func() {
+			By("creating provider CRDs with labels")
+			provider1 := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-provider-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"tier": "production",
+						"team": "ml",
+					},
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  "openai",
+					Model: "gpt-4",
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider1)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, provider1)
+			})
+
+			provider2 := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-provider-2",
+					Namespace: "default",
+					Labels: map[string]string{
+						"tier": "staging",
+						"team": "ml",
+					},
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  "claude",
+					Model: "claude-3-sonnet",
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider2)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, provider2)
+			})
+
+			By("creating an ArenaJob with provider overrides")
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "job-with-overrides",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					ProviderOverrides: map[string]omniav1alpha1.ProviderGroupSelector{
+						"default": {
+							Selector: metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "production",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("resolving provider overrides")
+			providers, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(providers).To(HaveLen(1))
+			Expect(providers[0].Name).To(Equal("test-provider-1"))
+		})
+
+		It("should return nil when no provider overrides specified", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "job-without-overrides",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			providers, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(providers).To(BeNil())
+		})
+
+		It("should build env vars from provider CRDs with secretRef", func() {
+			providerCRDs := []*omniav1alpha1.Provider{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "openai-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:  "openai",
+						Model: "gpt-4",
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "custom-openai-secret",
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			envVars := reconciler.buildProviderEnvVarsFromCRDs(providerCRDs)
+			Expect(envVars).NotTo(BeEmpty())
+
+			// Find the OPENAI_API_KEY env var
+			var foundOpenAI bool
+			for _, env := range envVars {
+				if env.Name == "OPENAI_API_KEY" {
+					foundOpenAI = true
+					Expect(env.ValueFrom).NotTo(BeNil())
+					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("custom-openai-secret"))
+				}
+			}
+			Expect(foundOpenAI).To(BeTrue())
+		})
+
+		It("should build env vars from provider CRDs without secretRef", func() {
+			providerCRDs := []*omniav1alpha1.Provider{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "claude-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:  "claude",
+						Model: "claude-3-opus",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			envVars := reconciler.buildProviderEnvVarsFromCRDs(providerCRDs)
+			Expect(envVars).NotTo(BeEmpty())
+
+			// Find the ANTHROPIC_API_KEY env var (claude provider uses ANTHROPIC_API_KEY)
+			var foundAnthropic bool
+			for _, env := range envVars {
+				if env.Name == "ANTHROPIC_API_KEY" {
+					foundAnthropic = true
+					Expect(env.ValueFrom).NotTo(BeNil())
+					// Should use default secret naming convention: ANTHROPIC_API_KEY -> anthropic-api-key
+					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("anthropic-api-key"))
+				}
+			}
+			Expect(foundAnthropic).To(BeTrue())
+		})
+
+		It("should extract provider IDs from CRDs", func() {
+			providerCRDs := []*omniav1alpha1.Provider{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "provider-alpha",
+						Namespace: "default",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "provider-beta",
+						Namespace: "default",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			ids := reconciler.getProviderIDsFromCRDs(providerCRDs)
+			Expect(ids).To(Equal([]string{"provider-alpha", "provider-beta"}))
+		})
+
+		It("should deduplicate providers resolved from multiple groups", func() {
+			By("creating a provider that matches multiple selectors")
+			provider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shared-provider",
+					Namespace: "default",
+					Labels: map[string]string{
+						"tier": "production",
+						"role": "judge",
+					},
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  "openai",
+					Model: "gpt-4",
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, provider)
+			})
+
+			By("creating an ArenaJob with multiple groups selecting same provider")
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "job-with-multi-group-overrides",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					ProviderOverrides: map[string]omniav1alpha1.ProviderGroupSelector{
+						"default": {
+							Selector: metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"tier": "production",
+								},
+							},
+						},
+						"judge": {
+							Selector: metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"role": "judge",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			By("resolving provider overrides - should deduplicate")
+			providers, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(providers).To(HaveLen(1)) // Should only have one provider despite matching both selectors
+			Expect(providers[0].Name).To(Equal("shared-provider"))
 		})
 	})
 })

@@ -158,6 +158,14 @@ type OutputConfig struct {
 	PVC *PVCOutputConfig `json:"pvc,omitempty"`
 }
 
+// ProviderGroupSelector defines how to select Provider CRDs for a specific group.
+type ProviderGroupSelector struct {
+	// selector is a label selector to match Provider CRDs in the workspace namespace.
+	// All matching providers will be used for the group, with scenarios run against each.
+	// +kubebuilder:validation:Required
+	Selector metav1.LabelSelector `json:"selector"`
+}
+
 // ScheduleConfig configures job scheduling.
 type ScheduleConfig struct {
 	// cron is a cron expression for scheduled execution.
@@ -231,6 +239,14 @@ type ArenaJobSpec struct {
 	// When enabled, workers will pass --verbose to promptarena for detailed output.
 	// +optional
 	Verbose bool `json:"verbose,omitempty"`
+
+	// providerOverrides allows overriding providers from the ArenaConfig by group.
+	// Keys are group names from the arena config file (e.g., "default", "judge").
+	// Use "*" as a catch-all for groups not explicitly specified.
+	// When specified, providers from the ArenaConfig are ignored for matched groups,
+	// and Provider CRDs matching the label selector are used instead.
+	// +optional
+	ProviderOverrides map[string]ProviderGroupSelector `json:"providerOverrides,omitempty"`
 }
 
 // ArenaJobPhase represents the current phase of the ArenaJob.

@@ -40,6 +40,7 @@ import (
 	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
 	"github.com/altairalabs/omnia/pkg/license"
+	"github.com/altairalabs/omnia/pkg/selector"
 )
 
 // ArenaJob condition types
@@ -116,6 +117,7 @@ func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, names
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/finalizers,verbs=update
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenaconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
@@ -297,6 +299,113 @@ func (r *ArenaJobReconciler) getWorkerImagePullPolicy() corev1.PullPolicy {
 	return corev1.PullIfNotPresent
 }
 
+// resolveProviderOverrides resolves provider CRDs based on ArenaJob's providerOverrides.
+// Returns the resolved providers and their environment variables.
+// If no overrides are specified, returns nil (use ArenaConfig providers).
+func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) ([]*omniav1alpha1.Provider, error) {
+	if len(arenaJob.Spec.ProviderOverrides) == 0 {
+		return nil, nil
+	}
+
+	log := logf.FromContext(ctx)
+	log.V(1).Info("resolving provider overrides", "overrides", len(arenaJob.Spec.ProviderOverrides))
+
+	// Resolve all provider overrides
+	resolvedByGroup, err := selector.ResolveProviderOverrides(ctx, r.Client, arenaJob.Namespace, arenaJob.Spec.ProviderOverrides)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve provider overrides: %w", err)
+	}
+
+	// Deduplicate providers across groups (same provider may match multiple selectors)
+	seen := make(map[string]bool)
+	var allProviders []*omniav1alpha1.Provider
+
+	for group, groupProviders := range resolvedByGroup {
+		log.V(1).Info("resolved providers for group", "group", group, "count", len(groupProviders))
+		for _, p := range groupProviders {
+			key := fmt.Sprintf("%s/%s", p.Namespace, p.Name)
+			if !seen[key] {
+				seen[key] = true
+				allProviders = append(allProviders, p)
+			}
+		}
+	}
+
+	log.Info("resolved provider overrides", "totalProviders", len(allProviders))
+	return allProviders, nil
+}
+
+// buildProviderEnvVarsFromCRDs builds environment variables for Provider CRDs.
+// This extracts credentials from each provider's secretRef.
+func (r *ArenaJobReconciler) buildProviderEnvVarsFromCRDs(providerCRDs []*omniav1alpha1.Provider) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{}
+	seen := make(map[string]bool)
+
+	for _, provider := range providerCRDs {
+		// Get the provider type for determining which env var to use
+		providerType := string(provider.Spec.Type)
+
+		// If provider has a secretRef, use it directly
+		if provider.Spec.SecretRef != nil {
+			// Get the expected env var name for this provider type
+			secretRefs := providers.GetSecretRefsForProvider(providerType)
+			for _, ref := range secretRefs {
+				if seen[ref.EnvVar] {
+					continue
+				}
+				seen[ref.EnvVar] = true
+
+				// Use the provider's secretRef instead of the default
+				envVars = append(envVars, corev1.EnvVar{
+					Name: ref.EnvVar,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: provider.Spec.SecretRef.Name,
+							},
+							Key:      ref.Key,
+							Optional: ptr(true),
+						},
+					},
+				})
+			}
+		} else {
+			// Fall back to default secret naming convention
+			secretRefs := providers.GetSecretRefsForProvider(providerType)
+			for _, ref := range secretRefs {
+				if seen[ref.EnvVar] {
+					continue
+				}
+				seen[ref.EnvVar] = true
+
+				envVars = append(envVars, corev1.EnvVar{
+					Name: ref.EnvVar,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: ref.SecretName,
+							},
+							Key:      ref.Key,
+							Optional: ptr(true),
+						},
+					},
+				})
+			}
+		}
+	}
+
+	return envVars
+}
+
+// getProviderIDsFromCRDs extracts provider IDs from Provider CRDs for work queue.
+func (r *ArenaJobReconciler) getProviderIDsFromCRDs(providerCRDs []*omniav1alpha1.Provider) []string {
+	ids := make([]string, len(providerCRDs))
+	for i, p := range providerCRDs {
+		ids[i] = p.Name
+	}
+	return ids
+}
+
 // createWorkerJob creates a K8s Job for the Arena workers.
 func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig) error {
 	log := logf.FromContext(ctx)
@@ -304,6 +413,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	replicas := int32(1)
 	if arenaJob.Spec.Workers != nil && arenaJob.Spec.Workers.Replicas > 0 {
 		replicas = arenaJob.Spec.Workers.Replicas
+	}
+
+	// Resolve provider overrides if specified
+	providerCRDs, err := r.resolveProviderOverrides(ctx, arenaJob)
+	if err != nil {
+		return fmt.Errorf("failed to resolve provider overrides: %w", err)
 	}
 
 	// Build environment variables
@@ -380,9 +495,15 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		}
 	}
 
-	// Add provider credential environment variables from secrets
-	// This injects API keys for each resolved provider based on their type
-	providerEnvVars := r.buildProviderEnvVars(config.Status.ResolvedProviders)
+	// Add provider credential environment variables
+	// Use resolved CRDs if provider overrides are specified, otherwise use ArenaConfig providers
+	var providerEnvVars []corev1.EnvVar
+	if len(providerCRDs) > 0 {
+		log.V(1).Info("using provider overrides for credentials", "count", len(providerCRDs))
+		providerEnvVars = r.buildProviderEnvVarsFromCRDs(providerCRDs)
+	} else {
+		providerEnvVars = r.buildProviderEnvVars(config.Status.ResolvedProviders)
+	}
 	env = append(env, providerEnvVars...)
 
 	// Determine if we should mount workspace content PVC
@@ -516,7 +637,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Enqueue work items (lazily connects to queue if configured)
-	if err := r.enqueueWorkItems(ctx, arenaJob, config); err != nil {
+	if err := r.enqueueWorkItems(ctx, arenaJob, config, providerCRDs); err != nil {
 		log.Error(err, "failed to enqueue work items")
 		// Don't return error - job is created, workers will wait for items
 	}
@@ -641,7 +762,8 @@ func (r *ArenaJobReconciler) getOrCreateQueue() (queue.WorkQueue, error) {
 
 // enqueueWorkItems creates and enqueues work items for the Arena job.
 // Work items are scenario × provider combinations.
-func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig) error {
+// If providerCRDs is non-nil, uses those providers; otherwise uses config.Status.ResolvedProviders.
+func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig, providerCRDs []*omniav1alpha1.Provider) error {
 	log := logf.FromContext(ctx)
 
 	// Get queue (lazily connect if needed)
@@ -660,18 +782,25 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 		bundleURL = config.Status.ResolvedSource.URL
 	}
 
-	// Get resolved providers
-	providers := config.Status.ResolvedProviders
-	if len(providers) == 0 {
+	// Get providers - use CRDs if overrides were resolved, otherwise use ArenaConfig providers
+	var providerIDs []string
+	if len(providerCRDs) > 0 {
+		providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
+		log.V(1).Info("using provider overrides for work items", "count", len(providerIDs))
+	} else {
+		providerIDs = config.Status.ResolvedProviders
+	}
+
+	if len(providerIDs) == 0 {
 		log.Info("no providers configured, skipping work item enqueueing")
 		return nil
 	}
 
 	// For now, create one work item per provider with a "default" scenario
 	// In the future, this should enumerate scenarios from the bundle
-	items := make([]queue.WorkItem, 0, len(providers))
+	items := make([]queue.WorkItem, 0, len(providerIDs))
 	now := time.Now()
-	for i, provider := range providers {
+	for i, provider := range providerIDs {
 		items = append(items, queue.WorkItem{
 			ID:          fmt.Sprintf("%s-%s-%d", arenaJob.Name, provider, i),
 			JobID:       arenaJob.Name,
@@ -685,7 +814,7 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 		})
 	}
 
-	log.Info("enqueueing work items", "count", len(items), "providers", providers)
+	log.Info("enqueueing work items", "count", len(items), "providers", providerIDs)
 	if err := q.Push(ctx, arenaJob.Name, items); err != nil {
 		return fmt.Errorf("failed to push work items to queue: %w", err)
 	}
@@ -719,29 +848,59 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 		switch condition.Type {
 		case batchv1.JobComplete:
 			if condition.Status == corev1.ConditionTrue {
-				arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseSucceeded
 				now := metav1.Now()
 				arenaJob.Status.CompletionTime = &now
 
 				// Aggregate results from queue if aggregator is available
+				// The aggregated results determine actual success/failure based on test outcomes
+				var hasTestFailures bool
+				var passedItems, failedItems int
 				if r.Aggregator != nil {
+					log.V(1).Info("aggregating results from queue", "jobID", arenaJob.Name)
 					result, err := r.Aggregator.Aggregate(ctx, arenaJob.Name)
 					if err != nil {
 						log.Error(err, "failed to aggregate results")
 					} else {
+						log.V(1).Info("aggregation complete",
+							"totalItems", result.TotalItems,
+							"passedItems", result.PassedItems,
+							"failedItems", result.FailedItems)
 						arenaJob.Status.Result = r.Aggregator.ToJobResult(result)
+						// Check if any tests actually failed
+						hasTestFailures = result.FailedItems > 0
+						passedItems = result.PassedItems
+						failedItems = result.FailedItems
 					}
+				} else {
+					log.V(1).Info("aggregator not available, skipping result aggregation")
 				}
 
-				r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
-					"JobSucceeded", "Job completed successfully")
-				r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionTrue,
-					"Succeeded", "Job completed successfully")
-				if r.Recorder != nil {
-					r.Recorder.Event(arenaJob, corev1.EventTypeNormal, ArenaJobEventReasonJobSucceeded,
-						"Job completed successfully")
+				// Set phase based on aggregated test results, not just K8s job completion
+				if hasTestFailures {
+					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
+					r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+						"TestsFailed", "Job completed but some tests failed")
+					r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+						"Failed", "Job completed but some tests failed")
+					if r.Recorder != nil {
+						r.Recorder.Event(arenaJob, corev1.EventTypeWarning, ArenaJobEventReasonJobFailed,
+							"Job completed but some tests failed")
+					}
+					log.Info("job completed with test failures",
+						"passed", passedItems,
+						"failed", failedItems)
+				} else {
+					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseSucceeded
+					r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+						"JobSucceeded", "Job completed successfully")
+					r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionTrue,
+						"Succeeded", "Job completed successfully")
+					if r.Recorder != nil {
+						r.Recorder.Event(arenaJob, corev1.EventTypeNormal, ArenaJobEventReasonJobSucceeded,
+							"Job completed successfully")
+					}
+					log.Info("job completed successfully")
 				}
-				log.Info("job completed successfully")
 			}
 		case batchv1.JobFailed:
 			if condition.Status == corev1.ConditionTrue {

@@ -124,7 +124,34 @@ func createEnterpriseValidator(t *testing.T, features license.Features) *license
 	return validator
 }
 
-func TestArenaSourceValidator_RejectsGitSourceWithoutLicense(t *testing.T) {
+func TestArenaSourceValidator_RejectsOCISourceWithoutLicense(t *testing.T) {
+	validator := &ArenaSourceValidator{
+		LicenseValidator: createOpenCoreValidator(t),
+	}
+
+	source := &omniav1alpha1.ArenaSource{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-source",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.ArenaSourceSpec{
+			Type:     omniav1alpha1.ArenaSourceTypeOCI,
+			Interval: "5m",
+			OCI: &omniav1alpha1.OCISource{
+				URL: "oci://example.com/repo:latest",
+			},
+		},
+	}
+
+	ctx := context.Background()
+	warnings, err := validator.ValidateCreate(ctx, source)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Enterprise license")
+	assert.NotEmpty(t, warnings)
+}
+
+func TestArenaSourceValidator_AllowsGitSourceWithOpenCore(t *testing.T) {
 	validator := &ArenaSourceValidator{
 		LicenseValidator: createOpenCoreValidator(t),
 	}
@@ -146,9 +173,8 @@ func TestArenaSourceValidator_RejectsGitSourceWithoutLicense(t *testing.T) {
 	ctx := context.Background()
 	warnings, err := validator.ValidateCreate(ctx, source)
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Enterprise license")
-	assert.NotEmpty(t, warnings)
+	assert.NoError(t, err)
+	assert.Empty(t, warnings)
 }
 
 func TestArenaSourceValidator_AllowsConfigMapSourceWithoutLicense(t *testing.T) {
@@ -446,16 +472,17 @@ func TestArenaSourceValidator_ValidateUpdate(t *testing.T) {
 		},
 	}
 
+	// OCI sources require enterprise license (Git is now allowed in open-core)
 	newSource := &omniav1alpha1.ArenaSource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-source",
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaSourceSpec{
-			Type:     omniav1alpha1.ArenaSourceTypeGit,
+			Type:     omniav1alpha1.ArenaSourceTypeOCI,
 			Interval: "5m",
-			Git: &omniav1alpha1.GitSource{
-				URL: "https://github.com/example/repo",
+			OCI: &omniav1alpha1.OCISource{
+				URL: "oci://example.com/repo:latest",
 			},
 		},
 	}

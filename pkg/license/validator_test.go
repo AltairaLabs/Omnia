@@ -60,8 +60,8 @@ func TestOpenCoreLicense(t *testing.T) {
 	assert.Equal(t, TierOpenCore, license.Tier)
 	assert.Equal(t, "Open Core User", license.Customer)
 
-	// Check features are disabled
-	assert.False(t, license.Features.GitSource)
+	// Check features - Git is included in open-core, others require enterprise
+	assert.True(t, license.Features.GitSource)
 	assert.False(t, license.Features.OCISource)
 	assert.False(t, license.Features.S3Source)
 	assert.False(t, license.Features.LoadTesting)
@@ -92,10 +92,10 @@ func TestLicense_CanUseSourceType(t *testing.T) {
 			expected:   true,
 		},
 		{
-			name:       "git not allowed on open-core",
+			name:       "git allowed on open-core",
 			sourceType: "git",
 			license:    OpenCoreLicense(),
-			expected:   false,
+			expected:   true,
 		},
 		{
 			name:       "oci not allowed on open-core",
@@ -632,7 +632,7 @@ func TestValidator_ValidateArenaSource(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("open-core rejects git", func(t *testing.T) {
+	t.Run("open-core allows git", func(t *testing.T) {
 		scheme := runtime.NewScheme()
 		require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -645,7 +645,7 @@ func TestValidator_ValidateArenaSource(t *testing.T) {
 
 		ctx := context.Background()
 		err = validator.ValidateArenaSource(ctx, "git")
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("enterprise allows git", func(t *testing.T) {
@@ -692,7 +692,7 @@ func TestValidator_ValidateArenaSource(t *testing.T) {
 
 	t.Run("expired license falls back to open-core", func(t *testing.T) {
 		// When a JWT license expires, the validator falls back to open-core
-		// Open-core allows configmap but not git
+		// Open-core allows configmap and git, but not OCI or S3
 		claims := &licenseClaims{
 			RegisteredClaims: jwt.RegisteredClaims{
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(-24 * time.Hour)),
@@ -703,6 +703,7 @@ func TestValidator_ValidateArenaSource(t *testing.T) {
 			Customer:  "Test Corp",
 			Features: Features{
 				GitSource: true,
+				OCISource: true,
 			},
 		}
 
@@ -733,8 +734,11 @@ func TestValidator_ValidateArenaSource(t *testing.T) {
 		// ConfigMap is allowed on open-core fallback
 		err = validator.ValidateArenaSource(ctx, "configmap")
 		assert.NoError(t, err)
-		// Git is NOT allowed on open-core fallback
+		// Git is allowed on open-core fallback
 		err = validator.ValidateArenaSource(ctx, "git")
+		assert.NoError(t, err)
+		// OCI is NOT allowed on open-core fallback
+		err = validator.ValidateArenaSource(ctx, "oci")
 		assert.Error(t, err)
 	})
 }

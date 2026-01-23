@@ -1650,17 +1650,17 @@ var _ = Describe("ArenaSource Controller", func() {
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaSource with Git type")
+			By("creating the ArenaSource with OCI type (requires enterprise license)")
 			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "license-test-source",
 					Namespace: arenaSourceNamespace,
 				},
 				Spec: omniav1alpha1.ArenaSourceSpec{
-					Type:     omniav1alpha1.ArenaSourceTypeGit,
+					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
-						URL: "https://github.com/example/repo.git",
+					OCI: &omniav1alpha1.OCISource{
+						URL: "oci://example.com/repo:latest",
 					},
 				},
 			}
