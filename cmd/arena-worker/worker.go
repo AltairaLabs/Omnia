@@ -37,6 +37,7 @@ import (
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
 	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
+	"gopkg.in/yaml.v3"
 )
 
 // Status constants for execution results.
@@ -482,6 +483,13 @@ func executeWorkItem(
 	// The workspace content is mounted read-only, so we need a writable path for media files
 	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
 
+	// Apply tool overrides from ToolRegistry CRDs
+	if len(cfg.ToolOverrides) > 0 {
+		if err := applyToolOverrides(arenaCfg, cfg.ToolOverrides, cfg.Verbose); err != nil {
+			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
+		}
+	}
+
 	// Build registries and executors from the config
 	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, err :=
 		engine.BuildEngineComponents(arenaCfg)
@@ -689,4 +697,102 @@ func setResultStatus(result *ExecutionResult, agg *runAggregator) {
 		result.Status = statusFail
 		result.Error = "no runs completed successfully"
 	}
+}
+
+// toolConfigWrapper wraps tool configuration for YAML parsing/serialization.
+type toolConfigWrapper struct {
+	APIVersion string         `yaml:"apiVersion"`
+	Kind       string         `yaml:"kind"`
+	Metadata   toolMetadata   `yaml:"metadata"`
+	Spec       toolSpecConfig `yaml:"spec"`
+}
+
+type toolMetadata struct {
+	Name string `yaml:"name"`
+}
+
+type toolSpecConfig struct {
+	Name         string                 `yaml:"name,omitempty"`
+	Description  string                 `yaml:"description,omitempty"`
+	InputSchema  map[string]interface{} `yaml:"input_schema,omitempty"`
+	OutputSchema map[string]interface{} `yaml:"output_schema,omitempty"`
+	Mode         string                 `yaml:"mode,omitempty"`
+	TimeoutMs    int                    `yaml:"timeout_ms,omitempty"`
+	MockResult   interface{}            `yaml:"mock_result,omitempty"`
+	MockTemplate string                 `yaml:"mock_template,omitempty"`
+	HTTP         *toolHTTPConfig        `yaml:"http,omitempty"`
+}
+
+type toolHTTPConfig struct {
+	URL            string            `yaml:"url"`
+	Method         string            `yaml:"method,omitempty"`
+	Headers        map[string]string `yaml:"headers,omitempty"`
+	HeadersFromEnv []string          `yaml:"headers_from_env,omitempty"`
+	TimeoutMs      int               `yaml:"timeout_ms,omitempty"`
+}
+
+// applyToolOverrides modifies LoadedTools in the config to apply overrides from ToolRegistry CRDs.
+// For each tool that has an override, it changes the mode to "http" and sets the endpoint URL.
+func applyToolOverrides(cfg *config.Config, overrides map[string]ToolOverrideConfig, verbose bool) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	appliedCount := 0
+	for i, toolData := range cfg.LoadedTools {
+		// Parse the tool YAML
+		var wrapper toolConfigWrapper
+		if err := yaml.Unmarshal(toolData.Data, &wrapper); err != nil {
+			// Skip tools that can't be parsed - they'll fail later in validation
+			continue
+		}
+
+		// Get tool name (prefer spec.name, fall back to metadata.name)
+		toolName := wrapper.Spec.Name
+		if toolName == "" {
+			toolName = wrapper.Metadata.Name
+		}
+
+		// Check if there's an override for this tool
+		override, hasOverride := overrides[toolName]
+		if !hasOverride {
+			continue
+		}
+
+		// Apply the override - change mode to http and set endpoint
+		wrapper.Spec.Mode = "http"
+		if wrapper.Spec.HTTP == nil {
+			wrapper.Spec.HTTP = &toolHTTPConfig{}
+		}
+		wrapper.Spec.HTTP.URL = override.Endpoint
+		if wrapper.Spec.HTTP.Method == "" {
+			wrapper.Spec.HTTP.Method = "POST"
+		}
+
+		// Update description if provided in override
+		if override.Description != "" {
+			wrapper.Spec.Description = override.Description
+		}
+
+		// Serialize back to YAML
+		newData, err := yaml.Marshal(&wrapper)
+		if err != nil {
+			return fmt.Errorf("failed to serialize tool %s after override: %w", toolName, err)
+		}
+
+		// Update the loaded tool data
+		cfg.LoadedTools[i].Data = newData
+		appliedCount++
+
+		if verbose {
+			fmt.Printf("  Applied tool override: %s -> %s (registry: %s, handler: %s)\n",
+				toolName, override.Endpoint, override.RegistryName, override.HandlerName)
+		}
+	}
+
+	if verbose && appliedCount > 0 {
+		fmt.Printf("  Applied %d tool override(s)\n", appliedCount)
+	}
+
+	return nil
 }
