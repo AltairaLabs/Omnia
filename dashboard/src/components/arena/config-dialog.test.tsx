@@ -21,6 +21,17 @@ vi.mock("@/hooks/use-arena-configs", () => ({
   })),
 }));
 
+vi.mock("@/hooks/use-arena-source-content", () => ({
+  useArenaSourceContent: vi.fn(() => ({
+    tree: [],
+    fileCount: 0,
+    directoryCount: 0,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+}));
+
 const mockSources: ArenaSource[] = [
   {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -253,7 +264,7 @@ describe("ConfigDialog", () => {
       await userEvent.click(screen.getByText("git-source"));
 
       // Enter arena file
-      const arenaFileInput = screen.getByLabelText(/Arena File Path/);
+      const arenaFileInput = screen.getByLabelText(/Arena File Name/);
       await userEvent.type(arenaFileInput, "custom-arena.yaml");
 
       // Enter temperature
@@ -302,7 +313,7 @@ describe("ConfigDialog", () => {
       expect(screen.getByText("Edit Config")).toBeInTheDocument();
       expect(screen.getByLabelText("Name")).toHaveValue("test-config");
       expect(screen.getByLabelText("Name")).toBeDisabled();
-      expect(screen.getByLabelText(/Arena File Path/)).toHaveValue("arena.yaml");
+      expect(screen.getByLabelText(/Arena File Name/)).toHaveValue("arena.yaml");
     });
 
     it("updates config successfully", async () => {

@@ -411,6 +411,26 @@ export interface JobWorkerStatus {
   failed?: number;
 }
 
+/** Job progress tracking (work item level) */
+export interface JobProgress {
+  /** Total work items */
+  total?: number;
+  /** Completed work items */
+  completed?: number;
+  /** Failed work items */
+  failed?: number;
+  /** Pending work items */
+  pending?: number;
+}
+
+/** Job result with summary metrics */
+export interface JobResult {
+  /** URL to detailed results */
+  url?: string;
+  /** Summary metrics (passRate, totalItems, passedItems, failedItems, avgDurationMs) */
+  summary?: Record<string, string>;
+}
+
 /** ArenaJob status */
 export interface ArenaJobStatus {
   /** Current phase */
@@ -419,20 +439,22 @@ export interface ArenaJobStatus {
   startTime?: string;
   /** Job completion time */
   completionTime?: string;
-  /** Total tasks/scenarios to process */
-  totalTasks?: number;
-  /** Completed tasks */
-  completedTasks?: number;
-  /** Failed tasks */
-  failedTasks?: number;
+  /** Job progress tracking */
+  progress?: JobProgress;
+  /** Job result summary */
+  result?: JobResult;
+  /** Active worker count */
+  activeWorkers?: number;
   /** Worker status */
   workers?: JobWorkerStatus;
-  /** URL to results artifact */
-  resultsUrl?: string;
   /** Standard conditions */
   conditions?: Condition[];
   /** Observed generation */
   observedGeneration?: number;
+  /** Last schedule time (for recurring jobs) */
+  lastScheduleTime?: string;
+  /** Next schedule time (for recurring jobs) */
+  nextScheduleTime?: string;
 }
 
 /** ArenaJob resource - executes evaluation/loadtest/datagen */
@@ -916,4 +938,62 @@ export interface ArenaConfigContent {
   fileTree: ArenaPackageTreeNode[];
   /** Entry point file path (e.g., config.arena.yaml) */
   entryPoint?: string;
+}
+
+// =============================================================================
+// Version Types (for ArenaSource version switching)
+// =============================================================================
+
+/** Metadata for a single version of ArenaSource content */
+export interface ArenaVersion {
+  /** Version hash (short hash identifier) */
+  hash: string;
+  /** When this version was created/synced */
+  createdAt: string;
+  /** Total size of the version content in bytes */
+  size: number;
+  /** Number of files in this version */
+  fileCount: number;
+  /** Whether this is the most recently synced (latest) version */
+  isLatest: boolean;
+}
+
+/** Response from the versions API */
+export interface ArenaVersionsResponse {
+  /** Name of the ArenaSource */
+  sourceName: string;
+  /** Current HEAD version hash (active version) */
+  head: string | null;
+  /** List of available versions */
+  versions: ArenaVersion[];
+}
+
+// =============================================================================
+// Source Content Types (for folder browser in config creation)
+// =============================================================================
+
+/** A node in the source content tree (file or directory) */
+export interface ArenaSourceContentNode {
+  /** Node name (file or directory name) */
+  name: string;
+  /** Full path relative to source root */
+  path: string;
+  /** Whether this is a directory */
+  isDirectory: boolean;
+  /** Children nodes (for directories only) */
+  children?: ArenaSourceContentNode[];
+  /** File size in bytes (for files only) */
+  size?: number;
+}
+
+/** Response from the source content API */
+export interface ArenaSourceContentResponse {
+  /** Name of the ArenaSource */
+  sourceName: string;
+  /** Content tree structure */
+  tree: ArenaSourceContentNode[];
+  /** Total number of files */
+  fileCount: number;
+  /** Total number of directories */
+  directoryCount: number;
 }
