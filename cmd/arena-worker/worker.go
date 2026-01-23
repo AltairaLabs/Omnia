@@ -26,11 +26,15 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/AltairaLabs/PromptKit/runtime/logger"
+	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
+	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
 )
 
@@ -67,6 +71,7 @@ type Config struct {
 	PromptArenaBin string
 	PollInterval   time.Duration
 	ShutdownDelay  time.Duration
+	Verbose        bool // Enable verbose/debug output from promptarena
 }
 
 // ExecutionResult represents the result of running a scenario.
@@ -102,6 +107,7 @@ func loadConfig() (*Config, error) {
 		PromptArenaBin:   getEnvOrDefault("PROMPTARENA_BIN", "promptarena"),
 		PollInterval:     getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
 		ShutdownDelay:    getDurationEnv("ARENA_SHUTDOWN_DELAY", 5*time.Second),
+		Verbose:          os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
 	if cfg.JobName == "" {
@@ -421,60 +427,213 @@ func executeWorkItem(
 ) (*ExecutionResult, error) {
 	start := time.Now()
 
-	// Build command arguments
-	args := []string{
-		"run",
-		"--bundle", bundlePath,
-		"--scenario", item.ScenarioID,
-		"--provider", item.ProviderID,
-		"--output-format", "json",
-	}
-
-	// Add config if present
-	if len(item.Config) > 0 {
-		configPath := filepath.Join(cfg.WorkDir, fmt.Sprintf("config-%s.json", item.ID))
-		if err := os.WriteFile(configPath, item.Config, 0644); err != nil {
-			return nil, fmt.Errorf("failed to write config: %w", err)
-		}
-		args = append(args, "--config", configPath)
-		defer func() { _ = os.Remove(configPath) }()
-	}
-
-	// Execute promptarena
-	cmd := exec.CommandContext(ctx, cfg.PromptArenaBin, args...)
-	cmd.Dir = bundlePath
-
-	output, err := cmd.Output()
-	duration := time.Since(start)
-
 	result := &ExecutionResult{
-		DurationMs: float64(duration.Milliseconds()),
-		Metrics:    make(map[string]float64),
+		Metrics: make(map[string]float64),
 	}
 
+	// Find the arena config file
+	configPath := findArenaConfigFile(bundlePath)
+	if configPath == "" {
+		return nil, fmt.Errorf("arena config file not found in bundle: %s", bundlePath)
+	}
+
+	if cfg.Verbose {
+		fmt.Printf("  Loading arena config from: %s\n", configPath)
+		// Configure verbose logging for the PromptKit engine
+		if err := logger.Configure(&logger.LoggingConfigSpec{
+			DefaultLevel: "debug",
+			Format:       "text",
+		}); err != nil {
+			fmt.Printf("  Warning: failed to configure verbose logging: %v\n", err)
+		}
+	}
+
+	// Create engine from config file
+	eng, err := engine.NewEngineFromConfigFile(configPath)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			result.Status = statusFail
-			result.Error = string(exitErr.Stderr)
-			return result, nil
-		}
-		return nil, fmt.Errorf("failed to execute promptarena: %w", err)
+		return nil, fmt.Errorf("failed to create engine: %w", err)
+	}
+	defer func() { _ = eng.Close() }()
+
+	// Set verbose flag on the loaded config if enabled
+	arenaCfg := eng.GetConfig()
+	if cfg.Verbose {
+		arenaCfg.Defaults.Verbose = true
 	}
 
-	// Parse output JSON
-	if len(output) > 0 {
-		if err := json.Unmarshal(output, result); err != nil {
-			// If output isn't valid JSON, treat as pass with raw output
-			result.Status = statusPass
-		}
-	} else {
+	// Validate provider credentials before execution
+	if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
+		result.Status = statusFail
+		result.Error = err.Error()
+		result.DurationMs = float64(time.Since(start).Milliseconds())
+		return result, nil
+	}
+
+	// Determine scenario filter
+	scenarioFilter := []string{}
+	if item.ScenarioID != "" && item.ScenarioID != "default" {
+		scenarioFilter = []string{item.ScenarioID}
+	}
+
+	// Generate run plan for this specific provider
+	plan, err := eng.GenerateRunPlan(
+		[]string{},                // no region filter
+		[]string{item.ProviderID}, // filter to this provider
+		scenarioFilter,            // scenario filter (empty = all)
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate run plan: %w", err)
+	}
+
+	if len(plan.Combinations) == 0 {
 		result.Status = statusPass
+		result.DurationMs = float64(time.Since(start).Milliseconds())
+		return result, nil
 	}
 
-	if result.Status == "" {
-		result.Status = statusPass
+	if cfg.Verbose {
+		fmt.Printf("  Executing %d scenario(s) with provider %s\n",
+			len(plan.Combinations), item.ProviderID)
 	}
 
+	// Execute runs with concurrency of 1 (single work item at a time)
+	runIDs, err := eng.ExecuteRuns(ctx, plan, 1)
+	if err != nil {
+		return nil, fmt.Errorf("execution failed: %w", err)
+	}
+
+	// Build result from state store
+	result = buildExecutionResult(eng.GetStateStore(), runIDs, start, cfg.Verbose)
 	return result, nil
+}
+
+// findArenaConfigFile looks for the arena config file in the bundle directory.
+// It checks for common naming conventions: config.arena.yaml, arena.yaml, config.yaml.
+func findArenaConfigFile(bundlePath string) string {
+	candidates := []string{
+		"config.arena.yaml",
+		"config.arena.yml",
+		"arena.yaml",
+		"arena.yml",
+		"config.yaml",
+		"config.yml",
+	}
+
+	for _, name := range candidates {
+		path := filepath.Join(bundlePath, name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return ""
+}
+
+// runAggregator collects and aggregates run results.
+type runAggregator struct {
+	passCount     int
+	failCount     int
+	errors        []string
+	totalDuration time.Duration
+	assertions    []AssertionResult
+}
+
+// processRun processes a single run's state and updates aggregated counts.
+func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaConversationState) {
+	if state.RunMetadata == nil {
+		return
+	}
+	meta := state.RunMetadata
+	a.totalDuration += meta.Duration
+
+	if meta.Error != "" {
+		a.errors = append(a.errors, fmt.Sprintf("run %s: %s", runID, meta.Error))
+		a.failCount++
+	} else {
+		a.passCount++
+	}
+
+	a.processAssertions(meta.ConversationAssertionResults)
+}
+
+// processAssertions extracts assertion results and adjusts pass/fail counts.
+func (a *runAggregator) processAssertions(assertions []arenastatestore.ConversationValidationResult) {
+	for _, assertion := range assertions {
+		a.assertions = append(a.assertions, AssertionResult{
+			Name:    assertion.Type,
+			Passed:  assertion.Passed,
+			Message: assertion.Message,
+		})
+		if !assertion.Passed && a.passCount > 0 {
+			a.passCount--
+			a.failCount++
+		}
+	}
+}
+
+// buildExecutionResult constructs an ExecutionResult from the engine's state store.
+func buildExecutionResult(store statestore.Store, runIDs []string, startTime time.Time, verbose bool) *ExecutionResult {
+	result := &ExecutionResult{
+		DurationMs: float64(time.Since(startTime).Milliseconds()),
+		Metrics:    make(map[string]float64),
+		Assertions: []AssertionResult{},
+	}
+
+	arenaStore, ok := store.(*arenastatestore.ArenaStateStore)
+	if !ok {
+		return buildFallbackResult(result, runIDs)
+	}
+
+	agg := &runAggregator{}
+	for _, runID := range runIDs {
+		state, err := arenaStore.GetArenaState(context.Background(), runID)
+		if err != nil {
+			if verbose {
+				fmt.Printf("  Warning: failed to get state for run %s: %v\n", runID, err)
+			}
+			agg.failCount++
+			continue
+		}
+		agg.processRun(runID, state)
+	}
+
+	result.Assertions = agg.assertions
+	populateMetrics(result, agg, len(runIDs))
+	setResultStatus(result, agg)
+
+	return result
+}
+
+// buildFallbackResult creates a simple result when arena store is unavailable.
+func buildFallbackResult(result *ExecutionResult, runIDs []string) *ExecutionResult {
+	if len(runIDs) > 0 {
+		result.Status = statusPass
+	} else {
+		result.Status = statusFail
+		result.Error = "no runs executed"
+	}
+	return result
+}
+
+// populateMetrics sets the metrics on the result from aggregated data.
+func populateMetrics(result *ExecutionResult, agg *runAggregator, totalRuns int) {
+	result.Metrics["totalDurationMs"] = float64(agg.totalDuration.Milliseconds())
+	result.Metrics["runsExecuted"] = float64(totalRuns)
+	result.Metrics["runsPassed"] = float64(agg.passCount)
+	result.Metrics["runsFailed"] = float64(agg.failCount)
+}
+
+// setResultStatus determines the overall status based on aggregated counts.
+func setResultStatus(result *ExecutionResult, agg *runAggregator) {
+	if agg.failCount > 0 {
+		result.Status = statusFail
+		if len(agg.errors) > 0 {
+			result.Error = strings.Join(agg.errors, "; ")
+		}
+	} else if agg.passCount > 0 {
+		result.Status = statusPass
+	} else {
+		result.Status = statusFail
+		result.Error = "no runs completed successfully"
+	}
 }

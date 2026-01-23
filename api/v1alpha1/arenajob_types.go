@@ -226,6 +226,11 @@ type ArenaJobSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// verbose enables verbose/debug logging for promptarena execution.
+	// When enabled, workers will pass --verbose to promptarena for detailed output.
+	// +optional
+	Verbose bool `json:"verbose,omitempty"`
 }
 
 // ArenaJobPhase represents the current phase of the ArenaJob.

@@ -241,6 +241,11 @@ spec:
                 - loadtest
                 - datagen
                 type: string
+              verbose:
+                description: |-
+                  verbose enables verbose/debug logging for promptarena execution.
+                  When enabled, workers will pass --verbose to promptarena for detailed output.
+                type: boolean
               workers:
                 description: workers configures the worker pool.
                 properties:

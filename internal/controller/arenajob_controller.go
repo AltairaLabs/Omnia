@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -36,6 +37,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/arena/aggregator"
+	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
 	"github.com/altairalabs/omnia/pkg/license"
 )
@@ -324,6 +326,28 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		},
 	}
 
+	// Add Redis configuration if available
+	if r.RedisAddr != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "REDIS_ADDR",
+			Value: r.RedisAddr,
+		})
+	}
+	if r.RedisPassword != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "REDIS_PASSWORD",
+			Value: r.RedisPassword,
+		})
+	}
+
+	// Add verbose flag for debug logging
+	if arenaJob.Spec.Verbose {
+		env = append(env, corev1.EnvVar{
+			Name:  "ARENA_VERBOSE",
+			Value: "true",
+		})
+	}
+
 	// Add source artifact info if available
 	if config.Status.ResolvedSource != nil {
 		// Legacy: tar.gz URL for backwards compatibility
@@ -355,6 +379,11 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			})
 		}
 	}
+
+	// Add provider credential environment variables from secrets
+	// This injects API keys for each resolved provider based on their type
+	providerEnvVars := r.buildProviderEnvVars(config.Status.ResolvedProviders)
+	env = append(env, providerEnvVars...)
 
 	// Determine if we should mount workspace content PVC
 	useWorkspaceContent := r.WorkspaceContentPath != "" &&
@@ -493,6 +522,95 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	return nil
+}
+
+// buildProviderEnvVars builds environment variables for provider credentials.
+// Each provider type maps to specific API key environment variables, which are
+// injected from corresponding Kubernetes secrets in the job's namespace.
+// Secrets are referenced with optional: true to allow jobs to run even if
+// some provider credentials are missing.
+func (r *ArenaJobReconciler) buildProviderEnvVars(resolvedProviders []string) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{}
+	seen := make(map[string]bool)
+
+	for _, providerID := range resolvedProviders {
+		// Extract provider type from ID (e.g., "gpt-4-turbo" might be type "openai")
+		// For now, we use a simple heuristic - in a full implementation,
+		// this would look up the provider type from the arena config
+		providerType := inferProviderType(providerID)
+
+		// Get secret references for this provider type
+		secretRefs := providers.GetSecretRefsForProvider(providerType)
+
+		for _, ref := range secretRefs {
+			// Skip if we've already added this env var (multiple providers may share types)
+			if seen[ref.EnvVar] {
+				continue
+			}
+			seen[ref.EnvVar] = true
+
+			envVars = append(envVars, corev1.EnvVar{
+				Name: ref.EnvVar,
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: ref.SecretName,
+						},
+						Key:      ref.Key,
+						Optional: ptr(true), // Don't fail if secret doesn't exist
+					},
+				},
+			})
+		}
+	}
+
+	return envVars
+}
+
+// inferProviderType attempts to determine the provider type from a provider ID.
+// This uses common naming conventions; in production, this should look up the
+// actual provider configuration from the arena config file.
+func inferProviderType(providerID string) string {
+	// Common provider ID patterns
+	id := providerID
+	switch {
+	case contains(id, "claude", "anthropic"):
+		return "claude"
+	case contains(id, "gpt", "openai", "o1", "o3"):
+		return "openai"
+	case contains(id, "gemini", "google"):
+		return "gemini"
+	case contains(id, "vllm"):
+		return "vllm"
+	case contains(id, "voyage"):
+		return "voyageai"
+	case contains(id, "azure"):
+		return "azure"
+	case contains(id, "bedrock", "aws"):
+		return "bedrock"
+	case contains(id, "groq"):
+		return "groq"
+	case contains(id, "together"):
+		return "together"
+	case contains(id, "ollama"):
+		return "ollama"
+	case contains(id, "mock"):
+		return "mock"
+	default:
+		// Return the ID itself as the type if no pattern matches
+		return providerID
+	}
+}
+
+// contains checks if any of the substrings are contained in s (case-insensitive).
+func contains(s string, substrs ...string) bool {
+	sLower := strings.ToLower(s)
+	for _, sub := range substrs {
+		if strings.Contains(sLower, strings.ToLower(sub)) {
+			return true
+		}
+	}
+	return false
 }
 
 // getOrCreateQueue returns the work queue, creating it lazily if needed.
