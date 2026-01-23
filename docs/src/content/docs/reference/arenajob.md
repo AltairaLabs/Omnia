@@ -154,6 +154,96 @@ spec:
     maxReplicas: 20
 ```
 
+### `providerOverrides`
+
+Override providers for specific groups using Kubernetes label selectors. This allows dynamic provider selection at runtime based on Provider CRD labels.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `<groupName>` | object | - | Override for a specific group |
+| `<groupName>.selector` | LabelSelector | Yes | Kubernetes label selector for Provider CRDs |
+
+Groups are defined in the ArenaConfig's pack configuration. Use `*` as a catch-all for groups not explicitly specified.
+
+```yaml
+spec:
+  providerOverrides:
+    default:
+      selector:
+        matchLabels:
+          tier: production
+          team: ml
+    judge:
+      selector:
+        matchLabels:
+          role: evaluator
+        matchExpressions:
+          - key: model-size
+            operator: In
+            values: ["large", "xlarge"]
+```
+
+#### Label Selector Fields
+
+The selector follows standard Kubernetes label selector syntax:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `matchLabels` | map[string]string | Exact label matches (AND logic) |
+| `matchExpressions` | []LabelSelectorRequirement | Advanced matching rules |
+
+**matchExpressions operators:**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `In` | Value in set | `values: ["a", "b"]` |
+| `NotIn` | Value not in set | `values: ["test"]` |
+| `Exists` | Label key exists | (no values needed) |
+| `DoesNotExist` | Label key absent | (no values needed) |
+
+#### Example: Multi-Provider Evaluation
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: gpt4-prod
+  labels:
+    tier: production
+    provider-type: openai
+spec:
+  type: openai
+  model: gpt-4
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: claude-judge
+  labels:
+    role: evaluator
+    provider-type: anthropic
+spec:
+  type: claude
+  model: claude-3-opus
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaJob
+metadata:
+  name: eval-with-overrides
+spec:
+  configRef:
+    name: my-config
+  providerOverrides:
+    default:
+      selector:
+        matchLabels:
+          tier: production
+    judge:
+      selector:
+        matchLabels:
+          role: evaluator
+```
+
 ### `output`
 
 Configure where job results are stored.
