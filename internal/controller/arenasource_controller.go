@@ -80,15 +80,8 @@ type ArenaSourceReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	// ArtifactDir is the directory where artifacts are stored (legacy tar.gz serving)
-	ArtifactDir string
-
-	// ArtifactBaseURL is the base URL for serving artifacts (legacy tar.gz serving)
-	ArtifactBaseURL string
-
 	// WorkspaceContentPath is the base path for workspace content volumes.
 	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/arena/{source-name}/
-	// If empty, falls back to legacy tar.gz artifact serving.
 	WorkspaceContentPath string
 
 	// MaxVersionsPerSource is the maximum number of versions to retain per source.
@@ -375,7 +368,7 @@ func (r *ArenaSourceReconciler) doFetchAsync(ctx context.Context, key types.Name
 
 	opts := fetcher.Options{
 		Timeout: timeout,
-		WorkDir: r.ArtifactDir,
+		WorkDir: os.TempDir(),
 	}
 
 	f, err := r.createFetcherFromSpec(ctx, source, opts)
@@ -555,47 +548,23 @@ func (r *ArenaSourceReconciler) loadOCICredentials(ctx context.Context, namespac
 	return creds, nil
 }
 
-// storeArtifact stores the fetched artifact. It either syncs to the workspace
-// content filesystem (new approach) or stores as tar.gz (legacy approach).
-// Returns contentPath, version, url (url is empty for filesystem mode).
+// storeArtifact stores the fetched artifact by syncing to the workspace content filesystem.
+// Returns contentPath, version, url (url is always empty for filesystem mode).
 func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
 	// If artifact has no path (no-change result), return existing values
 	if artifact.Path == "" && source.Status.Artifact != nil {
 		return source.Status.Artifact.ContentPath,
 			source.Status.Artifact.Version,
-			source.Status.Artifact.URL,
+			"",
 			nil
 	}
 
-	// Use filesystem sync if workspace content path is configured
-	if r.WorkspaceContentPath != "" {
-		return r.syncToFilesystem(source, artifact)
+	// WorkspaceContentPath is required
+	if r.WorkspaceContentPath == "" {
+		return "", "", "", fmt.Errorf("WorkspaceContentPath is required for storing artifacts")
 	}
 
-	// Legacy tar.gz artifact serving
-	return r.storeTarGzArtifact(source, artifact)
-}
-
-// storeTarGzArtifact stores artifact as tar.gz (legacy mode).
-func (r *ArenaSourceReconciler) storeTarGzArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
-	// Create artifact directory if needed
-	artifactDir := filepath.Join(r.ArtifactDir, source.Namespace, source.Name)
-	if err := os.MkdirAll(artifactDir, 0755); err != nil {
-		return "", "", "", fmt.Errorf("failed to create artifact directory: %w", err)
-	}
-
-	// Generate artifact filename
-	filename := fmt.Sprintf("%s.tar.gz", artifact.Checksum[7:19]) // Use part of checksum as filename
-	destPath := filepath.Join(artifactDir, filename)
-
-	// Copy artifact to destination
-	if err := copyFile(artifact.Path, destPath); err != nil {
-		return "", "", "", fmt.Errorf("failed to copy artifact: %w", err)
-	}
-
-	// Generate URL
-	url = fmt.Sprintf("%s/%s/%s/%s", r.ArtifactBaseURL, source.Namespace, source.Name, filename)
-	return "", "", url, nil
+	return r.syncToFilesystem(source, artifact)
 }
 
 // syncToFilesystem extracts the artifact to the workspace content filesystem
@@ -1015,27 +984,6 @@ func copyFileWithMode(src, dst string, mode os.FileMode) error {
 	}
 
 	return destFile.Close()
-}
-
-// copyFile copies a file from src to dst.
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = sourceFile.Close() }()
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = destFile.Close() }()
-
-	if _, err := destFile.ReadFrom(sourceFile); err != nil {
-		return err
-	}
-
-	return destFile.Sync()
 }
 
 // handleFetchError handles errors during fetch operations.

@@ -136,10 +136,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should return without error", func() {
 			By("reconciling a non-existent ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -189,10 +187,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should skip reconciliation and set condition", func() {
 			By("reconciling the suspended ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			result, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -255,10 +251,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase due to missing configuration", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -345,11 +339,10 @@ var _ = Describe("ArenaSource Controller", func() {
 			By("reconciling the ArenaSource with event recorder")
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        fakeRecorder,
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Recorder:             fakeRecorder,
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -377,7 +370,7 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			By("checking the updated status")
 			Expect(updatedSource.Status.Artifact).NotTo(BeNil())
-			Expect(updatedSource.Status.Artifact.URL).To(ContainSubstring("http://localhost:8080/artifacts"))
+			Expect(updatedSource.Status.Artifact.ContentPath).NotTo(BeEmpty())
 			Expect(updatedSource.Status.Artifact.Checksum).NotTo(BeEmpty())
 			Expect(updatedSource.Status.NextFetchTime).NotTo(BeNil())
 
@@ -391,21 +384,22 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(artifactCondition).NotTo(BeNil())
 			Expect(artifactCondition.Status).To(Equal(metav1.ConditionTrue))
 
-			By("verifying artifact was stored")
-			artifactPath := filepath.Join(artifactDir, arenaSourceNamespace, arenaSourceName)
-			entries, err := os.ReadDir(artifactPath)
+			By("verifying artifact was stored in filesystem")
+			// Content is stored at WorkspaceContentPath/<namespace>/<namespace>/<targetPath>/.arena/versions/<version>/
+			arenaDir := filepath.Join(artifactDir, arenaSourceNamespace, arenaSourceNamespace, "arena", arenaSourceName, ".arena")
+			Expect(arenaDir).To(BeADirectory())
+			versionsDir := filepath.Join(arenaDir, "versions")
+			entries, err := os.ReadDir(versionsDir)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(entries).To(HaveLen(1))
-			Expect(entries[0].Name()).To(HaveSuffix(".tar.gz"))
+			Expect(entries).ToNot(BeEmpty())
 		})
 
 		It("should skip fetch when artifact is already up to date", func() {
 			By("first reconciliation to fetch artifact")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -486,11 +480,9 @@ var _ = Describe("ArenaSource Controller", func() {
 			By("reconciling the ArenaSource with event recorder")
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        fakeRecorder,
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
 			}
 
 			req := reconcile.Request{
@@ -592,10 +584,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should create Git fetcher with loaded credentials", func() {
 			By("testing createGitFetcher")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			// Get the ArenaSource to populate it properly
@@ -682,10 +672,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should create OCI fetcher with loaded credentials", func() {
 			By("testing createOCIFetcher")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			// Get the ArenaSource to populate it properly
@@ -819,10 +807,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase when Secret is missing", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -876,54 +862,6 @@ var _ = Describe("ArenaSource Controller", func() {
 		})
 	})
 
-	Context("When testing copyFile helper", func() {
-		It("should copy a file correctly", func() {
-			By("creating source file")
-			srcDir, err := os.MkdirTemp("", "copy-test-src-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(srcDir) }()
-
-			srcPath := filepath.Join(srcDir, "source.txt")
-			content := []byte("test content for copy")
-			Expect(os.WriteFile(srcPath, content, 0644)).To(Succeed())
-
-			By("creating destination directory")
-			dstDir, err := os.MkdirTemp("", "copy-test-dst-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(dstDir) }()
-
-			dstPath := filepath.Join(dstDir, "dest.txt")
-
-			By("copying the file")
-			Expect(copyFile(srcPath, dstPath)).To(Succeed())
-
-			By("verifying the copy")
-			copiedContent, err := os.ReadFile(dstPath)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(copiedContent).To(Equal(content))
-		})
-
-		It("should fail when source doesn't exist", func() {
-			err := copyFile("/nonexistent/source.txt", "/tmp/dest.txt")
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("should fail when destination directory doesn't exist", func() {
-			By("creating source file")
-			srcDir, err := os.MkdirTemp("", "copy-test-src-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(srcDir) }()
-
-			srcPath := filepath.Join(srcDir, "source.txt")
-			content := []byte("test content")
-			Expect(os.WriteFile(srcPath, content, 0644)).To(Succeed())
-
-			By("trying to copy to nonexistent directory")
-			err = copyFile(srcPath, "/nonexistent/dir/dest.txt")
-			Expect(err).To(HaveOccurred())
-		})
-	})
-
 	Context("When reconciling an OCI source without credentials", func() {
 		var arenaSource *omniav1alpha1.ArenaSource
 
@@ -961,10 +899,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase due to network failure", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -1029,10 +965,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase due to network/auth failure", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -1119,10 +1053,9 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should successfully fetch with custom timeout", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -1160,8 +1093,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		})
 	})
 
-	Context("When testing storeArtifact with valid artifact", func() {
-		It("should store the artifact and return URL in legacy mode", func() {
+	Context("When testing storeArtifact without WorkspaceContentPath", func() {
+		It("should return error when WorkspaceContentPath is not set", func() {
 			By("creating a temporary artifact file")
 			tmpDir, err := os.MkdirTemp("", "artifact-test-*")
 			Expect(err).NotTo(HaveOccurred())
@@ -1170,11 +1103,8 @@ var _ = Describe("ArenaSource Controller", func() {
 			artifactPath := filepath.Join(tmpDir, "test.tar.gz")
 			Expect(os.WriteFile(artifactPath, []byte("fake tarball content"), 0644)).To(Succeed())
 
-			By("testing storeArtifact in legacy mode (no WorkspaceContentPath)")
-			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:     tmpDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
-			}
+			By("testing storeArtifact without WorkspaceContentPath")
+			reconciler := &ArenaSourceReconciler{}
 
 			source := &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1190,13 +1120,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     20,
 			}
 
-			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(ContainSubstring("http://localhost:8080/artifacts"))
-			Expect(url).To(ContainSubstring("default/test-store"))
-			// In legacy mode, contentPath and version should be empty
-			Expect(contentPath).To(BeEmpty())
-			Expect(version).To(BeEmpty())
+			_, _, _, err = reconciler.storeArtifact(source, artifact)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("WorkspaceContentPath is required"))
 		})
 	})
 
@@ -1238,11 +1164,10 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
 			reconciler = &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        record.NewFakeRecorder(10),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Recorder:             record.NewFakeRecorder(10),
+				WorkspaceContentPath: artifactDir,
 			}
 		})
 
@@ -1388,10 +1313,9 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
 			reconciler = &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: artifactDir,
 			}
 		})
 
@@ -1433,10 +1357,7 @@ var _ = Describe("ArenaSource Controller", func() {
 	Context("When testing storeArtifact with no-change result", func() {
 		It("should return existing values when artifact path is empty", func() {
 			By("testing storeArtifact with empty path")
-			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
-			}
+			reconciler := &ArenaSourceReconciler{}
 
 			source := &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1445,7 +1366,6 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 				Status: omniav1alpha1.ArenaSourceStatus{
 					Artifact: &omniav1alpha1.Artifact{
-						URL:         "http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz",
 						ContentPath: "arena/test-no-change/.arena/versions/abc123",
 						Version:     "abc123",
 						Revision:    "rev1",
@@ -1461,7 +1381,7 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(Equal("http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz"))
+			Expect(url).To(BeEmpty(), "URL should be empty in filesystem mode")
 			Expect(contentPath).To(Equal("arena/test-no-change/.arena/versions/abc123"))
 			Expect(version).To(Equal("abc123"))
 		})
@@ -1487,8 +1407,7 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			By("testing filesystem sync")
 			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:          "/tmp/artifacts",
-				ArtifactBaseURL:      "http://localhost:8080/artifacts",
+
 				WorkspaceContentPath: tmpDir,
 				MaxVersionsPerSource: 5,
 			}
@@ -1689,11 +1608,10 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaSourceReconciler{
-				Client:           k8sClient,
-				Scheme:           k8sClient.Scheme(),
-				Recorder:         fakeRecorder,
-				ArtifactDir:      artifactDir,
-				ArtifactBaseURL:  "http://localhost:8080/artifacts",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
+
 				LicenseValidator: licValidator,
 			}
 
@@ -1940,54 +1858,6 @@ var _ = Describe("ArenaSource Controller", func() {
 		})
 	})
 
-	Context("When testing copyFile helper", func() {
-		It("should copy file content", func() {
-			By("creating source file")
-			srcDir, err := os.MkdirTemp("", "copy-src-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(srcDir) }()
-
-			srcFile := filepath.Join(srcDir, "source.txt")
-			Expect(os.WriteFile(srcFile, []byte("test content to copy"), 0644)).To(Succeed())
-
-			By("copying to destination")
-			dstDir, err := os.MkdirTemp("", "copy-dst-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(dstDir) }()
-
-			dstFile := filepath.Join(dstDir, "dest.txt")
-			err = copyFile(srcFile, dstFile)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("verifying content")
-			content, err := os.ReadFile(dstFile)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(string(content)).To(Equal("test content to copy"))
-		})
-
-		It("should fail when source doesn't exist", func() {
-			dstDir, err := os.MkdirTemp("", "copy-fail-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(dstDir) }()
-
-			err = copyFile("/nonexistent/source.txt", filepath.Join(dstDir, "dest.txt"))
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("should fail when destination cannot be created", func() {
-			By("creating source file")
-			srcDir, err := os.MkdirTemp("", "copy-fail-dst-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(srcDir) }()
-
-			srcFile := filepath.Join(srcDir, "source.txt")
-			Expect(os.WriteFile(srcFile, []byte("content"), 0644)).To(Succeed())
-
-			err = copyFile(srcFile, "/nonexistent/dir/dest.txt")
-			Expect(err).To(HaveOccurred())
-		})
-	})
-
 	Context("When testing syncToFilesystem version caching", func() {
 		It("should skip sync when version already exists", func() {
 			By("creating a temporary workspace content directory")
@@ -2085,8 +1955,7 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should create OCI fetcher with default credentials", func() {
 			By("creating reconciler with OCI source")
 			reconciler := &ArenaSourceReconciler{
-				Client:      k8sClient,
-				ArtifactDir: "/tmp/artifacts",
+				Client: k8sClient,
 			}
 
 			source := &omniav1alpha1.ArenaSource{
@@ -2110,47 +1979,6 @@ var _ = Describe("ArenaSource Controller", func() {
 			f, err := reconciler.createOCIFetcher(ctx, source, opts)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
-		})
-	})
-
-	Context("When testing storeTarGzArtifact error paths", func() {
-		It("should handle short checksum gracefully", func() {
-			By("creating artifact directory")
-			artifactDir, err := os.MkdirTemp("", "artifact-short-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(artifactDir) }()
-
-			tarballDir, err := os.MkdirTemp("", "tarball-short-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(tarballDir) }()
-
-			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
-			createTestTarball(tarballPath, map[string]string{
-				"file.txt": "content",
-			})
-
-			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
-			}
-
-			source := &omniav1alpha1.ArenaSource{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "checksum-test",
-					Namespace: "default",
-				},
-			}
-
-			artifact := &fetcher.Artifact{
-				Path: tarballPath,
-				// Use a proper long checksum
-				Checksum: "sha256:abcdef123456789012345678901234567890abcdef123456789012345678901234",
-				Size:     100,
-			}
-
-			_, _, url, err := reconciler.storeTarGzArtifact(source, artifact)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(ContainSubstring("abcdef123456"))
 		})
 	})
 
@@ -2717,56 +2545,6 @@ var _ = Describe("ArenaSource Controller", func() {
 		})
 	})
 
-	Context("When testing storeTarGzArtifact helper", func() {
-		It("should store tarball to artifact directory", func() {
-			By("creating artifact directories")
-			artifactDir, err := os.MkdirTemp("", "artifact-store-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(artifactDir) }()
-
-			By("creating a test tarball")
-			tarballDir, err := os.MkdirTemp("", "tarball-src-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(tarballDir) }()
-
-			tarballPath := filepath.Join(tarballDir, "test.tar.gz")
-			createTestTarball(tarballPath, map[string]string{
-				"config.yaml": "test content\n",
-			})
-
-			By("storing the artifact")
-			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
-			}
-
-			source := &omniav1alpha1.ArenaSource{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "store-test",
-					Namespace: "default",
-				},
-			}
-
-			artifact := &fetcher.Artifact{
-				Path:     tarballPath,
-				Revision: "test-rev",
-				Checksum: "sha256:abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-				Size:     100,
-			}
-
-			_, _, url, err := reconciler.storeTarGzArtifact(source, artifact)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(ContainSubstring("http://localhost:8080/artifacts"))
-			Expect(url).To(ContainSubstring("default/store-test"))
-
-			By("verifying artifact was stored")
-			storedPath := filepath.Join(artifactDir, "default", "store-test")
-			entries, err := os.ReadDir(storedPath)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(entries).ToNot(BeEmpty())
-		})
-	})
-
 	Context("When testing async fetch with suspension", func() {
 		var (
 			arenaSource *omniav1alpha1.ArenaSource
@@ -2805,10 +2583,8 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
 			reconciler = &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 		})
 

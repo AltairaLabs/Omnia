@@ -400,7 +400,7 @@ if [ -f coverage.out ]; then
         fi
 
         # Skip cmd entry points (main.go files are hard to test)
-        if [[ "$file" == cmd/*/main.go ]]; then
+        if [[ "$file" == cmd/main.go ]] || [[ "$file" == cmd/*/main.go ]]; then
             continue
         fi
 
