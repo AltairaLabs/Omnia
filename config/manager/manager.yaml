@@ -80,10 +80,10 @@ spec:
             cpu: 100m
             memory: 128Mi
         volumeMounts:
-        - name: arena-artifacts
-          mountPath: /tmp/arena-artifacts
+        - name: tmp
+          mountPath: /tmp
       volumes:
-      - name: arena-artifacts
+      - name: tmp
         emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
