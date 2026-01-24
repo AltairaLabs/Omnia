@@ -224,7 +224,6 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
-      - arenaconfigs
       - arenajobs
       - arenasources
     verbs:
@@ -238,7 +237,6 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
-      - arenaconfigs/finalizers
       - arenajobs/finalizers
       - arenasources/finalizers
     verbs:
@@ -246,7 +244,6 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
-      - arenaconfigs/status
       - arenajobs/status
       - arenasources/status
     verbs:

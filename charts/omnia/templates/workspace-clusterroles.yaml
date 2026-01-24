@@ -19,7 +19,6 @@ rules:
       - providers
       {{- if .Values.arena.enabled }}
       - arenasources
-      - arenaconfigs
       - arenajobs
       {{- end }}
     verbs:
@@ -40,7 +39,6 @@ rules:
       - providers/status
       {{- if .Values.arena.enabled }}
       - arenasources/status
-      - arenaconfigs/status
       - arenajobs/status
       {{- end }}
     verbs:
@@ -116,7 +114,6 @@ rules:
       - promptpacks
       {{- if .Values.arena.enabled }}
       - arenasources
-      - arenaconfigs
       - arenajobs
       {{- end }}
     verbs:
@@ -135,7 +132,6 @@ rules:
       - promptpacks/status
       {{- if .Values.arena.enabled }}
       - arenasources/status
-      - arenaconfigs/status
       - arenajobs/status
       {{- end }}
     verbs:
@@ -229,7 +225,6 @@ rules:
       - providers
       {{- if .Values.arena.enabled }}
       - arenasources
-      - arenaconfigs
       - arenajobs
       {{- end }}
     verbs:
@@ -246,7 +241,6 @@ rules:
       - providers/status
       {{- if .Values.arena.enabled }}
       - arenasources/status
-      - arenaconfigs/status
       - arenajobs/status
       {{- end }}
     verbs:
