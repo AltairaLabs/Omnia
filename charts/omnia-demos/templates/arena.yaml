@@ -38,11 +38,11 @@ spec:
     name: demo-arena-bundle
   interval: {{ .Values.arenaDemo.source.interval }}
 ---
-# ArenaConfig using the Ollama provider (cost-free local testing)
+# ArenaJob for running the evaluation
 apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
+kind: ArenaJob
 metadata:
-  name: {{ .Values.arenaDemo.config.name }}
+  name: {{ .Values.arenaDemo.job.name }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: omnia-arena-demo
@@ -50,6 +50,8 @@ metadata:
 spec:
   sourceRef:
     name: {{ .Values.arenaDemo.source.name }}
+  arenaFile: config.arena.yaml
+  type: evaluation
   scenarios:
     include:
       - "*"
@@ -62,21 +64,6 @@ spec:
     metrics:
       - latency
       - tokens
----
-# ArenaJob for running the evaluation
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaJob
-metadata:
-  name: {{ .Values.arenaDemo.job.name }}
-  namespace: {{ .Values.namespace }}
-  labels:
-    app.kubernetes.io/name: omnia-arena-demo
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
-spec:
-  configRef:
-    name: {{ .Values.arenaDemo.config.name }}
-  type: evaluation
-  evaluation:
     outputFormats:
       - json
   workers:
