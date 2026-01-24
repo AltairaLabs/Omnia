@@ -147,6 +147,19 @@ rules:
       - patch
       - update
       - watch
+  # PersistentVolumeClaims for workspace content storage
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   # ServiceAccount token creation for workspace-scoped K8s API access
   - apiGroups:
       - ""

@@ -112,14 +112,6 @@ const mockDataService: DataService = {
   updateArenaSource: vi.fn().mockResolvedValue({}),
   deleteArenaSource: vi.fn().mockResolvedValue(undefined),
   syncArenaSource: vi.fn().mockResolvedValue(undefined),
-  // Arena Configs
-  getArenaConfigs: vi.fn().mockResolvedValue([]),
-  getArenaConfig: vi.fn().mockResolvedValue(undefined),
-  getArenaConfigContent: vi.fn().mockResolvedValue({ files: [], fileTree: [] }),
-  getArenaConfigFile: vi.fn().mockResolvedValue(""),
-  createArenaConfig: vi.fn().mockResolvedValue({}),
-  updateArenaConfig: vi.fn().mockResolvedValue({}),
-  deleteArenaConfig: vi.fn().mockResolvedValue(undefined),
   // Arena Jobs
   getArenaJobs: vi.fn().mockResolvedValue([]),
   getArenaJob: vi.fn().mockResolvedValue(undefined),

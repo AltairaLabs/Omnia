@@ -7,7 +7,7 @@ import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
 interface UseArenaJobsOptions {
-  configRef?: string;
+  sourceRef?: string;
   type?: ArenaJobType;
   phase?: ArenaJobPhase;
 }
@@ -36,7 +36,7 @@ interface UseArenaJobMutationsResult {
 
 /**
  * Hook to fetch Arena jobs for the current workspace.
- * Supports optional filtering by configRef, type, or phase.
+ * Supports optional filtering by sourceRef, type, or phase.
  */
 export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult {
   const { currentWorkspace } = useWorkspace();
@@ -57,7 +57,7 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
 
     try {
       const params = new URLSearchParams();
-      if (options?.configRef) params.set("configRef", options.configRef);
+      if (options?.sourceRef) params.set("sourceRef", options.sourceRef);
       if (options?.type) params.set("type", options.type);
       if (options?.phase) params.set("phase", options.phase);
 
@@ -77,7 +77,7 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
     } finally {
       setLoading(false);
     }
-  }, [workspace, options?.configRef, options?.type, options?.phase]);
+  }, [workspace, options?.sourceRef, options?.type, options?.phase]);
 
   useEffect(() => {
     fetchData();

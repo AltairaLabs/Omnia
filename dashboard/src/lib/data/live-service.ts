@@ -27,9 +27,6 @@ import type {
 import type {
   ArenaSource,
   ArenaSourceSpec,
-  ArenaConfig,
-  ArenaConfigSpec,
-  ArenaConfigContent,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
@@ -352,34 +349,6 @@ export class LiveDataService implements DataService {
 
   async syncArenaSource(workspace: string, name: string): Promise<void> {
     return this.arenaService.syncArenaSource(workspace, name);
-  }
-
-  async getArenaConfigs(workspace: string): Promise<ArenaConfig[]> {
-    return this.arenaService.getArenaConfigs(workspace);
-  }
-
-  async getArenaConfig(workspace: string, name: string): Promise<ArenaConfig | undefined> {
-    return this.arenaService.getArenaConfig(workspace, name);
-  }
-
-  async getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent> {
-    return this.arenaService.getArenaConfigContent(workspace, name);
-  }
-
-  async getArenaConfigFile(workspace: string, configName: string, filePath: string): Promise<string> {
-    return this.arenaService.getArenaConfigFile(workspace, configName, filePath);
-  }
-
-  async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
-    return this.arenaService.createArenaConfig(workspace, name, spec);
-  }
-
-  async updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
-    return this.arenaService.updateArenaConfig(workspace, name, spec);
-  }
-
-  async deleteArenaConfig(workspace: string, name: string): Promise<void> {
-    return this.arenaService.deleteArenaConfig(workspace, name);
   }
 
   async getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJob[]> {

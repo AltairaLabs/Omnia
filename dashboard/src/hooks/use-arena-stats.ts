@@ -14,7 +14,6 @@ interface UseArenaStatsResult {
 
 const EMPTY_STATS: ArenaStats = {
   sources: { total: 0, ready: 0, failed: 0, active: 0 },
-  configs: { total: 0, ready: 0, scenarios: 0 },
   jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
 };
 

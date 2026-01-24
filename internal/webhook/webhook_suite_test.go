@@ -240,7 +240,7 @@ func TestArenaJobValidator_RejectsLoadTestWithoutLicense(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeLoadTest,
 		},
 	}
@@ -264,7 +264,7 @@ func TestArenaJobValidator_AllowsEvaluationWithoutLicense(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 		},
 	}
@@ -287,7 +287,7 @@ func TestArenaJobValidator_RejectsMultipleReplicasWithoutLicense(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 			Workers: &omniav1alpha1.WorkerConfig{
 				Replicas: 5,
@@ -314,7 +314,7 @@ func TestArenaJobValidator_RejectsScheduledJobsWithoutLicense(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 			Schedule: &omniav1alpha1.ScheduleConfig{
 				Cron: "0 2 * * *",
@@ -345,7 +345,7 @@ func TestArenaJobValidator_AllowsAllFeaturesWithEnterpriseLicense(t *testing.T) 
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeLoadTest,
 			Workers: &omniav1alpha1.WorkerConfig{
 				Replicas: 10,
@@ -543,7 +543,7 @@ func TestArenaJobValidator_ValidateUpdate(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 		},
 	}
@@ -554,7 +554,7 @@ func TestArenaJobValidator_ValidateUpdate(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeLoadTest,
 		},
 	}
@@ -578,7 +578,7 @@ func TestArenaJobValidator_ValidateUpdateAllowed(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 		},
 	}
@@ -589,7 +589,7 @@ func TestArenaJobValidator_ValidateUpdateAllowed(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeLoadTest,
 		},
 	}
@@ -665,7 +665,7 @@ func TestArenaJobValidator_DefaultJobType(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			// Type is empty - should default to evaluation
 		},
 	}
@@ -689,7 +689,7 @@ func TestArenaJobValidator_NilWorkersDefaultsToOneReplica(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 			// Workers is nil - should default to 1 replica
 		},
@@ -714,7 +714,7 @@ func TestArenaJobValidator_ZeroReplicasDefaultsToOne(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 			Workers: &omniav1alpha1.WorkerConfig{
 				Replicas: 0, // Should default to 1
@@ -741,7 +741,7 @@ func TestArenaJobValidator_EmptyScheduleNotConsideredScheduled(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.ArenaJobSpec{
-			ConfigRef: omniav1alpha1.LocalObjectReference{Name: "my-config"},
+			SourceRef: omniav1alpha1.LocalObjectReference{Name: "my-source"},
 			Type:      omniav1alpha1.ArenaJobTypeEvaluation,
 			Schedule: &omniav1alpha1.ScheduleConfig{
 				Cron: "", // Empty cron - not scheduled

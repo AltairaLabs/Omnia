@@ -88,7 +88,6 @@ describe("ArenaSourceDetailPage", () => {
     const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSource).mockReturnValue({
       source: null,
-      linkedConfigs: [],
       loading: true,
       error: null,
       refetch: mockRefetch,
@@ -112,7 +111,6 @@ describe("ArenaSourceDetailPage", () => {
     const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSource).mockReturnValue({
       source: null,
-      linkedConfigs: [],
       loading: false,
       error: new Error("Failed to fetch source"),
       refetch: mockRefetch,
@@ -138,7 +136,6 @@ describe("ArenaSourceDetailPage", () => {
     const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSource).mockReturnValue({
       source: null,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -182,7 +179,6 @@ describe("ArenaSourceDetailPage", () => {
           },
         },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -225,7 +221,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -256,7 +251,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -285,10 +279,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [
-        { metadata: { name: "config-1" }, spec: { sourceRef: { name: "test-source" } }, status: { phase: "Ready" } },
-        { metadata: { name: "config-2" }, spec: { sourceRef: { name: "test-source" } }, status: { phase: "Ready" } },
-      ] as any,
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -306,7 +296,6 @@ describe("ArenaSourceDetailPage", () => {
 
     expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.getByText("Sync History")).toBeInTheDocument();
-    expect(screen.getByText("Linked Configs (2)")).toBeInTheDocument();
   });
 
   it("renders S3 source configuration", async () => {
@@ -321,7 +310,6 @@ describe("ArenaSourceDetailPage", () => {
         },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -355,7 +343,6 @@ describe("ArenaSourceDetailPage", () => {
         },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -389,7 +376,6 @@ describe("ArenaSourceDetailPage", () => {
           ],
         },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -410,65 +396,6 @@ describe("ArenaSourceDetailPage", () => {
     expect(syncHistoryTab).toBeInTheDocument();
   });
 
-  it("shows linked configs count in tab", async () => {
-    const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
-    vi.mocked(useArenaSource).mockReturnValue({
-      source: {
-        metadata: { name: "test-source" },
-        spec: { type: "configmap", configMap: { name: "cm" } },
-        status: { phase: "Ready" },
-      } as any,
-      linkedConfigs: [
-        { metadata: { name: "config-1" }, spec: { sourceRef: { name: "test-source" } }, status: { phase: "Ready", scenarioCount: 10 } },
-        { metadata: { name: "config-2" }, spec: { sourceRef: { name: "test-source" } }, status: { phase: "Failed", scenarioCount: 5 } },
-      ] as any,
-      loading: false,
-      error: null,
-      refetch: mockRefetch,
-    });
-    vi.mocked(useArenaSourceMutations).mockReturnValue({
-      createSource: vi.fn(),
-      updateSource: vi.fn(),
-      deleteSource: mockDeleteSource,
-      syncSource: mockSyncSource,
-      loading: false,
-      error: null,
-    });
-
-    render(<ArenaSourceDetailPage />);
-
-    // Check that linked configs tab shows the count
-    expect(screen.getByText(/Linked Configs \(2\)/)).toBeInTheDocument();
-  });
-
-  it("shows zero linked configs count in tab", async () => {
-    const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
-    vi.mocked(useArenaSource).mockReturnValue({
-      source: {
-        metadata: { name: "test-source" },
-        spec: { type: "configmap", configMap: { name: "cm" } },
-        status: { phase: "Ready" },
-      } as any,
-      linkedConfigs: [],
-      loading: false,
-      error: null,
-      refetch: mockRefetch,
-    });
-    vi.mocked(useArenaSourceMutations).mockReturnValue({
-      createSource: vi.fn(),
-      updateSource: vi.fn(),
-      deleteSource: mockDeleteSource,
-      syncSource: mockSyncSource,
-      loading: false,
-      error: null,
-    });
-
-    render(<ArenaSourceDetailPage />);
-
-    // Check that linked configs tab shows zero count
-    expect(screen.getByText(/Linked Configs \(0\)/)).toBeInTheDocument();
-  });
-
   it("opens edit dialog when Edit button is clicked", async () => {
     const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSource).mockReturnValue({
@@ -477,7 +404,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -506,7 +432,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -539,7 +464,6 @@ describe("ArenaSourceDetailPage", () => {
         },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -567,7 +491,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -599,7 +522,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -632,7 +554,6 @@ describe("ArenaSourceDetailPage", () => {
         spec: { type: "configmap", configMap: { name: "cm" } },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -670,7 +591,6 @@ describe("ArenaSourceDetailPage", () => {
         },
         status: { phase: "Ready" },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -702,7 +622,6 @@ describe("ArenaSourceDetailPage", () => {
           ],
         },
       } as any,
-      linkedConfigs: [],
       loading: false,
       error: null,
       refetch: mockRefetch,
@@ -721,66 +640,5 @@ describe("ArenaSourceDetailPage", () => {
     // Check sync history tab exists
     const historyTab = screen.getByRole("tab", { name: /sync history/i });
     expect(historyTab).toBeInTheDocument();
-  });
-
-  it("renders linked configs tab with count", async () => {
-    const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
-    vi.mocked(useArenaSource).mockReturnValue({
-      source: {
-        metadata: { name: "test-source" },
-        spec: { type: "configmap", configMap: { name: "cm" } },
-        status: { phase: "Ready" },
-      } as any,
-      linkedConfigs: [
-        { metadata: { name: "config-1" }, spec: { sourceRef: { name: "test-source" } }, status: { phase: "Ready", scenarioCount: 10 } },
-        { metadata: { name: "config-2" }, spec: { sourceRef: { name: "test-source" } }, status: { phase: "Failed", scenarioCount: 5 } },
-      ] as any,
-      loading: false,
-      error: null,
-      refetch: mockRefetch,
-    });
-    vi.mocked(useArenaSourceMutations).mockReturnValue({
-      createSource: vi.fn(),
-      updateSource: vi.fn(),
-      deleteSource: mockDeleteSource,
-      syncSource: mockSyncSource,
-      loading: false,
-      error: null,
-    });
-
-    render(<ArenaSourceDetailPage />);
-
-    // Check linked configs tab exists with count
-    const configsTab = screen.getByRole("tab", { name: /linked configs \(2\)/i });
-    expect(configsTab).toBeInTheDocument();
-  });
-
-  it("renders linked configs tab with zero count", async () => {
-    const { useArenaSource, useArenaSourceMutations } = await import("@/hooks");
-    vi.mocked(useArenaSource).mockReturnValue({
-      source: {
-        metadata: { name: "test-source" },
-        spec: { type: "configmap", configMap: { name: "cm" } },
-        status: { phase: "Ready" },
-      } as any,
-      linkedConfigs: [],
-      loading: false,
-      error: null,
-      refetch: mockRefetch,
-    });
-    vi.mocked(useArenaSourceMutations).mockReturnValue({
-      createSource: vi.fn(),
-      updateSource: vi.fn(),
-      deleteSource: mockDeleteSource,
-      syncSource: mockSyncSource,
-      loading: false,
-      error: null,
-    });
-
-    render(<ArenaSourceDetailPage />);
-
-    // Check linked configs tab exists with zero count
-    const configsTab = screen.getByRole("tab", { name: /linked configs \(0\)/i });
-    expect(configsTab).toBeInTheDocument();
   });
 });

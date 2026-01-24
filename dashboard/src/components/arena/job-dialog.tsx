@@ -32,7 +32,7 @@ import {
   Settings,
 } from "lucide-react";
 import type {
-  ArenaConfig,
+  ArenaSource,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobType,
@@ -51,15 +51,16 @@ const JOB_TYPES: {
 interface JobDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  configs: ArenaConfig[];
-  preselectedConfig?: string;
+  sources: ArenaSource[];
+  preselectedSource?: string;
   onSuccess?: () => void;
   onClose?: () => void;
 }
 
 interface FormState {
   name: string;
-  configRef: string;
+  sourceRef: string;
+  arenaFile: string;
   type: ArenaJobType;
   workers: string;
   timeout: string;
@@ -76,10 +77,11 @@ interface FormState {
   deduplicate: boolean;
 }
 
-function getInitialFormState(preselectedConfig?: string): FormState {
+function getInitialFormState(preselectedSource?: string): FormState {
   return {
     name: "",
-    configRef: preselectedConfig || "",
+    sourceRef: preselectedSource || "",
+    arenaFile: "config.arena.yaml",
     type: "evaluation",
     workers: "2",
     timeout: "30m",
@@ -127,8 +129,8 @@ function validateForm(
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(form.name)) {
     return "Name must be lowercase alphanumeric and may contain hyphens";
   }
-  if (!form.configRef) {
-    return "Config is required";
+  if (!form.sourceRef) {
+    return "Source is required";
   }
 
   // Check job type license
@@ -152,7 +154,8 @@ function validateForm(
 
 function buildSpec(form: FormState): ArenaJobSpec {
   const spec: ArenaJobSpec = {
-    configRef: { name: form.configRef },
+    sourceRef: { name: form.sourceRef },
+    arenaFile: form.arenaFile || undefined,
     type: form.type,
     workers: {
       replicas: parseInt(form.workers, 10),
@@ -187,23 +190,23 @@ function buildSpec(form: FormState): ArenaJobSpec {
 export function JobDialog({
   open,
   onOpenChange,
-  configs,
-  preselectedConfig,
+  sources,
+  preselectedSource,
   onSuccess,
   onClose,
 }: Readonly<JobDialogProps>) {
   const { createJob, loading } = useArenaJobMutations();
   const { license, isEnterprise } = useLicense();
 
-  // Use preselectedConfig as key to reset form
-  const formResetKey = `${preselectedConfig ?? "new"}-${open}`;
+  // Use preselectedSource as key to reset form
+  const formResetKey = `${preselectedSource ?? "new"}-${open}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <JobDialogForm
         key={formResetKey}
-        configs={configs}
-        preselectedConfig={preselectedConfig}
+        sources={sources}
+        preselectedSource={preselectedSource}
         loading={loading}
         createJob={createJob}
         onSuccess={onSuccess}
@@ -217,8 +220,8 @@ export function JobDialog({
 }
 
 interface JobDialogFormProps {
-  configs: ArenaConfig[];
-  preselectedConfig?: string;
+  sources: ArenaSource[];
+  preselectedSource?: string;
   loading: boolean;
   createJob: (name: string, spec: ArenaJob["spec"]) => Promise<ArenaJob>;
   onSuccess?: () => void;
@@ -229,8 +232,8 @@ interface JobDialogFormProps {
 }
 
 function JobDialogForm({
-  configs,
-  preselectedConfig,
+  sources,
+  preselectedSource,
   loading,
   createJob,
   onSuccess,
@@ -240,7 +243,7 @@ function JobDialogForm({
   maxWorkerReplicas,
 }: Readonly<JobDialogFormProps>) {
   const [formState, setFormState] = useState<FormState>(() =>
-    getInitialFormState(preselectedConfig)
+    getInitialFormState(preselectedSource)
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -271,8 +274,8 @@ function JobDialogForm({
     onOpenChange(false);
   };
 
-  const readyConfigs = configs.filter(
-    (c) => c.status?.phase === "Ready"
+  const readySources = sources.filter(
+    (s) => s.status?.phase === "Ready"
   );
 
   return (
@@ -303,33 +306,47 @@ function JobDialogForm({
           />
         </div>
 
-        {/* Config Reference */}
+        {/* Source Reference */}
         <div className="space-y-2">
-          <Label htmlFor="config">Config</Label>
+          <Label htmlFor="source">Source</Label>
           <Select
-            value={formState.configRef}
-            onValueChange={(v) => updateForm("configRef", v)}
+            value={formState.sourceRef}
+            onValueChange={(v) => updateForm("sourceRef", v)}
           >
-            <SelectTrigger id="config">
-              <SelectValue placeholder="Select a config" />
+            <SelectTrigger id="source">
+              <SelectValue placeholder="Select a source" />
             </SelectTrigger>
             <SelectContent>
-              {readyConfigs.length === 0 ? (
+              {readySources.length === 0 ? (
                 <div className="flex items-center gap-2 text-muted-foreground p-2 text-sm">
                   <Settings className="h-4 w-4" />
-                  No ready configs available
+                  No ready sources available
                 </div>
               ) : (
-                readyConfigs.map((config) => (
-                  <SelectItem key={config.metadata?.name} value={config.metadata?.name || "unknown"}>
-                    {config.metadata?.name}
+                readySources.map((source) => (
+                  <SelectItem key={source.metadata?.name} value={source.metadata?.name || "unknown"}>
+                    {source.metadata?.name}
                   </SelectItem>
                 ))
               )}
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Select the config containing scenarios to run
+            Select the source containing arena configuration and scenarios
+          </p>
+        </div>
+
+        {/* Arena File */}
+        <div className="space-y-2">
+          <Label htmlFor="arenaFile">Arena Config File</Label>
+          <Input
+            id="arenaFile"
+            placeholder="config.arena.yaml"
+            value={formState.arenaFile}
+            onChange={(e) => updateForm("arenaFile", e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Path to the arena config file within the source
           </p>
         </div>
 

@@ -304,15 +304,6 @@ func main() {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)
 	}
-	if err := (&controller.ArenaConfigReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Recorder:         mgr.GetEventRecorderFor("arenaconfig-controller"),
-		LicenseValidator: licenseValidator,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaConfig")
-		os.Exit(1)
-	}
 	// Create Redis queue and aggregator for arena job result tracking
 	var arenaAggregator *aggregator.Aggregator
 	if redisAddr != "" {

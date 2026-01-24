@@ -88,7 +88,7 @@ function getInitialFormState(source?: ArenaSource | null): FormState {
 
 function validateForm(
   form: FormState,
-  isEnterprise: boolean
+  canUseSourceType: (sourceType: string) => boolean
 ): string | null {
   if (!form.name.trim()) {
     return "Name is required";
@@ -105,7 +105,7 @@ function validateForm(
   if (form.sourceType === "configmap" && !form.configMapSpec.name) {
     return "ConfigMap name is required";
   }
-  if (!isEnterprise && ["git", "oci", "s3"].includes(form.sourceType)) {
+  if (!canUseSourceType(form.sourceType)) {
     return `${form.sourceType.toUpperCase()} sources require an Enterprise license`;
   }
   return null;
@@ -143,12 +143,11 @@ const SOURCE_TYPES: {
   value: ArenaSourceType;
   label: string;
   icon: React.ReactNode;
-  enterprise: boolean;
 }[] = [
-  { value: "configmap", label: "ConfigMap", icon: <FileText className="h-4 w-4" />, enterprise: false },
-  { value: "git", label: "Git", icon: <GitBranch className="h-4 w-4" />, enterprise: true },
-  { value: "oci", label: "OCI Registry", icon: <Box className="h-4 w-4" />, enterprise: true },
-  { value: "s3", label: "S3 Bucket", icon: <Cloud className="h-4 w-4" />, enterprise: true },
+  { value: "configmap", label: "ConfigMap", icon: <FileText className="h-4 w-4" /> },
+  { value: "git", label: "Git", icon: <GitBranch className="h-4 w-4" /> },
+  { value: "oci", label: "OCI Registry", icon: <Box className="h-4 w-4" /> },
+  { value: "s3", label: "S3 Bucket", icon: <Cloud className="h-4 w-4" /> },
 ];
 
 function GitSourceFields({
@@ -331,8 +330,7 @@ export function SourceDialog({
   onClose,
 }: Readonly<SourceDialogProps>) {
   const { createSource, updateSource, loading } = useArenaSourceMutations();
-  const { license } = useLicense();
-  const isEnterprise = license?.tier === "enterprise";
+  const { canUseSourceType } = useLicense();
   const isEditing = !!source;
 
   // Use source name as key to reset form when source changes, and add open state
@@ -345,7 +343,7 @@ export function SourceDialog({
         key={formResetKey}
         source={source}
         isEditing={isEditing}
-        isEnterprise={isEnterprise}
+        canUseSourceType={canUseSourceType}
         loading={loading}
         createSource={createSource}
         updateSource={updateSource}
@@ -360,7 +358,7 @@ export function SourceDialog({
 interface SourceDialogFormProps {
   source?: ArenaSource | null;
   isEditing: boolean;
-  isEnterprise: boolean;
+  canUseSourceType: (sourceType: string) => boolean;
   loading: boolean;
   createSource: (name: string, spec: ArenaSource["spec"]) => Promise<ArenaSource>;
   updateSource: (name: string, spec: ArenaSource["spec"]) => Promise<ArenaSource>;
@@ -372,7 +370,7 @@ interface SourceDialogFormProps {
 function SourceDialogForm({
   source,
   isEditing,
-  isEnterprise,
+  canUseSourceType,
   loading,
   createSource,
   updateSource,
@@ -393,7 +391,7 @@ function SourceDialogForm({
     try {
       setError(null);
 
-      const validationError = validateForm(formState, isEnterprise);
+      const validationError = validateForm(formState, canUseSourceType);
       if (validationError) {
         setError(validationError);
         return;
@@ -419,8 +417,7 @@ function SourceDialogForm({
   };
 
   const isTypeDisabled = (type: ArenaSourceType) => {
-    const typeConfig = SOURCE_TYPES.find((t) => t.value === type);
-    return typeConfig?.enterprise && !isEnterprise;
+    return !canUseSourceType(type);
   };
 
   return (
@@ -475,7 +472,7 @@ function SourceDialogForm({
                     <div className="flex items-center gap-2">
                       {type.icon}
                       <span>{type.label}</span>
-                      {type.enterprise && !isEnterprise && (
+                      {!canUseSourceType(type.value) && (
                         <Badge variant="outline" className="ml-2 text-xs">
                           <Lock className="h-3 w-3 mr-1" />
                           Enterprise

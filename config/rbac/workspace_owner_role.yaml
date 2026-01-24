@@ -22,7 +22,6 @@ rules:
       - toolregistries
       - providers
       - arenasources
-      - arenaconfigs
       - arenajobs
     verbs:
       - create
@@ -41,7 +40,6 @@ rules:
       - toolregistries/status
       - providers/status
       - arenasources/status
-      - arenaconfigs/status
       - arenajobs/status
     verbs:
       - get

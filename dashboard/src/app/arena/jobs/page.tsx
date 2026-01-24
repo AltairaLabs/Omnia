@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout";
 import { useArenaJobs, useArenaJobMutations } from "@/hooks/use-arena-jobs";
-import { useArenaConfigs } from "@/hooks/use-arena-configs";
+import { useArenaSources } from "@/hooks/use-arena-sources";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -178,19 +178,19 @@ function getJobPhaseBadge(phase: ArenaJobPhase | undefined) {
 }
 
 function JobProgress({ job }: Readonly<{ job: ArenaJob }>) {
-  const total = job.status?.totalTasks ?? 0;
-  const completed = job.status?.completedTasks ?? 0;
-  const failed = job.status?.failedTasks ?? 0;
+  const total = job.status?.progress?.total ?? 0;
+  const completed = job.status?.progress?.completed ?? 0;
+  const failed = job.status?.progress?.failed ?? 0;
 
   if (total === 0) {
     return <span className="text-muted-foreground">-</span>;
   }
 
-  const progress = Math.round(((completed + failed) / total) * 100);
+  const progressPct = Math.round(((completed + failed) / total) * 100);
 
   return (
     <div className="flex items-center gap-2 min-w-[120px]">
-      <Progress value={progress} className="h-2 flex-1" />
+      <Progress value={progressPct} className="h-2 flex-1" />
       <span className="text-xs text-muted-foreground whitespace-nowrap">
         {completed}/{total}
       </span>
@@ -244,7 +244,7 @@ function JobsTable({
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>
-          <TableHead>Config</TableHead>
+          <TableHead>Source</TableHead>
           <TableHead>Type</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Progress</TableHead>
@@ -266,10 +266,10 @@ function JobsTable({
             </TableCell>
             <TableCell>
               <Link
-                href={`/arena/configs/${job.spec?.configRef?.name}`}
+                href={`/arena/sources/${job.spec?.sourceRef?.name}`}
                 className="hover:underline text-muted-foreground"
               >
-                {job.spec?.configRef?.name || "-"}
+                {job.spec?.sourceRef?.name || "-"}
               </Link>
             </TableCell>
             <TableCell>{getJobTypeBadge(job.spec?.type)}</TableCell>
@@ -354,12 +354,12 @@ function JobsGrid({
                 {getJobTypeBadge(job.spec?.type)}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Config</span>
+                <span className="text-muted-foreground">Source</span>
                 <Link
-                  href={`/arena/configs/${job.spec?.configRef?.name}`}
+                  href={`/arena/sources/${job.spec?.sourceRef?.name}`}
                   className="hover:underline text-primary"
                 >
-                  {job.spec?.configRef?.name || "-"}
+                  {job.spec?.sourceRef?.name || "-"}
                 </Link>
               </div>
               <div className="flex items-center justify-between">
@@ -405,22 +405,22 @@ function LoadingSkeleton() {
 
 export default function ArenaJobsPage() {
   const searchParams = useSearchParams();
-  const initialConfigRef = searchParams.get("configRef") || undefined;
+  const initialSourceRef = searchParams.get("sourceRef") || undefined;
 
   const [typeFilter, setTypeFilter] = useState<ArenaJobType | "all">("all");
   const [phaseFilter, setPhaseFilter] = useState<ArenaJobPhase | "all">("all");
 
   const { jobs, loading, error, refetch } = useArenaJobs({
-    configRef: initialConfigRef,
+    sourceRef: initialSourceRef,
   });
-  const { configs } = useArenaConfigs();
+  const { sources } = useArenaSources();
   const { cancelJob, deleteJob } = useArenaJobMutations();
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
 
   const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
-  const [dialogOpen, setDialogOpen] = useState(!!initialConfigRef);
-  const [preselectedConfig] = useState<string | undefined>(initialConfigRef);
+  const [dialogOpen, setDialogOpen] = useState(!!initialSourceRef);
+  const [preselectedSource] = useState<string | undefined>(initialSourceRef);
 
   const filteredJobs = useMemo(() => {
     return jobs.filter((job) => {
@@ -571,8 +571,8 @@ export default function ArenaJobsPage() {
       <JobDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        configs={configs}
-        preselectedConfig={preselectedConfig}
+        sources={sources}
+        preselectedSource={preselectedSource}
         onSuccess={handleSaveSuccess}
         onClose={handleDialogClose}
       />

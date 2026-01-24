@@ -23,8 +23,8 @@ describe("license types", () => {
       expect(OPEN_CORE_LICENSE.id).toBe("open-core");
     });
 
-    it("should have all features disabled", () => {
-      expect(OPEN_CORE_LICENSE.features.gitSource).toBe(false);
+    it("should have correct features for open-core", () => {
+      expect(OPEN_CORE_LICENSE.features.gitSource).toBe(true); // Git is included in open-core
       expect(OPEN_CORE_LICENSE.features.ociSource).toBe(false);
       expect(OPEN_CORE_LICENSE.features.s3Source).toBe(false);
       expect(OPEN_CORE_LICENSE.features.loadTesting).toBe(false);
@@ -88,11 +88,11 @@ describe("license types", () => {
       expect(canUseSourceType(enterpriseLicense, "configmap")).toBe(true);
     });
 
-    it("should not allow git source for open-core", () => {
-      expect(canUseSourceType(OPEN_CORE_LICENSE, "git")).toBe(false);
+    it("should allow git source for open-core", () => {
+      expect(canUseSourceType(OPEN_CORE_LICENSE, "git")).toBe(true);
     });
 
-    it("should allow git source when feature is enabled", () => {
+    it("should allow git source for enterprise", () => {
       expect(canUseSourceType(enterpriseLicense, "git")).toBe(true);
     });
 

@@ -372,6 +372,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
             <LogViewer
               agentName={metadata.name}
               workspace={workspace}
+              resourceName={metadata.name}
             />
           </TabsContent>
 

@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -47,7 +46,7 @@ import (
 // ArenaJob condition types
 const (
 	ArenaJobConditionTypeReady       = "Ready"
-	ArenaJobConditionTypeConfigValid = "ConfigValid"
+	ArenaJobConditionTypeSourceValid = "SourceValid"
 	ArenaJobConditionTypeJobCreated  = "JobCreated"
 	ArenaJobConditionTypeProgressing = "Progressing"
 )
@@ -117,7 +116,7 @@ func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, names
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/finalizers,verbs=update
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenaconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources,verbs=get;list;watch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
@@ -186,15 +185,15 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Validate the referenced ArenaConfig
-	config, err := r.validateConfig(ctx, arenaJob)
+	// Validate the referenced ArenaSource
+	source, err := r.validateSource(ctx, arenaJob)
 	if err != nil {
-		log.Error(err, "failed to validate ArenaConfig")
-		r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeConfigValid, err)
+		log.Error(err, "failed to validate ArenaSource")
+		r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
 		return ctrl.Result{}, nil
 	}
-	r.setCondition(arenaJob, ArenaJobConditionTypeConfigValid, metav1.ConditionTrue,
-		"ConfigValid", fmt.Sprintf("ArenaConfig %s is valid and ready", arenaJob.Spec.ConfigRef.Name))
+	r.setCondition(arenaJob, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
+		"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
 
 	// Check if we already have a K8s Job
 	existingJob, err := r.getExistingJob(ctx, arenaJob)
@@ -205,7 +204,7 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if existingJob == nil {
 		// Create the K8s Job
-		if err := r.createWorkerJob(ctx, arenaJob, config); err != nil {
+		if err := r.createWorkerJob(ctx, arenaJob, source); err != nil {
 			log.Error(err, "failed to create worker job")
 			r.setCondition(arenaJob, ArenaJobConditionTypeJobCreated, metav1.ConditionFalse,
 				"JobCreationFailed", err.Error())
@@ -242,25 +241,30 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-// validateConfig fetches and validates the referenced ArenaConfig.
-func (r *ArenaJobReconciler) validateConfig(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (*omniav1alpha1.ArenaConfig, error) {
-	config := &omniav1alpha1.ArenaConfig{}
+// validateSource fetches and validates the referenced ArenaSource.
+func (r *ArenaJobReconciler) validateSource(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (*omniav1alpha1.ArenaSource, error) {
+	source := &omniav1alpha1.ArenaSource{}
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      arenaJob.Spec.ConfigRef.Name,
+		Name:      arenaJob.Spec.SourceRef.Name,
 		Namespace: arenaJob.Namespace,
-	}, config); err != nil {
+	}, source); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("arenaConfig %s not found", arenaJob.Spec.ConfigRef.Name)
+			return nil, fmt.Errorf("arenaSource %s not found", arenaJob.Spec.SourceRef.Name)
 		}
-		return nil, fmt.Errorf("failed to get arenaConfig %s: %w", arenaJob.Spec.ConfigRef.Name, err)
+		return nil, fmt.Errorf("failed to get arenaSource %s: %w", arenaJob.Spec.SourceRef.Name, err)
 	}
 
-	// Check if config is ready
-	if config.Status.Phase != omniav1alpha1.ArenaConfigPhaseReady {
-		return nil, fmt.Errorf("arenaConfig %s is not ready (phase: %s)", arenaJob.Spec.ConfigRef.Name, config.Status.Phase)
+	// Check if source is ready
+	if source.Status.Phase != omniav1alpha1.ArenaSourcePhaseReady {
+		return nil, fmt.Errorf("arenaSource %s is not ready (phase: %s)", arenaJob.Spec.SourceRef.Name, source.Status.Phase)
 	}
 
-	return config, nil
+	// Verify source has an artifact
+	if source.Status.Artifact == nil {
+		return nil, fmt.Errorf("arenaSource %s has no artifact", arenaJob.Spec.SourceRef.Name)
+	}
+
+	return source, nil
 }
 
 // getExistingJob checks if a K8s Job already exists for this ArenaJob.
@@ -454,7 +458,7 @@ func (r *ArenaJobReconciler) resolveToolRegistryOverride(ctx context.Context, ar
 }
 
 // createWorkerJob creates a K8s Job for the Arena workers.
-func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig) error {
+func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource) error {
 	log := logf.FromContext(ctx)
 
 	replicas := int32(1)
@@ -474,6 +478,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		return fmt.Errorf("failed to resolve tool registry override: %w", err)
 	}
 
+	// Determine arena file path
+	arenaFile := arenaJob.Spec.ArenaFile
+	if arenaFile == "" {
+		arenaFile = "config.arena.yaml"
+	}
+
 	// Build environment variables
 	env := []corev1.EnvVar{
 		{
@@ -485,8 +495,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Value: arenaJob.Namespace,
 		},
 		{
-			Name:  "ARENA_CONFIG_NAME",
-			Value: config.Name,
+			Name:  "ARENA_SOURCE_NAME",
+			Value: source.Name,
+		},
+		{
+			Name:  "ARENA_FILE",
+			Value: arenaFile,
 		},
 		{
 			Name:  "ARENA_JOB_TYPE",
@@ -517,40 +531,37 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Add source content info if available (filesystem-based content access)
-	if config.Status.ResolvedSource != nil {
-		if config.Status.ResolvedSource.ContentPath != "" {
+	if source.Status.Artifact != nil {
+		if source.Status.Artifact.ContentPath != "" {
 			// Full path: {mount}/{workspace}/{namespace}/{contentPath}
 			workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
 			fullContentPath := fmt.Sprintf("/workspace-content/%s/%s/%s",
-				workspaceName, arenaJob.Namespace, config.Status.ResolvedSource.ContentPath)
+				workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
 			env = append(env, corev1.EnvVar{
 				Name:  "ARENA_CONTENT_PATH",
 				Value: fullContentPath,
 			})
 		}
-		if config.Status.ResolvedSource.Version != "" {
+		if source.Status.Artifact.Version != "" {
 			env = append(env, corev1.EnvVar{
 				Name:  "ARENA_CONTENT_VERSION",
-				Value: config.Status.ResolvedSource.Version,
+				Value: source.Status.Artifact.Version,
 			})
 		}
 	}
 
-	// Add provider credential environment variables
-	// Use resolved CRDs if provider overrides are specified, otherwise use ArenaConfig providers
+	// Add provider credential environment variables from provider overrides
 	var providerEnvVars []corev1.EnvVar
 	if len(providerCRDs) > 0 {
 		log.Info("using provider overrides for credentials", "count", len(providerCRDs))
 		for _, p := range providerCRDs {
-			log.Info("provider override",
+			log.Info("provider",
 				"name", p.Name,
 				"type", p.Spec.Type,
 				"model", p.Spec.Model,
 			)
 		}
 		providerEnvVars = r.buildProviderEnvVarsFromCRDs(providerCRDs)
-	} else {
-		providerEnvVars = r.buildProviderEnvVars(config.Status.ResolvedProviders)
 	}
 	env = append(env, providerEnvVars...)
 
@@ -569,8 +580,8 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 
 	// Determine if we should mount workspace content PVC
 	useWorkspaceContent := r.WorkspaceContentPath != "" &&
-		config.Status.ResolvedSource != nil &&
-		config.Status.ResolvedSource.ContentPath != ""
+		source.Status.Artifact != nil &&
+		source.Status.Artifact.ContentPath != ""
 
 	// Build volumes list
 	volumes := []corev1.Volume{
@@ -698,101 +709,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Enqueue work items (lazily connects to queue if configured)
-	if err := r.enqueueWorkItems(ctx, arenaJob, config, providerCRDs); err != nil {
+	if err := r.enqueueWorkItems(ctx, arenaJob, source, providerCRDs); err != nil {
 		log.Error(err, "failed to enqueue work items")
 		// Don't return error - job is created, workers will wait for items
 	}
 
 	return nil
-}
-
-// buildProviderEnvVars builds environment variables for provider credentials.
-// Each provider type maps to specific API key environment variables, which are
-// injected from corresponding Kubernetes secrets in the job's namespace.
-// Secrets are referenced with optional: true to allow jobs to run even if
-// some provider credentials are missing.
-func (r *ArenaJobReconciler) buildProviderEnvVars(resolvedProviders []string) []corev1.EnvVar {
-	envVars := []corev1.EnvVar{}
-	seen := make(map[string]bool)
-
-	for _, providerID := range resolvedProviders {
-		// Extract provider type from ID (e.g., "gpt-4-turbo" might be type "openai")
-		// For now, we use a simple heuristic - in a full implementation,
-		// this would look up the provider type from the arena config
-		providerType := inferProviderType(providerID)
-
-		// Get secret references for this provider type
-		secretRefs := providers.GetSecretRefsForProvider(providerType)
-
-		for _, ref := range secretRefs {
-			// Skip if we've already added this env var (multiple providers may share types)
-			if seen[ref.EnvVar] {
-				continue
-			}
-			seen[ref.EnvVar] = true
-
-			envVars = append(envVars, corev1.EnvVar{
-				Name: ref.EnvVar,
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: ref.SecretName,
-						},
-						Key:      ref.Key,
-						Optional: ptr(true), // Don't fail if secret doesn't exist
-					},
-				},
-			})
-		}
-	}
-
-	return envVars
-}
-
-// inferProviderType attempts to determine the provider type from a provider ID.
-// This uses common naming conventions; in production, this should look up the
-// actual provider configuration from the arena config file.
-func inferProviderType(providerID string) string {
-	// Common provider ID patterns
-	id := providerID
-	switch {
-	case contains(id, "claude", "anthropic"):
-		return "claude"
-	case contains(id, "gpt", "openai", "o1", "o3"):
-		return "openai"
-	case contains(id, "gemini", "google"):
-		return "gemini"
-	case contains(id, "vllm"):
-		return "vllm"
-	case contains(id, "voyage"):
-		return "voyageai"
-	case contains(id, "azure"):
-		return "azure"
-	case contains(id, "bedrock", "aws"):
-		return "bedrock"
-	case contains(id, "groq"):
-		return "groq"
-	case contains(id, "together"):
-		return "together"
-	case contains(id, "ollama"):
-		return "ollama"
-	case contains(id, "mock"):
-		return "mock"
-	default:
-		// Return the ID itself as the type if no pattern matches
-		return providerID
-	}
-}
-
-// contains checks if any of the substrings are contained in s (case-insensitive).
-func contains(s string, substrs ...string) bool {
-	sLower := strings.ToLower(s)
-	for _, sub := range substrs {
-		if strings.Contains(sLower, strings.ToLower(sub)) {
-			return true
-		}
-	}
-	return false
 }
 
 // getOrCreateQueue returns the work queue, creating it lazily if needed.
@@ -823,8 +745,7 @@ func (r *ArenaJobReconciler) getOrCreateQueue() (queue.WorkQueue, error) {
 
 // enqueueWorkItems creates and enqueues work items for the Arena job.
 // Work items are scenario × provider combinations.
-// If providerCRDs is non-nil, uses those providers; otherwise uses config.Status.ResolvedProviders.
-func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, config *omniav1alpha1.ArenaConfig, providerCRDs []*omniav1alpha1.Provider) error {
+func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource, providerCRDs []*omniav1alpha1.Provider) error {
 	log := logf.FromContext(ctx)
 
 	// Get queue (lazily connect if needed)
@@ -837,19 +758,17 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 		return nil
 	}
 
-	// Get bundle URL from resolved source
+	// Get bundle URL from source artifact
 	bundleURL := ""
-	if config.Status.ResolvedSource != nil {
-		bundleURL = config.Status.ResolvedSource.URL
+	if source.Status.Artifact != nil {
+		bundleURL = source.Status.Artifact.URL
 	}
 
-	// Get providers - use CRDs if overrides were resolved, otherwise use ArenaConfig providers
+	// Get providers from provider overrides
 	var providerIDs []string
 	if len(providerCRDs) > 0 {
 		providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
-		log.V(1).Info("using provider overrides for work items", "count", len(providerIDs))
-	} else {
-		providerIDs = config.Status.ResolvedProviders
+		log.V(1).Info("using providers for work items", "count", len(providerIDs))
 	}
 
 	if len(providerIDs) == 0 {
@@ -884,6 +803,8 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 }
 
 // updateStatusFromJob updates the ArenaJob status based on the K8s Job status.
+//
+//nolint:gocognit // Status update functions inherently handle many conditions
 func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, job *batchv1.Job) {
 	log := logf.FromContext(ctx)
 
@@ -1018,22 +939,22 @@ func (r *ArenaJobReconciler) setCondition(arenaJob *omniav1alpha1.ArenaJob, cond
 	})
 }
 
-// findArenaJobsForConfig maps ArenaConfig changes to ArenaJob reconcile requests.
-func (r *ArenaJobReconciler) findArenaJobsForConfig(ctx context.Context, obj client.Object) []ctrl.Request {
-	config, ok := obj.(*omniav1alpha1.ArenaConfig)
+// findArenaJobsForSource maps ArenaSource changes to ArenaJob reconcile requests.
+func (r *ArenaJobReconciler) findArenaJobsForSource(ctx context.Context, obj client.Object) []ctrl.Request {
+	source, ok := obj.(*omniav1alpha1.ArenaSource)
 	if !ok {
 		return nil
 	}
 
-	// Find all ArenaJobs in the same namespace that reference this config
+	// Find all ArenaJobs in the same namespace that reference this source
 	jobList := &omniav1alpha1.ArenaJobList{}
-	if err := r.List(ctx, jobList, client.InNamespace(config.Namespace)); err != nil {
+	if err := r.List(ctx, jobList, client.InNamespace(source.Namespace)); err != nil {
 		return nil
 	}
 
 	var requests []ctrl.Request
 	for _, job := range jobList.Items {
-		if job.Spec.ConfigRef.Name == config.Name {
+		if job.Spec.SourceRef.Name == source.Name {
 			// Only trigger reconcile for pending jobs
 			if job.Status.Phase == omniav1alpha1.ArenaJobPhasePending || job.Status.Phase == "" {
 				requests = append(requests, ctrl.Request{
@@ -1078,8 +999,8 @@ func (r *ArenaJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&omniav1alpha1.ArenaJob{}).
 		Owns(&batchv1.Job{}).
 		Watches(
-			&omniav1alpha1.ArenaConfig{},
-			handler.EnqueueRequestsFromMapFunc(r.findArenaJobsForConfig),
+			&omniav1alpha1.ArenaSource{},
+			handler.EnqueueRequestsFromMapFunc(r.findArenaJobsForSource),
 		).
 		Named("arenajob").
 		Complete(r)

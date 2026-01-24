@@ -59,19 +59,30 @@ export const GET = withWorkspaceAccess<RouteParams>(
         CRD_KIND
       );
 
-      // Results are stored at an external URL (status.resultsUrl)
+      // Results are stored at an external URL (status.result.url)
       // Return the URL for the client to fetch, or null if not yet available
-      const resultsUrl = result.resource.status?.resultsUrl || null;
-      const phase = result.resource.status?.phase;
+      const status = result.resource.status;
+      const resultsUrl = status?.result?.url || null;
+      const phase = status?.phase;
+      const resultSummary = status?.result?.summary;
 
       auditSuccess(auditCtx, "get", jobName, { subresource: "results" });
       return NextResponse.json({
         jobName,
         phase,
         resultsUrl,
-        completedTasks: result.resource.status?.completedTasks || 0,
-        totalTasks: result.resource.status?.totalTasks || 0,
-        failedTasks: result.resource.status?.failedTasks || 0,
+        // Work item progress
+        completedTasks: status?.progress?.completed || 0,
+        totalTasks: status?.progress?.total || 0,
+        failedTasks: status?.progress?.failed || 0,
+        // Test result summary (if available)
+        summary: resultSummary ? {
+          totalItems: parseInt(resultSummary.totalItems || "0", 10),
+          passedItems: parseInt(resultSummary.passedItems || "0", 10),
+          failedItems: parseInt(resultSummary.failedItems || "0", 10),
+          passRate: resultSummary.passRate,
+          avgDurationMs: resultSummary.avgDurationMs,
+        } : null,
       });
     } catch (error) {
       if (auditCtx) {

@@ -43,7 +43,6 @@ describe("useArenaStats", () => {
 
     expect(result.current.stats).toEqual({
       sources: { total: 0, ready: 0, failed: 0, active: 0 },
-      configs: { total: 0, ready: 0, scenarios: 0 },
       jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
     });
     expect(result.current.recentJobs).toEqual([]);
@@ -77,7 +76,6 @@ describe("useArenaStats", () => {
 
     const mockStats = {
       sources: { total: 3, ready: 2, failed: 1, active: 2 },
-      configs: { total: 5, ready: 4, scenarios: 15 },
       jobs: { total: 10, running: 2, queued: 1, completed: 6, failed: 1, successRate: 0.857 },
     };
 
@@ -190,7 +188,6 @@ describe("useArenaStats", () => {
 
     const mockStats = {
       sources: { total: 1, ready: 1, failed: 0, active: 1 },
-      configs: { total: 1, ready: 1, scenarios: 5 },
       jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
     };
 
@@ -242,7 +239,6 @@ describe("useArenaStats", () => {
 
     const mockStats = {
       sources: { total: 1, ready: 1, failed: 0, active: 1 },
-      configs: { total: 1, ready: 1, scenarios: 5 },
       jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
     };
 

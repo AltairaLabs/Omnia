@@ -1,0 +1,63 @@
+{{- if and .Values.devMode .Values.vscodeServer.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnia.fullname" . }}-vscode-server
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vscode-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vscode-server
+  template:
+    metadata:
+      labels:
+        {{- include "omnia.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: vscode-server
+    spec:
+      containers:
+        - name: code-server
+          image: {{ .Values.vscodeServer.image.repository }}:{{ .Values.vscodeServer.image.tag }}
+          imagePullPolicy: {{ .Values.vscodeServer.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - --auth
+            - none
+            - --bind-addr
+            - "0.0.0.0:8080"
+            - /workspace
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: workspace-content
+              mountPath: /workspace
+          resources:
+            {{- toYaml .Values.vscodeServer.resources | nindent 12 }}
+      volumes:
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-vscode-server
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vscode-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: vscode-server
+{{- end }}

@@ -65,7 +65,7 @@ export const OPEN_CORE_LICENSE: License = {
   tier: "open-core",
   customer: "Open Core User",
   features: {
-    gitSource: false,
+    gitSource: true, // Git sources are included in open-core
     ociSource: false,
     s3Source: false,
     loadTesting: false,

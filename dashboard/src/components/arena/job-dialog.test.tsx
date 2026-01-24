@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { JobDialog } from "./job-dialog";
-import type { ArenaConfig } from "@/types/arena";
+import type { ArenaSource } from "@/types/arena";
 
 // Mock the hooks
 const mockCreateJob = vi.fn();
@@ -30,13 +30,17 @@ vi.mock("@/hooks/use-license", () => ({
   }),
 }));
 
-// Helper to create mock configs
-function createMockConfig(name: string, phase: string = "Ready"): ArenaConfig {
+// Helper to create mock sources
+function createMockSource(name: string, phase: string = "Ready"): ArenaSource {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
-    kind: "ArenaConfig",
+    kind: "ArenaSource",
     metadata: { name },
-    spec: { sourceRef: { name: "test-source" } },
+    spec: {
+      type: "git",
+      interval: "5m",
+      git: { url: "https://github.com/test/repo" },
+    },
     status: { phase: phase as "Pending" | "Ready" | "Failed" },
   };
 }
@@ -56,14 +60,14 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
       // Dialog title and submit button both have "Create Job" text
       expect(screen.getByRole("heading", { name: "Create Job" })).toBeInTheDocument();
       expect(screen.getByLabelText("Name")).toBeInTheDocument();
-      expect(screen.getByLabelText("Config")).toBeInTheDocument();
+      expect(screen.getByLabelText("Source")).toBeInTheDocument();
       expect(screen.getByLabelText("Job Type")).toBeInTheDocument();
     });
 
@@ -72,59 +76,59 @@ describe("JobDialog", () => {
         <JobDialog
           open={false}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
       expect(screen.queryByText("Create Job")).not.toBeInTheDocument();
     });
 
-    it("shows only ready configs in dropdown", () => {
+    it("shows only ready sources in dropdown", () => {
       render(
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[
-            createMockConfig("ready-config", "Ready"),
-            createMockConfig("pending-config", "Pending"),
-            createMockConfig("failed-config", "Failed"),
+          sources={[
+            createMockSource("ready-source", "Ready"),
+            createMockSource("pending-source", "Pending"),
+            createMockSource("failed-source", "Failed"),
           ]}
         />
       );
 
-      // Open the config select
-      fireEvent.click(screen.getByLabelText("Config"));
+      // Open the source select
+      fireEvent.click(screen.getByLabelText("Source"));
 
-      // Only ready config should be visible
-      expect(screen.getByRole("option", { name: "ready-config" })).toBeInTheDocument();
-      expect(screen.queryByRole("option", { name: "pending-config" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("option", { name: "failed-config" })).not.toBeInTheDocument();
+      // Only ready source should be visible
+      expect(screen.getByRole("option", { name: "ready-source" })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "pending-source" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "failed-source" })).not.toBeInTheDocument();
     });
 
-    it("shows message when no ready configs available", () => {
+    it("shows message when no ready sources available", () => {
       render(
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("pending-config", "Pending")]}
+          sources={[createMockSource("pending-source", "Pending")]}
         />
       );
 
-      fireEvent.click(screen.getByLabelText("Config"));
-      expect(screen.getByText("No ready configs available")).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("Source"));
+      expect(screen.getByText("No ready sources available")).toBeInTheDocument();
     });
 
-    it("preselects config when provided", () => {
+    it("preselects source when provided", () => {
       render(
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("preselected-config")]}
-          preselectedConfig="preselected-config"
+          sources={[createMockSource("preselected-source")]}
+          preselectedSource="preselected-source"
         />
       );
 
-      expect(screen.getByLabelText("Config")).toHaveTextContent("preselected-config");
+      expect(screen.getByLabelText("Source")).toHaveTextContent("preselected-source");
     });
   });
 
@@ -134,7 +138,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -148,7 +152,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -169,7 +173,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -191,7 +195,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -208,7 +212,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -220,12 +224,12 @@ describe("JobDialog", () => {
       });
     });
 
-    it("shows error when config is not selected", async () => {
+    it("shows error when source is not selected", async () => {
       render(
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -233,7 +237,7 @@ describe("JobDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
 
       await waitFor(() => {
-        expect(screen.getByText("Config is required")).toBeInTheDocument();
+        expect(screen.getByText("Source is required")).toBeInTheDocument();
       });
     });
 
@@ -242,8 +246,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -261,8 +265,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -280,8 +284,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -308,8 +312,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -339,8 +343,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
           onSuccess={onSuccess}
         />
       );
@@ -354,7 +358,8 @@ describe("JobDialog", () => {
 
       await waitFor(() => {
         expect(mockCreateJob).toHaveBeenCalledWith("my-eval-job", {
-          configRef: { name: "test-config" },
+          sourceRef: { name: "test-source" },
+          arenaFile: "config.arena.yaml",
           type: "evaluation",
           workers: { replicas: 4 },
           timeout: "1h",
@@ -373,8 +378,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -410,8 +415,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -448,8 +453,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -468,8 +473,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -491,7 +496,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={onOpenChange}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
           onClose={onClose}
         />
       );
@@ -509,7 +514,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -523,7 +528,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -537,7 +542,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -555,8 +560,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -588,8 +593,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -617,8 +622,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -633,26 +638,30 @@ describe("JobDialog", () => {
       });
     });
 
-    it("handles config with undefined metadata name", () => {
+    it("handles source with undefined metadata name", () => {
       // Use type assertion to test defensive UI code path when runtime data doesn't match types
-      const configWithNoName = {
+      const sourceWithNoName = {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
-        kind: "ArenaConfig",
+        kind: "ArenaSource",
         metadata: {} as { name?: string },
-        spec: { sourceRef: { name: "test" } },
+        spec: {
+          type: "git",
+          interval: "5m",
+          git: { url: "https://github.com/test/repo" },
+        },
         status: { phase: "Ready" },
-      } as ArenaConfig;
+      } as ArenaSource;
 
       render(
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[configWithNoName]}
+          sources={[sourceWithNoName]}
         />
       );
 
-      fireEvent.click(screen.getByLabelText("Config"));
-      // Config displays metadata.name (empty) but uses "unknown" as value
+      fireEvent.click(screen.getByLabelText("Source"));
+      // Source displays metadata.name (empty) but uses "unknown" as value
       // Verify the listbox is visible and has an option
       const listbox = screen.getByRole("listbox");
       expect(listbox).toBeInTheDocument();
@@ -670,7 +679,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -696,7 +705,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -721,7 +730,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -737,7 +746,7 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
+          sources={[createMockSource("test-source")]}
         />
       );
 
@@ -752,8 +761,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 
@@ -775,8 +784,8 @@ describe("JobDialog", () => {
         <JobDialog
           open={true}
           onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
+          sources={[createMockSource("test-source")]}
+          preselectedSource="test-source"
         />
       );
 

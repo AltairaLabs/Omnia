@@ -57,6 +57,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
@@ -81,6 +82,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     const { useArenaSourceContent } = await import("./use-arena-source-content");
@@ -102,6 +104,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     mockFetch.mockResolvedValueOnce({
@@ -136,6 +139,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     mockFetch.mockResolvedValueOnce({
@@ -166,6 +170,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     mockFetch.mockResolvedValueOnce({
@@ -194,6 +199,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
@@ -218,6 +224,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     mockFetch.mockResolvedValue({
@@ -252,6 +259,7 @@ describe("useArenaSourceContent", () => {
       workspaces: [mockWorkspace],
       isLoading: false,
       error: null,
+      refetch: vi.fn(),
     });
 
     mockFetch.mockResolvedValue({

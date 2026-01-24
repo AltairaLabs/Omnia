@@ -23,3 +23,12 @@ spec:
     enabled: true
     role: {{ .Values.workspace.anonymousAccess.role }}
   {{- end }}
+  # Workspace storage for Arena content
+  storage:
+    enabled: true
+    size: 5Gi
+    accessModes:
+      - ReadWriteMany
+    {{- if .Values.workspace.storage.storageClass }}
+    storageClass: {{ .Values.workspace.storage.storageClass }}
+    {{- end }}

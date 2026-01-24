@@ -416,21 +416,12 @@ workspaceContent:
   # -- Mount path in dashboard pod
   mountPath: /workspace-content
 
-  # HostPath storage for local development (single-node clusters only)
-  # Maps to a directory on your local machine
-  hostPath:
-    # -- Enable hostPath storage (for local dev with kind/Docker Desktop)
-    enabled: false
-    # -- Path on the node/host machine
-    path: /tmp/omnia-workspace-content
-
   persistence:
     # -- Storage class for dashboard's workspace content PVC
-    # For production: Use NFS-backed class that matches workspace PVCs
-    # For development: Leave empty to use cluster default
+    # For production: Use your cloud's RWX storage class (efs-sc, azurefile-csi-nfs, filestore-sc)
+    # For development: Leave empty and enable nfs.csiDriver to use internal NFS
     storageClass: ""
     # -- Access modes for dashboard content PVC (ReadWriteMany for shared access)
-    # For development with local-path, override to: ["ReadWriteOnce"]
     accessModes:
       - ReadWriteMany
     # -- Volume size for dashboard content view
@@ -448,17 +439,17 @@ nfs:
   server:
     # -- Deploy internal NFS server (dev only, not for production)
     enabled: false
-    # -- Use internal NFS server (when enabled, auto-configures provisioner)
+    # -- Use internal NFS server (when enabled, auto-configures CSI driver)
     internal: true
     # -- Storage class for NFS server's backing storage (only for internal server)
     storageClass: ""
     # -- Size of NFS server's backing storage
     size: 50Gi
     image:
-      # -- NFS server image repository
-      repository: itsthenetwork/nfs-server-alpine
+      # -- NFS server image repository (erichough/nfs-server is compatible with most K8s distributions)
+      repository: erichough/nfs-server
       # -- NFS server image tag
-      tag: "12"
+      tag: "2.2.1"
       # -- Image pull policy
       pullPolicy: IfNotPresent
     # -- Resource limits for NFS server pod
@@ -470,38 +461,66 @@ nfs:
         cpu: 50m
         memory: 64Mi
 
-  # External NFS server configuration (for production)
+  # External NFS server configuration (for production with self-managed NFS)
   external:
     # -- External NFS server hostname or IP
     server: ""
     # -- Export path on NFS server
     path: /exports/omnia
 
-  # NFS provisioner subchart configuration (nfs-subdir-external-provisioner)
-  provisioner:
-    # -- Enable NFS provisioner for dynamic PVC creation
+  # NFS CSI driver configuration (csi-driver-nfs subchart)
+  # The CSI driver mounts NFS from within pods, so DNS resolution works correctly
+  csiDriver:
+    # -- Enable NFS CSI driver for dynamic PVC provisioning
+    # For local dev: Set to true along with nfs.server.enabled
+    # For production: Use cloud-native storage classes instead (EFS, Azure Files, Filestore)
+    enabled: false
+    # StorageClass configuration
+    storageClass:
+      # -- Storage class name for NFS-backed PVCs
+      name: omnia-nfs
+      # -- Reclaim policy for provisioned PVs
+      reclaimPolicy: Delete
+      # -- Subdirectory for PVC data (optional, creates per-PVC subdirs automatically)
+      subDir: ""
+
+# NFS CSI driver subchart values (when nfs.csiDriver.enabled)
+# See: https://github.com/kubernetes-csi/csi-driver-nfs
+nfscsi:
+  # Controller configuration
+  controller:
+    # -- Number of controller replicas
+    replicas: 1
+  # Feature gates
+  feature:
+    # -- Enable fsGroupPolicy for proper file permissions
+    enableFSGroupPolicy: true
+  # External snapshotter sidecar (disabled - VolumeSnapshot CRDs not installed)
+  externalSnapshotter:
     enabled: false
 
-# nfs-subdir-external-provisioner subchart values (when nfs.provisioner.enabled)
-# See: https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner
-nfsprovisioner:
-  # NFS server configuration (auto-configured when nfs.server.internal is true)
-  nfs:
-    server: ""  # Set automatically if nfs.server.internal is true
-    path: /nfsshare
-  storageClass:
-    # -- Storage class name for NFS-backed PVCs
-    name: omnia-nfs
-    # -- Set as default storage class
-    defaultClass: false
-    # -- Access modes for provisioned PVCs
-    accessModes: ReadWriteMany
-    # -- Reclaim policy for provisioned PVs
-    reclaimPolicy: Delete
-    # -- Archive deleted PVCs instead of deleting
-    archiveOnDelete: false
-    # -- Path pattern for subdirectories: ${.PVC.namespace}/${.PVC.name}
-    pathPattern: "${.PVC.namespace}/${.PVC.name}"
+# ============================================================================
+# VS Code Server (Development Only)
+# Web-based VS Code for browsing/editing workspace content
+# ============================================================================
+
+vscodeServer:
+  # -- Enable VS Code server (only works when devMode is also true)
+  enabled: false
+  image:
+    # -- VS Code server image repository
+    repository: codercom/code-server
+    # -- VS Code server image tag
+    tag: "4.96.4"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
 
 # ============================================================================
 # Arena Fleet Configuration

@@ -1,4 +1,6 @@
 {{- if and .Values.workspaceContent.enabled (not .Values.workspaceContent.persistence.existingClaim) }}
+# PVC for workspace content storage
+# Used by dashboard to browse and manage workspace content
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,20 +9,13 @@ metadata:
     {{- include "omnia.labels" . | nindent 4 }}
     app.kubernetes.io/component: workspace-content
 spec:
-  {{- if or .Values.workspaceContent.hostPath.enabled (and .Values.nfs.server.enabled .Values.nfs.server.internal) }}
-  {{- /* Bind to static PV (hostPath or NFS) */}}
-  accessModes:
-    - ReadWriteMany
-  storageClassName: ""
-  volumeName: {{ include "omnia.fullname" . }}-workspace-content
-  {{- else }}
   accessModes:
     {{- toYaml .Values.workspaceContent.persistence.accessModes | nindent 4 }}
   {{- if .Values.workspaceContent.persistence.storageClass }}
   storageClassName: {{ .Values.workspaceContent.persistence.storageClass | quote }}
-  {{- else if .Values.nfs.provisioner.enabled }}
-  storageClassName: {{ .Values.nfsprovisioner.storageClass.name | default "omnia-nfs" | quote }}
-  {{- end }}
+  {{- else if .Values.nfs.csiDriver.enabled }}
+  # Use NFS CSI driver storage class when enabled
+  storageClassName: {{ include "omnia.nfsStorageClass" . | quote }}
   {{- end }}
   resources:
     requests:

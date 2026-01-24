@@ -68,11 +68,6 @@ const mockSources = [
   { metadata: { name: "source-3" }, status: { phase: "Failed" } },
 ];
 
-const mockConfigs = [
-  { metadata: { name: "config-1" }, status: { phase: "Ready", scenarioCount: 10 } },
-  { metadata: { name: "config-2" }, status: { phase: "Ready", scenarioCount: 5 } },
-];
-
 const mockJobs = [
   { metadata: { name: "job-1" }, status: { phase: "Running" } },
   { metadata: { name: "job-2" }, status: { phase: "Succeeded" } },
@@ -118,7 +113,6 @@ describe("GET /api/workspaces/[name]/arena/stats", () => {
     // Mock listCrd to return different data based on the CRD type
     vi.mocked(listCrd)
       .mockResolvedValueOnce(mockSources) // arenasources
-      .mockResolvedValueOnce(mockConfigs) // arenaconfigs
       .mockResolvedValueOnce(mockJobs);    // arenajobs
 
     const { GET } = await import("./route");
@@ -132,11 +126,6 @@ describe("GET /api/workspaces/[name]/arena/stats", () => {
     expect(body.sources.ready).toBe(2);
     expect(body.sources.failed).toBe(1);
     expect(body.sources.active).toBe(2);
-
-    // Config stats
-    expect(body.configs.total).toBe(2);
-    expect(body.configs.ready).toBe(2);
-    expect(body.configs.scenarios).toBe(15); // 10 + 5
 
     // Job stats
     expect(body.jobs.total).toBe(5);
@@ -164,7 +153,6 @@ describe("GET /api/workspaces/[name]/arena/stats", () => {
 
     vi.mocked(listCrd)
       .mockResolvedValueOnce([]) // arenasources
-      .mockResolvedValueOnce([]) // arenaconfigs
       .mockResolvedValueOnce([]); // arenajobs
 
     const { GET } = await import("./route");
@@ -174,7 +162,6 @@ describe("GET /api/workspaces/[name]/arena/stats", () => {
     const body = await response.json();
 
     expect(body.sources.total).toBe(0);
-    expect(body.configs.total).toBe(0);
     expect(body.jobs.total).toBe(0);
     expect(body.jobs.successRate).toBe(0);
   });

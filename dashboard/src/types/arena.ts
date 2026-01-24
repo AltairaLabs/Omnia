@@ -136,10 +136,8 @@ export interface ArenaSource {
 }
 
 // =============================================================================
-// ArenaConfig - Configuration combining source with providers/tools
+// Common Reference Types
 // =============================================================================
-
-export type ArenaConfigPhase = "Pending" | "Ready" | "Failed";
 
 /** Reference to another resource */
 export interface ResourceRef {
@@ -157,96 +155,30 @@ export interface ScenarioFilter {
   exclude?: string[];
 }
 
-/** Self-play configuration for evaluation scenarios */
-export interface SelfPlayConfig {
-  /** Provider for simulated user */
-  providerRef?: ResourceRef;
-  /** Persona filtering */
-  personas?: {
-    /** Glob patterns to include */
-    include?: string[];
+/** Provider group selector using Kubernetes label selectors */
+export interface ProviderGroupSelector {
+  /** Label selector to match Provider CRDs */
+  selector: {
+    matchLabels?: Record<string, string>;
+    matchExpressions?: Array<{
+      key: string;
+      operator: "In" | "NotIn" | "Exists" | "DoesNotExist";
+      values?: string[];
+    }>;
   };
 }
 
-/** Default configuration values */
-export interface ArenaDefaults {
-  /** Default temperature for LLM calls */
-  temperature?: number;
-  /** Default concurrency level */
-  concurrency?: number;
-  /** Default timeout per scenario */
-  timeout?: string;
-}
-
-/** ArenaConfig specification */
-export interface ArenaConfigSpec {
-  /** Reference to the ArenaSource */
-  sourceRef: ResourceRef;
-  /** Path to arena.yaml within the artifact (default: "arena.yaml") */
-  arenaFile?: string;
-  /** Scenario filtering */
-  scenarios?: ScenarioFilter;
-  /** Provider references (workspace or shared) */
-  providers?: ResourceRef[];
-  /** ToolRegistry references (workspace or shared) */
-  toolRegistries?: ResourceRef[];
-  /** Self-play configuration */
-  selfPlay?: SelfPlayConfig;
-  /** Default values */
-  defaults?: ArenaDefaults;
-  /** Suspend reconciliation */
-  suspend?: boolean;
-}
-
-/** Provider status in ArenaConfig */
-export interface ArenaProviderStatus {
-  /** Provider name */
-  name: string;
-  /** Provider namespace */
-  namespace?: string;
-  /** Status (Ready, NotFound, Error) */
-  status: string;
-  /** Error message if any */
-  message?: string;
-}
-
-/** ToolRegistry status in ArenaConfig */
-export interface ArenaToolRegistryStatus {
-  /** ToolRegistry name */
-  name: string;
-  /** ToolRegistry namespace */
-  namespace?: string;
-  /** Number of tools available */
-  toolCount?: number;
-  /** Status (Ready, NotFound, Error) */
-  status: string;
-}
-
-/** ArenaConfig status */
-export interface ArenaConfigStatus {
-  /** Current phase */
-  phase?: ArenaConfigPhase;
-  /** Source revision being used */
-  sourceRevision?: string;
-  /** Number of scenarios discovered */
-  scenarioCount?: number;
-  /** Provider statuses */
-  providers?: ArenaProviderStatus[];
-  /** ToolRegistry statuses */
-  toolRegistries?: ArenaToolRegistryStatus[];
-  /** Standard conditions */
-  conditions?: Condition[];
-  /** Observed generation */
-  observedGeneration?: number;
-}
-
-/** ArenaConfig resource - combines source with providers/tools */
-export interface ArenaConfig {
-  apiVersion: "omnia.altairalabs.ai/v1alpha1";
-  kind: "ArenaConfig";
-  metadata: ObjectMeta;
-  spec: ArenaConfigSpec;
-  status?: ArenaConfigStatus;
+/** ToolRegistry selector using Kubernetes label selectors */
+export interface ToolRegistrySelector {
+  /** Label selector to match ToolRegistry CRDs */
+  selector: {
+    matchLabels?: Record<string, string>;
+    matchExpressions?: Array<{
+      key: string;
+      operator: "In" | "NotIn" | "Exists" | "DoesNotExist";
+      values?: string[];
+    }>;
+  };
 }
 
 // =============================================================================
@@ -371,12 +303,18 @@ export interface ScheduleConfig {
 
 /** ArenaJob specification */
 export interface ArenaJobSpec {
-  /** Reference to ArenaConfig */
-  configRef: ResourceRef;
+  /** Reference to ArenaSource containing test scenarios and configuration */
+  sourceRef: ResourceRef;
+  /** Path to arena config file within the source (default: "config.arena.yaml") */
+  arenaFile?: string;
   /** Job type */
   type: ArenaJobType;
-  /** Scenario filtering (overrides config) */
+  /** Scenario filtering - filters which scenarios to run from the arena file */
   scenarios?: ScenarioFilter;
+  /** Provider overrides - use label selectors to match Provider CRDs for each group */
+  providerOverrides?: Record<string, ProviderGroupSelector>;
+  /** Tool registry override - use label selectors to match ToolRegistry CRDs */
+  toolRegistryOverride?: ToolRegistrySelector;
   /** Worker configuration */
   workers?: WorkerConfig;
   /** Queue configuration */
@@ -635,11 +573,6 @@ export interface ArenaStats {
     ready: number;
     failed: number;
     active: number;
-  };
-  configs: {
-    total: number;
-    ready: number;
-    scenarios: number;
   };
   jobs: {
     total: number;

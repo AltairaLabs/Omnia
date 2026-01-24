@@ -15,8 +15,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.configRef.name
-      name: Config
+    - jsonPath: .spec.sourceRef.name
+      name: Source
       type: string
     - jsonPath: .spec.type
       name: Type
@@ -36,7 +36,7 @@ spec:
       openAPIV3Schema:
         description: |-
           ArenaJob is the Schema for the arenajobs API.
-          It defines a test execution that runs scenarios from an ArenaConfig.
+          It defines a test execution that runs scenarios from an ArenaSource.
         properties:
           apiVersion:
             description: |-
@@ -58,17 +58,12 @@ spec:
           spec:
             description: spec defines the desired state of ArenaJob
             properties:
-              configRef:
-                description: configRef references the ArenaConfig containing test
-                  configuration.
-                properties:
-                  name:
-                    description: name is the name of the referenced resource.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
+              arenaFile:
+                default: config.arena.yaml
+                description: |-
+                  arenaFile is the path to the arena config file within the source.
+                  Supports glob patterns for multi-file configs (e.g., "evals/*.arena.yaml").
+                type: string
               dataGen:
                 description: |-
                   dataGen configures data generation settings.
@@ -162,7 +157,7 @@ spec:
                           Expected keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
                         properties:
                           name:
-                            description: name is the name of the referenced resource.
+                            description: name is the name of the object.
                             minLength: 1
                             type: string
                         required:
@@ -237,16 +232,15 @@ spec:
                   - selector
                   type: object
                 description: |-
-                  providerOverrides allows overriding providers from the ArenaConfig by group.
+                  providerOverrides allows overriding provider groups defined in the arena config file.
                   Keys are group names from the arena config file (e.g., "default", "judge").
                   Use "*" as a catch-all for groups not explicitly specified.
-                  When specified, providers from the ArenaConfig are ignored for matched groups,
-                  and Provider CRDs matching the label selector are used instead.
+                  Provider CRDs matching the label selector provide credentials for the matched groups.
                 type: object
               scenarios:
                 description: |-
-                  scenarios overrides scenario selection from the ArenaConfig.
-                  If not specified, uses the ArenaConfig's scenario settings.
+                  scenarios filters which scenarios to run from the arena file.
+                  If not specified, runs all scenarios defined in the arena file.
                 properties:
                   exclude:
                     description: |-
@@ -290,9 +284,20 @@ spec:
                     description: timezone specifies the timezone for the cron schedule.
                     type: string
                 type: object
+              sourceRef:
+                description: sourceRef references the ArenaSource containing test
+                  scenarios and configuration.
+                properties:
+                  name:
+                    description: name is the name of the object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               toolRegistryOverride:
                 description: |-
-                  toolRegistryOverride allows overriding tools/mcp_servers from arena.config.yaml
+                  toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
                   with handlers from ToolRegistry CRDs. All tools from matching registries will
                   override tools with matching names in the arena config.
                 properties:
@@ -389,7 +394,7 @@ spec:
                     type: integer
                 type: object
             required:
-            - configRef
+            - sourceRef
             type: object
           status:
             description: status defines the observed state of ArenaJob

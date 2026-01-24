@@ -75,6 +75,10 @@ const (
 type WorkspaceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// DefaultStorageClass is the default storage class for workspace PVCs
+	// when not specified in the Workspace spec. Used for NFS-backed storage.
+	DefaultStorageClass string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
@@ -88,6 +92,8 @@ type WorkspaceReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+//
+//nolint:gocognit // Reconcile functions inherently have high complexity due to state machine logic
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -186,20 +192,47 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
-		"StorageReady", "Storage is ready")
+
+	// Check if storage is provisioning (PVC exists but not yet bound)
+	storageProvisioning := false
+	if workspace.Status.Storage != nil && workspace.Status.Storage.Phase != "" {
+		if workspace.Status.Storage.Phase != string(corev1.ClaimBound) {
+			storageProvisioning = true
+			r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionFalse,
+				"StorageProvisioning", fmt.Sprintf("PVC %s is %s, waiting for volume to be provisioned",
+					workspace.Status.Storage.PVCName, workspace.Status.Storage.Phase))
+		} else {
+			r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
+				"StorageReady", "Storage is ready")
+		}
+	} else {
+		// Storage not enabled or not configured
+		r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
+			"StorageNotRequired", "Storage is not enabled for this workspace")
+	}
 
 	// Update member count
 	r.updateMemberCount(workspace)
 
-	// Set overall Ready condition
-	workspace.Status.Phase = omniav1alpha1.WorkspacePhaseReady
-	r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionTrue,
-		"WorkspaceReady", "Workspace is ready")
+	// Set overall Ready condition based on all components
+	if storageProvisioning {
+		workspace.Status.Phase = omniav1alpha1.WorkspacePhasePending
+		r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionFalse,
+			"StorageProvisioning", "Waiting for storage to be provisioned")
+	} else {
+		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseReady
+		r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionTrue,
+			"WorkspaceReady", "Workspace is ready")
+	}
 
 	workspace.Status.ObservedGeneration = workspace.Generation
 	if err := r.Status().Update(ctx, workspace); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Requeue if storage is still provisioning to check again
+	if storageProvisioning {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -623,7 +656,8 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 
 func (r *WorkspaceReconciler) reconcileStorage(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
 	namespaceName := workspace.Spec.Namespace.Name
-	pvcName := fmt.Sprintf("workspace-%s-content", workspace.Name)
+	// Use namespace name (not workspace name) so ArenaJob can derive PVC name from namespace
+	pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 
 	// Check if storage is enabled (defaults to false if not specified for backward compat)
 	storageEnabled := workspace.Spec.Storage != nil &&
@@ -738,8 +772,13 @@ func (r *WorkspaceReconciler) mutatePVC(
 				},
 			},
 		}
-		if storageConfig.StorageClass != "" {
-			pvc.Spec.StorageClassName = &storageConfig.StorageClass
+		// Use explicit storage class from workspace spec, or fall back to controller default
+		storageClass := storageConfig.StorageClass
+		if storageClass == "" {
+			storageClass = r.DefaultStorageClass
+		}
+		if storageClass != "" {
+			pvc.Spec.StorageClassName = &storageClass
 		}
 	} else {
 		if pvc.Labels == nil {

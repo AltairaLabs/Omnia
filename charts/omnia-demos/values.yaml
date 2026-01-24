@@ -15,6 +15,12 @@ workspace:
     # -- Role granted to anonymous users: viewer, editor, or owner
     # WARNING: editor/owner grants write access - only use in dev environments
     role: viewer
+  # -- Storage configuration for workspace content
+  storage:
+    # -- Storage class for workspace content PVC
+    # For local dev with NFS: omnia-nfs
+    # For production: use cloud storage class (efs-sc, azurefile-csi-nfs, etc.)
+    storageClass: ""
 
 # Ollama configuration (local LLM server)
 ollama:

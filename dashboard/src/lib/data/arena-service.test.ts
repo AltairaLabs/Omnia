@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ArenaService } from "./arena-service";
-import type { ArenaSource, ArenaConfig, ArenaJob, ArenaStats } from "@/types/arena";
+import type { ArenaSource, ArenaJob, ArenaStats } from "@/types/arena";
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -33,7 +33,7 @@ describe("ArenaService", () => {
           apiVersion: "omnia.altairalabs.ai/v1alpha1",
           kind: "ArenaSource",
           metadata: { name: "test-source", namespace: "test-ws" },
-          spec: { type: "configmap", configMap: { name: "test-cm" } },
+          spec: { type: "configmap", interval: "5m", configMap: { name: "test-cm" } },
         },
       ];
 
@@ -82,7 +82,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaSource",
         metadata: { name: "test-source", namespace: "test-ws" },
-        spec: { type: "configmap", configMap: { name: "test-cm" } },
+        spec: { type: "configmap", interval: "5m", configMap: { name: "test-cm" } },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -119,7 +119,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaSource",
         metadata: { name: "new-source", namespace: "test-ws" },
-        spec: { type: "configmap", configMap: { name: "test-cm" } },
+        spec: { type: "configmap", interval: "5m", configMap: { name: "test-cm" } },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -129,6 +129,7 @@ describe("ArenaService", () => {
 
       const result = await service.createArenaSource("test-ws", "new-source", {
         type: "configmap",
+        interval: "5m",
         configMap: { name: "test-cm" },
       });
 
@@ -137,7 +138,7 @@ describe("ArenaService", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metadata: { name: "new-source" },
-          spec: { type: "configmap", configMap: { name: "test-cm" } },
+          spec: { type: "configmap", interval: "5m", configMap: { name: "test-cm" } },
         }),
       });
       expect(result).toEqual(mockSource);
@@ -150,7 +151,7 @@ describe("ArenaService", () => {
       });
 
       await expect(
-        service.createArenaSource("test-ws", "new-source", { type: "configmap" })
+        service.createArenaSource("test-ws", "new-source", { type: "configmap", interval: "5m" })
       ).rejects.toThrow("Validation failed");
     });
 
@@ -161,7 +162,7 @@ describe("ArenaService", () => {
       });
 
       await expect(
-        service.createArenaSource("test-ws", "new-source", { type: "configmap" })
+        service.createArenaSource("test-ws", "new-source", { type: "configmap", interval: "5m" })
       ).rejects.toThrow("Failed to create arena source");
     });
   });
@@ -172,7 +173,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaSource",
         metadata: { name: "test-source", namespace: "test-ws" },
-        spec: { type: "configmap", configMap: { name: "updated-cm" } },
+        spec: { type: "configmap", interval: "10m", configMap: { name: "updated-cm" } },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -182,13 +183,14 @@ describe("ArenaService", () => {
 
       const result = await service.updateArenaSource("test-ws", "test-source", {
         type: "configmap",
+        interval: "10m",
         configMap: { name: "updated-cm" },
       });
 
       expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/sources/test-source", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec: { type: "configmap", configMap: { name: "updated-cm" } } }),
+        body: JSON.stringify({ spec: { type: "configmap", interval: "10m", configMap: { name: "updated-cm" } } }),
       });
       expect(result).toEqual(mockSource);
     });
@@ -200,7 +202,7 @@ describe("ArenaService", () => {
       });
 
       await expect(
-        service.updateArenaSource("test-ws", "test", { type: "configmap" })
+        service.updateArenaSource("test-ws", "test", { type: "configmap", interval: "5m" })
       ).rejects.toThrow("Not found");
     });
   });
@@ -249,248 +251,6 @@ describe("ArenaService", () => {
   });
 
   // ============================================================
-  // ArenaConfigs
-  // ============================================================
-
-  describe("getArenaConfigs", () => {
-    it("should fetch arena configs for a workspace", async () => {
-      const mockConfigs: ArenaConfig[] = [
-        {
-          apiVersion: "omnia.altairalabs.ai/v1alpha1",
-          kind: "ArenaConfig",
-          metadata: { name: "test-config", namespace: "test-ws" },
-          spec: { sourceRef: { name: "test-source" } },
-        },
-      ];
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockConfigs),
-      });
-
-      const result = await service.getArenaConfigs("test-ws");
-
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/configs");
-      expect(result).toEqual(mockConfigs);
-    });
-
-    it("should return empty array on auth/not-found errors", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 });
-      expect(await service.getArenaConfigs("test-ws")).toEqual([]);
-
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 403 });
-      expect(await service.getArenaConfigs("test-ws")).toEqual([]);
-
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
-      expect(await service.getArenaConfigs("test-ws")).toEqual([]);
-    });
-
-    it("should throw on other errors", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Error" });
-
-      await expect(service.getArenaConfigs("test-ws")).rejects.toThrow(
-        "Failed to fetch arena configs: Error"
-      );
-    });
-  });
-
-  describe("getArenaConfig", () => {
-    it("should fetch a single arena config", async () => {
-      const mockConfig: ArenaConfig = {
-        apiVersion: "omnia.altairalabs.ai/v1alpha1",
-        kind: "ArenaConfig",
-        metadata: { name: "test-config", namespace: "test-ws" },
-        spec: { sourceRef: { name: "test-source" } },
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockConfig),
-      });
-
-      const result = await service.getArenaConfig("test-ws", "test-config");
-
-      expect(result).toEqual(mockConfig);
-    });
-
-    it("should return undefined on 404", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
-
-      expect(await service.getArenaConfig("test-ws", "not-found")).toBeUndefined();
-    });
-
-    it("should throw on server errors", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
-
-      await expect(service.getArenaConfig("test-ws", "test-config")).rejects.toThrow(
-        "Failed to fetch arena config: Internal Server Error"
-      );
-    });
-  });
-
-  describe("getArenaConfigScenarios", () => {
-    it("should fetch scenarios for a config", async () => {
-      const mockScenarios = [
-        { name: "scenario1", path: "scenarios/s1.yaml" },
-        { name: "scenario2", path: "scenarios/s2.yaml" },
-      ];
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockScenarios),
-      });
-
-      const result = await service.getArenaConfigScenarios("test-ws", "test-config");
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws/arena/configs/test-config/scenarios"
-      );
-      expect(result).toEqual(mockScenarios);
-    });
-
-    it("should return empty array on 404", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
-
-      expect(await service.getArenaConfigScenarios("test-ws", "not-found")).toEqual([]);
-    });
-
-    it("should throw on server errors", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Internal Server Error" });
-
-      await expect(service.getArenaConfigScenarios("test-ws", "test-config")).rejects.toThrow(
-        "Failed to fetch arena config scenarios: Internal Server Error"
-      );
-    });
-  });
-
-  describe("createArenaConfig", () => {
-    it("should create an arena config", async () => {
-      const mockConfig: ArenaConfig = {
-        apiVersion: "omnia.altairalabs.ai/v1alpha1",
-        kind: "ArenaConfig",
-        metadata: { name: "new-config", namespace: "test-ws" },
-        spec: { sourceRef: { name: "test-source" } },
-      };
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockConfig),
-      });
-
-      const result = await service.createArenaConfig("test-ws", "new-config", {
-        sourceRef: { name: "test-source" },
-      });
-
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/configs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          metadata: { name: "new-config" },
-          spec: { sourceRef: { name: "test-source" } },
-        }),
-      });
-      expect(result).toEqual(mockConfig);
-    });
-
-    it("should throw on failure", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve("Config name already exists"),
-      });
-
-      await expect(
-        service.createArenaConfig("test-ws", "existing-config", { sourceRef: { name: "source" } })
-      ).rejects.toThrow("Config name already exists");
-    });
-
-    it("should throw default message on failure with empty response", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve(""),
-      });
-
-      await expect(
-        service.createArenaConfig("test-ws", "bad-config", { sourceRef: { name: "source" } })
-      ).rejects.toThrow("Failed to create arena config");
-    });
-  });
-
-  describe("updateArenaConfig", () => {
-    it("should update an arena config", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-
-      await service.updateArenaConfig("test-ws", "test-config", {
-        sourceRef: { name: "updated-source" },
-      });
-
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/configs/test-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec: { sourceRef: { name: "updated-source" } } }),
-      });
-    });
-
-    it("should throw on failure", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve("Invalid config spec"),
-      });
-
-      await expect(
-        service.updateArenaConfig("test-ws", "test-config", { sourceRef: { name: "bad" } })
-      ).rejects.toThrow("Invalid config spec");
-    });
-
-    it("should throw default message on failure with empty response", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve(""),
-      });
-
-      await expect(
-        service.updateArenaConfig("test-ws", "test-config", { sourceRef: { name: "bad" } })
-      ).rejects.toThrow("Failed to update arena config");
-    });
-  });
-
-  describe("deleteArenaConfig", () => {
-    it("should delete an arena config", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true });
-
-      await service.deleteArenaConfig("test-ws", "test-config");
-
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-ws/arena/configs/test-config", {
-        method: "DELETE",
-      });
-    });
-
-    it("should throw on failure", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve("Config is in use"),
-      });
-
-      await expect(service.deleteArenaConfig("test-ws", "test-config")).rejects.toThrow(
-        "Config is in use"
-      );
-    });
-
-    it("should throw default message on failure with empty response", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve(""),
-      });
-
-      await expect(service.deleteArenaConfig("test-ws", "test-config")).rejects.toThrow(
-        "Failed to delete arena config"
-      );
-    });
-  });
-
-  // ============================================================
   // ArenaJobs
   // ============================================================
 
@@ -501,7 +261,7 @@ describe("ArenaService", () => {
           apiVersion: "omnia.altairalabs.ai/v1alpha1",
           kind: "ArenaJob",
           metadata: { name: "test-job", namespace: "test-ws" },
-          spec: { configRef: { name: "test-config" }, type: "evaluation" },
+          spec: { sourceRef: { name: "test-source" }, arenaFile: "config.arena.yaml", type: "evaluation" },
         },
       ];
 
@@ -525,13 +285,13 @@ describe("ArenaService", () => {
       await service.getArenaJobs("test-ws", {
         type: "evaluation",
         phase: "Running",
-        configRef: "my-config",
+        sourceRef: "my-source",
         limit: 10,
         sort: "recent",
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws/arena/jobs?type=evaluation&phase=Running&configRef=my-config&limit=10&sort=recent"
+        "/api/workspaces/test-ws/arena/jobs?type=evaluation&phase=Running&sourceRef=my-source&limit=10&sort=recent"
       );
     });
 
@@ -572,7 +332,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaJob",
         metadata: { name: "test-job", namespace: "test-ws" },
-        spec: { configRef: { name: "test-config" }, type: "evaluation" },
+        spec: { sourceRef: { name: "test-source" }, arenaFile: "config.arena.yaml", type: "evaluation" },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -682,7 +442,7 @@ describe("ArenaService", () => {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
         kind: "ArenaJob",
         metadata: { name: "new-job", namespace: "test-ws" },
-        spec: { configRef: { name: "test-config" }, type: "evaluation" },
+        spec: { sourceRef: { name: "test-source" }, arenaFile: "config.arena.yaml", type: "evaluation" },
       };
 
       mockFetch.mockResolvedValueOnce({
@@ -691,7 +451,8 @@ describe("ArenaService", () => {
       });
 
       const result = await service.createArenaJob("test-ws", "new-job", {
-        configRef: { name: "test-config" },
+        sourceRef: { name: "test-source" },
+        arenaFile: "config.arena.yaml",
         type: "evaluation",
       });
 
@@ -700,7 +461,7 @@ describe("ArenaService", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metadata: { name: "new-job" },
-          spec: { configRef: { name: "test-config" }, type: "evaluation" },
+          spec: { sourceRef: { name: "test-source" }, arenaFile: "config.arena.yaml", type: "evaluation" },
         }),
       });
       expect(result).toEqual(mockJob);
@@ -714,7 +475,8 @@ describe("ArenaService", () => {
 
       await expect(
         service.createArenaJob("test-ws", "bad-job", {
-          configRef: { name: "invalid" },
+          sourceRef: { name: "invalid" },
+          arenaFile: "config.arena.yaml",
           type: "evaluation",
         })
       ).rejects.toThrow("Invalid job configuration");
@@ -728,7 +490,8 @@ describe("ArenaService", () => {
 
       await expect(
         service.createArenaJob("test-ws", "bad-job", {
-          configRef: { name: "invalid" },
+          sourceRef: { name: "invalid" },
+          arenaFile: "config.arena.yaml",
           type: "evaluation",
         })
       ).rejects.toThrow("Failed to create arena job");
@@ -801,7 +564,6 @@ describe("ArenaService", () => {
     it("should fetch arena stats for a workspace", async () => {
       const mockStats: ArenaStats = {
         sources: { total: 5, ready: 4, failed: 1, active: 4 },
-        configs: { total: 3, ready: 3, scenarios: 20 },
         jobs: { total: 10, running: 1, queued: 0, completed: 8, failed: 1, successRate: 0.89 },
       };
 
@@ -819,7 +581,6 @@ describe("ArenaService", () => {
     it("should return default stats on auth/not-found errors", async () => {
       const defaultStats = {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
       };
 

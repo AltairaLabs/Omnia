@@ -5,12 +5,15 @@
 # that provides ReadWriteMany (RWX) storage for workspace content.
 #
 # WARNING: The internal NFS server is NOT suitable for production use.
-# For production, use an external NFS server or cloud-native storage.
+# For production, use cloud-native storage:
+#   - AWS: EFS (efs-sc storage class)
+#   - Azure: Azure Files (azurefile-csi-nfs storage class)
+#   - GCP: Filestore (filestore-sc storage class)
 
 # Enable dev mode
 devMode: true
 
-# Enable internal NFS server for development
+# Enable internal NFS server and CSI driver for development
 nfs:
   server:
     enabled: true
@@ -19,43 +22,29 @@ nfs:
     storageClass: ""
     size: 50Gi
 
-  # Enable NFS provisioner for dynamic PVC creation
-  provisioner:
+  # Enable NFS CSI driver for dynamic PVC creation
+  # The CSI driver mounts NFS from within pods, so DNS names work correctly
+  csiDriver:
     enabled: true
+    storageClass:
+      name: omnia-nfs
+      reclaimPolicy: Delete
+      # Use a shared subDir so all PVCs see the same content
+      # Without this, each PVC gets its own isolated subdir
+      subDir: omnia-content
 
-# Configure the NFS provisioner subchart
-# NOTE: The server address must match the deployed NFS server service name.
-# Pattern: <fullname>-nfs-server.<namespace>.svc.cluster.local
-#
-# Fullname follows Helm conventions:
-#   - If release name contains chart name ("omnia"): fullname = release name
-#   - Otherwise: fullname = <release-name>-omnia
-#
-# Examples:
-#   helm install omnia ... -n omnia-system  -> omnia-nfs-server.omnia-system.svc.cluster.local
-#   helm install myapp ... -n default       -> myapp-omnia-nfs-server.default.svc.cluster.local
-#
-nfsprovisioner:
-  nfs:
-    # Update this if using a different release name or namespace
-    server: omnia-nfs-server.omnia-system.svc.cluster.local
-    path: /nfsshare
-  storageClass:
-    name: omnia-nfs
-    defaultClass: false
-    accessModes: ReadWriteMany
-    reclaimPolicy: Delete
-    archiveOnDelete: false
-    # Path pattern creates subdirectories per namespace/PVC
-    pathPattern: "${.PVC.namespace}/${.PVC.name}"
+# Workspace storage uses NFS for RWX access
+workspaces:
+  storage:
+    storageClass: "omnia-nfs"
+    accessModes:
+      - ReadWriteMany
 
-# Workspace content uses NFS storage class automatically when provisioner is enabled
+# Workspace content uses NFS storage class automatically when CSI driver is enabled
 workspaceContent:
   enabled: true
   persistence:
-    # Storage class is auto-set to omnia-nfs when nfs.provisioner.enabled
-    # Explicit setting here for clarity:
-    # storageClass: "omnia-nfs"
+    # Storage class is auto-set to omnia-nfs when nfs.csiDriver.enabled
     accessModes:
       - ReadWriteMany
     size: 50Gi
@@ -63,7 +52,23 @@ workspaceContent:
 # Arena configuration
 arena:
   enabled: true
-  worker:
-    # Worker pods mount workspace content from NFS
-    workspaceContent:
-      enabled: true
+  queue:
+    type: redis
+    redis:
+      # Auto-configured to use Redis subchart
+      host: "omnia-redis-master"
+      port: 6379
+
+# Enable Redis for arena work queue
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+
+# Enable VS Code server for browsing workspace content
+vscodeServer:
+  enabled: true

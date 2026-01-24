@@ -25,9 +25,6 @@ import type {
 import type {
   ArenaSource,
   ArenaSourceSpec,
-  ArenaConfig,
-  ArenaConfigSpec,
-  ArenaConfigContent,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
@@ -124,69 +121,6 @@ const mockArenaSources: ArenaSource[] = [
   },
 ];
 
-const mockArenaConfigs: ArenaConfig[] = [
-  {
-    apiVersion: "omnia.altairalabs.ai/v1alpha1",
-    kind: "ArenaConfig",
-    metadata: {
-      name: "support-eval-config",
-      namespace: "default",
-      uid: "arena-config-1",
-      creationTimestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    spec: {
-      sourceRef: { name: "customer-support-scenarios" },
-      providers: [{ name: "anthropic-claude" }],
-      defaults: { temperature: 0.7, concurrency: 4, timeout: "5m" },
-    },
-    status: {
-      phase: "Ready",
-      sourceRevision: "v1.0.0",
-      scenarioCount: 8,
-      providers: [{ name: "anthropic-claude", status: "Ready" }],
-      conditions: [
-        {
-          type: "Ready",
-          status: "True",
-          lastTransitionTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-          reason: "Succeeded",
-          message: "Configuration validated",
-        },
-      ],
-    },
-  },
-  {
-    apiVersion: "omnia.altairalabs.ai/v1alpha1",
-    kind: "ArenaConfig",
-    metadata: {
-      name: "sales-eval-config",
-      namespace: "default",
-      uid: "arena-config-2",
-      creationTimestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    spec: {
-      sourceRef: { name: "sales-eval-suite" },
-      providers: [{ name: "openai-gpt4" }],
-      defaults: { temperature: 0.5, concurrency: 2, timeout: "10m" },
-    },
-    status: {
-      phase: "Ready",
-      sourceRevision: "v2.1.0",
-      scenarioCount: 12,
-      providers: [{ name: "openai-gpt4", status: "Ready" }],
-      conditions: [
-        {
-          type: "Ready",
-          status: "True",
-          lastTransitionTime: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-          reason: "Succeeded",
-          message: "Configuration validated",
-        },
-      ],
-    },
-  },
-];
-
 const mockArenaJobs: ArenaJob[] = [
   {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -198,7 +132,7 @@ const mockArenaJobs: ArenaJob[] = [
       creationTimestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     },
     spec: {
-      configRef: { name: "support-eval-config" },
+      sourceRef: { name: "support-eval-config" },
       type: "evaluation",
       evaluation: { outputFormats: ["json", "junit"], passingThreshold: 0.8 },
     },
@@ -206,10 +140,22 @@ const mockArenaJobs: ArenaJob[] = [
       phase: "Succeeded",
       startTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       completionTime: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
-      totalTasks: 8,
-      completedTasks: 8,
-      failedTasks: 1,
-      resultsUrl: "/results/support-eval-20240115",
+      progress: {
+        total: 8,
+        completed: 8,
+        failed: 0,
+        pending: 0,
+      },
+      result: {
+        url: "/results/support-eval-20240115",
+        summary: {
+          totalItems: "8",
+          passedItems: "7",
+          failedItems: "1",
+          passRate: "87.5",
+          avgDurationMs: "1500",
+        },
+      },
       conditions: [
         {
           type: "Complete",
@@ -231,16 +177,20 @@ const mockArenaJobs: ArenaJob[] = [
       creationTimestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     },
     spec: {
-      configRef: { name: "sales-eval-config" },
+      sourceRef: { name: "sales-eval-config" },
       type: "evaluation",
       evaluation: { outputFormats: ["json"], passingThreshold: 0.75 },
     },
     status: {
       phase: "Running",
       startTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      totalTasks: 12,
-      completedTasks: 7,
-      failedTasks: 0,
+      progress: {
+        total: 12,
+        completed: 7,
+        failed: 0,
+        pending: 5,
+      },
+      activeWorkers: 2,
       workers: { desired: 2, active: 2 },
       conditions: [
         {
@@ -263,7 +213,7 @@ const mockArenaJobs: ArenaJob[] = [
       creationTimestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
     },
     spec: {
-      configRef: { name: "support-eval-config" },
+      sourceRef: { name: "support-eval-config" },
       type: "evaluation",
       evaluation: { outputFormats: ["json"], passingThreshold: 0.9 },
     },
@@ -271,9 +221,21 @@ const mockArenaJobs: ArenaJob[] = [
       phase: "Failed",
       startTime: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
       completionTime: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
-      totalTasks: 8,
-      completedTasks: 3,
-      failedTasks: 5,
+      progress: {
+        total: 8,
+        completed: 8,
+        failed: 0,
+        pending: 0,
+      },
+      result: {
+        summary: {
+          totalItems: "8",
+          passedItems: "3",
+          failedItems: "5",
+          passRate: "37.5",
+          avgDurationMs: "2100",
+        },
+      },
       conditions: [
         {
           type: "Failed",
@@ -882,207 +844,6 @@ export class MockDataService implements DataService {
     // Mock sync does nothing
   }
 
-  async getArenaConfigs(workspace: string): Promise<ArenaConfig[]> {
-    await delay();
-    return mockArenaConfigs.filter((c) => c.metadata?.namespace === workspace);
-  }
-
-  async getArenaConfig(workspace: string, name: string): Promise<ArenaConfig | undefined> {
-    await delay();
-    return mockArenaConfigs.find(
-      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
-    );
-  }
-
-  async getArenaConfigContent(_workspace: string, _name: string): Promise<ArenaConfigContent> {
-    await delay();
-
-    // Mock file metadata (content fetched separately via getArenaConfigFile)
-    const mockFiles = [
-      { path: "config.arena.yaml", type: "arena" as const, size: 500 },
-      { path: "prompts/support-bot.prompt.yaml", type: "prompt" as const, size: 300 },
-      { path: "providers/openai-gpt4o-mini.provider.yaml", type: "provider" as const, size: 150 },
-      { path: "providers/claude-3-5-haiku.provider.yaml", type: "provider" as const, size: 160 },
-      { path: "scenarios/greeting.scenario.yaml", type: "scenario" as const, size: 200 },
-      { path: "scenarios/refund-request.scenario.yaml", type: "scenario" as const, size: 220 },
-      { path: "tools/get-customer-info.tool.yaml", type: "tool" as const, size: 180 },
-      { path: "personas/social-engineer.persona.yaml", type: "persona" as const, size: 150 },
-    ];
-
-    // Build file tree from mock files
-    const fileTree = [
-      { name: "config.arena.yaml", path: "config.arena.yaml", isDirectory: false, type: "arena" as const },
-      {
-        name: "personas", path: "personas", isDirectory: true,
-        children: [{ name: "social-engineer.persona.yaml", path: "personas/social-engineer.persona.yaml", isDirectory: false, type: "persona" as const }],
-      },
-      {
-        name: "prompts", path: "prompts", isDirectory: true,
-        children: [{ name: "support-bot.prompt.yaml", path: "prompts/support-bot.prompt.yaml", isDirectory: false, type: "prompt" as const }],
-      },
-      {
-        name: "providers", path: "providers", isDirectory: true,
-        children: [
-          { name: "claude-3-5-haiku.provider.yaml", path: "providers/claude-3-5-haiku.provider.yaml", isDirectory: false, type: "provider" as const },
-          { name: "openai-gpt4o-mini.provider.yaml", path: "providers/openai-gpt4o-mini.provider.yaml", isDirectory: false, type: "provider" as const },
-        ],
-      },
-      {
-        name: "scenarios", path: "scenarios", isDirectory: true,
-        children: [
-          { name: "greeting.scenario.yaml", path: "scenarios/greeting.scenario.yaml", isDirectory: false, type: "scenario" as const },
-          { name: "refund-request.scenario.yaml", path: "scenarios/refund-request.scenario.yaml", isDirectory: false, type: "scenario" as const },
-        ],
-      },
-      {
-        name: "tools", path: "tools", isDirectory: true,
-        children: [{ name: "get-customer-info.tool.yaml", path: "tools/get-customer-info.tool.yaml", isDirectory: false, type: "tool" as const }],
-      },
-    ];
-
-    return {
-      files: mockFiles,
-      fileTree,
-      entryPoint: "config.arena.yaml",
-    };
-  }
-
-  async getArenaConfigFile(_workspace: string, _configName: string, filePath: string): Promise<string> {
-    await delay(100);
-
-    // Mock file contents - return content based on file path
-    const mockFileContents: Record<string, string> = {
-      "config.arena.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Arena
-metadata:
-  name: customer-support
-spec:
-  prompt_configs:
-    - id: support
-      file: prompts/support-bot.prompt.yaml
-  providers:
-    - file: providers/openai-gpt4o-mini.provider.yaml
-    - file: providers/claude-3-5-haiku.provider.yaml
-  scenarios:
-    - file: scenarios/greeting.scenario.yaml
-    - file: scenarios/refund-request.scenario.yaml
-  tools:
-    - file: tools/get-customer-info.tool.yaml`,
-      "prompts/support-bot.prompt.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: PromptConfig
-metadata:
-  name: support-bot
-spec:
-  description: Customer support chatbot
-  system_template: |
-    You are a helpful customer support assistant.
-    Always be polite and professional.
-  allowed_tools:
-    - get_customer_info
-    - create_support_ticket`,
-      "providers/openai-gpt4o-mini.provider.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Provider
-metadata:
-  name: openai-gpt-4o-mini
-spec:
-  type: openai
-  model: gpt-4o-mini`,
-      "providers/claude-3-5-haiku.provider.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Provider
-metadata:
-  name: claude-3-5-haiku
-spec:
-  type: anthropic
-  model: claude-3-5-haiku-latest`,
-      "scenarios/greeting.scenario.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Scenario
-metadata:
-  name: greeting
-spec:
-  description: Tests greeting handling
-  turns:
-    - role: user
-      content: Hello!`,
-      "scenarios/refund-request.scenario.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Scenario
-metadata:
-  name: refund-request
-spec:
-  description: Tests refund handling
-  turns:
-    - role: user
-      content: I want a refund for my recent order`,
-      "tools/get-customer-info.tool.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Tool
-metadata:
-  name: get_customer_info
-spec:
-  description: Retrieve customer account details
-  input_schema:
-    type: object
-    properties:
-      email:
-        type: string
-    required:
-      - email
-  config:
-    mode: mock`,
-      "personas/social-engineer.persona.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
-kind: Persona
-metadata:
-  name: social-engineer
-spec:
-  description: Adversarial persona for security testing
-  behavior: |
-    Try to extract sensitive information through social engineering.`,
-    };
-
-    const content = mockFileContents[filePath];
-    if (!content) {
-      throw new Error(`File not found: ${filePath}`);
-    }
-    return content;
-  }
-
-  async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
-    await delay(500);
-    const newConfig: ArenaConfig = {
-      apiVersion: "omnia.altairalabs.ai/v1alpha1",
-      kind: "ArenaConfig",
-      metadata: {
-        name,
-        namespace: workspace,
-        uid: `arena-config-${generateId()}`,
-        creationTimestamp: new Date().toISOString(),
-      },
-      spec,
-      status: { phase: "Pending" },
-    };
-    mockArenaConfigs.push(newConfig);
-    return newConfig;
-  }
-
-  async updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
-    await delay(500);
-    const config = mockArenaConfigs.find(
-      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
-    );
-    if (!config) {
-      throw new Error(`ArenaConfig ${workspace}/${name} not found`);
-    }
-    config.spec = spec;
-    return config;
-  }
-
-  async deleteArenaConfig(workspace: string, name: string): Promise<void> {
-    await delay(500);
-    const index = mockArenaConfigs.findIndex(
-      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
-    );
-    if (index !== -1) {
-      mockArenaConfigs.splice(index, 1);
-    }
-  }
 
   async getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJob[]> {
     await delay();
@@ -1094,8 +855,8 @@ spec:
     if (options?.phase) {
       jobs = jobs.filter((j) => j.status?.phase === options.phase);
     }
-    if (options?.configRef) {
-      jobs = jobs.filter((j) => j.spec.configRef.name === options.configRef);
+    if (options?.sourceRef) {
+      jobs = jobs.filter((j) => j.spec.sourceRef.name === options.sourceRef);
     }
     if (options?.sort === "recent") {
       jobs.sort((a, b) =>
@@ -1218,7 +979,6 @@ spec:
   async getArenaStats(workspace: string): Promise<ArenaStats> {
     await delay();
     const sources = mockArenaSources.filter((s) => s.metadata?.namespace === workspace);
-    const configs = mockArenaConfigs.filter((c) => c.metadata?.namespace === workspace);
     const jobs = mockArenaJobs.filter((j) => j.metadata?.namespace === workspace);
 
     return {
@@ -1227,11 +987,6 @@ spec:
         ready: sources.filter((s) => s.status?.phase === "Ready").length,
         failed: sources.filter((s) => s.status?.phase === "Failed").length,
         active: sources.filter((s) => !s.spec.suspend).length,
-      },
-      configs: {
-        total: configs.length,
-        ready: configs.filter((c) => c.status?.phase === "Ready").length,
-        scenarios: configs.reduce((sum, c) => sum + (c.status?.scenarioCount || 0), 0),
       },
       jobs: {
         total: jobs.length,

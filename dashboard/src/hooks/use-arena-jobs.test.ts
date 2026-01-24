@@ -29,7 +29,8 @@ const mockJob = {
   kind: "ArenaJob" as const,
   metadata: { name: "test-job", creationTimestamp: "2026-01-15T10:00:00Z" },
   spec: {
-    configRef: { name: "test-config" },
+    sourceRef: { name: "test-source" },
+    arenaFile: "config.arena.yaml",
     type: "evaluation" as const,
     workers: { replicas: 2 },
   },
@@ -103,7 +104,7 @@ describe("useArenaJobs", () => {
     expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/jobs");
   });
 
-  it("fetches jobs with configRef filter", async () => {
+  it("fetches jobs with sourceRef filter", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -119,14 +120,14 @@ describe("useArenaJobs", () => {
       json: () => Promise.resolve([mockJob]),
     });
 
-    const { result } = renderHook(() => useArenaJobs({ configRef: "my-config" }));
+    const { result } = renderHook(() => useArenaJobs({ sourceRef: "my-config" }));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "/api/workspaces/test-workspace/arena/jobs?configRef=my-config"
+      "/api/workspaces/test-workspace/arena/jobs?sourceRef=my-config"
     );
   });
 
@@ -354,7 +355,8 @@ describe("useArenaJobMutations", () => {
 
     await expect(
       result.current.createJob("test", {
-        configRef: { name: "config" },
+        sourceRef: { name: "test-source" },
+        arenaFile: "config.arena.yaml",
         type: "evaluation",
         workers: { replicas: 1 },
       })
@@ -380,7 +382,8 @@ describe("useArenaJobMutations", () => {
     const { result } = renderHook(() => useArenaJobMutations());
 
     const created = await result.current.createJob("test-job", {
-      configRef: { name: "test-config" },
+      sourceRef: { name: "test-source" },
+      arenaFile: "config.arena.yaml",
       type: "evaluation",
       workers: { replicas: 2 },
     });
@@ -394,7 +397,8 @@ describe("useArenaJobMutations", () => {
         body: JSON.stringify({
           metadata: { name: "test-job" },
           spec: {
-            configRef: { name: "test-config" },
+            sourceRef: { name: "test-source" },
+            arenaFile: "config.arena.yaml",
             type: "evaluation",
             workers: { replicas: 2 },
           },
@@ -423,7 +427,8 @@ describe("useArenaJobMutations", () => {
 
     await expect(
       result.current.createJob("test", {
-        configRef: { name: "config" },
+        sourceRef: { name: "test-source" },
+        arenaFile: "config.arena.yaml",
         type: "evaluation",
         workers: { replicas: 1 },
       })

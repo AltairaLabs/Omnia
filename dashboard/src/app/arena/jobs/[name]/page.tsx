@@ -143,10 +143,18 @@ function formatDuration(startTime?: string, completionTime?: string): string {
 function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
   const { spec, status } = job;
 
-  const total = status?.totalTasks ?? 0;
-  const completed = status?.completedTasks ?? 0;
-  const failed = status?.failedTasks ?? 0;
-  const progress = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
+  // Read from status.progress for work item tracking
+  const total = status?.progress?.total ?? 0;
+  const completed = status?.progress?.completed ?? 0;
+  const failed = status?.progress?.failed ?? 0;
+  const progressPct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
+
+  // Read from status.result.summary for test results
+  const resultSummary = status?.result?.summary;
+  const passedItems = resultSummary ? parseInt(resultSummary.passedItems || "0", 10) : 0;
+  const failedItems = resultSummary ? parseInt(resultSummary.failedItems || "0", 10) : 0;
+  const totalItems = resultSummary ? parseInt(resultSummary.totalItems || "0", 10) : 0;
+  const passRate = resultSummary?.passRate;
 
   return (
     <div className="space-y-6">
@@ -158,12 +166,13 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         <CardContent>
           <div className="space-y-4">
             <div className="flex items-center gap-4">
-              <Progress value={progress} className="flex-1" />
-              <span className="text-sm font-medium">{progress}%</span>
+              <Progress value={progressPct} className="flex-1" />
+              <span className="text-sm font-medium">{progressPct}%</span>
             </div>
+            {/* Work item progress */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Total Tasks</p>
+                <p className="text-sm text-muted-foreground">Work Items</p>
                 <p className="text-2xl font-bold">{total}</p>
               </div>
               <div>
@@ -181,6 +190,32 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
                 </p>
               </div>
             </div>
+            {/* Test results summary (when available) */}
+            {resultSummary && (
+              <>
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">Test Results</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Tests</p>
+                      <p className="text-2xl font-bold">{totalItems}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Passed</p>
+                      <p className="text-2xl font-bold text-green-600">{passedItems}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Failed</p>
+                      <p className="text-2xl font-bold text-red-600">{failedItems}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Pass Rate</p>
+                      <p className="text-2xl font-bold">{passRate ? `${passRate}%` : "-"}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -252,7 +287,7 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         </CardContent>
       </Card>
 
-      {/* Config Reference Card */}
+      {/* Source Reference Card */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -263,14 +298,20 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         <CardContent>
           <div className="space-y-3">
             <div>
-              <p className="text-sm text-muted-foreground">Config Reference</p>
+              <p className="text-sm text-muted-foreground">Source</p>
               <Link
-                href={`/arena/configs/${spec?.configRef?.name}`}
+                href={`/arena/sources/${spec?.sourceRef?.name}`}
                 className="text-primary hover:underline font-medium"
               >
-                {spec?.configRef?.name}
+                {spec?.sourceRef?.name}
               </Link>
             </div>
+            {spec?.arenaFile && (
+              <div>
+                <p className="text-sm text-muted-foreground">Arena File</p>
+                <p className="mt-1 font-mono text-sm">{spec.arenaFile}</p>
+              </div>
+            )}
             <div>
               <p className="text-sm text-muted-foreground">Job Type</p>
               <div className="mt-1">{getJobTypeBadge(spec?.type)}</div>
@@ -392,7 +433,7 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
       )}
 
       {/* Results URL Card */}
-      {status?.resultsUrl && (
+      {status?.result?.url && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -404,12 +445,12 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Results URL:</span>
               <a
-                href={status.resultsUrl}
+                href={status.result.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary hover:underline flex items-center gap-1"
               >
-                {status.resultsUrl}
+                {status.result.url}
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
@@ -458,7 +499,8 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
 
 function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
   const phase = job.status?.phase;
-  const resultsUrl = job.status?.resultsUrl;
+  const resultsUrl = job.status?.result?.url;
+  const resultSummary = job.status?.result?.summary;
 
   if (phase === "Pending" || phase === "Running") {
     return (
@@ -480,7 +522,14 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
     );
   }
 
-  if (!resultsUrl) {
+  // Parse result summary values
+  const totalItems = resultSummary ? parseInt(resultSummary.totalItems || "0", 10) : 0;
+  const passedItems = resultSummary ? parseInt(resultSummary.passedItems || "0", 10) : 0;
+  const failedItems = resultSummary ? parseInt(resultSummary.failedItems || "0", 10) : 0;
+  const passRate = resultSummary?.passRate;
+  const avgDurationMs = resultSummary?.avgDurationMs;
+
+  if (!resultsUrl && !resultSummary) {
     return (
       <div className="text-center py-12 text-muted-foreground">
         <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -492,8 +541,7 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
     );
   }
 
-  // For now, show a summary card with link to results
-  // In a full implementation, you'd fetch and display the actual results
+  // Show results summary
   return (
     <Card>
       <CardHeader>
@@ -506,44 +554,51 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p className="text-sm text-muted-foreground">Total Tasks</p>
-              <p className="text-2xl font-bold">{job.status?.totalTasks ?? 0}</p>
+              <p className="text-sm text-muted-foreground">Total Tests</p>
+              <p className="text-2xl font-bold">{totalItems}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Completed</p>
+              <p className="text-sm text-muted-foreground">Passed</p>
               <p className="text-2xl font-bold text-green-600">
-                {job.status?.completedTasks ?? 0}
+                {passedItems}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
               <p className="text-2xl font-bold text-red-600">
-                {job.status?.failedTasks ?? 0}
+                {failedItems}
               </p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Success Rate</p>
+              <p className="text-sm text-muted-foreground">Pass Rate</p>
               <p className="text-2xl font-bold">
-                {job.status?.totalTasks && job.status.totalTasks > 0
-                  ? `${Math.round(((job.status.completedTasks ?? 0) / job.status.totalTasks) * 100)}%`
-                  : "-"}
+                {passRate ? `${passRate}%` : "-"}
               </p>
             </div>
           </div>
 
-          <div className="pt-4 border-t">
-            <a
-              href={resultsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2"
-            >
-              <Button>
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View Full Results
-              </Button>
-            </a>
-          </div>
+          {avgDurationMs && (
+            <div className="pt-4 border-t">
+              <p className="text-sm text-muted-foreground">Average Duration</p>
+              <p className="text-lg font-medium">{avgDurationMs}ms</p>
+            </div>
+          )}
+
+          {resultsUrl && (
+            <div className="pt-4 border-t">
+              <a
+                href={resultsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2"
+              >
+                <Button>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  View Full Results
+                </Button>
+              </a>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -710,10 +765,10 @@ export default function ArenaJobDetailPage() {
             {formatDuration(job.status?.startTime, job.status?.completionTime)}
           </Badge>
           <Link
-            href={`/arena/configs/${job.spec?.configRef?.name}`}
+            href={`/arena/sources/${job.spec?.sourceRef?.name}`}
             className="text-sm text-muted-foreground hover:underline"
           >
-            Config: {job.spec?.configRef?.name}
+            Source: {job.spec?.sourceRef?.name}
           </Link>
         </div>
 

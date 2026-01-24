@@ -210,6 +210,8 @@ func checkContextDone(ctx context.Context) bool {
 }
 
 // handlePopError handles errors from queue.Pop and returns (done, newEmptyCount, error).
+//
+//nolint:unparam // maxEmptyPolls kept as parameter for testability
 func handlePopError(
 	ctx context.Context, err error, emptyCount, maxEmptyPolls int, cfg *Config, q queue.WorkQueue, jobID string,
 ) (bool, int, error) {

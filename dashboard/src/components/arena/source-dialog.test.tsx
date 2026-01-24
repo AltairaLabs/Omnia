@@ -32,6 +32,7 @@ vi.mock("@/hooks/use-license", () => ({
   useLicense: vi.fn(() => ({
     license: { tier: "enterprise" },
     isEnterprise: true,
+    canUseSourceType: () => true, // Allow all source types in tests
   })),
 }));
 

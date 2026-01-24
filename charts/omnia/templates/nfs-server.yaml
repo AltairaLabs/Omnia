@@ -1,7 +1,7 @@
 {{- if and .Values.nfs.server.enabled .Values.nfs.server.internal }}
 # Internal NFS server for development environments
-# Uses itsthenetwork/nfs-server-alpine for a lightweight NFS v4 server
-# WARNING: Not recommended for production - use external NFS server instead
+# Uses erichough/nfs-server for a lightweight NFS v4 server
+# WARNING: Not recommended for production - use external NFS server or cloud storage instead
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -50,10 +50,15 @@ spec:
               containerPort: 2049
               protocol: TCP
           env:
-            - name: SHARED_DIRECTORY
-              value: /nfsshare
+            # erichough/nfs-server configuration
+            # fsid=0 marks this as the NFSv4 pseudo-root, required for NFSv4 clients
+            - name: NFS_EXPORT_0
+              value: "/nfsshare *(rw,sync,no_subtree_check,no_root_squash,fsid=0)"
           securityContext:
             privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
           volumeMounts:
             - name: nfs-data
               mountPath: /nfsshare
@@ -73,9 +78,6 @@ metadata:
     app.kubernetes.io/component: nfs-server
 spec:
   type: ClusterIP
-  {{- if .Values.nfs.server.clusterIP }}
-  clusterIP: {{ .Values.nfs.server.clusterIP }}
-  {{- end }}
   ports:
     - name: nfs
       port: 2049
@@ -84,25 +86,4 @@ spec:
   selector:
     {{- include "omnia.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: nfs-server
----
-# Static PV for workspace content - uses ClusterIP which is resolvable by nodes
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: {{ include "omnia.fullname" . }}-workspace-content
-  labels:
-    {{- include "omnia.labels" . | nindent 4 }}
-    app.kubernetes.io/component: workspace-content
-spec:
-  capacity:
-    storage: {{ .Values.workspaceContent.persistence.size | default "50Gi" }}
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  nfs:
-    server: {{ .Values.nfs.server.clusterIP }}
-    path: /nfsshare
-  claimRef:
-    name: {{ include "omnia.fullname" . }}-workspace-content
-    namespace: {{ .Release.Namespace }}
 {{- end }}

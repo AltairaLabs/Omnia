@@ -18,9 +18,6 @@ import type { ToolRegistry as ToolRegistryType } from "@/types/tool-registry";
 import type {
   ArenaSource as ArenaSourceType,
   ArenaSourceSpec,
-  ArenaConfig as ArenaConfigType,
-  ArenaConfigSpec,
-  ArenaConfigContent,
   ArenaJob as ArenaJobType,
   ArenaJobSpec,
   ArenaJobResults,
@@ -61,10 +58,6 @@ export type {
   ArenaSourceSpec,
   ArenaSourceStatus,
   ArenaSourcePhase,
-  ArenaConfig,
-  ArenaConfigSpec,
-  ArenaConfigStatus,
-  ArenaConfigPhase,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobStatus,
@@ -387,15 +380,6 @@ export interface DataService {
   updateArenaSource(workspace: string, name: string, spec: ArenaSourceSpec): Promise<ArenaSourceType>;
   deleteArenaSource(workspace: string, name: string): Promise<void>;
   syncArenaSource(workspace: string, name: string): Promise<void>;
-
-  // Arena Configs (workspace-scoped)
-  getArenaConfigs(workspace: string): Promise<ArenaConfigType[]>;
-  getArenaConfig(workspace: string, name: string): Promise<ArenaConfigType | undefined>;
-  getArenaConfigContent(workspace: string, name: string): Promise<ArenaConfigContent>;
-  getArenaConfigFile(workspace: string, configName: string, filePath: string): Promise<string>;
-  createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
-  updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
-  deleteArenaConfig(workspace: string, name: string): Promise<void>;
 
   // Arena Jobs (workspace-scoped)
   getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJobType[]>;

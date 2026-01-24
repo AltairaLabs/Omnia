@@ -20,7 +20,6 @@ rules:
       - agentruntimes
       - promptpacks
       - arenasources
-      - arenaconfigs
       - arenajobs
     verbs:
       - create
@@ -37,7 +36,6 @@ rules:
       - agentruntimes/status
       - promptpacks/status
       - arenasources/status
-      - arenaconfigs/status
       - arenajobs/status
     verbs:
       - get

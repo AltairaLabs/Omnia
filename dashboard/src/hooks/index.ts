@@ -41,7 +41,6 @@ export { useArenaStats } from "./use-arena-stats";
 export { useArenaSources, useArenaSource, useArenaSourceMutations } from "./use-arena-sources";
 export { useArenaSourceVersions, useArenaSourceVersionMutations } from "./use-arena-source-versions";
 export { useArenaSourceContent } from "./use-arena-source-content";
-export { useArenaConfigs, useArenaConfig, useArenaConfigMutations } from "./use-arena-configs";
 export type { WorkspaceCostData } from "./use-workspace-costs";
 export type { DashboardStats } from "./use-stats";
 export type { K8sEvent } from "./use-agent-events";

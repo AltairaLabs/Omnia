@@ -99,7 +99,6 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes
-  - arenaconfigs
   - arenajobs
   - arenasources
   - promptpacks
@@ -118,7 +117,6 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/finalizers
-  - arenaconfigs/finalizers
   - arenajobs/finalizers
   - arenasources/finalizers
   - promptpacks/finalizers
@@ -131,7 +129,6 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/status
-  - arenaconfigs/status
   - arenajobs/status
   - arenasources/status
   - promptpacks/status

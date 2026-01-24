@@ -21,7 +21,6 @@ rules:
       - toolregistries
       - providers
       - arenasources
-      - arenaconfigs
       - arenajobs
     verbs:
       - get
@@ -36,7 +35,6 @@ rules:
       - toolregistries/status
       - providers/status
       - arenasources/status
-      - arenaconfigs/status
       - arenajobs/status
     verbs:
       - get

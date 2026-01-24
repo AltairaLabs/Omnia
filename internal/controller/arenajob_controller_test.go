@@ -42,7 +42,6 @@ var _ = Describe("ArenaJob Controller", func() {
 	const (
 		arenaJobName      = "test-arenajob"
 		arenaJobNamespace = "default"
-		arenaConfigName   = "test-config"
 		arenaSourceName   = "test-source"
 	)
 
@@ -66,19 +65,19 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
-	Context("When reconciling an ArenaJob with missing ArenaConfig", func() {
+	Context("When reconciling an ArenaJob with missing ArenaSource", func() {
 		var arenaJob *omniav1alpha1.ArenaJob
 
 		BeforeEach(func() {
-			By("creating the ArenaJob with missing config")
+			By("creating the ArenaJob with missing source")
 			arenaJob = &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "missing-config-job",
+					Name:      "missing-source-job",
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "nonexistent-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "nonexistent-source",
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -90,7 +89,7 @@ var _ = Describe("ArenaJob Controller", func() {
 			By("cleaning up the ArenaJob")
 			resource := &omniav1alpha1.ArenaJob{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "missing-config-job",
+				Name:      "missing-source-job",
 				Namespace: arenaJobNamespace,
 			}, resource)
 			if err == nil {
@@ -98,7 +97,7 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 		})
 
-		It("should set Failed phase and ConfigValid condition to false", func() {
+		It("should set Failed phase and SourceValid condition to false", func() {
 			By("reconciling the ArenaJob")
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaJobReconciler{
@@ -109,7 +108,7 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "missing-config-job",
+					Name:      "missing-source-job",
 					Namespace: arenaJobNamespace,
 				},
 			})
@@ -118,56 +117,55 @@ var _ = Describe("ArenaJob Controller", func() {
 			By("checking the updated status")
 			updatedJob := &omniav1alpha1.ArenaJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "missing-config-job",
+				Name:      "missing-source-job",
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
 			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseFailed))
 
-			By("checking the ConfigValid condition")
-			condition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeConfigValid)
+			By("checking the SourceValid condition")
+			condition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
 
-	Context("When reconciling an ArenaJob with ArenaConfig not ready", func() {
+	Context("When reconciling an ArenaJob with ArenaSource not ready", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig in Pending state")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource in Pending state")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pending-config",
+					Name:      "pending-source",
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-configmap",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
-			// Set config to Pending
-			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhasePending
-			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+			// Set source to Pending
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhasePending
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
 
 			By("creating the ArenaJob")
 			arenaJob = &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pending-config-job",
+					Name:      "pending-source-job",
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "pending-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "pending-source",
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -179,24 +177,24 @@ var _ = Describe("ArenaJob Controller", func() {
 			By("cleaning up resources")
 			job := &omniav1alpha1.ArenaJob{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "pending-config-job",
+				Name:      "pending-source-job",
 				Namespace: arenaJobNamespace,
 			}, job)
 			if err == nil {
 				Expect(k8sClient.Delete(ctx, job)).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "pending-config",
+				Name:      "pending-source",
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 
-		It("should set Failed phase due to config not ready", func() {
+		It("should set Failed phase due to source not ready", func() {
 			By("reconciling the ArenaJob")
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
@@ -205,7 +203,7 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "pending-config-job",
+					Name:      "pending-source-job",
 					Namespace: arenaJobNamespace,
 				},
 			})
@@ -214,7 +212,7 @@ var _ = Describe("ArenaJob Controller", func() {
 			By("checking the updated status")
 			updatedJob := &omniav1alpha1.ArenaJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "pending-config-job",
+				Name:      "pending-source-job",
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
@@ -225,35 +223,34 @@ var _ = Describe("ArenaJob Controller", func() {
 	Context("When reconciling a valid ArenaJob", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig in Ready state")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource in Ready state")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      arenaConfigName,
+					Name:      arenaSourceName,
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-configmap",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
-			// Set config to Ready with resolved source
-			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhaseReady
-			arenaConfig.Status.ResolvedSource = &omniav1alpha1.ResolvedSource{
-				Revision: "v1.0.0",
-				URL:      "http://localhost:8080/artifacts/test.tar.gz",
+			// Set source to Ready with artifact
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			arenaSource.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "v1.0.0",
+				Checksum:       "sha256:abc123",
+				LastUpdateTime: metav1.Now(),
 			}
-			arenaConfig.Status.ResolvedProviders = []string{"test-provider"}
-			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
 
 			By("creating the ArenaJob")
 			replicas := int32(2)
@@ -263,8 +260,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaConfigName,
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: arenaSourceName,
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 					Workers: &omniav1alpha1.WorkerConfig{
@@ -300,13 +297,13 @@ var _ = Describe("ArenaJob Controller", func() {
 				})).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      arenaConfigName,
+				Name:      arenaSourceName,
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 
@@ -337,10 +334,10 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(updatedJob.Status.Phase).To(Equal(omniav1alpha1.ArenaJobPhaseRunning))
 			Expect(updatedJob.Status.StartTime).NotTo(BeNil())
 
-			By("checking the ConfigValid condition")
-			configCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeConfigValid)
-			Expect(configCondition).NotTo(BeNil())
-			Expect(configCondition.Status).To(Equal(metav1.ConditionTrue))
+			By("checking the SourceValid condition")
+			sourceCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
+			Expect(sourceCondition).NotTo(BeNil())
+			Expect(sourceCondition.Status).To(Equal(metav1.ConditionTrue))
 
 			By("checking the JobCreated condition")
 			jobCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeJobCreated)
@@ -373,8 +370,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaConfigName,
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: arenaSourceName,
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -487,39 +484,38 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
-	Context("When testing findArenaJobsForConfig", func() {
+	Context("When testing findArenaJobsForSource", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "watch-config",
+					Name:      "watch-source",
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-cm",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
-			By("creating the ArenaJob that references the config")
+			By("creating the ArenaJob that references the source")
 			arenaJob = &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "watch-job",
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "watch-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "watch-source",
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -538,36 +534,36 @@ var _ = Describe("ArenaJob Controller", func() {
 				Expect(k8sClient.Delete(ctx, job)).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "watch-config",
+				Name:      "watch-source",
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 
-		It("should return reconcile requests for pending ArenaJobs referencing the config", func() {
-			By("calling findArenaJobsForConfig")
+		It("should return reconcile requests for pending ArenaJobs referencing the source", func() {
+			By("calling findArenaJobsForSource")
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
 
-			requests := reconciler.findArenaJobsForConfig(ctx, arenaConfig)
+			requests := reconciler.findArenaJobsForSource(ctx, arenaSource)
 			Expect(requests).To(HaveLen(1))
 			Expect(requests[0].Name).To(Equal("watch-job"))
 			Expect(requests[0].Namespace).To(Equal(arenaJobNamespace))
 		})
 
-		It("should return nil for non-ArenaConfig objects", func() {
+		It("should return nil for non-ArenaSource objects", func() {
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
 
-			requests := reconciler.findArenaJobsForConfig(ctx, &corev1.Secret{})
+			requests := reconciler.findArenaJobsForSource(ctx, &corev1.Secret{})
 			Expect(requests).To(BeNil())
 		})
 	})
@@ -623,43 +619,42 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
-	Context("When ArenaConfig is in Invalid phase", func() {
+	Context("When ArenaSource is in Error phase", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig in Invalid state")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource in Error state")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "invalid-config",
+					Name:      "error-source",
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-configmap",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
-			// Set config to Invalid
-			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhaseInvalid
-			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+			// Set source to Error
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
 
 			By("creating the ArenaJob")
 			arenaJob = &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "invalid-config-job",
+					Name:      "error-source-job",
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "invalid-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "error-source",
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -671,24 +666,24 @@ var _ = Describe("ArenaJob Controller", func() {
 			By("cleaning up resources")
 			job := &omniav1alpha1.ArenaJob{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "invalid-config-job",
+				Name:      "error-source-job",
 				Namespace: arenaJobNamespace,
 			}, job)
 			if err == nil {
 				Expect(k8sClient.Delete(ctx, job)).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "invalid-config",
+				Name:      "error-source",
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 
-		It("should set Failed phase due to invalid config", func() {
+		It("should set Failed phase due to source error", func() {
 			By("reconciling the ArenaJob")
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
@@ -697,7 +692,7 @@ var _ = Describe("ArenaJob Controller", func() {
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "invalid-config-job",
+					Name:      "error-source-job",
 					Namespace: arenaJobNamespace,
 				},
 			})
@@ -706,7 +701,7 @@ var _ = Describe("ArenaJob Controller", func() {
 			By("checking the updated status")
 			updatedJob := &omniav1alpha1.ArenaJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "invalid-config-job",
+				Name:      "error-source-job",
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
@@ -717,33 +712,33 @@ var _ = Describe("ArenaJob Controller", func() {
 	Context("When ArenaJob specifies TTL", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig in Ready state")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource in Ready state")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "ttl-config",
+					Name:      "ttl-source",
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-configmap",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
-			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhaseReady
-			arenaConfig.Status.ResolvedSource = &omniav1alpha1.ResolvedSource{
-				Revision: "v1.0.0",
-				URL:      "http://localhost:8080/artifacts/test.tar.gz",
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			arenaSource.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "v1.0.0",
+				Checksum:       "sha256:abc123",
+				LastUpdateTime: metav1.Now(),
 			}
-			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
 
 			By("creating the ArenaJob with TTL")
 			ttl := int32(300)
@@ -753,8 +748,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "ttl-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "ttl-source",
 					},
 					Type:                    omniav1alpha1.ArenaJobTypeLoadTest,
 					TTLSecondsAfterFinished: &ttl,
@@ -786,13 +781,13 @@ var _ = Describe("ArenaJob Controller", func() {
 				})).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "ttl-config",
+				Name:      "ttl-source",
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 
@@ -1005,8 +1000,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaConfigName,
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: arenaSourceName,
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -1067,8 +1062,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaConfigName,
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: arenaSourceName,
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -1121,33 +1116,33 @@ var _ = Describe("ArenaJob Controller", func() {
 	Context("When re-reconciling a running ArenaJob with existing K8s Job", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 			k8sJob      *batchv1.Job
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig in Ready state")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource in Ready state")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "rereconcile-config",
+					Name:      "rereconcile-source",
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-configmap",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
-			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhaseReady
-			arenaConfig.Status.ResolvedSource = &omniav1alpha1.ResolvedSource{
-				Revision: "v1.0.0",
-				URL:      "http://localhost:8080/artifacts/test.tar.gz",
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			arenaSource.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "v1.0.0",
+				Checksum:       "sha256:abc123",
+				LastUpdateTime: metav1.Now(),
 			}
-			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
 
 			By("creating the ArenaJob")
 			arenaJob = &omniav1alpha1.ArenaJob{
@@ -1156,8 +1151,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "rereconcile-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "rereconcile-source",
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 				},
@@ -1217,13 +1212,13 @@ var _ = Describe("ArenaJob Controller", func() {
 				})).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "rereconcile-config",
+				Name:      "rereconcile-source",
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 
@@ -1249,10 +1244,10 @@ var _ = Describe("ArenaJob Controller", func() {
 				Namespace: arenaJobNamespace,
 			}, updatedJob)).To(Succeed())
 
-			// Should have ConfigValid condition
-			configCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeConfigValid)
-			Expect(configCondition).NotTo(BeNil())
-			Expect(configCondition.Status).To(Equal(metav1.ConditionTrue))
+			// Should have SourceValid condition
+			sourceCondition := meta.FindStatusCondition(updatedJob.Status.Conditions, ArenaJobConditionTypeSourceValid)
+			Expect(sourceCondition).NotTo(BeNil())
+			Expect(sourceCondition.Status).To(Equal(metav1.ConditionTrue))
 
 			// Should have progress tracking
 			Expect(updatedJob.Status.Progress).NotTo(BeNil())
@@ -1334,11 +1329,11 @@ var _ = Describe("ArenaJob Controller", func() {
 				},
 			}
 
-			arenaConfig := &omniav1alpha1.ArenaConfig{
-				Status: omniav1alpha1.ArenaConfigStatus{
-					ResolvedProviders: []string{"provider-1"},
-					ResolvedSource: &omniav1alpha1.ResolvedSource{
-						URL: "http://example.com/artifact.tar.gz",
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision: "v1.0.0",
+						Checksum: "sha256:abc123",
 					},
 				},
 			}
@@ -1349,39 +1344,11 @@ var _ = Describe("ArenaJob Controller", func() {
 				RedisAddr: "", // No Redis configured
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should skip enqueueing when no providers configured", func() {
-			memQueue := queue.NewMemoryQueueWithDefaults()
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "no-providers-job",
-					Namespace: arenaJobNamespace,
-				},
-			}
-
-			arenaConfig := &omniav1alpha1.ArenaConfig{
-				Status: omniav1alpha1.ArenaConfigStatus{
-					ResolvedProviders: []string{}, // No providers
-					ResolvedSource: &omniav1alpha1.ResolvedSource{
-						URL: "http://example.com/artifact.tar.gz",
-					},
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Queue:  memQueue,
-			}
-
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("should enqueue work items for each provider", func() {
+		It("should enqueue work items for providers", func() {
 			memQueue := queue.NewMemoryQueueWithDefaults()
 			arenaJob := &omniav1alpha1.ArenaJob{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1390,13 +1357,20 @@ var _ = Describe("ArenaJob Controller", func() {
 				},
 			}
 
-			arenaConfig := &omniav1alpha1.ArenaConfig{
-				Status: omniav1alpha1.ArenaConfigStatus{
-					ResolvedProviders: []string{"provider-1", "provider-2", "provider-3"},
-					ResolvedSource: &omniav1alpha1.ResolvedSource{
-						URL: "http://example.com/artifact.tar.gz",
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision: "v1.0.0",
+						Checksum: "sha256:abc123",
 					},
 				},
+			}
+
+			// Create provider CRDs
+			providerCRDs := []*omniav1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-2"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-3"}},
 			}
 
 			reconciler := &ArenaJobReconciler{
@@ -1405,7 +1379,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				Queue:  memQueue,
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
+			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify items were enqueued
@@ -1420,40 +1394,8 @@ var _ = Describe("ArenaJob Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(item.JobID).To(Equal("enqueue-test-job"))
 				Expect(item.ScenarioID).To(Equal("default"))
-				Expect(item.BundleURL).To(Equal("http://example.com/artifact.tar.gz"))
 				Expect(item.MaxAttempts).To(Equal(3))
 			}
-		})
-
-		It("should handle nil resolved source gracefully", func() {
-			memQueue := queue.NewMemoryQueueWithDefaults()
-			arenaJob := &omniav1alpha1.ArenaJob{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "nil-source-job",
-					Namespace: arenaJobNamespace,
-				},
-			}
-
-			arenaConfig := &omniav1alpha1.ArenaConfig{
-				Status: omniav1alpha1.ArenaConfigStatus{
-					ResolvedProviders: []string{"provider-1"},
-					ResolvedSource:    nil, // No resolved source
-				},
-			}
-
-			reconciler := &ArenaJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Queue:  memQueue,
-			}
-
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaConfig, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify item was enqueued with empty bundle URL
-			item, err := memQueue.Pop(ctx, "nil-source-job")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(item.BundleURL).To(Equal(""))
 		})
 	})
 
@@ -1626,16 +1568,16 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
-	Context("When finding ArenaJobs for config", func() {
-		It("should return nil when object is not an ArenaConfig", func() {
-			By("calling findArenaJobsForConfig with wrong object type")
+	Context("When finding ArenaJobs for source", func() {
+		It("should return nil when object is not an ArenaSource", func() {
+			By("calling findArenaJobsForSource with wrong object type")
 			reconciler := &ArenaJobReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			// Pass a wrong object type (Namespace instead of ArenaConfig)
+			// Pass a wrong object type (Namespace instead of ArenaSource)
 			ns := &corev1.Namespace{}
-			result := reconciler.findArenaJobsForConfig(ctx, ns)
+			result := reconciler.findArenaJobsForSource(ctx, ns)
 			Expect(result).To(BeNil())
 		})
 	})
@@ -1643,34 +1585,33 @@ var _ = Describe("ArenaJob Controller", func() {
 	Context("When license validation fails", func() {
 		var (
 			arenaJob    *omniav1alpha1.ArenaJob
-			arenaConfig *omniav1alpha1.ArenaConfig
+			arenaSource *omniav1alpha1.ArenaSource
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaConfig in Ready state")
-			arenaConfig = &omniav1alpha1.ArenaConfig{
+			By("creating the ArenaSource in Ready state")
+			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "license-test-config",
+					Name:      "license-test-source",
 					Namespace: arenaJobNamespace,
 				},
-				Spec: omniav1alpha1.ArenaConfigSpec{
-					SourceRef: omniav1alpha1.LocalObjectReference{
-						Name: arenaSourceName,
-					},
-					Providers: []omniav1alpha1.NamespacedObjectReference{
-						{Name: "test-provider"},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-cm",
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
-			arenaConfig.Status.Phase = omniav1alpha1.ArenaConfigPhaseReady
-			arenaConfig.Status.ResolvedSource = &omniav1alpha1.ResolvedSource{
-				Revision: "v1.0.0",
-				URL:      "http://localhost:8080/artifacts/test.tar.gz",
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			arenaSource.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "v1.0.0",
+				Checksum:       "sha256:abc123",
+				LastUpdateTime: metav1.Now(),
 			}
-			arenaConfig.Status.ResolvedProviders = []string{"test-provider"}
-			Expect(k8sClient.Status().Update(ctx, arenaConfig)).To(Succeed())
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
 
 			By("creating the ArenaJob with replicas that exceed license limit")
 			replicas := int32(2) // OpenCoreLicense has MaxWorkerReplicas: 1
@@ -1680,8 +1621,8 @@ var _ = Describe("ArenaJob Controller", func() {
 					Namespace: arenaJobNamespace,
 				},
 				Spec: omniav1alpha1.ArenaJobSpec{
-					ConfigRef: omniav1alpha1.LocalObjectReference{
-						Name: "license-test-config",
+					SourceRef: omniav1alpha1.LocalObjectReference{
+						Name: "license-test-source",
 					},
 					Type: omniav1alpha1.ArenaJobTypeEvaluation,
 					Workers: &omniav1alpha1.WorkerConfig{
@@ -1703,13 +1644,13 @@ var _ = Describe("ArenaJob Controller", func() {
 				Expect(k8sClient.Delete(ctx, job)).To(Succeed())
 			}
 
-			config := &omniav1alpha1.ArenaConfig{}
+			source := &omniav1alpha1.ArenaSource{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "license-test-config",
+				Name:      "license-test-source",
 				Namespace: arenaJobNamespace,
-			}, config)
+			}, source)
 			if err == nil {
-				Expect(k8sClient.Delete(ctx, config)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
 			}
 		})
 

@@ -996,7 +996,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying PVC was created")
-			pvcName := fmt.Sprintf("workspace-%s-content", workspaceKey.Name)
+			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 			pvc := &corev1.PersistentVolumeClaim{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
@@ -1045,7 +1045,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying PVC has storage class")
-			pvcName := fmt.Sprintf("workspace-%s-content", workspaceKey.Name)
+			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 			pvc := &corev1.PersistentVolumeClaim{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
@@ -1088,7 +1088,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying PVC has correct access modes")
-			pvcName := fmt.Sprintf("workspace-%s-content", workspaceKey.Name)
+			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 			pvc := &corev1.PersistentVolumeClaim{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
@@ -1126,7 +1126,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying no PVC was created")
-			pvcName := fmt.Sprintf("workspace-%s-content", workspaceKey.Name)
+			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 			pvc := &corev1.PersistentVolumeClaim{}
 			err = k8sClient.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
@@ -1166,7 +1166,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying PVC exists")
-			pvcName := fmt.Sprintf("workspace-%s-content", workspaceKey.Name)
+			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 			pvc := &corev1.PersistentVolumeClaim{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
