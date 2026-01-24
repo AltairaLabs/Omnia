@@ -89,8 +89,9 @@ jobs:
         echo "Running tests with coverage and race detection..."
         mkdir -p test-results
         # Exclude internal/*: all internal packages run in envtest job with proper K8s environment
+        # Exclude test/integration: has dedicated job with Helm setup
         # This job runs: api, cmd (entry points), pkg
-        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/)
+        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/ | grep -v /test/integration)
         echo "Coverage report generated: coverage.out"
 
     - name: Publish Test Results
