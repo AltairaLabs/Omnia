@@ -135,6 +135,23 @@ jobs:
       with:
         go-version-file: go.mod
 
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: v3.14.0
+
+    - name: Add Helm repositories
+      run: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo add grafana https://grafana.github.io/helm-charts
+        helm repo add kedacore https://kedacore.github.io/charts
+        helm repo add bitnami https://charts.bitnami.com/bitnami
+        helm repo add csi-driver-nfs https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+        helm repo update
+
+    - name: Build Helm chart dependencies
+      run: helm dependency build ./charts/omnia
+
     - name: Run integration tests
       run: go test -tags=integration ./test/integration/... -v -timeout 5m
 
