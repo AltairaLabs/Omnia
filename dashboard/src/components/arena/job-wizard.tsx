@@ -213,20 +213,27 @@ function buildProviderOverrides(
   form: JobWizardFormState
 ): Record<string, ProviderGroupSelector> | undefined {
   if (!form.providerOverridesEnabled) return undefined;
+  if (form.activeProviderGroups.length === 0) return undefined;
 
   const overrides: Record<string, ProviderGroupSelector> = {};
 
   for (const group of form.activeProviderGroups) {
-    const selector = form.providerOverrides[group];
-    if (selector && (
-      (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) ||
-      (selector.matchExpressions && selector.matchExpressions.length > 0)
-    )) {
-      overrides[group] = { selector };
+    const selector = form.providerOverrides[group] || {};
+    // Build clean selector object (omit empty fields)
+    const cleanSelector: ProviderGroupSelector["selector"] = {};
+
+    if (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) {
+      cleanSelector.matchLabels = selector.matchLabels;
     }
+    if (selector.matchExpressions && selector.matchExpressions.length > 0) {
+      cleanSelector.matchExpressions = selector.matchExpressions;
+    }
+
+    // Include the group even with an empty selector (matches all providers)
+    overrides[group] = { selector: cleanSelector };
   }
 
-  return Object.keys(overrides).length > 0 ? overrides : undefined;
+  return overrides;
 }
 
 function buildToolRegistryOverride(
@@ -234,15 +241,19 @@ function buildToolRegistryOverride(
 ): ToolRegistrySelector | undefined {
   if (!form.toolRegistryOverrideEnabled) return undefined;
 
-  const selector = form.toolRegistryOverride;
-  if (
-    (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) ||
-    (selector.matchExpressions && selector.matchExpressions.length > 0)
-  ) {
-    return { selector };
+  const selector = form.toolRegistryOverride || {};
+  // Build clean selector object (omit empty fields)
+  const cleanSelector: ToolRegistrySelector["selector"] = {};
+
+  if (selector.matchLabels && Object.keys(selector.matchLabels).length > 0) {
+    cleanSelector.matchLabels = selector.matchLabels;
+  }
+  if (selector.matchExpressions && selector.matchExpressions.length > 0) {
+    cleanSelector.matchExpressions = selector.matchExpressions;
   }
 
-  return undefined;
+  // Include override even with empty selector (matches all registries)
+  return { selector: cleanSelector };
 }
 
 function buildSpec(form: JobWizardFormState): ArenaJobSpec {
