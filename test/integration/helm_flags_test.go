@@ -26,6 +26,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// disableSubcharts returns the Helm --set flags to disable all subcharts.
+// This is needed in CI where subchart dependencies aren't available.
+func disableSubcharts() []string {
+	return []string{
+		"--set", "prometheus.enabled=false",
+		"--set", "grafana.enabled=false",
+		"--set", "loki.enabled=false",
+		"--set", "alloy.enabled=false",
+		"--set", "tempo.enabled=false",
+		"--set", "keda.enabled=false",
+		"--set", "redis.enabled=false",
+		"--set", "csi-driver-nfs.enabled=false",
+	}
+}
+
 // TestHelmChartFlagsMatchController verifies that all flags passed to the controller
 // by the Helm chart are actually defined in the controller binary.
 // This prevents runtime failures due to undefined flags.
@@ -41,11 +56,16 @@ func TestHelmChartFlagsMatchController(t *testing.T) {
 	validFlags := extractFlagsFromHelp(string(helpOutput))
 
 	// Render the Helm chart and extract flags passed to the controller
-	helmCmd := exec.Command("helm", "template", "omnia", "../../charts/omnia",
+	// Use --skip-crds to avoid CRD rendering and focus on deployment
+	// Disable subcharts since we only care about flags in our templates
+	helmArgs := []string{
+		"template", "omnia", "../../charts/omnia",
 		"--set", "arena.enabled=true",
 		"--set", "metrics.enabled=true",
 		"--set", "devMode=true",
-	)
+	}
+	helmArgs = append(helmArgs, disableSubcharts()...)
+	helmCmd := exec.Command("helm", helmArgs...)
 	helmOutput, err := helmCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to render Helm template: %s", string(helmOutput))
 
@@ -140,6 +160,8 @@ func TestHelmChartRenders(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append([]string{"template", "omnia", "../../charts/omnia"}, tc.values...)
+			// Disable all subcharts to avoid dependency issues in CI
+			args = append(args, disableSubcharts()...)
 			cmd := exec.Command("helm", args...)
 			output, err := cmd.CombinedOutput()
 			require.NoError(t, err, "Helm template failed with %s: %s", tc.name, string(output))
