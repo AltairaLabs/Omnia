@@ -196,12 +196,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 )
-
-// Use local PromptKit for development (exports BuildEngineComponents)
-// These paths work both locally (with go.work) and in Docker builds (promptkit-local is copied)
-replace (
-	github.com/AltairaLabs/PromptKit/pkg => ./promptkit-local/pkg
-	github.com/AltairaLabs/PromptKit/runtime => ./promptkit-local/runtime
-	github.com/AltairaLabs/PromptKit/sdk => ./promptkit-local/sdk
-	github.com/AltairaLabs/PromptKit/tools/arena => ./promptkit-local/tools/arena
-)
