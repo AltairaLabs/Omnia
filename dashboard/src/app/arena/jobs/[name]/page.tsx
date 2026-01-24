@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
 import { useArenaJob, useArenaJobMutations } from "@/hooks/use-arena-jobs";
+import { useProviderPreview, useToolRegistryPreview } from "@/hooks";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -37,6 +38,8 @@ import {
   Timer,
   RefreshCw,
   FileText,
+  Cpu,
+  Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -45,7 +48,14 @@ import {
   getConditionIcon,
 } from "@/components/arena";
 import { LogViewer } from "@/components/logs";
-import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
+import type {
+  ArenaJob,
+  ArenaJobPhase,
+  ArenaJobType,
+  ProviderGroupSelector,
+  ToolRegistrySelector,
+} from "@/types/arena";
+import type { LabelSelectorValue } from "@/components/ui/k8s-label-selector";
 import type { Condition } from "@/types/common";
 
 const formatDate = (dateString?: string) => formatDateBase(dateString, true);
@@ -138,6 +148,137 @@ function formatDuration(startTime?: string, completionTime?: string): string {
     return `${minutes}m ${seconds % 60}s`;
   }
   return `${seconds}s`;
+}
+
+// Helper to display label selector details
+function LabelSelectorDisplay({ selector }: { selector?: LabelSelectorValue }) {
+  if (!selector) return <span className="text-muted-foreground">-</span>;
+
+  const hasMatchLabels = selector.matchLabels && Object.keys(selector.matchLabels).length > 0;
+  const hasMatchExpressions = selector.matchExpressions && selector.matchExpressions.length > 0;
+
+  if (!hasMatchLabels && !hasMatchExpressions) {
+    return <span className="text-muted-foreground italic">All (empty selector)</span>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {hasMatchLabels && (
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(selector.matchLabels!).map(([key, value]) => (
+            <Badge key={key} variant="secondary" className="font-mono text-xs">
+              {key}={value}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {hasMatchExpressions && (
+        <div className="space-y-1">
+          {selector.matchExpressions!.map((expr) => (
+            <div key={`${expr.key}-${expr.operator}-${expr.values?.join(",") ?? ""}`} className="flex items-center gap-1 text-xs">
+              <Badge variant="outline" className="font-mono">
+                {expr.key}
+              </Badge>
+              <span className="text-muted-foreground">{expr.operator}</span>
+              {expr.values && expr.values.length > 0 && (
+                <span className="font-mono">
+                  [{expr.values.join(", ")}]
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Component to show provider group override with matching providers
+function ProviderGroupOverrideDisplay({
+  groupName,
+  selector,
+}: {
+  groupName: string;
+  selector: ProviderGroupSelector;
+}) {
+  const labelSelector: LabelSelectorValue = selector.selector || {};
+  const { matchingProviders, matchCount, isLoading } = useProviderPreview(labelSelector);
+
+  return (
+    <div className="border rounded-md p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <Badge variant="outline" className="font-mono">
+          {groupName}
+        </Badge>
+        <span className="text-xs text-muted-foreground">
+          {isLoading ? "Loading..." : `${matchCount} provider(s) match`}
+        </span>
+      </div>
+      <div className="text-sm">
+        <p className="text-xs text-muted-foreground mb-1">Selector:</p>
+        <LabelSelectorDisplay selector={labelSelector} />
+      </div>
+      {!isLoading && matchingProviders.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Matching Providers:</p>
+          <div className="flex flex-wrap gap-1">
+            {matchingProviders.slice(0, 10).map((provider) => (
+              <Badge key={provider.metadata.name} variant="secondary" className="text-xs">
+                {provider.metadata.name}
+              </Badge>
+            ))}
+            {matchingProviders.length > 10 && (
+              <Badge variant="outline" className="text-xs">
+                +{matchingProviders.length - 10} more
+              </Badge>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Component to show tool registry override with matching registries
+function ToolRegistryOverrideDisplay({
+  selector,
+}: {
+  selector: ToolRegistrySelector;
+}) {
+  const labelSelector: LabelSelectorValue = selector.selector || {};
+  const { matchingRegistries, matchCount, totalToolsCount, isLoading } =
+    useToolRegistryPreview(labelSelector);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Selector</span>
+        <span className="text-xs text-muted-foreground">
+          {isLoading
+            ? "Loading..."
+            : `${matchCount} registry(s), ${totalToolsCount} tools`}
+        </span>
+      </div>
+      <LabelSelectorDisplay selector={labelSelector} />
+      {!isLoading && matchingRegistries.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Matching Registries:</p>
+          <div className="flex flex-wrap gap-1">
+            {matchingRegistries.map((registry) => (
+              <Badge key={registry.metadata.name} variant="secondary" className="text-xs">
+                {registry.metadata.name}
+                {registry.status?.discoveredToolsCount != null && (
+                  <span className="ml-1 text-muted-foreground">
+                    ({registry.status.discoveredToolsCount})
+                  </span>
+                )}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
@@ -428,6 +569,44 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Provider Overrides Card */}
+      {spec?.providerOverrides && Object.keys(spec.providerOverrides).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Cpu className="h-4 w-4" />
+              Provider Overrides
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {Object.entries(spec.providerOverrides).map(([groupName, selector]) => (
+                <ProviderGroupOverrideDisplay
+                  key={groupName}
+                  groupName={groupName}
+                  selector={selector}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tool Registry Override Card */}
+      {spec?.toolRegistryOverride && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wrench className="h-4 w-4" />
+              Tool Registry Override
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ToolRegistryOverrideDisplay selector={spec.toolRegistryOverride} />
           </CardContent>
         </Card>
       )}
