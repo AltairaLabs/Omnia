@@ -619,6 +619,8 @@ func TestOCIFetcher_ExtractOCITarToDir_InvalidTarPath(t *testing.T) {
 }
 
 func TestOCIFetcher_ExtractOCITarToDir_DirectoryTraversal(t *testing.T) {
+	// Test that directory traversal attempts are safely handled by SecureJoin
+	// The file should be extracted safely within destDir, not outside
 	tarPath := createTestTar(t, map[string]testTarEntry{
 		"../escape.txt": {Content: "escape", Mode: 0644, Typeflag: tar.TypeReg},
 	})
@@ -628,10 +630,23 @@ func TestOCIFetcher_ExtractOCITarToDir_DirectoryTraversal(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = os.RemoveAll(destDir) }()
 
+	// Create parent dir to verify escape didn't happen
+	parentDir := filepath.Dir(destDir)
+
 	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
 	err = fetcher.extractOCITarToDir(tarPath, destDir)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid tar path")
+	// SecureJoin prevents escape by safely resolving paths within destDir
+	assert.NoError(t, err)
+
+	// Verify file was NOT created outside destDir
+	escapedPath := filepath.Join(parentDir, "escape.txt")
+	_, err = os.Stat(escapedPath)
+	assert.True(t, os.IsNotExist(err), "file should not have escaped to parent directory")
+
+	// Verify file was created safely inside destDir
+	safePath := filepath.Join(destDir, "escape.txt")
+	_, err = os.Stat(safePath)
+	assert.NoError(t, err, "file should be created safely inside destDir")
 }
 
 func TestOCIFetcher_ExtractSymlink_EscapeAttempt(t *testing.T) {

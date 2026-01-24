@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -223,10 +224,10 @@ func (f *OCIFetcher) extractOCITarToDir(tarPath, destDir string) error {
 			return err
 		}
 
-		// Security: sanitize path to prevent directory traversal
-		target := filepath.Join(destDir, header.Name)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
-			return fmt.Errorf("invalid tar path: %s", header.Name)
+		// Security: use SecureJoin to prevent directory traversal attacks
+		target, err := securejoin.SecureJoin(destDir, header.Name)
+		if err != nil {
+			return fmt.Errorf("invalid tar path %q: %w", header.Name, err)
 		}
 
 		// Skip macOS resource fork files (AppleDouble format)
