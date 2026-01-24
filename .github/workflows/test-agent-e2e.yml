@@ -154,7 +154,20 @@ jobs:
             --set devMode=true \
             --timeout 10m
 
-          echo "Omnia operator deployed"
+          echo "Omnia operator deployed, waiting for controller to be ready..."
+
+          # Wait for the controller manager pod to be running
+          # This is critical - demos won't work until the controller can reconcile
+          kubectl wait --for=condition=Available deployment/omnia-controller-manager \
+            -n omnia-system --timeout=300s || {
+            echo "Controller manager not ready, checking pod status..."
+            kubectl get pods -n omnia-system -o wide
+            kubectl describe pods -n omnia-system -l app.kubernetes.io/name=omnia || true
+            kubectl logs -n omnia-system -l app.kubernetes.io/name=omnia --tail=50 || true
+            exit 1
+          }
+
+          echo "Omnia controller manager is ready"
 
       - name: Deploy demo agents
         run: |

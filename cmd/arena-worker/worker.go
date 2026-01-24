@@ -51,9 +51,11 @@ type Config struct {
 	JobType      string
 
 	// Filesystem content configuration
-	// Full path to mounted content (e.g., /workspace-content/ns/default/arena/name/.arena/versions/hash)
+	// ContentPath is the mount point for the job's content (e.g., /workspace-content)
+	// The content is isolated via subPath to only show the job's root folder
 	ContentPath    string
 	ContentVersion string // Content-addressable version hash
+	ConfigFile     string // Arena config filename within the content path
 
 	// Redis configuration
 	RedisAddr     string
@@ -104,6 +106,7 @@ func loadConfig() (*Config, error) {
 		JobType:        os.Getenv("ARENA_JOB_TYPE"),
 		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
 		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
+		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
 		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
 		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
 		RedisDB:        0,
@@ -285,7 +288,7 @@ func executeWorkItem(
 	}
 
 	// Find the arena config file
-	configPath := findArenaConfigFile(bundlePath)
+	configPath := findArenaConfigFile(bundlePath, cfg.ConfigFile)
 	if configPath == "" {
 		return nil, fmt.Errorf("arena config file not found in bundle: %s", bundlePath)
 	}
@@ -347,12 +350,18 @@ func executeWorkItem(
 		scenarioFilter = []string{item.ScenarioID}
 	}
 
-	// Generate run plan for this specific provider
+	// Determine provider filter - empty means use all providers from arena config
+	providerFilter := []string{}
+	if item.ProviderID != "" {
+		providerFilter = []string{item.ProviderID}
+	}
+
+	// Generate run plan for this specific provider (or all if no override)
 	plan, err := eng.GenerateRunPlan(
-		[]string{},                // no region filter
-		[]string{item.ProviderID}, // filter to this provider
-		scenarioFilter,            // scenario filter (empty = all)
-		[]string{},                // no eval filter
+		[]string{},     // no region filter
+		providerFilter, // filter to this provider (empty = all from config)
+		scenarioFilter, // scenario filter (empty = all)
+		[]string{},     // no eval filter
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate run plan: %w", err)
@@ -365,8 +374,12 @@ func executeWorkItem(
 	}
 
 	if cfg.Verbose {
-		fmt.Printf("  Executing %d scenario(s) with provider %s\n",
-			len(plan.Combinations), item.ProviderID)
+		providerDesc := "all providers"
+		if item.ProviderID != "" {
+			providerDesc = "provider " + item.ProviderID
+		}
+		fmt.Printf("  Executing %d scenario(s) with %s\n",
+			len(plan.Combinations), providerDesc)
 	}
 
 	// Execute runs with concurrency of 1 (single work item at a time)
@@ -381,8 +394,19 @@ func executeWorkItem(
 }
 
 // findArenaConfigFile looks for the arena config file in the bundle directory.
-// It checks for common naming conventions: config.arena.yaml, arena.yaml, config.yaml.
-func findArenaConfigFile(bundlePath string) string {
+// If configFile is provided, it uses that specific file.
+// Otherwise, it checks for common naming conventions: config.arena.yaml, arena.yaml, config.yaml.
+func findArenaConfigFile(bundlePath, configFile string) string {
+	// If a specific config file is provided, use it
+	if configFile != "" {
+		path := filepath.Join(bundlePath, configFile)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		// Config file was specified but not found - fall through to search
+	}
+
+	// Search for common arena config file names
 	candidates := []string{
 		"config.arena.yaml",
 		"config.arena.yml",

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -530,17 +531,44 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		})
 	}
 
+	// Extract root path from arenaFile (directory containing the config file)
+	// This is used to restrict the volume mount to only the job's root folder
+	var rootPath string
+	if arenaJob.Spec.ArenaFile != "" {
+		rootPath = filepath.Dir(arenaJob.Spec.ArenaFile)
+		if rootPath == "." {
+			rootPath = "" // No subdirectory, use the whole content
+		}
+	}
+
+	// Calculate the volume subPath for content isolation
+	// Structure: {workspace}/{namespace}/{contentPath}/{rootPath}
+	var contentSubPath string
+	if source.Status.Artifact != nil && source.Status.Artifact.ContentPath != "" {
+		workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+		contentSubPath = fmt.Sprintf("%s/%s/%s",
+			workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
+		if rootPath != "" {
+			contentSubPath = contentSubPath + "/" + rootPath
+		}
+	}
+
 	// Add source content info if available (filesystem-based content access)
 	if source.Status.Artifact != nil {
 		if source.Status.Artifact.ContentPath != "" {
-			// Full path: {mount}/{workspace}/{namespace}/{contentPath}
-			workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
-			fullContentPath := fmt.Sprintf("/workspace-content/%s/%s/%s",
-				workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
+			// Content path is now just the mount point since subPath handles isolation
 			env = append(env, corev1.EnvVar{
 				Name:  "ARENA_CONTENT_PATH",
-				Value: fullContentPath,
+				Value: "/workspace-content",
 			})
+			// Store the arena config filename (not the full path since we're in root folder)
+			if arenaJob.Spec.ArenaFile != "" {
+				arenaFileName := filepath.Base(arenaJob.Spec.ArenaFile)
+				env = append(env, corev1.EnvVar{
+					Name:  "ARENA_CONFIG_FILE",
+					Value: arenaFileName,
+				})
+			}
 		}
 		if source.Status.Artifact.Version != "" {
 			env = append(env, corev1.EnvVar{
@@ -628,11 +656,15 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Name:         "workspace-content",
 			VolumeSource: volumeSource,
 		})
+		// Use subPath to restrict access to only the job's root folder
+		// This provides content isolation between jobs
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "workspace-content",
 			MountPath: "/workspace-content",
+			SubPath:   contentSubPath,
 			ReadOnly:  true,
 		})
+		log.Info("mounting content with isolation", "subPath", contentSubPath)
 	}
 
 	// Create the Job
@@ -764,34 +796,48 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 		bundleURL = source.Status.Artifact.URL
 	}
 
-	// Get providers from provider overrides
+	// Get providers from provider overrides (if any)
 	var providerIDs []string
 	if len(providerCRDs) > 0 {
 		providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
 		log.V(1).Info("using providers for work items", "count", len(providerIDs))
 	}
 
-	if len(providerIDs) == 0 {
-		log.Info("no providers configured, skipping work item enqueueing")
-		return nil
-	}
-
-	// For now, create one work item per provider with a "default" scenario
-	// In the future, this should enumerate scenarios from the bundle
-	items := make([]queue.WorkItem, 0, len(providerIDs))
+	// Create work items - one per provider, or a single "default" item if no overrides
+	// When no provider overrides are configured, the worker uses providers from arena config
 	now := time.Now()
-	for i, provider := range providerIDs {
-		items = append(items, queue.WorkItem{
-			ID:          fmt.Sprintf("%s-%s-%d", arenaJob.Name, provider, i),
+	var items []queue.WorkItem
+
+	if len(providerIDs) == 0 {
+		// No provider overrides - create a single work item that runs all providers from config
+		log.Info("no provider overrides configured, creating default work item")
+		items = []queue.WorkItem{{
+			ID:          fmt.Sprintf("%s-default-0", arenaJob.Name),
 			JobID:       arenaJob.Name,
 			ScenarioID:  "default", // Worker will run all scenarios in the bundle
-			ProviderID:  provider,
+			ProviderID:  "",        // Empty means worker uses all providers from arena config
 			BundleURL:   bundleURL,
 			Status:      queue.ItemStatusPending,
 			Attempt:     1,
 			MaxAttempts: 3,
 			CreatedAt:   now,
-		})
+		}}
+	} else {
+		// Create one work item per provider override
+		items = make([]queue.WorkItem, 0, len(providerIDs))
+		for i, provider := range providerIDs {
+			items = append(items, queue.WorkItem{
+				ID:          fmt.Sprintf("%s-%s-%d", arenaJob.Name, provider, i),
+				JobID:       arenaJob.Name,
+				ScenarioID:  "default", // Worker will run all scenarios in the bundle
+				ProviderID:  provider,
+				BundleURL:   bundleURL,
+				Status:      queue.ItemStatusPending,
+				Attempt:     1,
+				MaxAttempts: 3,
+				CreatedAt:   now,
+			})
+		}
 	}
 
 	log.Info("enqueueing work items", "count", len(items), "providers", providerIDs)

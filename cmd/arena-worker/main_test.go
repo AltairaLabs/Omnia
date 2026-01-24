@@ -192,7 +192,7 @@ func TestFindArenaConfigFile(t *testing.T) {
 			t.Fatalf("failed to create config file: %v", err)
 		}
 
-		result := findArenaConfigFile(tmpDir)
+		result := findArenaConfigFile(tmpDir, "")
 		if result != configPath {
 			t.Errorf("expected %s, got %s", configPath, result)
 		}
@@ -205,7 +205,7 @@ func TestFindArenaConfigFile(t *testing.T) {
 			t.Fatalf("failed to create config file: %v", err)
 		}
 
-		result := findArenaConfigFile(tmpDir)
+		result := findArenaConfigFile(tmpDir, "")
 		if result != configPath {
 			t.Errorf("expected %s, got %s", configPath, result)
 		}
@@ -218,7 +218,7 @@ func TestFindArenaConfigFile(t *testing.T) {
 			t.Fatalf("failed to create config file: %v", err)
 		}
 
-		result := findArenaConfigFile(tmpDir)
+		result := findArenaConfigFile(tmpDir, "")
 		if result != configPath {
 			t.Errorf("expected %s, got %s", configPath, result)
 		}
@@ -235,7 +235,7 @@ func TestFindArenaConfigFile(t *testing.T) {
 			t.Fatalf("failed to create plain config: %v", err)
 		}
 
-		result := findArenaConfigFile(tmpDir)
+		result := findArenaConfigFile(tmpDir, "")
 		if result != arenaConfig {
 			t.Errorf("expected %s, got %s", arenaConfig, result)
 		}
@@ -244,7 +244,7 @@ func TestFindArenaConfigFile(t *testing.T) {
 	t.Run("returns empty string when no config found", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
-		result := findArenaConfigFile(tmpDir)
+		result := findArenaConfigFile(tmpDir, "")
 		if result != "" {
 			t.Errorf("expected empty string, got %s", result)
 		}

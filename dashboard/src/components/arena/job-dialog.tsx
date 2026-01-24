@@ -334,7 +334,8 @@ function JobDialogForm({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-4 py-4">
+      <div className="max-h-[60vh] overflow-y-auto">
+        <div className="space-y-4 py-4 pr-2">
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -618,6 +619,7 @@ function JobDialogForm({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       <DialogFooter>
