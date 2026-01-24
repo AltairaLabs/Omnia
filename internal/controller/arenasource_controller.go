@@ -17,11 +17,7 @@ limitations under the License.
 package controller
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -207,21 +203,21 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{RequeueAfter: interval}, nil
 		}
 
-		// Store the artifact (sync to filesystem or legacy tar.gz)
+		// Store the artifact (sync to filesystem)
 		contentPath, version, artifactURL, err := r.storeArtifact(source, result.artifact)
 		if err != nil {
 			log.Error(err, "Failed to store artifact")
 			r.handleFetchError(ctx, source, err)
-			// Clean up temp file
+			// Clean up artifact directory
 			if result.artifact != nil && result.artifact.Path != "" {
-				_ = os.Remove(result.artifact.Path)
+				_ = os.RemoveAll(result.artifact.Path)
 			}
 			return ctrl.Result{RequeueAfter: interval}, nil
 		}
 
-		// Clean up temp file
+		// Clean up artifact directory
 		if result.artifact != nil && result.artifact.Path != "" {
-			_ = os.Remove(result.artifact.Path)
+			_ = os.RemoveAll(result.artifact.Path)
 		}
 
 		// Update status with artifact info
@@ -567,7 +563,7 @@ func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource,
 	return r.syncToFilesystem(source, artifact)
 }
 
-// syncToFilesystem extracts the artifact to the workspace content filesystem
+// syncToFilesystem copies the artifact directory to the workspace content filesystem
 // and creates a content-addressable version.
 func (r *ArenaSourceReconciler) syncToFilesystem(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
 	ctx := context.Background()
@@ -589,40 +585,16 @@ func (r *ArenaSourceReconciler) syncToFilesystem(source *omniav1alpha1.ArenaSour
 	// This structure supports future multi-namespace workspaces
 	workspacePath := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, targetPath)
 
-	// Extract to temporary directory first
-	tempDir, err := os.MkdirTemp("", "arena-sync-*")
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(tempDir) }()
-
-	// Extract tar.gz to temp directory
-	if err := extractTarGzToDir(artifact.Path, tempDir); err != nil {
-		return "", "", "", fmt.Errorf("failed to extract artifact: %w", err)
-	}
-
-	// Handle double-wrapped archives: if extraction yields a single .tar.gz file,
-	// extract it again (e.g., ConfigMap with pre-packaged arena-pack.tar.gz)
-	if nestedTarGz := findNestedTarGz(tempDir); nestedTarGz != "" {
-		nestedTempDir, err := os.MkdirTemp("", "arena-nested-*")
+	// Use the checksum from the artifact (already calculated by fetcher)
+	// Extract the hash part from "sha256:<hash>"
+	contentHash := strings.TrimPrefix(artifact.Checksum, "sha256:")
+	if contentHash == "" || contentHash == artifact.Checksum || len(contentHash) < 12 {
+		// Fallback: calculate hash if checksum format is unexpected or too short
+		var err error
+		contentHash, err = fetcher.CalculateDirectoryHash(artifact.Path)
 		if err != nil {
-			return "", "", "", fmt.Errorf("failed to create nested temp directory: %w", err)
+			return "", "", "", fmt.Errorf("failed to calculate content hash: %w", err)
 		}
-		defer func() { _ = os.RemoveAll(nestedTempDir) }()
-
-		if err := extractTarGzToDir(nestedTarGz, nestedTempDir); err != nil {
-			return "", "", "", fmt.Errorf("failed to extract nested archive: %w", err)
-		}
-
-		// Replace tempDir contents with nested contents
-		_ = os.RemoveAll(tempDir)
-		tempDir = nestedTempDir
-	}
-
-	// Calculate content hash for versioning
-	contentHash, err := calculateDirectoryHash(tempDir)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to calculate content hash: %w", err)
 	}
 
 	// Short version for display (first 12 chars of SHA256)
@@ -645,11 +617,19 @@ func (r *ArenaSourceReconciler) syncToFilesystem(source *omniav1alpha1.ArenaSour
 		return "", "", "", fmt.Errorf("failed to create version directory: %w", err)
 	}
 
-	// Copy content to version directory
-	if err := copyDirectory(tempDir, versionDir); err != nil {
-		// Clean up on failure
+	// Try os.Rename first (atomic, same filesystem), fallback to copy
+	if err := os.Rename(artifact.Path, versionDir); err != nil {
+		// Rename failed (likely cross-filesystem), copy instead
+		// First remove the empty versionDir we just created
 		_ = os.RemoveAll(versionDir)
-		return "", "", "", fmt.Errorf("failed to copy content to version directory: %w", err)
+		if err := os.MkdirAll(versionDir, 0755); err != nil {
+			return "", "", "", fmt.Errorf("failed to create version directory: %w", err)
+		}
+		if err := copyDirectory(artifact.Path, versionDir); err != nil {
+			// Clean up on failure
+			_ = os.RemoveAll(versionDir)
+			return "", "", "", fmt.Errorf("failed to copy content to version directory: %w", err)
+		}
 	}
 
 	// Update HEAD pointer atomically
@@ -767,175 +747,6 @@ func (r *ArenaSourceReconciler) gcOldVersions(workspacePath string) error {
 	return nil
 }
 
-// findNestedTarGz checks if a directory contains only a single .tar.gz file.
-// Returns the path to the tar.gz file if found, empty string otherwise.
-// This handles ConfigMaps that contain pre-packaged arena archives.
-func findNestedTarGz(dir string) string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-
-	// Must have exactly one entry that is a .tar.gz file
-	if len(entries) != 1 {
-		return ""
-	}
-
-	entry := entries[0]
-	if entry.IsDir() {
-		return ""
-	}
-
-	name := entry.Name()
-	if strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".tgz") {
-		return filepath.Join(dir, name)
-	}
-
-	return ""
-}
-
-// extractTarGzToDir extracts a tar.gz file to a directory.
-func extractTarGzToDir(tarPath, destDir string) error {
-	file, err := os.Open(tarPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	gzr, err := gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-	return extractTarEntries(tr, destDir)
-}
-
-// extractTarEntries processes all entries from a tar reader.
-func extractTarEntries(tr *tar.Reader, destDir string) error {
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		if err := extractTarEntry(tr, header, destDir); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// extractTarEntry extracts a single tar entry to the destination directory.
-func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
-	// Security: sanitize path to prevent directory traversal
-	target := filepath.Join(destDir, header.Name)
-	if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
-		return fmt.Errorf("invalid tar path: %s", header.Name)
-	}
-
-	// Skip macOS resource fork files (AppleDouble format)
-	if strings.HasPrefix(filepath.Base(header.Name), "._") {
-		return nil
-	}
-
-	switch header.Typeflag {
-	case tar.TypeDir:
-		return os.MkdirAll(target, 0755)
-	case tar.TypeReg:
-		return extractRegularFile(tr, target, header)
-	case tar.TypeSymlink:
-		return extractSymlink(header, target, destDir)
-	}
-	return nil
-}
-
-// extractRegularFile extracts a regular file from the tar archive.
-func extractRegularFile(tr *tar.Reader, target string, header *tar.Header) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		return err
-	}
-
-	outFile, err := os.Create(target)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.CopyN(outFile, tr, header.Size); err != nil && err != io.EOF {
-		_ = outFile.Close()
-		return err
-	}
-
-	if err := outFile.Close(); err != nil {
-		return err
-	}
-
-	return os.Chmod(target, os.FileMode(header.Mode))
-}
-
-// extractSymlink extracts a symlink, validating it doesn't escape the destination.
-func extractSymlink(header *tar.Header, target, destDir string) error {
-	linkTarget := header.Linkname
-	absTarget := filepath.Join(filepath.Dir(target), linkTarget)
-	if !strings.HasPrefix(filepath.Clean(absTarget), filepath.Clean(destDir)) {
-		return fmt.Errorf("symlink escape attempt: %s -> %s", header.Name, linkTarget)
-	}
-	return os.Symlink(linkTarget, target)
-}
-
-// calculateDirectoryHash calculates a SHA256 hash of directory contents.
-// This creates a content-addressable version identifier.
-func calculateDirectoryHash(dir string) (string, error) {
-	h := sha256.New()
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-
-		// Hash the path
-		_, _ = h.Write([]byte(relPath))
-
-		// Hash file mode
-		_, _ = fmt.Fprintf(h, "%d", info.Mode())
-
-		if info.IsDir() {
-			return nil
-		}
-
-		// Hash file content
-		if info.Mode().IsRegular() {
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(h, f); err != nil {
-				_ = f.Close()
-				return err
-			}
-			_ = f.Close()
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // copyDirectory recursively copies a directory.
 func copyDirectory(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
@@ -953,6 +764,15 @@ func copyDirectory(src, dst string) error {
 
 		if info.IsDir() {
 			return os.MkdirAll(targetPath, info.Mode())
+		}
+
+		// Handle symlinks
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, targetPath)
 		}
 
 		// Copy file

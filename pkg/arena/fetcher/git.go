@@ -17,13 +17,8 @@ limitations under the License.
 package fetcher
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -151,7 +146,7 @@ func (f *GitFetcher) LatestRevision(ctx context.Context) (string, error) {
 	return head.Hash().String(), nil
 }
 
-// Fetch clones the repository at the specified revision and creates a tarball.
+// Fetch clones the repository at the specified revision and returns the directory.
 func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, error) {
 	auth, err := f.getAuth()
 	if err != nil {
@@ -183,8 +178,8 @@ func (f *GitFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 		return nil, fmt.Errorf("failed to get commit: %w", err)
 	}
 
-	// Create tarball and move to final location
-	return f.createArtifact(tmpDir, sourceDir, revision, commit)
+	// Create output directory and copy contents (excluding .git)
+	return f.createArtifact(sourceDir, revision, commit)
 }
 
 // cloneAndCheckout clones the repository and checks out the specified revision.
@@ -232,7 +227,7 @@ func (f *GitFetcher) buildCloneOptions(auth transport.AuthMethod) *git.CloneOpti
 	return cloneOpts
 }
 
-// getSourceDirectory returns the source directory for tarball creation.
+// getSourceDirectory returns the source directory for the artifact.
 func (f *GitFetcher) getSourceDirectory(cloneDir string) (string, error) {
 	if f.config.Path == "" {
 		return cloneDir, nil
@@ -245,51 +240,44 @@ func (f *GitFetcher) getSourceDirectory(cloneDir string) (string, error) {
 	return sourceDir, nil
 }
 
-// createArtifact creates the tarball and returns the final artifact.
-func (f *GitFetcher) createArtifact(tmpDir, sourceDir, revision string, commit *object.Commit) (*Artifact, error) {
-	// Create the tarball
-	tarballPath := filepath.Join(tmpDir, "artifact.tar.gz")
-	checksum, size, err := f.createTarball(sourceDir, tarballPath)
+// createArtifact copies the source directory to a new location and returns the artifact.
+func (f *GitFetcher) createArtifact(sourceDir, revision string, commit *object.Commit) (*Artifact, error) {
+	// Create output directory
+	outputDir, err := os.MkdirTemp(f.config.Options.WorkDir, "artifact-*")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create tarball: %w", err)
+		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Move tarball to final location
-	finalPath, err := f.moveTarballToFinal(tarballPath)
+	// Copy contents excluding .git directory
+	if err := CopyDirectoryExcluding(sourceDir, outputDir, []string{".git"}); err != nil {
+		_ = os.RemoveAll(outputDir)
+		return nil, fmt.Errorf("failed to copy directory: %w", err)
+	}
+
+	// Calculate checksum of output directory
+	checksum, err := CalculateDirectoryHash(outputDir)
 	if err != nil {
-		return nil, err
+		_ = os.RemoveAll(outputDir)
+		return nil, fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	// Calculate total size
+	size, err := CalculateDirectorySize(outputDir)
+	if err != nil {
+		_ = os.RemoveAll(outputDir)
+		return nil, fmt.Errorf("failed to calculate size: %w", err)
 	}
 
 	// Format revision with ref info
 	revisionStr := formatRevision(f.config.Ref, revision)
 
 	return &Artifact{
-		Path:         finalPath,
+		Path:         outputDir,
 		Revision:     revisionStr,
-		Checksum:     checksum,
+		Checksum:     "sha256:" + checksum,
 		Size:         size,
 		LastModified: commit.Author.When,
 	}, nil
-}
-
-// moveTarballToFinal moves the tarball to its final location.
-func (f *GitFetcher) moveTarballToFinal(tarballPath string) (string, error) {
-	finalPath, err := os.CreateTemp(f.config.Options.WorkDir, "artifact-*.tar.gz")
-	if err != nil {
-		return "", fmt.Errorf("failed to create final artifact file: %w", err)
-	}
-	if err := finalPath.Close(); err != nil {
-		return "", fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tarballPath, finalPath.Name()); err != nil {
-		// If rename fails (cross-device), copy instead
-		if err := copyFile(tarballPath, finalPath.Name()); err != nil {
-			return "", fmt.Errorf("failed to move artifact: %w", err)
-		}
-	}
-
-	return finalPath.Name(), nil
 }
 
 // getAuth returns the appropriate transport.AuthMethod based on credentials.
@@ -364,124 +352,6 @@ func (f *GitFetcher) configureKnownHosts(publicKeys *ssh.PublicKeys) error {
 	return nil
 }
 
-// createTarball creates a gzipped tarball of the source directory.
-func (f *GitFetcher) createTarball(sourceDir, destPath string) (string, int64, error) {
-	file, err := os.Create(destPath)
-	if err != nil {
-		return "", 0, err
-	}
-
-	hash := sha256.New()
-	multiWriter := io.MultiWriter(file, hash)
-
-	gzipWriter := gzip.NewWriter(multiWriter)
-	tarWriter := tar.NewWriter(gzipWriter)
-
-	// Track if we've closed everything successfully
-	var closed bool
-	defer func() {
-		if !closed {
-			// Only close if not already closed (error path)
-			_ = tarWriter.Close()
-			_ = gzipWriter.Close()
-			_ = file.Close()
-		}
-	}()
-
-	walkErr := filepath.Walk(sourceDir, func(path string, info os.FileInfo, walkErr error) error {
-		return addFileToTar(tarWriter, sourceDir, path, info, walkErr)
-	})
-
-	if walkErr != nil {
-		return "", 0, walkErr
-	}
-
-	// Close writers to flush
-	if err := tarWriter.Close(); err != nil {
-		return "", 0, err
-	}
-	if err := gzipWriter.Close(); err != nil {
-		return "", 0, err
-	}
-	if err := file.Close(); err != nil {
-		return "", 0, err
-	}
-	closed = true
-
-	// Get file size
-	stat, err := os.Stat(destPath)
-	if err != nil {
-		return "", 0, err
-	}
-
-	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), stat.Size(), nil
-}
-
-// addFileToTar adds a single file or directory to the tar archive.
-func addFileToTar(tarWriter *tar.Writer, sourceDir, path string, info os.FileInfo, walkErr error) error {
-	if walkErr != nil {
-		return walkErr
-	}
-
-	// Skip .git directory
-	if info.IsDir() && info.Name() == ".git" {
-		return filepath.SkipDir
-	}
-
-	// Get relative path
-	relPath, err := filepath.Rel(sourceDir, path)
-	if err != nil {
-		return err
-	}
-
-	// Skip root directory
-	if relPath == "." {
-		return nil
-	}
-
-	// Create tar header
-	header, err := tar.FileInfoHeader(info, "")
-	if err != nil {
-		return err
-	}
-	header.Name = relPath
-
-	// Handle symlinks
-	if info.Mode()&os.ModeSymlink != 0 {
-		link, err := os.Readlink(path)
-		if err != nil {
-			return err
-		}
-		header.Linkname = link
-	}
-
-	if err := tarWriter.WriteHeader(header); err != nil {
-		return err
-	}
-
-	// Write file content for regular files
-	if !info.IsDir() && info.Mode().IsRegular() {
-		return copyFileToTar(tarWriter, path)
-	}
-
-	return nil
-}
-
-// copyFileToTar copies a file's content to the tar writer.
-func copyFileToTar(tarWriter *tar.Writer, path string) error {
-	srcFile, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-
-	_, copyErr := io.Copy(tarWriter, srcFile)
-	closeErr := srcFile.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
-}
-
 // formatRevision formats the revision with ref information.
 func formatRevision(ref GitRef, commitSHA string) string {
 	shortSHA := commitSHA
@@ -496,34 +366,6 @@ func formatRevision(ref GitRef, commitSHA string) string {
 		return fmt.Sprintf("%s@sha1:%s", ref.Tag, shortSHA)
 	}
 	return fmt.Sprintf("sha1:%s", shortSHA)
-}
-
-// copyFile copies a file from src to dst.
-// This is only used as a fallback when os.Rename fails (cross-filesystem moves).
-// Coverage: tested via integration tests as it requires cross-filesystem scenarios.
-func copyFile(src, dst string) error { //nolint:unused // Used as fallback for cross-device moves
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		_ = sourceFile.Close()
-		return err
-	}
-
-	_, copyErr := io.Copy(destFile, sourceFile)
-	srcCloseErr := sourceFile.Close()
-	dstCloseErr := destFile.Close()
-
-	if copyErr != nil {
-		return copyErr
-	}
-	if srcCloseErr != nil {
-		return srcCloseErr
-	}
-	return dstCloseErr
 }
 
 // Ensure GitFetcher implements Fetcher interface.

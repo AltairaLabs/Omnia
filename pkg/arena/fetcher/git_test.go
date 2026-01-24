@@ -17,11 +17,7 @@ limitations under the License.
 package fetcher
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,15 +170,15 @@ func TestGitFetcher_LocalRepo(t *testing.T) {
 	// Test Fetch
 	artifact, err := fetcher.Fetch(ctx, revision)
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	assert.NotEmpty(t, artifact.Path)
 	assert.Contains(t, artifact.Revision, "master@sha1:")
 	assert.True(t, strings.HasPrefix(artifact.Checksum, "sha256:"))
 	assert.Greater(t, artifact.Size, int64(0))
 
-	// Verify tarball contents
-	verifyTarballContents(t, artifact.Path, []string{"pack.json"})
+	// Verify directory contents
+	verifyGitDirectoryContents(t, artifact.Path, []string{"pack.json"})
 }
 
 func TestGitFetcher_Subdirectory(t *testing.T) {
@@ -237,11 +233,11 @@ func TestGitFetcher_Subdirectory(t *testing.T) {
 	// Test Fetch
 	artifact, err := fetcher.Fetch(ctx, commit.String())
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
-	// Verify tarball only contains files from subdirectory
-	verifyTarballContents(t, artifact.Path, []string{"pack.json"})
-	verifyTarballNotContains(t, artifact.Path, []string{"README.md"})
+	// Verify directory only contains files from subdirectory
+	verifyGitDirectoryContents(t, artifact.Path, []string{"pack.json"})
+	verifyGitDirectoryNotContains(t, artifact.Path, []string{"README.md"})
 }
 
 func TestGitFetcher_TagRef(t *testing.T) {
@@ -296,7 +292,7 @@ func TestGitFetcher_TagRef(t *testing.T) {
 	// Test Fetch
 	artifact, err := fetcher.Fetch(ctx, revision)
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	assert.Contains(t, artifact.Revision, "v1.0.0@sha1:")
 }
@@ -575,64 +571,6 @@ func TestGitFetcher_InvalidPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not exist")
 }
 
-// verifyTarballContents checks that the tarball contains the expected files.
-func verifyTarballContents(t *testing.T, tarballPath string, expectedFiles []string) {
-	t.Helper()
-
-	file, err := os.Open(tarballPath)
-	require.NoError(t, err)
-	defer func() { _ = file.Close() }()
-
-	gzReader, err := gzip.NewReader(file)
-	require.NoError(t, err)
-	defer func() { _ = gzReader.Close() }()
-
-	tarReader := tar.NewReader(gzReader)
-
-	foundFiles := make(map[string]bool)
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-		foundFiles[header.Name] = true
-	}
-
-	for _, expected := range expectedFiles {
-		assert.True(t, foundFiles[expected], "expected file %s not found in tarball", expected)
-	}
-}
-
-// verifyTarballNotContains checks that the tarball does not contain certain files.
-func verifyTarballNotContains(t *testing.T, tarballPath string, unexpectedFiles []string) {
-	t.Helper()
-
-	file, err := os.Open(tarballPath)
-	require.NoError(t, err)
-	defer func() { _ = file.Close() }()
-
-	gzReader, err := gzip.NewReader(file)
-	require.NoError(t, err)
-	defer func() { _ = gzReader.Close() }()
-
-	tarReader := tar.NewReader(gzReader)
-
-	foundFiles := make(map[string]bool)
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-		foundFiles[header.Name] = true
-	}
-
-	for _, unexpected := range unexpectedFiles {
-		assert.False(t, foundFiles[unexpected], "unexpected file %s found in tarball", unexpected)
-	}
-}
-
 // testSSHPrivateKey is a valid ED25519 private key for testing.
 // This is a throwaway key generated specifically for tests - DO NOT use in production.
 const testSSHPrivateKey = `-----BEGIN OPENSSH PRIVATE KEY-----
@@ -702,63 +640,6 @@ func TestGitFetcher_GetAuth_SSHKeyWithInvalidKnownHosts(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse known_hosts")
 }
 
-func TestCopyFile(t *testing.T) {
-	// Create a temp source file
-	srcFile, err := os.CreateTemp("", "copy-src-*")
-	require.NoError(t, err)
-	defer func() { _ = os.Remove(srcFile.Name()) }()
-
-	testContent := []byte("test content for copy")
-	_, err = srcFile.Write(testContent)
-	require.NoError(t, err)
-	require.NoError(t, srcFile.Close())
-
-	// Create a temp destination path
-	dstFile, err := os.CreateTemp("", "copy-dst-*")
-	require.NoError(t, err)
-	dstPath := dstFile.Name()
-	require.NoError(t, dstFile.Close())
-	_ = os.Remove(dstPath) // Remove so copyFile can create it
-	defer func() { _ = os.Remove(dstPath) }()
-
-	// Test copyFile
-	err = copyFile(srcFile.Name(), dstPath)
-	require.NoError(t, err)
-
-	// Verify content
-	content, err := os.ReadFile(dstPath)
-	require.NoError(t, err)
-	assert.Equal(t, testContent, content)
-}
-
-func TestCopyFile_SourceNotFound(t *testing.T) {
-	err := copyFile("/nonexistent/path/file.txt", "/tmp/dest.txt")
-	assert.Error(t, err)
-}
-
-func TestCopyFile_DestinationError(t *testing.T) {
-	// Create a temp source file
-	srcFile, err := os.CreateTemp("", "copy-src-*")
-	require.NoError(t, err)
-	defer func() { _ = os.Remove(srcFile.Name()) }()
-	require.NoError(t, srcFile.Close())
-
-	// Try to copy to an invalid destination
-	err = copyFile(srcFile.Name(), "/nonexistent/directory/file.txt")
-	assert.Error(t, err)
-}
-
-func TestAddFileToTar_WalkError(t *testing.T) {
-	tarWriter := tar.NewWriter(io.Discard)
-	defer func() { _ = tarWriter.Close() }()
-
-	// Test with a walk error
-	walkErr := fmt.Errorf("simulated walk error")
-	err := addFileToTar(tarWriter, "/tmp", "/tmp/test", nil, walkErr)
-	assert.Error(t, err)
-	assert.Equal(t, walkErr, err)
-}
-
 func TestGitFetcher_MultipleFiles(t *testing.T) {
 	// Create a temporary directory for the test repo
 	tmpDir, err := os.MkdirTemp("", "git-test-*")
@@ -812,10 +693,10 @@ func TestGitFetcher_MultipleFiles(t *testing.T) {
 	// Test Fetch
 	artifact, err := fetcher.Fetch(ctx, commit.String())
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
-	// Verify tarball contains all files
-	verifyTarballContents(t, artifact.Path, []string{"file1.txt", "file2.txt", "subdir/file3.txt"})
+	// Verify directory contains all files
+	verifyGitDirectoryContents(t, artifact.Path, []string{"file1.txt", "file2.txt", "subdir/file3.txt"})
 }
 
 func TestGitFetcher_WithSymlink(t *testing.T) {
@@ -863,64 +744,11 @@ func TestGitFetcher_WithSymlink(t *testing.T) {
 	// Test Fetch
 	artifact, err := fetcher.Fetch(ctx, commit.String())
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
-	// Verify tarball contains both files
-	verifyTarballContents(t, artifact.Path, []string{"original.txt", "link.txt"})
+	// Verify directory contains both files
+	verifyGitDirectoryContents(t, artifact.Path, []string{"original.txt", "link.txt"})
 }
-
-func TestAddFileToTar_SkipGitDirectory(t *testing.T) {
-	tarWriter := tar.NewWriter(io.Discard)
-	defer func() { _ = tarWriter.Close() }()
-
-	// Create a mock directory info for .git
-	gitDirInfo := mockDirInfo{name: ".git", isDir: true}
-	err := addFileToTar(tarWriter, "/tmp/repo", "/tmp/repo/.git", gitDirInfo, nil)
-	assert.Equal(t, filepath.SkipDir, err)
-}
-
-func TestAddFileToTar_SkipRootDirectory(t *testing.T) {
-	tarWriter := tar.NewWriter(io.Discard)
-	defer func() { _ = tarWriter.Close() }()
-
-	// Create a mock directory info for root
-	rootInfo := mockDirInfo{name: "repo", isDir: true}
-	err := addFileToTar(tarWriter, "/tmp/repo", "/tmp/repo", rootInfo, nil)
-	assert.NoError(t, err)
-}
-
-func TestAddFileToTar_RegularDirectory(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "tar-test-*")
-	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	// Create a subdirectory
-	subDir := filepath.Join(tmpDir, "subdir")
-	require.NoError(t, os.MkdirAll(subDir, 0755))
-
-	tarWriter := tar.NewWriter(io.Discard)
-	defer func() { _ = tarWriter.Close() }()
-
-	// Get real directory info
-	info, err := os.Stat(subDir)
-	require.NoError(t, err)
-
-	err = addFileToTar(tarWriter, tmpDir, subDir, info, nil)
-	assert.NoError(t, err)
-}
-
-// mockDirInfo implements os.FileInfo for testing
-type mockDirInfo struct {
-	name  string
-	isDir bool
-}
-
-func (m mockDirInfo) Name() string       { return m.name }
-func (m mockDirInfo) Size() int64        { return 0 }
-func (m mockDirInfo) Mode() os.FileMode  { return os.ModeDir }
-func (m mockDirInfo) ModTime() time.Time { return time.Now() }
-func (m mockDirInfo) IsDir() bool        { return m.isDir }
-func (m mockDirInfo) Sys() any           { return nil }
 
 func TestGitFetcher_LatestRevision_InvalidURL(t *testing.T) {
 	fetcher := NewGitFetcher(GitFetcherConfig{
@@ -971,40 +799,24 @@ func TestGitFetcher_Fetch_InvalidRevision(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestCopyFileToTar(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "copy-test-*")
-	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
+// verifyGitDirectoryContents checks that the directory contains the expected files.
+func verifyGitDirectoryContents(t *testing.T, dirPath string, expectedFiles []string) {
+	t.Helper()
 
-	// Create a test file
-	testContent := "test content"
-	testFile := filepath.Join(tmpDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte(testContent), 0644))
-
-	// Create a tar writer to a buffer
-	var buf strings.Builder
-	tarWriter := tar.NewWriter(&buf)
-
-	// Write header first
-	header := &tar.Header{
-		Name: "test.txt",
-		Mode: 0644,
-		Size: int64(len(testContent)),
+	for _, expected := range expectedFiles {
+		filePath := filepath.Join(dirPath, expected)
+		_, err := os.Stat(filePath)
+		assert.NoError(t, err, "expected file %s not found in directory", expected)
 	}
-	require.NoError(t, tarWriter.WriteHeader(header))
-
-	err = copyFileToTar(tarWriter, testFile)
-	assert.NoError(t, err)
-
-	_ = tarWriter.Close()
 }
 
-func TestCopyFileToTar_FileNotFound(t *testing.T) {
-	var buf strings.Builder
-	tarWriter := tar.NewWriter(&buf)
+// verifyGitDirectoryNotContains checks that the directory does not contain certain files.
+func verifyGitDirectoryNotContains(t *testing.T, dirPath string, unexpectedFiles []string) {
+	t.Helper()
 
-	err := copyFileToTar(tarWriter, "/nonexistent/file.txt")
-	assert.Error(t, err)
-
-	_ = tarWriter.Close()
+	for _, unexpected := range unexpectedFiles {
+		filePath := filepath.Join(dirPath, unexpected)
+		_, err := os.Stat(filePath)
+		assert.True(t, os.IsNotExist(err), "unexpected file %s found in directory", unexpected)
+	}
 }

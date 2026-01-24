@@ -17,14 +17,10 @@ limitations under the License.
 package fetcher
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -82,7 +78,7 @@ func (f *ConfigMapFetcher) LatestRevision(ctx context.Context) (string, error) {
 	return cm.ResourceVersion, nil
 }
 
-// Fetch creates a tarball from the ConfigMap data.
+// Fetch creates a directory from the ConfigMap data.
 func (f *ConfigMapFetcher) Fetch(ctx context.Context, revision string) (*Artifact, error) {
 	cm := &corev1.ConfigMap{}
 	key := types.NamespacedName{
@@ -99,10 +95,24 @@ func (f *ConfigMapFetcher) Fetch(ctx context.Context, revision string) (*Artifac
 		return nil, fmt.Errorf("ConfigMap revision mismatch: expected %s, got %s", revision, cm.ResourceVersion)
 	}
 
-	// Create tarball from ConfigMap data
-	tarballPath, checksum, size, err := f.createTarball(cm)
+	// Write ConfigMap data to directory
+	dirPath, err := f.writeToDirectory(cm)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create tarball: %w", err)
+		return nil, fmt.Errorf("failed to write to directory: %w", err)
+	}
+
+	// Calculate checksum of directory contents
+	checksum, err := CalculateDirectoryHash(dirPath)
+	if err != nil {
+		_ = os.RemoveAll(dirPath)
+		return nil, fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	// Calculate total size
+	size, err := CalculateDirectorySize(dirPath)
+	if err != nil {
+		_ = os.RemoveAll(dirPath)
+		return nil, fmt.Errorf("failed to calculate size: %w", err)
 	}
 
 	// Determine last modified time
@@ -112,60 +122,54 @@ func (f *ConfigMapFetcher) Fetch(ctx context.Context, revision string) (*Artifac
 	}
 
 	return &Artifact{
-		Path:         tarballPath,
+		Path:         dirPath,
 		Revision:     cm.ResourceVersion,
-		Checksum:     checksum,
+		Checksum:     "sha256:" + checksum,
 		Size:         size,
 		LastModified: lastModified,
 	}, nil
 }
 
-// createTarball creates a gzipped tarball from ConfigMap data.
-func (f *ConfigMapFetcher) createTarball(cm *corev1.ConfigMap) (string, string, int64, error) {
-	// Create temporary file for the tarball
-	tmpFile, err := os.CreateTemp(f.config.Options.WorkDir, "configmap-*.tar.gz")
+// writeToDirectory writes ConfigMap data to a temporary directory.
+func (f *ConfigMapFetcher) writeToDirectory(cm *corev1.ConfigMap) (string, error) {
+	// Create temporary directory
+	tmpDir, err := os.MkdirTemp(f.config.Options.WorkDir, "configmap-*")
 	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to create temp file: %w", err)
+		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
-
-	hash := sha256.New()
-	multiWriter := io.MultiWriter(tmpFile, hash)
-
-	gzipWriter := gzip.NewWriter(multiWriter)
-	tarWriter := tar.NewWriter(gzipWriter)
-
-	// Track if we've closed everything successfully
-	var closed bool
-	defer func() {
-		if !closed {
-			_ = tarWriter.Close()
-			_ = gzipWriter.Close()
-			_ = tmpFile.Close()
-		}
-	}()
 
 	// Get sorted keys for deterministic output
 	keys := getSortedConfigMapKeys(cm)
 
-	// Add each file to the tarball
-	if err := writeConfigMapEntries(tarWriter, cm, keys); err != nil {
-		return "", "", 0, err
+	// Write each file
+	for _, key := range keys {
+		content := getConfigMapContent(cm, key)
+		filePath := filepath.Join(tmpDir, key)
+
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			_ = os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("failed to create directory for %s: %w", key, err)
+		}
+
+		// Write file with deterministic modification time
+		if err := os.WriteFile(filePath, content, 0644); err != nil {
+			_ = os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("failed to write file %s: %w", key, err)
+		}
+
+		// Set modification time to ConfigMap creation time for determinism
+		modTime := cm.CreationTimestamp.Time
+		if modTime.IsZero() {
+			modTime = time.Now()
+		}
+		if err := os.Chtimes(filePath, modTime, modTime); err != nil {
+			// Non-fatal: log but continue
+			_ = err
+		}
 	}
 
-	// Close writers to flush
-	if err := closeWriters(tarWriter, gzipWriter, tmpFile); err != nil {
-		return "", "", 0, err
-	}
-	closed = true
-
-	// Get file size
-	stat, err := os.Stat(tmpFile.Name())
-	if err != nil {
-		return "", "", 0, fmt.Errorf("failed to stat tarball: %w", err)
-	}
-
-	checksum := "sha256:" + hex.EncodeToString(hash.Sum(nil))
-	return tmpFile.Name(), checksum, stat.Size(), nil
+	return tmpDir, nil
 }
 
 // getSortedConfigMapKeys returns sorted keys from both Data and BinaryData, with Data taking precedence.
@@ -184,17 +188,6 @@ func getSortedConfigMapKeys(cm *corev1.ConfigMap) []string {
 	return keys
 }
 
-// writeConfigMapEntries writes ConfigMap entries to a tar archive.
-func writeConfigMapEntries(tarWriter *tar.Writer, cm *corev1.ConfigMap, keys []string) error {
-	for _, key := range keys {
-		content := getConfigMapContent(cm, key)
-		if err := writeTarEntry(tarWriter, key, content, cm.CreationTimestamp.Time); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // getConfigMapContent retrieves content for a key from ConfigMap Data or BinaryData.
 func getConfigMapContent(cm *corev1.ConfigMap, key string) []byte {
 	if data, ok := cm.Data[key]; ok {
@@ -202,40 +195,6 @@ func getConfigMapContent(cm *corev1.ConfigMap, key string) []byte {
 	}
 	if binData, ok := cm.BinaryData[key]; ok {
 		return binData
-	}
-	return nil
-}
-
-// writeTarEntry writes a single entry to the tar archive.
-func writeTarEntry(tarWriter *tar.Writer, name string, content []byte, modTime time.Time) error {
-	header := &tar.Header{
-		Name:    name,
-		Mode:    0644,
-		Size:    int64(len(content)),
-		ModTime: modTime,
-	}
-
-	if err := tarWriter.WriteHeader(header); err != nil {
-		return fmt.Errorf("failed to write tar header for %s: %w", name, err)
-	}
-
-	if _, err := tarWriter.Write(content); err != nil {
-		return fmt.Errorf("failed to write tar content for %s: %w", name, err)
-	}
-
-	return nil
-}
-
-// closeWriters closes all writers in order.
-func closeWriters(tarWriter *tar.Writer, gzipWriter *gzip.Writer, tmpFile *os.File) error {
-	if err := tarWriter.Close(); err != nil {
-		return fmt.Errorf("failed to close tar writer: %w", err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		return fmt.Errorf("failed to close gzip writer: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 	return nil
 }

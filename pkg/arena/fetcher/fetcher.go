@@ -25,16 +25,19 @@ import (
 
 // Artifact represents a fetched bundle artifact.
 type Artifact struct {
-	// Path is the local filesystem path to the artifact tarball.
+	// Path is the local filesystem path to the artifact directory.
+	// The fetcher writes content directly to this directory (not as a tarball).
+	// Callers are responsible for cleaning up this directory when done.
 	Path string
 
 	// Revision is the source revision identifier (e.g., commit SHA, tag).
 	Revision string
 
-	// Checksum is the SHA256 checksum of the artifact.
+	// Checksum is the SHA256 checksum of the directory contents.
+	// Calculated using CalculateDirectoryHash for content-addressable versioning.
 	Checksum string
 
-	// Size is the artifact size in bytes.
+	// Size is the total size of all files in the directory in bytes.
 	Size int64
 
 	// LastModified is when the source was last modified.
@@ -50,8 +53,8 @@ type Fetcher interface {
 	LatestRevision(ctx context.Context) (string, error)
 
 	// Fetch downloads the bundle at the specified revision and returns an Artifact.
-	// The artifact is stored as a tarball at a temporary path.
-	// Callers are responsible for cleaning up the artifact path when done.
+	// The artifact is stored as a directory at a temporary path.
+	// Callers are responsible for cleaning up the artifact directory when done.
 	Fetch(ctx context.Context, revision string) (*Artifact, error)
 
 	// Type returns the source type (git, oci, configmap).

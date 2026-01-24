@@ -17,6 +17,7 @@ limitations under the License.
 package fetcher
 
 import (
+	"archive/tar"
 	"context"
 	"os"
 	"path/filepath"
@@ -286,36 +287,6 @@ func TestOCIFetcher_GetRemoteOptions(t *testing.T) {
 	}
 }
 
-func TestOCIFetcher_CalculateChecksum(t *testing.T) {
-	// Create a temporary file with known content
-	tmpDir, err := os.MkdirTemp("", "oci-test-*")
-	require.NoError(t, err)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	testContent := "test content for checksum"
-	testFile := filepath.Join(tmpDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte(testContent), 0644))
-
-	fetcher := NewOCIFetcher(OCIFetcherConfig{
-		URL: "oci://ghcr.io/example/repo:latest",
-	})
-
-	checksum, size, err := fetcher.calculateChecksum(testFile)
-	require.NoError(t, err)
-	assert.Equal(t, int64(len(testContent)), size)
-	assert.True(t, strings.HasPrefix(checksum, "sha256:"))
-	assert.Len(t, checksum, 7+64) // "sha256:" + 64 hex chars
-}
-
-func TestOCIFetcher_CalculateChecksum_FileNotFound(t *testing.T) {
-	fetcher := NewOCIFetcher(OCIFetcherConfig{
-		URL: "oci://ghcr.io/example/repo:latest",
-	})
-
-	_, _, err := fetcher.calculateChecksum("/nonexistent/file.txt")
-	assert.Error(t, err)
-}
-
 func TestOCIFetcher_LatestRevision_InvalidReference(t *testing.T) {
 	fetcher := NewOCIFetcher(OCIFetcherConfig{
 		URL: "oci://",
@@ -479,7 +450,7 @@ func TestOCIFetcher_Fetch_WithMock(t *testing.T) {
 	ctx := context.Background()
 	artifact, err := fetcher.Fetch(ctx, "v1.0.0")
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	assert.NotEmpty(t, artifact.Path)
 	assert.NotEmpty(t, artifact.Revision)
@@ -507,8 +478,176 @@ func TestOCIFetcher_Fetch_WithDigestRevision_Mock(t *testing.T) {
 	revision := testEmptyDigest
 	artifact, err := fetcher.Fetch(ctx, revision)
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	assert.NotEmpty(t, artifact.Path)
 	assert.NotEmpty(t, artifact.Revision)
+}
+
+// Helper function to create a test tarball
+func createTestTar(t *testing.T, entries map[string]testTarEntry) string {
+	t.Helper()
+	tmpFile, err := os.CreateTemp("", "test-*.tar")
+	require.NoError(t, err)
+	defer func() { _ = tmpFile.Close() }()
+
+	tw := tar.NewWriter(tmpFile)
+	defer func() { _ = tw.Close() }()
+
+	for entryName, entry := range entries {
+		hdr := &tar.Header{
+			Name:     entryName,
+			Mode:     entry.Mode,
+			Size:     int64(len(entry.Content)),
+			Typeflag: entry.Typeflag,
+			Linkname: entry.Linkname,
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+		if entry.Content != "" {
+			_, err := tw.Write([]byte(entry.Content))
+			require.NoError(t, err)
+		}
+	}
+
+	return tmpFile.Name()
+}
+
+type testTarEntry struct {
+	Content  string
+	Mode     int64
+	Typeflag byte
+	Linkname string
+}
+
+func TestOCIFetcher_ExtractOCITarToDir_RegularFile(t *testing.T) {
+	tarPath := createTestTar(t, map[string]testTarEntry{
+		"file.txt": {Content: "hello", Mode: 0644, Typeflag: tar.TypeReg},
+	})
+	defer func() { _ = os.Remove(tarPath) }()
+
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+	err = fetcher.extractOCITarToDir(tarPath, destDir)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(destDir, "file.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(content))
+}
+
+func TestOCIFetcher_ExtractOCITarToDir_Directory(t *testing.T) {
+	tarPath := createTestTar(t, map[string]testTarEntry{
+		"subdir/": {Mode: 0755, Typeflag: tar.TypeDir},
+	})
+	defer func() { _ = os.Remove(tarPath) }()
+
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+	err = fetcher.extractOCITarToDir(tarPath, destDir)
+	require.NoError(t, err)
+
+	info, err := os.Stat(filepath.Join(destDir, "subdir"))
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+}
+
+func TestOCIFetcher_ExtractOCITarToDir_Symlink(t *testing.T) {
+	tarPath := createTestTar(t, map[string]testTarEntry{
+		"target.txt": {Content: "target", Mode: 0644, Typeflag: tar.TypeReg},
+		"link.txt":   {Mode: 0777, Typeflag: tar.TypeSymlink, Linkname: "target.txt"},
+	})
+	defer func() { _ = os.Remove(tarPath) }()
+
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+	err = fetcher.extractOCITarToDir(tarPath, destDir)
+	require.NoError(t, err)
+
+	// Verify symlink exists
+	linkPath := filepath.Join(destDir, "link.txt")
+	info, err := os.Lstat(linkPath)
+	require.NoError(t, err)
+	assert.True(t, info.Mode()&os.ModeSymlink != 0)
+
+	// Verify symlink target
+	target, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, "target.txt", target)
+}
+
+func TestOCIFetcher_ExtractOCITarToDir_SkipsAppleDouble(t *testing.T) {
+	tarPath := createTestTar(t, map[string]testTarEntry{
+		"file.txt":   {Content: "real", Mode: 0644, Typeflag: tar.TypeReg},
+		"._file.txt": {Content: "resource fork", Mode: 0644, Typeflag: tar.TypeReg},
+	})
+	defer func() { _ = os.Remove(tarPath) }()
+
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+	err = fetcher.extractOCITarToDir(tarPath, destDir)
+	require.NoError(t, err)
+
+	// file.txt should exist
+	_, err = os.Stat(filepath.Join(destDir, "file.txt"))
+	assert.NoError(t, err)
+
+	// ._file.txt should not exist (skipped)
+	_, err = os.Stat(filepath.Join(destDir, "._file.txt"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestOCIFetcher_ExtractOCITarToDir_InvalidTarPath(t *testing.T) {
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+	err = fetcher.extractOCITarToDir("/nonexistent/file.tar", destDir)
+	assert.Error(t, err)
+}
+
+func TestOCIFetcher_ExtractOCITarToDir_DirectoryTraversal(t *testing.T) {
+	tarPath := createTestTar(t, map[string]testTarEntry{
+		"../escape.txt": {Content: "escape", Mode: 0644, Typeflag: tar.TypeReg},
+	})
+	defer func() { _ = os.Remove(tarPath) }()
+
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+	err = fetcher.extractOCITarToDir(tarPath, destDir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid tar path")
+}
+
+func TestOCIFetcher_ExtractSymlink_EscapeAttempt(t *testing.T) {
+	destDir, err := os.MkdirTemp("", "extract-*")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(destDir) }()
+
+	fetcher := NewOCIFetcher(OCIFetcherConfig{URL: "oci://test:latest"})
+
+	header := &tar.Header{
+		Name:     "link.txt",
+		Linkname: "../../../etc/passwd",
+	}
+	target := filepath.Join(destDir, "link.txt")
+
+	err = fetcher.extractSymlink(header, target, destDir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink escape attempt")
 }

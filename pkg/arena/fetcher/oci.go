@@ -17,12 +17,12 @@ limitations under the License.
 package fetcher
 
 import (
+	"archive/tar"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -118,7 +118,7 @@ func (f *OCIFetcher) LatestRevision(ctx context.Context) (string, error) {
 	return desc.Digest.String(), nil
 }
 
-// Fetch downloads the OCI artifact and returns it as a tarball.
+// Fetch downloads the OCI artifact and extracts it to a directory.
 func (f *OCIFetcher) Fetch(ctx context.Context, revision string) (*Artifact, error) {
 	ref, err := f.parseReference()
 	if err != nil {
@@ -141,35 +141,53 @@ func (f *OCIFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 
-	// Create temporary file for the tarball
-	tmpFile, err := os.CreateTemp(f.config.Options.WorkDir, "oci-artifact-*.tar.gz")
+	// Create temporary file for the OCI tarball (required by go-containerregistry API)
+	tmpFile, err := os.CreateTemp(f.config.Options.WorkDir, "oci-artifact-*.tar")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
+	tmpTarPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpTarPath) }() // Clean up temp tarball
 
-	// Write image as tarball
+	// Write image as tarball (go-containerregistry API constraint)
 	if err := tarball.Write(ref, img, tmpFile); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
 		return nil, fmt.Errorf("failed to write tarball: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpFile.Name())
 		return nil, fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	// Calculate checksum
-	checksum, size, err := f.calculateChecksum(tmpFile.Name())
+	// Extract tarball to output directory
+	outputDir, err := os.MkdirTemp(f.config.Options.WorkDir, "artifact-*")
 	if err != nil {
-		_ = os.Remove(tmpFile.Name())
+		return nil, fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	if err := f.extractOCITarToDir(tmpTarPath, outputDir); err != nil {
+		_ = os.RemoveAll(outputDir)
+		return nil, fmt.Errorf("failed to extract OCI tarball: %w", err)
+	}
+
+	// Calculate checksum of output directory
+	checksum, err := CalculateDirectoryHash(outputDir)
+	if err != nil {
+		_ = os.RemoveAll(outputDir)
 		return nil, fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	// Calculate total size
+	size, err := CalculateDirectorySize(outputDir)
+	if err != nil {
+		_ = os.RemoveAll(outputDir)
+		return nil, fmt.Errorf("failed to calculate size: %w", err)
 	}
 
 	// Get the digest for the revision string
 	digest, err := img.Digest()
 	if err != nil {
-		_ = os.Remove(tmpFile.Name())
+		_ = os.RemoveAll(outputDir)
 		return nil, fmt.Errorf("failed to get image digest: %w", err)
 	}
 
@@ -177,12 +195,95 @@ func (f *OCIFetcher) Fetch(ctx context.Context, revision string) (*Artifact, err
 	revisionStr := f.formatRevision(ref, digest.String())
 
 	return &Artifact{
-		Path:         tmpFile.Name(),
+		Path:         outputDir,
 		Revision:     revisionStr,
-		Checksum:     checksum,
+		Checksum:     "sha256:" + checksum,
 		Size:         size,
 		LastModified: time.Now(), // OCI doesn't provide creation time easily
 	}, nil
+}
+
+// extractOCITarToDir extracts an OCI image tarball to the destination directory.
+// OCI tarballs have a specific structure with manifest.json and layer blobs.
+func (f *OCIFetcher) extractOCITarToDir(tarPath, destDir string) error {
+	file, err := os.Open(tarPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	tr := tar.NewReader(file)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		// Security: sanitize path to prevent directory traversal
+		target := filepath.Join(destDir, header.Name)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
+			return fmt.Errorf("invalid tar path: %s", header.Name)
+		}
+
+		// Skip macOS resource fork files (AppleDouble format)
+		if strings.HasPrefix(filepath.Base(header.Name), "._") {
+			continue
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := f.extractRegularFile(tr, target, header); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			if err := f.extractSymlink(header, target, destDir); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// extractRegularFile extracts a regular file from the tar archive.
+func (f *OCIFetcher) extractRegularFile(tr *tar.Reader, target string, header *tar.Header) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return err
+	}
+
+	outFile, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.CopyN(outFile, tr, header.Size); err != nil && err != io.EOF {
+		_ = outFile.Close()
+		return err
+	}
+
+	if err := outFile.Close(); err != nil {
+		return err
+	}
+
+	return os.Chmod(target, os.FileMode(header.Mode))
+}
+
+// extractSymlink extracts a symlink, validating it doesn't escape the destination.
+func (f *OCIFetcher) extractSymlink(header *tar.Header, target, destDir string) error {
+	linkTarget := header.Linkname
+	absTarget := filepath.Join(filepath.Dir(target), linkTarget)
+	if !strings.HasPrefix(filepath.Clean(absTarget), filepath.Clean(destDir)) {
+		return fmt.Errorf("symlink escape attempt: %s -> %s", header.Name, linkTarget)
+	}
+	return os.Symlink(linkTarget, target)
 }
 
 // parseReference parses the OCI URL into a name.Reference.
@@ -241,23 +342,6 @@ func (f *OCIFetcher) getAuth() authn.Authenticator {
 	}
 
 	return authn.Anonymous
-}
-
-// calculateChecksum calculates the SHA256 checksum and size of a file.
-func (f *OCIFetcher) calculateChecksum(path string) (string, int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() { _ = file.Close() }()
-
-	hash := sha256.New()
-	size, err := io.Copy(hash, file)
-	if err != nil {
-		return "", 0, err
-	}
-
-	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
 // formatRevision formats the revision with tag/digest information.
