@@ -19,8 +19,8 @@ import {
   auditError,
   notFoundResponse,
 } from "@/lib/k8s/workspace-route-helpers";
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import type { ArenaSource, ArenaSourceContentResponse, ArenaSourceContentNode } from "@/types/arena";

@@ -660,9 +660,8 @@ func TestOCIFetcher_ExtractSymlink_EscapeAttempt(t *testing.T) {
 		Name:     "link.txt",
 		Linkname: "../../../etc/passwd",
 	}
-	target := filepath.Join(destDir, "link.txt")
 
-	err = fetcher.extractSymlink(header, target, destDir)
+	err = fetcher.extractSymlink(header, destDir)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "symlink escape attempt")
 }

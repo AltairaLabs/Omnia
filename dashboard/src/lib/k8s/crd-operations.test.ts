@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { gzipSync } from "zlib";
+import { gzipSync } from "node:zlib";
 import * as tar from "tar-stream";
 
 // Helper to create a valid tar.gz buffer for testing

@@ -22,7 +22,7 @@ vi.mock("@/lib/k8s/workspace-route-helpers", async (importOriginal) => {
   };
 });
 
-vi.mock("fs/promises", () => ({
+vi.mock("node:fs/promises", () => ({
   access: vi.fn(),
   stat: vi.fn(),
   readdir: vi.fn(),
@@ -101,7 +101,7 @@ describe("GET /api/workspaces/[name]/content/arena/[config]/versions", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -120,7 +120,7 @@ describe("GET /api/workspaces/[name]/content/arena/[config]/versions", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -152,7 +152,7 @@ describe("GET /api/workspaces/[name]/content/arena/[config]/versions", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });

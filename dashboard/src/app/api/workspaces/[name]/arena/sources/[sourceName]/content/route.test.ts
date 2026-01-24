@@ -50,7 +50,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 // Mock fs for filesystem content reading
-vi.mock("fs", () => ({
+vi.mock("node:fs", () => ({
   existsSync: vi.fn(),
   readdirSync: vi.fn(),
   readFileSync: vi.fn(),
@@ -141,7 +141,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -166,7 +166,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -191,7 +191,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -224,7 +224,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -283,7 +283,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -338,7 +338,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
@@ -391,7 +391,7 @@ describe("GET /api/workspaces/[name]/arena/sources/[sourceName]/content", () => 
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("fs");
+    const fs = await import("node:fs");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });

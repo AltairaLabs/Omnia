@@ -151,9 +151,9 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
 
   // Read from status.result.summary for test results
   const resultSummary = status?.result?.summary;
-  const passedItems = resultSummary ? parseInt(resultSummary.passedItems || "0", 10) : 0;
-  const failedItems = resultSummary ? parseInt(resultSummary.failedItems || "0", 10) : 0;
-  const totalItems = resultSummary ? parseInt(resultSummary.totalItems || "0", 10) : 0;
+  const passedItems = resultSummary ? Number.parseInt(resultSummary.passedItems || "0", 10) : 0;
+  const failedItems = resultSummary ? Number.parseInt(resultSummary.failedItems || "0", 10) : 0;
+  const totalItems = resultSummary ? Number.parseInt(resultSummary.totalItems || "0", 10) : 0;
   const passRate = resultSummary?.passRate;
 
   return (
@@ -523,9 +523,9 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
   }
 
   // Parse result summary values
-  const totalItems = resultSummary ? parseInt(resultSummary.totalItems || "0", 10) : 0;
-  const passedItems = resultSummary ? parseInt(resultSummary.passedItems || "0", 10) : 0;
-  const failedItems = resultSummary ? parseInt(resultSummary.failedItems || "0", 10) : 0;
+  const totalItems = resultSummary ? Number.parseInt(resultSummary.totalItems || "0", 10) : 0;
+  const passedItems = resultSummary ? Number.parseInt(resultSummary.passedItems || "0", 10) : 0;
+  const failedItems = resultSummary ? Number.parseInt(resultSummary.failedItems || "0", 10) : 0;
   const passRate = resultSummary?.passRate;
   const avgDurationMs = resultSummary?.avgDurationMs;
 

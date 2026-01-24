@@ -245,7 +245,7 @@ func (f *OCIFetcher) extractOCITarToDir(tarPath, destDir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
-			if err := f.extractSymlink(header, target, destDir); err != nil {
+			if err := f.extractSymlink(header, destDir); err != nil {
 				return err
 			}
 		}
@@ -278,12 +278,30 @@ func (f *OCIFetcher) extractRegularFile(tr *tar.Reader, target string, header *t
 }
 
 // extractSymlink extracts a symlink, validating it doesn't escape the destination.
-func (f *OCIFetcher) extractSymlink(header *tar.Header, target, destDir string) error {
-	linkTarget := header.Linkname
-	absTarget := filepath.Join(filepath.Dir(target), linkTarget)
-	if !strings.HasPrefix(filepath.Clean(absTarget), filepath.Clean(destDir)) {
-		return fmt.Errorf("symlink escape attempt: %s -> %s", header.Name, linkTarget)
+// The symlink path is validated using SecureJoin, and the link destination is
+// manually validated to ensure it resolves within destDir.
+func (f *OCIFetcher) extractSymlink(header *tar.Header, destDir string) error {
+	// Securely resolve the symlink path within destDir
+	target, err := securejoin.SecureJoin(destDir, header.Name)
+	if err != nil {
+		return fmt.Errorf("invalid symlink path %q: %w", header.Name, err)
 	}
+
+	// Compute where the symlink would resolve to when followed.
+	// We use filepath.Join (not SecureJoin) because we need to see
+	// where the OS would actually resolve the symlink, not a sanitized version.
+	linkTarget := header.Linkname
+	linkDir := filepath.Dir(target)
+	resolvedPath := filepath.Clean(filepath.Join(linkDir, linkTarget))
+
+	// Validate the resolved path is within destDir
+	cleanDestDir := filepath.Clean(destDir)
+	if !strings.HasPrefix(resolvedPath, cleanDestDir+string(filepath.Separator)) &&
+		resolvedPath != cleanDestDir {
+		return fmt.Errorf("symlink escape attempt: %s -> %s resolves outside destDir",
+			header.Name, linkTarget)
+	}
+
 	return os.Symlink(linkTarget, target)
 }
 

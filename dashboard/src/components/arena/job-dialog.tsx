@@ -104,12 +104,12 @@ function validateJobTypeOptions(form: FormState): string | null {
       return isValidThreshold ? null : "Passing threshold must be a number between 0 and 1";
     }
     case "loadtest": {
-      const rps = parseInt(form.targetRPS, 10);
+      const rps = Number.parseInt(form.targetRPS, 10);
       const isValidRps = !isNaN(rps) && rps >= 1;
       return isValidRps ? null : "Target RPS must be a positive integer";
     }
     case "datagen": {
-      const count = parseInt(form.sampleCount, 10);
+      const count = Number.parseInt(form.sampleCount, 10);
       const isValidCount = !isNaN(count) && count >= 1;
       return isValidCount ? null : "Sample count must be a positive integer";
     }
@@ -139,7 +139,7 @@ function validateForm(
     return `${jobType.label} requires an Enterprise license`;
   }
 
-  const workers = parseInt(form.workers, 10);
+  const workers = Number.parseInt(form.workers, 10);
   if (isNaN(workers) || workers < 1) {
     return "Workers must be a positive integer";
   }
@@ -158,7 +158,7 @@ function buildSpec(form: FormState): ArenaJobSpec {
     arenaFile: form.arenaFile || undefined,
     type: form.type,
     workers: {
-      replicas: parseInt(form.workers, 10),
+      replicas: Number.parseInt(form.workers, 10),
     },
     timeout: form.timeout || undefined,
     verbose: form.verbose || undefined,
@@ -174,11 +174,11 @@ function buildSpec(form: FormState): ArenaJobSpec {
     spec.loadtest = {
       profileType: form.profileType as "constant" | "ramp" | "spike" | "soak",
       duration: form.duration,
-      targetRPS: parseInt(form.targetRPS, 10),
+      targetRPS: Number.parseInt(form.targetRPS, 10),
     };
   } else if (form.type === "datagen") {
     spec.datagen = {
-      sampleCount: parseInt(form.sampleCount, 10),
+      sampleCount: Number.parseInt(form.sampleCount, 10),
       deduplicate: form.deduplicate,
       outputFormat: "jsonl",
     };

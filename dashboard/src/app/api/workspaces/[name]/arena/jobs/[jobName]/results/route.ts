@@ -77,9 +77,9 @@ export const GET = withWorkspaceAccess<RouteParams>(
         failedTasks: status?.progress?.failed || 0,
         // Test result summary (if available)
         summary: resultSummary ? {
-          totalItems: parseInt(resultSummary.totalItems || "0", 10),
-          passedItems: parseInt(resultSummary.passedItems || "0", 10),
-          failedItems: parseInt(resultSummary.failedItems || "0", 10),
+          totalItems: Number.parseInt(resultSummary.totalItems || "0", 10),
+          passedItems: Number.parseInt(resultSummary.passedItems || "0", 10),
+          failedItems: Number.parseInt(resultSummary.failedItems || "0", 10),
           passRate: resultSummary.passRate,
           avgDurationMs: resultSummary.avgDurationMs,
         } : null,

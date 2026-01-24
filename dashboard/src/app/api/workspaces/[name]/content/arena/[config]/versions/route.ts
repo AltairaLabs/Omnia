@@ -22,8 +22,8 @@ import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import * as fs from "fs/promises";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 // Base path for workspace content (configurable via environment)
 const WORKSPACE_CONTENT_BASE =
