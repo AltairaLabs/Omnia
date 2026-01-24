@@ -61,15 +61,9 @@ spec:
             - --metrics-secure=false
             {{- end }}
             {{- end }}
-            {{- if .Values.api.enabled }}
-            - --api-bind-address=:{{ .Values.api.port }}
-            {{- end }}
             {{- if .Values.arena.enabled }}
             - --arena-worker-image={{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.arena.worker.image.pullPolicy }}
-            {{- if .Values.api.enabled }}
-            - --artifact-base-url=http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}/artifacts
-            {{- end }}
             {{- if and .Values.arena.queue (eq .Values.arena.queue.type "redis") }}
             {{- if .Values.redis.enabled }}
             - --redis-addr={{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.arena.queue.redis.port | default 6379 }}
@@ -93,11 +87,6 @@ spec:
             - --dev-mode
             {{- end }}
           ports:
-            {{- if .Values.api.enabled }}
-            - name: api
-              containerPort: {{ .Values.api.port }}
-              protocol: TCP
-            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

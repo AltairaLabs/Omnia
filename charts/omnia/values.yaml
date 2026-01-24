@@ -112,13 +112,6 @@ webhook:
   # -- Port for webhooks
   port: 9443
 
-# Artifact server configuration (serves Arena artifacts)
-api:
-  # -- Enable artifact server
-  enabled: true
-  # -- Port for artifact server
-  port: 8082
-
 # RBAC configuration
 rbac:
   # -- Create RBAC resources
