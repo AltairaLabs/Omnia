@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -38,6 +39,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/arena/aggregator"
+	"github.com/altairalabs/omnia/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
 	"github.com/altairalabs/omnia/pkg/license"
@@ -120,6 +122,7 @@ func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, names
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources,verbs=get;list;watch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -306,9 +309,9 @@ func (r *ArenaJobReconciler) getWorkerImagePullPolicy() corev1.PullPolicy {
 }
 
 // resolveProviderOverrides resolves provider CRDs based on ArenaJob's providerOverrides.
-// Returns the resolved providers and their environment variables.
+// Returns providers grouped by their selector group name (e.g., "default", "judge").
 // If no overrides are specified, returns nil (use ArenaConfig providers).
-func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) ([]*omniav1alpha1.Provider, error) {
+func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (map[string][]*omniav1alpha1.Provider, error) {
 	if len(arenaJob.Spec.ProviderOverrides) == 0 {
 		return nil, nil
 	}
@@ -316,18 +319,33 @@ func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arena
 	log := logf.FromContext(ctx)
 	log.V(1).Info("resolving provider overrides", "overrides", len(arenaJob.Spec.ProviderOverrides))
 
-	// Resolve all provider overrides
+	// Resolve all provider overrides (returns map of group -> providers)
 	resolvedByGroup, err := selector.ResolveProviderOverrides(ctx, r.Client, arenaJob.Namespace, arenaJob.Spec.ProviderOverrides)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve provider overrides: %w", err)
 	}
 
-	// Deduplicate providers across groups (same provider may match multiple selectors)
+	totalCount := 0
+	for group, groupProviders := range resolvedByGroup {
+		log.V(1).Info("resolved providers for group", "group", group, "count", len(groupProviders))
+		totalCount += len(groupProviders)
+	}
+
+	log.Info("resolved provider overrides", "groups", len(resolvedByGroup), "totalProviders", totalCount)
+	return resolvedByGroup, nil
+}
+
+// flattenProviders returns a deduplicated flat list of providers from grouped providers.
+// Used for building env vars from provider secrets.
+func flattenProviders(providersByGroup map[string][]*omniav1alpha1.Provider) []*omniav1alpha1.Provider {
+	if len(providersByGroup) == 0 {
+		return nil
+	}
+
 	seen := make(map[string]bool)
 	var allProviders []*omniav1alpha1.Provider
 
-	for group, groupProviders := range resolvedByGroup {
-		log.V(1).Info("resolved providers for group", "group", group, "count", len(groupProviders))
+	for _, groupProviders := range providersByGroup {
 		for _, p := range groupProviders {
 			key := fmt.Sprintf("%s/%s", p.Namespace, p.Name)
 			if !seen[key] {
@@ -337,8 +355,7 @@ func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arena
 		}
 	}
 
-	log.Info("resolved provider overrides", "totalProviders", len(allProviders))
-	return allProviders, nil
+	return allProviders
 }
 
 // buildProviderEnvVarsFromCRDs builds environment variables for Provider CRDs.
@@ -458,6 +475,170 @@ func (r *ArenaJobReconciler) resolveToolRegistryOverride(ctx context.Context, ar
 	return toolOverrides, nil
 }
 
+// getOverrideConfigMapName returns the name for the override ConfigMap.
+func getOverrideConfigMapName(jobName string) string {
+	return fmt.Sprintf("%s-overrides", jobName)
+}
+
+// convertProviderToOverride converts a Provider CRD to a ProviderOverride struct.
+func convertProviderToOverride(p *omniav1alpha1.Provider) overrides.ProviderOverride {
+	override := overrides.ProviderOverride{
+		ID:      p.Name,
+		Type:    string(p.Spec.Type),
+		Model:   p.Spec.Model,
+		BaseURL: p.Spec.BaseURL,
+	}
+
+	// Set the env var name for credentials
+	if p.Spec.SecretRef != nil {
+		secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
+		if len(secretRefs) > 0 {
+			override.SecretEnvVar = secretRefs[0].EnvVar
+		}
+	}
+
+	// Set defaults if specified
+	if p.Spec.Defaults != nil {
+		if p.Spec.Defaults.Temperature != nil {
+			if temp, err := strconv.ParseFloat(*p.Spec.Defaults.Temperature, 64); err == nil {
+				override.Temperature = temp
+			}
+		}
+		if p.Spec.Defaults.TopP != nil {
+			if topP, err := strconv.ParseFloat(*p.Spec.Defaults.TopP, 64); err == nil {
+				override.TopP = topP
+			}
+		}
+		if p.Spec.Defaults.MaxTokens != nil {
+			override.MaxTokens = int(*p.Spec.Defaults.MaxTokens)
+		}
+	}
+
+	return override
+}
+
+// convertToolOverrides converts tool overrides to the override config format.
+func convertToolOverrides(toolOverrides map[string]selector.ToolOverrideConfig) []overrides.ToolOverride {
+	if len(toolOverrides) == 0 {
+		return nil
+	}
+
+	tools := make([]overrides.ToolOverride, 0, len(toolOverrides))
+	for _, t := range toolOverrides {
+		tools = append(tools, overrides.ToolOverride{
+			Name:         t.Name,
+			Description:  t.Description,
+			Endpoint:     t.Endpoint,
+			HandlerType:  t.HandlerType,
+			RegistryName: t.RegistryName,
+			HandlerName:  t.HandlerName,
+		})
+	}
+	return tools
+}
+
+// buildOverrideConfig creates the override config from resolved CRDs.
+// providersByGroup maps group name (e.g., "default", "judge") to Provider CRDs.
+// toolOverrides maps tool name to its override configuration.
+func (r *ArenaJobReconciler) buildOverrideConfig(
+	ctx context.Context,
+	providersByGroup map[string][]*omniav1alpha1.Provider,
+	toolOverrides map[string]selector.ToolOverrideConfig,
+) *overrides.OverrideConfig {
+	log := logf.FromContext(ctx)
+
+	// If no overrides, return nil (worker will use arena config providers)
+	if len(providersByGroup) == 0 && len(toolOverrides) == 0 {
+		return nil
+	}
+
+	cfg := &overrides.OverrideConfig{
+		Providers: make(map[string][]overrides.ProviderOverride),
+	}
+
+	// Convert Provider CRDs to ProviderOverride structs
+	for groupName, groupProviders := range providersByGroup {
+		overrideList := make([]overrides.ProviderOverride, 0, len(groupProviders))
+		for _, p := range groupProviders {
+			override := convertProviderToOverride(p)
+			overrideList = append(overrideList, override)
+			log.V(1).Info("added provider override",
+				"group", groupName,
+				"id", override.ID,
+				"type", override.Type,
+				"model", override.Model,
+			)
+		}
+		cfg.Providers[groupName] = overrideList
+	}
+
+	// Convert tool overrides
+	cfg.Tools = convertToolOverrides(toolOverrides)
+
+	return cfg
+}
+
+// createOverrideConfigMap creates or updates the ConfigMap containing provider/tool overrides.
+// The ConfigMap is owned by the ArenaJob and will be garbage collected when the job is deleted.
+func (r *ArenaJobReconciler) createOverrideConfigMap(
+	ctx context.Context,
+	arenaJob *omniav1alpha1.ArenaJob,
+	config *overrides.OverrideConfig,
+) error {
+	log := logf.FromContext(ctx)
+
+	// Marshal config to JSON
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal override config: %w", err)
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      getOverrideConfigMapName(arenaJob.Name),
+			Namespace: arenaJob.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":       "arena-overrides",
+				"app.kubernetes.io/managed-by": "omnia-operator",
+				"omnia.altairalabs.ai/job":     arenaJob.Name,
+			},
+		},
+		Data: map[string]string{
+			overrides.ConfigMapKey: string(configJSON),
+		},
+	}
+
+	// Set ArenaJob as owner - ConfigMap will be GC'd when job is deleted
+	if err := ctrl.SetControllerReference(arenaJob, cm, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference: %w", err)
+	}
+
+	// Try to create, update if already exists
+	if err := r.Create(ctx, cm); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// Update existing ConfigMap
+			existing := &corev1.ConfigMap{}
+			if getErr := r.Get(ctx, types.NamespacedName{
+				Name:      cm.Name,
+				Namespace: cm.Namespace,
+			}, existing); getErr != nil {
+				return fmt.Errorf("failed to get existing ConfigMap: %w", getErr)
+			}
+			existing.Data = cm.Data
+			if updateErr := r.Update(ctx, existing); updateErr != nil {
+				return fmt.Errorf("failed to update ConfigMap: %w", updateErr)
+			}
+			log.V(1).Info("updated override ConfigMap", "name", cm.Name)
+		} else {
+			return fmt.Errorf("failed to create ConfigMap: %w", err)
+		}
+	} else {
+		log.Info("created override ConfigMap", "name", cm.Name)
+	}
+
+	return nil
+}
+
 // createWorkerJob creates a K8s Job for the Arena workers.
 func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource) error {
 	log := logf.FromContext(ctx)
@@ -467,8 +648,8 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		replicas = arenaJob.Spec.Workers.Replicas
 	}
 
-	// Resolve provider overrides if specified
-	providerCRDs, err := r.resolveProviderOverrides(ctx, arenaJob)
+	// Resolve provider overrides if specified (grouped by selector group name)
+	providersByGroup, err := r.resolveProviderOverrides(ctx, arenaJob)
 	if err != nil {
 		return fmt.Errorf("failed to resolve provider overrides: %w", err)
 	}
@@ -478,6 +659,18 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	if err != nil {
 		return fmt.Errorf("failed to resolve tool registry override: %w", err)
 	}
+
+	// Build and create override ConfigMap if there are any overrides
+	overrideConfig := r.buildOverrideConfig(ctx, providersByGroup, toolOverrides)
+	hasOverrides := overrideConfig != nil
+	if hasOverrides {
+		if err := r.createOverrideConfigMap(ctx, arenaJob, overrideConfig); err != nil {
+			return fmt.Errorf("failed to create override ConfigMap: %w", err)
+		}
+	}
+
+	// Flatten providers for env var injection (secrets still passed as env vars)
+	providerCRDs := flattenProviders(providersByGroup)
 
 	// Determine arena file path
 	arenaFile := arenaJob.Spec.ArenaFile
@@ -579,11 +772,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Add provider credential environment variables from provider overrides
+	// Secrets are still passed as env vars for security (not in ConfigMap)
 	var providerEnvVars []corev1.EnvVar
 	if len(providerCRDs) > 0 {
 		log.Info("using provider overrides for credentials", "count", len(providerCRDs))
 		for _, p := range providerCRDs {
-			log.Info("provider",
+			log.V(1).Info("provider",
 				"name", p.Name,
 				"type", p.Spec.Type,
 				"model", p.Spec.Model,
@@ -593,17 +787,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 	env = append(env, providerEnvVars...)
 
-	// Add tool registry overrides as JSON if specified
-	if len(toolOverrides) > 0 {
-		toolOverridesJSON, err := json.Marshal(toolOverrides)
-		if err != nil {
-			return fmt.Errorf("failed to marshal tool overrides: %w", err)
-		}
+	// Add overrides path env var if ConfigMap was created
+	if hasOverrides {
 		env = append(env, corev1.EnvVar{
-			Name:  "ARENA_TOOL_OVERRIDES",
-			Value: string(toolOverridesJSON),
+			Name:  "ARENA_OVERRIDES_PATH",
+			Value: "/etc/arena/overrides.json",
 		})
-		log.Info("tool overrides configured", "count", len(toolOverrides))
 	}
 
 	// Determine if we should mount workspace content PVC
@@ -627,6 +816,25 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Name:      "tmp",
 			MountPath: "/tmp",
 		},
+	}
+
+	// Add override ConfigMap volume if there are overrides
+	if hasOverrides {
+		volumes = append(volumes, corev1.Volume{
+			Name: "arena-overrides",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: getOverrideConfigMapName(arenaJob.Name),
+					},
+				},
+			},
+		})
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "arena-overrides",
+			MountPath: "/etc/arena",
+			ReadOnly:  true,
+		})
 	}
 
 	// Add workspace content volume if using filesystem mode

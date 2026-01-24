@@ -31,6 +31,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
+	"github.com/altairalabs/omnia/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
 	"gopkg.in/yaml.v3"
@@ -57,6 +58,10 @@ type Config struct {
 	ContentVersion string // Content-addressable version hash
 	ConfigFile     string // Arena config filename within the content path
 
+	// Override configuration from mounted ConfigMap
+	// OverridesPath is the path to the mounted overrides.json file
+	OverridesPath string
+
 	// Redis configuration
 	RedisAddr     string
 	RedisPassword string
@@ -69,6 +74,7 @@ type Config struct {
 	Verbose       bool // Enable verbose/debug output from promptarena
 
 	// Override configurations (resolved from CRDs by controller)
+	// Deprecated: Use OverridesPath instead
 	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
 }
 
@@ -107,6 +113,7 @@ func loadConfig() (*Config, error) {
 		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
 		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
 		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
+		OverridesPath:  os.Getenv("ARENA_OVERRIDES_PATH"),
 		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
 		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
 		RedisDB:        0,
@@ -123,7 +130,7 @@ func loadConfig() (*Config, error) {
 		return nil, errors.New("ARENA_CONTENT_PATH is required")
 	}
 
-	// Parse tool overrides if provided
+	// Parse tool overrides if provided (legacy env var, prefer OverridesPath)
 	if toolOverridesJSON := os.Getenv("ARENA_TOOL_OVERRIDES"); toolOverridesJSON != "" {
 		var toolOverrides map[string]ToolOverrideConfig
 		if err := json.Unmarshal([]byte(toolOverridesJSON), &toolOverrides); err != nil {
@@ -315,8 +322,17 @@ func executeWorkItem(
 	// The workspace content is mounted read-only, so we need a writable path for media files
 	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
 
-	// Apply tool overrides from ToolRegistry CRDs
-	if len(cfg.ToolOverrides) > 0 {
+	// Load and apply overrides from ConfigMap (new method - takes precedence)
+	overrideCfg, err := loadOverrides(cfg.OverridesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load overrides: %w", err)
+	}
+	if overrideCfg != nil {
+		if err := applyOverridesFromConfig(arenaCfg, overrideCfg, cfg.Verbose); err != nil {
+			return nil, fmt.Errorf("failed to apply overrides from ConfigMap: %w", err)
+		}
+	} else if len(cfg.ToolOverrides) > 0 {
+		// Fall back to legacy tool overrides from env var (for backwards compatibility)
 		if err := applyToolOverrides(arenaCfg, cfg.ToolOverrides, cfg.Verbose); err != nil {
 			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
 		}
@@ -645,6 +661,133 @@ func applyToolOverrides(cfg *config.Config, overrides map[string]ToolOverrideCon
 
 	if verbose && appliedCount > 0 {
 		fmt.Printf("  Applied %d tool override(s)\n", appliedCount)
+	}
+
+	return nil
+}
+
+// loadOverrides reads the override config from the mounted ConfigMap file.
+// Returns nil if the file doesn't exist (no overrides configured).
+func loadOverrides(path string) (*overrides.OverrideConfig, error) {
+	if path == "" {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read overrides file: %w", err)
+	}
+
+	var cfg overrides.OverrideConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse overrides: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// applyProviderOverrides injects provider configs from CRD overrides into the arena config.
+// Providers are added to LoadedProviders and can be used by the engine.
+func applyProviderOverrides(
+	arenaCfg *config.Config,
+	providersByGroup map[string][]overrides.ProviderOverride,
+	verbose bool,
+) {
+	if len(providersByGroup) == 0 {
+		return
+	}
+
+	if arenaCfg.LoadedProviders == nil {
+		arenaCfg.LoadedProviders = make(map[string]*config.Provider)
+	}
+
+	appliedCount := 0
+	for groupName, groupProviders := range providersByGroup {
+		for _, p := range groupProviders {
+			// Create a PromptKit-compatible provider config
+			provider := &config.Provider{
+				ID:      p.ID,
+				Type:    p.Type,
+				Model:   p.Model,
+				BaseURL: p.BaseURL,
+				Defaults: config.ProviderDefaults{
+					Temperature: float32(p.Temperature),
+					TopP:        float32(p.TopP),
+					MaxTokens:   p.MaxTokens,
+				},
+			}
+
+			// Set credential from env var if specified
+			if p.SecretEnvVar != "" {
+				provider.Credential = &config.CredentialConfig{
+					CredentialEnv: p.SecretEnvVar,
+				}
+			}
+
+			// Add to LoadedProviders (overwriting any existing provider with same ID)
+			arenaCfg.LoadedProviders[p.ID] = provider
+
+			// Track provider group for filtering
+			if arenaCfg.ProviderGroups == nil {
+				arenaCfg.ProviderGroups = make(map[string]string)
+			}
+			arenaCfg.ProviderGroups[p.ID] = groupName
+
+			appliedCount++
+			if verbose {
+				credStatus := "no credentials required"
+				if p.SecretEnvVar != "" {
+					if os.Getenv(p.SecretEnvVar) != "" {
+						credStatus = fmt.Sprintf("✓ %s set", p.SecretEnvVar)
+					} else {
+						credStatus = fmt.Sprintf("✗ %s MISSING", p.SecretEnvVar)
+					}
+				}
+				fmt.Printf("  Provider override: %s (%s/%s) group=%s [%s]\n",
+					p.ID, p.Type, p.Model, groupName, credStatus)
+			}
+		}
+	}
+
+	if verbose && appliedCount > 0 {
+		fmt.Printf("  Applied %d provider override(s)\n", appliedCount)
+	}
+}
+
+// applyOverridesFromConfig applies all overrides from the loaded override config.
+// This handles both provider and tool overrides from the ConfigMap.
+func applyOverridesFromConfig(
+	arenaCfg *config.Config,
+	overrideCfg *overrides.OverrideConfig,
+	verbose bool,
+) error {
+	if overrideCfg == nil {
+		return nil
+	}
+
+	// Apply provider overrides first
+	applyProviderOverrides(arenaCfg, overrideCfg.Providers, verbose)
+
+	// Apply tool overrides
+	if len(overrideCfg.Tools) > 0 {
+		// Convert to the legacy ToolOverrideConfig format for compatibility
+		toolOverrides := make(map[string]ToolOverrideConfig)
+		for _, t := range overrideCfg.Tools {
+			toolOverrides[t.Name] = ToolOverrideConfig{
+				Name:         t.Name,
+				Description:  t.Description,
+				Endpoint:     t.Endpoint,
+				HandlerType:  t.HandlerType,
+				RegistryName: t.RegistryName,
+				HandlerName:  t.HandlerName,
+			}
+		}
+		if err := applyToolOverrides(arenaCfg, toolOverrides, verbose); err != nil {
+			return fmt.Errorf("failed to apply tool overrides: %w", err)
+		}
 	}
 
 	return nil

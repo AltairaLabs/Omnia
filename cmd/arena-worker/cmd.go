@@ -47,8 +47,13 @@ func run(ctx context.Context) error {
 	fmt.Printf("  Type: %s\n", cfg.JobType)
 	fmt.Printf("  Content: %s (version: %s)\n", cfg.ContentPath, cfg.ContentVersion)
 
-	// Log tool registry overrides
-	logToolOverrides(cfg)
+	// Log override config if present
+	if cfg.OverridesPath != "" {
+		logOverrideConfig(cfg.OverridesPath)
+	} else {
+		// Log legacy tool registry overrides (deprecated)
+		logToolOverrides(cfg)
+	}
 
 	// Log provider credential overrides (detected from environment)
 	logProviderOverrides()
@@ -95,6 +100,54 @@ func logToolOverrides(cfg *Config) {
 			fmt.Printf(" type=%s", override.HandlerType)
 		}
 		fmt.Printf("\n")
+	}
+}
+
+// logOverrideConfig logs details about the override config loaded from ConfigMap.
+func logOverrideConfig(path string) {
+	cfg, err := loadOverrides(path)
+	if err != nil {
+		fmt.Printf("  Override config: error loading from %s: %v\n", path, err)
+		return
+	}
+	if cfg == nil {
+		fmt.Printf("  Override config: none (file not found at %s)\n", path)
+		return
+	}
+
+	fmt.Printf("  Override config: %s\n", path)
+
+	// Log provider overrides by group
+	totalProviders := 0
+	for group, providers := range cfg.Providers {
+		fmt.Printf("    Provider group '%s': %d provider(s)\n", group, len(providers))
+		for _, p := range providers {
+			totalProviders++
+			credStatus := "no credentials required"
+			if p.SecretEnvVar != "" {
+				if os.Getenv(p.SecretEnvVar) != "" {
+					credStatus = fmt.Sprintf("✓ %s set", p.SecretEnvVar)
+				} else {
+					credStatus = fmt.Sprintf("✗ %s MISSING", p.SecretEnvVar)
+				}
+			}
+			model := p.Model
+			if model == "" {
+				model = "default"
+			}
+			fmt.Printf("      - %s (%s/%s) [%s]\n", p.ID, p.Type, model, credStatus)
+		}
+	}
+	if totalProviders > 0 {
+		fmt.Printf("    Total override providers: %d\n", totalProviders)
+	}
+
+	// Log tool overrides
+	if len(cfg.Tools) > 0 {
+		fmt.Printf("    Tool overrides: %d tool(s)\n", len(cfg.Tools))
+		for _, t := range cfg.Tools {
+			fmt.Printf("      - %s -> %s\n", t.Name, t.Endpoint)
+		}
 	}
 }
 

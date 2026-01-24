@@ -1823,10 +1823,11 @@ var _ = Describe("ArenaJob Controller", func() {
 			}
 
 			By("resolving provider overrides")
-			providers, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
+			providersByGroup, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(providers).To(HaveLen(1))
-			Expect(providers[0].Name).To(Equal("test-provider-1"))
+			Expect(providersByGroup).To(HaveLen(1))
+			Expect(providersByGroup["default"]).To(HaveLen(1))
+			Expect(providersByGroup["default"][0].Name).To(Equal("test-provider-1"))
 		})
 
 		It("should return nil when no provider overrides specified", func() {
@@ -1997,11 +1998,15 @@ var _ = Describe("ArenaJob Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			By("resolving provider overrides - should deduplicate")
-			providers, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
+			By("resolving provider overrides - should return per-group")
+			providersByGroup, err := reconciler.resolveProviderOverrides(ctx, arenaJob)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(providers).To(HaveLen(1)) // Should only have one provider despite matching both selectors
-			Expect(providers[0].Name).To(Equal("shared-provider"))
+			// Should have two groups (default and judge) each with the same provider
+			Expect(providersByGroup).To(HaveLen(2))
+			Expect(providersByGroup["default"]).To(HaveLen(1))
+			Expect(providersByGroup["judge"]).To(HaveLen(1))
+			Expect(providersByGroup["default"][0].Name).To(Equal("shared-provider"))
+			Expect(providersByGroup["judge"][0].Name).To(Equal("shared-provider"))
 		})
 	})
 
