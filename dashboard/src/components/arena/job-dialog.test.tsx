@@ -30,6 +30,15 @@ vi.mock("@/hooks/use-license", () => ({
   }),
 }));
 
+// Mock useArenaSourceContent hook
+vi.mock("@/hooks/use-arena-source-content", () => ({
+  useArenaSourceContent: () => ({
+    tree: [],
+    loading: false,
+    error: null,
+  }),
+}));
+
 // Helper to create mock sources
 function createMockSource(name: string, phase: string = "Ready"): ArenaSource {
   return {

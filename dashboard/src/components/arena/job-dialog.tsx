@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useArenaJobMutations } from "@/hooks/use-arena-jobs";
+import { useArenaSourceContent } from "@/hooks/use-arena-source-content";
 import { useLicense } from "@/hooks/use-license";
+import { FolderBrowser } from "./folder-browser";
 import {
   Dialog,
   DialogContent,
@@ -60,7 +62,8 @@ interface JobDialogProps {
 interface FormState {
   name: string;
   sourceRef: string;
-  arenaFile: string;
+  rootPath: string;
+  arenaFileName: string;
   type: ArenaJobType;
   workers: string;
   timeout: string;
@@ -81,7 +84,8 @@ function getInitialFormState(preselectedSource?: string): FormState {
   return {
     name: "",
     sourceRef: preselectedSource || "",
-    arenaFile: "config.arena.yaml",
+    rootPath: "",
+    arenaFileName: "config.arena.yaml",
     type: "evaluation",
     workers: "2",
     timeout: "30m",
@@ -152,10 +156,18 @@ function validateForm(
   return validateJobTypeOptions(form);
 }
 
+function buildArenaFilePath(rootPath: string, fileName: string): string | undefined {
+  if (!rootPath && !fileName) return undefined;
+  if (!rootPath) return fileName;
+  if (!fileName) return `${rootPath}/config.arena.yaml`;
+  return `${rootPath}/${fileName}`;
+}
+
 function buildSpec(form: FormState): ArenaJobSpec {
+  const arenaFile = buildArenaFilePath(form.rootPath, form.arenaFileName);
   const spec: ArenaJobSpec = {
     sourceRef: { name: form.sourceRef },
-    arenaFile: form.arenaFile || undefined,
+    arenaFile: arenaFile || undefined,
     type: form.type,
     workers: {
       replicas: Number.parseInt(form.workers, 10),
@@ -247,8 +259,43 @@ function JobDialogForm({
   );
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch source content for folder browser
+  const {
+    tree: sourceTree,
+    loading: contentLoading,
+    error: contentError,
+  } = useArenaSourceContent(formState.sourceRef || undefined);
+
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setFormState((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Handle source change - reset paths when source changes
+  const handleSourceChange = (newSourceRef: string) => {
+    setFormState((prev) => ({
+      ...prev,
+      sourceRef: newSourceRef,
+      rootPath: "",
+      arenaFileName: "config.arena.yaml",
+    }));
+  };
+
+  const handleFolderSelect = (path: string) => {
+    updateForm("rootPath", path);
+  };
+
+  const handleFileSelect = (filePath: string, folderPath: string, fileName: string) => {
+    // Only auto-fill if the selected file looks like an arena config
+    if (fileName.endsWith(".arena.yaml") || fileName.endsWith(".arena.yml")) {
+      setFormState((prev) => ({
+        ...prev,
+        rootPath: folderPath,
+        arenaFileName: fileName,
+      }));
+    } else {
+      // Just set the folder path for other files
+      updateForm("rootPath", folderPath);
+    }
   };
 
   const handleSubmit = async () => {
@@ -311,7 +358,7 @@ function JobDialogForm({
           <Label htmlFor="source">Source</Label>
           <Select
             value={formState.sourceRef}
-            onValueChange={(v) => updateForm("sourceRef", v)}
+            onValueChange={handleSourceChange}
           >
             <SelectTrigger id="source">
               <SelectValue placeholder="Select a source" />
@@ -336,17 +383,44 @@ function JobDialogForm({
           </p>
         </div>
 
-        {/* Arena File */}
+        {/* Folder Browser - only show when source is selected */}
+        {formState.sourceRef && (
+          <div className="space-y-2">
+            <Label>Root Folder</Label>
+            <FolderBrowser
+              tree={sourceTree}
+              loading={contentLoading}
+              error={contentError?.message}
+              selectedPath={formState.rootPath}
+              onSelectFolder={handleFolderSelect}
+              onSelectFile={handleFileSelect}
+              maxHeight="180px"
+            />
+            <p className="text-xs text-muted-foreground">
+              Select a root folder or click an arena config file to auto-fill both
+            </p>
+          </div>
+        )}
+
+        {/* Arena File Name */}
         <div className="space-y-2">
-          <Label htmlFor="arenaFile">Arena Config File</Label>
-          <Input
-            id="arenaFile"
-            placeholder="config.arena.yaml"
-            value={formState.arenaFile}
-            onChange={(e) => updateForm("arenaFile", e.target.value)}
-          />
+          <Label htmlFor="arenaFileName">Arena Config File</Label>
+          <div className="flex items-center gap-2">
+            {formState.rootPath && (
+              <code className="text-xs bg-muted px-2 py-1 rounded text-muted-foreground">
+                {formState.rootPath}/
+              </code>
+            )}
+            <Input
+              id="arenaFileName"
+              placeholder="config.arena.yaml"
+              value={formState.arenaFileName}
+              onChange={(e) => updateForm("arenaFileName", e.target.value)}
+              className="flex-1"
+            />
+          </div>
           <p className="text-xs text-muted-foreground">
-            Path to the arena config file within the source
+            Full path: {buildArenaFilePath(formState.rootPath, formState.arenaFileName) || "config.arena.yaml"}
           </p>
         </div>
 
