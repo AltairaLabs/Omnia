@@ -63,7 +63,8 @@ jobs:
       - name: Run E2E tests with coverage
         run: |
           # Start the server in background with demo mode
-          DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true npm run start &
+          # Set anonymous role to editor so E2E tests can test write operations
+          DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_AUTH_ANONYMOUS_ROLE=editor npm run start &
           # Wait for server to be ready
           npx wait-on http://localhost:3000 --timeout 60000
           # Run Playwright tests with coverage collection
