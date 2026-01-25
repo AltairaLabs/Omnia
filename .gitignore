@@ -46,5 +46,9 @@ charts/*/Chart.lock
 docs/local-backlog/
 
 .mcp.json
-arena-worker
-main
+# Compiled binaries (only at root level)
+/arena-worker
+/main
+
+# Test output directories
+**/out/
