@@ -36,6 +36,7 @@
     "@bufbuild/protobuf": "^2.10.2",
     "@hookform/resolvers": "^5.2.2",
     "@kubernetes/client-node": "^1.4.0",
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "^1.1.11",
@@ -82,6 +83,7 @@
     "remark-gfm": "^4.0.1",
     "swr": "^2.3.8",
     "tailwind-merge": "^3.4.0",
+    "tar-stream": "^3.1.7",
     "ws": "^8.18.0",
     "zod": "^4.3.5",
     "zustand": "^5.0.9"
@@ -101,6 +103,7 @@
     "@types/pg": "^8.16.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/tar-stream": "^3.1.4",
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.0.16",
     "axe-core": "^4.11.1",

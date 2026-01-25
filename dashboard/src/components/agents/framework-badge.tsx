@@ -19,11 +19,6 @@ const frameworkMeta: Record<
     icon: <PythonIcon className="h-3 w-3" />,
     color: "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20",
   },
-  crewai: {
-    label: "CrewAI",
-    icon: <PythonIcon className="h-3 w-3" />,
-    color: "bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/20",
-  },
   autogen: {
     label: "AutoGen",
     icon: <PythonIcon className="h-3 w-3" />,

@@ -15,8 +15,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.configRef.name
-      name: Config
+    - jsonPath: .spec.sourceRef.name
+      name: Source
       type: string
     - jsonPath: .spec.type
       name: Type
@@ -36,7 +36,7 @@ spec:
       openAPIV3Schema:
         description: |-
           ArenaJob is the Schema for the arenajobs API.
-          It defines a test execution that runs scenarios from an ArenaConfig.
+          It defines a test execution that runs scenarios from an ArenaSource.
         properties:
           apiVersion:
             description: |-
@@ -58,17 +58,12 @@ spec:
           spec:
             description: spec defines the desired state of ArenaJob
             properties:
-              configRef:
-                description: configRef references the ArenaConfig containing test
-                  configuration.
-                properties:
-                  name:
-                    description: name is the name of the referenced resource.
-                    minLength: 1
-                    type: string
-                required:
-                - name
-                type: object
+              arenaFile:
+                default: config.arena.yaml
+                description: |-
+                  arenaFile is the path to the arena config file within the source.
+                  Supports glob patterns for multi-file configs (e.g., "evals/*.arena.yaml").
+                type: string
               dataGen:
                 description: |-
                   dataGen configures data generation settings.
@@ -162,7 +157,7 @@ spec:
                           Expected keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
                         properties:
                           name:
-                            description: name is the name of the referenced resource.
+                            description: name is the name of the object.
                             minLength: 1
                             type: string
                         required:
@@ -180,10 +175,72 @@ spec:
                 required:
                 - type
                 type: object
+              providerOverrides:
+                additionalProperties:
+                  description: ProviderGroupSelector defines how to select Provider
+                    CRDs for a specific group.
+                  properties:
+                    selector:
+                      description: |-
+                        selector is a label selector to match Provider CRDs in the workspace namespace.
+                        All matching providers will be used for the group, with scenarios run against each.
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  required:
+                  - selector
+                  type: object
+                description: |-
+                  providerOverrides allows overriding provider groups defined in the arena config file.
+                  Keys are group names from the arena config file (e.g., "default", "judge").
+                  Use "*" as a catch-all for groups not explicitly specified.
+                  Provider CRDs matching the label selector provide credentials for the matched groups.
+                type: object
               scenarios:
                 description: |-
-                  scenarios overrides scenario selection from the ArenaConfig.
-                  If not specified, uses the ArenaConfig's scenario settings.
+                  scenarios filters which scenarios to run from the arena file.
+                  If not specified, runs all scenarios defined in the arena file.
                 properties:
                   exclude:
                     description: |-
@@ -227,6 +284,74 @@ spec:
                     description: timezone specifies the timezone for the cron schedule.
                     type: string
                 type: object
+              sourceRef:
+                description: sourceRef references the ArenaSource containing test
+                  scenarios and configuration.
+                properties:
+                  name:
+                    description: name is the name of the object.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              toolRegistryOverride:
+                description: |-
+                  toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
+                  with handlers from ToolRegistry CRDs. All tools from matching registries will
+                  override tools with matching names in the arena config.
+                properties:
+                  selector:
+                    description: |-
+                      selector is a label selector to match ToolRegistry CRDs in the workspace namespace.
+                      All tools from matching registries will override tools/mcp_servers defined in arena.config.yaml.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - selector
+                type: object
               ttlSecondsAfterFinished:
                 description: ttlSecondsAfterFinished specifies how long to keep completed
                   jobs.
@@ -241,6 +366,11 @@ spec:
                 - loadtest
                 - datagen
                 type: string
+              verbose:
+                description: |-
+                  verbose enables verbose/debug logging for promptarena execution.
+                  When enabled, workers will pass --verbose to promptarena for detailed output.
+                type: boolean
               workers:
                 description: workers configures the worker pool.
                 properties:
@@ -264,7 +394,7 @@ spec:
                     type: integer
                 type: object
             required:
-            - configRef
+            - sourceRef
             type: object
           status:
             description: status defines the observed state of ArenaJob

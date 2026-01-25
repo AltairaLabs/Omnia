@@ -27,12 +27,17 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s" -o arena-worker ./cmd/arena-worker
 
 # Build promptarena CLI if source is available
-# Otherwise, it must be provided externally via PROMPTARENA_BIN env var
-RUN if [ -f "promptkit-local/cmd/promptarena/main.go" ]; then \
+# promptarena has its own go.mod, so we build from within its directory
+RUN if [ -f "promptkit-local/tools/arena/cmd/promptarena/main.go" ]; then \
+        echo "Building promptarena from promptkit-local/tools/arena" && \
+        cd promptkit-local/tools/arena && \
+        go mod tidy && \
         CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-        go build -ldflags="-w -s" -o promptarena ./promptkit-local/cmd/promptarena; \
+        go build -ldflags="-w -s" -o /workspace/promptarena ./cmd/promptarena && \
+        chmod +x /workspace/promptarena; \
     else \
-        echo "Note: promptarena not found, must be provided externally" && \
+        echo "WARNING: promptarena source not found, creating placeholder" && \
+        echo "To enable: copy promptkit/tools to promptkit-local/tools" && \
         touch promptarena; \
     fi
 
@@ -45,10 +50,10 @@ WORKDIR /app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Copy worker binary
-COPY --from=builder /workspace/arena-worker /app/arena-worker
+COPY --from=builder --chmod=755 /workspace/arena-worker /app/arena-worker
 
 # Copy promptarena if built (may be empty placeholder)
-COPY --from=builder /workspace/promptarena /app/promptarena
+COPY --from=builder --chmod=755 /workspace/promptarena /app/promptarena
 
 # Set environment defaults
 ENV PROMPTARENA_BIN=/app/promptarena

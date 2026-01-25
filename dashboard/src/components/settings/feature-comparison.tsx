@@ -28,7 +28,7 @@ const FEATURE_COMPARISON: FeatureCategory[] = [
     category: "Source Types",
     features: [
       { name: "ConfigMap Sources", openCore: true, enterprise: true },
-      { name: "Git Repository Sources", openCore: false, enterprise: true },
+      { name: "Git Repository Sources", openCore: true, enterprise: true },
       { name: "OCI Registry Sources", openCore: false, enterprise: true },
       { name: "S3 Bucket Sources", openCore: false, enterprise: true },
     ],

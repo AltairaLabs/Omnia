@@ -203,7 +203,7 @@ describe("useArenaSource", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("fetches source and linked configs when name and workspace are provided", async () => {
+  it("fetches source when name and workspace are provided", async () => {
     const { useWorkspace } = await import("@/contexts/workspace-context");
     vi.mocked(useWorkspace).mockReturnValue({
       currentWorkspace: mockWorkspace,
@@ -214,19 +214,10 @@ describe("useArenaSource", () => {
       refetch: vi.fn(),
     });
 
-    const mockLinkedConfigs = [
-      { metadata: { name: "config-1" }, spec: { sourceRef: { name: "git-source" } } },
-    ];
-
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockSource),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockLinkedConfigs),
-      });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(mockSource),
+    });
 
     const { result } = renderHook(() => useArenaSource("git-source"));
 
@@ -237,11 +228,9 @@ describe("useArenaSource", () => {
     });
 
     expect(result.current.source).toEqual(mockSource);
-    expect(result.current.linkedConfigs).toEqual(mockLinkedConfigs);
     expect(result.current.error).toBeNull();
 
     expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/sources/git-source");
-    expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/test-workspace/arena/configs");
   });
 
   it("handles source fetch error", async () => {
@@ -601,47 +590,13 @@ describe("useArenaSourceMutations", () => {
   });
 });
 
-describe("useArenaSource - configs handling", () => {
+describe("useArenaSource - error handling", () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
   afterEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("handles configs fetch failure gracefully", async () => {
-    const { useWorkspace } = await import("@/contexts/workspace-context");
-    vi.mocked(useWorkspace).mockReturnValue({
-      currentWorkspace: mockWorkspace,
-      setCurrentWorkspace: vi.fn(),
-      workspaces: [mockWorkspace],
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockSource),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        statusText: "Internal Server Error",
-      });
-
-    const { result } = renderHook(() => useArenaSource("git-source"));
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    // Source should be loaded successfully
-    expect(result.current.source).toEqual(mockSource);
-    // But linked configs should be empty due to fetch failure
-    expect(result.current.linkedConfigs).toEqual([]);
-    expect(result.current.error).toBeNull();
   });
 
   it("handles 404 error for source", async () => {

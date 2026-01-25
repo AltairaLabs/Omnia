@@ -131,17 +131,26 @@ spec:
             failureThreshold: {{ .Values.dashboard.readinessProbe.failureThreshold | default 3 }}
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
-          {{- if and .Values.dashboard.persistence.enabled (eq .Values.dashboard.builtin.storeType "sqlite") }}
           volumeMounts:
+            {{- if and .Values.dashboard.persistence.enabled (eq .Values.dashboard.builtin.storeType "sqlite") }}
             - name: data
               mountPath: /data
-          {{- end }}
-      {{- if and .Values.dashboard.persistence.enabled (eq .Values.dashboard.builtin.storeType "sqlite") }}
+            {{- end }}
+            {{- if .Values.workspaceContent.enabled }}
+            - name: workspace-content
+              mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
+            {{- end }}
       volumes:
+        {{- if and .Values.dashboard.persistence.enabled (eq .Values.dashboard.builtin.storeType "sqlite") }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Values.dashboard.persistence.existingClaim | default (printf "%s-data" (include "omnia.dashboard.fullname" .)) }}
-      {{- end }}
+        {{- end }}
+        {{- if .Values.workspaceContent.enabled }}
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
+        {{- end }}
       {{- with .Values.dashboard.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

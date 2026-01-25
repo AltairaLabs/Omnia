@@ -126,6 +126,13 @@ func (q *RedisQueue) Push(ctx context.Context, jobID string, items []WorkItem) e
 	now := time.Now()
 	pendingKey := q.pendingKey(jobID)
 
+	// Store job metadata so Progress() can identify the job exists
+	metaKey := q.metaKey(jobID)
+	pipe.HSet(ctx, metaKey, map[string]interface{}{
+		"totalItems": len(items),
+		"createdAt":  now.Format(time.RFC3339),
+	})
+
 	for i := range items {
 		item := items[i]
 		item.JobID = jobID

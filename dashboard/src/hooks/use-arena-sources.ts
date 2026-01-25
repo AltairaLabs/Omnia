@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
-import type { ArenaSource, ArenaConfig } from "@/types/arena";
+import type { ArenaSource } from "@/types/arena";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
@@ -15,7 +15,6 @@ interface UseArenaSourcesResult {
 
 interface UseArenaSourceResult {
   source: ArenaSource | null;
-  linkedConfigs: ArenaConfig[];
   loading: boolean;
   error: Error | null;
   refetch: () => void;
@@ -78,20 +77,18 @@ export function useArenaSources(): UseArenaSourcesResult {
 }
 
 /**
- * Hook to fetch a single Arena source and its linked configs.
+ * Hook to fetch a single Arena source.
  */
 export function useArenaSource(name: string | undefined): UseArenaSourceResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
   const [source, setSource] = useState<ArenaSource | null>(null);
-  const [linkedConfigs, setLinkedConfigs] = useState<ArenaConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!workspace || !name) {
       setSource(null);
-      setLinkedConfigs([]);
       setLoading(false);
       return;
     }
@@ -100,36 +97,20 @@ export function useArenaSource(name: string | undefined): UseArenaSourceResult {
     setError(null);
 
     try {
-      // Fetch source and configs in parallel
-      const [sourceResponse, configsResponse] = await Promise.all([
-        fetch(`/api/workspaces/${workspace}/arena/sources/${name}`),
-        fetch(`/api/workspaces/${workspace}/arena/configs`),
-      ]);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/sources/${name}`);
 
-      if (!sourceResponse.ok) {
-        if (sourceResponse.status === 404) {
+      if (!response.ok) {
+        if (response.status === 404) {
           throw new Error("Source not found");
         }
-        throw new Error(`Failed to fetch source: ${sourceResponse.statusText}`);
+        throw new Error(`Failed to fetch source: ${response.statusText}`);
       }
 
-      const sourceData = await sourceResponse.json();
+      const sourceData = await response.json();
       setSource(sourceData);
-
-      if (configsResponse.ok) {
-        const configsData: ArenaConfig[] = await configsResponse.json();
-        // Filter configs that reference this source
-        const linked = configsData.filter(
-          (config) => config.spec?.sourceRef?.name === name
-        );
-        setLinkedConfigs(linked);
-      } else {
-        setLinkedConfigs([]);
-      }
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
       setSource(null);
-      setLinkedConfigs([]);
     } finally {
       setLoading(false);
     }
@@ -141,7 +122,6 @@ export function useArenaSource(name: string | undefined): UseArenaSourceResult {
 
   return {
     source,
-    linkedConfigs,
     loading,
     error,
     refetch: fetchData,

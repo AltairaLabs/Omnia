@@ -147,8 +147,8 @@ export function getSourceUrl(source: ArenaSource): string {
     const prefix = spec.s3.prefix ? "/" + spec.s3.prefix : "";
     return `s3://${spec.s3.bucket}${prefix}`;
   }
-  if (spec.type === "configmap" && spec.configMapRef) {
-    return spec.configMapRef.name;
+  if (spec.type === "configmap" && spec.configMap) {
+    return spec.configMap.name;
   }
   return "-";
 }

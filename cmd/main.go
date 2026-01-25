@@ -37,10 +37,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-	"github.com/altairalabs/omnia/internal/api"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
 	arenawebhook "github.com/altairalabs/omnia/internal/webhook"
+	"github.com/altairalabs/omnia/pkg/arena/aggregator"
+	"github.com/altairalabs/omnia/pkg/arena/queue"
 	"github.com/altairalabs/omnia/pkg/license"
 	// +kubebuilder:scaffold:imports
 )
@@ -69,7 +70,6 @@ func main() {
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
 	var probeAddr string
-	var apiAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var facadeImage string
@@ -80,7 +80,9 @@ func main() {
 	var tracingEndpoint string
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
-	var artifactBaseURL string
+	var workspaceContentPath string
+	var nfsServer string
+	var nfsPath string
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
@@ -105,8 +107,17 @@ func main() {
 		"The image to use for Arena worker containers. If not set, defaults to ghcr.io/altairalabs/arena-worker:latest")
 	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent. Default: IfNotPresent")
-	flag.StringVar(&artifactBaseURL, "artifact-base-url", "http://localhost:8082/artifacts",
-		"Base URL for serving Arena artifacts to workers. In-cluster, use the service URL.")
+	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
+		"Base path for workspace content volumes. ArenaSource syncs content to filesystem. "+
+			"Structure: {path}/{workspace}/{namespace}/arena/{source-name}/.")
+	flag.StringVar(&nfsServer, "nfs-server", "",
+		"NFS server address for workspace content (e.g., nfs-server.namespace.svc.cluster.local). "+
+			"When set with --nfs-path, Arena workers mount NFS directly for shared content access.")
+	flag.StringVar(&nfsPath, "nfs-path", "",
+		"NFS export path for workspace content (e.g., /nfsshare). Used with --nfs-server.")
+	var workspaceStorageClass string
+	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
+		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
 	flag.StringVar(&redisAddr, "redis-addr", "",
 		"Redis server address for Arena work queue (e.g., redis:6379). If empty, Arena queue features are disabled.")
 	flag.StringVar(&redisPassword, "redis-password", "",
@@ -118,7 +129,6 @@ func main() {
 	flag.BoolVar(&devMode, "dev-mode", false,
 		"Enable development mode with a full-featured license. DO NOT USE IN PRODUCTION.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the REST API server binds to for dashboard access.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -270,12 +280,6 @@ func main() {
 	}
 
 	// Arena Fleet controllers
-	arenaArtifactDir := "/tmp/arena-artifacts"
-	if err := os.MkdirAll(arenaArtifactDir, 0755); err != nil {
-		setupLog.Error(err, "unable to create arena artifact directory")
-		os.Exit(1)
-	}
-
 	// Create license validator for Arena Fleet
 	var licenseValidator *license.Validator
 	validatorOpts := []license.ValidatorOption{}
@@ -290,25 +294,34 @@ func main() {
 	}
 
 	if err := (&controller.ArenaSourceReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Recorder:         mgr.GetEventRecorderFor("arenasource-controller"),
-		ArtifactDir:      arenaArtifactDir,
-		ArtifactBaseURL:  artifactBaseURL,
-		LicenseValidator: licenseValidator,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Recorder:             mgr.GetEventRecorderFor("arenasource-controller"),
+		WorkspaceContentPath: workspaceContentPath,
+		MaxVersionsPerSource: 10, // Default version retention
+		LicenseValidator:     licenseValidator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)
 	}
-	if err := (&controller.ArenaConfigReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Recorder:         mgr.GetEventRecorderFor("arenaconfig-controller"),
-		LicenseValidator: licenseValidator,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaConfig")
-		os.Exit(1)
+	// Create Redis queue and aggregator for arena job result tracking
+	var arenaAggregator *aggregator.Aggregator
+	if redisAddr != "" {
+		redisQueue, err := queue.NewRedisQueue(queue.RedisOptions{
+			Addr:     redisAddr,
+			Password: redisPassword,
+			DB:       redisDB,
+			Options:  queue.DefaultOptions(),
+		})
+		if err != nil {
+			setupLog.Error(err, "failed to create Redis queue for arena aggregator")
+			// Continue without aggregator - results won't be tracked but jobs will still run
+		} else {
+			arenaAggregator = aggregator.New(redisQueue)
+			setupLog.Info("arena result aggregator initialized", "redisAddr", redisAddr)
+		}
 	}
+
 	if err := (&controller.ArenaJobReconciler{
 		Client:                mgr.GetClient(),
 		Scheme:                mgr.GetScheme(),
@@ -316,10 +329,14 @@ func main() {
 		WorkerImage:           arenaWorkerImage,
 		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
 		LicenseValidator:      licenseValidator,
+		Aggregator:            arenaAggregator,
 		// Redis configuration for lazy connection during reconciliation
-		RedisAddr:     redisAddr,
-		RedisPassword: redisPassword,
-		RedisDB:       redisDB,
+		RedisAddr:            redisAddr,
+		RedisPassword:        redisPassword,
+		RedisDB:              redisDB,
+		WorkspaceContentPath: workspaceContentPath, // If set, enables filesystem-based content access
+		NFSServer:            nfsServer,            // If set with NFSPath, workers mount NFS directly
+		NFSPath:              nfsPath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)
@@ -340,8 +357,9 @@ func main() {
 
 	// Workspace controller for multi-tenancy
 	if err := (&controller.WorkspaceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		DefaultStorageClass: workspaceStorageClass,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)
@@ -359,16 +377,6 @@ func main() {
 
 	// Setup signal handler once (can only be called once)
 	ctx := ctrl.SetupSignalHandler()
-
-	// Start the artifact server for Arena artifacts
-	if apiAddr != "" && apiAddr != "0" {
-		apiServer := api.NewServer(ctrl.Log, arenaArtifactDir)
-		go func() {
-			if err := apiServer.Run(ctx, apiAddr); err != nil {
-				setupLog.Error(err, "problem running artifact server")
-			}
-		}()
-	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {

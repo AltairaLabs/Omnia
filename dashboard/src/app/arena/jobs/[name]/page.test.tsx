@@ -76,7 +76,8 @@ const mockJob = {
   kind: "ArenaJob" as const,
   metadata: { name: "test-job", creationTimestamp: "2026-01-15T10:00:00Z" },
   spec: {
-    configRef: { name: "test-config" },
+    sourceRef: { name: "test-source" },
+    arenaFile: "arena.yaml",
     type: "evaluation" as const,
     workers: { replicas: 2 },
     timeout: "30m",
@@ -88,9 +89,12 @@ const mockJob = {
   },
   status: {
     phase: "Running" as const,
-    totalTasks: 100,
-    completedTasks: 50,
-    failedTasks: 0,
+    progress: {
+      total: 100,
+      completed: 50,
+      failed: 0,
+      pending: 50,
+    },
     workers: { desired: 2, active: 2 },
     startTime: "2026-01-15T10:00:00Z",
     conditions: [
@@ -204,7 +208,7 @@ describe("ArenaJobDetailPage", () => {
 
     expect(screen.getAllByText("test-job").length).toBeGreaterThan(0);
     expect(screen.getByText("Progress")).toBeInTheDocument();
-    expect(screen.getByText("Total Tasks")).toBeInTheDocument();
+    expect(screen.getByText("Work Items")).toBeInTheDocument();
   });
 
   it("shows cancel button for running job with write permission", async () => {
@@ -229,16 +233,16 @@ describe("ArenaJobDetailPage", () => {
     expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
-  it("shows delete button for completed job", async () => {
+  it("shows delete button for succeeded job", async () => {
     const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
 
-    const completedJob = {
+    const succeededJob = {
       ...mockJob,
-      status: { ...mockJob.status, phase: "Completed" as const },
+      status: { ...mockJob.status, phase: "Succeeded" as const },
     };
 
     vi.mocked(useArenaJob).mockReturnValue({
-      job: completedJob,
+      job: succeededJob,
       loading: false,
       error: null,
       refetch: mockRefetch,

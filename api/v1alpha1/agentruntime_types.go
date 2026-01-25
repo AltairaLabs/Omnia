@@ -383,7 +383,7 @@ type ProviderConfig struct {
 }
 
 // FrameworkType defines which agent framework to use.
-// +kubebuilder:validation:Enum=promptkit;langchain;crewai;autogen;custom
+// +kubebuilder:validation:Enum=promptkit;langchain;autogen;custom
 type FrameworkType string
 
 const (
@@ -391,8 +391,6 @@ const (
 	FrameworkTypePromptKit FrameworkType = "promptkit"
 	// FrameworkTypeLangChain uses the LangChain framework.
 	FrameworkTypeLangChain FrameworkType = "langchain"
-	// FrameworkTypeCrewAI uses the CrewAI framework.
-	FrameworkTypeCrewAI FrameworkType = "crewai"
 	// FrameworkTypeAutoGen uses Microsoft's AutoGen framework.
 	FrameworkTypeAutoGen FrameworkType = "autogen"
 	// FrameworkTypeCustom uses a user-provided container image.
@@ -621,7 +619,7 @@ type RuntimeConfig struct {
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
 type AgentRuntimeSpec struct {
 	// framework specifies which agent framework to use.
-	// Supports PromptKit, LangChain, CrewAI, AutoGen, or a custom image.
+	// Supports PromptKit, LangChain, AutoGen, or a custom image.
 	// If not specified, defaults to PromptKit.
 	// +optional
 	Framework *FrameworkConfig `json:"framework,omitempty"`

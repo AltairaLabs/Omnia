@@ -77,15 +77,19 @@ export interface ConfigMapSourceSpec {
 /** Artifact produced by ArenaSource reconciliation */
 export interface Artifact {
   /** Revision identifier (e.g., "main@sha1:abc123" for git) */
-  revision: string;
-  /** Internal URL to fetch the artifact */
-  url: string;
+  revision?: string;
+  /** Internal URL to fetch the artifact (legacy - tar.gz serving) */
+  url?: string;
   /** SHA256 checksum of the artifact */
   checksum: string;
   /** Size in bytes */
   size?: number;
   /** When the artifact was last updated */
   lastUpdateTime: string;
+  /** Relative path to content in workspace volume (e.g., "arena/my-source/.arena/versions/abc123") */
+  contentPath?: string;
+  /** Version identifier (short hash of checksum) */
+  version?: string;
 }
 
 /** ArenaSource specification */
@@ -101,7 +105,7 @@ export interface ArenaSourceSpec {
   /** S3 bucket configuration */
   s3?: S3SourceSpec;
   /** ConfigMap configuration */
-  configMapRef?: ConfigMapSourceSpec;
+  configMap?: ConfigMapSourceSpec;
   /** Secret containing credentials */
   secretRef?: LocalObjectReference;
   /** Suspend reconciliation */
@@ -132,10 +136,8 @@ export interface ArenaSource {
 }
 
 // =============================================================================
-// ArenaConfig - Configuration combining source with providers/tools
+// Common Reference Types
 // =============================================================================
-
-export type ArenaConfigPhase = "Pending" | "Ready" | "Failed";
 
 /** Reference to another resource */
 export interface ResourceRef {
@@ -153,96 +155,30 @@ export interface ScenarioFilter {
   exclude?: string[];
 }
 
-/** Self-play configuration for evaluation scenarios */
-export interface SelfPlayConfig {
-  /** Provider for simulated user */
-  providerRef?: ResourceRef;
-  /** Persona filtering */
-  personas?: {
-    /** Glob patterns to include */
-    include?: string[];
+/** Provider group selector using Kubernetes label selectors */
+export interface ProviderGroupSelector {
+  /** Label selector to match Provider CRDs */
+  selector: {
+    matchLabels?: Record<string, string>;
+    matchExpressions?: Array<{
+      key: string;
+      operator: "In" | "NotIn" | "Exists" | "DoesNotExist";
+      values?: string[];
+    }>;
   };
 }
 
-/** Default configuration values */
-export interface ArenaDefaults {
-  /** Default temperature for LLM calls */
-  temperature?: number;
-  /** Default concurrency level */
-  concurrency?: number;
-  /** Default timeout per scenario */
-  timeout?: string;
-}
-
-/** ArenaConfig specification */
-export interface ArenaConfigSpec {
-  /** Reference to the ArenaSource */
-  sourceRef: ResourceRef;
-  /** Path to arena.yaml within the artifact (default: "arena.yaml") */
-  arenaFile?: string;
-  /** Scenario filtering */
-  scenarios?: ScenarioFilter;
-  /** Provider references (workspace or shared) */
-  providers?: ResourceRef[];
-  /** ToolRegistry references (workspace or shared) */
-  toolRegistries?: ResourceRef[];
-  /** Self-play configuration */
-  selfPlay?: SelfPlayConfig;
-  /** Default values */
-  defaults?: ArenaDefaults;
-  /** Suspend reconciliation */
-  suspend?: boolean;
-}
-
-/** Provider status in ArenaConfig */
-export interface ArenaProviderStatus {
-  /** Provider name */
-  name: string;
-  /** Provider namespace */
-  namespace?: string;
-  /** Status (Ready, NotFound, Error) */
-  status: string;
-  /** Error message if any */
-  message?: string;
-}
-
-/** ToolRegistry status in ArenaConfig */
-export interface ArenaToolRegistryStatus {
-  /** ToolRegistry name */
-  name: string;
-  /** ToolRegistry namespace */
-  namespace?: string;
-  /** Number of tools available */
-  toolCount?: number;
-  /** Status (Ready, NotFound, Error) */
-  status: string;
-}
-
-/** ArenaConfig status */
-export interface ArenaConfigStatus {
-  /** Current phase */
-  phase?: ArenaConfigPhase;
-  /** Source revision being used */
-  sourceRevision?: string;
-  /** Number of scenarios discovered */
-  scenarioCount?: number;
-  /** Provider statuses */
-  providers?: ArenaProviderStatus[];
-  /** ToolRegistry statuses */
-  toolRegistries?: ArenaToolRegistryStatus[];
-  /** Standard conditions */
-  conditions?: Condition[];
-  /** Observed generation */
-  observedGeneration?: number;
-}
-
-/** ArenaConfig resource - combines source with providers/tools */
-export interface ArenaConfig {
-  apiVersion: "omnia.altairalabs.ai/v1alpha1";
-  kind: "ArenaConfig";
-  metadata: ObjectMeta;
-  spec: ArenaConfigSpec;
-  status?: ArenaConfigStatus;
+/** ToolRegistry selector using Kubernetes label selectors */
+export interface ToolRegistrySelector {
+  /** Label selector to match ToolRegistry CRDs */
+  selector: {
+    matchLabels?: Record<string, string>;
+    matchExpressions?: Array<{
+      key: string;
+      operator: "In" | "NotIn" | "Exists" | "DoesNotExist";
+      values?: string[];
+    }>;
+  };
 }
 
 // =============================================================================
@@ -250,7 +186,7 @@ export interface ArenaConfig {
 // =============================================================================
 
 export type ArenaJobType = "evaluation" | "loadtest" | "datagen";
-export type ArenaJobPhase = "Pending" | "Running" | "Completed" | "Failed" | "Cancelled";
+export type ArenaJobPhase = "Pending" | "Running" | "Succeeded" | "Failed" | "Cancelled";
 
 /** Worker autoscaling configuration */
 export interface WorkerAutoscaleConfig {
@@ -367,12 +303,18 @@ export interface ScheduleConfig {
 
 /** ArenaJob specification */
 export interface ArenaJobSpec {
-  /** Reference to ArenaConfig */
-  configRef: ResourceRef;
+  /** Reference to ArenaSource containing test scenarios and configuration */
+  sourceRef: ResourceRef;
+  /** Path to arena config file within the source (default: "config.arena.yaml") */
+  arenaFile?: string;
   /** Job type */
   type: ArenaJobType;
-  /** Scenario filtering (overrides config) */
+  /** Scenario filtering - filters which scenarios to run from the arena file */
   scenarios?: ScenarioFilter;
+  /** Provider overrides - use label selectors to match Provider CRDs for each group */
+  providerOverrides?: Record<string, ProviderGroupSelector>;
+  /** Tool registry override - use label selectors to match ToolRegistry CRDs */
+  toolRegistryOverride?: ToolRegistrySelector;
   /** Worker configuration */
   workers?: WorkerConfig;
   /** Queue configuration */
@@ -391,6 +333,8 @@ export interface ArenaJobSpec {
   timeout?: string;
   /** Suspend job */
   suspend?: boolean;
+  /** Enable verbose/debug logging for promptarena */
+  verbose?: boolean;
 }
 
 /** Worker status within a job */
@@ -405,6 +349,26 @@ export interface JobWorkerStatus {
   failed?: number;
 }
 
+/** Job progress tracking (work item level) */
+export interface JobProgress {
+  /** Total work items */
+  total?: number;
+  /** Completed work items */
+  completed?: number;
+  /** Failed work items */
+  failed?: number;
+  /** Pending work items */
+  pending?: number;
+}
+
+/** Job result with summary metrics */
+export interface JobResult {
+  /** URL to detailed results */
+  url?: string;
+  /** Summary metrics (passRate, totalItems, passedItems, failedItems, avgDurationMs) */
+  summary?: Record<string, string>;
+}
+
 /** ArenaJob status */
 export interface ArenaJobStatus {
   /** Current phase */
@@ -413,20 +377,22 @@ export interface ArenaJobStatus {
   startTime?: string;
   /** Job completion time */
   completionTime?: string;
-  /** Total tasks/scenarios to process */
-  totalTasks?: number;
-  /** Completed tasks */
-  completedTasks?: number;
-  /** Failed tasks */
-  failedTasks?: number;
+  /** Job progress tracking */
+  progress?: JobProgress;
+  /** Job result summary */
+  result?: JobResult;
+  /** Active worker count */
+  activeWorkers?: number;
   /** Worker status */
   workers?: JobWorkerStatus;
-  /** URL to results artifact */
-  resultsUrl?: string;
   /** Standard conditions */
   conditions?: Condition[];
   /** Observed generation */
   observedGeneration?: number;
+  /** Last schedule time (for recurring jobs) */
+  lastScheduleTime?: string;
+  /** Next schedule time (for recurring jobs) */
+  nextScheduleTime?: string;
 }
 
 /** ArenaJob resource - executes evaluation/loadtest/datagen */
@@ -608,11 +574,6 @@ export interface ArenaStats {
     failed: number;
     active: number;
   };
-  configs: {
-    total: number;
-    ready: number;
-    scenarios: number;
-  };
   jobs: {
     total: number;
     running: number;
@@ -641,4 +602,331 @@ export interface Scenario {
   assertions?: string[];
   /** File path within artifact */
   path: string;
+  /** Reference to the prompt to use */
+  promptRef?: string;
+}
+
+// =============================================================================
+// Arena.yaml Content Types (parsed from ArenaSource artifact)
+// =============================================================================
+
+/** Prompt config reference in arena.yaml */
+export interface ArenaPromptConfigRef {
+  /** Prompt ID used for reference */
+  id: string;
+  /** Path to the prompt file */
+  file: string;
+  /** Variable overrides */
+  vars?: Record<string, string>;
+}
+
+/** Provider reference in arena.yaml */
+export interface ArenaProviderRef {
+  /** Path to the provider file */
+  file: string;
+  /** Provider group (e.g., "default", "evaluation") */
+  group?: string;
+}
+
+/** Scenario reference in arena.yaml */
+export interface ArenaScenarioRef {
+  /** Path to the scenario file */
+  file: string;
+}
+
+/** Tool reference in arena.yaml */
+export interface ArenaToolRef {
+  /** Path to the tool file */
+  file: string;
+}
+
+/** MCP server configuration */
+export interface ArenaMcpServer {
+  /** Command to run the MCP server */
+  command: string;
+  /** Arguments for the command */
+  args?: string[];
+  /** Environment variables */
+  env?: Record<string, string>;
+}
+
+/** Judge configuration for LLM-as-judge evaluation */
+export interface ArenaJudge {
+  /** Provider ID to use for this judge */
+  provider: string;
+}
+
+/** Judge defaults configuration */
+export interface ArenaJudgeDefaults {
+  /** Default prompt for judge-based assertions */
+  prompt?: string;
+  /** Registry path for judge resources */
+  registryPath?: string;
+}
+
+/** Output configuration in defaults */
+export interface ArenaOutputConfig {
+  /** Output directory */
+  dir?: string;
+  /** Output formats to generate */
+  formats?: string[];
+}
+
+/** Session recording configuration */
+export interface ArenaSessionConfig {
+  /** Enable session recording */
+  enabled?: boolean;
+  /** Directory for session files */
+  dir?: string;
+}
+
+/** State management configuration */
+export interface ArenaStateConfig {
+  /** Enable state management */
+  enabled?: boolean;
+  /** Maximum history turns to retain */
+  maxHistoryTurns?: number;
+  /** Persistence backend */
+  persistence?: string;
+  /** Redis URL for persistence */
+  redisUrl?: string;
+}
+
+/** Default configuration values in arena.yaml */
+export interface ArenaDefaultsConfig {
+  /** Default temperature for LLM calls */
+  temperature?: number;
+  /** Default top_p for LLM calls */
+  topP?: number;
+  /** Default max tokens */
+  maxTokens?: number;
+  /** Random seed for reproducibility */
+  seed?: number;
+  /** Concurrency level */
+  concurrency?: number;
+  /** Timeout per scenario */
+  timeout?: string;
+  /** Maximum retries */
+  maxRetries?: number;
+  /** Output configuration */
+  output?: ArenaOutputConfig;
+  /** Session recording configuration */
+  session?: ArenaSessionConfig;
+  /** Failure behavior conditions */
+  failOn?: string[];
+  /** State management configuration */
+  state?: ArenaStateConfig;
+}
+
+/** Self-play configuration in arena.yaml */
+export interface ArenaSelfPlayConfig {
+  /** Enable self-play mode */
+  enabled: boolean;
+  /** Persona file for simulated user */
+  persona?: string;
+  /** Provider ID for simulated user */
+  provider?: string;
+}
+
+// =============================================================================
+// Parsed Content Types (fully resolved from file references)
+// =============================================================================
+
+/** Parsed prompt config from .prompt.yaml file */
+export interface ParsedPromptConfig {
+  /** Prompt ID */
+  id: string;
+  /** Human-readable name */
+  name: string;
+  /** Prompt version */
+  version?: string;
+  /** Description */
+  description?: string;
+  /** Task type */
+  taskType?: string;
+  /** System template (may be truncated for display) */
+  systemTemplate?: string;
+  /** Variables used in the template */
+  variables?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    default?: string;
+    description?: string;
+  }>;
+  /** Tool names this prompt can use */
+  allowedTools?: string[];
+  /** Validators configured */
+  validators?: Array<{
+    type: string;
+    config?: Record<string, unknown>;
+  }>;
+  /** Source file path */
+  file: string;
+}
+
+/** Parsed provider config from .provider.yaml file */
+export interface ParsedProviderConfig {
+  /** Provider ID */
+  id: string;
+  /** Provider name */
+  name: string;
+  /** Provider type (openai, anthropic, gemini, mock) */
+  type: string;
+  /** Model identifier */
+  model: string;
+  /** Provider group */
+  group?: string;
+  /** Pricing information */
+  pricing?: {
+    inputPer1kTokens?: number;
+    outputPer1kTokens?: number;
+  };
+  /** Default parameters */
+  defaults?: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+  };
+  /** Source file path */
+  file: string;
+}
+
+/** Parsed scenario from .scenario.yaml file */
+export interface ParsedScenario {
+  /** Scenario ID */
+  id: string;
+  /** Scenario name */
+  name: string;
+  /** Description */
+  description?: string;
+  /** Task type */
+  taskType?: string;
+  /** Conversation turns */
+  turns?: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+  /** Number of turns */
+  turnCount?: number;
+  /** Expected assertions/behaviors */
+  assertions?: string[];
+  /** Tags for filtering */
+  tags?: string[];
+  /** Source file path */
+  file: string;
+}
+
+/** Parsed tool from .tool.yaml file */
+export interface ParsedTool {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description: string;
+  /** Tool mode (mock, live, mcp) */
+  mode?: string;
+  /** Timeout in milliseconds */
+  timeout?: number;
+  /** Input schema (JSON Schema) */
+  inputSchema?: Record<string, unknown>;
+  /** Output schema (JSON Schema) */
+  outputSchema?: Record<string, unknown>;
+  /** Whether mock data is available */
+  hasMockData?: boolean;
+  /** Source file path */
+  file: string;
+}
+
+/** A file in the arena package */
+export interface ArenaPackageFile {
+  /** File path relative to package root */
+  path: string;
+  /** File content (YAML/JSON as string) - only populated when fetched individually */
+  content?: string;
+  /** File type based on YAML kind field */
+  type: "arena" | "prompt" | "provider" | "scenario" | "tool" | "persona" | "other";
+  /** File size in bytes */
+  size: number;
+}
+
+/** Directory structure node for file tree */
+export interface ArenaPackageTreeNode {
+  /** Node name (file or directory name) */
+  name: string;
+  /** Full path */
+  path: string;
+  /** Whether this is a directory */
+  isDirectory: boolean;
+  /** Children nodes (for directories) */
+  children?: ArenaPackageTreeNode[];
+  /** File type (for files) */
+  type?: ArenaPackageFile["type"];
+}
+
+/** Arena pack content for file browser view */
+export interface ArenaConfigContent {
+  /** Package files with metadata (type, size) */
+  files: ArenaPackageFile[];
+  /** File tree structure for navigation */
+  fileTree: ArenaPackageTreeNode[];
+  /** Entry point file path (e.g., config.arena.yaml) */
+  entryPoint?: string;
+}
+
+// =============================================================================
+// Version Types (for ArenaSource version switching)
+// =============================================================================
+
+/** Metadata for a single version of ArenaSource content */
+export interface ArenaVersion {
+  /** Version hash (short hash identifier) */
+  hash: string;
+  /** When this version was created/synced */
+  createdAt: string;
+  /** Total size of the version content in bytes */
+  size: number;
+  /** Number of files in this version */
+  fileCount: number;
+  /** Whether this is the most recently synced (latest) version */
+  isLatest: boolean;
+}
+
+/** Response from the versions API */
+export interface ArenaVersionsResponse {
+  /** Name of the ArenaSource */
+  sourceName: string;
+  /** Current HEAD version hash (active version) */
+  head: string | null;
+  /** List of available versions */
+  versions: ArenaVersion[];
+}
+
+// =============================================================================
+// Source Content Types (for folder browser in config creation)
+// =============================================================================
+
+/** A node in the source content tree (file or directory) */
+export interface ArenaSourceContentNode {
+  /** Node name (file or directory name) */
+  name: string;
+  /** Full path relative to source root */
+  path: string;
+  /** Whether this is a directory */
+  isDirectory: boolean;
+  /** Children nodes (for directories only) */
+  children?: ArenaSourceContentNode[];
+  /** File size in bytes (for files only) */
+  size?: number;
+}
+
+/** Response from the source content API */
+export interface ArenaSourceContentResponse {
+  /** Name of the ArenaSource */
+  sourceName: string;
+  /** Content tree structure */
+  tree: ArenaSourceContentNode[];
+  /** Total number of files */
+  fileCount: number;
+  /** Total number of directories */
+  directoryCount: number;
 }

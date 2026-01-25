@@ -17,21 +17,24 @@ limitations under the License.
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/PromptKit/runtime/logger"
+	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
+	"github.com/altairalabs/omnia/pkg/arena/overrides"
+	"github.com/altairalabs/omnia/pkg/arena/providers"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
+	"gopkg.in/yaml.v3"
 )
 
 // Status constants for execution results.
@@ -48,9 +51,16 @@ type Config struct {
 	ConfigName   string
 	JobType      string
 
-	// Artifact configuration
-	ArtifactURL      string
-	ArtifactRevision string
+	// Filesystem content configuration
+	// ContentPath is the mount point for the job's content (e.g., /workspace-content)
+	// The content is isolated via subPath to only show the job's root folder
+	ContentPath    string
+	ContentVersion string // Content-addressable version hash
+	ConfigFile     string // Arena config filename within the content path
+
+	// Override configuration from mounted ConfigMap
+	// OverridesPath is the path to the mounted overrides.json file
+	OverridesPath string
 
 	// Redis configuration
 	RedisAddr     string
@@ -58,10 +68,24 @@ type Config struct {
 	RedisDB       int
 
 	// Worker configuration
-	WorkDir        string
-	PromptArenaBin string
-	PollInterval   time.Duration
-	ShutdownDelay  time.Duration
+	WorkDir       string
+	PollInterval  time.Duration
+	ShutdownDelay time.Duration
+	Verbose       bool // Enable verbose/debug output from promptarena
+
+	// Override configurations (resolved from CRDs by controller)
+	// Deprecated: Use OverridesPath instead
+	ToolOverrides map[string]ToolOverrideConfig // Tool name -> override config
+}
+
+// ToolOverrideConfig contains the configuration for a tool override from ToolRegistry CRD.
+type ToolOverrideConfig struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	HandlerName  string `json:"handlerName"`
+	RegistryName string `json:"registryName"`
+	HandlerType  string `json:"handlerType,omitempty"`
 }
 
 // ExecutionResult represents the result of running a scenario.
@@ -82,26 +106,37 @@ type AssertionResult struct {
 
 func loadConfig() (*Config, error) {
 	cfg := &Config{
-		JobName:          os.Getenv("ARENA_JOB_NAME"),
-		JobNamespace:     os.Getenv("ARENA_JOB_NAMESPACE"),
-		ConfigName:       os.Getenv("ARENA_CONFIG_NAME"),
-		JobType:          os.Getenv("ARENA_JOB_TYPE"),
-		ArtifactURL:      os.Getenv("ARENA_ARTIFACT_URL"),
-		ArtifactRevision: os.Getenv("ARENA_ARTIFACT_REVISION"),
-		RedisAddr:        getEnvOrDefault("REDIS_ADDR", "redis:6379"),
-		RedisPassword:    os.Getenv("REDIS_PASSWORD"),
-		RedisDB:          0,
-		WorkDir:          getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
-		PromptArenaBin:   getEnvOrDefault("PROMPTARENA_BIN", "promptarena"),
-		PollInterval:     getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
-		ShutdownDelay:    getDurationEnv("ARENA_SHUTDOWN_DELAY", 5*time.Second),
+		JobName:        os.Getenv("ARENA_JOB_NAME"),
+		JobNamespace:   os.Getenv("ARENA_JOB_NAMESPACE"),
+		ConfigName:     os.Getenv("ARENA_CONFIG_NAME"),
+		JobType:        os.Getenv("ARENA_JOB_TYPE"),
+		ContentPath:    os.Getenv("ARENA_CONTENT_PATH"),
+		ContentVersion: os.Getenv("ARENA_CONTENT_VERSION"),
+		ConfigFile:     os.Getenv("ARENA_CONFIG_FILE"), // Config file name in content path
+		OverridesPath:  os.Getenv("ARENA_OVERRIDES_PATH"),
+		RedisAddr:      getEnvOrDefault("REDIS_ADDR", "redis:6379"),
+		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
+		RedisDB:        0,
+		WorkDir:        getEnvOrDefault("ARENA_WORK_DIR", "/tmp/arena"),
+		PollInterval:   getDurationEnv("ARENA_POLL_INTERVAL", 100*time.Millisecond),
+		ShutdownDelay:  getDurationEnv("ARENA_SHUTDOWN_DELAY", 5*time.Second),
+		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
 	}
-	if cfg.ArtifactURL == "" {
-		return nil, errors.New("ARENA_ARTIFACT_URL is required")
+	if cfg.ContentPath == "" {
+		return nil, errors.New("ARENA_CONTENT_PATH is required")
+	}
+
+	// Parse tool overrides if provided (legacy env var, prefer OverridesPath)
+	if toolOverridesJSON := os.Getenv("ARENA_TOOL_OVERRIDES"); toolOverridesJSON != "" {
+		var toolOverrides map[string]ToolOverrideConfig
+		if err := json.Unmarshal([]byte(toolOverridesJSON), &toolOverrides); err != nil {
+			return nil, fmt.Errorf("failed to parse ARENA_TOOL_OVERRIDES: %w", err)
+		}
+		cfg.ToolOverrides = toolOverrides
 	}
 
 	return cfg, nil
@@ -123,155 +158,20 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	return defaultValue
 }
 
-func downloadAndExtract(ctx context.Context, cfg *Config) (string, error) {
-	// Create work directory
-	bundleDir := filepath.Join(cfg.WorkDir, "bundle")
-	if err := os.MkdirAll(bundleDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create work directory: %w", err)
-	}
-
-	// Download artifact
-	tarPath := filepath.Join(cfg.WorkDir, "bundle.tar.gz")
-	if err := downloadFile(ctx, cfg.ArtifactURL, tarPath); err != nil {
-		return "", fmt.Errorf("failed to download artifact: %w", err)
-	}
-
-	// Extract tarball
-	if err := extractTarGz(tarPath, bundleDir); err != nil {
-		return "", fmt.Errorf("failed to extract artifact: %w", err)
-	}
-
-	// Clean up tarball (ignore error, non-critical)
-	_ = os.Remove(tarPath)
-
-	return bundleDir, nil
-}
-
-func downloadFile(ctx context.Context, url, destPath string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// getContentPath validates and returns the mounted content path.
+func getContentPath(cfg *Config) (string, error) {
+	// Validate that the content path exists and is accessible
+	info, err := os.Stat(cfg.ContentPath)
 	if err != nil {
-		return err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
-
-	out, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
-
-	_, err = io.Copy(out, resp.Body)
-	return err
-}
-
-func extractTarGz(tarPath, destDir string) error {
-	file, err := os.Open(tarPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	gzr, err := gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("content path does not exist: %s", cfg.ContentPath)
 		}
-		if err != nil {
-			return err
-		}
-
-		// Sanitize path to prevent directory traversal
-		target := filepath.Join(destDir, header.Name)
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("invalid tar path: %s", header.Name)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := extractRegularFile(target, tr, header.Mode); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			// Validate and sanitize symlink target to prevent symlink escape attacks
-			safeLinkTarget, err := sanitizeSymlinkTarget(destDir, target, header.Linkname)
-			if err != nil {
-				return fmt.Errorf("invalid symlink in archive: %w", err)
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return err
-			}
-			if err := os.Symlink(safeLinkTarget, target); err != nil {
-				return err
-			}
-		}
+		return "", fmt.Errorf("failed to access content path: %w", err)
 	}
-
-	return nil
-}
-
-func extractRegularFile(target string, tr *tar.Reader, mode int64) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		return err
+	if !info.IsDir() {
+		return "", fmt.Errorf("content path is not a directory: %s", cfg.ContentPath)
 	}
-	outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(mode))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = outFile.Close() }()
-
-	_, err = io.Copy(outFile, tr)
-	return err
-}
-
-// sanitizeSymlinkTarget validates a symlink target from an archive and returns
-// a safe relative path. This prevents symlink escape attacks (CWE-22).
-func sanitizeSymlinkTarget(destDir, symlinkPath, linkTarget string) (string, error) {
-	// Reject absolute symlink targets
-	if filepath.IsAbs(linkTarget) {
-		return "", fmt.Errorf("absolute symlink target not allowed: %s", linkTarget)
-	}
-
-	// Resolve the symlink target relative to the symlink's directory
-	linkDir := filepath.Dir(symlinkPath)
-	resolvedPath := filepath.Join(linkDir, linkTarget)
-	resolvedPath = filepath.Clean(resolvedPath)
-
-	// Verify resolved path stays within destDir
-	cleanDestDir := filepath.Clean(destDir)
-	if !strings.HasPrefix(resolvedPath, cleanDestDir+string(os.PathSeparator)) &&
-		resolvedPath != cleanDestDir {
-		return "", fmt.Errorf("symlink target escapes destination: %s", linkTarget)
-	}
-
-	// Compute the relative path from the symlink to the target
-	// This ensures we're not using the raw archive data
-	relPath, err := filepath.Rel(linkDir, resolvedPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to compute relative path: %w", err)
-	}
-
-	return relPath, nil
+	return cfg.ContentPath, nil
 }
 
 func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundlePath string) error {
@@ -320,6 +220,8 @@ func checkContextDone(ctx context.Context) bool {
 }
 
 // handlePopError handles errors from queue.Pop and returns (done, newEmptyCount, error).
+//
+//nolint:unparam // maxEmptyPolls kept as parameter for testability
 func handlePopError(
 	ctx context.Context, err error, emptyCount, maxEmptyPolls int, cfg *Config, q queue.WorkQueue, jobID string,
 ) (bool, int, error) {
@@ -388,60 +290,505 @@ func executeWorkItem(
 ) (*ExecutionResult, error) {
 	start := time.Now()
 
-	// Build command arguments
-	args := []string{
-		"run",
-		"--bundle", bundlePath,
-		"--scenario", item.ScenarioID,
-		"--provider", item.ProviderID,
-		"--output-format", "json",
-	}
-
-	// Add config if present
-	if len(item.Config) > 0 {
-		configPath := filepath.Join(cfg.WorkDir, fmt.Sprintf("config-%s.json", item.ID))
-		if err := os.WriteFile(configPath, item.Config, 0644); err != nil {
-			return nil, fmt.Errorf("failed to write config: %w", err)
-		}
-		args = append(args, "--config", configPath)
-		defer func() { _ = os.Remove(configPath) }()
-	}
-
-	// Execute promptarena
-	cmd := exec.CommandContext(ctx, cfg.PromptArenaBin, args...)
-	cmd.Dir = bundlePath
-
-	output, err := cmd.Output()
-	duration := time.Since(start)
-
 	result := &ExecutionResult{
-		DurationMs: float64(duration.Milliseconds()),
-		Metrics:    make(map[string]float64),
+		Metrics: make(map[string]float64),
 	}
 
+	// Find the arena config file
+	configPath := findArenaConfigFile(bundlePath, cfg.ConfigFile)
+	if configPath == "" {
+		return nil, fmt.Errorf("arena config file not found in bundle: %s", bundlePath)
+	}
+
+	// Configure verbose logging BEFORE creating the engine
+	if cfg.Verbose {
+		fmt.Printf("  Loading arena config from: %s\n", configPath)
+		logger.SetVerbose(true)
+		logger.SetOutput(os.Stderr) // Ensure logs go to stderr for kubectl logs
+	}
+
+	// Load configuration from file BEFORE creating engine so we can modify it
+	arenaCfg, err := config.LoadConfig(configPath)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			result.Status = statusFail
-			result.Error = string(exitErr.Stderr)
-			return result, nil
-		}
-		return nil, fmt.Errorf("failed to execute promptarena: %w", err)
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Parse output JSON
-	if len(output) > 0 {
-		if err := json.Unmarshal(output, result); err != nil {
-			// If output isn't valid JSON, treat as pass with raw output
-			result.Status = statusPass
+	// Configure settings BEFORE creating engine (media storage is created during engine init)
+	if cfg.Verbose {
+		arenaCfg.Defaults.Verbose = true
+	}
+
+	// Set output directory to a writable location
+	// The workspace content is mounted read-only, so we need a writable path for media files
+	arenaCfg.Defaults.Output.Dir = "/tmp/arena-output"
+
+	// Load and apply overrides from ConfigMap (new method - takes precedence)
+	overrideCfg, err := loadOverrides(cfg.OverridesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load overrides: %w", err)
+	}
+	if overrideCfg != nil {
+		if err := applyOverridesFromConfig(arenaCfg, overrideCfg, cfg.Verbose); err != nil {
+			return nil, fmt.Errorf("failed to apply overrides from ConfigMap: %w", err)
+		}
+	} else if len(cfg.ToolOverrides) > 0 {
+		// Fall back to legacy tool overrides from env var (for backwards compatibility)
+		if err := applyToolOverrides(arenaCfg, cfg.ToolOverrides, cfg.Verbose); err != nil {
+			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
+		}
+	}
+
+	// Build registries and executors from the config
+	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, err :=
+		engine.BuildEngineComponents(arenaCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build engine components: %w", err)
+	}
+
+	// Create engine with all components
+	eng, err := engine.NewEngine(arenaCfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create engine: %w", err)
+	}
+	defer func() { _ = eng.Close() }()
+
+	// Validate provider credentials before execution
+	if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
+		result.Status = statusFail
+		result.Error = err.Error()
+		result.DurationMs = float64(time.Since(start).Milliseconds())
+		return result, nil
+	}
+
+	// Determine scenario filter
+	scenarioFilter := []string{}
+	if item.ScenarioID != "" && item.ScenarioID != "default" {
+		scenarioFilter = []string{item.ScenarioID}
+	}
+
+	// Determine provider filter - empty means use all providers from arena config
+	providerFilter := []string{}
+	if item.ProviderID != "" {
+		providerFilter = []string{item.ProviderID}
+	}
+
+	// Generate run plan for this specific provider (or all if no override)
+	plan, err := eng.GenerateRunPlan(
+		[]string{},     // no region filter
+		providerFilter, // filter to this provider (empty = all from config)
+		scenarioFilter, // scenario filter (empty = all)
+		[]string{},     // no eval filter
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate run plan: %w", err)
+	}
+
+	if len(plan.Combinations) == 0 {
+		result.Status = statusPass
+		result.DurationMs = float64(time.Since(start).Milliseconds())
+		return result, nil
+	}
+
+	if cfg.Verbose {
+		providerDesc := "all providers"
+		if item.ProviderID != "" {
+			providerDesc = "provider " + item.ProviderID
+		}
+		fmt.Printf("  Executing %d scenario(s) with %s\n",
+			len(plan.Combinations), providerDesc)
+	}
+
+	// Execute runs with concurrency of 1 (single work item at a time)
+	runIDs, err := eng.ExecuteRuns(ctx, plan, 1)
+	if err != nil {
+		return nil, fmt.Errorf("execution failed: %w", err)
+	}
+
+	// Build result from state store
+	result = buildExecutionResult(eng.GetStateStore(), runIDs, start, cfg.Verbose)
+	return result, nil
+}
+
+// findArenaConfigFile looks for the arena config file in the bundle directory.
+// If configFile is provided, it uses that specific file.
+// Otherwise, it checks for common naming conventions: config.arena.yaml, arena.yaml, config.yaml.
+func findArenaConfigFile(bundlePath, configFile string) string {
+	// If a specific config file is provided, use it
+	if configFile != "" {
+		path := filepath.Join(bundlePath, configFile)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		// Config file was specified but not found - fall through to search
+	}
+
+	// Search for common arena config file names
+	candidates := []string{
+		"config.arena.yaml",
+		"config.arena.yml",
+		"arena.yaml",
+		"arena.yml",
+		"config.yaml",
+		"config.yml",
+	}
+
+	for _, name := range candidates {
+		path := filepath.Join(bundlePath, name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return ""
+}
+
+// runAggregator collects and aggregates run results.
+type runAggregator struct {
+	passCount     int
+	failCount     int
+	errors        []string
+	totalDuration time.Duration
+	assertions    []AssertionResult
+	verbose       bool
+}
+
+// processRun processes a single run's state and updates aggregated counts.
+func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaConversationState) {
+	if state.RunMetadata == nil {
+		if a.verbose {
+			fmt.Printf("    Run %s: no metadata available\n", runID)
+		}
+		return
+	}
+	meta := state.RunMetadata
+	a.totalDuration += meta.Duration
+
+	if meta.Error != "" {
+		a.errors = append(a.errors, fmt.Sprintf("run %s: %s", runID, meta.Error))
+		a.failCount++
+		if a.verbose {
+			fmt.Printf("    Run %s FAILED: %s\n", runID, meta.Error)
 		}
 	} else {
-		result.Status = statusPass
+		a.passCount++
+		if a.verbose {
+			fmt.Printf("    Run %s PASSED (duration: %v)\n", runID, meta.Duration)
+		}
 	}
 
-	if result.Status == "" {
-		result.Status = statusPass
+	a.processAssertions(meta.ConversationAssertionResults)
+}
+
+// processAssertions extracts assertion results and adjusts pass/fail counts.
+func (a *runAggregator) processAssertions(assertions []arenastatestore.ConversationValidationResult) {
+	for _, assertion := range assertions {
+		a.assertions = append(a.assertions, AssertionResult{
+			Name:    assertion.Type,
+			Passed:  assertion.Passed,
+			Message: assertion.Message,
+		})
+		if a.verbose {
+			status := "PASS"
+			if !assertion.Passed {
+				status = "FAIL"
+			}
+			fmt.Printf("      Assertion [%s] %s: %s\n", assertion.Type, status, assertion.Message)
+		}
+		if !assertion.Passed && a.passCount > 0 {
+			a.passCount--
+			a.failCount++
+		}
+	}
+}
+
+// buildExecutionResult constructs an ExecutionResult from the engine's state store.
+func buildExecutionResult(store statestore.Store, runIDs []string, startTime time.Time, verbose bool) *ExecutionResult {
+	result := &ExecutionResult{
+		DurationMs: float64(time.Since(startTime).Milliseconds()),
+		Metrics:    make(map[string]float64),
+		Assertions: []AssertionResult{},
 	}
 
-	return result, nil
+	arenaStore, ok := store.(*arenastatestore.ArenaStateStore)
+	if !ok {
+		return buildFallbackResult(result, runIDs)
+	}
+
+	agg := &runAggregator{verbose: verbose}
+	for _, runID := range runIDs {
+		state, err := arenaStore.GetArenaState(context.Background(), runID)
+		if err != nil {
+			if verbose {
+				fmt.Printf("  Warning: failed to get state for run %s: %v\n", runID, err)
+			}
+			agg.failCount++
+			continue
+		}
+		agg.processRun(runID, state)
+	}
+
+	result.Assertions = agg.assertions
+	populateMetrics(result, agg, len(runIDs))
+	setResultStatus(result, agg)
+
+	return result
+}
+
+// buildFallbackResult creates a simple result when arena store is unavailable.
+func buildFallbackResult(result *ExecutionResult, runIDs []string) *ExecutionResult {
+	if len(runIDs) > 0 {
+		result.Status = statusPass
+	} else {
+		result.Status = statusFail
+		result.Error = "no runs executed"
+	}
+	return result
+}
+
+// populateMetrics sets the metrics on the result from aggregated data.
+func populateMetrics(result *ExecutionResult, agg *runAggregator, totalRuns int) {
+	result.Metrics["totalDurationMs"] = float64(agg.totalDuration.Milliseconds())
+	result.Metrics["runsExecuted"] = float64(totalRuns)
+	result.Metrics["runsPassed"] = float64(agg.passCount)
+	result.Metrics["runsFailed"] = float64(agg.failCount)
+}
+
+// setResultStatus determines the overall status based on aggregated counts.
+func setResultStatus(result *ExecutionResult, agg *runAggregator) {
+	if agg.failCount > 0 {
+		result.Status = statusFail
+		if len(agg.errors) > 0 {
+			result.Error = strings.Join(agg.errors, "; ")
+		}
+	} else if agg.passCount > 0 {
+		result.Status = statusPass
+	} else {
+		result.Status = statusFail
+		result.Error = "no runs completed successfully"
+	}
+}
+
+// toolConfigWrapper wraps tool configuration for YAML parsing/serialization.
+type toolConfigWrapper struct {
+	APIVersion string         `yaml:"apiVersion"`
+	Kind       string         `yaml:"kind"`
+	Metadata   toolMetadata   `yaml:"metadata"`
+	Spec       toolSpecConfig `yaml:"spec"`
+}
+
+type toolMetadata struct {
+	Name string `yaml:"name"`
+}
+
+type toolSpecConfig struct {
+	Name         string                 `yaml:"name,omitempty"`
+	Description  string                 `yaml:"description,omitempty"`
+	InputSchema  map[string]interface{} `yaml:"input_schema,omitempty"`
+	OutputSchema map[string]interface{} `yaml:"output_schema,omitempty"`
+	Mode         string                 `yaml:"mode,omitempty"`
+	TimeoutMs    int                    `yaml:"timeout_ms,omitempty"`
+	MockResult   interface{}            `yaml:"mock_result,omitempty"`
+	MockTemplate string                 `yaml:"mock_template,omitempty"`
+	HTTP         *toolHTTPConfig        `yaml:"http,omitempty"`
+}
+
+type toolHTTPConfig struct {
+	URL            string            `yaml:"url"`
+	Method         string            `yaml:"method,omitempty"`
+	Headers        map[string]string `yaml:"headers,omitempty"`
+	HeadersFromEnv []string          `yaml:"headers_from_env,omitempty"`
+	TimeoutMs      int               `yaml:"timeout_ms,omitempty"`
+}
+
+// applyToolOverrides modifies LoadedTools in the config to apply overrides from ToolRegistry CRDs.
+// For each tool that has an override, it changes the mode to "http" and sets the endpoint URL.
+func applyToolOverrides(cfg *config.Config, overrides map[string]ToolOverrideConfig, verbose bool) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	appliedCount := 0
+	for i, toolData := range cfg.LoadedTools {
+		// Parse the tool YAML
+		var wrapper toolConfigWrapper
+		if err := yaml.Unmarshal(toolData.Data, &wrapper); err != nil {
+			// Skip tools that can't be parsed - they'll fail later in validation
+			continue
+		}
+
+		// Get tool name (prefer spec.name, fall back to metadata.name)
+		toolName := wrapper.Spec.Name
+		if toolName == "" {
+			toolName = wrapper.Metadata.Name
+		}
+
+		// Check if there's an override for this tool
+		override, hasOverride := overrides[toolName]
+		if !hasOverride {
+			continue
+		}
+
+		// Apply the override - change mode to http and set endpoint
+		wrapper.Spec.Mode = "http"
+		if wrapper.Spec.HTTP == nil {
+			wrapper.Spec.HTTP = &toolHTTPConfig{}
+		}
+		wrapper.Spec.HTTP.URL = override.Endpoint
+		if wrapper.Spec.HTTP.Method == "" {
+			wrapper.Spec.HTTP.Method = "POST"
+		}
+
+		// Update description if provided in override
+		if override.Description != "" {
+			wrapper.Spec.Description = override.Description
+		}
+
+		// Serialize back to YAML
+		newData, err := yaml.Marshal(&wrapper)
+		if err != nil {
+			return fmt.Errorf("failed to serialize tool %s after override: %w", toolName, err)
+		}
+
+		// Update the loaded tool data
+		cfg.LoadedTools[i].Data = newData
+		appliedCount++
+
+		if verbose {
+			fmt.Printf("  Applied tool override: %s -> %s (registry: %s, handler: %s)\n",
+				toolName, override.Endpoint, override.RegistryName, override.HandlerName)
+		}
+	}
+
+	if verbose && appliedCount > 0 {
+		fmt.Printf("  Applied %d tool override(s)\n", appliedCount)
+	}
+
+	return nil
+}
+
+// loadOverrides reads the override config from the mounted ConfigMap file.
+// Returns nil if the file doesn't exist (no overrides configured).
+func loadOverrides(path string) (*overrides.OverrideConfig, error) {
+	if path == "" {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read overrides file: %w", err)
+	}
+
+	var cfg overrides.OverrideConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse overrides: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// applyProviderOverrides injects provider configs from CRD overrides into the arena config.
+// Providers are added to LoadedProviders and can be used by the engine.
+func applyProviderOverrides(
+	arenaCfg *config.Config,
+	providersByGroup map[string][]overrides.ProviderOverride,
+	verbose bool,
+) {
+	if len(providersByGroup) == 0 {
+		return
+	}
+
+	if arenaCfg.LoadedProviders == nil {
+		arenaCfg.LoadedProviders = make(map[string]*config.Provider)
+	}
+
+	appliedCount := 0
+	for groupName, groupProviders := range providersByGroup {
+		for _, p := range groupProviders {
+			// Create a PromptKit-compatible provider config
+			provider := &config.Provider{
+				ID:      p.ID,
+				Type:    p.Type,
+				Model:   p.Model,
+				BaseURL: p.BaseURL,
+				Defaults: config.ProviderDefaults{
+					Temperature: float32(p.Temperature),
+					TopP:        float32(p.TopP),
+					MaxTokens:   p.MaxTokens,
+				},
+			}
+
+			// Set credential from env var if specified
+			if p.SecretEnvVar != "" {
+				provider.Credential = &config.CredentialConfig{
+					CredentialEnv: p.SecretEnvVar,
+				}
+			}
+
+			// Add to LoadedProviders (overwriting any existing provider with same ID)
+			arenaCfg.LoadedProviders[p.ID] = provider
+
+			// Track provider group for filtering
+			if arenaCfg.ProviderGroups == nil {
+				arenaCfg.ProviderGroups = make(map[string]string)
+			}
+			arenaCfg.ProviderGroups[p.ID] = groupName
+
+			appliedCount++
+			if verbose {
+				credStatus := "no credentials required"
+				if p.SecretEnvVar != "" {
+					if os.Getenv(p.SecretEnvVar) != "" {
+						credStatus = fmt.Sprintf("✓ %s set", p.SecretEnvVar)
+					} else {
+						credStatus = fmt.Sprintf("✗ %s MISSING", p.SecretEnvVar)
+					}
+				}
+				fmt.Printf("  Provider override: %s (%s/%s) group=%s [%s]\n",
+					p.ID, p.Type, p.Model, groupName, credStatus)
+			}
+		}
+	}
+
+	if verbose && appliedCount > 0 {
+		fmt.Printf("  Applied %d provider override(s)\n", appliedCount)
+	}
+}
+
+// applyOverridesFromConfig applies all overrides from the loaded override config.
+// This handles both provider and tool overrides from the ConfigMap.
+func applyOverridesFromConfig(
+	arenaCfg *config.Config,
+	overrideCfg *overrides.OverrideConfig,
+	verbose bool,
+) error {
+	if overrideCfg == nil {
+		return nil
+	}
+
+	// Apply provider overrides first
+	applyProviderOverrides(arenaCfg, overrideCfg.Providers, verbose)
+
+	// Apply tool overrides
+	if len(overrideCfg.Tools) > 0 {
+		// Convert to the legacy ToolOverrideConfig format for compatibility
+		toolOverrides := make(map[string]ToolOverrideConfig)
+		for _, t := range overrideCfg.Tools {
+			toolOverrides[t.Name] = ToolOverrideConfig{
+				Name:         t.Name,
+				Description:  t.Description,
+				Endpoint:     t.Endpoint,
+				HandlerType:  t.HandlerType,
+				RegistryName: t.RegistryName,
+				HandlerName:  t.HandlerName,
+			}
+		}
+		if err := applyToolOverrides(arenaCfg, toolOverrides, verbose); err != nil {
+			return fmt.Errorf("failed to apply tool overrides: %w", err)
+		}
+	}
+
+	return nil
 }

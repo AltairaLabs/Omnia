@@ -194,7 +194,7 @@ spec:
 		_, _ = fmt.Fprintf(GinkgoWriter, "Pods:\n%s\n", output)
 
 		// Get all Arena resources
-		for _, resource := range []string{"arenasource", "arenaconfig", "arenajob", "provider"} {
+		for _, resource := range []string{"arenasource", "arenajob", "provider"} {
 			cmd = exec.Command("kubectl", "get", resource, "-n", arenaNamespace, "-o", "yaml")
 			output, _ = utils.Run(cmd)
 			_, _ = fmt.Fprintf(GinkgoWriter, "%s:\n%s\n", resource, output)
@@ -276,8 +276,8 @@ spec:
 		})
 	})
 
-	Context("ArenaConfig", func() {
-		It("should create and validate an ArenaConfig with mock provider", func() {
+	Context("Basic Workflow Test", func() {
+		It("should create Provider for mock testing", func() {
 			By("creating a Provider resource for mock testing")
 			providerManifest := fmt.Sprintf(`
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -307,53 +307,8 @@ spec:
 				g.Expect(output).To(Equal("Ready"), "Provider should be Ready, got: "+output)
 			}
 			Eventually(verifyProviderReady, time.Minute, time.Second).Should(Succeed())
-
-			By("creating the ArenaConfig")
-			arenaConfigManifest := fmt.Sprintf(`
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: assertions-test-config
-  namespace: %s
-spec:
-  sourceRef:
-    name: assertions-test-source
-  scenarios:
-    include:
-      - "scenarios/*.yaml"
-  providers:
-    - name: test-mock-provider
-  evaluation:
-    concurrency: 2
-    timeout: "60s"
-`, arenaNamespace)
-
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(arenaConfigManifest)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ArenaConfig")
-
-			By("verifying the ArenaConfig status becomes Ready")
-			verifyArenaConfigReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "arenaconfig", "assertions-test-config",
-					"-n", arenaNamespace, "-o", "jsonpath={.status.phase}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Ready"), "ArenaConfig should be Ready, got: "+output)
-			}
-			Eventually(verifyArenaConfigReady, 2*time.Minute, 2*time.Second).Should(Succeed())
-
-			By("verifying the ArenaConfig resolved the source")
-			cmd = exec.Command("kubectl", "get", "arenaconfig", "assertions-test-config",
-				"-n", arenaNamespace, "-o", "jsonpath={.status.resolvedSource.revision}")
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).NotTo(BeEmpty(), "ArenaConfig should have resolved source revision")
-			_, _ = fmt.Fprintf(GinkgoWriter, "ArenaConfig resolved source revision: %s\n", output)
 		})
-	})
 
-	Context("Basic Workflow Test", func() {
 		It("should complete a basic Arena job with mock provider", func() {
 			By("creating an ArenaJob")
 			arenaJobManifest := fmt.Sprintf(`
@@ -363,9 +318,15 @@ metadata:
   name: assertions-test-job
   namespace: %s
 spec:
-  configRef:
-    name: assertions-test-config
+  sourceRef:
+    name: assertions-test-source
+  arenaFile: config.arena.yaml
   type: evaluation
+  providers:
+    - name: test-mock-provider
+  evaluation:
+    concurrency: 2
+    timeout: "60s"
   workers:
     replicas: 1
 `, arenaNamespace)
@@ -444,9 +405,15 @@ metadata:
   name: multi-worker-test-job
   namespace: %s
 spec:
-  configRef:
-    name: assertions-test-config
+  sourceRef:
+    name: assertions-test-source
+  arenaFile: config.arena.yaml
   type: evaluation
+  providers:
+    - name: test-mock-provider
+  evaluation:
+    concurrency: 2
+    timeout: "60s"
   workers:
     replicas: 3
 `, arenaNamespace)
@@ -498,46 +465,8 @@ spec:
 	})
 
 	Context("Error Handling Test", func() {
-		It("should handle invalid ArenaConfig gracefully", func() {
-			By("creating an ArenaConfig with non-existent source")
-			invalidConfigManifest := fmt.Sprintf(`
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: invalid-config
-  namespace: %s
-spec:
-  sourceRef:
-    name: non-existent-source
-  providers:
-    - name: test-mock-provider
-`, arenaNamespace)
-
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(invalidConfigManifest)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create invalid ArenaConfig")
-
-			By("verifying the ArenaConfig reports an error or invalid state")
-			verifyConfigError := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "arenaconfig", "invalid-config",
-					"-n", arenaNamespace, "-o", "jsonpath={.status.phase}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				// Should be in Error, Invalid, or Pending state (not Ready)
-				g.Expect(output).NotTo(Equal("Ready"),
-					"Invalid config should not be Ready, got: "+output)
-			}
-			Eventually(verifyConfigError, time.Minute, 2*time.Second).Should(Succeed())
-
-			By("cleaning up invalid config")
-			cmd = exec.Command("kubectl", "delete", "arenaconfig", "invalid-config",
-				"-n", arenaNamespace, "--ignore-not-found")
-			_, _ = utils.Run(cmd)
-		})
-
-		It("should handle ArenaJob with invalid config reference", func() {
-			By("creating an ArenaJob with non-existent config")
+		It("should handle ArenaJob with invalid source reference", func() {
+			By("creating an ArenaJob with non-existent source")
 			invalidJobManifest := fmt.Sprintf(`
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaJob
@@ -545,9 +474,12 @@ metadata:
   name: invalid-job
   namespace: %s
 spec:
-  configRef:
-    name: non-existent-config
+  sourceRef:
+    name: non-existent-source
+  arenaFile: config.arena.yaml
   type: evaluation
+  providers:
+    - name: test-mock-provider
 `, arenaNamespace)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")

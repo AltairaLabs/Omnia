@@ -89,8 +89,9 @@ jobs:
         echo "Running tests with coverage and race detection..."
         mkdir -p test-results
         # Exclude internal/*: all internal packages run in envtest job with proper K8s environment
+        # Exclude test/integration: has dedicated job with Helm setup
         # This job runs: api, cmd (entry points), pkg
-        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/)
+        gotestsum --junitfile test-results/unit-tests.xml --format testname -- -race -coverprofile=coverage.out $(go list ./... | grep -v /internal/ | grep -v /test/integration)
         echo "Coverage report generated: coverage.out"
 
     - name: Publish Test Results
@@ -134,6 +135,23 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version-file: go.mod
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: v3.14.0
+
+    - name: Add Helm repositories
+      run: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo add grafana https://grafana.github.io/helm-charts
+        helm repo add kedacore https://kedacore.github.io/charts
+        helm repo add bitnami https://charts.bitnami.com/bitnami
+        helm repo add csi-driver-nfs https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+        helm repo update
+
+    - name: Build Helm chart dependencies
+      run: helm dependency build ./charts/omnia
 
     - name: Run integration tests
       run: go test -tags=integration ./test/integration/... -v -timeout 5m
@@ -638,6 +656,13 @@ jobs:
       uses: SonarSource/sonarqube-scan-action@v7
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    - name: SonarCloud Quality Gate check
+      id: sonarcloud-quality-gate-check
+      uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
+      timeout-minutes: 5
+      env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   sonarcloud-skip:

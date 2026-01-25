@@ -26,6 +26,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -47,6 +48,7 @@ const (
 	labelWorkspaceManaged = "omnia.altairalabs.ai/managed"
 	labelWorkspaceRole    = "omnia.altairalabs.ai/role"
 	labelEnvironment      = "omnia.altairalabs.ai/environment"
+	labelValueTrue        = "true"
 
 	// ClusterRole names for workspace roles
 	clusterRoleOwner  = "omnia-workspace-owner"
@@ -61,6 +63,7 @@ const (
 	ConditionTypeServiceAccountsReady = "ServiceAccountsReady"
 	ConditionTypeRoleBindingsReady    = "RoleBindingsReady"
 	ConditionTypeNetworkPolicyReady   = "NetworkPolicyReady"
+	ConditionTypeStorageReady         = "StorageReady"
 )
 
 // Network policy constants
@@ -72,6 +75,10 @@ const (
 type WorkspaceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// DefaultStorageClass is the default storage class for workspace PVCs
+	// when not specified in the Workspace spec. Used for NFS-backed storage.
+	DefaultStorageClass string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
@@ -79,11 +86,14 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+//
+//nolint:gocognit // Reconcile functions inherently have high complexity due to state machine logic
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -172,32 +182,94 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	r.setCondition(workspace, ConditionTypeNetworkPolicyReady, metav1.ConditionTrue,
 		"NetworkPolicyReady", "NetworkPolicy is ready")
 
+	// Reconcile Storage (PVC)
+	if err := r.reconcileStorage(ctx, workspace); err != nil {
+		r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionFalse,
+			"StorageFailed", err.Error())
+		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
+		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Check if storage is provisioning (PVC exists but not yet bound)
+	storageProvisioning := false
+	if workspace.Status.Storage != nil && workspace.Status.Storage.Phase != "" {
+		if workspace.Status.Storage.Phase != string(corev1.ClaimBound) {
+			storageProvisioning = true
+			r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionFalse,
+				"StorageProvisioning", fmt.Sprintf("PVC %s is %s, waiting for volume to be provisioned",
+					workspace.Status.Storage.PVCName, workspace.Status.Storage.Phase))
+		} else {
+			r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
+				"StorageReady", "Storage is ready")
+		}
+	} else {
+		// Storage not enabled or not configured
+		r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
+			"StorageNotRequired", "Storage is not enabled for this workspace")
+	}
+
 	// Update member count
 	r.updateMemberCount(workspace)
 
-	// Set overall Ready condition
-	workspace.Status.Phase = omniav1alpha1.WorkspacePhaseReady
-	r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionTrue,
-		"WorkspaceReady", "Workspace is ready")
+	// Set overall Ready condition based on all components
+	if storageProvisioning {
+		workspace.Status.Phase = omniav1alpha1.WorkspacePhasePending
+		r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionFalse,
+			"StorageProvisioning", "Waiting for storage to be provisioned")
+	} else {
+		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseReady
+		r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionTrue,
+			"WorkspaceReady", "Workspace is ready")
+	}
 
 	workspace.Status.ObservedGeneration = workspace.Generation
 	if err := r.Status().Update(ctx, workspace); err != nil {
 		return ctrl.Result{}, err
 	}
 
+	// Requeue if storage is still provisioning to check again
+	if storageProvisioning {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
 	return ctrl.Result{}, nil
 }
 
+//nolint:gocognit // Deletion logic requires handling many resource types
 func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *omniav1alpha1.Workspace) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Handling deletion of Workspace")
 
 	namespaceName := workspace.Spec.Namespace.Name
 
+	// Clean up PVCs in the namespace (only if retention policy is Delete or not specified)
+	retentionPolicy := "Delete"
+	if workspace.Spec.Storage != nil && workspace.Spec.Storage.RetentionPolicy != "" {
+		retentionPolicy = workspace.Spec.Storage.RetentionPolicy
+	}
+	if retentionPolicy == "Delete" {
+		pvcs := &corev1.PersistentVolumeClaimList{}
+		if err := r.List(ctx, pvcs, client.InNamespace(namespaceName),
+			client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
+			for i := range pvcs.Items {
+				if err := r.Delete(ctx, &pvcs.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+					log.Error(err, "Failed to delete PVC", "name", pvcs.Items[i].Name)
+				} else {
+					log.Info("Deleted PVC", "name", pvcs.Items[i].Name)
+				}
+			}
+		}
+	} else {
+		log.Info("Retaining PVC due to retention policy", "policy", retentionPolicy)
+	}
+
 	// Clean up NetworkPolicies in the namespace
 	networkPolicies := &networkingv1.NetworkPolicyList{}
 	if err := r.List(ctx, networkPolicies, client.InNamespace(namespaceName),
-		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: "true"}); err == nil {
+		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
 		for i := range networkPolicies.Items {
 			if err := r.Delete(ctx, &networkPolicies.Items[i]); err != nil && !apierrors.IsNotFound(err) {
 				log.Error(err, "Failed to delete NetworkPolicy", "name", networkPolicies.Items[i].Name)
@@ -208,7 +280,7 @@ func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *om
 	// Clean up RoleBindings in the namespace
 	roleBindings := &rbacv1.RoleBindingList{}
 	if err := r.List(ctx, roleBindings, client.InNamespace(namespaceName),
-		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: "true"}); err == nil {
+		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
 		for i := range roleBindings.Items {
 			if err := r.Delete(ctx, &roleBindings.Items[i]); err != nil && !apierrors.IsNotFound(err) {
 				log.Error(err, "Failed to delete RoleBinding", "name", roleBindings.Items[i].Name)
@@ -219,7 +291,7 @@ func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *om
 	// Clean up ServiceAccounts in the namespace
 	serviceAccounts := &corev1.ServiceAccountList{}
 	if err := r.List(ctx, serviceAccounts, client.InNamespace(namespaceName),
-		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: "true"}); err == nil {
+		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
 		for i := range serviceAccounts.Items {
 			if err := r.Delete(ctx, &serviceAccounts.Items[i]); err != nil && !apierrors.IsNotFound(err) {
 				log.Error(err, "Failed to delete ServiceAccount", "name", serviceAccounts.Items[i].Name)
@@ -273,7 +345,7 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, workspace 
 				Name: namespaceName,
 				Labels: map[string]string{
 					labelWorkspace:        workspace.Name,
-					labelWorkspaceManaged: "true",
+					labelWorkspaceManaged: labelValueTrue,
 					labelEnvironment:      string(workspace.Spec.Environment),
 				},
 			},
@@ -373,7 +445,7 @@ func (r *WorkspaceReconciler) reconcileServiceAccounts(ctx context.Context, work
 		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, sa, func() error {
 			sa.Labels = map[string]string{
 				labelWorkspace:        workspace.Name,
-				labelWorkspaceManaged: "true",
+				labelWorkspaceManaged: labelValueTrue,
 				labelWorkspaceRole:    string(roleInfo.role),
 			}
 			return nil
@@ -430,7 +502,7 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, workspa
 		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
 			rb.Labels = map[string]string{
 				labelWorkspace:        workspace.Name,
-				labelWorkspaceManaged: "true",
+				labelWorkspaceManaged: labelValueTrue,
 				labelWorkspaceRole:    string(role.role),
 			}
 			rb.RoleRef = rbacv1.RoleRef{
@@ -478,7 +550,7 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, workspa
 			result, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
 				rb.Labels = map[string]string{
 					labelWorkspace:        workspace.Name,
-					labelWorkspaceManaged: "true",
+					labelWorkspaceManaged: labelValueTrue,
 					labelWorkspaceRole:    string(binding.Role),
 				}
 				rb.RoleRef = rbacv1.RoleRef{
@@ -541,7 +613,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, np, func() error {
 		np.Labels = map[string]string{
 			labelWorkspace:        workspace.Name,
-			labelWorkspaceManaged: "true",
+			labelWorkspaceManaged: labelValueTrue,
 		}
 
 		// Build ingress rules
@@ -582,6 +654,170 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 	return nil
 }
 
+func (r *WorkspaceReconciler) reconcileStorage(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
+	namespaceName := workspace.Spec.Namespace.Name
+	// Use namespace name (not workspace name) so ArenaJob can derive PVC name from namespace
+	pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
+
+	// Check if storage is enabled (defaults to false if not specified for backward compat)
+	storageEnabled := workspace.Spec.Storage != nil &&
+		(workspace.Spec.Storage.Enabled == nil || *workspace.Spec.Storage.Enabled)
+
+	if !storageEnabled {
+		return r.deleteStoragePVCIfExists(ctx, workspace, pvcName, namespaceName)
+	}
+
+	return r.ensureStoragePVC(ctx, workspace, pvcName, namespaceName)
+}
+
+// deleteStoragePVCIfExists deletes the workspace storage PVC if it exists and is managed by us.
+func (r *WorkspaceReconciler) deleteStoragePVCIfExists(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	pvcName, namespaceName string,
+) error {
+	log := logf.FromContext(ctx)
+	pvc := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: namespaceName}, pvc)
+	if err == nil {
+		if pvc.Labels[labelWorkspace] == workspace.Name && pvc.Labels[labelWorkspaceManaged] == labelValueTrue {
+			if err := r.Delete(ctx, pvc); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete PVC %s: %w", pvcName, err)
+			}
+			log.Info("Deleted PVC (storage disabled)", "name", pvcName)
+		}
+	}
+	workspace.Status.Storage = nil
+	return nil
+}
+
+// ensureStoragePVC creates or updates the workspace storage PVC.
+func (r *WorkspaceReconciler) ensureStoragePVC(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	pvcName, namespaceName string,
+) error {
+	log := logf.FromContext(ctx)
+	storageConfig := workspace.Spec.Storage
+
+	quantity, accessModes, err := r.parseStorageConfig(storageConfig)
+	if err != nil {
+		return err
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: namespaceName,
+		},
+	}
+
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, pvc, func() error {
+		return r.mutatePVC(pvc, workspace, storageConfig, quantity, accessModes)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create/update PVC %s: %w", pvcName, err)
+	}
+
+	if result != controllerutil.OperationResultNone {
+		log.Info("PVC reconciled", "name", pvcName, "namespace", namespaceName, "result", result)
+	}
+
+	return r.updateStorageStatus(ctx, workspace, pvcName, namespaceName)
+}
+
+// parseStorageConfig parses the storage configuration and returns quantity and access modes.
+func (r *WorkspaceReconciler) parseStorageConfig(
+	config *omniav1alpha1.WorkspaceStorageConfig,
+) (resource.Quantity, []corev1.PersistentVolumeAccessMode, error) {
+	storageSize := "10Gi"
+	if config.Size != "" {
+		storageSize = config.Size
+	}
+
+	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
+	if len(config.AccessModes) > 0 {
+		accessModes = make([]corev1.PersistentVolumeAccessMode, 0, len(config.AccessModes))
+		for _, mode := range config.AccessModes {
+			accessModes = append(accessModes, corev1.PersistentVolumeAccessMode(mode))
+		}
+	}
+
+	quantity, err := resource.ParseQuantity(storageSize)
+	if err != nil {
+		return resource.Quantity{}, nil, fmt.Errorf("invalid storage size %s: %w", storageSize, err)
+	}
+
+	return quantity, accessModes, nil
+}
+
+// mutatePVC sets or updates the PVC spec and labels.
+func (r *WorkspaceReconciler) mutatePVC(
+	pvc *corev1.PersistentVolumeClaim,
+	workspace *omniav1alpha1.Workspace,
+	storageConfig *omniav1alpha1.WorkspaceStorageConfig,
+	quantity resource.Quantity,
+	accessModes []corev1.PersistentVolumeAccessMode,
+) error {
+	if pvc.CreationTimestamp.IsZero() {
+		pvc.Labels = map[string]string{
+			labelWorkspace:        workspace.Name,
+			labelWorkspaceManaged: labelValueTrue,
+		}
+		pvc.Spec = corev1.PersistentVolumeClaimSpec{
+			AccessModes: accessModes,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: quantity,
+				},
+			},
+		}
+		// Use explicit storage class from workspace spec, or fall back to controller default
+		storageClass := storageConfig.StorageClass
+		if storageClass == "" {
+			storageClass = r.DefaultStorageClass
+		}
+		if storageClass != "" {
+			pvc.Spec.StorageClassName = &storageClass
+		}
+	} else {
+		if pvc.Labels == nil {
+			pvc.Labels = make(map[string]string)
+		}
+		pvc.Labels[labelWorkspace] = workspace.Name
+		pvc.Labels[labelWorkspaceManaged] = labelValueTrue
+	}
+	return nil
+}
+
+// updateStorageStatus updates the workspace status with PVC information.
+func (r *WorkspaceReconciler) updateStorageStatus(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	pvcName, namespaceName string,
+) error {
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: namespaceName}, pvc); err != nil {
+		return fmt.Errorf("failed to get PVC status: %w", err)
+	}
+
+	capacity := ""
+	if pvc.Status.Capacity != nil {
+		if storageQty, ok := pvc.Status.Capacity[corev1.ResourceStorage]; ok {
+			capacity = storageQty.String()
+		}
+	}
+
+	workspace.Status.Storage = &omniav1alpha1.WorkspaceStorageStatus{
+		PVCName:   pvcName,
+		Phase:     string(pvc.Status.Phase),
+		Capacity:  capacity,
+		MountPath: fmt.Sprintf("/workspace-content/%s/%s", workspace.Name, namespaceName),
+	}
+
+	return nil
+}
+
 // buildIngressRules builds the ingress rules for the NetworkPolicy
 func (r *WorkspaceReconciler) buildIngressRules(workspace *omniav1alpha1.Workspace) []networkingv1.NetworkPolicyIngressRule {
 	policy := workspace.Spec.NetworkPolicy
@@ -599,7 +835,7 @@ func (r *WorkspaceReconciler) buildIngressRules(workspace *omniav1alpha1.Workspa
 				{
 					NamespaceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							labelSharedNamespace: "true",
+							labelSharedNamespace: labelValueTrue,
 						},
 					},
 				},
@@ -668,7 +904,7 @@ func (r *WorkspaceReconciler) buildEgressRules(workspace *omniav1alpha1.Workspac
 				{
 					NamespaceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							labelSharedNamespace: "true",
+							labelSharedNamespace: labelValueTrue,
 						},
 					},
 				},

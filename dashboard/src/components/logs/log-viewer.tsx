@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useLogs,
+  useArenaJobLogs,
   useDemoMode,
   useObservabilityConfig,
   useGrafana,
@@ -30,13 +31,30 @@ export interface LogEntry {
   container?: string;
 }
 
-interface LogViewerProps {
-  agentName: string;
+interface BaseLogViewerProps {
   workspace: string;
   containers?: string[];
   className?: string;
   defaultTailLines?: number;
+  /** Unique identifier for the resource (used in download filename and status) */
+  resourceName: string;
+  /** Whether to show Grafana links (Loki/Tempo) */
+  showGrafanaLinks?: boolean;
 }
+
+interface AgentLogViewerProps extends BaseLogViewerProps {
+  /** Agent name - use this for agent logs */
+  agentName: string;
+  jobName?: never;
+}
+
+interface ArenaJobLogViewerProps extends BaseLogViewerProps {
+  /** Arena job name - use this for arena job logs */
+  jobName: string;
+  agentName?: never;
+}
+
+export type LogViewerProps = AgentLogViewerProps | ArenaJobLogViewerProps;
 
 const TAIL_LINE_OPTIONS = [50, 100, 200, 500, 1000];
 
@@ -73,11 +91,13 @@ function LogContent({
   logs,
   filteredLogs,
   formatTimestamp,
+  showContainer,
 }: Readonly<{
   isLoading: boolean;
   logs: LogEntry[];
   filteredLogs: LogEntry[];
   formatTimestamp: (date: Date) => string;
+  showContainer: boolean;
 }>) {
   if (isLoading && logs.length === 0) {
     return (
@@ -113,9 +133,11 @@ function LogContent({
           >
             {log.level}
           </span>
-          <span className="text-muted-foreground shrink-0 w-16">
-            [{log.container}]
-          </span>
+          {showContainer && (
+            <span className="text-muted-foreground shrink-0 w-16">
+              [{log.container}]
+            </span>
+          )}
           <span className="break-all">{log.message}</span>
         </div>
       ))}
@@ -123,33 +145,47 @@ function LogContent({
   );
 }
 
-export function LogViewer({
-  agentName,
-  workspace,
-  containers = ["facade", "runtime"],
-  className,
-  defaultTailLines = 100,
-}: Readonly<LogViewerProps>) {
+export function LogViewer(props: Readonly<LogViewerProps>) {
+  const {
+    workspace,
+    containers = ["facade", "runtime"],
+    className,
+    defaultTailLines = 100,
+    resourceName,
+    showGrafanaLinks = true,
+  } = props;
+
+  const isArenaJob = "jobName" in props && !!props.jobName;
+  // One of jobName or agentName is always defined due to discriminated union
+  const name = (isArenaJob ? props.jobName : props.agentName) as string;
+
   const { isDemoMode } = useDemoMode();
   const { lokiEnabled, tempoEnabled } = useObservabilityConfig();
   const grafanaConfig = useGrafana();
   const [tailLines, setTailLines] = useState(defaultTailLines);
 
-  // Build Grafana Explore URLs for Loki and Tempo
-  // Note: These need the K8s namespace, not workspace name - using workspace for now
-  // Future: Get actual namespace from workspace or agent metadata
-  const lokiExploreUrl = lokiEnabled
-    ? buildLokiExploreUrl(grafanaConfig, workspace, agentName)
+  // Build Grafana Explore URLs for Loki and Tempo (only for agents)
+  const lokiExploreUrl = showGrafanaLinks && !isArenaJob && lokiEnabled
+    ? buildLokiExploreUrl(grafanaConfig, workspace, name)
     : null;
-  const tempoExploreUrl = tempoEnabled
-    ? buildTempoExploreUrl(grafanaConfig, workspace, agentName)
+  const tempoExploreUrl = showGrafanaLinks && !isArenaJob && tempoEnabled
+    ? buildTempoExploreUrl(grafanaConfig, workspace, name)
     : null;
 
-  // Fetch logs via DataService (works in both demo and live modes)
-  const { data: apiLogs, isLoading, refetch } = useLogs(workspace, agentName, {
+  // Fetch logs via appropriate hook based on resource type
+  const agentLogsQuery = useLogs(workspace, isArenaJob ? "" : name, {
     tailLines,
     sinceSeconds: 3600,
   });
+  const arenaJobLogsQuery = useArenaJobLogs(workspace, isArenaJob ? name : "", {
+    tailLines,
+    sinceSeconds: 3600,
+  });
+
+  // Select the appropriate query result
+  const { data: apiLogs, isLoading, refetch } = isArenaJob
+    ? arenaJobLogsQuery
+    : agentLogsQuery;
 
   // Convert API logs to LogEntry format with Date objects
   const logs = useMemo(() => {
@@ -170,6 +206,9 @@ export function LogViewer({
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Determine if we should show container selector (hide for single container)
+  const showContainerSelector = containers.length > 1;
+
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
@@ -179,7 +218,7 @@ export function LogViewer({
 
   // Filter logs based on user selections
   const filteredLogs = logs.filter((log) => {
-    if (selectedContainer !== "all" && log.container !== selectedContainer) {
+    if (showContainerSelector && selectedContainer !== "all" && log.container !== selectedContainer) {
       return false;
     }
     if (!selectedLevels.has(log.level)) {
@@ -206,18 +245,20 @@ export function LogViewer({
   const downloadLogs = useCallback(() => {
     const content = filteredLogs
       .map(
-        (log) =>
-          `${log.timestamp.toISOString()} [${log.level.toUpperCase()}] [${log.container}] ${log.message}`
+        (log) => {
+          const containerPart = log.container ? ` [${log.container}]` : "";
+          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart} ${log.message}`;
+        }
       )
       .join("\n");
     const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${agentName}-${workspace}-logs.txt`;
+    a.download = `${resourceName}-${workspace}-logs.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [filteredLogs, agentName, workspace]);
+  }, [filteredLogs, resourceName, workspace]);
 
   const formatTimestamp = (date: Date) => {
     return date.toLocaleTimeString([], {
@@ -260,32 +301,34 @@ export function LogViewer({
           </SelectContent>
         </Select>
 
-        {/* Container selector */}
-        <div className="flex items-center gap-1">
-          <Badge
-            variant="outline"
-            className={cn(
-              "cursor-pointer",
-              selectedContainer === "all" && "bg-primary text-primary-foreground"
-            )}
-            onClick={() => setSelectedContainer("all")}
-          >
-            All
-          </Badge>
-          {containers.map((container) => (
+        {/* Container selector - only show if multiple containers */}
+        {showContainerSelector && (
+          <div className="flex items-center gap-1">
             <Badge
-              key={container}
               variant="outline"
               className={cn(
                 "cursor-pointer",
-                selectedContainer === container && "bg-primary text-primary-foreground"
+                selectedContainer === "all" && "bg-primary text-primary-foreground"
               )}
-              onClick={() => setSelectedContainer(container)}
+              onClick={() => setSelectedContainer("all")}
             >
-              {container}
+              All
             </Badge>
-          ))}
-        </div>
+            {containers.map((container) => (
+              <Badge
+                key={container}
+                variant="outline"
+                className={cn(
+                  "cursor-pointer",
+                  selectedContainer === container && "bg-primary text-primary-foreground"
+                )}
+                onClick={() => setSelectedContainer(container)}
+              >
+                {container}
+              </Badge>
+            ))}
+          </div>
+        )}
 
         {/* Level filters */}
         <div className="flex items-center gap-1 ml-2">
@@ -380,6 +423,7 @@ export function LogViewer({
             logs={logs}
             filteredLogs={filteredLogs}
             formatTimestamp={formatTimestamp}
+            showContainer={showContainerSelector}
           />
         </div>
       </ScrollArea>
@@ -390,7 +434,7 @@ export function LogViewer({
           {filteredLogs.length} / {logs.length} entries
         </span>
         <span>
-          {getStatusText(isDemoMode, isLoading)} • {agentName}.{workspace}
+          {getStatusText(isDemoMode, isLoading)} • {resourceName}.{workspace}
         </span>
       </div>
     </div>

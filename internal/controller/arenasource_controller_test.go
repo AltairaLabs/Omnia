@@ -64,6 +64,27 @@ func createOpenCoreLicenseValidator(publicKey *rsa.PublicKey) (*license.Validato
 	return license.NewValidator(client, license.WithPublicKey(publicKey))
 }
 
+// createTestDirectory creates a directory with the given files.
+// Returns the path to the directory.
+func createTestDirectory(files map[string]string) string {
+	dir, err := os.MkdirTemp("", "test-dir-*")
+	if err != nil {
+		panic(err)
+	}
+
+	for name, content := range files {
+		filePath := filepath.Join(dir, name)
+		// Create parent directories if needed
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			panic(err)
+		}
+	}
+	return dir
+}
+
 var _ = Describe("ArenaSource Controller", func() {
 	const (
 		arenaSourceName      = "test-arenasource"
@@ -91,10 +112,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should return without error", func() {
 			By("reconciling a non-existent ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -144,10 +163,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should skip reconciliation and set condition", func() {
 			By("reconciling the suspended ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			result, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -210,10 +227,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase due to missing configuration", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -300,11 +315,10 @@ var _ = Describe("ArenaSource Controller", func() {
 			By("reconciling the ArenaSource with event recorder")
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        fakeRecorder,
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Recorder:             fakeRecorder,
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -332,7 +346,7 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			By("checking the updated status")
 			Expect(updatedSource.Status.Artifact).NotTo(BeNil())
-			Expect(updatedSource.Status.Artifact.URL).To(ContainSubstring("http://localhost:8080/artifacts"))
+			Expect(updatedSource.Status.Artifact.ContentPath).NotTo(BeEmpty())
 			Expect(updatedSource.Status.Artifact.Checksum).NotTo(BeEmpty())
 			Expect(updatedSource.Status.NextFetchTime).NotTo(BeNil())
 
@@ -346,21 +360,22 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(artifactCondition).NotTo(BeNil())
 			Expect(artifactCondition.Status).To(Equal(metav1.ConditionTrue))
 
-			By("verifying artifact was stored")
-			artifactPath := filepath.Join(artifactDir, arenaSourceNamespace, arenaSourceName)
-			entries, err := os.ReadDir(artifactPath)
+			By("verifying artifact was stored in filesystem")
+			// Content is stored at WorkspaceContentPath/<namespace>/<namespace>/<targetPath>/.arena/versions/<version>/
+			arenaDir := filepath.Join(artifactDir, arenaSourceNamespace, arenaSourceNamespace, "arena", arenaSourceName, ".arena")
+			Expect(arenaDir).To(BeADirectory())
+			versionsDir := filepath.Join(arenaDir, "versions")
+			entries, err := os.ReadDir(versionsDir)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(entries).To(HaveLen(1))
-			Expect(entries[0].Name()).To(HaveSuffix(".tar.gz"))
+			Expect(entries).ToNot(BeEmpty())
 		})
 
 		It("should skip fetch when artifact is already up to date", func() {
 			By("first reconciliation to fetch artifact")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -441,11 +456,9 @@ var _ = Describe("ArenaSource Controller", func() {
 			By("reconciling the ArenaSource with event recorder")
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        fakeRecorder,
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
 			}
 
 			req := reconcile.Request{
@@ -547,10 +560,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should create Git fetcher with loaded credentials", func() {
 			By("testing createGitFetcher")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			// Get the ArenaSource to populate it properly
@@ -637,10 +648,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should create OCI fetcher with loaded credentials", func() {
 			By("testing createOCIFetcher")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			// Get the ArenaSource to populate it properly
@@ -774,10 +783,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase when Secret is missing", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -831,54 +838,6 @@ var _ = Describe("ArenaSource Controller", func() {
 		})
 	})
 
-	Context("When testing copyFile helper", func() {
-		It("should copy a file correctly", func() {
-			By("creating source file")
-			srcDir, err := os.MkdirTemp("", "copy-test-src-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(srcDir) }()
-
-			srcPath := filepath.Join(srcDir, "source.txt")
-			content := []byte("test content for copy")
-			Expect(os.WriteFile(srcPath, content, 0644)).To(Succeed())
-
-			By("creating destination directory")
-			dstDir, err := os.MkdirTemp("", "copy-test-dst-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(dstDir) }()
-
-			dstPath := filepath.Join(dstDir, "dest.txt")
-
-			By("copying the file")
-			Expect(copyFile(srcPath, dstPath)).To(Succeed())
-
-			By("verifying the copy")
-			copiedContent, err := os.ReadFile(dstPath)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(copiedContent).To(Equal(content))
-		})
-
-		It("should fail when source doesn't exist", func() {
-			err := copyFile("/nonexistent/source.txt", "/tmp/dest.txt")
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("should fail when destination directory doesn't exist", func() {
-			By("creating source file")
-			srcDir, err := os.MkdirTemp("", "copy-test-src-*")
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(srcDir) }()
-
-			srcPath := filepath.Join(srcDir, "source.txt")
-			content := []byte("test content")
-			Expect(os.WriteFile(srcPath, content, 0644)).To(Succeed())
-
-			By("trying to copy to nonexistent directory")
-			err = copyFile(srcPath, "/nonexistent/dir/dest.txt")
-			Expect(err).To(HaveOccurred())
-		})
-	})
-
 	Context("When reconciling an OCI source without credentials", func() {
 		var arenaSource *omniav1alpha1.ArenaSource
 
@@ -916,10 +875,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase due to network failure", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -984,10 +941,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should set Error phase due to network/auth failure", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			req := reconcile.Request{
@@ -1074,10 +1029,9 @@ var _ = Describe("ArenaSource Controller", func() {
 		It("should successfully fetch with custom timeout", func() {
 			By("reconciling the ArenaSource")
 			reconciler := &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: artifactDir,
 			}
 
 			req := reconcile.Request{
@@ -1115,8 +1069,8 @@ var _ = Describe("ArenaSource Controller", func() {
 		})
 	})
 
-	Context("When testing storeArtifact with valid artifact", func() {
-		It("should store the artifact and return URL", func() {
+	Context("When testing storeArtifact without WorkspaceContentPath", func() {
+		It("should return error when WorkspaceContentPath is not set", func() {
 			By("creating a temporary artifact file")
 			tmpDir, err := os.MkdirTemp("", "artifact-test-*")
 			Expect(err).NotTo(HaveOccurred())
@@ -1125,11 +1079,8 @@ var _ = Describe("ArenaSource Controller", func() {
 			artifactPath := filepath.Join(tmpDir, "test.tar.gz")
 			Expect(os.WriteFile(artifactPath, []byte("fake tarball content"), 0644)).To(Succeed())
 
-			By("testing storeArtifact")
-			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:     tmpDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
-			}
+			By("testing storeArtifact without WorkspaceContentPath")
+			reconciler := &ArenaSourceReconciler{}
 
 			source := &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1145,10 +1096,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     20,
 			}
 
-			url, err := reconciler.storeArtifact(source, artifact)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(ContainSubstring("http://localhost:8080/artifacts"))
-			Expect(url).To(ContainSubstring("default/test-store"))
+			_, _, _, err = reconciler.storeArtifact(source, artifact)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("WorkspaceContentPath is required"))
 		})
 	})
 
@@ -1190,11 +1140,10 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
 			reconciler = &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        record.NewFakeRecorder(10),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Recorder:             record.NewFakeRecorder(10),
+				WorkspaceContentPath: artifactDir,
 			}
 		})
 
@@ -1340,10 +1289,9 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
 			reconciler = &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				WorkspaceContentPath: artifactDir,
 			}
 		})
 
@@ -1383,12 +1331,9 @@ var _ = Describe("ArenaSource Controller", func() {
 	})
 
 	Context("When testing storeArtifact with no-change result", func() {
-		It("should return existing URL when artifact path is empty", func() {
+		It("should return existing values when artifact path is empty", func() {
 			By("testing storeArtifact with empty path")
-			reconciler := &ArenaSourceReconciler{
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
-			}
+			reconciler := &ArenaSourceReconciler{}
 
 			source := &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1397,8 +1342,9 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 				Status: omniav1alpha1.ArenaSourceStatus{
 					Artifact: &omniav1alpha1.Artifact{
-						URL:      "http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz",
-						Revision: "rev1",
+						ContentPath: "arena/test-no-change/.arena/versions/abc123",
+						Version:     "abc123",
+						Revision:    "rev1",
 					},
 				},
 			}
@@ -1409,9 +1355,174 @@ var _ = Describe("ArenaSource Controller", func() {
 				Revision: "rev1",
 			}
 
-			url, err := reconciler.storeArtifact(source, artifact)
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(Equal("http://localhost:8080/artifacts/default/test-no-change/existing.tar.gz"))
+			Expect(url).To(BeEmpty(), "URL should be empty in filesystem mode")
+			Expect(contentPath).To(Equal("arena/test-no-change/.arena/versions/abc123"))
+			Expect(version).To(Equal("abc123"))
+		})
+	})
+
+	Context("When testing filesystem sync mode", func() {
+		It("should sync content to filesystem and create version", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "workspace-content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test directory with content")
+			artifactDir := createTestDirectory(map[string]string{
+				"config.yaml":       "name: test\n",
+				"prompts/hello.txt": "Hello, world!\n",
+			})
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			By("testing filesystem sync")
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sync",
+					Namespace: "test-workspace",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					TargetPath: "arena/test-sync",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     artifactDir,
+				Revision: "test-revision",
+				Checksum: "sha256:1234567890123456789012345678901234567890123456789012345678901234",
+				Size:     100,
+			}
+
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(BeEmpty(), "URL should be empty in filesystem mode")
+			Expect(version).NotTo(BeEmpty(), "Version should be set")
+			Expect(contentPath).To(ContainSubstring(".arena/versions/"))
+
+			By("verifying content was synced correctly")
+			versionDir := filepath.Join(tmpDir, "test-workspace", "test-workspace", "arena/test-sync", ".arena", "versions", version)
+			Expect(versionDir).To(BeADirectory())
+
+			configContent, err := os.ReadFile(filepath.Join(versionDir, "config.yaml"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(configContent)).To(Equal("name: test\n"))
+
+			promptContent, err := os.ReadFile(filepath.Join(versionDir, "prompts/hello.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(promptContent)).To(Equal("Hello, world!\n"))
+
+			By("verifying HEAD was updated")
+			headContent, err := os.ReadFile(filepath.Join(tmpDir, "test-workspace", "test-workspace", "arena/test-sync", ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(headContent)).To(Equal(version))
+		})
+
+		It("should reuse existing version when content hash matches", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "workspace-content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test directory")
+			artifactDir := createTestDirectory(map[string]string{
+				"config.yaml": "name: test\n",
+			})
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-dedup",
+					Namespace: "test-workspace",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     artifactDir,
+				Revision: "rev1",
+				Checksum: "sha256:abc123",
+				Size:     50,
+			}
+
+			By("syncing first time")
+			contentPath1, version1, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("syncing second time with same content")
+			artifact.Revision = "rev2" // Different revision but same content
+			contentPath2, version2, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying same version was returned")
+			Expect(version2).To(Equal(version1))
+			Expect(contentPath2).To(Equal(contentPath1))
+		})
+
+		It("should garbage collect old versions", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "workspace-content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 2, // Keep only 2 versions
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-gc",
+					Namespace: "test-workspace",
+				},
+			}
+
+			By("creating multiple versions")
+			versionsDir := filepath.Join(tmpDir, "test-workspace", "test-workspace", "arena/test-gc", ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 3 old versions with different timestamps
+			for i, v := range []string{"old1", "old2", "old3"} {
+				vDir := filepath.Join(versionsDir, v)
+				Expect(os.MkdirAll(vDir, 0755)).To(Succeed())
+				Expect(os.WriteFile(filepath.Join(vDir, "file.txt"), []byte("content"), 0644)).To(Succeed())
+				// Set modification time in the past
+				pastTime := time.Now().Add(time.Duration(-(i+1)*10) * time.Minute)
+				Expect(os.Chtimes(vDir, pastTime, pastTime)).To(Succeed())
+			}
+
+			By("creating a new version")
+			artifactDir := createTestDirectory(map[string]string{
+				"new-file.yaml": "new content\n",
+			})
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			artifact := &fetcher.Artifact{
+				Path:     artifactDir,
+				Revision: "new-rev",
+				Checksum: "sha256:new123",
+				Size:     50,
+			}
+
+			_, version, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying old versions were garbage collected")
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			// Should have max 2 versions: 1 old (most recent) + 1 new
+			Expect(len(entries)).To(BeNumerically("<=", 2))
+			Expect(entries).To(ContainElement(HaveField("Name()", version)))
 		})
 	})
 
@@ -1421,17 +1532,17 @@ var _ = Describe("ArenaSource Controller", func() {
 		)
 
 		BeforeEach(func() {
-			By("creating the ArenaSource with Git type")
+			By("creating the ArenaSource with OCI type (requires enterprise license)")
 			arenaSource = &omniav1alpha1.ArenaSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "license-test-source",
 					Namespace: arenaSourceNamespace,
 				},
 				Spec: omniav1alpha1.ArenaSourceSpec{
-					Type:     omniav1alpha1.ArenaSourceTypeGit,
+					Type:     omniav1alpha1.ArenaSourceTypeOCI,
 					Interval: "5m",
-					Git: &omniav1alpha1.GitSource{
-						URL: "https://github.com/example/repo.git",
+					OCI: &omniav1alpha1.OCISource{
+						URL: "oci://example.com/repo:latest",
 					},
 				},
 			}
@@ -1460,11 +1571,10 @@ var _ = Describe("ArenaSource Controller", func() {
 
 			fakeRecorder := record.NewFakeRecorder(10)
 			reconciler := &ArenaSourceReconciler{
-				Client:           k8sClient,
-				Scheme:           k8sClient.Scheme(),
-				Recorder:         fakeRecorder,
-				ArtifactDir:      artifactDir,
-				ArtifactBaseURL:  "http://localhost:8080/artifacts",
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: fakeRecorder,
+
 				LicenseValidator: licValidator,
 			}
 
@@ -1492,6 +1602,496 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(condition.Reason).To(Equal("LicenseViolation"))
+		})
+	})
+
+	Context("When testing getWorkspaceForNamespace helper", func() {
+		It("should return workspace name from namespace label", func() {
+			By("creating a namespace with workspace label")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ws-test-namespace",
+					Labels: map[string]string{
+						"omnia.altairalabs.ai/workspace": "my-workspace",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("testing getWorkspaceForNamespace")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "ws-test-namespace")
+			Expect(result).To(Equal("my-workspace"))
+		})
+
+		It("should return namespace name when label is missing", func() {
+			By("creating a namespace without workspace label")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ws-test-no-label",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("testing getWorkspaceForNamespace")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "ws-test-no-label")
+			Expect(result).To(Equal("ws-test-no-label"))
+		})
+
+		It("should return namespace name when namespace doesn't exist", func() {
+			By("testing getWorkspaceForNamespace with nonexistent namespace")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+			result := reconciler.getWorkspaceForNamespace(ctx, "nonexistent-namespace")
+			Expect(result).To(Equal("nonexistent-namespace"))
+		})
+	})
+
+	Context("When testing updateHEAD helper", func() {
+		It("should create HEAD file with version", func() {
+			By("creating a temporary workspace path")
+			tmpDir, err := os.MkdirTemp("", "head-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("calling updateHEAD")
+			reconciler := &ArenaSourceReconciler{}
+			err = reconciler.updateHEAD(tmpDir, "v1.0.0")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HEAD file exists with correct content")
+			headContent, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(headContent)).To(Equal("v1.0.0"))
+		})
+
+		It("should update existing HEAD file", func() {
+			By("creating a temporary workspace path with existing HEAD")
+			tmpDir, err := os.MkdirTemp("", "head-update-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{}
+
+			By("creating first version")
+			err = reconciler.updateHEAD(tmpDir, "v1.0.0")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("updating to second version")
+			err = reconciler.updateHEAD(tmpDir, "v2.0.0")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying HEAD has new version")
+			headContent, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(headContent)).To(Equal("v2.0.0"))
+		})
+	})
+
+	Context("When testing gcOldVersions helper", func() {
+		It("should not remove versions when under limit", func() {
+			By("creating workspace with fewer versions than limit")
+			tmpDir, err := os.MkdirTemp("", "gc-under-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 2 versions
+			for _, v := range []string{"v1", "v2"} {
+				Expect(os.MkdirAll(filepath.Join(versionsDir, v), 0755)).To(Succeed())
+			}
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Both versions should still exist
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(2))
+		})
+
+		It("should handle nonexistent versions directory", func() {
+			tmpDir, err := os.MkdirTemp("", "gc-nonexistent-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should remove oldest versions when exceeding limit", func() {
+			By("creating workspace with more versions than limit")
+			tmpDir, err := os.MkdirTemp("", "gc-remove-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 5 versions with different mod times
+			versions := []string{"v1", "v2", "v3", "v4", "v5"}
+			for i, v := range versions {
+				versionPath := filepath.Join(versionsDir, v)
+				Expect(os.MkdirAll(versionPath, 0755)).To(Succeed())
+				// Set different mod times to control ordering
+				modTime := time.Now().Add(time.Duration(i) * time.Hour)
+				Expect(os.Chtimes(versionPath, modTime, modTime)).To(Succeed())
+			}
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 3}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Should have 3 versions left (the newest ones)
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(3))
+
+			// v1 and v2 should be removed (oldest)
+			_, err = os.Stat(filepath.Join(versionsDir, "v1"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+			_, err = os.Stat(filepath.Join(versionsDir, "v2"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+		})
+
+		It("should use default max when not configured", func() {
+			By("creating workspace with max versions set to 0")
+			tmpDir, err := os.MkdirTemp("", "gc-default-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create 5 versions
+			for _, v := range []string{"v1", "v2", "v3", "v4", "v5"} {
+				Expect(os.MkdirAll(filepath.Join(versionsDir, v), 0755)).To(Succeed())
+			}
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 0} // Should default to 10
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// All 5 should remain (under default of 10)
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(5))
+		})
+
+		It("should skip non-directory entries", func() {
+			By("creating workspace with mixed entries")
+			tmpDir, err := os.MkdirTemp("", "gc-mixed-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			versionsDir := filepath.Join(tmpDir, ".arena", "versions")
+			Expect(os.MkdirAll(versionsDir, 0755)).To(Succeed())
+
+			// Create directories
+			for _, v := range []string{"v1", "v2"} {
+				Expect(os.MkdirAll(filepath.Join(versionsDir, v), 0755)).To(Succeed())
+			}
+			// Create a file (should be skipped)
+			Expect(os.WriteFile(filepath.Join(versionsDir, "README.txt"), []byte("info"), 0644)).To(Succeed())
+
+			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
+			err = reconciler.gcOldVersions(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			// All entries should remain
+			entries, err := os.ReadDir(versionsDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(3)) // v1, v2, README.txt
+		})
+	})
+
+	Context("When testing syncToFilesystem version caching", func() {
+		It("should skip sync when version already exists", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "sync-skip-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test directory")
+			artifactDir := createTestDirectory(map[string]string{
+				"config.yaml": "name: cached-test\n",
+			})
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			By("syncing first time to create version")
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cache-test",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					TargetPath: "arena/cache-test",
+				},
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     artifactDir,
+				Revision: "rev1",
+				Checksum: "sha256:cache",
+				Size:     50,
+			}
+
+			contentPath1, version1, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version1).NotTo(BeEmpty())
+
+			By("syncing again with same content (should skip)")
+			contentPath2, version2, _, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(version2).To(Equal(version1))
+			Expect(contentPath2).To(Equal(contentPath1))
+		})
+	})
+
+	Context("When testing updateHEAD error paths", func() {
+		It("should succeed with valid path", func() {
+			tmpDir, err := os.MkdirTemp("", "head-ok-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			reconciler := &ArenaSourceReconciler{}
+			err = reconciler.updateHEAD(tmpDir, "test-version")
+			Expect(err).NotTo(HaveOccurred())
+
+			content, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content)).To(Equal("test-version"))
+		})
+	})
+
+	Context("When testing createOCIFetcher helper", func() {
+		It("should create OCI fetcher with default credentials", func() {
+			By("creating reconciler with OCI source")
+			reconciler := &ArenaSourceReconciler{
+				Client: k8sClient,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "oci-test",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type: omniav1alpha1.ArenaSourceTypeOCI,
+					OCI: &omniav1alpha1.OCISource{
+						URL: "registry.example.com/my-repo:latest",
+					},
+				},
+			}
+
+			opts := fetcher.Options{
+				Timeout: time.Minute,
+				WorkDir: "/tmp",
+			}
+
+			f, err := reconciler.createOCIFetcher(ctx, source, opts)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(f).NotTo(BeNil())
+		})
+	})
+
+	Context("When testing copyDirectory helper", func() {
+		It("should copy directory recursively", func() {
+			By("creating source directory with files")
+			srcDir, err := os.MkdirTemp("", "copy-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			Expect(os.WriteFile(filepath.Join(srcDir, "file1.txt"), []byte("content1"), 0644)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(srcDir, "subdir"), 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(srcDir, "subdir", "file2.txt"), []byte("content2"), 0644)).To(Succeed())
+
+			By("copying to destination")
+			dstDir, err := os.MkdirTemp("", "copy-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			err = copyDirectory(srcDir, dstDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying copied files")
+			content1, err := os.ReadFile(filepath.Join(dstDir, "file1.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content1)).To(Equal("content1"))
+
+			content2, err := os.ReadFile(filepath.Join(dstDir, "subdir", "file2.txt"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content2)).To(Equal("content2"))
+		})
+	})
+
+	Context("When testing copyFileWithMode helper", func() {
+		It("should copy file with mode", func() {
+			By("creating source file")
+			srcDir, err := os.MkdirTemp("", "copymode-src-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			srcFile := filepath.Join(srcDir, "source.txt")
+			Expect(os.WriteFile(srcFile, []byte("test content"), 0755)).To(Succeed())
+
+			By("copying to destination")
+			dstDir, err := os.MkdirTemp("", "copymode-dst-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			dstFile := filepath.Join(dstDir, "dest.txt")
+			err = copyFileWithMode(srcFile, dstFile, 0755)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying content and mode")
+			content, err := os.ReadFile(dstFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(content)).To(Equal("test content"))
+
+			info, err := os.Stat(dstFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Mode().Perm()).To(Equal(os.FileMode(0755)))
+		})
+
+		It("should fail when source doesn't exist", func() {
+			dstDir, err := os.MkdirTemp("", "copymode-fail-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dstDir) }()
+
+			err = copyFileWithMode("/nonexistent/file.txt", filepath.Join(dstDir, "dest.txt"), 0644)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail when destination directory doesn't exist", func() {
+			srcDir, err := os.MkdirTemp("", "copymode-src2-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(srcDir) }()
+
+			srcFile := filepath.Join(srcDir, "source.txt")
+			Expect(os.WriteFile(srcFile, []byte("content"), 0644)).To(Succeed())
+
+			err = copyFileWithMode(srcFile, "/nonexistent/dir/dest.txt", 0644)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("When testing fetcher.CalculateDirectoryHash helper", func() {
+		It("should calculate hash for directory", func() {
+			By("creating directory with files")
+			tmpDir, err := os.MkdirTemp("", "hash-test-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("content"), 0644)).To(Succeed())
+
+			By("calculating hash")
+			hash, err := fetcher.CalculateDirectoryHash(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(hash).NotTo(BeEmpty())
+			Expect(hash).To(HaveLen(64)) // SHA256 hex = 64 chars
+		})
+
+		It("should return different hashes for different content", func() {
+			By("creating first directory")
+			dir1, err := os.MkdirTemp("", "hash-test1-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dir1) }()
+			Expect(os.WriteFile(filepath.Join(dir1, "file.txt"), []byte("content1"), 0644)).To(Succeed())
+
+			By("creating second directory")
+			dir2, err := os.MkdirTemp("", "hash-test2-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(dir2) }()
+			Expect(os.WriteFile(filepath.Join(dir2, "file.txt"), []byte("content2"), 0644)).To(Succeed())
+
+			By("comparing hashes")
+			hash1, err := fetcher.CalculateDirectoryHash(dir1)
+			Expect(err).NotTo(HaveOccurred())
+
+			hash2, err := fetcher.CalculateDirectoryHash(dir2)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(hash1).NotTo(Equal(hash2))
+		})
+
+		It("should handle subdirectories", func() {
+			By("creating directory with subdirectories")
+			tmpDir, err := os.MkdirTemp("", "hash-subdir-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			Expect(os.MkdirAll(filepath.Join(tmpDir, "subdir1", "nested"), 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(tmpDir, "subdir1", "nested", "file.txt"), []byte("nested content"), 0644)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(tmpDir, "subdir2"), 0755)).To(Succeed())
+
+			By("calculating hash")
+			hash, err := fetcher.CalculateDirectoryHash(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(hash).NotTo(BeEmpty())
+		})
+	})
+
+	Context("When testing syncToFilesystem edge cases", func() {
+		It("should use default target path when not specified", func() {
+			By("creating a temporary workspace content directory")
+			tmpDir, err := os.MkdirTemp("", "sync-default-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(tmpDir) }()
+
+			By("creating a test directory")
+			artifactDir := createTestDirectory(map[string]string{
+				"config.yaml": "name: test\n",
+			})
+			defer func() { _ = os.RemoveAll(artifactDir) }()
+
+			By("syncing with no target path (uses default)")
+			reconciler := &ArenaSourceReconciler{
+				WorkspaceContentPath: tmpDir,
+				MaxVersionsPerSource: 5,
+			}
+
+			source := &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-source",
+					Namespace: "test-ws",
+				},
+				// No TargetPath specified - should default to arena/{source-name}
+			}
+
+			artifact := &fetcher.Artifact{
+				Path:     artifactDir,
+				Revision: "rev1",
+				Checksum: "sha256:abc",
+				Size:     50,
+			}
+
+			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(url).To(BeEmpty())
+			Expect(version).NotTo(BeEmpty())
+			Expect(contentPath).To(ContainSubstring("arena/my-source"))
 		})
 	})
 
@@ -1533,10 +2133,8 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
 
 			reconciler = &ArenaSourceReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				ArtifactDir:     artifactDir,
-				ArtifactBaseURL: "http://localhost:8080/artifacts",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 		})
 

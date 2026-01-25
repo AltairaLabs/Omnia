@@ -42,8 +42,8 @@ function getJobStatusBadge(phase?: string) {
   switch (phase) {
     case "Running":
       return <Badge variant="default" className="bg-blue-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Running</Badge>;
-    case "Completed":
-      return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" /> Completed</Badge>;
+    case "Succeeded":
+      return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" /> Succeeded</Badge>;
     case "Failed":
       return <Badge variant="destructive"><AlertCircle className="h-3 w-3 mr-1" /> Failed</Badge>;
     case "Cancelled":
@@ -90,9 +90,9 @@ function RecentJobsTable({ jobs }: Readonly<{ jobs: ArenaJob[] }>) {
       </TableHeader>
       <TableBody>
         {jobs.map((job) => {
-          const completed = job.status?.completedTasks || 0;
-          const total = job.status?.totalTasks || 0;
-          const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const completed = job.status?.progress?.completed || 0;
+          const total = job.status?.progress?.total || 0;
+          const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
           return (
             <TableRow key={job.metadata?.name}>
@@ -111,10 +111,10 @@ function RecentJobsTable({ jobs }: Readonly<{ jobs: ArenaJob[] }>) {
                   <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full bg-primary transition-all"
-                      style={{ width: `${progress}%` }}
+                      style={{ width: `${progressPct}%` }}
                     />
                   </div>
-                  <span className="text-sm text-muted-foreground">{progress}%</span>
+                  <span className="text-sm text-muted-foreground">{progressPct}%</span>
                 </div>
               </TableCell>
               <TableCell className="text-muted-foreground">
@@ -195,15 +195,6 @@ export default function ArenaPage() {
             />
           </Link>
 
-          <Link href="/arena/configs">
-            <StatCard
-              title="Configurations"
-              value={stats?.configs.total || 0}
-              icon={Settings}
-              description={stats?.configs.scenarios ? `${stats.configs.scenarios} scenarios` : undefined}
-            />
-          </Link>
-
           <Link href="/arena/jobs">
             <StatCard
               title="Running Jobs"
@@ -218,6 +209,13 @@ export default function ArenaPage() {
             value={successRatePercent}
             icon={Target}
             description={stats?.jobs.completed ? `${stats.jobs.completed} completed` : undefined}
+          />
+
+          <StatCard
+            title="Total Jobs"
+            value={stats?.jobs.total || 0}
+            icon={Settings}
+            description={stats?.jobs.failed ? `${stats.jobs.failed} failed` : undefined}
           />
         </div>
 
@@ -236,7 +234,7 @@ export default function ArenaPage() {
         </div>
 
         {/* Quick Links */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <Link
             href="/arena/sources"
             className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
@@ -244,18 +242,7 @@ export default function ArenaPage() {
             <Database className="h-8 w-8 mb-3 text-muted-foreground" />
             <h3 className="font-semibold mb-1">Manage Sources</h3>
             <p className="text-sm text-muted-foreground">
-              Configure Git, OCI, or S3 sources for your PromptKit bundles
-            </p>
-          </Link>
-
-          <Link
-            href="/arena/configs"
-            className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
-          >
-            <Settings className="h-8 w-8 mb-3 text-muted-foreground" />
-            <h3 className="font-semibold mb-1">Create Configs</h3>
-            <p className="text-sm text-muted-foreground">
-              Set up evaluation, load test, or data generation configurations
+              Configure Git, OCI, or S3 sources containing arena configurations and scenarios
             </p>
           </Link>
 
@@ -266,7 +253,7 @@ export default function ArenaPage() {
             <Play className="h-8 w-8 mb-3 text-muted-foreground" />
             <h3 className="font-semibold mb-1">Run Jobs</h3>
             <p className="text-sm text-muted-foreground">
-              Execute and monitor Arena Fleet jobs for your agents
+              Execute evaluations, load tests, or data generation jobs
             </p>
           </Link>
         </div>

@@ -8,6 +8,9 @@
 
 import { NextResponse } from "next/server";
 import { getWorkspace } from "./workspace-client";
+
+// Re-export getWorkspace for use by content API routes
+export { getWorkspace };
 import { extractK8sErrorMessage, isForbiddenError } from "./crd-operations";
 import { getUser } from "@/lib/auth";
 import {

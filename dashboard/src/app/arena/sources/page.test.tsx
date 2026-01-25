@@ -268,7 +268,7 @@ describe("ArenaSourcesPage", () => {
         { metadata: { name: "git-src" }, spec: { type: "git", git: { url: "https://github.com/org/repo" } }, status: { phase: "Ready" } },
         { metadata: { name: "oci-src" }, spec: { type: "oci", oci: { url: "oci://ghcr.io/org/pkg" } }, status: { phase: "Ready" } },
         { metadata: { name: "s3-src" }, spec: { type: "s3", s3: { bucket: "bucket" } }, status: { phase: "Ready" } },
-        { metadata: { name: "cm-src" }, spec: { type: "configmap", configMapRef: { name: "my-cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "cm-src" }, spec: { type: "configmap", configMap: { name: "my-cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -298,7 +298,7 @@ describe("ArenaSourcesPage", () => {
       sources: [
         { metadata: { name: "git-src" }, spec: { type: "git", git: { url: "https://github.com/org/repo.git" } }, status: { phase: "Ready" } },
         { metadata: { name: "s3-src" }, spec: { type: "s3", s3: { bucket: "my-bucket", prefix: "prompts" } }, status: { phase: "Ready" } },
-        { metadata: { name: "cm-src" }, spec: { type: "configmap", configMapRef: { name: "my-configmap" } }, status: { phase: "Ready" } },
+        { metadata: { name: "cm-src" }, spec: { type: "configmap", configMap: { name: "my-configmap" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -324,9 +324,9 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "src-1" }, spec: { type: "configmap", configMapRef: { name: "cm1" } }, status: { phase: "Ready" } },
-        { metadata: { name: "src-2" }, spec: { type: "configmap", configMapRef: { name: "cm2" } }, status: { phase: "Failed" } },
-        { metadata: { name: "src-3" }, spec: { type: "configmap", configMapRef: { name: "cm3" } }, status: { phase: "Pending" } },
+        { metadata: { name: "src-1" }, spec: { type: "configmap", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
+        { metadata: { name: "src-2" }, spec: { type: "configmap", configMap: { name: "cm2" } }, status: { phase: "Failed" } },
+        { metadata: { name: "src-3" }, spec: { type: "configmap", configMap: { name: "cm3" } }, status: { phase: "Pending" } },
       ] as any,
       loading: false,
       error: null,
@@ -352,8 +352,8 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "src-1" }, spec: { type: "configmap", interval: "5m", configMapRef: { name: "cm1" } }, status: { phase: "Ready" } },
-        { metadata: { name: "src-2" }, spec: { type: "configmap", interval: "1h", configMapRef: { name: "cm2" } }, status: { phase: "Ready" } },
+        { metadata: { name: "src-1" }, spec: { type: "configmap", interval: "5m", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
+        { metadata: { name: "src-2" }, spec: { type: "configmap", interval: "1h", configMap: { name: "cm2" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -401,7 +401,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "my-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "my-source" }, spec: { type: "configmap", configMap: { name: "cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -426,7 +426,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "my-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "my-source" }, spec: { type: "configmap", configMap: { name: "cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -454,7 +454,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "my-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "my-source" }, spec: { type: "configmap", configMap: { name: "cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -530,7 +530,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "my-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "my-source" }, spec: { type: "configmap", configMap: { name: "cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -560,7 +560,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "src-1" }, spec: { type: "configmap", interval: "30s", configMapRef: { name: "cm1" } }, status: { phase: "Ready" } },
+        { metadata: { name: "src-1" }, spec: { type: "configmap", interval: "30s", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -584,7 +584,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "src-1" }, spec: { type: "configmap", interval: "6h", configMapRef: { name: "cm1" } }, status: { phase: "Ready" } },
+        { metadata: { name: "src-1" }, spec: { type: "configmap", interval: "6h", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -610,7 +610,7 @@ describe("ArenaSourcesPage", () => {
       sources: [
         {
           metadata: { name: "synced-source" },
-          spec: { type: "configmap", configMapRef: { name: "cm" } },
+          spec: { type: "configmap", configMap: { name: "cm" } },
           status: {
             phase: "Ready",
             artifact: {
@@ -674,7 +674,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "unknown-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: undefined } },
+        { metadata: { name: "unknown-source" }, spec: { type: "configmap", configMap: { name: "cm" } }, status: { phase: undefined } },
       ] as any,
       loading: false,
       error: null,
@@ -725,7 +725,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "daily-source" }, spec: { type: "configmap", interval: "24h", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "daily-source" }, spec: { type: "configmap", interval: "24h", configMap: { name: "cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -749,7 +749,7 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "no-interval-source" }, spec: { type: "configmap", configMapRef: { name: "cm" } }, status: { phase: "Ready" } },
+        { metadata: { name: "no-interval-source" }, spec: { type: "configmap", configMap: { name: "cm" } }, status: { phase: "Ready" } },
       ] as any,
       loading: false,
       error: null,
@@ -773,8 +773,8 @@ describe("ArenaSourcesPage", () => {
     const { useArenaSources, useArenaSourceMutations } = await import("@/hooks");
     vi.mocked(useArenaSources).mockReturnValue({
       sources: [
-        { metadata: { name: "ready-src" }, spec: { type: "configmap", configMapRef: { name: "cm1" } }, status: { phase: "Ready" } },
-        { metadata: { name: "failed-src" }, spec: { type: "configmap", configMapRef: { name: "cm2" } }, status: { phase: "Failed" } },
+        { metadata: { name: "ready-src" }, spec: { type: "configmap", configMap: { name: "cm1" } }, status: { phase: "Ready" } },
+        { metadata: { name: "failed-src" }, spec: { type: "configmap", configMap: { name: "cm2" } }, status: { phase: "Failed" } },
       ] as any,
       loading: false,
       error: null,

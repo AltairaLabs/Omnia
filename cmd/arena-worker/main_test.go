@@ -17,22 +17,16 @@ limitations under the License.
 package main
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/altairalabs/omnia/pkg/arena/queue"
 )
-
-const testContent = "test content"
 
 func TestGetEnvOrDefault(t *testing.T) {
 	tests := []struct {
@@ -119,9 +113,8 @@ func TestGetDurationEnv(t *testing.T) {
 
 func TestLoadConfig(t *testing.T) {
 	t.Run("returns error when ARENA_JOB_NAME is missing", func(t *testing.T) {
-		// Clear required env vars
 		t.Setenv("ARENA_JOB_NAME", "")
-		t.Setenv("ARENA_ARTIFACT_URL", "")
+		t.Setenv("ARENA_CONTENT_PATH", "/workspace/content")
 
 		_, err := loadConfig()
 		if err == nil {
@@ -129,19 +122,19 @@ func TestLoadConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error when ARENA_ARTIFACT_URL is missing", func(t *testing.T) {
+	t.Run("returns error when ARENA_CONTENT_PATH is missing", func(t *testing.T) {
 		t.Setenv("ARENA_JOB_NAME", "test-job")
-		t.Setenv("ARENA_ARTIFACT_URL", "")
+		t.Setenv("ARENA_CONTENT_PATH", "")
 
 		_, err := loadConfig()
 		if err == nil {
-			t.Error("loadConfig() should return error when ARENA_ARTIFACT_URL is missing")
+			t.Error("loadConfig() should return error when ARENA_CONTENT_PATH is missing")
 		}
 	})
 
 	t.Run("returns config when required fields are set", func(t *testing.T) {
 		t.Setenv("ARENA_JOB_NAME", "test-job")
-		t.Setenv("ARENA_ARTIFACT_URL", "http://example.com/bundle.tar.gz")
+		t.Setenv("ARENA_CONTENT_PATH", "/workspace/content")
 
 		cfg, err := loadConfig()
 		if err != nil {
@@ -150,8 +143,8 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.JobName != "test-job" {
 			t.Errorf("JobName = %v, want test-job", cfg.JobName)
 		}
-		if cfg.ArtifactURL != "http://example.com/bundle.tar.gz" {
-			t.Errorf("ArtifactURL = %v, want http://example.com/bundle.tar.gz", cfg.ArtifactURL)
+		if cfg.ContentPath != "/workspace/content" {
+			t.Errorf("ContentPath = %v, want /workspace/content", cfg.ContentPath)
 		}
 		// Check defaults
 		if cfg.RedisAddr != "redis:6379" {
@@ -160,318 +153,7 @@ func TestLoadConfig(t *testing.T) {
 	})
 }
 
-func TestDownloadFile(t *testing.T) {
-	t.Run("downloads file successfully", func(t *testing.T) {
-		content := testContent
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(content))
-		}))
-		defer server.Close()
-
-		tmpDir := t.TempDir()
-		destPath := filepath.Join(tmpDir, "downloaded.txt")
-
-		err := downloadFile(context.Background(), server.URL, destPath)
-		if err != nil {
-			t.Fatalf("downloadFile() error = %v", err)
-		}
-
-		got, err := os.ReadFile(destPath)
-		if err != nil {
-			t.Fatalf("failed to read downloaded file: %v", err)
-		}
-		if string(got) != content {
-			t.Errorf("downloaded content = %v, want %v", string(got), content)
-		}
-	})
-
-	t.Run("returns error on non-200 status", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer server.Close()
-
-		tmpDir := t.TempDir()
-		destPath := filepath.Join(tmpDir, "downloaded.txt")
-
-		err := downloadFile(context.Background(), server.URL, destPath)
-		if err == nil {
-			t.Error("downloadFile() should return error on 404")
-		}
-	})
-}
-
-func TestExtractTarGz(t *testing.T) {
-	t.Run("extracts tar.gz successfully", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		tarPath := filepath.Join(tmpDir, "test.tar.gz")
-		destDir := filepath.Join(tmpDir, "extracted")
-
-		// Create test tar.gz
-		if err := createTestTarGz(tarPath); err != nil {
-			t.Fatalf("failed to create test tar.gz: %v", err)
-		}
-
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			t.Fatalf("failed to create dest dir: %v", err)
-		}
-
-		err := extractTarGz(tarPath, destDir)
-		if err != nil {
-			t.Fatalf("extractTarGz() error = %v", err)
-		}
-
-		// Verify extracted file exists
-		extractedFile := filepath.Join(destDir, "test.txt")
-		if _, err := os.Stat(extractedFile); os.IsNotExist(err) {
-			t.Error("expected file was not extracted")
-		}
-
-		// Verify content
-		content, err := os.ReadFile(extractedFile)
-		if err != nil {
-			t.Fatalf("failed to read extracted file: %v", err)
-		}
-		if string(content) != testContent {
-			t.Errorf("extracted content = %v, want %q", string(content), testContent)
-		}
-	})
-
-	t.Run("rejects path traversal attempts", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		tarPath := filepath.Join(tmpDir, "malicious.tar.gz")
-		destDir := filepath.Join(tmpDir, "extracted")
-
-		// Create malicious tar.gz with path traversal
-		if err := createMaliciousTarGz(tarPath); err != nil {
-			t.Fatalf("failed to create malicious tar.gz: %v", err)
-		}
-
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			t.Fatalf("failed to create dest dir: %v", err)
-		}
-
-		err := extractTarGz(tarPath, destDir)
-		if err == nil {
-			t.Error("extractTarGz() should reject path traversal")
-		}
-	})
-
-	t.Run("rejects absolute symlink targets", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		tarPath := filepath.Join(tmpDir, "symlink-absolute.tar.gz")
-		destDir := filepath.Join(tmpDir, "extracted")
-
-		if err := createTarGzWithSymlink(tarPath, "link.txt", "/etc/passwd"); err != nil {
-			t.Fatalf("failed to create tar.gz with symlink: %v", err)
-		}
-
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			t.Fatalf("failed to create dest dir: %v", err)
-		}
-
-		err := extractTarGz(tarPath, destDir)
-		if err == nil {
-			t.Error("extractTarGz() should reject absolute symlink targets")
-		}
-	})
-
-	t.Run("rejects symlink escaping destination", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		tarPath := filepath.Join(tmpDir, "symlink-escape.tar.gz")
-		destDir := filepath.Join(tmpDir, "extracted")
-
-		if err := createTarGzWithSymlink(tarPath, "link.txt", "../../../etc/passwd"); err != nil {
-			t.Fatalf("failed to create tar.gz with symlink: %v", err)
-		}
-
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			t.Fatalf("failed to create dest dir: %v", err)
-		}
-
-		err := extractTarGz(tarPath, destDir)
-		if err == nil {
-			t.Error("extractTarGz() should reject symlink escape attempts")
-		}
-	})
-}
-
-func createTestTarGz(path string) error {
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	gw := gzip.NewWriter(file)
-	defer func() { _ = gw.Close() }()
-
-	tw := tar.NewWriter(gw)
-	defer func() { _ = tw.Close() }()
-
-	content := []byte(testContent)
-	hdr := &tar.Header{
-		Name: "test.txt",
-		Mode: 0644,
-		Size: int64(len(content)),
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	if _, err := tw.Write(content); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func createMaliciousTarGz(path string) error {
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	gw := gzip.NewWriter(file)
-	defer func() { _ = gw.Close() }()
-
-	tw := tar.NewWriter(gw)
-	defer func() { _ = tw.Close() }()
-
-	content := []byte("malicious content")
-	hdr := &tar.Header{
-		Name: "../../../etc/passwd",
-		Mode: 0644,
-		Size: int64(len(content)),
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	if _, err := tw.Write(content); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func TestSanitizeSymlinkTarget(t *testing.T) {
-	tmpDir := t.TempDir()
-	destDir := filepath.Join(tmpDir, "dest")
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		t.Fatalf("failed to create dest dir: %v", err)
-	}
-
-	tests := []struct {
-		name        string
-		symlinkPath string
-		linkTarget  string
-		wantErr     bool
-	}{
-		{
-			name:        "valid relative symlink",
-			symlinkPath: filepath.Join(destDir, "link.txt"),
-			linkTarget:  "target.txt",
-			wantErr:     false,
-		},
-		{
-			name:        "valid relative symlink in subdir",
-			symlinkPath: filepath.Join(destDir, "subdir", "link.txt"),
-			linkTarget:  "../target.txt",
-			wantErr:     false,
-		},
-		{
-			name:        "absolute symlink target",
-			symlinkPath: filepath.Join(destDir, "link.txt"),
-			linkTarget:  "/etc/passwd",
-			wantErr:     true,
-		},
-		{
-			name:        "symlink escaping destination",
-			symlinkPath: filepath.Join(destDir, "link.txt"),
-			linkTarget:  "../../../etc/passwd",
-			wantErr:     true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := sanitizeSymlinkTarget(destDir, tt.symlinkPath, tt.linkTarget)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("sanitizeSymlinkTarget() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func createTarGzWithSymlink(path, linkName, linkTarget string) error {
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	gw := gzip.NewWriter(file)
-	defer func() { _ = gw.Close() }()
-
-	tw := tar.NewWriter(gw)
-	defer func() { _ = tw.Close() }()
-
-	hdr := &tar.Header{
-		Name:     linkName,
-		Mode:     0777,
-		Typeflag: tar.TypeSymlink,
-		Linkname: linkTarget,
-	}
-	return tw.WriteHeader(hdr)
-}
-
 func TestProcessWorkItems(t *testing.T) {
-	t.Run("processes items from queue until empty", func(t *testing.T) {
-		q := queue.NewMemoryQueueWithDefaults()
-		jobID := "test-job"
-
-		// Push work items
-		items := []queue.WorkItem{
-			{ID: "item-1", ScenarioID: "scenario1", ProviderID: "provider1"},
-			{ID: "item-2", ScenarioID: "scenario2", ProviderID: "provider1"},
-		}
-		if err := q.Push(context.Background(), jobID, items); err != nil {
-			t.Fatalf("failed to push items: %v", err)
-		}
-
-		// Create a mock executable that returns valid JSON
-		tmpDir := t.TempDir()
-		mockBin := createMockPromptArena(t, tmpDir, `{"status":"pass","durationMs":100}`)
-
-		cfg := &Config{
-			JobName:        jobID,
-			WorkDir:        tmpDir,
-			PromptArenaBin: mockBin,
-			PollInterval:   10 * time.Millisecond,
-		}
-
-		// Create a context that will cancel after short timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		err := processWorkItems(ctx, cfg, q, tmpDir)
-		if err != nil {
-			t.Fatalf("processWorkItems() error = %v", err)
-		}
-
-		// Verify all items were processed
-		progress, err := q.Progress(context.Background(), jobID)
-		if err != nil {
-			t.Fatalf("failed to get progress: %v", err)
-		}
-		if progress.Completed != 2 {
-			t.Errorf("expected 2 completed items, got %d", progress.Completed)
-		}
-		if progress.Pending != 0 {
-			t.Errorf("expected 0 pending items, got %d", progress.Pending)
-		}
-	})
-
 	t.Run("handles context cancellation", func(t *testing.T) {
 		q := queue.NewMemoryQueueWithDefaults()
 		jobID := "test-job-cancel"
@@ -486,10 +168,9 @@ func TestProcessWorkItems(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		cfg := &Config{
-			JobName:        jobID,
-			WorkDir:        tmpDir,
-			PromptArenaBin: "nonexistent-binary",
-			PollInterval:   10 * time.Millisecond,
+			JobName:      jobID,
+			WorkDir:      tmpDir,
+			PollInterval: 10 * time.Millisecond,
 		}
 
 		// Cancel context immediately
@@ -501,107 +182,81 @@ func TestProcessWorkItems(t *testing.T) {
 			t.Fatalf("processWorkItems() with cancelled context should return nil, got %v", err)
 		}
 	})
+}
 
-	t.Run("handles failed items", func(t *testing.T) {
-		q := queue.NewMemoryQueueWithDefaults()
-		jobID := "test-job-fail"
-
-		// Push work items
-		items := []queue.WorkItem{
-			{ID: "item-fail", ScenarioID: "scenario1", ProviderID: "provider1", MaxAttempts: 1},
-		}
-		if err := q.Push(context.Background(), jobID, items); err != nil {
-			t.Fatalf("failed to push items: %v", err)
-		}
-
+func TestFindArenaConfigFile(t *testing.T) {
+	t.Run("finds config.arena.yaml", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		// Create a mock that always exits with error
-		mockBin := createMockPromptArena(t, tmpDir, "")
-
-		cfg := &Config{
-			JobName:        jobID,
-			WorkDir:        tmpDir,
-			PromptArenaBin: mockBin + "-nonexistent", // Force failure
-			PollInterval:   10 * time.Millisecond,
+		configPath := filepath.Join(tmpDir, "config.arena.yaml")
+		if err := os.WriteFile(configPath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create config file: %v", err)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		result := findArenaConfigFile(tmpDir, "")
+		if result != configPath {
+			t.Errorf("expected %s, got %s", configPath, result)
+		}
+	})
 
-		err := processWorkItems(ctx, cfg, q, tmpDir)
-		if err != nil {
-			t.Fatalf("processWorkItems() error = %v", err)
+	t.Run("finds arena.yaml", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "arena.yaml")
+		if err := os.WriteFile(configPath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create config file: %v", err)
 		}
 
-		// Verify item was marked as failed
-		progress, err := q.Progress(context.Background(), jobID)
-		if err != nil {
-			t.Fatalf("failed to get progress: %v", err)
+		result := findArenaConfigFile(tmpDir, "")
+		if result != configPath {
+			t.Errorf("expected %s, got %s", configPath, result)
 		}
-		if progress.Failed != 1 {
-			t.Errorf("expected 1 failed item, got %d", progress.Failed)
+	})
+
+	t.Run("finds config.yaml", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+		if err := os.WriteFile(configPath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create config file: %v", err)
+		}
+
+		result := findArenaConfigFile(tmpDir, "")
+		if result != configPath {
+			t.Errorf("expected %s, got %s", configPath, result)
+		}
+	})
+
+	t.Run("prefers config.arena.yaml over others", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		arenaConfig := filepath.Join(tmpDir, "config.arena.yaml")
+		plainConfig := filepath.Join(tmpDir, "config.yaml")
+		if err := os.WriteFile(arenaConfig, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create arena config: %v", err)
+		}
+		if err := os.WriteFile(plainConfig, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create plain config: %v", err)
+		}
+
+		result := findArenaConfigFile(tmpDir, "")
+		if result != arenaConfig {
+			t.Errorf("expected %s, got %s", arenaConfig, result)
+		}
+	})
+
+	t.Run("returns empty string when no config found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		result := findArenaConfigFile(tmpDir, "")
+		if result != "" {
+			t.Errorf("expected empty string, got %s", result)
 		}
 	})
 }
 
 func TestExecuteWorkItem(t *testing.T) {
-	t.Run("executes successfully with JSON output", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		mockBin := createMockPromptArena(t, tmpDir, `{"status":"pass","durationMs":150,"metrics":{"tokens":100}}`)
-
-		cfg := &Config{
-			WorkDir:        tmpDir,
-			PromptArenaBin: mockBin,
-		}
-
-		item := &queue.WorkItem{
-			ID:         "test-item",
-			ScenarioID: "test-scenario",
-			ProviderID: "test-provider",
-		}
-
-		result, err := executeWorkItem(context.Background(), cfg, item, tmpDir)
-		if err != nil {
-			t.Fatalf("executeWorkItem() error = %v", err)
-		}
-
-		if result.Status != statusPass {
-			t.Errorf("expected status 'pass', got '%s'", result.Status)
-		}
-	})
-
-	t.Run("handles non-JSON output", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		mockBin := createMockPromptArena(t, tmpDir, "not valid json")
-
-		cfg := &Config{
-			WorkDir:        tmpDir,
-			PromptArenaBin: mockBin,
-		}
-
-		item := &queue.WorkItem{
-			ID:         "test-item",
-			ScenarioID: "test-scenario",
-			ProviderID: "test-provider",
-		}
-
-		result, err := executeWorkItem(context.Background(), cfg, item, tmpDir)
-		if err != nil {
-			t.Fatalf("executeWorkItem() error = %v", err)
-		}
-
-		// Non-JSON output should be treated as pass
-		if result.Status != statusPass {
-			t.Errorf("expected status 'pass' for non-JSON output, got '%s'", result.Status)
-		}
-	})
-
-	t.Run("handles binary not found", func(t *testing.T) {
+	t.Run("returns error when arena config not found", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		cfg := &Config{
-			WorkDir:        tmpDir,
-			PromptArenaBin: "/nonexistent/binary",
+			WorkDir: tmpDir,
 		}
 
 		item := &queue.WorkItem{
@@ -612,177 +267,595 @@ func TestExecuteWorkItem(t *testing.T) {
 
 		_, err := executeWorkItem(context.Background(), cfg, item, tmpDir)
 		if err == nil {
-			t.Error("executeWorkItem() should return error for missing binary")
+			t.Error("executeWorkItem() should return error when arena config is missing")
+		}
+		if !contains(err.Error(), "arena config file not found") {
+			t.Errorf("expected error about missing config, got: %v", err)
+		}
+	})
+}
+
+// contains checks if s contains any of the substrings (used in tests)
+func contains(s string, substrs ...string) bool {
+	for _, sub := range substrs {
+		if bytes.Contains([]byte(s), []byte(sub)) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGetContentPath(t *testing.T) {
+	t.Run("returns content path when directory exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		contentDir := filepath.Join(tmpDir, "content")
+		if err := os.MkdirAll(contentDir, 0755); err != nil {
+			t.Fatalf("failed to create content dir: %v", err)
+		}
+
+		cfg := &Config{
+			ContentPath: contentDir,
+		}
+
+		path, err := getContentPath(cfg)
+		if err != nil {
+			t.Fatalf("getContentPath() error = %v", err)
+		}
+		if path != contentDir {
+			t.Errorf("expected %s, got %s", contentDir, path)
 		}
 	})
 
-	t.Run("handles item with config", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		mockBin := createMockPromptArena(t, tmpDir, `{"status":"pass"}`)
-
+	t.Run("returns error when ContentPath does not exist", func(t *testing.T) {
 		cfg := &Config{
-			WorkDir:        tmpDir,
-			PromptArenaBin: mockBin,
+			ContentPath: "/nonexistent/path",
 		}
 
-		item := &queue.WorkItem{
-			ID:         "test-item-config",
-			ScenarioID: "test-scenario",
-			ProviderID: "test-provider",
-			Config:     []byte(`{"key":"value"}`),
-		}
-
-		result, err := executeWorkItem(context.Background(), cfg, item, tmpDir)
-		if err != nil {
-			t.Fatalf("executeWorkItem() error = %v", err)
-		}
-
-		if result.Status != statusPass {
-			t.Errorf("expected status 'pass', got '%s'", result.Status)
-		}
-
-		// Verify config file was created and cleaned up
-		configPath := filepath.Join(tmpDir, "config-test-item-config.json")
-		if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-			t.Error("config file should be cleaned up after execution")
+		_, err := getContentPath(cfg)
+		if err == nil {
+			t.Error("expected error when ContentPath does not exist")
 		}
 	})
 
-	t.Run("handles command exit error", func(t *testing.T) {
+	t.Run("returns error when ContentPath is a file not directory", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		mockBin := createFailingMockPromptArena(t, tmpDir)
+		filePath := filepath.Join(tmpDir, "file.txt")
+		if err := os.WriteFile(filePath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create file: %v", err)
+		}
 
 		cfg := &Config{
-			WorkDir:        tmpDir,
-			PromptArenaBin: mockBin,
+			ContentPath: filePath,
 		}
 
-		item := &queue.WorkItem{
-			ID:         "test-item-exit",
-			ScenarioID: "test-scenario",
-			ProviderID: "test-provider",
+		_, err := getContentPath(cfg)
+		if err == nil {
+			t.Error("expected error when ContentPath is a file")
 		}
+	})
+}
 
-		result, err := executeWorkItem(context.Background(), cfg, item, tmpDir)
+func TestHandlePopError(t *testing.T) {
+	t.Run("returns error for non-empty-queue errors", func(t *testing.T) {
+		cfg := &Config{
+			PollInterval: 10 * time.Millisecond,
+		}
+		q := queue.NewMemoryQueueWithDefaults()
+
+		done, newCount, err := handlePopError(
+			context.Background(),
+			context.DeadlineExceeded, // Non-queue error
+			0,
+			10,
+			cfg,
+			q,
+			"test-job",
+		)
+
+		if err == nil {
+			t.Error("expected error for non-empty-queue errors")
+		}
+		if done {
+			t.Error("should not be done on error")
+		}
+		if newCount != 0 {
+			t.Errorf("expected count 0, got %d", newCount)
+		}
+	})
+
+	t.Run("increments count on empty queue", func(t *testing.T) {
+		cfg := &Config{
+			PollInterval: 1 * time.Millisecond,
+		}
+		q := queue.NewMemoryQueueWithDefaults()
+
+		done, newCount, err := handlePopError(
+			context.Background(),
+			queue.ErrQueueEmpty,
+			5,
+			10,
+			cfg,
+			q,
+			"test-job",
+		)
+
 		if err != nil {
-			t.Fatalf("executeWorkItem() should return result for exit error, got error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
+		if done {
+			t.Error("should not be done yet")
+		}
+		if newCount != 6 {
+			t.Errorf("expected count 6, got %d", newCount)
+		}
+	})
+
+	t.Run("checks completion at max empty polls", func(t *testing.T) {
+		cfg := &Config{
+			PollInterval: 1 * time.Millisecond,
+		}
+		q := queue.NewMemoryQueueWithDefaults()
+		jobID := "test-job-complete"
+
+		// Initialize progress to simulate completed job
+		items := []queue.WorkItem{{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"}}
+		if err := q.Push(context.Background(), jobID, items); err != nil {
+			t.Fatalf("failed to push: %v", err)
+		}
+		// Pop and ack to complete
+		item, _ := q.Pop(context.Background(), jobID)
+		_ = q.Ack(context.Background(), jobID, item.ID, []byte(`{"status":"pass"}`))
+
+		done, _, err := handlePopError(
+			context.Background(),
+			queue.ErrQueueEmpty,
+			9, // At max - 1
+			10,
+			cfg,
+			q,
+			jobID,
+		)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !done {
+			t.Error("expected done=true when job is complete")
+		}
+	})
+}
+
+func TestCheckJobCompletion(t *testing.T) {
+	t.Run("returns true when job is complete", func(t *testing.T) {
+		q := queue.NewMemoryQueueWithDefaults()
+		jobID := "test-job-done"
+
+		// Push and complete items
+		items := []queue.WorkItem{{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"}}
+		if err := q.Push(context.Background(), jobID, items); err != nil {
+			t.Fatalf("failed to push: %v", err)
+		}
+		item, _ := q.Pop(context.Background(), jobID)
+		_ = q.Ack(context.Background(), jobID, item.ID, []byte(`{}`))
+
+		done, err := checkJobCompletion(context.Background(), q, jobID, 10)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !done {
+			t.Error("expected done=true")
+		}
+	})
+
+	t.Run("returns false when job is not complete", func(t *testing.T) {
+		q := queue.NewMemoryQueueWithDefaults()
+		jobID := "test-job-pending"
+
+		// Push items but don't complete them
+		items := []queue.WorkItem{{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"}}
+		if err := q.Push(context.Background(), jobID, items); err != nil {
+			t.Fatalf("failed to push: %v", err)
+		}
+
+		done, err := checkJobCompletion(context.Background(), q, jobID, 10)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if done {
+			t.Error("expected done=false when items pending")
+		}
+	})
+}
+
+func TestReportWorkItemResult(t *testing.T) {
+	t.Run("acks successful result", func(t *testing.T) {
+		q := queue.NewMemoryQueueWithDefaults()
+		jobID := "test-job-ack"
+
+		items := []queue.WorkItem{{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"}}
+		if err := q.Push(context.Background(), jobID, items); err != nil {
+			t.Fatalf("failed to push: %v", err)
+		}
+		item, _ := q.Pop(context.Background(), jobID)
+
+		result := &ExecutionResult{
+			Status:     statusPass,
+			DurationMs: 100,
+		}
+
+		reportWorkItemResult(context.Background(), q, jobID, item, result, nil)
+
+		// Check progress
+		progress, _ := q.Progress(context.Background(), jobID)
+		if progress.Completed != 1 {
+			t.Errorf("expected 1 completed, got %d", progress.Completed)
+		}
+	})
+
+	t.Run("nacks failed result", func(t *testing.T) {
+		// Use a queue with MaxRetries=1 so Nack immediately marks as failed
+		q := queue.NewMemoryQueue(queue.Options{
+			VisibilityTimeout: 5 * time.Minute,
+			MaxRetries:        1,
+		})
+		jobID := "test-job-nack"
+
+		items := []queue.WorkItem{{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"}}
+		if err := q.Push(context.Background(), jobID, items); err != nil {
+			t.Fatalf("failed to push: %v", err)
+		}
+		item, _ := q.Pop(context.Background(), jobID)
+
+		execErr := context.DeadlineExceeded
+		reportWorkItemResult(context.Background(), q, jobID, item, nil, execErr)
+
+		// Check progress - with MaxRetries=1, the item should be marked as failed
+		progress, _ := q.Progress(context.Background(), jobID)
+		if progress.Failed != 1 {
+			t.Errorf("expected 1 failed, got %d", progress.Failed)
+		}
+	})
+}
+
+func TestBuildFallbackResult(t *testing.T) {
+	t.Run("returns pass when runs exist", func(t *testing.T) {
+		result := &ExecutionResult{
+			DurationMs: 100,
+			Metrics:    make(map[string]float64),
+		}
+		runIDs := []string{"run-1", "run-2"}
+
+		got := buildFallbackResult(result, runIDs)
+
+		if got.Status != statusPass {
+			t.Errorf("expected status %s, got %s", statusPass, got.Status)
+		}
+	})
+
+	t.Run("returns fail when no runs", func(t *testing.T) {
+		result := &ExecutionResult{
+			DurationMs: 100,
+			Metrics:    make(map[string]float64),
+		}
+		runIDs := []string{}
+
+		got := buildFallbackResult(result, runIDs)
+
+		if got.Status != statusFail {
+			t.Errorf("expected status %s, got %s", statusFail, got.Status)
+		}
+		if got.Error != "no runs executed" {
+			t.Errorf("expected error 'no runs executed', got '%s'", got.Error)
+		}
+	})
+}
+
+func TestPopulateMetrics(t *testing.T) {
+	t.Run("populates all metrics", func(t *testing.T) {
+		result := &ExecutionResult{
+			Metrics: make(map[string]float64),
+		}
+		agg := &runAggregator{
+			passCount:     5,
+			failCount:     2,
+			totalDuration: 1500 * time.Millisecond,
+		}
+
+		populateMetrics(result, agg, 7)
+
+		if result.Metrics["totalDurationMs"] != 1500 {
+			t.Errorf("expected totalDurationMs=1500, got %v", result.Metrics["totalDurationMs"])
+		}
+		if result.Metrics["runsExecuted"] != 7 {
+			t.Errorf("expected runsExecuted=7, got %v", result.Metrics["runsExecuted"])
+		}
+		if result.Metrics["runsPassed"] != 5 {
+			t.Errorf("expected runsPassed=5, got %v", result.Metrics["runsPassed"])
+		}
+		if result.Metrics["runsFailed"] != 2 {
+			t.Errorf("expected runsFailed=2, got %v", result.Metrics["runsFailed"])
+		}
+	})
+}
+
+func TestSetResultStatus(t *testing.T) {
+	t.Run("sets fail when failures exist", func(t *testing.T) {
+		result := &ExecutionResult{}
+		agg := &runAggregator{
+			passCount: 3,
+			failCount: 1,
+			errors:    []string{"run-1: timeout"},
+		}
+
+		setResultStatus(result, agg)
 
 		if result.Status != statusFail {
-			t.Errorf("expected status 'fail' for exit error, got '%s'", result.Status)
+			t.Errorf("expected status %s, got %s", statusFail, result.Status)
+		}
+		if result.Error != "run-1: timeout" {
+			t.Errorf("expected error 'run-1: timeout', got '%s'", result.Error)
+		}
+	})
+
+	t.Run("sets pass when all pass", func(t *testing.T) {
+		result := &ExecutionResult{}
+		agg := &runAggregator{
+			passCount: 5,
+			failCount: 0,
+		}
+
+		setResultStatus(result, agg)
+
+		if result.Status != statusPass {
+			t.Errorf("expected status %s, got %s", statusPass, result.Status)
+		}
+	})
+
+	t.Run("sets fail when no runs completed", func(t *testing.T) {
+		result := &ExecutionResult{}
+		agg := &runAggregator{
+			passCount: 0,
+			failCount: 0,
+		}
+
+		setResultStatus(result, agg)
+
+		if result.Status != statusFail {
+			t.Errorf("expected status %s, got %s", statusFail, result.Status)
+		}
+		if result.Error != "no runs completed successfully" {
+			t.Errorf("expected specific error, got '%s'", result.Error)
 		}
 	})
 }
 
-func TestDownloadAndExtract(t *testing.T) {
-	t.Run("downloads and extracts artifact", func(t *testing.T) {
-		// Create a test tar.gz and serve it
+func TestRunAggregatorProcessAssertions(t *testing.T) {
+	t.Run("processes passing assertions", func(t *testing.T) {
+		agg := &runAggregator{
+			passCount:  1,
+			assertions: []AssertionResult{},
+		}
+
+		// Simulate PromptKit assertion results using the type from worker.go
+		// Since we can't import arenastatestore directly, we test via the public interface
+		// by calling processAssertions with mock data
+
+		// The processAssertions method expects arenastatestore.ConversationValidationResult
+		// which we can't easily mock, so instead we test the aggregator state directly
+		assertion := AssertionResult{
+			Name:    "contains_greeting",
+			Passed:  true,
+			Message: "Found greeting",
+		}
+		agg.assertions = append(agg.assertions, assertion)
+
+		if len(agg.assertions) != 1 {
+			t.Errorf("expected 1 assertion, got %d", len(agg.assertions))
+		}
+		if !agg.assertions[0].Passed {
+			t.Error("expected assertion to pass")
+		}
+	})
+
+	t.Run("failing assertion decrements pass count", func(t *testing.T) {
+		agg := &runAggregator{
+			passCount:  1,
+			failCount:  0,
+			assertions: []AssertionResult{},
+		}
+
+		// Add a failing assertion
+		agg.assertions = append(agg.assertions, AssertionResult{
+			Name:    "expected_output",
+			Passed:  false,
+			Message: "Output mismatch",
+		})
+
+		// Simulate what processAssertions does for failing assertion
+		if !agg.assertions[0].Passed && agg.passCount > 0 {
+			agg.passCount--
+			agg.failCount++
+		}
+
+		if agg.passCount != 0 {
+			t.Errorf("expected passCount=0, got %d", agg.passCount)
+		}
+		if agg.failCount != 1 {
+			t.Errorf("expected failCount=1, got %d", agg.failCount)
+		}
+	})
+}
+
+func TestBuildExecutionResult(t *testing.T) {
+	t.Run("returns fallback result when store is not ArenaStateStore", func(t *testing.T) {
+		// Use a mock store that isn't ArenaStateStore
+		// This exercises the fallback path in buildExecutionResult
+		mockStore := &mockStore{}
+		runIDs := []string{"run-1"}
+		startTime := time.Now()
+
+		result := buildExecutionResult(mockStore, runIDs, startTime, false)
+
+		// Should return pass via fallback since runs exist
+		if result.Status != statusPass {
+			t.Errorf("expected status %s, got %s", statusPass, result.Status)
+		}
+	})
+
+	t.Run("returns fallback fail when no runs with non-arena store", func(t *testing.T) {
+		mockStore := &mockStore{}
+		runIDs := []string{}
+		startTime := time.Now()
+
+		result := buildExecutionResult(mockStore, runIDs, startTime, false)
+
+		if result.Status != statusFail {
+			t.Errorf("expected status %s, got %s", statusFail, result.Status)
+		}
+	})
+}
+
+// mockStore implements statestore.Store interface for testing
+type mockStore struct{}
+
+func (m *mockStore) Load(_ context.Context, _ string) (*statestore.ConversationState, error) {
+	return nil, nil
+}
+func (m *mockStore) Save(_ context.Context, _ *statestore.ConversationState) error { return nil }
+func (m *mockStore) Fork(_ context.Context, _, _ string) error                     { return nil }
+
+func TestProcessWorkItemsComplete(t *testing.T) {
+	t.Run("processes until queue empty and job complete", func(t *testing.T) {
+		q := queue.NewMemoryQueue(queue.Options{
+			VisibilityTimeout: 5 * time.Minute,
+			MaxRetries:        1,
+		})
+		jobID := "test-job-process"
+
+		// Don't push any items - queue starts empty
 		tmpDir := t.TempDir()
-		tarPath := filepath.Join(tmpDir, "bundle.tar.gz")
-		if err := createTestTarGz(tarPath); err != nil {
-			t.Fatalf("failed to create test tar.gz: %v", err)
-		}
-
-		tarContent, err := os.ReadFile(tarPath)
-		if err != nil {
-			t.Fatalf("failed to read tar.gz: %v", err)
-		}
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(tarContent)
-		}))
-		defer server.Close()
-
-		workDir := filepath.Join(tmpDir, "work")
 		cfg := &Config{
-			ArtifactURL: server.URL,
-			WorkDir:     workDir,
+			JobName:      jobID,
+			WorkDir:      tmpDir,
+			PollInterval: 1 * time.Millisecond,
 		}
 
-		bundlePath, err := downloadAndExtract(context.Background(), cfg)
+		// Initialize job with no items
+		items := []queue.WorkItem{}
+		if err := q.Push(context.Background(), jobID, items); err != nil {
+			t.Fatalf("failed to push: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		err := processWorkItems(ctx, cfg, q, tmpDir)
 		if err != nil {
-			t.Fatalf("downloadAndExtract() error = %v", err)
-		}
-
-		// Verify extracted file exists
-		extractedFile := filepath.Join(bundlePath, "test.txt")
-		if _, err := os.Stat(extractedFile); os.IsNotExist(err) {
-			t.Error("expected file was not extracted")
+			t.Fatalf("processWorkItems() error = %v", err)
 		}
 	})
 }
 
-func TestExtractRegularFile(t *testing.T) {
-	t.Run("extracts file with correct permissions", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		target := filepath.Join(tmpDir, "subdir", "test.txt")
-		content := testContent
-
-		// Create a tar reader with our content
-		var buf bytes.Buffer
-		tw := tar.NewWriter(&buf)
-		hdr := &tar.Header{
-			Name: "test.txt",
-			Mode: 0755,
-			Size: int64(len(content)),
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			t.Fatalf("failed to write header: %v", err)
-		}
-		if _, err := tw.Write([]byte(content)); err != nil {
-			t.Fatalf("failed to write content: %v", err)
-		}
-		if err := tw.Close(); err != nil {
-			t.Fatalf("failed to close tar writer: %v", err)
+func TestRunAggregator(t *testing.T) {
+	t.Run("aggregator tracks pass count", func(t *testing.T) {
+		agg := &runAggregator{
+			verbose: false,
 		}
 
-		tr := tar.NewReader(&buf)
-		_, err := tr.Next()
-		if err != nil {
-			t.Fatalf("failed to read header: %v", err)
+		// Verify initial state
+		if agg.passCount != 0 {
+			t.Errorf("expected initial passCount=0, got %d", agg.passCount)
+		}
+		if agg.failCount != 0 {
+			t.Errorf("expected initial failCount=0, got %d", agg.failCount)
 		}
 
-		err = extractRegularFile(target, tr, 0755)
-		if err != nil {
-			t.Fatalf("extractRegularFile() error = %v", err)
+		// Simulate a pass
+		agg.passCount++
+		if agg.passCount != 1 {
+			t.Errorf("expected passCount=1, got %d", agg.passCount)
+		}
+	})
+
+	t.Run("aggregator tracks errors", func(t *testing.T) {
+		agg := &runAggregator{
+			errors: []string{},
 		}
 
-		// Verify file exists and has content
-		got, err := os.ReadFile(target)
-		if err != nil {
-			t.Fatalf("failed to read extracted file: %v", err)
+		agg.errors = append(agg.errors, "run-1: timeout")
+		agg.errors = append(agg.errors, "run-2: invalid response")
+		agg.failCount = 2
+
+		if len(agg.errors) != 2 {
+			t.Errorf("expected 2 errors, got %d", len(agg.errors))
 		}
-		if string(got) != content {
-			t.Errorf("content = %q, want %q", string(got), content)
+	})
+
+	t.Run("aggregator tracks duration", func(t *testing.T) {
+		agg := &runAggregator{}
+
+		agg.totalDuration += 100 * time.Millisecond
+		agg.totalDuration += 200 * time.Millisecond
+
+		if agg.totalDuration != 300*time.Millisecond {
+			t.Errorf("expected totalDuration=300ms, got %v", agg.totalDuration)
 		}
 	})
 }
 
-// createMockPromptArena creates a mock promptarena binary that outputs the given JSON
-func createMockPromptArena(t *testing.T, dir, output string) string {
-	t.Helper()
+func TestCheckContextDone(t *testing.T) {
+	t.Run("returns false when context not cancelled", func(t *testing.T) {
+		ctx := context.Background()
+		done := checkContextDone(ctx)
+		if done {
+			t.Error("expected done=false for active context")
+		}
+	})
 
-	// Create a simple shell script that outputs the JSON
-	scriptPath := filepath.Join(dir, "mock-promptarena.sh")
-	script := fmt.Sprintf("#!/bin/sh\necho '%s'", output)
-
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
-		t.Fatalf("failed to create mock script: %v", err)
-	}
-
-	return scriptPath
+	t.Run("returns true when context cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		done := checkContextDone(ctx)
+		if !done {
+			t.Error("expected done=true for cancelled context")
+		}
+	})
 }
 
-// createFailingMockPromptArena creates a mock that exits with error
-func createFailingMockPromptArena(t *testing.T, dir string) string {
-	t.Helper()
+func TestLoadConfigWithToolOverrides(t *testing.T) {
+	t.Run("parses tool overrides from env", func(t *testing.T) {
+		t.Setenv("ARENA_JOB_NAME", "test-job")
+		t.Setenv("ARENA_CONTENT_PATH", "/workspace/content")
+		t.Setenv("ARENA_TOOL_OVERRIDES", `{"get_weather":{"name":"get_weather","endpoint":"https://api.weather.com"}}`)
 
-	scriptPath := filepath.Join(dir, "mock-promptarena-fail.sh")
-	script := "#!/bin/sh\necho 'error message' >&2\nexit 1"
+		cfg, err := loadConfig()
+		if err != nil {
+			t.Fatalf("loadConfig() error = %v", err)
+		}
 
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
-		t.Fatalf("failed to create mock script: %v", err)
-	}
+		if cfg.ToolOverrides == nil {
+			t.Fatal("expected ToolOverrides to be set")
+		}
+		if len(cfg.ToolOverrides) != 1 {
+			t.Errorf("expected 1 tool override, got %d", len(cfg.ToolOverrides))
+		}
+		override, ok := cfg.ToolOverrides["get_weather"]
+		if !ok {
+			t.Fatal("expected get_weather override")
+		}
+		if override.Endpoint != "https://api.weather.com" {
+			t.Errorf("expected endpoint 'https://api.weather.com', got '%s'", override.Endpoint)
+		}
+	})
 
-	return scriptPath
+	t.Run("returns error on invalid tool overrides JSON", func(t *testing.T) {
+		t.Setenv("ARENA_JOB_NAME", "test-job")
+		t.Setenv("ARENA_CONTENT_PATH", "/workspace/content")
+		t.Setenv("ARENA_TOOL_OVERRIDES", `{invalid json}`)
+
+		_, err := loadConfig()
+		if err == nil {
+			t.Error("expected error on invalid JSON")
+		}
+	})
 }

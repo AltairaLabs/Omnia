@@ -112,13 +112,6 @@ webhook:
   # -- Port for webhooks
   port: 9443
 
-# Artifact server configuration (serves Arena artifacts)
-api:
-  # -- Enable artifact server
-  enabled: true
-  # -- Port for artifact server
-  port: 8082
-
 # RBAC configuration
 rbac:
   # -- Create RBAC resources
@@ -371,9 +364,10 @@ dashboard:
     enabled: false
     # -- Storage class
     storageClass: ""
-    # -- Access modes
+    # -- Access modes (ReadWriteMany required for job mounting)
+    # For development with local-path, override to: ["ReadWriteOnce"]
     accessModes:
-      - ReadWriteOnce
+      - ReadWriteMany
     # -- Volume size
     size: 1Gi
     # -- Existing PVC to use
@@ -387,6 +381,139 @@ dashboard:
 workspaces:
   # -- Enable Workspace controller for multi-tenant isolation
   enabled: true
+
+  # Default storage settings for workspace PVCs
+  # These are used when Workspace.spec.storage doesn't specify values
+  storage:
+    # -- Default storage class for workspace content PVCs
+    # For production: Use NFS-backed class (efs-sc, azurefile, nfs-client)
+    # For development: Leave empty to use cluster default
+    storageClass: ""
+    # -- Default volume size for workspace content
+    size: 10Gi
+    # -- Default access modes (ReadWriteMany for jobs to mount same PVC)
+    # For development with local-path, override to: ["ReadWriteOnce"]
+    accessModes:
+      - ReadWriteMany
+
+# ============================================================================
+# Workspace Content Storage Configuration
+# Dashboard mount for browsing all workspace content
+# ============================================================================
+
+workspaceContent:
+  # -- Enable workspace content storage for dashboard
+  # This creates a root PVC that the dashboard mounts to browse all workspace content
+  enabled: true
+
+  # -- Mount path in dashboard pod
+  mountPath: /workspace-content
+
+  persistence:
+    # -- Storage class for dashboard's workspace content PVC
+    # For production: Use your cloud's RWX storage class (efs-sc, azurefile-csi-nfs, filestore-sc)
+    # For development: Leave empty and enable nfs.csiDriver to use internal NFS
+    storageClass: ""
+    # -- Access modes for dashboard content PVC (ReadWriteMany for shared access)
+    accessModes:
+      - ReadWriteMany
+    # -- Volume size for dashboard content view
+    size: 50Gi
+    # -- Use existing PVC instead of creating one
+    existingClaim: ""
+
+# ============================================================================
+# NFS Storage Configuration
+# Shared storage backend for workspace content across namespaces
+# ============================================================================
+
+nfs:
+  # Internal NFS server for development environments
+  server:
+    # -- Deploy internal NFS server (dev only, not for production)
+    enabled: false
+    # -- Use internal NFS server (when enabled, auto-configures CSI driver)
+    internal: true
+    # -- Storage class for NFS server's backing storage (only for internal server)
+    storageClass: ""
+    # -- Size of NFS server's backing storage
+    size: 50Gi
+    image:
+      # -- NFS server image repository (erichough/nfs-server is compatible with most K8s distributions)
+      repository: erichough/nfs-server
+      # -- NFS server image tag
+      tag: "2.2.1"
+      # -- Image pull policy
+      pullPolicy: IfNotPresent
+    # -- Resource limits for NFS server pod
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  # External NFS server configuration (for production with self-managed NFS)
+  external:
+    # -- External NFS server hostname or IP
+    server: ""
+    # -- Export path on NFS server
+    path: /exports/omnia
+
+  # NFS CSI driver configuration (csi-driver-nfs subchart)
+  # The CSI driver mounts NFS from within pods, so DNS resolution works correctly
+  csiDriver:
+    # -- Enable NFS CSI driver for dynamic PVC provisioning
+    # For local dev: Set to true along with nfs.server.enabled
+    # For production: Use cloud-native storage classes instead (EFS, Azure Files, Filestore)
+    enabled: false
+    # StorageClass configuration
+    storageClass:
+      # -- Storage class name for NFS-backed PVCs
+      name: omnia-nfs
+      # -- Reclaim policy for provisioned PVs
+      reclaimPolicy: Delete
+      # -- Subdirectory for PVC data (optional, creates per-PVC subdirs automatically)
+      subDir: ""
+
+# NFS CSI driver subchart values (when nfs.csiDriver.enabled)
+# See: https://github.com/kubernetes-csi/csi-driver-nfs
+nfscsi:
+  # Controller configuration
+  controller:
+    # -- Number of controller replicas
+    replicas: 1
+  # Feature gates
+  feature:
+    # -- Enable fsGroupPolicy for proper file permissions
+    enableFSGroupPolicy: true
+  # External snapshotter sidecar (disabled - VolumeSnapshot CRDs not installed)
+  externalSnapshotter:
+    enabled: false
+
+# ============================================================================
+# VS Code Server (Development Only)
+# Web-based VS Code for browsing/editing workspace content
+# ============================================================================
+
+vscodeServer:
+  # -- Enable VS Code server (only works when devMode is also true)
+  enabled: false
+  image:
+    # -- VS Code server image repository
+    repository: codercom/code-server
+    # -- VS Code server image tag
+    tag: "4.96.4"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "1"
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
 
 # ============================================================================
 # Arena Fleet Configuration

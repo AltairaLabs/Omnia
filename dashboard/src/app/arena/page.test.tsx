@@ -71,7 +71,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 5, ready: 3, failed: 1, active: 3 },
-        configs: { total: 10, ready: 8, scenarios: 50 },
         jobs: { total: 20, running: 2, queued: 3, completed: 15, failed: 2, successRate: 0.882 },
       },
       recentJobs: [],
@@ -87,10 +86,6 @@ describe("ArenaPage", () => {
     expect(screen.getByText("3")).toBeInTheDocument(); // active sources
     expect(screen.getByText("1 failed")).toBeInTheDocument();
 
-    expect(screen.getByText("Configurations")).toBeInTheDocument();
-    expect(screen.getByText("10")).toBeInTheDocument(); // total configs
-    expect(screen.getByText("50 scenarios")).toBeInTheDocument();
-
     expect(screen.getByText("Running Jobs")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument(); // running jobs
     expect(screen.getByText("3 queued")).toBeInTheDocument();
@@ -105,7 +100,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [],
@@ -124,7 +118,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 1, ready: 1, failed: 0, active: 1 },
-        configs: { total: 1, ready: 1, scenarios: 5 },
         jobs: { total: 2, running: 1, queued: 0, completed: 1, failed: 0, successRate: 1 },
       },
       recentJobs: [
@@ -136,7 +129,7 @@ describe("ArenaPage", () => {
         {
           metadata: { name: "load-job-1", creationTimestamp: "2026-01-20T09:00:00Z" },
           spec: { type: "loadtest", configRef: { name: "config-2" } },
-          status: { phase: "Completed", completedTasks: 100, totalTasks: 100 },
+          status: { phase: "Succeeded", completedTasks: 100, totalTasks: 100 },
         },
       ] as any,
       loading: false,
@@ -163,7 +156,7 @@ describe("ArenaPage", () => {
 
     // Check job statuses
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
 
     // Check progress percentages in table (use getAllByText since success rate card also shows %)
     const progressCells = screen.getAllByText(/^\d+%$/);
@@ -175,12 +168,11 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 5, running: 1, queued: 1, completed: 1, failed: 1, successRate: 0.5 },
       },
       recentJobs: [
         { metadata: { name: "job-1" }, spec: { type: "evaluation", configRef: { name: "c1" } }, status: { phase: "Running" } },
-        { metadata: { name: "job-2" }, spec: { type: "evaluation", configRef: { name: "c2" } }, status: { phase: "Completed" } },
+        { metadata: { name: "job-2" }, spec: { type: "evaluation", configRef: { name: "c2" } }, status: { phase: "Succeeded" } },
         { metadata: { name: "job-3" }, spec: { type: "evaluation", configRef: { name: "c3" } }, status: { phase: "Failed" } },
         { metadata: { name: "job-4" }, spec: { type: "evaluation", configRef: { name: "c4" } }, status: { phase: "Cancelled" } },
         { metadata: { name: "job-5" }, spec: { type: "evaluation", configRef: { name: "c5" } }, status: { phase: "Pending" } },
@@ -193,7 +185,7 @@ describe("ArenaPage", () => {
     render(<ArenaPage />);
 
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();
@@ -204,7 +196,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 3, running: 3, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [
@@ -229,7 +220,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 1, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [
@@ -251,7 +241,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 1, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [
@@ -276,7 +265,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [],
@@ -288,7 +276,6 @@ describe("ArenaPage", () => {
     render(<ArenaPage />);
 
     expect(screen.getByText("Manage Sources")).toBeInTheDocument();
-    expect(screen.getByText("Create Configs")).toBeInTheDocument();
     expect(screen.getByText("Run Jobs")).toBeInTheDocument();
   });
 
@@ -297,7 +284,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 0, ready: 0, failed: 0, active: 0 },
-        configs: { total: 0, ready: 0, scenarios: 0 },
         jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [],
@@ -316,7 +302,6 @@ describe("ArenaPage", () => {
     vi.mocked(useArenaStats).mockReturnValue({
       stats: {
         sources: { total: 1, ready: 1, failed: 0, active: 1 },
-        configs: { total: 1, ready: 1, scenarios: 5 },
         jobs: { total: 1, running: 1, queued: 0, completed: 0, failed: 0, successRate: 0 },
       },
       recentJobs: [],
@@ -332,7 +317,6 @@ describe("ArenaPage", () => {
     const hrefs = links.map(link => link.getAttribute("href"));
 
     expect(hrefs).toContain("/arena/sources");
-    expect(hrefs).toContain("/arena/configs");
     expect(hrefs).toContain("/arena/jobs");
   });
 });

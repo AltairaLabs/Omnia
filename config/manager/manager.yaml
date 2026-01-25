@@ -46,14 +46,9 @@ spec:
           - --health-probe-bind-address=:8081
           - --arena-worker-image=example.com/arena-worker:v0.0.1
           - --arena-worker-image-pull-policy=IfNotPresent
-          - --artifact-base-url=http://omnia-controller-manager-artifact-service.omnia-system.svc.cluster.local:8082/artifacts
           - --redis-addr=redis.test-arena.svc.cluster.local:6379
         image: controller:latest
         name: manager
-        ports:
-        - containerPort: 8082
-          name: artifact
-          protocol: TCP
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
@@ -85,10 +80,10 @@ spec:
             cpu: 100m
             memory: 128Mi
         volumeMounts:
-        - name: arena-artifacts
-          mountPath: /tmp/arena-artifacts
+        - name: tmp
+          mountPath: /tmp
       volumes:
-      - name: arena-artifacts
+      - name: tmp
         emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

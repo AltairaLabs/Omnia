@@ -125,21 +125,21 @@ describe("POST /api/workspaces/[name]/arena/jobs/[jobName]/cancel", () => {
     );
   });
 
-  it("returns 400 when job is already completed", async () => {
+  it("returns 400 when job is already succeeded", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
 
-    const completedJob = {
+    const succeededJob = {
       ...mockJob,
-      status: { phase: "Completed", completedTasks: 10, totalTasks: 10 },
+      status: { phase: "Succeeded", completedTasks: 10, totalTasks: 10 },
     };
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
     vi.mocked(getWorkspaceResource).mockResolvedValue({
       ok: true,
-      resource: completedJob,
+      resource: succeededJob,
       workspace: mockWorkspace as any,
       clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
     });

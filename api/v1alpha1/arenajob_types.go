@@ -20,6 +20,27 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// LocalObjectReference contains enough information to let you locate the referenced object.
+type LocalObjectReference struct {
+	// name is the name of the object.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
+// NamespacedObjectReference contains enough information to let you locate the referenced object.
+type NamespacedObjectReference struct {
+	// name is the name of the object.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// namespace is the namespace of the object.
+	// If not specified, defaults to the same namespace as the referencing object.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // ArenaJobType represents the type of job to execute.
 // +kubebuilder:validation:Enum=evaluation;loadtest;datagen
 type ArenaJobType string
@@ -32,6 +53,21 @@ const (
 	// ArenaJobTypeDataGen generates synthetic data using prompts.
 	ArenaJobTypeDataGen ArenaJobType = "datagen"
 )
+
+// ScenarioFilter defines include/exclude patterns for scenario selection.
+type ScenarioFilter struct {
+	// include specifies glob patterns for scenarios to include.
+	// If empty, all scenarios are included by default.
+	// Examples: ["scenarios/*.yaml", "tests/billing-*.yaml"]
+	// +optional
+	Include []string `json:"include,omitempty"`
+
+	// exclude specifies glob patterns for scenarios to exclude.
+	// Exclusions are applied after inclusions.
+	// Examples: ["*-wip.yaml", "scenarios/experimental/*"]
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
+}
 
 // EvaluationSettings configures evaluation-specific settings.
 type EvaluationSettings struct {
@@ -158,6 +194,22 @@ type OutputConfig struct {
 	PVC *PVCOutputConfig `json:"pvc,omitempty"`
 }
 
+// ProviderGroupSelector defines how to select Provider CRDs for a specific group.
+type ProviderGroupSelector struct {
+	// selector is a label selector to match Provider CRDs in the workspace namespace.
+	// All matching providers will be used for the group, with scenarios run against each.
+	// +kubebuilder:validation:Required
+	Selector metav1.LabelSelector `json:"selector"`
+}
+
+// ToolRegistrySelector defines how to select ToolRegistry CRDs.
+type ToolRegistrySelector struct {
+	// selector is a label selector to match ToolRegistry CRDs in the workspace namespace.
+	// All tools from matching registries will override tools/mcp_servers defined in arena.config.yaml.
+	// +kubebuilder:validation:Required
+	Selector metav1.LabelSelector `json:"selector"`
+}
+
 // ScheduleConfig configures job scheduling.
 type ScheduleConfig struct {
 	// cron is a cron expression for scheduled execution.
@@ -180,17 +232,23 @@ type ScheduleConfig struct {
 
 // ArenaJobSpec defines the desired state of ArenaJob.
 type ArenaJobSpec struct {
-	// configRef references the ArenaConfig containing test configuration.
+	// sourceRef references the ArenaSource containing test scenarios and configuration.
 	// +kubebuilder:validation:Required
-	ConfigRef LocalObjectReference `json:"configRef"`
+	SourceRef LocalObjectReference `json:"sourceRef"`
+
+	// arenaFile is the path to the arena config file within the source.
+	// Supports glob patterns for multi-file configs (e.g., "evals/*.arena.yaml").
+	// +kubebuilder:default="config.arena.yaml"
+	// +optional
+	ArenaFile string `json:"arenaFile,omitempty"`
 
 	// type specifies the type of job to execute.
 	// +kubebuilder:default="evaluation"
 	// +optional
 	Type ArenaJobType `json:"type,omitempty"`
 
-	// scenarios overrides scenario selection from the ArenaConfig.
-	// If not specified, uses the ArenaConfig's scenario settings.
+	// scenarios filters which scenarios to run from the arena file.
+	// If not specified, runs all scenarios defined in the arena file.
 	// +optional
 	Scenarios *ScenarioFilter `json:"scenarios,omitempty"`
 
@@ -226,6 +284,24 @@ type ArenaJobSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// verbose enables verbose/debug logging for promptarena execution.
+	// When enabled, workers will pass --verbose to promptarena for detailed output.
+	// +optional
+	Verbose bool `json:"verbose,omitempty"`
+
+	// providerOverrides allows overriding provider groups defined in the arena config file.
+	// Keys are group names from the arena config file (e.g., "default", "judge").
+	// Use "*" as a catch-all for groups not explicitly specified.
+	// Provider CRDs matching the label selector provide credentials for the matched groups.
+	// +optional
+	ProviderOverrides map[string]ProviderGroupSelector `json:"providerOverrides,omitempty"`
+
+	// toolRegistryOverride allows overriding tools/mcp_servers defined in the arena config file
+	// with handlers from ToolRegistry CRDs. All tools from matching registries will
+	// override tools with matching names in the arena config.
+	// +optional
+	ToolRegistryOverride *ToolRegistrySelector `json:"toolRegistryOverride,omitempty"`
 }
 
 // ArenaJobPhase represents the current phase of the ArenaJob.
@@ -322,14 +398,14 @@ type ArenaJobStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Config",type=string,JSONPath=`.spec.configRef.name`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Progress",type=string,JSONPath=`.status.progress.completed`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ArenaJob is the Schema for the arenajobs API.
-// It defines a test execution that runs scenarios from an ArenaConfig.
+// It defines a test execution that runs scenarios from an ArenaSource.
 type ArenaJob struct {
 	metav1.TypeMeta `json:",inline"`
 

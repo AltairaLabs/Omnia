@@ -17,21 +17,11 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   AlertCircle,
   RefreshCw,
   Pencil,
   Trash2,
-  ExternalLink,
   History,
-  Link as LinkIcon,
   Info,
   AlertTriangle,
 } from "lucide-react";
@@ -46,7 +36,7 @@ import {
   getStatusBadge,
   getConditionIcon,
 } from "@/components/arena";
-import type { ArenaSource, ArenaConfig } from "@/types/arena";
+import type { ArenaSource } from "@/types/arena";
 import type { Condition } from "@/types/common";
 
 // Use the shared utilities with detail page specific defaults
@@ -167,10 +157,10 @@ function OverviewTab({ source }: Readonly<{ source: ArenaSource }>) {
               )}
             </div>
           )}
-          {spec?.type === "configmap" && spec.configMapRef && (
+          {spec?.type === "configmap" && spec.configMap && (
             <div>
               <p className="text-sm text-muted-foreground">ConfigMap Name</p>
-              <p className="font-medium">{spec.configMapRef.name}</p>
+              <p className="font-medium">{spec.configMap.name}</p>
             </div>
           )}
           {spec?.secretRef && (
@@ -205,12 +195,14 @@ function OverviewTab({ source }: Readonly<{ source: ArenaSource }>) {
                 <p className="text-sm text-muted-foreground">Size</p>
                 <p className="font-medium">{formatBytes(status.artifact.size)}</p>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Checksum</p>
-                <p className="font-mono text-sm truncate" title={status.artifact.checksum}>
-                  {status.artifact.checksum.substring(0, 16)}...
-                </p>
-              </div>
+              {status.artifact.checksum && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Checksum</p>
+                  <p className="font-mono text-sm truncate" title={status.artifact.checksum}>
+                    {status.artifact.checksum.substring(0, 16)}...
+                  </p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -268,74 +260,6 @@ function SyncHistoryTab({ source }: Readonly<{ source: ArenaSource }>) {
   );
 }
 
-function LinkedConfigsTab({
-  configs,
-  sourceName,
-}: Readonly<{
-  configs: ArenaConfig[];
-  sourceName: string;
-}>) {
-  if (configs.length === 0) {
-    return (
-      <div className="text-center py-12 text-muted-foreground">
-        <LinkIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-        <p className="text-lg font-medium mb-1">No linked configurations</p>
-        <p className="text-sm">
-          Create an ArenaConfig that references this source to see it here.
-        </p>
-        <Link href="/arena/configs">
-          <Button variant="outline" className="mt-4">
-            <ExternalLink className="h-4 w-4 mr-2" />
-            Go to Configs
-          </Button>
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">ArenaConfigs Using This Source</CardTitle>
-        <CardDescription>
-          These configurations reference &quot;{sourceName}&quot; as their source
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Scenarios</TableHead>
-              <TableHead>Created</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {configs.map((config) => (
-              <TableRow key={config.metadata?.name}>
-                <TableCell className="font-medium">
-                  <Link
-                    href={`/arena/configs/${config.metadata?.name}`}
-                    className="hover:underline text-primary"
-                  >
-                    {config.metadata?.name}
-                  </Link>
-                </TableCell>
-                <TableCell>{getStatusBadge(config.status?.phase)}</TableCell>
-                <TableCell>{config.status?.scenarioCount || 0}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDate(config.metadata?.creationTimestamp)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
-
 function LoadingSkeleton() {
   return (
     <div className="flex flex-col h-full">
@@ -359,7 +283,7 @@ export default function ArenaSourceDetailPage() {
   const router = useRouter();
   const sourceName = params.name as string;
 
-  const { source, linkedConfigs, loading, error, refetch } = useArenaSource(sourceName);
+  const { source, loading, error, refetch } = useArenaSource(sourceName);
   const { syncSource, deleteSource } = useArenaSourceMutations();
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
@@ -509,10 +433,6 @@ export default function ArenaSourceDetailPage() {
               <History className="h-4 w-4 mr-2" />
               Sync History
             </TabsTrigger>
-            <TabsTrigger value="configs">
-              <LinkIcon className="h-4 w-4 mr-2" />
-              Linked Configs ({linkedConfigs.length})
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
@@ -521,10 +441,6 @@ export default function ArenaSourceDetailPage() {
 
           <TabsContent value="history">
             <SyncHistoryTab source={source} />
-          </TabsContent>
-
-          <TabsContent value="configs">
-            <LinkedConfigsTab configs={linkedConfigs} sourceName={sourceName} />
           </TabsContent>
         </Tabs>
       </div>

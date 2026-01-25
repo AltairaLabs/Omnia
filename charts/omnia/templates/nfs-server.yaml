@@ -1,0 +1,89 @@
+{{- if and .Values.nfs.server.enabled .Values.nfs.server.internal }}
+# Internal NFS server for development environments
+# Uses erichough/nfs-server for a lightweight NFS v4 server
+# WARNING: Not recommended for production - use external NFS server or cloud storage instead
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "omnia.fullname" . }}-nfs-data
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.nfs.server.storageClass }}
+  storageClassName: {{ .Values.nfs.server.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.nfs.server.size | default "50Gi" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnia.fullname" . }}-nfs-server
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nfs-server
+  template:
+    metadata:
+      labels:
+        {{- include "omnia.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nfs-server
+    spec:
+      containers:
+        - name: nfs-server
+          image: {{ .Values.nfs.server.image.repository }}:{{ .Values.nfs.server.image.tag }}
+          imagePullPolicy: {{ .Values.nfs.server.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: nfs
+              containerPort: 2049
+              protocol: TCP
+          env:
+            # erichough/nfs-server configuration
+            # fsid=0 marks this as the NFSv4 pseudo-root, required for NFSv4 clients
+            - name: NFS_EXPORT_0
+              value: "/nfsshare *(rw,sync,no_subtree_check,no_root_squash,fsid=0)"
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          volumeMounts:
+            - name: nfs-data
+              mountPath: /nfsshare
+          resources:
+            {{- toYaml .Values.nfs.server.resources | nindent 12 }}
+      volumes:
+        - name: nfs-data
+          persistentVolumeClaim:
+            claimName: {{ include "omnia.fullname" . }}-nfs-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-nfs-server
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+spec:
+  type: ClusterIP
+  ports:
+    - name: nfs
+      port: 2049
+      targetPort: nfs
+      protocol: TCP
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nfs-server
+{{- end }}

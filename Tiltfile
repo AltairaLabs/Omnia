@@ -32,10 +32,20 @@ ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() i
 #   kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=$GEMINI_API_KEY
 ENABLE_AUDIO_DEMO = os.getenv('ENABLE_AUDIO_DEMO', '').lower() in ('true', '1', 'yes') or False
 
+# Set to True to enable LangChain runtime demos alongside PromptKit demos
+# Deploys vision-demo-langchain and tools-demo-langchain agents using the LangChain runtime
+# Can be set via environment: ENABLE_LANGCHAIN=true tilt up
+ENABLE_LANGCHAIN = os.getenv('ENABLE_LANGCHAIN', '').lower() in ('true', '1', 'yes') or False
+
+# Path to the omnia-langchain-runtime repository for local builds
+LANGCHAIN_RUNTIME_PATH = os.getenv('LANGCHAIN_RUNTIME_PATH', '../omnia-langchain-runtime')
+
 # Set to True to build runtime with local PromptKit source for debugging
 # Can be set via environment: USE_LOCAL_PROMPTKIT=true PROMPTKIT_PATH=/path/to/PromptKit tilt up
 # This allows rapid iteration on PromptKit changes without publishing releases
-USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or False
+# Auto-enables if promptkit-local/tools exists (arena worker needs promptarena)
+_promptkit_local_exists = os.path.exists('./promptkit-local/tools/arena/cmd/promptarena/main.go')
+USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or _promptkit_local_exists
 PROMPTKIT_PATH = os.getenv('PROMPTKIT_PATH', '../PromptKit')
 
 # Set to True to enable full production-like stack
@@ -45,11 +55,19 @@ PROMPTKIT_PATH = os.getenv('PROMPTKIT_PATH', '../PromptKit')
 # Can be set via environment: ENABLE_FULL_STACK=true tilt up
 ENABLE_FULL_STACK = os.getenv('ENABLE_FULL_STACK', '').lower() in ('true', '1', 'yes') or False
 
+# Enable internal NFS server for workspace content storage (enabled by default)
+# Provides ReadWriteMany (RWX) storage for Arena and workspace content
+# Required for ArenaJob workers to access shared content across namespaces
+# Can be disabled via environment: ENABLE_NFS=false tilt up
+ENABLE_NFS = os.getenv('ENABLE_NFS', 'true').lower() not in ('false', '0', 'no')
+
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind', 'orbstack'])
 
 # Suppress warnings for images passed as CLI args to operator (not in K8s manifests)
-update_settings(suppress_unused_image_warnings=['omnia-facade-dev', 'omnia-runtime-dev'])
+# Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
+update_settings(suppress_unused_image_warnings=['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev', 'omnia-arena-worker-dev'])
+
 
 # Create namespace if it doesn't exist
 namespace_create('omnia-system')
@@ -142,21 +160,25 @@ docker_build(
 # ============================================================================
 
 # Build operator image
+operator_only = [
+    './cmd',
+    './api',
+    './internal',
+    './pkg',
+    './go.mod',
+    './go.sum',
+    # Embedded files for go:embed directives
+    './pkg/license/keys',
+]
+if USE_LOCAL_PROMPTKIT:
+    operator_only.append('./promptkit-local')
+
 docker_build(
     'omnia-operator-dev',
     context='.',
     dockerfile='./Dockerfile',
     # Only rebuild when Go files change
-    only=[
-        './cmd',
-        './api',
-        './internal',
-        './pkg',
-        './go.mod',
-        './go.sum',
-        # Embedded files for go:embed directives
-        './pkg/license/keys',
-    ],
+    only=operator_only,
 )
 
 # ============================================================================
@@ -197,16 +219,22 @@ if USE_LOCAL_PROMPTKIT:
 
 if USE_LOCAL_PROMPTKIT:
     # Sync local PromptKit source for development builds
-    # This copies runtime and sdk subdirectories needed by the Dockerfile
+    # This copies all subdirectories needed by go.mod replace directives:
+    # - pkg: config types used by discovery.go
+    # - runtime: agent runtime components
+    # - sdk: SDK types
+    # - tools/arena: promptarena CLI and engine
     local_resource(
         'sync-promptkit',
         cmd='''
-            mkdir -p promptkit-local
+            mkdir -p promptkit-local/tools
+            rsync -av --delete "%s/pkg/" promptkit-local/pkg/
             rsync -av --delete "%s/runtime/" promptkit-local/runtime/
             rsync -av --delete "%s/sdk/" promptkit-local/sdk/
+            rsync -av --delete "%s/tools/arena/" promptkit-local/tools/arena/
             echo "Synced PromptKit from %s"
-        ''' % (PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH),
-        deps=[PROMPTKIT_PATH + '/runtime', PROMPTKIT_PATH + '/sdk'],
+        ''' % (PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH),
+        deps=[PROMPTKIT_PATH + '/pkg', PROMPTKIT_PATH + '/runtime', PROMPTKIT_PATH + '/sdk', PROMPTKIT_PATH + '/tools/arena'],
         labels=['dev'],
     )
 
@@ -217,6 +245,39 @@ docker_build(
     only=runtime_only,
     build_args=runtime_build_args,
 )
+
+# Build arena-worker image (evaluation job worker)
+arena_worker_only = [
+    './cmd/arena-worker',
+    './internal/arena',
+    './pkg',
+    './api',
+    './go.mod',
+    './go.sum',
+]
+if USE_LOCAL_PROMPTKIT:
+    arena_worker_only.append('./promptkit-local')
+
+docker_build(
+    'omnia-arena-worker-dev',
+    context='.',
+    dockerfile='./Dockerfile.arena-worker',
+    only=arena_worker_only,
+)
+
+# ============================================================================
+# LangChain Runtime - Python-based agent framework
+# ============================================================================
+
+if ENABLE_LANGCHAIN:
+    # Build LangChain runtime from external repo using local_resource
+    # This always runs because Tilt can't detect image refs in CRD fields
+    local_resource(
+        'langchain-runtime-build',
+        cmd='docker build -t omnia-langchain-runtime-dev:latest ' + LANGCHAIN_RUNTIME_PATH,
+        deps=[LANGCHAIN_RUNTIME_PATH + '/src', LANGCHAIN_RUNTIME_PATH + '/Dockerfile', LANGCHAIN_RUNTIME_PATH + '/pyproject.toml'],
+        labels=['langchain'],
+    )
 
 # ============================================================================
 # Helm Deployment
@@ -241,11 +302,27 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
+    # LangChain runtime image (used when framework.type=langchain)
+    'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
+    'langchainRuntime.image.tag=latest',
+    'langchainRuntime.image.pullPolicy=Never',
+    # Arena worker image (used by ArenaJob workers)
+    'arena.worker.image.repository=omnia-arena-worker-dev',
+    'arena.worker.image.tag=latest',
+    'arena.worker.image.pullPolicy=Never',
     # Increase dashboard resources for HMR compilation
-    'dashboard.resources.limits.cpu=2000m',
-    'dashboard.resources.limits.memory=2Gi',
-    'dashboard.resources.requests.cpu=500m',
-    'dashboard.resources.requests.memory=1Gi',
+    'dashboard.resources.limits.cpu=4000m',
+    'dashboard.resources.limits.memory=4Gi',
+    'dashboard.resources.requests.cpu=1000m',
+    'dashboard.resources.requests.memory=2Gi',
+    # Give dashboard more time to compile in dev mode
+    'dashboard.startupProbe.httpGet.path=/api/health',
+    'dashboard.startupProbe.httpGet.port=http',
+    'dashboard.startupProbe.initialDelaySeconds=10',
+    'dashboard.startupProbe.periodSeconds=10',
+    'dashboard.startupProbe.failureThreshold=30',  # 30 * 10s = 5 minutes to start
+    'dashboard.livenessProbe.initialDelaySeconds=60',
+    'dashboard.livenessProbe.failureThreshold=6',
 ]
 
 if ENABLE_OBSERVABILITY:
@@ -332,6 +409,8 @@ if ENABLE_FULL_STACK:
 
 # Build values files list
 helm_values = ['./charts/omnia/values-dev.yaml']
+if ENABLE_NFS:
+    helm_values.append('./charts/omnia/values-dev-nfs.yaml')
 if ENABLE_FULL_STACK:
     helm_values.append('./charts/omnia/values-istio-prometheus.yaml')
 
@@ -363,9 +442,22 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
         'workspace.anonymousAccess.role=owner',
     ]
 
+    # Use NFS storage class for workspace when NFS is enabled
+    if ENABLE_NFS:
+        demo_helm_set.append('workspace.storage.storageClass=omnia-nfs')
+
     if ENABLE_AUDIO_DEMO:
         demo_helm_set.extend([
             'audioDemo.enabled=true',
+        ])
+
+    if ENABLE_LANGCHAIN:
+        demo_helm_set.extend([
+            # Enable LangChain demos (mirror of vision-demo and tools-demo)
+            'langchainDemo.enabled=true',
+            'langchainDemo.image.repository=omnia-langchain-runtime-dev',
+            'langchainDemo.image.tag=latest',
+            'langchainDemo.image.pullPolicy=Never',
         ])
 
     if ENABLE_FULL_STACK:
@@ -390,10 +482,19 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
 # Note: facade/runtime images are built by docker_build() but not directly
 # referenced in K8s YAML (they're passed as CLI args to the operator).
 # The restart-agents local_resource handles restarting agent pods when these change.
+
+# Build resource dependencies - when NFS is enabled, wait for storage to be ready
+controller_deps = []
+dashboard_deps = []
+if ENABLE_NFS:
+    controller_deps = ['csi-nfs-controller', 'omnia-nfs-server']
+    dashboard_deps = ['csi-nfs-controller', 'omnia-nfs-server']
+
 k8s_resource(
     'omnia-controller-manager',
     labels=['operator'],
     port_forwards=['8082:8082'],  # Operator API
+    resource_deps=controller_deps,
 )
 
 k8s_resource(
@@ -403,6 +504,7 @@ k8s_resource(
         '3000:3000',  # Dashboard UI
         '3002:3002',  # WebSocket proxy for agent connections
     ],
+    resource_deps=dashboard_deps,
 )
 
 if ENABLE_OBSERVABILITY:
@@ -439,6 +541,46 @@ k8s_resource(
     labels=['redis'],
     port_forwards=['6379:6379'],  # Redis port for local debugging
 )
+
+# ============================================================================
+# NFS Server and CSI Driver for Workspace Content Storage
+# ============================================================================
+
+if ENABLE_NFS:
+    # NFS server deployment and backing storage
+    k8s_resource(
+        'omnia-nfs-server',
+        labels=['storage'],
+        objects=[
+            'omnia-nfs-data:persistentvolumeclaim',
+        ],
+    )
+
+    # NFS CSI driver controller (handles dynamic PV provisioning)
+    # Must be ready before workspace-content PVC can be provisioned
+    k8s_resource(
+        'csi-nfs-controller',
+        labels=['storage'],
+        objects=[
+            'omnia-nfs:storageclass',
+            'omnia-workspace-content:persistentvolumeclaim',
+        ],
+        resource_deps=['omnia-nfs-server'],
+    )
+
+    # NFS CSI driver node daemonset
+    k8s_resource(
+        'csi-nfs-node',
+        labels=['storage'],
+    )
+
+    # VS Code Server for browsing/editing workspace content
+    k8s_resource(
+        'omnia-vscode-server',
+        labels=['dev-tools'],
+        port_forwards=['8888:8080'],  # VS Code Server UI
+        resource_deps=['csi-nfs-controller', 'omnia-nfs-server'],
+    )
 
 # ============================================================================
 # Full Stack Mode Resources (Istio, Tempo, Loki, Alloy)
@@ -509,6 +651,15 @@ if ENABLE_DEMO:
         'demo-tools-prompts:promptpack',
         'tools-demo:agentruntime',
     ]
+
+    # Add LangChain demo resources when enabled
+    if ENABLE_LANGCHAIN:
+        ollama_objects.extend([
+            # LangChain vision demo (uses same PromptPack and Provider)
+            'vision-demo-langchain:agentruntime',
+            # LangChain tools demo
+            'tools-demo-langchain:agentruntime',
+        ])
     # Sidecar mode uses Envoy config, extauthz mode uses EnvoyFilter
     if ENABLE_FULL_STACK:
         ollama_objects.append('ollama-opa-ext-authz:envoyfilter')

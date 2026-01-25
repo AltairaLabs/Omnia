@@ -25,13 +25,10 @@ import type {
 import type {
   ArenaSource,
   ArenaSourceSpec,
-  ArenaConfig,
-  ArenaConfigSpec,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 import type { ArenaJobMetrics } from "./arena-service";
 
@@ -68,7 +65,7 @@ const mockArenaSources: ArenaSource[] = [
     spec: {
       type: "configmap",
       interval: "5m",
-      configMapRef: { name: "support-scenarios-v1" },
+      configMap: { name: "support-scenarios-v1" },
     },
     status: {
       phase: "Ready",
@@ -101,7 +98,7 @@ const mockArenaSources: ArenaSource[] = [
     spec: {
       type: "configmap",
       interval: "10m",
-      configMapRef: { name: "sales-scenarios-v2" },
+      configMap: { name: "sales-scenarios-v2" },
     },
     status: {
       phase: "Ready",
@@ -124,69 +121,6 @@ const mockArenaSources: ArenaSource[] = [
   },
 ];
 
-const mockArenaConfigs: ArenaConfig[] = [
-  {
-    apiVersion: "omnia.altairalabs.ai/v1alpha1",
-    kind: "ArenaConfig",
-    metadata: {
-      name: "support-eval-config",
-      namespace: "default",
-      uid: "arena-config-1",
-      creationTimestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    spec: {
-      sourceRef: { name: "customer-support-scenarios" },
-      providers: [{ name: "anthropic-claude" }],
-      defaults: { temperature: 0.7, concurrency: 4, timeout: "5m" },
-    },
-    status: {
-      phase: "Ready",
-      sourceRevision: "v1.0.0",
-      scenarioCount: 8,
-      providers: [{ name: "anthropic-claude", status: "Ready" }],
-      conditions: [
-        {
-          type: "Ready",
-          status: "True",
-          lastTransitionTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-          reason: "Succeeded",
-          message: "Configuration validated",
-        },
-      ],
-    },
-  },
-  {
-    apiVersion: "omnia.altairalabs.ai/v1alpha1",
-    kind: "ArenaConfig",
-    metadata: {
-      name: "sales-eval-config",
-      namespace: "default",
-      uid: "arena-config-2",
-      creationTimestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    spec: {
-      sourceRef: { name: "sales-eval-suite" },
-      providers: [{ name: "openai-gpt4" }],
-      defaults: { temperature: 0.5, concurrency: 2, timeout: "10m" },
-    },
-    status: {
-      phase: "Ready",
-      sourceRevision: "v2.1.0",
-      scenarioCount: 12,
-      providers: [{ name: "openai-gpt4", status: "Ready" }],
-      conditions: [
-        {
-          type: "Ready",
-          status: "True",
-          lastTransitionTime: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-          reason: "Succeeded",
-          message: "Configuration validated",
-        },
-      ],
-    },
-  },
-];
-
 const mockArenaJobs: ArenaJob[] = [
   {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -198,18 +132,30 @@ const mockArenaJobs: ArenaJob[] = [
       creationTimestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     },
     spec: {
-      configRef: { name: "support-eval-config" },
+      sourceRef: { name: "support-eval-config" },
       type: "evaluation",
       evaluation: { outputFormats: ["json", "junit"], passingThreshold: 0.8 },
     },
     status: {
-      phase: "Completed",
+      phase: "Succeeded",
       startTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       completionTime: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
-      totalTasks: 8,
-      completedTasks: 8,
-      failedTasks: 1,
-      resultsUrl: "/results/support-eval-20240115",
+      progress: {
+        total: 8,
+        completed: 8,
+        failed: 0,
+        pending: 0,
+      },
+      result: {
+        url: "/results/support-eval-20240115",
+        summary: {
+          totalItems: "8",
+          passedItems: "7",
+          failedItems: "1",
+          passRate: "87.5",
+          avgDurationMs: "1500",
+        },
+      },
       conditions: [
         {
           type: "Complete",
@@ -231,16 +177,20 @@ const mockArenaJobs: ArenaJob[] = [
       creationTimestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     },
     spec: {
-      configRef: { name: "sales-eval-config" },
+      sourceRef: { name: "sales-eval-config" },
       type: "evaluation",
       evaluation: { outputFormats: ["json"], passingThreshold: 0.75 },
     },
     status: {
       phase: "Running",
       startTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      totalTasks: 12,
-      completedTasks: 7,
-      failedTasks: 0,
+      progress: {
+        total: 12,
+        completed: 7,
+        failed: 0,
+        pending: 5,
+      },
+      activeWorkers: 2,
       workers: { desired: 2, active: 2 },
       conditions: [
         {
@@ -263,7 +213,7 @@ const mockArenaJobs: ArenaJob[] = [
       creationTimestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
     },
     spec: {
-      configRef: { name: "support-eval-config" },
+      sourceRef: { name: "support-eval-config" },
       type: "evaluation",
       evaluation: { outputFormats: ["json"], passingThreshold: 0.9 },
     },
@@ -271,9 +221,21 @@ const mockArenaJobs: ArenaJob[] = [
       phase: "Failed",
       startTime: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
       completionTime: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
-      totalTasks: 8,
-      completedTasks: 3,
-      failedTasks: 5,
+      progress: {
+        total: 8,
+        completed: 8,
+        failed: 0,
+        pending: 0,
+      },
+      result: {
+        summary: {
+          totalItems: "8",
+          passedItems: "3",
+          failedItems: "5",
+          passRate: "37.5",
+          avgDurationMs: "2100",
+        },
+      },
       conditions: [
         {
           type: "Failed",
@@ -287,11 +249,12 @@ const mockArenaJobs: ArenaJob[] = [
   },
 ];
 
-const mockScenarios: Scenario[] = [
-  { name: "greeting", displayName: "Greeting Test", description: "Tests greeting handling", tags: ["basic"], path: "scenarios/greeting.yaml" },
-  { name: "refund-request", displayName: "Refund Request", description: "Tests refund handling", tags: ["support", "financial"], path: "scenarios/refund.yaml" },
-  { name: "product-inquiry", displayName: "Product Inquiry", description: "Tests product questions", tags: ["support", "sales"], path: "scenarios/product.yaml" },
-  { name: "escalation", displayName: "Escalation Test", description: "Tests escalation flow", tags: ["support", "critical"], path: "scenarios/escalation.yaml" },
+/** Mock scenario data for pack content (kept for future use) */
+const _mockScenarios = [
+  { name: "greeting", displayName: "Greeting Test", description: "Tests greeting handling", tags: ["basic"] },
+  { name: "refund-request", displayName: "Refund Request", description: "Tests refund handling", tags: ["support", "financial"] },
+  { name: "product-inquiry", displayName: "Product Inquiry", description: "Tests product questions", tags: ["support", "sales"] },
+  { name: "escalation", displayName: "Escalation Test", description: "Tests escalation flow", tags: ["support", "critical"] },
 ];
 
 // Simulate network delay for realistic demo experience
@@ -503,7 +466,7 @@ const MOCK_LOG_TEMPLATES = [
 const TOOL_NAMES = ["search_database", "get_user_info", "send_email", "fetch_data"];
 const CONTAINERS = ["facade", "runtime"];
 
-function generateMockLogs(count: number): LogEntry[] {
+function generateMockLogs(count: number, containers: string[] = CONTAINERS): LogEntry[] {
   const logs: LogEntry[] = [];
   const now = Date.now();
 
@@ -521,7 +484,7 @@ function generateMockLogs(count: number): LogEntry[] {
       timestamp: new Date(now - (count - i) * 1000).toISOString(),
       level: template.level,
       message,
-      container: CONTAINERS[Math.floor(Math.random() * CONTAINERS.length)],
+      container: containers[Math.floor(Math.random() * containers.length)],
     });
   }
 
@@ -881,62 +844,6 @@ export class MockDataService implements DataService {
     // Mock sync does nothing
   }
 
-  async getArenaConfigs(workspace: string): Promise<ArenaConfig[]> {
-    await delay();
-    return mockArenaConfigs.filter((c) => c.metadata?.namespace === workspace);
-  }
-
-  async getArenaConfig(workspace: string, name: string): Promise<ArenaConfig | undefined> {
-    await delay();
-    return mockArenaConfigs.find(
-      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
-    );
-  }
-
-  async getArenaConfigScenarios(_workspace: string, _name: string): Promise<Scenario[]> {
-    await delay();
-    return mockScenarios;
-  }
-
-  async createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
-    await delay(500);
-    const newConfig: ArenaConfig = {
-      apiVersion: "omnia.altairalabs.ai/v1alpha1",
-      kind: "ArenaConfig",
-      metadata: {
-        name,
-        namespace: workspace,
-        uid: `arena-config-${generateId()}`,
-        creationTimestamp: new Date().toISOString(),
-      },
-      spec,
-      status: { phase: "Pending" },
-    };
-    mockArenaConfigs.push(newConfig);
-    return newConfig;
-  }
-
-  async updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfig> {
-    await delay(500);
-    const config = mockArenaConfigs.find(
-      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
-    );
-    if (!config) {
-      throw new Error(`ArenaConfig ${workspace}/${name} not found`);
-    }
-    config.spec = spec;
-    return config;
-  }
-
-  async deleteArenaConfig(workspace: string, name: string): Promise<void> {
-    await delay(500);
-    const index = mockArenaConfigs.findIndex(
-      (c) => c.metadata?.namespace === workspace && c.metadata?.name === name
-    );
-    if (index !== -1) {
-      mockArenaConfigs.splice(index, 1);
-    }
-  }
 
   async getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJob[]> {
     await delay();
@@ -948,8 +855,8 @@ export class MockDataService implements DataService {
     if (options?.phase) {
       jobs = jobs.filter((j) => j.status?.phase === options.phase);
     }
-    if (options?.configRef) {
-      jobs = jobs.filter((j) => j.spec.configRef.name === options.configRef);
+    if (options?.sourceRef) {
+      jobs = jobs.filter((j) => j.spec.sourceRef.name === options.sourceRef);
     }
     if (options?.sort === "recent") {
       jobs.sort((a, b) =>
@@ -980,7 +887,7 @@ export class MockDataService implements DataService {
     await delay();
     // Return mock evaluation results for completed jobs
     const job = mockArenaJobs.find((j) => j.metadata?.name === name);
-    if (!job || job.status?.phase !== "Completed") {
+    if (!job || job.status?.phase !== "Succeeded") {
       return undefined;
     }
     return {
@@ -1059,10 +966,19 @@ export class MockDataService implements DataService {
     }
   }
 
+  async getArenaJobLogs(
+    _workspace: string,
+    _name: string,
+    options?: LogOptions
+  ): Promise<LogEntry[]> {
+    await delay();
+    // Generate mock logs for arena job workers
+    return generateMockLogs(options?.tailLines || 100, ["worker"]);
+  }
+
   async getArenaStats(workspace: string): Promise<ArenaStats> {
     await delay();
     const sources = mockArenaSources.filter((s) => s.metadata?.namespace === workspace);
-    const configs = mockArenaConfigs.filter((c) => c.metadata?.namespace === workspace);
     const jobs = mockArenaJobs.filter((j) => j.metadata?.namespace === workspace);
 
     return {
@@ -1072,19 +988,14 @@ export class MockDataService implements DataService {
         failed: sources.filter((s) => s.status?.phase === "Failed").length,
         active: sources.filter((s) => !s.spec.suspend).length,
       },
-      configs: {
-        total: configs.length,
-        ready: configs.filter((c) => c.status?.phase === "Ready").length,
-        scenarios: configs.reduce((sum, c) => sum + (c.status?.scenarioCount || 0), 0),
-      },
       jobs: {
         total: jobs.length,
         running: jobs.filter((j) => j.status?.phase === "Running").length,
         queued: jobs.filter((j) => j.status?.phase === "Pending").length,
-        completed: jobs.filter((j) => j.status?.phase === "Completed").length,
+        completed: jobs.filter((j) => j.status?.phase === "Succeeded").length,
         failed: jobs.filter((j) => j.status?.phase === "Failed").length,
         successRate: jobs.length > 0
-          ? jobs.filter((j) => j.status?.phase === "Completed").length / jobs.filter((j) => ["Completed", "Failed"].includes(j.status?.phase || "")).length
+          ? jobs.filter((j) => j.status?.phase === "Succeeded").length / jobs.filter((j) => ["Succeeded", "Failed"].includes(j.status?.phase || "")).length
           : 0,
       },
     };

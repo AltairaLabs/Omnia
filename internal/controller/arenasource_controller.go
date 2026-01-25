@@ -19,8 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,11 +76,14 @@ type ArenaSourceReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	// ArtifactDir is the directory where artifacts are stored
-	ArtifactDir string
+	// WorkspaceContentPath is the base path for workspace content volumes.
+	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/arena/{source-name}/
+	WorkspaceContentPath string
 
-	// ArtifactBaseURL is the base URL for serving artifacts
-	ArtifactBaseURL string
+	// MaxVersionsPerSource is the maximum number of versions to retain per source.
+	// Older versions are garbage collected when this limit is exceeded.
+	// Default is 10 if not set.
+	MaxVersionsPerSource int
 
 	// LicenseValidator validates license for source types (defense in depth)
 	LicenseValidator *license.Validator
@@ -98,6 +104,8 @@ type ArenaSourceReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+//
+//nolint:gocognit,gocyclo // Reconcile functions inherently have high complexity due to state machine logic
 func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.V(1).Info("reconciling ArenaSource", "name", req.Name, "namespace", req.Namespace)
@@ -195,37 +203,62 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{RequeueAfter: interval}, nil
 		}
 
-		// Store the artifact
-		artifactURL, err := r.storeArtifact(source, result.artifact)
+		// Store the artifact (sync to filesystem)
+		contentPath, version, artifactURL, err := r.storeArtifact(source, result.artifact)
 		if err != nil {
 			log.Error(err, "Failed to store artifact")
 			r.handleFetchError(ctx, source, err)
-			// Clean up temp file
+			// Clean up artifact directory
 			if result.artifact != nil && result.artifact.Path != "" {
-				_ = os.Remove(result.artifact.Path)
+				_ = os.RemoveAll(result.artifact.Path)
 			}
 			return ctrl.Result{RequeueAfter: interval}, nil
 		}
 
-		// Clean up temp file
+		// Clean up artifact directory
 		if result.artifact != nil && result.artifact.Path != "" {
-			_ = os.Remove(result.artifact.Path)
+			_ = os.RemoveAll(result.artifact.Path)
 		}
 
 		// Update status with artifact info
 		source.Status.Artifact = &omniav1alpha1.Artifact{
 			Revision:       result.artifact.Revision,
-			URL:            artifactURL,
+			URL:            artifactURL, // Legacy: tar.gz URL (empty for filesystem mode)
+			ContentPath:    contentPath, // New: filesystem path
+			Version:        version,     // New: content-addressable hash
 			Checksum:       result.artifact.Checksum,
 			Size:           result.artifact.Size,
 			LastUpdateTime: metav1.Now(),
 		}
 		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
 
+		// Update version tracking status
+		if version != "" {
+			source.Status.LastSyncRevision = result.artifact.Revision
+			source.Status.LastVersionCreated = version
+			source.Status.HeadVersion = version
+			// Count versions
+			if r.WorkspaceContentPath != "" {
+				workspaceName := r.getWorkspaceForNamespace(ctx, source.Namespace)
+				targetPath := source.Spec.TargetPath
+				if targetPath == "" {
+					targetPath = fmt.Sprintf("arena/%s", source.Name)
+				}
+				versionsDir := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, targetPath, ".arena", "versions")
+				if entries, err := os.ReadDir(versionsDir); err == nil {
+					source.Status.VersionCount = len(entries)
+				}
+			}
+		}
+
 		r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
 			"FetchComplete", "Successfully fetched artifact")
+		availableMsg := fmt.Sprintf("Artifact available at revision %s", result.artifact.Revision)
+		if version != "" {
+			availableMsg = fmt.Sprintf("Content synced at revision %s, version %s", result.artifact.Revision, version)
+		}
 		r.setCondition(source, ArenaSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
-			"ArtifactAvailable", fmt.Sprintf("Artifact available at revision %s", result.artifact.Revision))
+			"ArtifactAvailable", availableMsg)
 		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
 			"Ready", "ArenaSource is ready")
 
@@ -331,7 +364,7 @@ func (r *ArenaSourceReconciler) doFetchAsync(ctx context.Context, key types.Name
 
 	opts := fetcher.Options{
 		Timeout: timeout,
-		WorkDir: r.ArtifactDir,
+		WorkDir: os.TempDir(),
 	}
 
 	f, err := r.createFetcherFromSpec(ctx, source, opts)
@@ -511,52 +544,266 @@ func (r *ArenaSourceReconciler) loadOCICredentials(ctx context.Context, namespac
 	return creds, nil
 }
 
-// storeArtifact stores the fetched artifact and returns its URL.
-func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (string, error) {
-	// If artifact has no path (no-change result), return existing URL
+// storeArtifact stores the fetched artifact by syncing to the workspace content filesystem.
+// Returns contentPath, version, url (url is always empty for filesystem mode).
+func (r *ArenaSourceReconciler) storeArtifact(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
+	// If artifact has no path (no-change result), return existing values
 	if artifact.Path == "" && source.Status.Artifact != nil {
-		return source.Status.Artifact.URL, nil
+		return source.Status.Artifact.ContentPath,
+			source.Status.Artifact.Version,
+			"",
+			nil
 	}
 
-	// Create artifact directory if needed
-	artifactDir := filepath.Join(r.ArtifactDir, source.Namespace, source.Name)
-	if err := os.MkdirAll(artifactDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create artifact directory: %w", err)
+	// WorkspaceContentPath is required
+	if r.WorkspaceContentPath == "" {
+		return "", "", "", fmt.Errorf("WorkspaceContentPath is required for storing artifacts")
 	}
 
-	// Generate artifact filename
-	filename := fmt.Sprintf("%s.tar.gz", artifact.Checksum[7:19]) // Use part of checksum as filename
-	destPath := filepath.Join(artifactDir, filename)
-
-	// Copy artifact to destination
-	if err := copyFile(artifact.Path, destPath); err != nil {
-		return "", fmt.Errorf("failed to copy artifact: %w", err)
-	}
-
-	// Generate URL
-	url := fmt.Sprintf("%s/%s/%s/%s", r.ArtifactBaseURL, source.Namespace, source.Name, filename)
-	return url, nil
+	return r.syncToFilesystem(source, artifact)
 }
 
-// copyFile copies a file from src to dst.
-func copyFile(src, dst string) error {
+// syncToFilesystem copies the artifact directory to the workspace content filesystem
+// and creates a content-addressable version.
+func (r *ArenaSourceReconciler) syncToFilesystem(source *omniav1alpha1.ArenaSource, artifact *fetcher.Artifact) (contentPath, version, url string, err error) {
+	ctx := context.Background()
+	log := logf.FromContext(ctx).WithValues(
+		"source", source.Name,
+		"namespace", source.Namespace,
+	)
+
+	// Get workspace name from namespace label (allows future multi-namespace workspaces)
+	workspaceName := r.getWorkspaceForNamespace(ctx, source.Namespace)
+
+	// Determine target path within workspace content
+	targetPath := source.Spec.TargetPath
+	if targetPath == "" {
+		targetPath = fmt.Sprintf("arena/%s", source.Name)
+	}
+
+	// Workspace content structure: {base}/{workspace}/{namespace}/{targetPath}
+	// This structure supports future multi-namespace workspaces
+	workspacePath := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, targetPath)
+
+	// Use the checksum from the artifact (already calculated by fetcher)
+	// Extract the hash part from "sha256:<hash>"
+	contentHash := strings.TrimPrefix(artifact.Checksum, "sha256:")
+	if contentHash == "" || contentHash == artifact.Checksum || len(contentHash) < 12 {
+		// Fallback: calculate hash if checksum format is unexpected or too short
+		var err error
+		contentHash, err = fetcher.CalculateDirectoryHash(artifact.Path)
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to calculate content hash: %w", err)
+		}
+	}
+
+	// Short version for display (first 12 chars of SHA256)
+	version = contentHash[:12]
+
+	// Check if this version already exists
+	versionDir := filepath.Join(workspacePath, ".arena", "versions", version)
+	if _, err := os.Stat(versionDir); err == nil {
+		log.V(1).Info("Version already exists, skipping sync", "version", version)
+		// Version already exists, just update HEAD
+		contentPath = filepath.Join(targetPath, ".arena", "versions", version)
+		if err := r.updateHEAD(workspacePath, version); err != nil {
+			return "", "", "", fmt.Errorf("failed to update HEAD: %w", err)
+		}
+		return contentPath, version, "", nil
+	}
+
+	// Create version directory
+	if err := os.MkdirAll(versionDir, 0755); err != nil {
+		return "", "", "", fmt.Errorf("failed to create version directory: %w", err)
+	}
+
+	// Try os.Rename first (atomic, same filesystem), fallback to copy
+	if err := os.Rename(artifact.Path, versionDir); err != nil {
+		// Rename failed (likely cross-filesystem), copy instead
+		// First remove the empty versionDir we just created
+		_ = os.RemoveAll(versionDir)
+		if err := os.MkdirAll(versionDir, 0755); err != nil {
+			return "", "", "", fmt.Errorf("failed to create version directory: %w", err)
+		}
+		if err := copyDirectory(artifact.Path, versionDir); err != nil {
+			// Clean up on failure
+			_ = os.RemoveAll(versionDir)
+			return "", "", "", fmt.Errorf("failed to copy content to version directory: %w", err)
+		}
+	}
+
+	// Update HEAD pointer atomically
+	if err := r.updateHEAD(workspacePath, version); err != nil {
+		return "", "", "", fmt.Errorf("failed to update HEAD: %w", err)
+	}
+
+	// Garbage collect old versions
+	if err := r.gcOldVersions(workspacePath); err != nil {
+		// Log but don't fail on GC errors
+		log.Error(err, "Failed to garbage collect old versions")
+	}
+
+	log.Info("Successfully synced content to filesystem",
+		"version", version,
+		"path", versionDir,
+	)
+
+	contentPath = filepath.Join(targetPath, ".arena", "versions", version)
+	return contentPath, version, "", nil
+}
+
+// getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
+// Returns the namespace name as fallback if workspace label is not found.
+func (r *ArenaSourceReconciler) getWorkspaceForNamespace(ctx context.Context, namespace string) string {
+	// Handle nil client (e.g., in tests that don't set up the client)
+	if r.Client == nil {
+		return namespace
+	}
+	ns := &corev1.Namespace{}
+	if err := r.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
+		// Fallback to namespace name if we can't look it up
+		return namespace
+	}
+	if workspace, ok := ns.Labels[labelWorkspace]; ok && workspace != "" {
+		return workspace
+	}
+	// Fallback to namespace name
+	return namespace
+}
+
+// updateHEAD atomically updates the HEAD pointer to the given version.
+func (r *ArenaSourceReconciler) updateHEAD(workspacePath, version string) error {
+	arenaDir := filepath.Join(workspacePath, ".arena")
+	if err := os.MkdirAll(arenaDir, 0755); err != nil {
+		return err
+	}
+
+	headPath := filepath.Join(arenaDir, "HEAD")
+	tempPath := headPath + ".tmp"
+
+	// Write to temp file first
+	if err := os.WriteFile(tempPath, []byte(version), 0644); err != nil {
+		return err
+	}
+
+	// Atomic rename
+	return os.Rename(tempPath, headPath)
+}
+
+// gcOldVersions removes old versions exceeding MaxVersionsPerSource.
+func (r *ArenaSourceReconciler) gcOldVersions(workspacePath string) error {
+	versionsDir := filepath.Join(workspacePath, ".arena", "versions")
+
+	entries, err := os.ReadDir(versionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	maxVersions := r.MaxVersionsPerSource
+	if maxVersions <= 0 {
+		maxVersions = 10 // Default
+	}
+
+	if len(entries) <= maxVersions {
+		return nil
+	}
+
+	// Get version directories with their mod times
+	type versionInfo struct {
+		name    string
+		modTime time.Time
+	}
+	versions := make([]versionInfo, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		versions = append(versions, versionInfo{
+			name:    entry.Name(),
+			modTime: info.ModTime(),
+		})
+	}
+
+	// Sort by mod time (oldest first)
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].modTime.Before(versions[j].modTime)
+	})
+
+	// Remove oldest versions
+	for i := 0; i < len(versions)-maxVersions; i++ {
+		versionPath := filepath.Join(versionsDir, versions[i].name)
+		if err := os.RemoveAll(versionPath); err != nil {
+			return fmt.Errorf("failed to remove old version %s: %w", versions[i].name, err)
+		}
+	}
+
+	return nil
+}
+
+// copyDirectory recursively copies a directory.
+func copyDirectory(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		targetPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(targetPath, info.Mode())
+		}
+
+		// Handle symlinks
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, targetPath)
+		}
+
+		// Copy file
+		return copyFileWithMode(path, targetPath, info.Mode())
+	})
+}
+
+// copyFileWithMode copies a file preserving its mode.
+func copyFileWithMode(src, dst string, mode os.FileMode) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sourceFile.Close() }()
 
-	destFile, err := os.Create(dst)
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = destFile.Close() }()
 
-	if _, err := destFile.ReadFrom(sourceFile); err != nil {
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		_ = destFile.Close()
 		return err
 	}
 
-	return destFile.Sync()
+	if err := destFile.Sync(); err != nil {
+		_ = destFile.Close()
+		return err
+	}
+
+	return destFile.Close()
 }
 
 // handleFetchError handles errors during fetch operations.

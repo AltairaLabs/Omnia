@@ -10,7 +10,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
-import * as fs from "fs";
+import * as fs from "node:fs";
 import type { WorkspaceRole } from "@/types/workspace";
 import {
   getCachedToken,

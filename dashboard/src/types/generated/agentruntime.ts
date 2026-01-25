@@ -181,7 +181,7 @@ export interface AgentRuntimeSpec {
     type: "websocket" | "grpc";
   };
   /** framework specifies which agent framework to use.
-   * Supports PromptKit, LangChain, CrewAI, AutoGen, or a custom image.
+   * Supports PromptKit, LangChain, AutoGen, or a custom image.
    * If not specified, defaults to PromptKit. */
   framework?: {
     /** image overrides the default container image for the framework.
@@ -189,7 +189,7 @@ export interface AgentRuntimeSpec {
      * For built-in frameworks, this allows using a custom build or private registry. */
     image?: string;
     /** type specifies the agent framework to use. */
-    type: "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
+    type: "promptkit" | "langchain" | "autogen" | "custom";
     /** version specifies the framework version to use.
      * If not specified, the latest supported version is used. */
     version?: string;

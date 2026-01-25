@@ -18,13 +18,10 @@ import type { ToolRegistry as ToolRegistryType } from "@/types/tool-registry";
 import type {
   ArenaSource as ArenaSourceType,
   ArenaSourceSpec,
-  ArenaConfig as ArenaConfigType,
-  ArenaConfigSpec,
   ArenaJob as ArenaJobType,
   ArenaJobSpec,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 import type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
 
@@ -61,10 +58,6 @@ export type {
   ArenaSourceSpec,
   ArenaSourceStatus,
   ArenaSourcePhase,
-  ArenaConfig,
-  ArenaConfigSpec,
-  ArenaConfigStatus,
-  ArenaConfigPhase,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobStatus,
@@ -72,7 +65,6 @@ export type {
   ArenaJobType,
   ArenaJobResults,
   ArenaStats,
-  Scenario,
 } from "@/types/arena";
 
 export type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
@@ -389,14 +381,6 @@ export interface DataService {
   deleteArenaSource(workspace: string, name: string): Promise<void>;
   syncArenaSource(workspace: string, name: string): Promise<void>;
 
-  // Arena Configs (workspace-scoped)
-  getArenaConfigs(workspace: string): Promise<ArenaConfigType[]>;
-  getArenaConfig(workspace: string, name: string): Promise<ArenaConfigType | undefined>;
-  getArenaConfigScenarios(workspace: string, name: string): Promise<Scenario[]>;
-  createArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
-  updateArenaConfig(workspace: string, name: string, spec: ArenaConfigSpec): Promise<ArenaConfigType>;
-  deleteArenaConfig(workspace: string, name: string): Promise<void>;
-
   // Arena Jobs (workspace-scoped)
   getArenaJobs(workspace: string, options?: ArenaJobListOptions): Promise<ArenaJobType[]>;
   getArenaJob(workspace: string, name: string): Promise<ArenaJobType | undefined>;
@@ -405,6 +389,7 @@ export interface DataService {
   createArenaJob(workspace: string, name: string, spec: ArenaJobSpec): Promise<ArenaJobType>;
   cancelArenaJob(workspace: string, name: string): Promise<void>;
   deleteArenaJob(workspace: string, name: string): Promise<void>;
+  getArenaJobLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
 
   // Arena Stats (workspace-scoped)
   getArenaStats(workspace: string): Promise<ArenaStats>;

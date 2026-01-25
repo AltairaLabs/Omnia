@@ -7,7 +7,7 @@
  * Query parameters for GET:
  * - type: Filter by job type (evaluation, loadtest, datagen)
  * - status: Filter by status (Pending, Running, Completed, Failed, Cancelled)
- * - configRef: Filter by config reference name
+ * - sourceRef: Filter by source reference name
  *
  * Protected by workspace access checks.
  */
@@ -59,7 +59,7 @@ export const GET = withWorkspaceAccess(
       const { searchParams } = new URL(request.url);
       const typeFilter = searchParams.get("type") as ArenaJobType | null;
       const statusFilter = searchParams.get("status") as ArenaJobPhase | null;
-      const configRefFilter = searchParams.get("configRef");
+      const sourceRefFilter = searchParams.get("sourceRef");
 
       if (typeFilter) {
         jobs = jobs.filter((job) => job.spec.type === typeFilter);
@@ -67,8 +67,8 @@ export const GET = withWorkspaceAccess(
       if (statusFilter) {
         jobs = jobs.filter((job) => job.status?.phase === statusFilter);
       }
-      if (configRefFilter) {
-        jobs = jobs.filter((job) => job.spec.configRef.name === configRefFilter);
+      if (sourceRefFilter) {
+        jobs = jobs.filter((job) => job.spec.sourceRef.name === sourceRefFilter);
       }
 
       auditSuccess(auditCtx, "list", undefined, { count: jobs.length });

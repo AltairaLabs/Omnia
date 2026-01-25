@@ -574,9 +574,9 @@ func defaultImageForFramework(framework *omniav1alpha1.FrameworkConfig) string {
 		return DefaultLangChainImage
 	case omniav1alpha1.FrameworkTypePromptKit:
 		return DefaultFrameworkImage
-	case omniav1alpha1.FrameworkTypeCrewAI, omniav1alpha1.FrameworkTypeAutoGen:
-		// These frameworks don't have default images yet; use PromptKit as fallback
-		// Users must specify an image override for these frameworks
+	case omniav1alpha1.FrameworkTypeAutoGen:
+		// AutoGen doesn't have a default image yet; use PromptKit as fallback
+		// Users must specify an image override for this framework
 		return DefaultFrameworkImage
 	default:
 		return DefaultFrameworkImage

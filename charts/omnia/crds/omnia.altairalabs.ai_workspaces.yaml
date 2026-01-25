@@ -509,6 +509,46 @@ spec:
                   - role
                   type: object
                 type: array
+              storage:
+                description: |-
+                  storage configures shared storage for this workspace.
+                  When enabled, a PVC is created for storing Arena content, PromptPacks, and datasets.
+                  Job runners and dashboard mount this PVC directly for efficient content access.
+                properties:
+                  accessModes:
+                    default:
+                    - ReadWriteMany
+                    description: |-
+                      accessModes specifies the PVC access modes.
+                      Defaults to ReadWriteMany for shared access by dashboard and job runners.
+                    items:
+                      type: string
+                    type: array
+                  enabled:
+                    default: true
+                    description: |-
+                      enabled specifies whether to create a shared PVC for this workspace.
+                      When enabled, a PVC is created and mounted by dashboard and job runners.
+                    type: boolean
+                  retentionPolicy:
+                    default: Delete
+                    description: retentionPolicy specifies what happens to the PVC
+                      when the workspace is deleted.
+                    enum:
+                    - Delete
+                    - Retain
+                    type: string
+                  size:
+                    default: 10Gi
+                    description: size is the requested storage size (e.g., "10Gi").
+                    type: string
+                  storageClass:
+                    description: |-
+                      storageClass is the Kubernetes storage class to use for the PVC.
+                      If not specified, the cluster default storage class is used.
+                      For production, use a ReadWriteMany-capable storage class (e.g., EFS, NFS).
+                    type: string
+                type: object
             required:
             - displayName
             - namespace
@@ -664,6 +704,25 @@ spec:
                     type: string
                   viewer:
                     description: viewer is the name of the viewer ServiceAccount.
+                    type: string
+                type: object
+              storage:
+                description: storage tracks the status of workspace shared storage.
+                properties:
+                  capacity:
+                    description: capacity is the actual provisioned capacity of the
+                      PVC.
+                    type: string
+                  mountPath:
+                    description: mountPath is the path where the PVC is mounted (e.g.,
+                      /workspace-content/{workspace}/default).
+                    type: string
+                  phase:
+                    description: phase is the current phase of the PVC (Pending, Bound,
+                      Lost).
+                    type: string
+                  pvcName:
+                    description: pvcName is the name of the PVC created for this workspace.
                     type: string
                 type: object
             type: object

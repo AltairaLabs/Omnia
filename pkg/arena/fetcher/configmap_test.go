@@ -17,11 +17,9 @@ limitations under the License.
 package fetcher
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,15 +160,15 @@ func TestConfigMapFetcher_Fetch(t *testing.T) {
 	ctx := context.Background()
 	artifact, err := fetcher.Fetch(ctx, "12345")
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	assert.NotEmpty(t, artifact.Path)
 	assert.Equal(t, "12345", artifact.Revision)
 	assert.True(t, strings.HasPrefix(artifact.Checksum, "sha256:"))
 	assert.Greater(t, artifact.Size, int64(0))
 
-	// Verify tarball contents
-	verifyConfigMapTarball(t, artifact.Path, map[string]string{
+	// Verify directory contents
+	verifyDirectoryContents(t, artifact.Path, map[string]string{
 		"config.yaml": "key: value\n",
 		"prompt.txt":  "Hello, world!",
 	})
@@ -209,13 +207,15 @@ func TestConfigMapFetcher_Fetch_WithBinaryData(t *testing.T) {
 	ctx := context.Background()
 	artifact, err := fetcher.Fetch(ctx, "")
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	assert.NotEmpty(t, artifact.Path)
 
-	// Verify binary data is in tarball
-	contents := extractTarballContents(t, artifact.Path)
-	assert.Equal(t, binaryContent, contents["binary.bin"])
+	// Verify binary data is in directory
+	binaryPath := filepath.Join(artifact.Path, "binary.bin")
+	content, err := os.ReadFile(binaryPath)
+	require.NoError(t, err)
+	assert.Equal(t, binaryContent, content)
 }
 
 func TestConfigMapFetcher_Fetch_RevisionMismatch(t *testing.T) {
@@ -293,11 +293,16 @@ func TestConfigMapFetcher_Fetch_EmptyConfigMap(t *testing.T) {
 	ctx := context.Background()
 	artifact, err := fetcher.Fetch(ctx, "")
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
-	// Should create a valid (empty) tarball
+	// Should create a valid (empty) directory
 	assert.NotEmpty(t, artifact.Path)
 	assert.Equal(t, "12345", artifact.Revision)
+
+	// Verify directory exists but is empty
+	entries, err := os.ReadDir(artifact.Path)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 func TestConfigMapFetcher_Fetch_DataPrecedenceOverBinary(t *testing.T) {
@@ -333,51 +338,179 @@ func TestConfigMapFetcher_Fetch_DataPrecedenceOverBinary(t *testing.T) {
 	ctx := context.Background()
 	artifact, err := fetcher.Fetch(ctx, "")
 	require.NoError(t, err)
-	defer func() { _ = os.Remove(artifact.Path) }()
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
 	// Data should take precedence
-	contents := extractTarballContents(t, artifact.Path)
-	assert.Equal(t, []byte("from-data"), contents["config.yaml"])
+	configPath := filepath.Join(artifact.Path, "config.yaml")
+	content, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("from-data"), content)
 }
 
-// Helper function to verify tarball contents
-func verifyConfigMapTarball(t *testing.T, tarballPath string, expected map[string]string) {
+func TestConfigMapFetcher_DeterministicChecksum(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "test-config",
+			Namespace:         "default",
+			ResourceVersion:   "12345",
+			CreationTimestamp: metav1.Now(),
+		},
+		Data: map[string]string{
+			"a.txt": "content a",
+			"b.txt": "content b",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cm).
+		Build()
+
+	fetcher := NewConfigMapFetcher(ConfigMapFetcherConfig{
+		Name:      "test-config",
+		Namespace: "default",
+	}, fakeClient)
+
+	ctx := context.Background()
+
+	// Fetch twice and verify same checksum
+	artifact1, err := fetcher.Fetch(ctx, "12345")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(artifact1.Path) }()
+
+	artifact2, err := fetcher.Fetch(ctx, "12345")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(artifact2.Path) }()
+
+	assert.Equal(t, artifact1.Checksum, artifact2.Checksum)
+}
+
+func TestConfigMapFetcher_Fetch_BinaryDataOnly(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	binaryContent := []byte{0x00, 0x01, 0x02, 0x03}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "binary-only-config",
+			Namespace:         "default",
+			ResourceVersion:   "12345",
+			CreationTimestamp: metav1.Now(),
+		},
+		BinaryData: map[string][]byte{
+			"data.bin": binaryContent,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cm).
+		Build()
+
+	fetcher := NewConfigMapFetcher(ConfigMapFetcherConfig{
+		Name:      "binary-only-config",
+		Namespace: "default",
+	}, fakeClient)
+
+	ctx := context.Background()
+	artifact, err := fetcher.Fetch(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
+
+	// Verify binary data
+	content, err := os.ReadFile(filepath.Join(artifact.Path, "data.bin"))
+	require.NoError(t, err)
+	assert.Equal(t, binaryContent, content)
+}
+
+func TestConfigMapFetcher_Fetch_WithZeroTimestamp(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "test-config",
+			Namespace:       "default",
+			ResourceVersion: "12345",
+			// No CreationTimestamp set (zero value)
+		},
+		Data: map[string]string{
+			"config.yaml": "key: value",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cm).
+		Build()
+
+	fetcher := NewConfigMapFetcher(ConfigMapFetcherConfig{
+		Name:      "test-config",
+		Namespace: "default",
+	}, fakeClient)
+
+	ctx := context.Background()
+	artifact, err := fetcher.Fetch(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
+
+	assert.NotEmpty(t, artifact.Path)
+}
+
+func TestConfigMapFetcher_Fetch_WithNestedPaths(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	// ConfigMap keys can have path separators
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "nested-config",
+			Namespace:         "default",
+			ResourceVersion:   "12345",
+			CreationTimestamp: metav1.Now(),
+		},
+		Data: map[string]string{
+			"subdir/config.yaml":  "nested: value",
+			"subdir/deep/file.md": "# Deep file",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cm).
+		Build()
+
+	fetcher := NewConfigMapFetcher(ConfigMapFetcherConfig{
+		Name:      "nested-config",
+		Namespace: "default",
+	}, fakeClient)
+
+	ctx := context.Background()
+	artifact, err := fetcher.Fetch(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
+
+	// Verify nested structure
+	content1, err := os.ReadFile(filepath.Join(artifact.Path, "subdir", "config.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "nested: value", string(content1))
+
+	content2, err := os.ReadFile(filepath.Join(artifact.Path, "subdir", "deep", "file.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "# Deep file", string(content2))
+}
+
+// Helper function to verify directory contents
+func verifyDirectoryContents(t *testing.T, dirPath string, expected map[string]string) {
 	t.Helper()
 
-	contents := extractTarballContents(t, tarballPath)
 	for key, expectedValue := range expected {
-		actualValue, ok := contents[key]
-		assert.True(t, ok, "expected file %s not found in tarball", key)
-		assert.Equal(t, []byte(expectedValue), actualValue, "content mismatch for %s", key)
+		filePath := filepath.Join(dirPath, key)
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err, "expected file %s not found in directory", key)
+		assert.Equal(t, expectedValue, string(content), "content mismatch for %s", key)
 	}
-}
-
-// Helper function to extract tarball contents
-func extractTarballContents(t *testing.T, tarballPath string) map[string][]byte {
-	t.Helper()
-
-	file, err := os.Open(tarballPath)
-	require.NoError(t, err)
-	defer func() { _ = file.Close() }()
-
-	gzipReader, err := gzip.NewReader(file)
-	require.NoError(t, err)
-	defer func() { _ = gzipReader.Close() }()
-
-	tarReader := tar.NewReader(gzipReader)
-	contents := make(map[string][]byte)
-
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-
-		data, err := io.ReadAll(tarReader)
-		require.NoError(t, err)
-		contents[header.Name] = data
-	}
-
-	return contents
 }

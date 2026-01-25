@@ -6,6 +6,5 @@ resources:
 - omnia_v1alpha1_toolregistry.yaml
 - omnia_v1alpha1_provider.yaml
 - omnia_v1alpha1_arenasource.yaml
-- omnia_v1alpha1_arenaconfig.yaml
 - omnia_v1alpha1_arenajob.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

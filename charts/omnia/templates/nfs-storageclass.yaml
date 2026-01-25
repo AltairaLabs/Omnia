@@ -1,0 +1,32 @@
+{{- if .Values.nfs.csiDriver.enabled }}
+# StorageClass for NFS CSI driver
+# Provides ReadWriteMany (RWX) storage for workspace content
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.nfs.csiDriver.storageClass.name | default "omnia-nfs" }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+provisioner: nfs.csi.k8s.io
+parameters:
+  {{- if and .Values.nfs.server.enabled .Values.nfs.server.internal }}
+  # Use internal NFS server (for local development)
+  # NFSv4 with fsid=0 exports at pseudo-root /
+  server: {{ include "omnia.fullname" . }}-nfs-server.{{ .Release.Namespace }}.svc.cluster.local
+  share: /
+  {{- else }}
+  # Use external NFS server (for production)
+  server: {{ required "nfs.external.server is required when not using internal NFS server" .Values.nfs.external.server }}
+  share: {{ .Values.nfs.external.path | default "/exports/omnia" }}
+  {{- end }}
+  {{- if .Values.nfs.csiDriver.storageClass.subDir }}
+  subDir: {{ .Values.nfs.csiDriver.storageClass.subDir }}
+  {{- end }}
+  # Set mount permissions to 0777 so pods can write
+  mountPermissions: "0777"
+mountOptions:
+  - nfsvers=4.1
+reclaimPolicy: {{ .Values.nfs.csiDriver.storageClass.reclaimPolicy | default "Delete" }}
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+{{- end }}

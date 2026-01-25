@@ -46,3 +46,5 @@ charts/*/Chart.lock
 docs/local-backlog/
 
 .mcp.json
+arena-worker
+main

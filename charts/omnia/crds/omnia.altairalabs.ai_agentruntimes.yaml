@@ -432,7 +432,7 @@ spec:
               framework:
                 description: |-
                   framework specifies which agent framework to use.
-                  Supports PromptKit, LangChain, CrewAI, AutoGen, or a custom image.
+                  Supports PromptKit, LangChain, AutoGen, or a custom image.
                   If not specified, defaults to PromptKit.
                 properties:
                   image:
@@ -447,7 +447,6 @@ spec:
                     enum:
                     - promptkit
                     - langchain
-                    - crewai
                     - autogen
                     - custom
                     type: string

@@ -73,6 +73,12 @@ spec:
                 required:
                 - name
                 type: object
+              createVersionOnSync:
+                default: true
+                description: |-
+                  createVersionOnSync controls whether to create a new version after each successful sync.
+                  Versions are content-addressable using SHA256 hashes.
+                type: boolean
               git:
                 description: |-
                   git specifies the Git repository source.
@@ -181,6 +187,12 @@ spec:
                 description: suspend prevents the source from being reconciled when
                   set to true.
                 type: boolean
+              targetPath:
+                description: |-
+                  targetPath specifies where to sync content within the workspace content volume.
+                  The path is relative to the workspace content root: /workspace-content/{workspace}/default/
+                  If not specified, defaults to "arena/{source-name}".
+                type: string
               timeout:
                 default: 60s
                 description: |-
@@ -208,6 +220,12 @@ spec:
                   checksum:
                     description: checksum is the SHA256 checksum of the artifact.
                     type: string
+                  contentPath:
+                    description: |-
+                      contentPath is the filesystem path where the content is synced.
+                      This is relative to the workspace content volume root.
+                      Workers can mount the PVC directly and access content at this path.
+                    type: string
                   lastUpdateTime:
                     description: lastUpdateTime is when the artifact was last updated.
                     format: date-time
@@ -225,13 +243,17 @@ spec:
                     type: integer
                   url:
                     description: |-
-                      url is the URL where the artifact can be downloaded.
-                      This URL is used by Arena workers to fetch the bundle.
+                      url is the URL where the artifact can be downloaded (legacy tar.gz serving).
+                      Deprecated: Use contentPath for filesystem-based access.
+                    type: string
+                  version:
+                    description: |-
+                      version is the content-addressable version hash (SHA256).
+                      This identifies a specific immutable snapshot of the synced content.
                     type: string
                 required:
                 - lastUpdateTime
                 - revision
-                - url
                 type: object
               conditions:
                 description: conditions represent the current state of the ArenaSource
@@ -294,9 +316,23 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              headVersion:
+                description: |-
+                  headVersion points to the current "latest" version.
+                  This is updated atomically after a successful sync.
+                type: string
               lastFetchTime:
                 description: lastFetchTime is the timestamp of the last fetch attempt.
                 format: date-time
+                type: string
+              lastSyncRevision:
+                description: |-
+                  lastSyncRevision is the revision from the source that was last synced.
+                  Used to detect when re-sync is needed.
+                type: string
+              lastVersionCreated:
+                description: lastVersionCreated is the version hash created on the
+                  last successful sync.
                 type: string
               nextFetchTime:
                 description: nextFetchTime is the scheduled time for the next fetch.
@@ -315,6 +351,9 @@ spec:
                 - Fetching
                 - Error
                 type: string
+              versionCount:
+                description: versionCount is the number of versions currently stored.
+                type: integer
             type: object
         required:
         - spec

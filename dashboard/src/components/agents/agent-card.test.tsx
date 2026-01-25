@@ -112,13 +112,6 @@ const mockDataService: DataService = {
   updateArenaSource: vi.fn().mockResolvedValue({}),
   deleteArenaSource: vi.fn().mockResolvedValue(undefined),
   syncArenaSource: vi.fn().mockResolvedValue(undefined),
-  // Arena Configs
-  getArenaConfigs: vi.fn().mockResolvedValue([]),
-  getArenaConfig: vi.fn().mockResolvedValue(undefined),
-  getArenaConfigScenarios: vi.fn().mockResolvedValue([]),
-  createArenaConfig: vi.fn().mockResolvedValue({}),
-  updateArenaConfig: vi.fn().mockResolvedValue({}),
-  deleteArenaConfig: vi.fn().mockResolvedValue(undefined),
   // Arena Jobs
   getArenaJobs: vi.fn().mockResolvedValue([]),
   getArenaJob: vi.fn().mockResolvedValue(undefined),
@@ -127,6 +120,7 @@ const mockDataService: DataService = {
   createArenaJob: vi.fn().mockResolvedValue({}),
   cancelArenaJob: vi.fn().mockResolvedValue(undefined),
   deleteArenaJob: vi.fn().mockResolvedValue(undefined),
+  getArenaJobLogs: vi.fn().mockResolvedValue([]),
   // Arena Stats
   getArenaStats: vi.fn().mockResolvedValue({ sources: {}, configs: {}, jobs: {} }),
   // Agent connections

@@ -63,13 +63,13 @@ export const GET = withWorkspaceAccess<RouteParams>(
 
       // Build metrics from job status
       const status = result.resource.status;
-      const totalTasks = status?.totalTasks || 0;
-      const completedTasks = status?.completedTasks || 0;
-      const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+      const totalTasks = status?.progress?.total || 0;
+      const completedTasks = status?.progress?.completed || 0;
+      const progressPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
       const metrics: ArenaJobMetrics = {
-        progress,
-        activeWorkers: status?.workers?.active,
+        progress: progressPct,
+        activeWorkers: status?.activeWorkers,
         completedScenarios: completedTasks,
         totalScenarios: totalTasks,
       };

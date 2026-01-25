@@ -68,8 +68,13 @@ const mockJob = {
   spec: { type: "evaluation", configRef: "eval-config" },
   status: {
     phase: "Running",
-    completedTasks: 5,
-    totalTasks: 10,
+    progress: {
+      total: 10,
+      completed: 5,
+      failed: 0,
+      pending: 5,
+    },
+    activeWorkers: 3,
     workers: { active: 3, total: 5 },
   },
 };
@@ -127,7 +132,7 @@ describe("GET /api/workspaces/[name]/arena/jobs/[jobName]/metrics", () => {
 
     const jobNoTasks = {
       ...mockJob,
-      status: { phase: "Pending", totalTasks: 0 },
+      status: { phase: "Pending", progress: { total: 0 } },
     };
 
     vi.mocked(getUser).mockResolvedValue(mockUser);

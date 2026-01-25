@@ -1,4 +1,4 @@
-name: E2E Tests
+name: Operator E2E Tests
 
 on:
   push:
@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   test-e2e:
-    name: Run on Ubuntu
+    name: Operator E2E
     runs-on: ubuntu-latest
     # E2E tests are informational for PRs - they don't block merging
     # They only block releases (enforced in release workflow)

@@ -20,12 +20,13 @@ Object.defineProperty(globalThis, "matchMedia", {
   })),
 });
 
-// Mock ResizeObserver
-globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-}));
+// Mock ResizeObserver as a proper class
+class MockResizeObserver {
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+}
+globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
 
 // Mock pointer capture methods for Radix UI components
 Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);

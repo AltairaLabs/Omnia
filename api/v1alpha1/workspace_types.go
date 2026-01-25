@@ -292,6 +292,38 @@ type NetworkPolicyRule struct {
 	Ports []NetworkPolicyPort `json:"ports,omitempty"`
 }
 
+// WorkspaceStorageConfig defines shared storage configuration for a workspace.
+type WorkspaceStorageConfig struct {
+	// enabled specifies whether to create a shared PVC for this workspace.
+	// When enabled, a PVC is created and mounted by dashboard and job runners.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// storageClass is the Kubernetes storage class to use for the PVC.
+	// If not specified, the cluster default storage class is used.
+	// For production, use a ReadWriteMany-capable storage class (e.g., EFS, NFS).
+	// +optional
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// size is the requested storage size (e.g., "10Gi").
+	// +kubebuilder:default="10Gi"
+	// +optional
+	Size string `json:"size,omitempty"`
+
+	// accessModes specifies the PVC access modes.
+	// Defaults to ReadWriteMany for shared access by dashboard and job runners.
+	// +kubebuilder:default={"ReadWriteMany"}
+	// +optional
+	AccessModes []string `json:"accessModes,omitempty"`
+
+	// retentionPolicy specifies what happens to the PVC when the workspace is deleted.
+	// +kubebuilder:validation:Enum=Delete;Retain
+	// +kubebuilder:default=Delete
+	// +optional
+	RetentionPolicy string `json:"retentionPolicy,omitempty"`
+}
+
 // WorkspaceNetworkPolicy defines network isolation settings for a workspace.
 type WorkspaceNetworkPolicy struct {
 	// isolate enables network isolation for the workspace namespace.
@@ -337,6 +369,25 @@ type NetworkPolicyStatus struct {
 	// rulesCount is the total number of ingress and egress rules.
 	// +optional
 	RulesCount int32 `json:"rulesCount,omitempty"`
+}
+
+// WorkspaceStorageStatus tracks the status of workspace shared storage.
+type WorkspaceStorageStatus struct {
+	// pvcName is the name of the PVC created for this workspace.
+	// +optional
+	PVCName string `json:"pvcName,omitempty"`
+
+	// phase is the current phase of the PVC (Pending, Bound, Lost).
+	// +optional
+	Phase string `json:"phase,omitempty"`
+
+	// capacity is the actual provisioned capacity of the PVC.
+	// +optional
+	Capacity string `json:"capacity,omitempty"`
+
+	// mountPath is the path where the PVC is mounted (e.g., /workspace-content/{workspace}/default).
+	// +optional
+	MountPath string `json:"mountPath,omitempty"`
 }
 
 // WorkspaceQuotas defines resource quotas for a workspace.
@@ -409,6 +460,12 @@ type WorkspaceSpec struct {
 	// networkPolicy defines network isolation settings for this workspace.
 	// +optional
 	NetworkPolicy *WorkspaceNetworkPolicy `json:"networkPolicy,omitempty"`
+
+	// storage configures shared storage for this workspace.
+	// When enabled, a PVC is created for storing Arena content, PromptPacks, and datasets.
+	// Job runners and dashboard mount this PVC directly for efficient content access.
+	// +optional
+	Storage *WorkspaceStorageConfig `json:"storage,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.
@@ -511,6 +568,10 @@ type WorkspaceStatus struct {
 	// networkPolicy tracks the status of the workspace NetworkPolicy.
 	// +optional
 	NetworkPolicy *NetworkPolicyStatus `json:"networkPolicy,omitempty"`
+
+	// storage tracks the status of workspace shared storage.
+	// +optional
+	Storage *WorkspaceStorageStatus `json:"storage,omitempty"`
 
 	// conditions represent the current state of the Workspace resource.
 	// +listType=map

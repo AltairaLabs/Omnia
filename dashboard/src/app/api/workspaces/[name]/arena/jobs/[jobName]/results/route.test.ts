@@ -68,17 +68,37 @@ const mockJobCompleted = {
   spec: { type: "evaluation", configRef: "eval-config" },
   status: {
     phase: "Completed",
-    completedTasks: 10,
-    totalTasks: 10,
-    failedTasks: 1,
-    resultsUrl: "https://storage.example.com/results/eval-job-1.json",
+    progress: {
+      total: 10,
+      completed: 10,
+      failed: 0,
+      pending: 0,
+    },
+    result: {
+      url: "https://storage.example.com/results/eval-job-1.json",
+      summary: {
+        totalItems: "10",
+        passedItems: "9",
+        failedItems: "1",
+        passRate: "90.0",
+        avgDurationMs: "1500",
+      },
+    },
   },
 };
 
 const mockJobRunning = {
   metadata: { name: "eval-job-1", namespace: "test-ns" },
   spec: { type: "evaluation", configRef: "eval-config" },
-  status: { phase: "Running", completedTasks: 5, totalTasks: 10, failedTasks: 0 },
+  status: {
+    phase: "Running",
+    progress: {
+      total: 10,
+      completed: 5,
+      failed: 0,
+      pending: 5,
+    },
+  },
 };
 
 function createMockRequest(): NextRequest {
@@ -125,7 +145,13 @@ describe("GET /api/workspaces/[name]/arena/jobs/[jobName]/results", () => {
     expect(body.resultsUrl).toBe("https://storage.example.com/results/eval-job-1.json");
     expect(body.completedTasks).toBe(10);
     expect(body.totalTasks).toBe(10);
-    expect(body.failedTasks).toBe(1);
+    expect(body.failedTasks).toBe(0);
+    // Test result summary
+    expect(body.summary).toBeDefined();
+    expect(body.summary.totalItems).toBe(10);
+    expect(body.summary.passedItems).toBe(9);
+    expect(body.summary.failedItems).toBe(1);
+    expect(body.summary.passRate).toBe("90.0");
   });
 
   it("returns null resultsUrl for running job", async () => {
@@ -152,6 +178,7 @@ describe("GET /api/workspaces/[name]/arena/jobs/[jobName]/results", () => {
     expect(body.resultsUrl).toBeNull();
     expect(body.completedTasks).toBe(5);
     expect(body.totalTasks).toBe(10);
+    expect(body.summary).toBeNull();
   });
 
   it("returns 404 when job not found", async () => {

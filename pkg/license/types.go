@@ -86,7 +86,7 @@ func OpenCoreLicense() *License {
 		Tier:     TierOpenCore,
 		Customer: "Open Core User",
 		Features: Features{
-			GitSource:          false,
+			GitSource:          true, // Git sources are included in open-core
 			OCISource:          false,
 			S3Source:           false,
 			LoadTesting:        false,

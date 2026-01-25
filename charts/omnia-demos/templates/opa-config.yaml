@@ -19,8 +19,8 @@ data:
 
     default allow := false
 
-    # Allowed model from Helm values
-    allowed_model := {{ .Values.ollama.model | quote }}
+    # Allowed models from Helm values (primary + additional)
+    allowed_models := {{ append .Values.ollama.additionalModels .Values.ollama.model | toJson }}
 
     # Helper to check if path requires model validation
     requires_model_validation if {
@@ -32,10 +32,13 @@ data:
       input.attributes.request.http.path == "/api/pull"
     }
 
-    # Parse JSON body from request
-    parsed_body := json.unmarshal(input.attributes.request.http.body)
+    # Raw request body
+    raw_body := input.attributes.request.http.body
 
-    # Get requested model from body
+    # Try to parse JSON body from request (may fail for large bodies with images)
+    parsed_body := json.unmarshal(raw_body)
+
+    # Get requested model from parsed body
     requested_model := parsed_body.model if {
       parsed_body.model
     }
@@ -45,21 +48,33 @@ data:
       parsed_body.name
     }
 
+    # Fallback: check if any allowed model appears in raw body (for large requests)
+    raw_body_contains_allowed_model if {
+      some allowed in allowed_models
+      contains(raw_body, concat("", ["\"model\":\"", allowed, "\""]))
+    }
+
     # Model matching - exact match
-    model_matches(requested, allowed) if {
+    model_matches_single(requested, allowed) if {
       requested == allowed
     }
 
     # Model matching - requested without tag, allowed with tag
-    model_matches(requested, allowed) if {
+    model_matches_single(requested, allowed) if {
       not contains(requested, ":")
       startswith(allowed, concat("", [requested, ":"]))
     }
 
     # Model matching - allowed without tag, requested with tag
-    model_matches(requested, allowed) if {
+    model_matches_single(requested, allowed) if {
       not contains(allowed, ":")
       startswith(requested, concat("", [allowed, ":"]))
+    }
+
+    # Check if requested model matches any allowed model
+    model_matches(requested) if {
+      some allowed in allowed_models
+      model_matches_single(requested, allowed)
     }
 
     # Allow non-model endpoints (health, tags, version, etc.)
@@ -68,25 +83,32 @@ data:
       not is_pull_request
     }
 
-    # Allow if model matches the allowed model
+    # Allow if model matches any allowed model (parsed body)
     allow if {
       requires_model_validation
-      model_matches(requested_model, allowed_model)
+      model_matches(requested_model)
     }
 
-    # Allow pull requests only for the allowed model
+    # Allow if raw body contains allowed model (fallback for large requests with images)
+    allow if {
+      requires_model_validation
+      not requested_model
+      raw_body_contains_allowed_model
+    }
+
+    # Allow pull requests only for allowed models
     allow if {
       is_pull_request
-      model_matches(pull_model_name, allowed_model)
+      model_matches(pull_model_name)
     }
 
     # Deny response with details
-    deny_message := sprintf("Model '%s' not allowed. Only '%s' is permitted on this instance.", [requested_model, allowed_model]) if {
+    deny_message := sprintf("Model '%s' not allowed. Permitted models: %v", [requested_model, allowed_models]) if {
       requires_model_validation
       requested_model
     }
 
-    deny_message := sprintf("Cannot pull model '%s'. Only '%s' is permitted on this instance.", [pull_model_name, allowed_model]) if {
+    deny_message := sprintf("Cannot pull model '%s'. Permitted models: %v", [pull_model_name, allowed_models]) if {
       is_pull_request
       pull_model_name
     }
@@ -110,6 +132,6 @@ data:
     # Deny response body
     deny_body := json.marshal({
       "error": deny_message,
-      "allowed_model": allowed_model
+      "allowed_models": allowed_models
     })
 {{- end }}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
 import { useArenaJob, useArenaJobMutations } from "@/hooks/use-arena-jobs";
+import { useProviderPreview, useToolRegistryPreview } from "@/hooks";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,6 +37,9 @@ import {
   ExternalLink,
   Timer,
   RefreshCw,
+  FileText,
+  Cpu,
+  Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -43,7 +47,15 @@ import {
   formatDate as formatDateBase,
   getConditionIcon,
 } from "@/components/arena";
-import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
+import { LogViewer } from "@/components/logs";
+import type {
+  ArenaJob,
+  ArenaJobPhase,
+  ArenaJobType,
+  ProviderGroupSelector,
+  ToolRegistrySelector,
+} from "@/types/arena";
+import type { LabelSelectorValue } from "@/components/ui/k8s-label-selector";
 import type { Condition } from "@/types/common";
 
 const formatDate = (dateString?: string) => formatDateBase(dateString, true);
@@ -92,11 +104,11 @@ function getJobPhaseBadge(phase: ArenaJobPhase | undefined) {
           Running
         </Badge>
       );
-    case "Completed":
+    case "Succeeded":
       return (
         <Badge variant="default" className="gap-1 bg-green-500">
           <CheckCircle className="h-3 w-3" />
-          Completed
+          Succeeded
         </Badge>
       );
     case "Failed":
@@ -138,13 +150,152 @@ function formatDuration(startTime?: string, completionTime?: string): string {
   return `${seconds}s`;
 }
 
+// Helper to display label selector details
+function LabelSelectorDisplay({ selector }: { selector?: LabelSelectorValue }) {
+  if (!selector) return <span className="text-muted-foreground">-</span>;
+
+  const hasMatchLabels = selector.matchLabels && Object.keys(selector.matchLabels).length > 0;
+  const hasMatchExpressions = selector.matchExpressions && selector.matchExpressions.length > 0;
+
+  if (!hasMatchLabels && !hasMatchExpressions) {
+    return <span className="text-muted-foreground italic">All (empty selector)</span>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {hasMatchLabels && (
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(selector.matchLabels!).map(([key, value]) => (
+            <Badge key={key} variant="secondary" className="font-mono text-xs">
+              {key}={value}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {hasMatchExpressions && (
+        <div className="space-y-1">
+          {selector.matchExpressions!.map((expr) => (
+            <div key={`${expr.key}-${expr.operator}-${expr.values?.join(",") ?? ""}`} className="flex items-center gap-1 text-xs">
+              <Badge variant="outline" className="font-mono">
+                {expr.key}
+              </Badge>
+              <span className="text-muted-foreground">{expr.operator}</span>
+              {expr.values && expr.values.length > 0 && (
+                <span className="font-mono">
+                  [{expr.values.join(", ")}]
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Component to show provider group override with matching providers
+function ProviderGroupOverrideDisplay({
+  groupName,
+  selector,
+}: {
+  groupName: string;
+  selector: ProviderGroupSelector;
+}) {
+  const labelSelector: LabelSelectorValue = selector.selector || {};
+  const { matchingProviders, matchCount, isLoading } = useProviderPreview(labelSelector);
+
+  return (
+    <div className="border rounded-md p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <Badge variant="outline" className="font-mono">
+          {groupName}
+        </Badge>
+        <span className="text-xs text-muted-foreground">
+          {isLoading ? "Loading..." : `${matchCount} provider(s) match`}
+        </span>
+      </div>
+      <div className="text-sm">
+        <p className="text-xs text-muted-foreground mb-1">Selector:</p>
+        <LabelSelectorDisplay selector={labelSelector} />
+      </div>
+      {!isLoading && matchingProviders.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Matching Providers:</p>
+          <div className="flex flex-wrap gap-1">
+            {matchingProviders.slice(0, 10).map((provider) => (
+              <Badge key={provider.metadata.name} variant="secondary" className="text-xs">
+                {provider.metadata.name}
+              </Badge>
+            ))}
+            {matchingProviders.length > 10 && (
+              <Badge variant="outline" className="text-xs">
+                +{matchingProviders.length - 10} more
+              </Badge>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Component to show tool registry override with matching registries
+function ToolRegistryOverrideDisplay({
+  selector,
+}: {
+  selector: ToolRegistrySelector;
+}) {
+  const labelSelector: LabelSelectorValue = selector.selector || {};
+  const { matchingRegistries, matchCount, totalToolsCount, isLoading } =
+    useToolRegistryPreview(labelSelector);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Selector</span>
+        <span className="text-xs text-muted-foreground">
+          {isLoading
+            ? "Loading..."
+            : `${matchCount} registry(s), ${totalToolsCount} tools`}
+        </span>
+      </div>
+      <LabelSelectorDisplay selector={labelSelector} />
+      {!isLoading && matchingRegistries.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Matching Registries:</p>
+          <div className="flex flex-wrap gap-1">
+            {matchingRegistries.map((registry) => (
+              <Badge key={registry.metadata.name} variant="secondary" className="text-xs">
+                {registry.metadata.name}
+                {registry.status?.discoveredToolsCount != null && (
+                  <span className="ml-1 text-muted-foreground">
+                    ({registry.status.discoveredToolsCount})
+                  </span>
+                )}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
   const { spec, status } = job;
 
-  const total = status?.totalTasks ?? 0;
-  const completed = status?.completedTasks ?? 0;
-  const failed = status?.failedTasks ?? 0;
-  const progress = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
+  // Read from status.progress for work item tracking
+  const total = status?.progress?.total ?? 0;
+  const completed = status?.progress?.completed ?? 0;
+  const failed = status?.progress?.failed ?? 0;
+  const progressPct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
+
+  // Read from status.result.summary for test results
+  const resultSummary = status?.result?.summary;
+  const passedItems = resultSummary ? Number.parseInt(resultSummary.passedItems || "0", 10) : 0;
+  const failedItems = resultSummary ? Number.parseInt(resultSummary.failedItems || "0", 10) : 0;
+  const totalItems = resultSummary ? Number.parseInt(resultSummary.totalItems || "0", 10) : 0;
+  const passRate = resultSummary?.passRate;
 
   return (
     <div className="space-y-6">
@@ -156,12 +307,13 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         <CardContent>
           <div className="space-y-4">
             <div className="flex items-center gap-4">
-              <Progress value={progress} className="flex-1" />
-              <span className="text-sm font-medium">{progress}%</span>
+              <Progress value={progressPct} className="flex-1" />
+              <span className="text-sm font-medium">{progressPct}%</span>
             </div>
+            {/* Work item progress */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Total Tasks</p>
+                <p className="text-sm text-muted-foreground">Work Items</p>
                 <p className="text-2xl font-bold">{total}</p>
               </div>
               <div>
@@ -179,6 +331,32 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
                 </p>
               </div>
             </div>
+            {/* Test results summary (when available) */}
+            {resultSummary && (
+              <>
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">Test Results</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Tests</p>
+                      <p className="text-2xl font-bold">{totalItems}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Passed</p>
+                      <p className="text-2xl font-bold text-green-600">{passedItems}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Failed</p>
+                      <p className="text-2xl font-bold text-red-600">{failedItems}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Pass Rate</p>
+                      <p className="text-2xl font-bold">{passRate ? `${passRate}%` : "-"}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -250,7 +428,7 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         </CardContent>
       </Card>
 
-      {/* Config Reference Card */}
+      {/* Source Reference Card */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -261,14 +439,20 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         <CardContent>
           <div className="space-y-3">
             <div>
-              <p className="text-sm text-muted-foreground">Config Reference</p>
+              <p className="text-sm text-muted-foreground">Source</p>
               <Link
-                href={`/arena/configs/${spec?.configRef?.name}`}
+                href={`/arena/sources/${spec?.sourceRef?.name}`}
                 className="text-primary hover:underline font-medium"
               >
-                {spec?.configRef?.name}
+                {spec?.sourceRef?.name}
               </Link>
             </div>
+            {spec?.arenaFile && (
+              <div>
+                <p className="text-sm text-muted-foreground">Arena File</p>
+                <p className="mt-1 font-mono text-sm">{spec.arenaFile}</p>
+              </div>
+            )}
             <div>
               <p className="text-sm text-muted-foreground">Job Type</p>
               <div className="mt-1">{getJobTypeBadge(spec?.type)}</div>
@@ -389,8 +573,46 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         </Card>
       )}
 
+      {/* Provider Overrides Card */}
+      {spec?.providerOverrides && Object.keys(spec.providerOverrides).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Cpu className="h-4 w-4" />
+              Provider Overrides
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {Object.entries(spec.providerOverrides).map(([groupName, selector]) => (
+                <ProviderGroupOverrideDisplay
+                  key={groupName}
+                  groupName={groupName}
+                  selector={selector}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tool Registry Override Card */}
+      {spec?.toolRegistryOverride && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wrench className="h-4 w-4" />
+              Tool Registry Override
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ToolRegistryOverrideDisplay selector={spec.toolRegistryOverride} />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Results URL Card */}
-      {status?.resultsUrl && (
+      {status?.result?.url && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -402,12 +624,12 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Results URL:</span>
               <a
-                href={status.resultsUrl}
+                href={status.result.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary hover:underline flex items-center gap-1"
               >
-                {status.resultsUrl}
+                {status.result.url}
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>
@@ -456,7 +678,8 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
 
 function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
   const phase = job.status?.phase;
-  const resultsUrl = job.status?.resultsUrl;
+  const resultsUrl = job.status?.result?.url;
+  const resultSummary = job.status?.result?.summary;
 
   if (phase === "Pending" || phase === "Running") {
     return (
@@ -478,7 +701,14 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
     );
   }
 
-  if (!resultsUrl) {
+  // Parse result summary values
+  const totalItems = resultSummary ? Number.parseInt(resultSummary.totalItems || "0", 10) : 0;
+  const passedItems = resultSummary ? Number.parseInt(resultSummary.passedItems || "0", 10) : 0;
+  const failedItems = resultSummary ? Number.parseInt(resultSummary.failedItems || "0", 10) : 0;
+  const passRate = resultSummary?.passRate;
+  const avgDurationMs = resultSummary?.avgDurationMs;
+
+  if (!resultsUrl && !resultSummary) {
     return (
       <div className="text-center py-12 text-muted-foreground">
         <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -490,8 +720,7 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
     );
   }
 
-  // For now, show a summary card with link to results
-  // In a full implementation, you'd fetch and display the actual results
+  // Show results summary
   return (
     <Card>
       <CardHeader>
@@ -504,44 +733,51 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p className="text-sm text-muted-foreground">Total Tasks</p>
-              <p className="text-2xl font-bold">{job.status?.totalTasks ?? 0}</p>
+              <p className="text-sm text-muted-foreground">Total Tests</p>
+              <p className="text-2xl font-bold">{totalItems}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Completed</p>
+              <p className="text-sm text-muted-foreground">Passed</p>
               <p className="text-2xl font-bold text-green-600">
-                {job.status?.completedTasks ?? 0}
+                {passedItems}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
               <p className="text-2xl font-bold text-red-600">
-                {job.status?.failedTasks ?? 0}
+                {failedItems}
               </p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Success Rate</p>
+              <p className="text-sm text-muted-foreground">Pass Rate</p>
               <p className="text-2xl font-bold">
-                {job.status?.totalTasks && job.status.totalTasks > 0
-                  ? `${Math.round(((job.status.completedTasks ?? 0) / job.status.totalTasks) * 100)}%`
-                  : "-"}
+                {passRate ? `${passRate}%` : "-"}
               </p>
             </div>
           </div>
 
-          <div className="pt-4 border-t">
-            <a
-              href={resultsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2"
-            >
-              <Button>
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View Full Results
-              </Button>
-            </a>
-          </div>
+          {avgDurationMs && (
+            <div className="pt-4 border-t">
+              <p className="text-sm text-muted-foreground">Average Duration</p>
+              <p className="text-lg font-medium">{avgDurationMs}ms</p>
+            </div>
+          )}
+
+          {resultsUrl && (
+            <div className="pt-4 border-t">
+              <a
+                href={resultsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2"
+              >
+                <Button>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  View Full Results
+                </Button>
+              </a>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -579,7 +815,7 @@ export default function ArenaJobDetailPage() {
   const [deleting, setDeleting] = useState(false);
 
   const isRunning = job?.status?.phase === "Running" || job?.status?.phase === "Pending";
-  const isFinished = job?.status?.phase === "Completed" || job?.status?.phase === "Failed" || job?.status?.phase === "Cancelled";
+  const isFinished = job?.status?.phase === "Succeeded" || job?.status?.phase === "Failed" || job?.status?.phase === "Cancelled";
 
   const handleCancel = async () => {
     if (!confirm(`Are you sure you want to cancel job "${jobName}"?`)) {
@@ -708,10 +944,10 @@ export default function ArenaJobDetailPage() {
             {formatDuration(job.status?.startTime, job.status?.completionTime)}
           </Badge>
           <Link
-            href={`/arena/configs/${job.spec?.configRef?.name}`}
+            href={`/arena/sources/${job.spec?.sourceRef?.name}`}
             className="text-sm text-muted-foreground hover:underline"
           >
-            Config: {job.spec?.configRef?.name}
+            Source: {job.spec?.sourceRef?.name}
           </Link>
         </div>
 
@@ -722,6 +958,10 @@ export default function ArenaJobDetailPage() {
               <Info className="h-4 w-4 mr-2" />
               Overview
             </TabsTrigger>
+            <TabsTrigger value="logs">
+              <FileText className="h-4 w-4 mr-2" />
+              Logs
+            </TabsTrigger>
             <TabsTrigger value="results">
               <BarChart3 className="h-4 w-4 mr-2" />
               Results
@@ -730,6 +970,16 @@ export default function ArenaJobDetailPage() {
 
           <TabsContent value="overview">
             <OverviewTab job={job} />
+          </TabsContent>
+
+          <TabsContent value="logs">
+            <LogViewer
+              jobName={jobName}
+              workspace={currentWorkspace?.name || ""}
+              resourceName={jobName}
+              containers={["worker"]}
+              showGrafanaLinks={false}
+            />
           </TabsContent>
 
           <TabsContent value="results">

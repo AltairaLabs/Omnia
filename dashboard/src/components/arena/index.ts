@@ -1,7 +1,8 @@
 export { ArenaBreadcrumb, type BreadcrumbItem } from "./breadcrumb";
 export { SourceDialog } from "./source-dialog";
-export { ConfigDialog } from "./config-dialog";
 export { JobDialog } from "./job-dialog";
+export { VersionSelector } from "./version-selector";
+export { FolderBrowser } from "./folder-browser";
 export {
   formatDate,
   formatInterval,

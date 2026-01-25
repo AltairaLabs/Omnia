@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { usePromptPacks, useToolRegistries, useReadOnly, usePermissions, Permission } from "@/hooks";
+import { usePromptPacks, useToolRegistries, useProviders, useReadOnly, usePermissions, Permission } from "@/hooks";
 import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -36,8 +36,7 @@ interface DeployWizardProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
-type ProviderType = "claude" | "openai" | "gemini" | "ollama";
+type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 type FacadeType = "websocket" | "grpc";
 type SessionType = "memory" | "redis";
 
@@ -52,9 +51,7 @@ interface WizardFormData {
   promptPackName: string;
   promptPackTrack: string;
   // Step 4: Provider
-  providerType: ProviderType;
-  providerModel: string;
-  providerSecretName: string;
+  providerRefName: string;
   // Step 5: Tools & Session
   toolRegistryName: string;
   toolRegistryNamespace: string;
@@ -77,9 +74,7 @@ const INITIAL_FORM_DATA: WizardFormData = {
   customImage: "",
   promptPackName: "",
   promptPackTrack: "stable",
-  providerType: "claude",
-  providerModel: "",
-  providerSecretName: "",
+  providerRefName: "",
   toolRegistryName: "",
   toolRegistryNamespace: "",
   sessionType: "memory",
@@ -106,16 +101,8 @@ const STEPS = [
 const FRAMEWORKS: { value: FrameworkType; label: string; description: string }[] = [
   { value: "promptkit", label: "PromptKit", description: "AltairaLabs' native framework" },
   { value: "langchain", label: "LangChain", description: "Popular Python framework" },
-  { value: "crewai", label: "CrewAI", description: "Multi-agent orchestration" },
   { value: "autogen", label: "AutoGen", description: "Microsoft's agent framework" },
   { value: "custom", label: "Custom", description: "Your own container image" },
-];
-
-const PROVIDERS: { value: ProviderType; label: string; models: string[] }[] = [
-  { value: "claude", label: "Anthropic Claude", models: ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-3-5-sonnet-20241022"] },
-  { value: "openai", label: "OpenAI", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"] },
-  { value: "gemini", label: "Google Gemini", models: ["gemini-2.0-flash", "gemini-1.5-pro"] },
-  { value: "ollama", label: "Ollama (Local)", models: ["llama3.2", "llava:7b", "mistral"] },
 ];
 
 /**
@@ -187,6 +174,8 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
   const { data: promptPacks } = usePromptPacks();
   // Get all ToolRegistries (shared resources)
   const { data: toolRegistries } = useToolRegistries();
+  // Get Providers from current workspace (only Ready ones)
+  const { data: providers } = useProviders({ phase: "Ready" });
 
   const updateField = useCallback(<K extends keyof WizardFormData>(
     field: K,
@@ -245,12 +234,12 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
       };
     }
 
-    // Provider (type is required)
-    (yaml.spec as Record<string, unknown>).provider = {
-      type: formData.providerType,
-      ...(formData.providerModel && { model: formData.providerModel }),
-      ...(formData.providerSecretName && { secretRef: { name: formData.providerSecretName } }),
-    };
+    // Provider reference
+    if (formData.providerRefName) {
+      (yaml.spec as Record<string, unknown>).providerRef = {
+        name: formData.providerRefName,
+      };
+    }
 
     // Tool Registry
     if (formData.toolRegistryName) {
@@ -465,59 +454,45 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>LLM Provider</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Select a configured Provider from {currentWorkspace?.namespace} namespace
+              </p>
               <Select
-                value={formData.providerType}
-                onValueChange={(v) => {
-                  updateField("providerType", v as ProviderType);
-                  updateField("providerModel", "");
-                }}
+                value={formData.providerRefName}
+                onValueChange={(v) => updateField("providerRefName", v)}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select a Provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  {PROVIDERS.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>
-                      {p.label}
+                  {providers?.map((provider) => (
+                    <SelectItem key={provider.metadata.uid} value={provider.metadata.name}>
+                      <div className="flex items-center gap-2">
+                        <span>{provider.metadata.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {provider.spec.type}
+                        </Badge>
+                        {provider.spec.model && (
+                          <Badge variant="secondary" className="text-xs">
+                            {provider.spec.model}
+                          </Badge>
+                        )}
+                      </div>
                     </SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Model</Label>
-              <Select
-                value={formData.providerModel}
-                onValueChange={(v) => updateField("providerModel", v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDERS.find((p) => p.value === formData.providerType)?.models.map((model) => (
-                    <SelectItem key={model} value={model}>
-                      {model}
+                  {(!providers || providers.length === 0) && (
+                    <SelectItem value="__no_providers__" disabled>
+                      No Providers available
                     </SelectItem>
-                  ))}
+                  )}
                 </SelectContent>
               </Select>
-            </div>
-
-            {formData.providerType !== "ollama" && (
-              <div className="space-y-2">
-                <Label htmlFor="secretName">API Key Secret Name</Label>
-                <Input
-                  id="secretName"
-                  value={formData.providerSecretName}
-                  onChange={(e) => updateField("providerSecretName", e.target.value)}
-                  placeholder="llm-api-key"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Kubernetes Secret containing the API key
+              {(!providers || providers.length === 0) && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  No Providers configured. Create a Provider resource first.
                 </p>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         );
 
@@ -719,8 +694,19 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
 
                   <div className="text-muted-foreground">Provider</div>
                   <div>
-                    {PROVIDERS.find((p) => p.value === formData.providerType)?.label}
-                    {formData.providerModel && ` / ${formData.providerModel}`}
+                    {formData.providerRefName ? (
+                      (() => {
+                        const selectedProvider = providers?.find(p => p.metadata.name === formData.providerRefName);
+                        const providerType = selectedProvider?.spec.type ?? "";
+                        const providerModel = selectedProvider?.spec.model;
+                        const modelSuffix = providerModel ? " / " + providerModel : "";
+                        return selectedProvider
+                          ? formData.providerRefName + " (" + providerType + modelSuffix + ")"
+                          : formData.providerRefName;
+                      })()
+                    ) : (
+                      <span className="text-muted-foreground italic">None selected</span>
+                    )}
                   </div>
 
                   <div className="text-muted-foreground">Facade</div>

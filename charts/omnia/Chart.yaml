@@ -56,6 +56,11 @@ dependencies:
     version: "~21.0"
     repository: https://charts.bitnami.com/bitnami
     condition: redis.enabled
+  - name: csi-driver-nfs
+    version: "~4.9"
+    repository: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+    condition: nfs.csiDriver.enabled
+    alias: nfscsi
 
 # NOTE: Istio should be installed separately before deploying Omnia.
 # See: https://istio.io/latest/docs/setup/install/helm/

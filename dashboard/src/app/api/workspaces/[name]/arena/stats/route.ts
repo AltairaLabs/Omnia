@@ -5,7 +5,6 @@
  *
  * Returns aggregated statistics:
  * - Sources: total, ready, failed, active
- * - Configs: total, ready, failed
  * - Jobs: total, running, completed, failed
  *
  * Protected by workspace access checks.
@@ -18,7 +17,6 @@ import {
   validateWorkspace,
   serverErrorResponse,
   CRD_ARENA_SOURCES,
-  CRD_ARENA_CONFIGS,
   CRD_ARENA_JOBS,
   createAuditContext,
   auditSuccess,
@@ -26,7 +24,7 @@ import {
 } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import type { ArenaSource, ArenaConfig, ArenaJob, ArenaStats } from "@/types/arena";
+import type { ArenaSource, ArenaJob, ArenaStats } from "@/types/arena";
 
 export const GET = withWorkspaceAccess(
   "viewer",
@@ -52,9 +50,8 @@ export const GET = withWorkspaceAccess(
       );
 
       // Fetch all arena resources in parallel
-      const [sources, configs, jobs] = await Promise.all([
+      const [sources, jobs] = await Promise.all([
         listCrd<ArenaSource>(result.clientOptions, CRD_ARENA_SOURCES),
-        listCrd<ArenaConfig>(result.clientOptions, CRD_ARENA_CONFIGS),
         listCrd<ArenaJob>(result.clientOptions, CRD_ARENA_JOBS),
       ]);
 
@@ -66,16 +63,8 @@ export const GET = withWorkspaceAccess(
         active: sources.filter((s) => s.status?.phase === "Ready").length, // Active = Ready sources
       };
 
-      // Calculate config stats with total scenario count
-      const totalScenarios = configs.reduce((sum, c) => sum + (c.status?.scenarioCount || 0), 0);
-      const configStats = {
-        total: configs.length,
-        ready: configs.filter((c) => c.status?.phase === "Ready").length,
-        scenarios: totalScenarios,
-      };
-
       // Calculate job stats
-      const completedJobs = jobs.filter((j) => j.status?.phase === "Completed").length;
+      const completedJobs = jobs.filter((j) => j.status?.phase === "Succeeded").length;
       const failedJobs = jobs.filter((j) => j.status?.phase === "Failed" || j.status?.phase === "Cancelled").length;
       const totalFinished = completedJobs + failedJobs;
       const successRate = totalFinished > 0 ? completedJobs / totalFinished : 0;
@@ -91,7 +80,6 @@ export const GET = withWorkspaceAccess(
 
       const stats: ArenaStats = {
         sources: sourceStats,
-        configs: configStats,
         jobs: jobStats,
       };
 

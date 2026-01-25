@@ -1,4 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { gzipSync } from "node:zlib";
+import * as tar from "tar-stream";
+
+// Helper to create a valid tar.gz buffer for testing
+async function createTarGzBuffer(files: Record<string, string>): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const pack = tar.pack();
+    const chunks: Buffer[] = [];
+
+    pack.on("data", (chunk: Buffer) => chunks.push(chunk));
+    pack.on("end", () => {
+      const tarBuffer = Buffer.concat(chunks);
+      const gzipped = gzipSync(tarBuffer);
+      resolve(gzipped);
+    });
+    pack.on("error", reject);
+
+    for (const [name, content] of Object.entries(files)) {
+      pack.entry({ name }, content);
+    }
+    pack.finalize();
+  });
+}
 
 // Mock the token-fetcher module
 vi.mock("./token-fetcher", () => ({
@@ -535,6 +558,89 @@ describe("crd-operations", () => {
       );
 
       expect(result).toBeNull();
+    });
+
+    it("should extract files from tar.gz binaryData", async () => {
+      const tarGzBuffer = await createTarGzBuffer({
+        "config.yaml": "apiVersion: v1\nkind: Arena",
+        "prompts/greeting.yaml": "kind: PromptConfig",
+      });
+
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        binaryData: {
+          "pack.tar.gz": tarGzBuffer.toString("base64"),
+        },
+      });
+
+      const result = await crdOperations.getConfigMapContent(
+        defaultOptions,
+        "my-pack-config"
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.["config.yaml"]).toContain("apiVersion: v1");
+      expect(result?.["prompts/greeting.yaml"]).toContain("PromptConfig");
+    });
+
+    it("should fall back to data when binaryData has no tar.gz", async () => {
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        binaryData: {
+          "other.bin": Buffer.from("some binary").toString("base64"),
+        },
+        data: {
+          "fallback.yaml": "content: fallback",
+        },
+      });
+
+      const result = await crdOperations.getConfigMapContent(
+        defaultOptions,
+        "my-config"
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.["fallback.yaml"]).toBe("content: fallback");
+    });
+
+    it("should handle .tgz extension in binaryData", async () => {
+      const tarGzBuffer = await createTarGzBuffer({
+        "test.yaml": "kind: Test",
+      });
+
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        binaryData: {
+          "pack.tgz": tarGzBuffer.toString("base64"),
+        },
+      });
+
+      const result = await crdOperations.getConfigMapContent(
+        defaultOptions,
+        "my-tgz-config"
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.["test.yaml"]).toContain("kind: Test");
+    });
+
+    it("should fall back to data when tar.gz extraction yields no files", async () => {
+      // Create an empty tar.gz (just end-of-archive markers)
+      const emptyTarGz = gzipSync(Buffer.alloc(1024, 0));
+
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        binaryData: {
+          "pack.tar.gz": emptyTarGz.toString("base64"),
+        },
+        data: {
+          "fallback.yaml": "fallback content",
+        },
+      });
+
+      const result = await crdOperations.getConfigMapContent(
+        defaultOptions,
+        "my-empty-tar-config"
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.["fallback.yaml"]).toBe("fallback content");
     });
   });
 

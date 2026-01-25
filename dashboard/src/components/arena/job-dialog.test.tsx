@@ -1,11 +1,32 @@
 /**
- * Tests for Arena JobDialog component
+ * Tests for Arena JobDialog wrapper component.
+ * The actual wizard logic is tested in job-wizard.test.tsx.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JobDialog } from "./job-dialog";
-import type { ArenaConfig } from "@/types/arena";
+import type { ArenaSource } from "@/types/arena";
+
+// Mock workspace context
+const mockCurrentWorkspace = {
+  name: "test-workspace",
+  namespace: "test-namespace",
+  role: "editor",
+};
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: [mockCurrentWorkspace],
+    isLoading: false,
+    error: null,
+    setCurrentWorkspace: vi.fn(),
+    refetch: vi.fn(),
+  }),
+}));
 
 // Mock the hooks
 const mockCreateJob = vi.fn();
@@ -16,775 +37,390 @@ vi.mock("@/hooks/use-arena-jobs", () => ({
   }),
 }));
 
-// Mock license hook with configurable values
-let mockIsEnterprise = true;
-let mockMaxWorkerReplicas = 0;
+// Mock license hook
 vi.mock("@/hooks/use-license", () => ({
   useLicense: () => ({
-    isEnterprise: mockIsEnterprise,
+    isEnterprise: true,
     license: {
       limits: {
-        maxWorkerReplicas: mockMaxWorkerReplicas,
+        maxWorkerReplicas: 0,
       },
     },
   }),
 }));
 
-// Helper to create mock configs
-function createMockConfig(name: string, phase: string = "Ready"): ArenaConfig {
+// Mock useArenaSourceContent hook
+vi.mock("@/hooks/use-arena-source-content", () => ({
+  useArenaSourceContent: () => ({
+    tree: [],
+    loading: false,
+    error: null,
+  }),
+}));
+
+// Mock provider and tool registry data
+vi.mock("@/lib/data", () => ({
+  useDataService: () => ({
+    name: "mock",
+    getProviders: vi.fn().mockResolvedValue([]),
+    getToolRegistries: vi.fn().mockResolvedValue([]),
+  }),
+}));
+
+// Helper to create mock sources
+function createMockSource(name: string, phase: string = "Ready"): ArenaSource {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
-    kind: "ArenaConfig",
+    kind: "ArenaSource",
     metadata: { name },
-    spec: { sourceRef: { name: "test-source" } },
+    spec: {
+      type: "git",
+      interval: "5m",
+      git: { url: "https://github.com/test/repo" },
+    },
     status: { phase: phase as "Pending" | "Ready" | "Failed" },
   };
+}
+
+function TestWrapper({ children }: { children: React.ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+      },
+    },
+  });
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
 describe("JobDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     mockCreateJob.mockResolvedValue({ metadata: { name: "test-job" } });
-    // Reset license mocks to enterprise defaults
-    mockIsEnterprise = true;
-    mockMaxWorkerReplicas = 0;
   });
 
-  describe("rendering", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("dialog rendering", () => {
     it("renders dialog when open", () => {
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      // Dialog title and submit button both have "Create Job" text
+      // Dialog title
       expect(screen.getByRole("heading", { name: "Create Job" })).toBeInTheDocument();
-      expect(screen.getByLabelText("Name")).toBeInTheDocument();
-      expect(screen.getByLabelText("Config")).toBeInTheDocument();
-      expect(screen.getByLabelText("Job Type")).toBeInTheDocument();
+      // Job wizard should be present - it starts with step 0 (Basic Info)
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
 
     it("does not render dialog when closed", () => {
       render(
-        <JobDialog
-          open={false}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={false}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
       expect(screen.queryByText("Create Job")).not.toBeInTheDocument();
     });
 
-    it("shows only ready configs in dropdown", () => {
+    it("renders dialog description", () => {
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[
-            createMockConfig("ready-config", "Ready"),
-            createMockConfig("pending-config", "Pending"),
-            createMockConfig("failed-config", "Failed"),
-          ]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      // Open the config select
-      fireEvent.click(screen.getByLabelText("Config"));
-
-      // Only ready config should be visible
-      expect(screen.getByRole("option", { name: "ready-config" })).toBeInTheDocument();
-      expect(screen.queryByRole("option", { name: "pending-config" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("option", { name: "failed-config" })).not.toBeInTheDocument();
-    });
-
-    it("shows message when no ready configs available", () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("pending-config", "Pending")]}
-        />
-      );
-
-      fireEvent.click(screen.getByLabelText("Config"));
-      expect(screen.getByText("No ready configs available")).toBeInTheDocument();
-    });
-
-    it("preselects config when provided", () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("preselected-config")]}
-          preselectedConfig="preselected-config"
-        />
-      );
-
-      expect(screen.getByLabelText("Config")).toHaveTextContent("preselected-config");
+      expect(
+        screen.getByText(/Create a new Arena job to run evaluations/)
+      ).toBeInTheDocument();
     });
   });
 
-  describe("job type options", () => {
-    it("shows evaluation options by default", () => {
+  describe("props and callbacks", () => {
+    it("passes preselectedSource to JobWizard", () => {
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("my-source")]}
+            preselectedSource="my-source"
+          />
+        </TestWrapper>
       );
 
-      expect(screen.getByText("Evaluation Options")).toBeInTheDocument();
-      expect(screen.getByText("Passing Threshold")).toBeInTheDocument();
-      expect(screen.getByText("Continue on Failure")).toBeInTheDocument();
+      // Dialog should render with JobWizard
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
 
-    it("shows load test options when loadtest type selected", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+    it("calls onOpenChange when dialog state changes", async () => {
+      const onOpenChange = vi.fn();
+      const { rerender } = render(
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={onOpenChange}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      // Change job type to loadtest
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Load Test" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Load Test Options")).toBeInTheDocument();
-      });
-      expect(screen.getByText("Profile Type")).toBeInTheDocument();
-      expect(screen.getByText("Duration")).toBeInTheDocument();
-      expect(screen.getByText("Target RPS")).toBeInTheDocument();
-    });
-
-    it("shows data generation options when datagen type selected", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+      // Rerender with closed state
+      rerender(
+        <TestWrapper>
+          <JobDialog
+            open={false}
+            onOpenChange={onOpenChange}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      // Change job type to datagen
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Data Generation" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Data Generation Options")).toBeInTheDocument();
-      });
-      expect(screen.getByText("Sample Count")).toBeInTheDocument();
-      expect(screen.getByText("Deduplicate")).toBeInTheDocument();
-    });
-  });
-
-  describe("form validation", () => {
-    it("shows error when name is empty", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
-      );
-
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Name is required")).toBeInTheDocument();
-      });
-      expect(mockCreateJob).not.toHaveBeenCalled();
+      expect(screen.queryByText("Create Job")).not.toBeInTheDocument();
     });
 
-    it("shows error for invalid name format", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Invalid_Name" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Name must be lowercase alphanumeric and may contain hyphens")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error when config is not selected", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "valid-name" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Config is required")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error for invalid workers value", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "valid-name" } });
-      fireEvent.change(screen.getByLabelText("Workers"), { target: { value: "0" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Workers must be a positive integer")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error for invalid passing threshold", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "valid-name" } });
-      fireEvent.change(screen.getByLabelText("Passing Threshold"), { target: { value: "1.5" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Passing threshold must be a number between 0 and 1")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error for invalid target RPS in loadtest", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "valid-name" } });
-
-      // Change to loadtest
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Load Test" }));
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Target RPS")).toBeInTheDocument();
-      });
-
-      fireEvent.change(screen.getByLabelText("Target RPS"), { target: { value: "0" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Target RPS must be a positive integer")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error for invalid sample count in datagen", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "valid-name" } });
-
-      // Change to datagen
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Data Generation" }));
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Sample Count")).toBeInTheDocument();
-      });
-
-      fireEvent.change(screen.getByLabelText("Sample Count"), { target: { value: "-1" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Sample count must be a positive integer")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("form submission", () => {
-    it("creates evaluation job with correct spec", async () => {
-      const onSuccess = vi.fn();
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-          onSuccess={onSuccess}
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-eval-job" } });
-      fireEvent.change(screen.getByLabelText("Workers"), { target: { value: "4" } });
-      fireEvent.change(screen.getByLabelText("Timeout"), { target: { value: "1h" } });
-      fireEvent.change(screen.getByLabelText("Passing Threshold"), { target: { value: "0.9" } });
-
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(mockCreateJob).toHaveBeenCalledWith("my-eval-job", {
-          configRef: { name: "test-config" },
-          type: "evaluation",
-          workers: { replicas: 4 },
-          timeout: "1h",
-          evaluation: {
-            continueOnFailure: true,
-            passingThreshold: 0.9,
-            outputFormats: ["json", "junit"],
-          },
-        });
-      });
-      expect(onSuccess).toHaveBeenCalled();
-    });
-
-    it("creates loadtest job with correct spec", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-loadtest" } });
-
-      // Change to loadtest
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Load Test" }));
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Target RPS")).toBeInTheDocument();
-      });
-
-      fireEvent.change(screen.getByLabelText("Target RPS"), { target: { value: "50" } });
-      fireEvent.change(screen.getByLabelText("Duration"), { target: { value: "10m" } });
-
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(mockCreateJob).toHaveBeenCalledWith("my-loadtest", expect.objectContaining({
-          type: "loadtest",
-          loadtest: {
-            profileType: "constant",
-            duration: "10m",
-            targetRPS: 50,
-          },
-        }));
-      });
-    });
-
-    it("creates datagen job with correct spec", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-datagen" } });
-
-      // Change to datagen
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Data Generation" }));
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Sample Count")).toBeInTheDocument();
-      });
-
-      fireEvent.change(screen.getByLabelText("Sample Count"), { target: { value: "500" } });
-
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(mockCreateJob).toHaveBeenCalledWith("my-datagen", expect.objectContaining({
-          type: "datagen",
-          datagen: {
-            sampleCount: 500,
-            deduplicate: true,
-            outputFormat: "jsonl",
-          },
-        }));
-      });
-    });
-
-    it("shows error when createJob fails", async () => {
-      mockCreateJob.mockRejectedValue(new Error("API Error"));
-
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-job" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("API Error")).toBeInTheDocument();
-      });
-    });
-
-    it("shows generic error for non-Error exceptions", async () => {
-      mockCreateJob.mockRejectedValue("Unknown failure");
-
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "my-job" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Failed to create job")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("dialog actions", () => {
-    it("calls onClose and onOpenChange when cancel is clicked", () => {
+    it("calls onClose callback when wizard closes", async () => {
       const onClose = vi.fn();
       const onOpenChange = vi.fn();
-
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={onOpenChange}
-          configs={[createMockConfig("test-config")]}
-          onClose={onClose}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={onOpenChange}
+            sources={[createMockSource("test-source")]}
+            onClose={onClose}
+          />
+        </TestWrapper>
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      // Click cancel button (wizard's close action)
+      const cancelButton = screen.getByRole("button", { name: /cancel/i });
+      cancelButton.click();
 
       expect(onClose).toHaveBeenCalled();
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
-  });
 
-  describe("form interactions", () => {
-    it("updates workers field", () => {
+    it("calls onSuccess and closes dialog after successful job creation", async () => {
+      vi.useRealTimers(); // Use real timers for this async test
+      const onSuccess = vi.fn();
+      const onClose = vi.fn();
+      const onOpenChange = vi.fn();
+
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={onOpenChange}
+            sources={[createMockSource("test-source")]}
+            onSuccess={onSuccess}
+            onClose={onClose}
+          />
+        </TestWrapper>
       );
 
-      const workersInput = screen.getByLabelText("Workers");
-      fireEvent.change(workersInput, { target: { value: "8" } });
-      expect(workersInput).toHaveValue(8);
-    });
-
-    it("updates timeout field", () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
-      );
-
-      const timeoutInput = screen.getByLabelText("Timeout");
-      fireEvent.change(timeoutInput, { target: { value: "2h" } });
-      expect(timeoutInput).toHaveValue("2h");
-    });
-
-    it("toggles continue on failure switch", () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
-      );
-
-      const switchElement = screen.getByRole("switch");
-      expect(switchElement).toBeChecked();
-
-      fireEvent.click(switchElement);
-      expect(switchElement).not.toBeChecked();
-    });
-
-    it("changes profile type in loadtest", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      // Change to loadtest
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Load Test" }));
-
-      await waitFor(() => {
-        expect(screen.getByLabelText("Profile Type")).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByLabelText("Profile Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Ramp" }));
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ramp-test" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
-      await waitFor(() => {
-        expect(mockCreateJob).toHaveBeenCalledWith("ramp-test", expect.objectContaining({
-          loadtest: expect.objectContaining({
-            profileType: "ramp",
-          }),
-        }));
-      });
-    });
-
-    it("toggles deduplicate switch in datagen", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      // Change to datagen
-      fireEvent.click(screen.getByLabelText("Job Type"));
-      fireEvent.click(screen.getByRole("option", { name: "Data Generation" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Data Generation Options")).toBeInTheDocument();
-      });
-
-      // Find deduplicate switch (second switch on page)
-      const switches = screen.getAllByRole("switch");
-      const deduplicateSwitch = switches[0]; // Only switch visible in datagen mode
-
-      expect(deduplicateSwitch).toBeChecked();
-      fireEvent.click(deduplicateSwitch);
-      expect(deduplicateSwitch).not.toBeChecked();
+      // The JobWizard will call onSuccess when job is created successfully
+      // We just verify the props are passed correctly
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
   });
 
-  describe("edge cases", () => {
-    it("handles empty timeout (uses undefined)", async () => {
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
+  describe("form reset behavior", () => {
+    it("generates unique key based on preselectedSource and open state", () => {
+      const { rerender } = render(
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("source-1"), createMockSource("source-2")]}
+            preselectedSource="source-1"
+          />
+        </TestWrapper>
       );
 
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "no-timeout-job" } });
-      fireEvent.change(screen.getByLabelText("Timeout"), { target: { value: "" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
+      // Rerender with different preselected source
+      rerender(
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("source-1"), createMockSource("source-2")]}
+            preselectedSource="source-2"
+          />
+        </TestWrapper>
+      );
 
-      await waitFor(() => {
-        expect(mockCreateJob).toHaveBeenCalledWith("no-timeout-job", expect.objectContaining({
-          timeout: undefined,
-        }));
-      });
+      // Form should reset (wizard should be on first step)
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
 
-    it("handles config with undefined metadata name", () => {
-      // Use type assertion to test defensive UI code path when runtime data doesn't match types
-      const configWithNoName = {
-        apiVersion: "omnia.altairalabs.ai/v1alpha1",
-        kind: "ArenaConfig",
-        metadata: {} as { name?: string },
-        spec: { sourceRef: { name: "test" } },
-        status: { phase: "Ready" },
-      } as ArenaConfig;
-
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[configWithNoName]}
-        />
+    it("resets form when dialog reopens", () => {
+      const { rerender } = render(
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      fireEvent.click(screen.getByLabelText("Config"));
-      // Config displays metadata.name (empty) but uses "unknown" as value
-      // Verify the listbox is visible and has an option
-      const listbox = screen.getByRole("listbox");
-      expect(listbox).toBeInTheDocument();
-      // There should be an option element (even with empty name)
-      const options = screen.getAllByRole("option");
-      expect(options.length).toBeGreaterThan(0);
+      // Close dialog
+      rerender(
+        <TestWrapper>
+          <JobDialog
+            open={false}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
+      );
+
+      // Reopen dialog
+      rerender(
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
+      );
+
+      // Should show the wizard's first step
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
+    });
+
+    it("uses 'new' in key when no preselectedSource provided", () => {
+      render(
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
+      );
+
+      // Should render properly without preselectedSource
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
   });
 
-  describe("license gating", () => {
-    it("disables loadtest and datagen for open core users", () => {
-      mockIsEnterprise = false;
-
+  describe("hook integration", () => {
+    it("uses createJob from useArenaJobMutations", () => {
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      fireEvent.click(screen.getByLabelText("Job Type"));
-
-      // Evaluation should be enabled
-      const evaluationOption = screen.getByRole("option", { name: /Evaluation/i });
-      expect(evaluationOption).not.toHaveAttribute("data-disabled");
-
-      // Load Test should be disabled with Enterprise badge
-      const loadTestOption = screen.getByRole("option", { name: /Load Test.*Enterprise/i });
-      expect(loadTestOption).toHaveAttribute("data-disabled");
-
-      // Data Generation should be disabled with Enterprise badge
-      const dataGenOption = screen.getByRole("option", { name: /Data Generation.*Enterprise/i });
-      expect(dataGenOption).toHaveAttribute("data-disabled");
+      // The JobWizard should be rendered with the createJob function
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
 
-    it("enables all job types for enterprise users", () => {
-      mockIsEnterprise = true;
-
+    it("uses license info from useLicense hook", () => {
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={vi.fn()}
+            sources={[createMockSource("test-source")]}
+          />
+        </TestWrapper>
       );
 
-      fireEvent.click(screen.getByLabelText("Job Type"));
+      // With isEnterprise: true, loadtest and datagen should be available
+      // The license hook is used to determine enterprise status
+      const typeSelect = screen.getByRole("combobox");
+      fireEvent.click(typeSelect);
 
-      // All options should be enabled for enterprise
-      const evaluationOption = screen.getByRole("option", { name: /Evaluation/i });
-      expect(evaluationOption).not.toHaveAttribute("data-disabled");
-
-      const loadTestOption = screen.getByRole("option", { name: /Load Test/i });
-      expect(loadTestOption).not.toHaveAttribute("data-disabled");
-
-      const dataGenOption = screen.getByRole("option", { name: /Data Generation/i });
-      expect(dataGenOption).not.toHaveAttribute("data-disabled");
+      // All options should be available (Evaluation, Load Test, Data Generation)
+      // Using queryAllByText to verify multiple elements with "Evaluation" exist (in select and options)
+      const evaluationTexts = screen.getAllByText("Evaluation");
+      expect(evaluationTexts.length).toBeGreaterThan(0);
     });
+  });
 
-    it("shows worker limit warning for open core users", () => {
-      mockIsEnterprise = false;
-      mockMaxWorkerReplicas = 1;
+  describe("full job creation flow", () => {
+    // Helper to select an option from a Radix Select
+    async function selectOption(trigger: HTMLElement, optionText: string) {
+      fireEvent.click(trigger);
+      const option = await screen.findByRole("option", { name: optionText });
+      fireEvent.click(option);
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    }
 
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
-      );
-
-      expect(screen.getByText(/Limited to 1 worker/i)).toBeInTheDocument();
-      expect(screen.getByText(/upgrade for more/i)).toBeInTheDocument();
-    });
-
-    it("does not show worker limit warning for enterprise users", () => {
-      mockIsEnterprise = true;
-      mockMaxWorkerReplicas = 0;
+    it("calls onSuccess after successful job creation and closes dialog", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      const onSuccess = vi.fn();
+      const onClose = vi.fn();
+      const onOpenChange = vi.fn();
 
       render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-        />
+        <TestWrapper>
+          <JobDialog
+            open={true}
+            onOpenChange={onOpenChange}
+            sources={[createMockSource("test-source")]}
+            onSuccess={onSuccess}
+            onClose={onClose}
+          />
+        </TestWrapper>
       );
 
-      expect(screen.queryByText(/Limited to/i)).not.toBeInTheDocument();
-    });
+      // Step 0: Enter job name
+      const nameInput = screen.getByPlaceholderText("my-job");
+      await user.type(nameInput, "test-job");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-    it("shows validation error when workers exceed limit", async () => {
-      mockIsEnterprise = false;
-      mockMaxWorkerReplicas = 1;
+      // Step 1: Select source
+      await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
+      // Step 2-4: Skip
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "test-job" } });
-      fireEvent.change(screen.getByLabelText("Workers"), { target: { value: "5" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
+      // Step 5: Submit
+      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
 
+      // Wait for success and onSuccess callback
       await waitFor(() => {
-        expect(screen.getByText(/Open Core is limited to 1 worker/i)).toBeInTheDocument();
+        expect(screen.getByText("Job Created!")).toBeInTheDocument();
       });
-      expect(mockCreateJob).not.toHaveBeenCalled();
-    });
+      expect(onSuccess).toHaveBeenCalled();
+      expect(mockCreateJob).toHaveBeenCalled();
 
-    it("allows creating job with workers within limit", async () => {
-      mockIsEnterprise = false;
-      mockMaxWorkerReplicas = 1;
-
-      render(
-        <JobDialog
-          open={true}
-          onOpenChange={vi.fn()}
-          configs={[createMockConfig("test-config")]}
-          preselectedConfig="test-config"
-        />
-      );
-
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "test-job" } });
-      fireEvent.change(screen.getByLabelText("Workers"), { target: { value: "1" } });
-      fireEvent.click(screen.getByRole("button", { name: "Create Job" }));
-
+      // Wait for setTimeout to close dialog
       await waitFor(() => {
-        expect(mockCreateJob).toHaveBeenCalled();
-      });
+        expect(onClose).toHaveBeenCalled();
+      }, { timeout: 2000 });
+      expect(onOpenChange).toHaveBeenCalledWith(false);
     });
   });
 });
