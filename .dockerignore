@@ -19,8 +19,17 @@
 !pkg/license/keys/
 !pkg/license/keys/public.pem
 
-# Re-include enterprise (ee/) directory
-!ee/**
+# Re-include enterprise (ee/) directory structure and files
+!ee/
+!ee/cmd/
+!ee/cmd/arena-worker/
+!ee/cmd/omnia-arena-controller/
+!ee/api/
+!ee/internal/
+!ee/pkg/
+!ee/pkg/license/
+!ee/pkg/license/keys/
+!ee/pkg/license/keys/public.pem
 
 # Re-include local PromptKit source for development builds
 !promptkit-local/**
