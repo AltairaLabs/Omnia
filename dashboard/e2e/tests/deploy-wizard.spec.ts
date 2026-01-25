@@ -38,7 +38,7 @@ const STEPS = {
 const LABELS = {
   deployNewAgent: 'text=Deploy New Agent',
   agentName: 'label:has-text("Agent Name")',
-  agentFramework: 'label:has-text("Agent Framework")',
+  agentFramework: 'label[data-slot="label"]:has-text("Agent Framework")',
   promptKit: 'text=PromptKit',
   langChain: 'text=LangChain',
   autoGen: 'text=AutoGen',
