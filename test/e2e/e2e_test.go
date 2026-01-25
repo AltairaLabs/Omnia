@@ -86,6 +86,12 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
+		By("waiting for initial controller-manager deployment to be ready")
+		initialRolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
+			"-n", namespace, "--timeout=120s")
+		_, err = utils.Run(initialRolloutCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to wait for initial controller-manager rollout")
+
 		By("patching the controller-manager to use the test facade, framework images, and dev mode")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=json",
@@ -93,7 +99,7 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
-		By("waiting for controller-manager rollout to complete")
+		By("waiting for patched controller-manager rollout to complete")
 		rolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
 			"-n", namespace, "--timeout=120s")
 		_, err = utils.Run(rolloutCmd)
