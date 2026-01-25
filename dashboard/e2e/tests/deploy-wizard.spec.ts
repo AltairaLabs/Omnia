@@ -49,13 +49,13 @@ const LABELS = {
   selectProvider: 'text=Select a configured Provider',
   noProvidersAvailable: 'text=No Providers available',
   noProvidersConfigured: 'text=No Providers configured',
-  toolRegistry: 'text=Tool Registry',
-  sessionStorage: 'text=Session Storage',
-  facadeType: 'text=Facade Type',
-  replicas: 'text=Replicas',
+  toolRegistry: 'label[data-slot="label"]:has-text("Tool Registry")',
+  sessionStorage: 'label[data-slot="label"]:has-text("Session Storage")',
+  facadeType: 'label[data-slot="label"]:has-text("Facade Type")',
+  replicas: 'label[data-slot="label"]:has-text("Replicas")',
   reviewConfig: 'text=Review Configuration',
   yamlPreview: 'text=YAML Preview',
-  containerImage: 'text=Container Image',
+  containerImage: 'label[data-slot="label"]:has-text("Container Image")',
 };
 
 // Test agent names
