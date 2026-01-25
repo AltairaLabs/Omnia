@@ -21,6 +21,7 @@ package e2e
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -43,6 +44,12 @@ const promptKitExamplePath = "examples/assertions-test"
 var _ = Describe("Arena Fleet", Ordered, func() {
 	// Before running Arena tests, set up the namespace, CRDs, controller, and Redis
 	BeforeAll(func() {
+		// Skip Arena tests if ENABLE_ARENA_E2E is not set
+		// Arena requires the enterprise controller which is deployed separately
+		if os.Getenv("ENABLE_ARENA_E2E") != "true" {
+			Skip("Arena E2E tests require ENABLE_ARENA_E2E=true (enterprise controller)")
+		}
+
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", namespace)
 		_, _ = utils.Run(cmd) // Ignore error if already exists

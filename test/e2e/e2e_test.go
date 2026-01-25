@@ -92,10 +92,17 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(initialRolloutCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to wait for initial controller-manager rollout")
 
-		By("patching the controller-manager to use the test facade, framework images, and dev mode")
-		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+		By("patching the controller-manager strategy to Recreate to avoid rolling update issues")
+		strategyPatchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=json",
-			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--framework-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--dev-mode"}]`, facadeImageRef, runtimeImageRef))
+			"-p", `[{"op": "replace", "path": "/spec/strategy", "value": {"type": "Recreate"}}]`)
+		_, err = utils.Run(strategyPatchCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager strategy")
+
+		By("patching the controller-manager to use the test facade and framework images")
+		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+			"-n", namespace, "--type=strategic",
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
