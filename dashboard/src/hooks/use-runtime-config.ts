@@ -10,6 +10,10 @@ interface RuntimeConfig {
   grafanaUrl: string;
   lokiEnabled: boolean;
   tempoEnabled: boolean;
+  /** Whether enterprise features are deployed (enterprise.enabled=true in Helm) */
+  enterpriseEnabled: boolean;
+  /** Whether to hide enterprise features completely instead of showing upgrade prompts */
+  hideEnterprise: boolean;
 }
 
 // Use NEXT_PUBLIC_* as build-time defaults to avoid flash of wrong state
@@ -22,6 +26,8 @@ const defaultConfig: RuntimeConfig = {
   grafanaUrl: process.env.NEXT_PUBLIC_GRAFANA_URL || "",
   lokiEnabled: process.env.NEXT_PUBLIC_LOKI_ENABLED === "true",
   tempoEnabled: process.env.NEXT_PUBLIC_TEMPO_ENABLED === "true",
+  enterpriseEnabled: process.env.NEXT_PUBLIC_ENTERPRISE_ENABLED === "true",
+  hideEnterprise: process.env.NEXT_PUBLIC_HIDE_ENTERPRISE === "true",
 };
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -108,6 +114,28 @@ export function useObservabilityConfig() {
   return {
     lokiEnabled: config.lokiEnabled,
     tempoEnabled: config.tempoEnabled,
+    loading,
+  };
+}
+
+/**
+ * Get enterprise features configuration.
+ *
+ * Returns:
+ * - enterpriseEnabled: Whether enterprise features are deployed (infrastructure level)
+ * - hideEnterprise: Whether to hide enterprise features completely
+ * - showUpgradePrompts: Whether to show upgrade prompts for unavailable features
+ *   (true when enterprise is not enabled but hideEnterprise is false)
+ */
+export function useEnterpriseConfig() {
+  const { config, loading } = useRuntimeConfig();
+  return {
+    /** Whether enterprise CRDs and controllers are deployed */
+    enterpriseEnabled: config.enterpriseEnabled,
+    /** Whether to hide enterprise features completely in the UI */
+    hideEnterprise: config.hideEnterprise,
+    /** Whether to show upgrade prompts (enterprise not enabled, but not hidden) */
+    showUpgradePrompts: !config.enterpriseEnabled && !config.hideEnterprise,
     loading,
   };
 }

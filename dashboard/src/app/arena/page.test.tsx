@@ -11,6 +11,16 @@ vi.mock("@/hooks", () => ({
   useArenaStats: vi.fn(),
 }));
 
+// Mock useEnterpriseConfig hook to enable enterprise features for tests
+vi.mock("@/hooks/use-runtime-config", () => ({
+  useEnterpriseConfig: vi.fn().mockReturnValue({
+    enterpriseEnabled: true,
+    hideEnterprise: false,
+    showUpgradePrompts: false,
+    loading: false,
+  }),
+}));
+
 // Mock layout components that require providers
 vi.mock("@/components/layout", () => ({
   Header: ({ title, description }: { title: string; description: string }) => (
@@ -30,7 +40,7 @@ vi.mock("next/link", () => ({
 
 describe("ArenaPage", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
   });
 
   it("renders loading skeleton when loading", async () => {

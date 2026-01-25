@@ -231,6 +231,11 @@ dashboard:
   # -- Enable dashboard deployment
   enabled: true
 
+  # -- Hide enterprise features completely instead of showing upgrade prompts
+  # When false (default): Shows enterprise features with upgrade prompts when enterprise.enabled=false
+  # When true: Hides enterprise features entirely from the UI
+  hideEnterprise: false
+
   image:
     # -- Dashboard image repository
     repository: ghcr.io/altairalabs/omnia-dashboard

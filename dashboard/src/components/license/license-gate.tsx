@@ -5,6 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Lock, Sparkles, ExternalLink } from "lucide-react";
 import { useLicense } from "@/hooks/use-license";
+import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
 import type { LicenseFeatures } from "@/types/license";
 
 const UPGRADE_URL = "https://altairalabs.ai/enterprise";
@@ -276,4 +277,113 @@ export function LicenseInfo({ detailed = false }: LicenseInfoProps) {
       )}
     </div>
   );
+}
+
+export interface EnterpriseGateProps {
+  /** Content to show when enterprise is enabled */
+  children: ReactNode;
+  /** Content to show when enterprise is not enabled but not hidden (defaults to EnterpriseUpgradePage) */
+  fallback?: ReactNode;
+  /** Feature name for the upgrade prompt */
+  featureName?: string;
+}
+
+/**
+ * Gate component that checks infrastructure-level enterprise enablement.
+ *
+ * This is different from LicenseGate which checks license features.
+ * EnterpriseGate checks whether enterprise CRDs/controllers are deployed.
+ *
+ * Behavior:
+ * - enterpriseEnabled=true: Show children normally
+ * - enterpriseEnabled=false, hideEnterprise=false: Show upgrade prompt
+ * - hideEnterprise=true: Render nothing (return null)
+ *
+ * @example
+ * ```tsx
+ * <EnterpriseGate featureName="Arena Fleet">
+ *   <ArenaPage />
+ * </EnterpriseGate>
+ * ```
+ */
+export function EnterpriseGate({ children, fallback, featureName = "This feature" }: EnterpriseGateProps) {
+  const { enterpriseEnabled, hideEnterprise, loading } = useEnterpriseConfig();
+
+  // While loading, render nothing to avoid flash
+  if (loading) {
+    return null;
+  }
+
+  // If enterprise is enabled, show children
+  if (enterpriseEnabled) {
+    return <>{children}</>;
+  }
+
+  // If hideEnterprise is true, don't render anything
+  if (hideEnterprise) {
+    return null;
+  }
+
+  // Show upgrade prompt
+  return (
+    <>
+      {fallback ?? (
+        <EnterpriseUpgradePage featureName={featureName} />
+      )}
+    </>
+  );
+}
+
+export interface EnterpriseUpgradePageProps {
+  /** Feature name to display */
+  featureName: string;
+}
+
+/**
+ * Full-page upgrade prompt for enterprise features.
+ */
+export function EnterpriseUpgradePage({ featureName }: EnterpriseUpgradePageProps) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-8">
+      <div className="max-w-md text-center space-y-6">
+        <div className="mx-auto w-16 h-16 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
+          <Sparkles className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold">Enterprise Feature</h1>
+          <p className="text-muted-foreground">
+            {featureName} is an enterprise feature. Upgrade to unlock Arena Fleet
+            for AI agent evaluation, load testing, and data generation.
+          </p>
+        </div>
+        <div className="space-y-3">
+          <Button asChild size="lg" className="w-full">
+            <a href={UPGRADE_URL} target="_blank" rel="noopener noreferrer">
+              Upgrade to Enterprise
+              <ExternalLink className="ml-2 h-4 w-4" />
+            </a>
+          </Button>
+          <p className="text-sm text-muted-foreground">
+            Contact{" "}
+            <a
+              href="mailto:sales@altairalabs.ai"
+              className="text-primary hover:underline"
+            >
+              sales@altairalabs.ai
+            </a>{" "}
+            for pricing and trial licenses.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Hook to check if enterprise features should be visible in navigation.
+ * Returns false if hideEnterprise is true, otherwise true.
+ */
+export function useShowEnterpriseNav() {
+  const { hideEnterprise, loading } = useEnterpriseConfig();
+  return { showEnterpriseNav: !hideEnterprise, loading };
 }
