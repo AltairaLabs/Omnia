@@ -64,13 +64,6 @@ var _ = Describe("Arena Fleet", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
-		By("patching the controller-manager to enable dev mode for testing")
-		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
-			"-n", namespace, "--type=json",
-			"-p", `[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--dev-mode"}]`)
-		_, err = utils.Run(patchCmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager with dev mode")
-
 		By("waiting for controller-manager to be ready")
 		verifyControllerReady := func(g Gomega) {
 			cmd := exec.Command("kubectl", "get", "deployment", "omnia-controller-manager",
@@ -80,6 +73,21 @@ var _ = Describe("Arena Fleet", Ordered, func() {
 			g.Expect(output).To(Equal("1"), "Controller manager should have 1 ready replica")
 		}
 		Eventually(verifyControllerReady, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+		By("deploying the arena controller (enterprise)")
+		cmd = exec.Command("make", "deploy-ee", fmt.Sprintf("ARENA_IMG=%s", arenaControllerImage))
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the arena controller")
+
+		By("waiting for arena-controller to be ready")
+		verifyArenaControllerReady := func(g Gomega) {
+			cmd := exec.Command("kubectl", "get", "deployment", "omnia-arena-controller-manager",
+				"-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
+			output, err := utils.Run(cmd)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(output).To(Equal("1"), "Arena controller manager should have 1 ready replica")
+		}
+		Eventually(verifyArenaControllerReady, 2*time.Minute, 2*time.Second).Should(Succeed())
 
 		By("creating arena test namespace")
 		cmd = exec.Command("kubectl", "create", "ns", arenaNamespace)
@@ -178,6 +186,10 @@ spec:
 		cmd := exec.Command("kubectl", "delete", "ns", arenaNamespace, "--ignore-not-found", "--timeout=120s")
 		_, _ = utils.Run(cmd)
 
+		By("undeploying the arena controller (enterprise)")
+		cmd = exec.Command("make", "undeploy-ee")
+		_, _ = utils.Run(cmd)
+
 		By("undeploying the controller-manager")
 		cmd = exec.Command("make", "undeploy")
 		_, _ = utils.Run(cmd)
@@ -217,6 +229,12 @@ spec:
 			"-l", "control-plane=controller-manager", "--tail=100")
 		output, _ = utils.Run(cmd)
 		_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n%s\n", output)
+
+		// Get arena controller logs
+		cmd = exec.Command("kubectl", "logs", "-n", namespace,
+			"-l", "control-plane=arena-controller-manager", "--tail=100")
+		output, _ = utils.Run(cmd)
+		_, _ = fmt.Fprintf(GinkgoWriter, "Arena controller logs:\n%s\n", output)
 	}
 
 	// After each test, check for failures and dump debug info

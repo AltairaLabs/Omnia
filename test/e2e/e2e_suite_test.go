@@ -55,6 +55,9 @@ var (
 
 	// arenaWorkerImage is the name of the arena-worker image used by ArenaJob
 	arenaWorkerImage = "example.com/arena-worker:v0.0.1"
+
+	// arenaControllerImage is the name of the arena controller image (Enterprise)
+	arenaControllerImage = "example.com/arena-controller:v0.0.1"
 )
 
 // buildResult holds the result of an image build operation
@@ -77,7 +80,7 @@ var _ = BeforeSuite(func() {
 	// Build all images in parallel for faster setup
 	By("building all container images in parallel")
 	var wg sync.WaitGroup
-	results := make(chan buildResult, 4)
+	results := make(chan buildResult, 5)
 
 	// Build manager image
 	wg.Add(1)
@@ -115,6 +118,15 @@ var _ = BeforeSuite(func() {
 		results <- buildResult{name: "arena-worker", err: err}
 	}()
 
+	// Build arena-controller image (Enterprise)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("docker", "build", "-t", arenaControllerImage, "-f", "ee/Dockerfile.arena-controller", ".")
+		_, err := utils.Run(cmd)
+		results <- buildResult{name: "arena-controller", err: err}
+	}()
+
 	// Wait for all builds to complete
 	go func() {
 		wg.Wait()
@@ -131,7 +143,7 @@ var _ = BeforeSuite(func() {
 	// Load images into Kind in parallel
 	By("loading all container images into Kind in parallel")
 	var loadWg sync.WaitGroup
-	loadResults := make(chan buildResult, 4)
+	loadResults := make(chan buildResult, 5)
 
 	images := []struct {
 		name  string
@@ -141,6 +153,7 @@ var _ = BeforeSuite(func() {
 		{"facade", facadeImage},
 		{"runtime", runtimeImage},
 		{"arena-worker", arenaWorkerImage},
+		{"arena-controller", arenaControllerImage},
 	}
 
 	for _, img := range images {

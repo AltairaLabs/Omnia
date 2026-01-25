@@ -432,6 +432,18 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
+# Enterprise controller image for deploy-ee
+ARENA_IMG ?= arena-controller:latest
+
+.PHONY: deploy-ee
+deploy-ee: manifests-ee kustomize ## Deploy Arena controller (Enterprise) to the K8s cluster specified in ~/.kube/config.
+	cd ee/config/manager && "$(KUSTOMIZE)" edit set image arena-controller=${ARENA_IMG}
+	"$(KUSTOMIZE)" build ee/config/default | "$(KUBECTL)" apply -f -
+
+.PHONY: undeploy-ee
+undeploy-ee: kustomize ## Undeploy Arena controller (Enterprise) from the K8s cluster. Call with ignore-not-found=true to ignore resource not found errors.
+	"$(KUSTOMIZE)" build ee/config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+
 ##@ Dependencies
 
 ## Location to install dependencies to

@@ -12,6 +12,7 @@ on:
       - 'api/**'
       - 'cmd/**'
       - 'config/**'
+      - 'ee/**'
       - 'internal/**'
       - 'pkg/**'
       - 'test/**'
@@ -26,6 +27,7 @@ on:
       - 'api/**'
       - 'cmd/**'
       - 'config/**'
+      - 'ee/**'
       - 'internal/**'
       - 'pkg/**'
       - 'test/**'
@@ -67,6 +69,8 @@ jobs:
         run: kind version
 
       - name: Running Test e2e
+        env:
+          ENABLE_ARENA_E2E: "true"
         run: |
           # Skip go mod tidy - may fail on local replace directives for PromptKit
           make test-e2e-junit
