@@ -21,10 +21,11 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY pkg/ pkg/
 COPY internal/ internal/
+COPY ee/ ee/
 
-# Build the worker binary
+# Build the worker binary (located in ee/ for enterprise)
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-w -s" -o arena-worker ./cmd/arena-worker
+    go build -ldflags="-w -s" -o arena-worker ./ee/cmd/arena-worker
 
 # Build promptarena CLI if source is available
 # promptarena has its own go.mod, so we build from within its directory

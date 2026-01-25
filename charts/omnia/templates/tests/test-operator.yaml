@@ -1,4 +1,3 @@
-{{- if .Values.api.enabled }}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -18,7 +17,7 @@ spec:
         - -c
         - |
           echo "Testing operator health endpoint..."
-          wget -qO- --timeout=10 http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.api.port }}/healthz
+          wget -qO- --timeout=10 http://{{ include "omnia.fullname" . }}-controller-manager:{{ .Values.probes.port }}/healthz
           echo ""
           echo "Operator health check passed!"
       securityContext:
@@ -29,4 +28,3 @@ spec:
           drop:
             - ALL
         readOnlyRootFilesystem: true
-{{- end }}
