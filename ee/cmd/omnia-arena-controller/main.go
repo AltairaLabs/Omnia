@@ -33,6 +33,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
+	"github.com/altairalabs/omnia/ee/pkg/workspace"
 )
 
 const logKeyController = "controller"
@@ -60,6 +61,7 @@ func main() {
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
 	var workspaceContentPath string
+	var workspaceStorageClass string
 	var nfsServer string
 	var nfsPath string
 	var redisAddr string
@@ -76,6 +78,8 @@ func main() {
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent.")
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
 		"Base path for workspace content volumes.")
+	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
+		"Default storage class for workspace PVCs (e.g., nfs-client).")
 	flag.StringVar(&nfsServer, "nfs-server", "",
 		"NFS server address for workspace content.")
 	flag.StringVar(&nfsPath, "nfs-path", "",
@@ -167,6 +171,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create storage manager for lazy PVC creation (only used when NFS is not configured)
+	var storageManager *workspace.StorageManager
+	if nfsServer == "" || nfsPath == "" {
+		storageManager = workspace.NewStorageManager(mgr.GetClient(), workspaceStorageClass)
+		setupLog.Info("storage manager initialized for lazy PVC creation",
+			"defaultStorageClass", workspaceStorageClass)
+	} else {
+		setupLog.Info("using direct NFS mount, storage manager not needed")
+	}
+
 	// ArenaSource controller
 	if err := (&controller.ArenaSourceReconciler{
 		Client:               mgr.GetClient(),
@@ -175,6 +189,7 @@ func main() {
 		WorkspaceContentPath: workspaceContentPath,
 		MaxVersionsPerSource: 10,
 		LicenseValidator:     licenseValidator,
+		StorageManager:       storageManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
 		os.Exit(1)
@@ -212,6 +227,7 @@ func main() {
 		WorkspaceContentPath:  workspaceContentPath,
 		NFSServer:             nfsServer,
 		NFSPath:               nfsPath,
+		StorageManager:        storageManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)

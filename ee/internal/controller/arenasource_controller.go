@@ -35,6 +35,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fetcher"
 	"github.com/altairalabs/omnia/ee/pkg/license"
+	"github.com/altairalabs/omnia/ee/pkg/workspace"
 )
 
 // ArenaSource condition types
@@ -81,6 +82,10 @@ type ArenaSourceReconciler struct {
 
 	// LicenseValidator validates license for source types (defense in depth)
 	LicenseValidator *license.Validator
+
+	// StorageManager handles lazy workspace PVC creation.
+	// When set, the reconciler will ensure workspace PVC exists before storing artifacts.
+	StorageManager *workspace.StorageManager
 
 	// inProgress tracks in-progress fetch operations
 	inProgress sync.Map // map[types.NamespacedName]*fetchJob
@@ -569,6 +574,15 @@ func (r *ArenaSourceReconciler) syncToFilesystem(source *omniav1alpha1.ArenaSour
 	// Get workspace name from namespace label (allows future multi-namespace workspaces)
 	workspaceName := r.getWorkspaceForNamespace(ctx, source.Namespace)
 
+	// Ensure workspace PVC exists (lazy creation)
+	if r.StorageManager != nil {
+		if _, pvcErr := r.StorageManager.EnsureWorkspacePVC(ctx, workspaceName); pvcErr != nil {
+			log.Error(pvcErr, "failed to ensure workspace PVC exists", "workspace", workspaceName)
+			return "", "", "", fmt.Errorf("failed to ensure workspace PVC: %w", pvcErr)
+		}
+		log.V(1).Info("workspace PVC ensured", "workspace", workspaceName)
+	}
+
 	// Determine target path within workspace content
 	targetPath := source.Spec.TargetPath
 	if targetPath == "" {
@@ -658,8 +672,8 @@ func (r *ArenaSourceReconciler) getWorkspaceForNamespace(ctx context.Context, na
 		// Fallback to namespace name if we can't look it up
 		return namespace
 	}
-	if workspace, ok := ns.Labels[labelWorkspace]; ok && workspace != "" {
-		return workspace
+	if wsName, ok := ns.Labels[labelWorkspace]; ok && wsName != "" {
+		return wsName
 	}
 	// Fallback to namespace name
 	return namespace

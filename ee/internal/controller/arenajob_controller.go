@@ -39,6 +39,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/selector"
+	"github.com/altairalabs/omnia/ee/pkg/workspace"
 )
 
 // Workspace label for namespace association
@@ -93,6 +94,10 @@ type ArenaJobReconciler struct {
 	NFSServer string
 	// NFSPath is the NFS export path for workspace content (optional).
 	NFSPath string
+	// StorageManager handles lazy workspace PVC creation.
+	// When set, the reconciler will ensure workspace PVC exists before creating worker jobs
+	// that mount the PVC. Ignored when NFSServer/NFSPath are set (direct NFS mount).
+	StorageManager *workspace.StorageManager
 }
 
 // getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
@@ -107,8 +112,8 @@ func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, names
 		// Fallback to namespace name if we can't look it up
 		return namespace
 	}
-	if workspace, ok := ns.Labels[labelWorkspace]; ok && workspace != "" {
-		return workspace
+	if wsName, ok := ns.Labels[labelWorkspace]; ok && wsName != "" {
+		return wsName
 	}
 	// Fallback to namespace name
 	return namespace
@@ -648,6 +653,25 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		replicas = arenaJob.Spec.Workers.Replicas
 	}
 
+	// Ensure workspace PVC exists (lazy creation) when using PVC mode (not NFS direct mount)
+	// This is only needed when:
+	// 1. WorkspaceContentPath is set (filesystem mode enabled)
+	// 2. NFSServer/NFSPath are NOT set (not using direct NFS mount)
+	// 3. StorageManager is available
+	useWorkspaceContent := r.WorkspaceContentPath != "" &&
+		source.Status.Artifact != nil &&
+		source.Status.Artifact.ContentPath != ""
+	usePVCMount := r.NFSServer == "" || r.NFSPath == ""
+
+	if useWorkspaceContent && usePVCMount && r.StorageManager != nil {
+		workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+		if _, err := r.StorageManager.EnsureWorkspacePVC(ctx, workspaceName); err != nil {
+			log.Error(err, "failed to ensure workspace PVC exists", "workspace", workspaceName)
+			return fmt.Errorf("failed to ensure workspace PVC: %w", err)
+		}
+		log.V(1).Info("workspace PVC ensured", "workspace", workspaceName)
+	}
+
 	// Resolve provider overrides if specified (grouped by selector group name)
 	providersByGroup, err := r.resolveProviderOverrides(ctx, arenaJob)
 	if err != nil {
@@ -794,11 +818,6 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Value: "/etc/arena/overrides.json",
 		})
 	}
-
-	// Determine if we should mount workspace content PVC
-	useWorkspaceContent := r.WorkspaceContentPath != "" &&
-		source.Status.Artifact != nil &&
-		source.Status.Artifact.ContentPath != ""
 
 	// Build volumes list
 	volumes := []corev1.Volume{
