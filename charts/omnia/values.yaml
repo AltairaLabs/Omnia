@@ -511,9 +511,10 @@ workspaces:
 # ============================================================================
 
 workspaceContent:
-  # -- Enable workspace content storage for dashboard
+  # -- Enable workspace content storage for dashboard (Enterprise feature)
   # This creates a root PVC that the dashboard mounts to browse all workspace content
-  enabled: true
+  # Requires enterprise.enabled=true and shared storage (NFS or cloud RWX storage)
+  enabled: false
 
   # -- Mount path in dashboard pod
   mountPath: /workspace-content

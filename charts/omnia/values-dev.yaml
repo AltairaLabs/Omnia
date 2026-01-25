@@ -118,7 +118,8 @@ nfs:
 
 # Workspace content - uses hostPath for local dev (RWX on single-node clusters)
 workspaceContent:
-  enabled: true
+  # Disabled in non-enterprise dev mode - enable via ENABLE_ENTERPRISE=true
+  enabled: false
   # HostPath for local development - maps to folder on your machine
   hostPath:
     enabled: true
