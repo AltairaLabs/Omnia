@@ -82,7 +82,7 @@ export function useToolRegistryPreview(
     // Convert Sets to sorted arrays
     const result: Record<string, string[]> = {};
     for (const [key, values] of Object.entries(labelsMap)) {
-      result[key] = Array.from(values).sort();
+      result[key] = Array.from(values).sort((a, b) => a.localeCompare(b));
     }
 
     return result;
