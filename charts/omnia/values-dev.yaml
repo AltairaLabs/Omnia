@@ -116,17 +116,10 @@ nfs:
   provisioner:
     enabled: false
 
-# Workspace content - uses hostPath for local dev (RWX on single-node clusters)
+# Workspace content storage for dashboard (only used when enterprise.enabled=true)
+# Requires RWX storage - use values-dev-enterprise.yaml with NFS for local dev
 workspaceContent:
-  # Disabled in non-enterprise dev mode - enable via ENABLE_ENTERPRISE=true
-  enabled: false
-  # HostPath for local development - maps to folder on your machine
-  hostPath:
-    enabled: true
-    # Path on your local machine (Docker Desktop/kind mounts this into the VM)
-    # For Docker Desktop on macOS: use /tmp or a path under your home directory
-    # For kind: the path is inside the kind container, not your host
-    path: /tmp/omnia-workspace-content
+  enabled: true  # Gated by enterprise.enabled in templates
   persistence:
     accessModes:
       - ReadWriteMany

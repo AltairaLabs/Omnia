@@ -1,6 +1,7 @@
-{{- if and .Values.workspaceContent.enabled (not .Values.workspaceContent.persistence.existingClaim) }}
-# PVC for workspace content storage
+{{- if and .Values.enterprise.enabled .Values.workspaceContent.enabled (not .Values.workspaceContent.persistence.existingClaim) }}
+# PVC for workspace content storage (Enterprise feature)
 # Used by dashboard to browse and manage workspace content
+# Requires RWX storage class (NFS or cloud-native RWX)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
