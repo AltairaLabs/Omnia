@@ -36,7 +36,7 @@ interface DeployWizardProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
+type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 type ProviderType = "claude" | "openai" | "gemini" | "ollama";
 type FacadeType = "websocket" | "grpc";
 type SessionType = "memory" | "redis";
@@ -106,7 +106,6 @@ const STEPS = [
 const FRAMEWORKS: { value: FrameworkType; label: string; description: string }[] = [
   { value: "promptkit", label: "PromptKit", description: "AltairaLabs' native framework" },
   { value: "langchain", label: "LangChain", description: "Popular Python framework" },
-  { value: "crewai", label: "CrewAI", description: "Multi-agent orchestration" },
   { value: "autogen", label: "AutoGen", description: "Microsoft's agent framework" },
   { value: "custom", label: "Custom", description: "Your own container image" },
 ];

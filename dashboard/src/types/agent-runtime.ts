@@ -9,7 +9,7 @@ export type HandlerMode = "echo" | "demo" | "runtime";
 export type SessionStoreType = "memory" | "redis" | "postgres";
 export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
-export type FrameworkType = "promptkit" | "langchain" | "crewai" | "autogen" | "custom";
+export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 
 // Nested types
 export interface PromptPackRef {

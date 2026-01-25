@@ -48,13 +48,6 @@ func TestDefaultImageForFramework(t *testing.T) {
 			want: DefaultFrameworkImage,
 		},
 		{
-			name: "CrewAI framework returns default image (fallback)",
-			framework: &omniav1alpha1.FrameworkConfig{
-				Type: omniav1alpha1.FrameworkTypeCrewAI,
-			},
-			want: DefaultFrameworkImage,
-		},
-		{
 			name: "AutoGen framework returns default image (fallback)",
 			framework: &omniav1alpha1.FrameworkConfig{
 				Type: omniav1alpha1.FrameworkTypeAutoGen,
