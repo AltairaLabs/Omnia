@@ -218,58 +218,77 @@ framework:
     tag: ""  # Defaults to Chart appVersion
 ```
 
+## Enterprise Features
+
+Enterprise features require a valid license key. Enable them with:
+
+```yaml
+enterprise:
+  enabled: true  # Enable enterprise features (Arena Fleet, etc.)
+```
+
+When `enterprise.enabled` is `true`:
+- Arena CRDs (ArenaSource, ArenaJob) are installed
+- Arena controllers are deployed
+- Workspace shared filesystem features are available
+
+:::note[License Required]
+Enterprise features require a valid license. See [Installing a License](/how-to/install-license/) for details.
+:::
+
 ## Arena Fleet Configuration
 
-Arena Fleet provides distributed testing for PromptKit bundles.
+Arena Fleet provides distributed testing for PromptKit bundles. This is an **enterprise feature**.
 
 ### Basic Settings
 
 ```yaml
-arena:
-  enabled: true  # Enable Arena Fleet controllers
+enterprise:
+  enabled: true  # Required for Arena Fleet
 
-  worker:
-    image:
-      repository: ghcr.io/altairalabs/arena-worker
-      tag: ""  # Defaults to Chart appVersion
-      pullPolicy: IfNotPresent
-    resources:
-      limits:
-        cpu: 1000m
-        memory: 512Mi
-      requests:
-        cpu: 100m
-        memory: 128Mi
+      image:
+        repository: ghcr.io/altairalabs/arena-worker
+        tag: ""  # Defaults to Chart appVersion
+        pullPolicy: IfNotPresent
+      resources:
+        limits:
+          cpu: 1000m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
 ```
 
 ### Source Configuration
 
 ```yaml
-arena:
-  source:
-    defaultInterval: 5m  # Interval between source checks
-    fetchTimeout: 2m     # Timeout for fetching sources
+enterprise:
+  arena:
+    source:
+      defaultInterval: 5m  # Interval between source checks
+      fetchTimeout: 2m     # Timeout for fetching sources
 ```
 
 ### Result Storage
 
 ```yaml
-arena:
-  storage:
-    type: memory  # memory (testing), s3, or pvc
+enterprise:
+  arena:
+    storage:
+      type: memory  # memory (testing), s3, or pvc
 
-    # S3 configuration (when type: s3)
-    s3:
-      bucket: ""
-      region: ""
-      endpoint: ""      # For S3-compatible storage
-      secretRef: ""     # Secret with AWS credentials
+      # S3 configuration (when type: s3)
+      s3:
+        bucket: ""
+        region: ""
+        endpoint: ""      # For S3-compatible storage
+        secretRef: ""     # Secret with AWS credentials
 
-    # PVC configuration (when type: pvc)
-    pvc:
-      claimName: ""
-      storageClass: ""
-      size: 10Gi
+      # PVC configuration (when type: pvc)
+      pvc:
+        claimName: ""
+        storageClass: ""
+        size: 10Gi
 ```
 
 When Arena Fleet is enabled, the operator will watch for:
@@ -286,9 +305,10 @@ Arena Fleet uses a work queue for distributing tasks to workers. By default, an 
 #### Queue Type
 
 ```yaml
-arena:
-  queue:
-    type: memory  # memory (dev) or redis (production)
+enterprise:
+  arena:
+    queue:
+      type: memory  # memory (dev) or redis (production)
 ```
 
 #### Managed Redis (Bitnami Subchart)
@@ -313,12 +333,13 @@ redis:
         cpu: 50m
         memory: 64Mi
 
-arena:
-  queue:
-    type: redis
-    redis:
-      host: "omnia-redis-master"  # Auto-generated service name
-      port: 6379
+enterprise:
+  arena:
+    queue:
+      type: redis
+      redis:
+        host: "omnia-redis-master"  # Auto-generated service name
+        port: 6379
 ```
 
 #### Bring Your Own Redis (BYOD)
@@ -326,23 +347,24 @@ arena:
 Connect to an external Redis instance (ElastiCache, Memorystore, Azure Cache, etc.):
 
 ```yaml
-arena:
-  queue:
-    type: redis
-    external:
-      # Option 1: Direct URL
-      url: "redis://my-redis.example.com:6379"
+enterprise:
+  arena:
+    queue:
+      type: redis
+      external:
+        # Option 1: Direct URL
+        url: "redis://my-redis.example.com:6379"
 
-      # Option 2: URL from secret
-      secretRef:
-        name: redis-credentials
-        key: redis-url
+        # Option 2: URL from secret
+        secretRef:
+          name: redis-credentials
+          key: redis-url
 
-      # Option 3: Password separate from URL
-      password: ""  # Or use passwordSecretRef
-      passwordSecretRef:
-        name: redis-credentials
-        key: redis-password
+        # Option 3: Password separate from URL
+        password: ""  # Or use passwordSecretRef
+        passwordSecretRef:
+          name: redis-credentials
+          key: redis-password
 ```
 
 #### Redis Subchart Configuration

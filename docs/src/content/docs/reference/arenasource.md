@@ -4,9 +4,13 @@ description: "Complete reference for the ArenaSource custom resource"
 sidebar:
   order: 10
   badge:
-    text: Arena
-    variant: note
+    text: Enterprise
+    variant: tip
 ---
+
+:::note[Enterprise Feature]
+ArenaSource is an enterprise feature. The CRD is only installed when `enterprise.enabled=true` in your Helm values. See [Installing a License](/how-to/install-license/) for details.
+:::
 
 The ArenaSource custom resource defines a source for fetching PromptKit bundles from external repositories. It supports Git repositories, OCI registries, and Kubernetes ConfigMaps as sources, enabling GitOps-friendly bundle management for Arena Fleet.
 
