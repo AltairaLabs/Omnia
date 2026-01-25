@@ -60,18 +60,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - batch
-  resources:
-  - jobs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - keda.sh
   resources:
   - scaledobjects
@@ -99,8 +87,6 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes
-  - arenajobs
-  - arenasources
   - promptpacks
   - providers
   - toolregistries
@@ -117,8 +103,6 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/finalizers
-  - arenajobs/finalizers
-  - arenasources/finalizers
   - promptpacks/finalizers
   - providers/finalizers
   - toolregistries/finalizers
@@ -129,8 +113,6 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes/status
-  - arenajobs/status
-  - arenasources/status
   - promptpacks/status
   - providers/status
   - toolregistries/status

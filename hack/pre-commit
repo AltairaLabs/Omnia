@@ -400,22 +400,22 @@ if [ -f coverage.out ]; then
         fi
 
         # Skip cmd entry points (main.go files are hard to test)
-        if [[ "$file" == cmd/main.go ]] || [[ "$file" == cmd/*/main.go ]]; then
+        if [[ "$file" == cmd/main.go ]] || [[ "$file" == cmd/*/main.go ]] || [[ "$file" == ee/cmd/*/main.go ]]; then
             continue
         fi
 
         # Skip cmd CLI setup files (Cobra command setup - minimal testable logic)
-        if [[ "$file" == cmd/*/cmd.go ]]; then
+        if [[ "$file" == cmd/*/cmd.go ]] || [[ "$file" == ee/cmd/*/cmd.go ]]; then
             continue
         fi
 
         # Skip arena-worker (PromptKit arena engine integration, tested via E2E)
-        if [[ "$file" == cmd/arena-worker/worker.go ]]; then
+        if [[ "$file" == cmd/arena-worker/worker.go ]] || [[ "$file" == ee/cmd/arena-worker/worker.go ]]; then
             continue
         fi
 
         # Skip arena controllers (async goroutines, Redis integration, tested via E2E)
-        if [[ "$file" == internal/controller/arena*.go ]]; then
+        if [[ "$file" == internal/controller/arena*.go ]] || [[ "$file" == ee/internal/controller/arena*.go ]]; then
             continue
         fi
 

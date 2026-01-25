@@ -431,9 +431,6 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
     # Build demo helm set values
     demo_helm_set = [
         'namespace=omnia-demo',
-        # Enable OPA model validation (sidecar mode by default, no Istio required)
-        'opa.enabled=true',
-        'opa.mode=sidecar',
         # Use persistence for model cache
         'ollama.persistence.enabled=true',
         # Grant anonymous users owner access for local development
@@ -638,7 +635,6 @@ if ENABLE_DEMO:
     # Object list differs based on OPA mode (sidecar vs extauthz)
     ollama_objects = [
         'ollama-models:persistentvolumeclaim',
-        'ollama-opa-config:configmap',
         'ollama-credentials:secret',
         'ollama:provider',
         # Include vision-demo CRs (the Deployment is created by operator)
@@ -660,16 +656,8 @@ if ENABLE_DEMO:
             # LangChain tools demo
             'tools-demo-langchain:agentruntime',
         ])
-    # Sidecar mode uses Envoy config, extauthz mode uses EnvoyFilter
-    if ENABLE_FULL_STACK:
-        ollama_objects.append('ollama-opa-ext-authz:envoyfilter')
-    else:
-        ollama_objects.append('ollama-envoy-config:configmap')
-
-    # Build resource_deps - need istio-crds when using EnvoyFilter
+    # Build resource_deps
     ollama_deps = []
-    if ENABLE_FULL_STACK:
-        ollama_deps.append('istio-crds')
 
     k8s_resource(
         'ollama',

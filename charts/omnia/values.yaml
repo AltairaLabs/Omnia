@@ -7,6 +7,59 @@ replicaCount: 1
 # -- Enable development mode with full-featured license. DO NOT USE IN PRODUCTION.
 devMode: false
 
+# ============================================================================
+# Enterprise Features (requires license)
+# ============================================================================
+enterprise:
+  # -- Enable enterprise features (Arena, licensing)
+  enabled: false
+
+  # Arena controller configuration
+  arena:
+    controller:
+      # -- Number of arena controller replicas
+      replicaCount: 1
+      image:
+        # -- Arena controller image repository
+        repository: ghcr.io/altairalabs/omnia-arena-controller
+        # -- Arena controller image tag (defaults to Chart appVersion)
+        tag: ""
+        # -- Arena controller image pull policy
+        pullPolicy: IfNotPresent
+      # -- Resource limits for arena controller
+      resources: {}
+
+    # Worker configuration for ArenaJob execution
+    worker:
+      image:
+        # -- Worker image repository
+        repository: ghcr.io/altairalabs/omnia-arena-worker
+        # -- Worker image tag (defaults to Chart appVersion)
+        tag: ""
+        # -- Worker image pull policy
+        pullPolicy: IfNotPresent
+
+      # -- Default resource limits for worker pods
+      resources:
+        limits:
+          cpu: 1000m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+
+    # Work queue configuration for job distribution
+    queue:
+      # -- Queue backend type: memory (dev) or redis (prod)
+      type: memory
+
+      # Redis configuration (when type: redis)
+      redis:
+        # -- Redis host (auto-configured when redis.enabled=true)
+        host: ""
+        # -- Redis port
+        port: 6379
+
 # License configuration
 license:
   # -- License key (JWT). If set, creates the arena-license Secret.

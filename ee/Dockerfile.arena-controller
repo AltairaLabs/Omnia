@@ -1,0 +1,18 @@
+# Build the arena controller binary
+FROM golang:1.25 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.mod
+COPY go.sum go.sum
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o arena-controller ./ee/cmd/omnia-arena-controller
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/arena-controller .
+USER 65532:65532
+
+ENTRYPOINT ["/arena-controller"]

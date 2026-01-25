@@ -58,6 +58,12 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./cmd/..." paths="./internal/..." paths="./pkg/..."
 
+.PHONY: manifests-all
+manifests-all: manifests manifests-ee ## Generate manifests for core and enterprise.
+
+.PHONY: generate-all
+generate-all: generate generate-ee ## Generate code for core and enterprise.
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -310,6 +316,35 @@ build: manifests generate fmt vet ## Build manager binary.
 .PHONY: build-runtime
 build-runtime: fmt vet ## Build runtime binary.
 	go build -o bin/runtime ./cmd/runtime
+
+##@ Enterprise Edition
+
+.PHONY: build-arena-controller
+build-arena-controller: manifests-ee generate-ee fmt vet ## Build Arena controller binary (Enterprise).
+	go build -o bin/arena-controller ./ee/cmd/omnia-arena-controller
+
+.PHONY: build-arena-worker
+build-arena-worker: fmt vet ## Build Arena worker binary (Enterprise).
+	go build -o bin/arena-worker ./ee/cmd/arena-worker
+
+.PHONY: manifests-ee
+manifests-ee: controller-gen ## Generate CRDs for Enterprise types.
+	"$(CONTROLLER_GEN)" rbac:roleName=arena-manager-role crd webhook paths="./ee/api/..." paths="./ee/internal/..." output:crd:artifacts:config=config/crd/bases
+
+.PHONY: generate-ee
+generate-ee: controller-gen ## Generate code for Enterprise types.
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate-ee.go.txt" paths="./ee/api/..." paths="./ee/internal/..." paths="./ee/pkg/..."
+
+.PHONY: docker-build-arena-controller
+docker-build-arena-controller: ## Build docker image for Arena controller (Enterprise).
+	$(CONTAINER_TOOL) build -t arena-controller:latest -f ee/Dockerfile.arena-controller .
+
+.PHONY: docker-build-arena-worker
+docker-build-arena-worker: ## Build docker image for Arena worker (Enterprise).
+	$(CONTAINER_TOOL) build -t arena-worker:latest -f ee/Dockerfile.arena-worker .
+
+.PHONY: build-all
+build-all: build build-runtime build-arena-controller build-arena-worker ## Build all binaries (core + enterprise).
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
