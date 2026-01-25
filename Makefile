@@ -271,8 +271,21 @@ docker-build-dashboard: ## Build docker image for the dashboard
 	$(CONTAINER_TOOL) build -t ${DASHBOARD_IMG} ./dashboard
 
 .PHONY: sync-chart-crds
-sync-chart-crds: manifests ## Sync CRDs from config/crd/bases to charts/omnia/crds
-	cp config/crd/bases/*.yaml charts/omnia/crds/
+sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to charts/omnia/crds
+	# Copy core CRDs (excluding enterprise arena CRDs which are conditional templates)
+	cp config/crd/bases/omnia.altairalabs.ai_agentruntimes.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_promptpacks.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_providers.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_toolregistries.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_workspaces.yaml charts/omnia/crds/
+	# Sync enterprise CRDs to conditional templates (wrapped with enterprise.enabled check)
+	@echo "Syncing enterprise CRDs to conditional templates..."
+	@for f in config/crd/bases/omnia.altairalabs.ai_arena*.yaml; do \
+		base=$$(basename $$f); \
+		echo "{{- if .Values.enterprise.enabled }}" > charts/omnia/templates/enterprise/$$base; \
+		cat $$f >> charts/omnia/templates/enterprise/$$base; \
+		echo "{{- end }}" >> charts/omnia/templates/enterprise/$$base; \
+	done
 
 .PHONY: generate-dashboard-types
 generate-dashboard-types: sync-chart-crds ## Generate TypeScript types from CRD schemas
