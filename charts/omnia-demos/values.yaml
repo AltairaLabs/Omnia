@@ -357,8 +357,8 @@ istio:
 # ============================================================================
 
 arenaDemo:
-  # -- Enable arena demo
-  enabled: true
+  # -- Enable arena demo (requires enterprise.enabled=true in omnia chart)
+  enabled: false
 
   # -- ArenaSource configuration
   source:
