@@ -51,6 +51,81 @@ kind version        # kind v0.20.x ...
 helm version        # version.BuildInfo{Version:"v3.12.x" ...}
 ```
 
+## Tilt Development (Recommended)
+
+The easiest way to develop Omnia is using [Tilt](https://tilt.dev/), which provides hot-reload development with automatic image building and deployment.
+
+### Install Tilt
+
+```bash
+# macOS
+brew install tilt
+
+# Linux
+curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
+```
+
+### Start Development
+
+```bash
+# Create a kind cluster (one-time)
+make kind-cluster
+
+# Start Tilt (core features only)
+tilt up
+
+# Or with enterprise features (Arena, NFS, Redis)
+ENABLE_ENTERPRISE=true tilt up
+```
+
+Tilt will:
+- Build all required images (operator, dashboard, facade, runtime)
+- Deploy the Helm chart with development settings
+- Watch for file changes and rebuild automatically
+- Provide a web UI at http://localhost:10350
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_ENTERPRISE` | `false` | Enable enterprise features (Arena controller, NFS, Redis) |
+| `ENABLE_DEMO` | `false` | Enable demo mode with Ollama + OPA |
+| `ENABLE_OBSERVABILITY` | `true` | Enable Prometheus/Grafana/Tempo |
+| `ENABLE_FULL_STACK` | `false` | Enable Istio, Loki, Alloy |
+| `ENABLE_LANGCHAIN` | `false` | Enable LangChain runtime demos |
+
+### Access Services
+
+When Tilt is running:
+- **Dashboard**: http://localhost:3000
+- **WebSocket Proxy**: ws://localhost:3002
+- **Operator API**: http://localhost:8082
+- **Grafana** (if enabled): http://localhost:3001
+- **VS Code Server** (enterprise): http://localhost:8888
+
+### Enterprise Features
+
+When `ENABLE_ENTERPRISE=true`:
+- **Arena Controller**: Manages ArenaSource and ArenaJob resources
+- **Arena Worker**: Executes evaluation jobs
+- **NFS Server**: Shared workspace storage (development only)
+- **Redis**: Work queue for Arena job distribution
+- **VS Code Server**: Browse/edit workspace content
+
+### Stopping Tilt
+
+```bash
+tilt down
+```
+
+This removes all deployed resources but preserves the kind cluster.
+
+---
+
+## Manual Development (Without Tilt)
+
+If you prefer manual control or can't use Tilt, follow the sections below.
+
 ## Create a Local Kubernetes Cluster
 
 ### Option 1: kind (Recommended)
