@@ -89,6 +89,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
+            --set workspaceContent.enabled=false \
             --timeout 2m
 
           echo "Verifying resources were created..."
@@ -204,6 +205,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
+            --set workspaceContent.enabled=false \
             --timeout 2m
 
           echo "KEDA conflict detection test passed!"
@@ -254,6 +256,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
+            --set workspaceContent.enabled=false \
             --set prometheus.enabled=true \
             --set grafana.enabled=true \
             --set loki.enabled=true \
@@ -309,6 +312,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
+            --set workspaceContent.enabled=false \
             --set prometheus.enabled=true \
             --set prometheus.server.persistentVolume.enabled=false \
             --set prometheus.alertmanager.enabled=false \
