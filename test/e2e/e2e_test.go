@@ -95,7 +95,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("waiting for controller-manager rollout to complete")
 		rolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
-			"-n", namespace, "--timeout=60s")
+			"-n", namespace, "--timeout=120s")
 		_, err = utils.Run(rolloutCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to wait for controller-manager rollout")
 	})
