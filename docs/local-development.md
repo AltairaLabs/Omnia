@@ -90,7 +90,7 @@ Tilt will:
 |----------|---------|-------------|
 | `ENABLE_ENTERPRISE` | `false` | Enable enterprise features (Arena controller, NFS, Redis) |
 | `ENABLE_DEMO` | `false` | Enable demo mode with Ollama + OPA |
-| `ENABLE_OBSERVABILITY` | `true` | Enable Prometheus/Grafana/Tempo |
+| `ENABLE_OBSERVABILITY` | `true` | Enable Prometheus/Grafana |
 | `ENABLE_FULL_STACK` | `false` | Enable Istio, Loki, Alloy |
 | `ENABLE_LANGCHAIN` | `false` | Enable LangChain runtime demos |
 

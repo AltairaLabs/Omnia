@@ -417,15 +417,10 @@ if ENABLE_OBSERVABILITY:
         'dashboard.prometheus.url=http://omnia-prometheus-server:80/prometheus',
         # Use localhost URL for browser access to Grafana iframes
         'dashboard.grafana.url=http://localhost:3001',
-        # Enable Tempo for tracing (works without Istio via runtime instrumentation)
-        'tempo.enabled=true',
-        'tempo.persistence.enabled=false',
-        # Enable tracing for agent runtime containers
-        'tracing.enabled=true',
-        'tracing.endpoint=omnia-tempo.omnia-system.svc.cluster.local:4317',
-        # Disable Loki/Alloy for simpler setup
+        # Disable Loki/Alloy/Tempo for simpler setup (use ENABLE_FULL_STACK for full observability)
         'loki.enabled=false',
         'alloy.enabled=false',
+        'tempo.enabled=false',
     ])
 else:
     helm_set.extend([
