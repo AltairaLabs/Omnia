@@ -120,7 +120,7 @@ function getInitialFormState(preselectedSource?: string): JobWizardFormState {
     activeProviderGroups: [],
     toolRegistryOverrideEnabled: false,
     toolRegistryOverride: {},
-    workers: "2",
+    workers: "1",
     timeout: "30m",
     verbose: false,
     continueOnFailure: true,

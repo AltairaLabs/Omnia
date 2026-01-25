@@ -509,7 +509,7 @@ describe("JobWizard", () => {
           expect.objectContaining({
             sourceRef: { name: "test-source" },
             type: "evaluation",
-            workers: { replicas: 2 },
+            workers: { replicas: 1 },
           })
         );
       });
@@ -936,7 +936,12 @@ describe("JobWizard", () => {
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Workers defaults to 2, but maxWorkerReplicas is 1
+      // Set workers to 2 which exceeds maxWorkerReplicas of 1
+      const workersInput = screen.getByLabelText("Workers");
+      await user.clear(workersInput);
+      await user.type(workersInput, "2");
+
+      // Navigate to review and try to submit
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /create job/i }));
 
