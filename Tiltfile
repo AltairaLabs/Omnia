@@ -583,16 +583,17 @@ if ENABLE_OBSERVABILITY:
         port_forwards=['3001:3000'],  # Grafana UI (container port 3000, local 3001)
     )
 
-    # Tempo for distributed tracing (runtime instrumentation, no Istio required)
-    k8s_resource(
-        'omnia-tempo',
-        labels=['observability'],
-        port_forwards=[
-            '3200:3200',   # Tempo HTTP API
-            '4317:4317',   # OTLP gRPC
-            '4318:4318',   # OTLP HTTP
-        ],
-    )
+    # Tempo for distributed tracing (only with ENABLE_FULL_STACK)
+    if ENABLE_FULL_STACK:
+        k8s_resource(
+            'omnia-tempo',
+            labels=['observability'],
+            port_forwards=[
+                '3200:3200',   # Tempo HTTP API
+                '4317:4317',   # OTLP gRPC
+                '4318:4318',   # OTLP HTTP
+            ],
+        )
 
 # ============================================================================
 # Redis for Arena Queue (Enterprise only)
