@@ -19,12 +19,8 @@
 !pkg/license/keys/
 !pkg/license/keys/public.pem
 
-# Re-include enterprise (ee/) directory for go:embed
-!ee/
-!ee/pkg/
-!ee/pkg/license/
-!ee/pkg/license/keys/
-!ee/pkg/license/keys/public.pem
+# Re-include enterprise (ee/) directory
+!ee/**
 
 # Re-include local PromptKit source for development builds
 !promptkit-local/**
