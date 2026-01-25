@@ -17,7 +17,7 @@ rules:
       - promptpacks
       - toolregistries
       - providers
-      {{- if .Values.arena.enabled }}
+      {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
       {{- end }}
@@ -37,7 +37,7 @@ rules:
       - promptpacks/status
       - toolregistries/status
       - providers/status
-      {{- if .Values.arena.enabled }}
+      {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
       {{- end }}
@@ -112,7 +112,7 @@ rules:
     resources:
       - agentruntimes
       - promptpacks
-      {{- if .Values.arena.enabled }}
+      {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
       {{- end }}
@@ -130,7 +130,7 @@ rules:
     resources:
       - agentruntimes/status
       - promptpacks/status
-      {{- if .Values.arena.enabled }}
+      {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
       {{- end }}
@@ -223,7 +223,7 @@ rules:
       - promptpacks
       - toolregistries
       - providers
-      {{- if .Values.arena.enabled }}
+      {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
       {{- end }}
@@ -239,7 +239,7 @@ rules:
       - promptpacks/status
       - toolregistries/status
       - providers/status
-      {{- if .Values.arena.enabled }}
+      {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
       {{- end }}

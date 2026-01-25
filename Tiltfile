@@ -481,7 +481,7 @@ if ENABLE_FULL_STACK:
 # Build values files list
 helm_values = ['./charts/omnia/values-dev.yaml']
 if ENABLE_NFS:
-    helm_values.append('./charts/omnia/values-dev-nfs.yaml')
+    helm_values.append('./charts/omnia/values-dev-enterprise.yaml')
 if ENABLE_FULL_STACK:
     helm_values.append('./charts/omnia/values-istio-prometheus.yaml')
 

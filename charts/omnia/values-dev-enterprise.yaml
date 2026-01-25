@@ -1,8 +1,12 @@
-# Development values with internal NFS server
-# Use with: helm install omnia ./charts/omnia -f ./charts/omnia/values-dev-nfs.yaml
+# Development values with Enterprise features enabled
+# Use with: helm install omnia ./charts/omnia -f ./charts/omnia/values-dev.yaml -f ./charts/omnia/values-dev-enterprise.yaml
+# Or with Tilt: ENABLE_ENTERPRISE=true tilt up
 #
-# This configuration deploys an internal NFS server for development environments
-# that provides ReadWriteMany (RWX) storage for workspace content.
+# This configuration enables enterprise features:
+#   - Arena controller and CRDs (ArenaSource, ArenaJob)
+#   - Internal NFS server for ReadWriteMany workspace storage
+#   - Redis for Arena work queue
+#   - VS Code server for browsing workspace content
 #
 # WARNING: The internal NFS server is NOT suitable for production use.
 # For production, use cloud-native storage:
@@ -10,8 +14,27 @@
 #   - Azure: Azure Files (azurefile-csi-nfs storage class)
 #   - GCP: Filestore (filestore-sc storage class)
 
-# Enable dev mode
+# Enable dev mode license (DO NOT USE IN PRODUCTION)
 devMode: true
+
+# ============================================================================
+# Enterprise Features
+# ============================================================================
+
+enterprise:
+  enabled: true
+
+  arena:
+    queue:
+      type: redis
+      redis:
+        # Auto-configured to use Redis subchart
+        host: "omnia-redis-master"
+        port: 6379
+
+# ============================================================================
+# NFS Storage (for shared workspace content)
+# ============================================================================
 
 # Enable internal NFS server and CSI driver for development
 nfs:
@@ -49,17 +72,10 @@ workspaceContent:
       - ReadWriteMany
     size: 50Gi
 
-# Arena configuration
-arena:
-  enabled: true
-  queue:
-    type: redis
-    redis:
-      # Auto-configured to use Redis subchart
-      host: "omnia-redis-master"
-      port: 6379
+# ============================================================================
+# Redis (for Arena work queue)
+# ============================================================================
 
-# Enable Redis for arena work queue
 redis:
   enabled: true
   architecture: standalone
@@ -68,6 +84,10 @@ redis:
   master:
     persistence:
       enabled: false
+
+# ============================================================================
+# Development Tools
+# ============================================================================
 
 # Enable VS Code server for browsing workspace content
 vscodeServer:

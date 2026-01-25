@@ -219,8 +219,8 @@ rules:
       - update
       - watch
   {{- end }}
-  {{- if .Values.arena.enabled }}
-  # Arena Fleet CRDs
+  {{- if .Values.enterprise.enabled }}
+  # Enterprise Arena CRDs (ArenaJob, ArenaSource)
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
