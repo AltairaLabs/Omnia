@@ -19,17 +19,13 @@
 !pkg/license/keys/
 !pkg/license/keys/public.pem
 
-# Re-include enterprise (ee/) directory structure and files
+# Re-include enterprise (ee/) directory - use multiple patterns to ensure all subdirs are included
 !ee/
-!ee/cmd/
-!ee/cmd/arena-worker/
-!ee/cmd/omnia-arena-controller/
-!ee/api/
-!ee/internal/
-!ee/pkg/
-!ee/pkg/license/
-!ee/pkg/license/keys/
-!ee/pkg/license/keys/public.pem
+!ee/*
+!ee/*/*
+!ee/*/*/*
+!ee/*/*/*/*
+!ee/*/*/*/*/*
 
 # Re-include local PromptKit source for development builds
 !promptkit-local/**
