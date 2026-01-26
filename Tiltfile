@@ -85,7 +85,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev'])
+    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -309,6 +309,23 @@ if ENABLE_ENTERPRISE:
         only=arena_worker_only,
     )
 
+    # Build promptkit-lsp image (LSP server for PromptKit YAML validation)
+    docker_build(
+        'omnia-promptkit-lsp-dev',
+        context='.',
+        dockerfile='./ee/Dockerfile.promptkit-lsp',
+        only=[
+            './ee/cmd/promptkit-lsp',
+            './ee/internal',
+            './ee/pkg',
+            './ee/api',
+            './pkg',
+            './api',
+            './go.mod',
+            './go.sum',
+        ],
+    )
+
 # ============================================================================
 # LangChain Runtime - Python-based agent framework
 # ============================================================================
@@ -388,6 +405,11 @@ if ENABLE_ENTERPRISE:
         'redis.architecture=standalone',
         'redis.auth.enabled=false',
         'redis.master.persistence.enabled=false',
+        # PromptKit LSP server for YAML validation
+        'enterprise.promptkitLsp.enabled=true',
+        'enterprise.promptkitLsp.image.repository=omnia-promptkit-lsp-dev',
+        'enterprise.promptkitLsp.image.tag=latest',
+        'enterprise.promptkitLsp.image.pullPolicy=Never',
     ])
 else:
     # Disable enterprise features
@@ -661,6 +683,13 @@ if ENABLE_ENTERPRISE:
         'omnia-arena-controller',
         labels=['enterprise'],
         resource_deps=arena_deps + ['omnia-redis-master'],
+    )
+
+    # PromptKit LSP server for YAML validation in project editor
+    k8s_resource(
+        'omnia-promptkit-lsp',
+        labels=['enterprise'],
+        resource_deps=['omnia-dashboard'],
     )
 
 # ============================================================================
