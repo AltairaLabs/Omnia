@@ -1,4 +1,4 @@
-name: Dashboard E2E Tests
+name: Multimodal E2E Tests
 
 on:
   push:
@@ -28,79 +28,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Regular E2E tests (demo mode, no agent binary needed)
-  dashboard-e2e:
-    name: Dashboard E2E
-    runs-on: ubuntu-latest
-    # E2E tests are informational for PRs - they don't block merging
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: dashboard/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-        working-directory: dashboard
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-        working-directory: dashboard
-
-      - name: Build dashboard
-        run: npm run build
-        working-directory: dashboard
-        env:
-          NEXT_PUBLIC_DEMO_MODE: 'true'
-
-      - name: Run E2E tests with coverage
-        run: |
-          # Start the server in background with demo mode
-          # Set anonymous role to editor so E2E tests can test write operations
-          DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_AUTH_ANONYMOUS_ROLE=editor npm run start &
-          # Wait for server to be ready
-          npx wait-on http://localhost:3000 --timeout 60000
-          # Run Playwright tests with coverage collection
-          PLAYWRIGHT_BASE_URL=http://localhost:3000 COLLECT_COVERAGE=true npx playwright test
-        working-directory: dashboard
-        env:
-          CI: true
-
-      - name: Upload E2E test results
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: dashboard-e2e-results
-          path: |
-            dashboard/test-results/
-            dashboard/playwright-report/
-            dashboard/e2e-results.xml
-          retention-days: 7
-
-      - name: Upload E2E coverage
-        uses: actions/upload-artifact@v6
-        if: success()
-        with:
-          name: dashboard-e2e-coverage
-          path: dashboard/e2e-coverage/
-          retention-days: 7
-
-      - name: Publish E2E Test Results
-        uses: mikepenz/action-junit-report@v6
-        if: always()
-        with:
-          report_paths: 'dashboard/e2e-results.xml'
-          check_name: 'Dashboard E2E Results'
-          detailed_summary: true
-          include_passed: true
-
   # Multimodal E2E tests (requires Go agent binary with demo handler)
   multimodal-e2e:
     name: Multimodal Console Tests
