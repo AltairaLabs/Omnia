@@ -173,6 +173,7 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/components/arena/file-tree.tsx ]] || \
                    [[ "$REL_FILE" == src/components/arena/editor-tabs.tsx ]] || \
                    [[ "$REL_FILE" == src/components/arena/yaml-editor.tsx ]] || \
+                   [[ "$REL_FILE" == src/components/arena/lsp-yaml-editor.tsx ]] || \
                    [[ "$REL_FILE" == src/components/console/* ]] || \
                    [[ "$REL_FILE" == src/components/cost/* ]] || \
                    [[ "$REL_FILE" == src/components/credentials/* ]] || \
@@ -214,7 +215,8 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/lib/k8s/workspace-k8s-client-factory.ts ]] || \
                    [[ "$REL_FILE" == src/lib/image-processor.ts ]] || \
                    [[ "$REL_FILE" == src/lib/mock-data.ts ]] || \
-                   [[ "$REL_FILE" == src/lib/auth/types.ts ]]; then
+                   [[ "$REL_FILE" == src/lib/auth/types.ts ]] || \
+                   [[ "$REL_FILE" == server.js ]]; then
                     continue
                 fi
 
@@ -456,6 +458,11 @@ if [ -f coverage.out ]; then
 
         # Skip cloud storage implementations (require external infrastructure: S3/MinIO, GCS emulator, Azurite)
         if [[ "$file" == "internal/media/s3.go" ]] || [[ "$file" == "internal/media/gcs.go" ]] || [[ "$file" == "internal/media/azure.go" ]] || [[ "$file" == "internal/media/handler.go" ]]; then
+            continue
+        fi
+
+        # Skip promptkit-lsp server (requires WebSocket infrastructure for integration testing)
+        if [[ "$file" == ee/cmd/promptkit-lsp/server/*.go ]]; then
             continue
         fi
 

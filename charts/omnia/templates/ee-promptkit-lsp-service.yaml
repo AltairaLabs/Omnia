@@ -1,0 +1,21 @@
+{{- if .Values.enterprise.enabled }}
+{{- if .Values.enterprise.promptkitLsp.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-promptkit-lsp
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: promptkit-lsp
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.enterprise.promptkitLsp.service.port | default 8080 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: promptkit-lsp
+{{- end }}
+{{- end }}

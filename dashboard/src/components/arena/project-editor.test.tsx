@@ -57,6 +57,28 @@ vi.mock("@/hooks/use-toast", () => ({
   }),
 }));
 
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: { name: "test-workspace" },
+  }),
+}));
+
+vi.mock("@/lib/config", () => ({
+  getRuntimeConfig: vi.fn(() =>
+    Promise.resolve({
+      enterpriseEnabled: false,
+      demoMode: false,
+      readOnlyMode: false,
+      readOnlyMessage: "",
+      wsProxyUrl: "",
+      grafanaUrl: "",
+      lokiEnabled: false,
+      tempoEnabled: false,
+      hideEnterprise: false,
+    })
+  ),
+}));
+
 describe("ProjectEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks();

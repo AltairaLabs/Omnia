@@ -29,6 +29,8 @@ const wsProxyPort = parseInt(process.env.WS_PROXY_PORT || "3002", 10);
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 // Default facade port
 const DEFAULT_FACADE_PORT = parseInt(process.env.DEFAULT_FACADE_PORT || "8080", 10);
+// PromptKit LSP service URL (overridable via env var)
+const LSP_SERVICE_URL = process.env.LSP_SERVICE_URL || `ws://omnia-promptkit-lsp.omnia-system.${SERVICE_DOMAIN}:8080/lsp`;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -43,6 +45,32 @@ function parseAgentWsPath(pathname) {
     return { namespace: match[1], name: match[2] };
   }
   return null;
+}
+
+/**
+ * Check if the path is an LSP WebSocket request.
+ * Expected format: /api/lsp
+ */
+function isLspPath(pathname) {
+  return pathname === "/api/lsp";
+}
+
+/**
+ * Parse query parameters from URL.
+ */
+function parseQueryParams(url) {
+  const params = {};
+  const queryStart = url.indexOf("?");
+  if (queryStart !== -1) {
+    const queryString = url.slice(queryStart + 1);
+    for (const pair of queryString.split("&")) {
+      const [key, value] = pair.split("=");
+      if (key) {
+        params[decodeURIComponent(key)] = value ? decodeURIComponent(value) : "";
+      }
+    }
+  }
+  return params;
 }
 
 /**
@@ -206,6 +234,117 @@ function proxyWebSocket(clientSocket, namespace, name) {
   }
 }
 
+/**
+ * Proxy a WebSocket connection to the LSP service.
+ */
+function proxyLspWebSocket(clientSocket, workspace, project) {
+  // Build upstream URL with query params
+  const upstreamUrl = workspace && project
+    ? `${LSP_SERVICE_URL}?workspace=${encodeURIComponent(workspace)}&project=${encodeURIComponent(project)}`
+    : LSP_SERVICE_URL;
+
+  console.log(`[WS LSP Proxy] Connecting to upstream: ${upstreamUrl}`);
+
+  let upstream = null;
+  let upstreamConnected = false;
+  let connectionTimeout = null;
+
+  // Set a connection timeout (10 seconds)
+  connectionTimeout = setTimeout(() => {
+    if (!upstreamConnected) {
+      console.error(`[WS LSP Proxy] Connection timeout`);
+      sendError(clientSocket, `Connection to LSP service timed out`, "CONNECTION_TIMEOUT");
+      clientSocket.close(1011, "Connection timeout");
+    }
+  }, 10000);
+
+  try {
+    upstream = new WebSocket(upstreamUrl);
+
+    upstream.on("open", () => {
+      upstreamConnected = true;
+      clearTimeout(connectionTimeout);
+      console.log(`[WS LSP Proxy] Connected to LSP service`);
+    });
+
+    upstream.on("message", (data, isBinary) => {
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.send(data, { binary: isBinary });
+      }
+    });
+
+    upstream.on("close", (code, reason) => {
+      clearTimeout(connectionTimeout);
+      const reasonStr = reason ? reason.toString() : "";
+      console.log(`[WS LSP Proxy] Upstream closed: ${code} ${reasonStr}`);
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        if (!upstreamConnected) {
+          sendError(clientSocket, `LSP service is not available`, "LSP_UNAVAILABLE");
+        }
+        clientSocket.close(sanitizeCloseCode(code), reasonStr || "Connection closed");
+      }
+    });
+
+    upstream.on("error", (err) => {
+      clearTimeout(connectionTimeout);
+      console.error(`[WS LSP Proxy] Upstream error:`);
+      console.error(`[WS LSP Proxy]   message: ${err.message}`);
+      console.error(`[WS LSP Proxy]   code: ${err.code}`);
+
+      let errorMessage = `Failed to connect to LSP service`;
+      let errorCode = "CONNECTION_ERROR";
+
+      if (err.code === "ENOTFOUND" || err.code === "EAI_AGAIN") {
+        errorMessage = `LSP service not found. Check that enterprise features are enabled.`;
+        errorCode = "LSP_NOT_FOUND";
+      } else if (err.code === "ECONNREFUSED") {
+        errorMessage = `LSP service is not accepting connections.`;
+        errorCode = "CONNECTION_REFUSED";
+      } else if (err.code === "ETIMEDOUT") {
+        errorMessage = `Connection to LSP service timed out.`;
+        errorCode = "CONNECTION_TIMEOUT";
+      }
+
+      sendError(clientSocket, errorMessage, errorCode);
+
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.close(1011, "Upstream connection failed");
+      }
+    });
+
+    // Forward client messages to upstream
+    clientSocket.on("message", (data, isBinary) => {
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.send(data, { binary: isBinary });
+      } else if (!upstreamConnected) {
+        console.warn(`[WS LSP Proxy] Client sent message before upstream connected`);
+      }
+    });
+
+    clientSocket.on("close", (code, reason) => {
+      clearTimeout(connectionTimeout);
+      const reasonStr = reason ? reason.toString() : "";
+      console.log(`[WS LSP Proxy] Client closed: ${code} ${reasonStr}`);
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close(sanitizeCloseCode(code), reasonStr);
+      }
+    });
+
+    clientSocket.on("error", (err) => {
+      clearTimeout(connectionTimeout);
+      console.error(`[WS LSP Proxy] Client error:`, err.message);
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close(1011, "Client connection error");
+      }
+    });
+  } catch (err) {
+    clearTimeout(connectionTimeout);
+    console.error(`[WS LSP Proxy] Failed to create upstream connection:`, err.message);
+    sendError(clientSocket, `Failed to connect to LSP service: ${err.message}`, "CONNECTION_ERROR");
+    clientSocket.close(1011, "Failed to connect to LSP service");
+  }
+}
+
 app.prepare().then(() => {
   // Create main HTTP server for Next.js (no WebSocket handling - let HMR work)
   const server = createServer(async (req, res) => {
@@ -233,6 +372,10 @@ app.prepare().then(() => {
 
     if (agent) {
       proxyWebSocket(ws, agent.namespace, agent.name);
+    } else if (isLspPath(pathname)) {
+      // Parse query params for LSP context
+      const params = parseQueryParams(req.url);
+      proxyLspWebSocket(ws, params.workspace, params.project);
     } else {
       console.warn(`[WS] Unknown WebSocket path: ${pathname}`);
       ws.close(1008, "Unknown path");
@@ -247,6 +390,11 @@ app.prepare().then(() => {
 
     if (agent) {
       console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } else if (isLspPath(pathname)) {
+      console.log(`[WS Upgrade] LSP connection request`);
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });

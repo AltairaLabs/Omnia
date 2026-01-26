@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: promptkit-lsp
+  namespace: omnia-system
+  labels:
+    app: promptkit-lsp
+    app.kubernetes.io/name: omnia-promptkit-lsp
+    app.kubernetes.io/component: lsp-server
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: promptkit-lsp

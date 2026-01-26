@@ -11,7 +11,10 @@ import {
 import { FileTree } from "./file-tree";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
+import { LspYamlEditor, LspYamlEditorEmptyState } from "./lsp-yaml-editor";
 import { ProjectToolbar } from "./project-toolbar";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { getRuntimeConfig } from "@/lib/config";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -35,6 +38,16 @@ interface ProjectEditorProps {
 /* eslint-disable sonarjs/cognitive-complexity -- orchestration component inherently complex */
 export function ProjectEditor({ className, initialProjectId }: ProjectEditorProps) {
   const { toast } = useToast();
+  const { currentWorkspace } = useWorkspace();
+  const workspace = currentWorkspace?.name;
+
+  // Enterprise feature check for LSP
+  const [lspEnabled, setLspEnabled] = useState(false);
+  useEffect(() => {
+    getRuntimeConfig().then((config) => {
+      setLspEnabled(config.enterpriseEnabled);
+    });
+  }, []);
 
   // Store state
   const currentProject = useProjectEditorStore((state) => state.currentProject);
@@ -327,15 +340,30 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
               {/* Editor */}
               <div className="flex-1 min-h-0">
                 {activeFile ? (
-                  <YamlEditor
-                    value={activeFile.content}
-                    onChange={handleEditorChange}
-                    onSave={handleSave}
-                    fileType={activeFile.type}
-                    loading={activeFile.loading}
-                  />
+                  lspEnabled && workspace && currentProject ? (
+                    <LspYamlEditor
+                      value={activeFile.content}
+                      onChange={handleEditorChange}
+                      onSave={handleSave}
+                      fileType={activeFile.type}
+                      loading={activeFile.loading}
+                      workspace={workspace}
+                      projectId={currentProject.id}
+                      filePath={activeFile.path}
+                    />
+                  ) : (
+                    <YamlEditor
+                      value={activeFile.content}
+                      onChange={handleEditorChange}
+                      onSave={handleSave}
+                      fileType={activeFile.type}
+                      loading={activeFile.loading}
+                    />
+                  )
                 ) : openFiles.length > 0 ? (
                   <EditorTabsEmptyState />
+                ) : lspEnabled ? (
+                  <LspYamlEditorEmptyState />
                 ) : (
                   <YamlEditorEmptyState />
                 )}
