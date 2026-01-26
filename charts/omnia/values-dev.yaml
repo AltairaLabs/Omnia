@@ -99,33 +99,10 @@ gateway:
 internalGateway:
   enabled: false
 
-# Enable Redis for Arena queue development (Bitnami Redis)
+# Redis is disabled by default - only needed for enterprise Arena features
+# Enable via: ENABLE_ENTERPRISE=true tilt up
 redis:
-  enabled: true
-  architecture: standalone
-  image:
-    tag: latest  # Use latest for dev to avoid version mismatch issues
-  auth:
-    enabled: false  # No auth for dev
-  master:
-    persistence:
-      enabled: false  # No persistence for dev
-    resources:
-      limits:
-        cpu: 100m
-        memory: 128Mi
-      requests:
-        cpu: 50m
-        memory: 64Mi
-
-# Arena queue configuration
-arena:
-  queue:
-    type: redis
-    redis:
-      # Auto-configured to use the Bitnami Redis subchart
-      host: "omnia-redis-master"
-      port: 6379
+  enabled: false
 
 # ============================================================================
 # Workspace Content Storage (RWX via hostPath)
@@ -139,16 +116,10 @@ nfs:
   provisioner:
     enabled: false
 
-# Workspace content - uses hostPath for local dev (RWX on single-node clusters)
+# Workspace content storage for dashboard (only used when enterprise.enabled=true)
+# Requires RWX storage - use values-dev-enterprise.yaml with NFS for local dev
 workspaceContent:
-  enabled: true
-  # HostPath for local development - maps to folder on your machine
-  hostPath:
-    enabled: true
-    # Path on your local machine (Docker Desktop/kind mounts this into the VM)
-    # For Docker Desktop on macOS: use /tmp or a path under your home directory
-    # For kind: the path is inside the kind container, not your host
-    path: /tmp/omnia-workspace-content
+  enabled: true  # Gated by enterprise.enabled in templates
   persistence:
     accessModes:
       - ReadWriteMany

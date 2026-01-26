@@ -86,16 +86,29 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
-		By("patching the controller-manager to use the test facade, framework images, and dev mode")
-		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+		By("waiting for initial controller-manager deployment to be ready")
+		initialRolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
+			"-n", namespace, "--timeout=120s")
+		_, err = utils.Run(initialRolloutCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to wait for initial controller-manager rollout")
+
+		By("patching the controller-manager strategy to Recreate to avoid rolling update issues")
+		strategyPatchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=json",
-			"-p", fmt.Sprintf(`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--facade-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--framework-image=%s"},{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--dev-mode"}]`, facadeImageRef, runtimeImageRef))
+			"-p", `[{"op": "replace", "path": "/spec/strategy", "value": {"type": "Recreate"}}]`)
+		_, err = utils.Run(strategyPatchCmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager strategy")
+
+		By("patching the controller-manager to use the test facade and framework images")
+		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
+			"-n", namespace, "--type=strategic",
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
-		By("waiting for controller-manager rollout to complete")
+		By("waiting for patched controller-manager rollout to complete")
 		rolloutCmd := exec.Command("kubectl", "rollout", "status", "deployment/omnia-controller-manager",
-			"-n", namespace, "--timeout=60s")
+			"-n", namespace, "--timeout=120s")
 		_, err = utils.Run(rolloutCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to wait for controller-manager rollout")
 	})
@@ -587,11 +600,14 @@ spec:
 			Eventually(verifyDeploymentCreated, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying the AgentRuntime creates a Service")
-			cmd = exec.Command("kubectl", "get", "service", "test-agent",
-				"-n", agentsNamespace, "-o", "jsonpath={.spec.ports[0].port}")
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal("8080"))
+			verifyServiceCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "service", "test-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.spec.ports[0].port}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("8080"))
+			}
+			Eventually(verifyServiceCreated, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying the AgentRuntime status")
 			verifyAgentRuntimeStatus := func(g Gomega) {

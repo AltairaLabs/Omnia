@@ -58,6 +58,29 @@ Omnia follows an **Open Core** model: the core platform is free and open source 
 | Multi-cluster aggregation | ❌ | ✅ |
 | Priority support | ❌ | ✅ |
 
+## Enabling Enterprise Features
+
+To enable Enterprise features in your Helm deployment:
+
+```yaml
+enterprise:
+  enabled: true
+
+license:
+  key: "your-license-key"
+  # Or use existing secret:
+  # existingSecret: "license-secret"
+```
+
+When `enterprise.enabled=true`:
+- Enterprise CRDs (ArenaSource, ArenaJob) are installed
+- Arena controller and worker deployments are created
+- Shared filesystem features for workspaces are available
+
+:::tip[Local Development]
+For local development with Tilt, use `ENABLE_ENTERPRISE=true tilt up` to enable enterprise features.
+:::
+
 ## Open Core Edition
 
 The Open Core edition is perfect for:

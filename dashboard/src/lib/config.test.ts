@@ -52,6 +52,8 @@ describe("config", () => {
         grafanaUrl: "",
         lokiEnabled: false,
         tempoEnabled: false,
+        enterpriseEnabled: false,
+        hideEnterprise: false,
       });
     });
 
@@ -73,6 +75,8 @@ describe("config", () => {
         grafanaUrl: "",
         lokiEnabled: false,
         tempoEnabled: false,
+        enterpriseEnabled: false,
+        hideEnterprise: false,
       });
     });
 

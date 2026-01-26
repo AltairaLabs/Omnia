@@ -1,0 +1,95 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arena-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - omnia.altairalabs.ai
+  resources:
+  - arenajobs
+  - arenasources
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - omnia.altairalabs.ai
+  resources:
+  - arenajobs/finalizers
+  - arenasources/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - omnia.altairalabs.ai
+  resources:
+  - arenajobs/status
+  - arenasources/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - omnia.altairalabs.ai
+  resources:
+  - providers
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch

@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { EnterpriseGate } from "@/components/license/license-gate";
 import {
   Database,
   Settings,
@@ -147,7 +148,7 @@ function LoadingSkeleton() {
   );
 }
 
-export default function ArenaPage() {
+function ArenaContent() {
   const { stats, recentJobs, loading, error } = useArenaStats();
 
   if (loading) {
@@ -259,5 +260,13 @@ export default function ArenaPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ArenaPage() {
+  return (
+    <EnterpriseGate featureName="Arena Fleet">
+      <ArenaContent />
+    </EnterpriseGate>
   );
 }

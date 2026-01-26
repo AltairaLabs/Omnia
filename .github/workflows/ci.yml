@@ -517,7 +517,8 @@ jobs:
     - name: Run E2E tests with coverage
       run: |
         # Start the server in background with demo mode and production settings
-        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true npm run start &
+        # OMNIA_AUTH_ANONYMOUS_ROLE=editor allows E2E tests to perform write operations
+        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_AUTH_ANONYMOUS_ROLE=editor npm run start &
         # Wait for server to be ready
         npx wait-on http://localhost:3000 --timeout 60000
         # Run Playwright tests with coverage collection
@@ -636,12 +637,13 @@ jobs:
           wc -l dashboard/coverage/lcov.info
 
           # Check if E2E coverage exists and merge it
-          if [ -f dashboard/e2e-coverage/coverage/lcov.info ]; then
+          # Note: artifact upload flattens paths, so lcov.info ends up at dashboard/e2e-coverage/lcov.info
+          if [ -f dashboard/e2e-coverage/lcov.info ]; then
             echo "E2E coverage found, merging..."
-            wc -l dashboard/e2e-coverage/coverage/lcov.info
+            wc -l dashboard/e2e-coverage/lcov.info
 
             # Merge lcov files - append E2E coverage to unit test coverage
-            cat dashboard/e2e-coverage/coverage/lcov.info >> dashboard/coverage/lcov.info
+            cat dashboard/e2e-coverage/lcov.info >> dashboard/coverage/lcov.info
 
             echo "Merged dashboard coverage:"
             wc -l dashboard/coverage/lcov.info

@@ -1,0 +1,32 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "omnia.fullname" . }}-test-dashboard
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: wget
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          echo "Testing dashboard health endpoint..."
+          wget -qO- --timeout=10 http://{{ include "omnia.dashboard.fullname" . }}:{{ .Values.dashboard.service.port }}/api/health
+          echo ""
+          echo "Dashboard health check passed!"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        readOnlyRootFilesystem: true
+{{- end }}

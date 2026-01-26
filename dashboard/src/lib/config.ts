@@ -14,6 +14,10 @@ export interface RuntimeConfig {
   grafanaUrl: string;
   lokiEnabled: boolean;
   tempoEnabled: boolean;
+  /** Whether enterprise features are deployed (enterprise.enabled=true in Helm) */
+  enterpriseEnabled: boolean;
+  /** Whether to hide enterprise features completely instead of showing upgrade prompts */
+  hideEnterprise: boolean;
 }
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -57,6 +61,8 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
         grafanaUrl: "",
         lokiEnabled: false,
         tempoEnabled: false,
+        enterpriseEnabled: false,
+        hideEnterprise: false,
       };
     })
     .finally(() => {

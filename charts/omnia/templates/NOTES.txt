@@ -49,10 +49,10 @@ The Omnia operator is running and watching for:
   - PromptPacks
   - ToolRegistries
   - Providers
-{{- if .Values.arena.enabled }}
-  - ArenaSources
-  - ArenaConfigs
-  - ArenaJobs
+  - Workspaces
+{{- if .Values.enterprise.enabled }}
+  - ArenaSources (Enterprise)
+  - ArenaJobs (Enterprise)
 {{- end }}
 
 To verify the operator is running:
@@ -90,13 +90,13 @@ Default credentials: admin / {{ .Values.grafana.adminPassword }}
 
 {{- end }}
 
-{{- if .Values.arena.enabled }}
+{{- if .Values.enterprise.enabled }}
 
-=== Arena Fleet ===
+=== Enterprise Features ===
 
-Arena Fleet is enabled for distributed prompt testing and evaluation.
+Enterprise features are enabled including Arena for prompt testing and evaluation.
 
-To create your first Arena test:
+To create your first Arena evaluation:
 
 1. Define a source for your PromptKit bundles:
 
@@ -105,43 +105,34 @@ To create your first Arena test:
   kind: ArenaSource
   metadata:
     name: my-prompts
+    namespace: <workspace-namespace>
   spec:
     type: git
-    interval: 5m
     git:
       url: https://github.com/your-org/prompts
       ref:
         branch: main
   EOF
 
-2. Create a test configuration:
-
-  kubectl apply -f - <<EOF
-  apiVersion: omnia.altairalabs.ai/v1alpha1
-  kind: ArenaConfig
-  metadata:
-    name: my-config
-  spec:
-    sourceRef:
-      name: my-prompts
-    providers:
-      - name: my-provider
-  EOF
-
-3. Run a job:
+2. Run an evaluation job:
 
   kubectl apply -f - <<EOF
   apiVersion: omnia.altairalabs.ai/v1alpha1
   kind: ArenaJob
   metadata:
     name: my-eval
+    namespace: <workspace-namespace>
   spec:
-    configRef:
-      name: my-config
-    type: evaluation
+    sourceRef:
+      name: my-prompts
+    providerRef:
+      name: my-provider
+    scenarios:
+      - name: test-scenario
   EOF
 
-Worker image: {{ .Values.arena.worker.image.repository }}:{{ .Values.arena.worker.image.tag | default .Chart.AppVersion }}
+Arena controller: {{ include "omnia.fullname" . }}-arena-controller
+Worker image: {{ .Values.enterprise.arena.worker.image.repository }}:{{ .Values.enterprise.arena.worker.image.tag | default .Chart.AppVersion }}
 
 {{- end }}
 

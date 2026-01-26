@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arena-controller-manager
+  namespace: omnia-system
+  labels:
+    control-plane: arena-controller-manager
+    app.kubernetes.io/name: omnia-arena
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      control-plane: arena-controller-manager
+      app.kubernetes.io/name: omnia-arena
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: arena-controller-manager
+        app.kubernetes.io/name: omnia-arena
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - command:
+        - /arena-controller
+        args:
+          - --leader-elect
+          - --health-probe-bind-address=:8082
+        image: arena-controller:latest
+        name: manager
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+            ephemeral-storage: 100Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+            ephemeral-storage: 50Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: workspace-content
+          mountPath: /workspace-content
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: workspace-content
+        emptyDir:
+          sizeLimit: 1Gi
+      serviceAccountName: arena-controller-manager
+      # Service account is bound to RBAC via config/rbac/role_binding.yaml
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 10

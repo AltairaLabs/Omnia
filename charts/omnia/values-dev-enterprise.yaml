@@ -1,0 +1,94 @@
+# Development values with Enterprise features enabled
+# Use with: helm install omnia ./charts/omnia -f ./charts/omnia/values-dev.yaml -f ./charts/omnia/values-dev-enterprise.yaml
+# Or with Tilt: ENABLE_ENTERPRISE=true tilt up
+#
+# This configuration enables enterprise features:
+#   - Arena controller and CRDs (ArenaSource, ArenaJob)
+#   - Internal NFS server for ReadWriteMany workspace storage
+#   - Redis for Arena work queue
+#   - VS Code server for browsing workspace content
+#
+# WARNING: The internal NFS server is NOT suitable for production use.
+# For production, use cloud-native storage:
+#   - AWS: EFS (efs-sc storage class)
+#   - Azure: Azure Files (azurefile-csi-nfs storage class)
+#   - GCP: Filestore (filestore-sc storage class)
+
+# Enable dev mode license (DO NOT USE IN PRODUCTION)
+devMode: true
+
+# ============================================================================
+# Enterprise Features
+# ============================================================================
+
+enterprise:
+  enabled: true
+
+  arena:
+    queue:
+      type: redis
+      redis:
+        # Auto-configured to use Redis subchart
+        host: "omnia-redis-master"
+        port: 6379
+
+# ============================================================================
+# NFS Storage (for shared workspace content)
+# ============================================================================
+
+# Enable internal NFS server and CSI driver for development
+nfs:
+  server:
+    enabled: true
+    internal: true
+    # Uses cluster default storage class for NFS server's backing storage
+    storageClass: ""
+    size: 50Gi
+
+  # Enable NFS CSI driver for dynamic PVC creation
+  # The CSI driver mounts NFS from within pods, so DNS names work correctly
+  csiDriver:
+    enabled: true
+    storageClass:
+      name: omnia-nfs
+      reclaimPolicy: Delete
+      # Use a shared subDir so all PVCs see the same content
+      # Without this, each PVC gets its own isolated subdir
+      subDir: omnia-content
+
+# Workspace storage uses NFS for RWX access
+workspaces:
+  storage:
+    storageClass: "omnia-nfs"
+    accessModes:
+      - ReadWriteMany
+
+# Workspace content uses NFS storage class automatically when CSI driver is enabled
+workspaceContent:
+  enabled: true
+  persistence:
+    # Storage class is auto-set to omnia-nfs when nfs.csiDriver.enabled
+    accessModes:
+      - ReadWriteMany
+    size: 50Gi
+
+# ============================================================================
+# Redis (for Arena work queue)
+# ============================================================================
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+
+# ============================================================================
+# Development Tools
+# ============================================================================
+
+# Enable VS Code server for browsing workspace content
+vscodeServer:
+  enabled: true

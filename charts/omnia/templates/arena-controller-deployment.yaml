@@ -1,0 +1,112 @@
+{{- if .Values.enterprise.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnia.fullname" . }}-arena-controller
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: arena-controller
+spec:
+  replicas: {{ .Values.enterprise.arena.controller.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: arena-controller
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "omnia.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: arena-controller
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "omnia.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: manager
+          image: {{ .Values.enterprise.arena.controller.image.repository | default "ghcr.io/altairalabs/omnia-arena-controller" }}:{{ .Values.enterprise.arena.controller.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.enterprise.arena.controller.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - /arena-controller
+          args:
+            {{- if .Values.leaderElection.enabled }}
+            - --leader-elect
+            {{- end }}
+            - --health-probe-bind-address=:{{ .Values.probes.port }}
+            - --arena-worker-image={{ .Values.enterprise.arena.worker.image.repository | default "ghcr.io/altairalabs/omnia-arena-worker" }}:{{ .Values.enterprise.arena.worker.image.tag | default .Chart.AppVersion }}
+            - --arena-worker-image-pull-policy={{ .Values.enterprise.arena.worker.image.pullPolicy | default "IfNotPresent" }}
+            {{- if and .Values.enterprise.arena.queue (eq .Values.enterprise.arena.queue.type "redis") }}
+            {{- if .Values.redis.enabled }}
+            - --redis-addr={{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
+            {{- else if .Values.enterprise.arena.queue.redis.host }}
+            - --redis-addr={{ .Values.enterprise.arena.queue.redis.host }}:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
+            {{- end }}
+            {{- end }}
+            {{- if and (or .Values.nfs.server.enabled .Values.nfs.external.server) (not .Values.nfs.csiDriver.enabled) }}
+            - --nfs-server={{ include "omnia.nfsServer" . }}
+            - --nfs-path={{ include "omnia.nfsPath" . }}
+            {{- end }}
+            - --workspace-content-path=/tmp/arena-artifacts
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            {{- if .Values.metrics.secure }}
+            - --metrics-secure=true
+            {{- else }}
+            - --metrics-secure=false
+            {{- end }}
+            {{- end }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.probes.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.probes.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.enterprise.arena.controller.resources | default .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: arena-artifacts
+              mountPath: /tmp/arena-artifacts
+      volumes:
+        - name: arena-artifacts
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10
+{{- end }}

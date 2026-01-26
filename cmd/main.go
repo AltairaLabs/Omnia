@@ -21,8 +21,6 @@ import (
 	"flag"
 	"os"
 
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,16 +37,10 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
-	arenawebhook "github.com/altairalabs/omnia/internal/webhook"
-	"github.com/altairalabs/omnia/pkg/arena/aggregator"
-	"github.com/altairalabs/omnia/pkg/arena/queue"
-	"github.com/altairalabs/omnia/pkg/license"
 	// +kubebuilder:scaffold:imports
 )
 
 const logKeyController = "controller"
-
-// Error message constants.
 const errUnableToCreateController = "unable to create controller"
 
 var (
@@ -58,12 +50,10 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
-// nolint:gocyclo
 func main() {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -78,17 +68,9 @@ func main() {
 	var frameworkImagePullPolicy string
 	var tracingEnabled bool
 	var tracingEndpoint string
-	var arenaWorkerImage string
-	var arenaWorkerImagePullPolicy string
-	var workspaceContentPath string
-	var nfsServer string
-	var nfsPath string
-	var redisAddr string
-	var redisPassword string
-	var redisDB int
-	var enableLicenseWebhooks bool
-	var devMode bool
+	var workspaceStorageClass string
 	var tlsOpts []func(*tls.Config)
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&facadeImage, "facade-image", "",
@@ -103,31 +85,8 @@ func main() {
 		"Enable distributed tracing for agent runtime containers")
 	flag.StringVar(&tracingEndpoint, "tracing-endpoint", "",
 		"OTLP endpoint for traces (e.g., tempo.omnia-system.svc.cluster.local:4317)")
-	flag.StringVar(&arenaWorkerImage, "arena-worker-image", "",
-		"The image to use for Arena worker containers. If not set, defaults to ghcr.io/altairalabs/arena-worker:latest")
-	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
-		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent. Default: IfNotPresent")
-	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
-		"Base path for workspace content volumes. ArenaSource syncs content to filesystem. "+
-			"Structure: {path}/{workspace}/{namespace}/arena/{source-name}/.")
-	flag.StringVar(&nfsServer, "nfs-server", "",
-		"NFS server address for workspace content (e.g., nfs-server.namespace.svc.cluster.local). "+
-			"When set with --nfs-path, Arena workers mount NFS directly for shared content access.")
-	flag.StringVar(&nfsPath, "nfs-path", "",
-		"NFS export path for workspace content (e.g., /nfsshare). Used with --nfs-server.")
-	var workspaceStorageClass string
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
-	flag.StringVar(&redisAddr, "redis-addr", "",
-		"Redis server address for Arena work queue (e.g., redis:6379). If empty, Arena queue features are disabled.")
-	flag.StringVar(&redisPassword, "redis-password", "",
-		"Redis password for Arena work queue (optional).")
-	flag.IntVar(&redisDB, "redis-db", 0,
-		"Redis database number for Arena work queue.")
-	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
-		"Enable license validation webhooks for Arena resources.")
-	flag.BoolVar(&devMode, "dev-mode", false,
-		"Enable development mode with a full-featured license. DO NOT USE IN PRODUCTION.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -151,12 +110,6 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// if the enable-http2 flag is false (the default), http/2 should be disabled
-	// due to its vulnerabilities. More specifically, disabling http/2 will
-	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
-	// Rapid Reset CVEs. For more information see:
-	// - https://github.com/advisories/GHSA-qppj-fm5r-hxr3
-	// - https://github.com/advisories/GHSA-4374-p667-p6c8
 	disableHTTP2 := func(c *tls.Config) {
 		setupLog.Info("disabling http/2")
 		c.NextProtos = []string{"http/1.1"}
@@ -166,7 +119,6 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	// Initial webhook TLS options
 	webhookTLSOpts := tlsOpts
 	webhookServerOptions := webhook.Options{
 		TLSOpts: webhookTLSOpts,
@@ -183,10 +135,6 @@ func main() {
 
 	webhookServer := webhook.NewServer(webhookServerOptions)
 
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
-	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.4/pkg/metrics/server
-	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: secureMetrics,
@@ -194,21 +142,9 @@ func main() {
 	}
 
 	if secureMetrics {
-		// FilterProvider is used to protect the metrics endpoint with authn/authz.
-		// These configurations ensure that only authorized users and service accounts
-		// can access the metrics endpoint. The RBAC are configured in 'config/rbac/kustomization.yaml'. More info:
-		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.4/pkg/metrics/filters#WithAuthenticationAndAuthorization
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
-	// If the certificate is not specified, controller-runtime will automatically
-	// generate self-signed certificates for the metrics server. While convenient for development and testing,
-	// this setup is not recommended for production.
-	//
-	// To enable certManager, uncomment the following in your kustomization configs:
-	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to generate and use certificates
-	// managed by cert-manager for the metrics server.
-	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
 	if len(metricsCertPath) > 0 {
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
@@ -225,17 +161,6 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "4416a20d.altairalabs.ai",
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -279,82 +204,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Arena Fleet controllers
-	// Create license validator for Arena Fleet
-	var licenseValidator *license.Validator
-	validatorOpts := []license.ValidatorOption{}
-	if devMode {
-		setupLog.Info("WARNING: Running in dev mode with full-featured license. DO NOT USE IN PRODUCTION.")
-		validatorOpts = append(validatorOpts, license.WithDevMode())
-	}
-	licenseValidator, err = license.NewValidator(mgr.GetClient(), validatorOpts...)
-	if err != nil {
-		setupLog.Error(err, "unable to create license validator")
-		os.Exit(1)
-	}
-
-	if err := (&controller.ArenaSourceReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		Recorder:             mgr.GetEventRecorderFor("arenasource-controller"),
-		WorkspaceContentPath: workspaceContentPath,
-		MaxVersionsPerSource: 10, // Default version retention
-		LicenseValidator:     licenseValidator,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaSource")
-		os.Exit(1)
-	}
-	// Create Redis queue and aggregator for arena job result tracking
-	var arenaAggregator *aggregator.Aggregator
-	if redisAddr != "" {
-		redisQueue, err := queue.NewRedisQueue(queue.RedisOptions{
-			Addr:     redisAddr,
-			Password: redisPassword,
-			DB:       redisDB,
-			Options:  queue.DefaultOptions(),
-		})
-		if err != nil {
-			setupLog.Error(err, "failed to create Redis queue for arena aggregator")
-			// Continue without aggregator - results won't be tracked but jobs will still run
-		} else {
-			arenaAggregator = aggregator.New(redisQueue)
-			setupLog.Info("arena result aggregator initialized", "redisAddr", redisAddr)
-		}
-	}
-
-	if err := (&controller.ArenaJobReconciler{
-		Client:                mgr.GetClient(),
-		Scheme:                mgr.GetScheme(),
-		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
-		WorkerImage:           arenaWorkerImage,
-		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
-		LicenseValidator:      licenseValidator,
-		Aggregator:            arenaAggregator,
-		// Redis configuration for lazy connection during reconciliation
-		RedisAddr:            redisAddr,
-		RedisPassword:        redisPassword,
-		RedisDB:              redisDB,
-		WorkspaceContentPath: workspaceContentPath, // If set, enables filesystem-based content access
-		NFSServer:            nfsServer,            // If set with NFSPath, workers mount NFS directly
-		NFSPath:              nfsPath,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
-		os.Exit(1)
-	}
-
-	// Setup license validation webhooks for Arena resources
-	if enableLicenseWebhooks {
-		if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaSource")
-			os.Exit(1)
-		}
-		if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaJob")
-			os.Exit(1)
-		}
-		setupLog.Info("license validation webhooks enabled")
-	}
-
 	// Workspace controller for multi-tenancy
 	if err := (&controller.WorkspaceReconciler{
 		Client:              mgr.GetClient(),
@@ -375,7 +224,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup signal handler once (can only be called once)
 	ctx := ctrl.SetupSignalHandler()
 
 	setupLog.Info("starting manager")

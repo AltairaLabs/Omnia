@@ -136,7 +136,7 @@ spec:
             - name: data
               mountPath: /data
             {{- end }}
-            {{- if .Values.workspaceContent.enabled }}
+            {{- if and .Values.enterprise.enabled .Values.workspaceContent.enabled }}
             - name: workspace-content
               mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
             {{- end }}
@@ -146,7 +146,7 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.dashboard.persistence.existingClaim | default (printf "%s-data" (include "omnia.dashboard.fullname" .)) }}
         {{- end }}
-        {{- if .Values.workspaceContent.enabled }}
+        {{- if and .Values.enterprise.enabled .Values.workspaceContent.enabled }}
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}

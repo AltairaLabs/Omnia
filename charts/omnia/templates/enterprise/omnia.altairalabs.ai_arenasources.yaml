@@ -1,0 +1,366 @@
+{{- if .Values.enterprise.enabled }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: arenasources.omnia.altairalabs.ai
+spec:
+  group: omnia.altairalabs.ai
+  names:
+    kind: ArenaSource
+    listKind: ArenaSourceList
+    plural: arenasources
+    singular: arenasource
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.artifact.revision
+      name: Revision
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ArenaSource is the Schema for the arenasources API.
+          It defines a source for fetching PromptKit bundles from external repositories.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ArenaSource
+            properties:
+              configMap:
+                description: |-
+                  configMap specifies the ConfigMap source.
+                  Required when type is "configmap".
+                properties:
+                  key:
+                    default: pack.json
+                    description: |-
+                      key is the key within the ConfigMap containing the bundle.
+                      Defaults to "pack.json".
+                    type: string
+                  name:
+                    description: name is the name of the ConfigMap.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              createVersionOnSync:
+                default: true
+                description: |-
+                  createVersionOnSync controls whether to create a new version after each successful sync.
+                  Versions are content-addressable using SHA256 hashes.
+                type: boolean
+              git:
+                description: |-
+                  git specifies the Git repository source.
+                  Required when type is "git".
+                properties:
+                  path:
+                    description: |-
+                      path is the path within the repository to the PromptKit bundle.
+                      Defaults to the repository root.
+                    type: string
+                  ref:
+                    description: |-
+                      ref specifies the Git reference to checkout.
+                      If not specified, defaults to the default branch.
+                    properties:
+                      branch:
+                        description: branch to checkout. Takes precedence over tag
+                          and commit.
+                        type: string
+                      commit:
+                        description: commit SHA to checkout. Used when branch and
+                          tag are not specified.
+                        type: string
+                      tag:
+                        description: tag to checkout. Takes precedence over commit.
+                        type: string
+                    type: object
+                  secretRef:
+                    description: |-
+                      secretRef references a Secret containing Git credentials.
+                      The Secret should contain 'username' and 'password' keys for HTTPS,
+                      or 'identity' and 'known_hosts' keys for SSH.
+                    properties:
+                      key:
+                        description: |-
+                          key is the key within the Secret to use.
+                          If not specified, the provider-appropriate key is used:
+                          - ANTHROPIC_API_KEY for Claude
+                          - OPENAI_API_KEY for OpenAI
+                          - GEMINI_API_KEY for Gemini
+                        type: string
+                      name:
+                        description: name is the name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  url:
+                    description: |-
+                      url is the Git repository URL.
+                      Supports https:// and ssh:// protocols.
+                    pattern: ^(https?|ssh)://.*$
+                    type: string
+                required:
+                - url
+                type: object
+              interval:
+                description: |-
+                  interval is the reconciliation interval for polling the source.
+                  Format: duration string (e.g., "5m", "1h").
+                pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                type: string
+              oci:
+                description: |-
+                  oci specifies the OCI registry source.
+                  Required when type is "oci".
+                properties:
+                  insecure:
+                    default: false
+                    description: insecure allows connecting to registries without
+                      TLS verification.
+                    type: boolean
+                  secretRef:
+                    description: |-
+                      secretRef references a Secret containing registry credentials.
+                      The Secret should contain 'username' and 'password' keys,
+                      or a '.dockerconfigjson' key for Docker config format.
+                    properties:
+                      key:
+                        description: |-
+                          key is the key within the Secret to use.
+                          If not specified, the provider-appropriate key is used:
+                          - ANTHROPIC_API_KEY for Claude
+                          - OPENAI_API_KEY for OpenAI
+                          - GEMINI_API_KEY for Gemini
+                        type: string
+                      name:
+                        description: name is the name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  url:
+                    description: |-
+                      url is the OCI artifact URL.
+                      Format: oci://registry/repository:tag or oci://registry/repository@digest
+                    pattern: ^oci://.*$
+                    type: string
+                required:
+                - url
+                type: object
+              suspend:
+                default: false
+                description: suspend prevents the source from being reconciled when
+                  set to true.
+                type: boolean
+              targetPath:
+                description: |-
+                  targetPath specifies where to sync content within the workspace content volume.
+                  The path is relative to the workspace content root: /workspace-content/{workspace}/default/
+                  If not specified, defaults to "arena/{source-name}".
+                type: string
+              timeout:
+                default: 60s
+                description: |-
+                  timeout is the timeout for fetch operations.
+                  Defaults to 60s.
+                type: string
+              type:
+                description: type specifies the source type.
+                enum:
+                - git
+                - oci
+                - configmap
+                type: string
+            required:
+            - interval
+            - type
+            type: object
+          status:
+            description: status defines the observed state of ArenaSource
+            properties:
+              artifact:
+                description: artifact contains information about the last successfully
+                  fetched artifact.
+                properties:
+                  checksum:
+                    description: checksum is the SHA256 checksum of the artifact.
+                    type: string
+                  contentPath:
+                    description: |-
+                      contentPath is the filesystem path where the content is synced.
+                      This is relative to the workspace content volume root.
+                      Workers can mount the PVC directly and access content at this path.
+                    type: string
+                  lastUpdateTime:
+                    description: lastUpdateTime is when the artifact was last updated.
+                    format: date-time
+                    type: string
+                  revision:
+                    description: |-
+                      revision is the source revision identifier.
+                      For Git: branch@sha1:commit or tag@sha1:commit
+                      For OCI: tag@sha256:digest
+                      For ConfigMap: resourceVersion
+                    type: string
+                  size:
+                    description: size is the size of the artifact in bytes.
+                    format: int64
+                    type: integer
+                  url:
+                    description: |-
+                      url is the URL where the artifact can be downloaded (legacy tar.gz serving).
+                      Deprecated: Use contentPath for filesystem-based access.
+                    type: string
+                  version:
+                    description: |-
+                      version is the content-addressable version hash (SHA256).
+                      This identifies a specific immutable snapshot of the synced content.
+                    type: string
+                required:
+                - lastUpdateTime
+                - revision
+                type: object
+              conditions:
+                description: conditions represent the current state of the ArenaSource
+                  resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              headVersion:
+                description: |-
+                  headVersion points to the current "latest" version.
+                  This is updated atomically after a successful sync.
+                type: string
+              lastFetchTime:
+                description: lastFetchTime is the timestamp of the last fetch attempt.
+                format: date-time
+                type: string
+              lastSyncRevision:
+                description: |-
+                  lastSyncRevision is the revision from the source that was last synced.
+                  Used to detect when re-sync is needed.
+                type: string
+              lastVersionCreated:
+                description: lastVersionCreated is the version hash created on the
+                  last successful sync.
+                type: string
+              nextFetchTime:
+                description: nextFetchTime is the scheduled time for the next fetch.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              phase:
+                description: phase represents the current lifecycle phase of the ArenaSource.
+                enum:
+                - Pending
+                - Ready
+                - Fetching
+                - Error
+                type: string
+              versionCount:
+                description: versionCount is the number of versions currently stored.
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}

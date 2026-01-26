@@ -4,9 +4,13 @@ description: "Complete reference for the ArenaJob custom resource"
 sidebar:
   order: 12
   badge:
-    text: Arena
-    variant: note
+    text: Enterprise
+    variant: tip
 ---
+
+:::note[Enterprise Feature]
+ArenaJob is an enterprise feature. The CRD is only installed when `enterprise.enabled=true` in your Helm values. See [Installing a License](/how-to/install-license/) for details.
+:::
 
 The ArenaJob custom resource defines a test execution that runs scenarios from an ArenaConfig. It supports evaluation, load testing, and data generation job types with configurable workers and output destinations.
 

@@ -58,6 +58,12 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./cmd/..." paths="./internal/..." paths="./pkg/..."
 
+.PHONY: manifests-all
+manifests-all: manifests manifests-ee ## Generate manifests for core and enterprise.
+
+.PHONY: generate-all
+generate-all: generate generate-ee ## Generate code for core and enterprise.
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -150,12 +156,33 @@ test-e2e-junit: setup-test-e2e manifests generate fmt vet ## Run e2e tests with 
 		-ginkgo.junit-report=e2e-results.xml \
 		-ginkgo.show-node-events \
 		-ginkgo.poll-progress-after=30s \
+		$(if $(GINKGO_LABEL_FILTER),-ginkgo.label-filter=$(GINKGO_LABEL_FILTER),) \
 		-timeout 20m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+# Arena E2E environment (mirrors Tilt enterprise setup in Kind)
+ARENA_E2E_CLUSTER ?= omnia-arena-e2e
+
+.PHONY: setup-arena-e2e
+setup-arena-e2e: ## Set up Arena E2E environment in Kind (mirrors Tilt enterprise setup)
+	KIND_CLUSTER=$(ARENA_E2E_CLUSTER) ./scripts/setup-arena-e2e.sh
+
+.PHONY: setup-arena-e2e-skip-build
+setup-arena-e2e-skip-build: ## Set up Arena E2E environment without rebuilding images
+	KIND_CLUSTER=$(ARENA_E2E_CLUSTER) SKIP_BUILD=true ./scripts/setup-arena-e2e.sh
+
+.PHONY: cleanup-arena-e2e
+cleanup-arena-e2e: ## Tear down Arena E2E environment
+	KIND_CLUSTER=$(ARENA_E2E_CLUSTER) ./scripts/setup-arena-e2e.sh clean
+
+.PHONY: test-arena-e2e
+test-arena-e2e: setup-arena-e2e ## Run Arena E2E tests in dedicated Kind cluster
+	kubectl config use-context kind-$(ARENA_E2E_CLUSTER)
+	ENABLE_ARENA_E2E=true E2E_SKIP_CLEANUP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter=arena -timeout 30m
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -265,8 +292,21 @@ docker-build-dashboard: ## Build docker image for the dashboard
 	$(CONTAINER_TOOL) build -t ${DASHBOARD_IMG} ./dashboard
 
 .PHONY: sync-chart-crds
-sync-chart-crds: manifests ## Sync CRDs from config/crd/bases to charts/omnia/crds
-	cp config/crd/bases/*.yaml charts/omnia/crds/
+sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to charts/omnia/crds
+	# Copy core CRDs (excluding enterprise arena CRDs which are conditional templates)
+	cp config/crd/bases/omnia.altairalabs.ai_agentruntimes.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_promptpacks.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_providers.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_toolregistries.yaml charts/omnia/crds/
+	cp config/crd/bases/omnia.altairalabs.ai_workspaces.yaml charts/omnia/crds/
+	# Sync enterprise CRDs to conditional templates (wrapped with enterprise.enabled check)
+	@echo "Syncing enterprise CRDs to conditional templates..."
+	@for f in config/crd/bases/omnia.altairalabs.ai_arena*.yaml; do \
+		base=$$(basename $$f); \
+		echo "{{- if .Values.enterprise.enabled }}" > charts/omnia/templates/enterprise/$$base; \
+		cat $$f >> charts/omnia/templates/enterprise/$$base; \
+		echo "{{- end }}" >> charts/omnia/templates/enterprise/$$base; \
+	done
 
 .PHONY: generate-dashboard-types
 generate-dashboard-types: sync-chart-crds ## Generate TypeScript types from CRD schemas
@@ -310,6 +350,35 @@ build: manifests generate fmt vet ## Build manager binary.
 .PHONY: build-runtime
 build-runtime: fmt vet ## Build runtime binary.
 	go build -o bin/runtime ./cmd/runtime
+
+##@ Enterprise Edition
+
+.PHONY: build-arena-controller
+build-arena-controller: manifests-ee generate-ee fmt vet ## Build Arena controller binary (Enterprise).
+	go build -o bin/arena-controller ./ee/cmd/omnia-arena-controller
+
+.PHONY: build-arena-worker
+build-arena-worker: fmt vet ## Build Arena worker binary (Enterprise).
+	go build -o bin/arena-worker ./ee/cmd/arena-worker
+
+.PHONY: manifests-ee
+manifests-ee: controller-gen ## Generate CRDs for Enterprise types.
+	"$(CONTROLLER_GEN)" rbac:roleName=arena-manager-role crd webhook paths="./ee/api/..." paths="./ee/internal/..." output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=ee/config/rbac
+
+.PHONY: generate-ee
+generate-ee: controller-gen ## Generate code for Enterprise types.
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate-ee.go.txt" paths="./ee/api/..." paths="./ee/internal/..." paths="./ee/pkg/..."
+
+.PHONY: docker-build-arena-controller
+docker-build-arena-controller: ## Build docker image for Arena controller (Enterprise).
+	$(CONTAINER_TOOL) build -t arena-controller:latest -f ee/Dockerfile.arena-controller .
+
+.PHONY: docker-build-arena-worker
+docker-build-arena-worker: ## Build docker image for Arena worker (Enterprise).
+	$(CONTAINER_TOOL) build -t arena-worker:latest -f ee/Dockerfile.arena-worker .
+
+.PHONY: build-all
+build-all: build build-runtime build-arena-controller build-arena-worker ## Build all binaries (core + enterprise).
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -383,6 +452,18 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+
+# Enterprise controller image for deploy-ee
+ARENA_IMG ?= arena-controller:latest
+
+.PHONY: deploy-ee
+deploy-ee: manifests-ee kustomize ## Deploy Arena controller (Enterprise) to the K8s cluster specified in ~/.kube/config.
+	cd ee/config/manager && "$(KUSTOMIZE)" edit set image arena-controller=${ARENA_IMG}
+	"$(KUSTOMIZE)" build ee/config/default | "$(KUBECTL)" apply -f -
+
+.PHONY: undeploy-ee
+undeploy-ee: kustomize ## Undeploy Arena controller (Enterprise) from the K8s cluster. Call with ignore-not-found=true to ignore resource not found errors.
+	"$(KUSTOMIZE)" build ee/config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Dependencies
 

@@ -19,5 +19,13 @@
 !pkg/license/keys/
 !pkg/license/keys/public.pem
 
+# Re-include enterprise (ee/) directory - use multiple patterns to ensure all subdirs are included
+!ee/
+!ee/*
+!ee/*/*
+!ee/*/*/*
+!ee/*/*/*/*
+!ee/*/*/*/*/*
+
 # Re-include local PromptKit source for development builds
 !promptkit-local/**

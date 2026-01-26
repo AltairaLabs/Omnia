@@ -1,0 +1,41 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "omnia.fullname" . }}-controller-manager
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller-manager
+{{- end }}
+---
+{{- if and .Values.dashboard.enabled .Values.dashboard.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "omnia.dashboard.fullname" . }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.dashboard.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.dashboard.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.dashboard.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.dashboard.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+{{- end }}

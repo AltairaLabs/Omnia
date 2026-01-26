@@ -26,14 +26,15 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -89,6 +90,14 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// These permissions are required for workspace RoleBinding creation (RBAC escalation prevention)
+// The controller must have all permissions it grants via workspace ClusterRoles
+// +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
+// +kubebuilder:rbac:groups=core,resources=pods;pods/log,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments;replicasets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes;promptpacks;toolregistries;providers;arenasources;arenajobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/status;arenajobs/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -654,6 +663,9 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 	return nil
 }
 
+// reconcileStorage checks and updates workspace storage status.
+// PVC creation is handled lazily by Arena controllers when Arena CRDs are created.
+// This function only tracks the status of existing PVCs and handles cleanup.
 func (r *WorkspaceReconciler) reconcileStorage(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
 	namespaceName := workspace.Spec.Namespace.Name
 	// Use namespace name (not workspace name) so ArenaJob can derive PVC name from namespace
@@ -667,7 +679,9 @@ func (r *WorkspaceReconciler) reconcileStorage(ctx context.Context, workspace *o
 		return r.deleteStoragePVCIfExists(ctx, workspace, pvcName, namespaceName)
 	}
 
-	return r.ensureStoragePVC(ctx, workspace, pvcName, namespaceName)
+	// Storage is enabled - check if PVC exists and update status
+	// PVC will be created lazily by Arena controllers when needed
+	return r.updateStorageStatusIfPVCExists(ctx, workspace, pvcName, namespaceName)
 }
 
 // deleteStoragePVCIfExists deletes the workspace storage PVC if it exists and is managed by us.
@@ -691,113 +705,25 @@ func (r *WorkspaceReconciler) deleteStoragePVCIfExists(
 	return nil
 }
 
-// ensureStoragePVC creates or updates the workspace storage PVC.
-func (r *WorkspaceReconciler) ensureStoragePVC(
-	ctx context.Context,
-	workspace *omniav1alpha1.Workspace,
-	pvcName, namespaceName string,
-) error {
-	log := logf.FromContext(ctx)
-	storageConfig := workspace.Spec.Storage
-
-	quantity, accessModes, err := r.parseStorageConfig(storageConfig)
-	if err != nil {
-		return err
-	}
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: namespaceName,
-		},
-	}
-
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, pvc, func() error {
-		return r.mutatePVC(pvc, workspace, storageConfig, quantity, accessModes)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create/update PVC %s: %w", pvcName, err)
-	}
-
-	if result != controllerutil.OperationResultNone {
-		log.Info("PVC reconciled", "name", pvcName, "namespace", namespaceName, "result", result)
-	}
-
-	return r.updateStorageStatus(ctx, workspace, pvcName, namespaceName)
-}
-
-// parseStorageConfig parses the storage configuration and returns quantity and access modes.
-func (r *WorkspaceReconciler) parseStorageConfig(
-	config *omniav1alpha1.WorkspaceStorageConfig,
-) (resource.Quantity, []corev1.PersistentVolumeAccessMode, error) {
-	storageSize := "10Gi"
-	if config.Size != "" {
-		storageSize = config.Size
-	}
-
-	accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
-	if len(config.AccessModes) > 0 {
-		accessModes = make([]corev1.PersistentVolumeAccessMode, 0, len(config.AccessModes))
-		for _, mode := range config.AccessModes {
-			accessModes = append(accessModes, corev1.PersistentVolumeAccessMode(mode))
-		}
-	}
-
-	quantity, err := resource.ParseQuantity(storageSize)
-	if err != nil {
-		return resource.Quantity{}, nil, fmt.Errorf("invalid storage size %s: %w", storageSize, err)
-	}
-
-	return quantity, accessModes, nil
-}
-
-// mutatePVC sets or updates the PVC spec and labels.
-func (r *WorkspaceReconciler) mutatePVC(
-	pvc *corev1.PersistentVolumeClaim,
-	workspace *omniav1alpha1.Workspace,
-	storageConfig *omniav1alpha1.WorkspaceStorageConfig,
-	quantity resource.Quantity,
-	accessModes []corev1.PersistentVolumeAccessMode,
-) error {
-	if pvc.CreationTimestamp.IsZero() {
-		pvc.Labels = map[string]string{
-			labelWorkspace:        workspace.Name,
-			labelWorkspaceManaged: labelValueTrue,
-		}
-		pvc.Spec = corev1.PersistentVolumeClaimSpec{
-			AccessModes: accessModes,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: quantity,
-				},
-			},
-		}
-		// Use explicit storage class from workspace spec, or fall back to controller default
-		storageClass := storageConfig.StorageClass
-		if storageClass == "" {
-			storageClass = r.DefaultStorageClass
-		}
-		if storageClass != "" {
-			pvc.Spec.StorageClassName = &storageClass
-		}
-	} else {
-		if pvc.Labels == nil {
-			pvc.Labels = make(map[string]string)
-		}
-		pvc.Labels[labelWorkspace] = workspace.Name
-		pvc.Labels[labelWorkspaceManaged] = labelValueTrue
-	}
-	return nil
-}
-
-// updateStorageStatus updates the workspace status with PVC information.
-func (r *WorkspaceReconciler) updateStorageStatus(
+// updateStorageStatusIfPVCExists updates the workspace status with PVC information if the PVC exists.
+// If the PVC doesn't exist yet, it sets the status to indicate it will be created on-demand.
+func (r *WorkspaceReconciler) updateStorageStatusIfPVCExists(
 	ctx context.Context,
 	workspace *omniav1alpha1.Workspace,
 	pvcName, namespaceName string,
 ) error {
 	pvc := &corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: namespaceName}, pvc); err != nil {
+	err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: namespaceName}, pvc)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// PVC doesn't exist yet - will be created on-demand by Arena controllers
+			workspace.Status.Storage = &omniav1alpha1.WorkspaceStorageStatus{
+				PVCName:   pvcName,
+				Phase:     "Pending",
+				MountPath: fmt.Sprintf("/workspace-content/%s/%s", workspace.Name, namespaceName),
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to get PVC status: %w", err)
 	}
 
@@ -1099,6 +1025,31 @@ func sanitizeName(name string) string {
 func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&omniav1alpha1.Workspace{}).
+		// Watch PVCs with the workspace label to trigger reconciliation when PVC phase changes
+		Watches(
+			&corev1.PersistentVolumeClaim{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPVCToWorkspace),
+		).
 		Named("workspace").
 		Complete(r)
+}
+
+// mapPVCToWorkspace maps a PVC event to a Workspace reconciliation request
+// if the PVC has the workspace label.
+func (r *WorkspaceReconciler) mapPVCToWorkspace(_ context.Context, obj client.Object) []reconcile.Request {
+	pvc, ok := obj.(*corev1.PersistentVolumeClaim)
+	if !ok {
+		return nil
+	}
+
+	// Check if this PVC is managed by workspace controller
+	workspaceName := pvc.Labels[labelWorkspace]
+	if workspaceName == "" {
+		return nil
+	}
+
+	// Workspace is cluster-scoped, so we only need the name
+	return []reconcile.Request{
+		{NamespacedName: client.ObjectKey{Name: workspaceName}},
+	}
 }

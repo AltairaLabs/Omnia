@@ -32,7 +32,11 @@ kind create cluster --name omnia-dev
 ### 2. Start Tilt
 
 ```bash
+# Core features only
 tilt up
+
+# Or with enterprise features (Arena Fleet, NFS, Redis)
+ENABLE_ENTERPRISE=true tilt up
 ```
 
 This will:
@@ -41,10 +45,32 @@ This will:
 - Set up port forwards automatically
 - Watch for file changes and sync them instantly
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_ENTERPRISE` | `false` | Enable enterprise features (Arena controller, NFS, Redis) |
+| `ENABLE_DEMO` | `false` | Enable demo mode with Ollama + OPA |
+| `ENABLE_OBSERVABILITY` | `true` | Enable Prometheus/Grafana |
+| `ENABLE_FULL_STACK` | `false` | Enable Istio, Loki, Alloy |
+| `ENABLE_LANGCHAIN` | `false` | Enable LangChain runtime demos |
+
 ### 3. Access the Services
 
 - **Dashboard**: http://localhost:3000
 - **Operator API**: http://localhost:8082
+- **Grafana** (if observability enabled): http://localhost:3001
+- **VS Code Server** (enterprise only): http://localhost:8888
+
+### Enterprise Features
+
+When `ENABLE_ENTERPRISE=true`, the following additional components are deployed:
+
+- **Arena Controller**: Manages ArenaSource and ArenaJob resources
+- **Arena Worker**: Executes evaluation jobs
+- **NFS Server**: Shared workspace storage (development only)
+- **Redis**: Work queue for Arena job distribution
+- **VS Code Server**: Browse/edit workspace content at http://localhost:8888
 
 ### 4. Develop with Hot Reload
 

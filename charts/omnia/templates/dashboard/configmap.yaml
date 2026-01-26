@@ -37,6 +37,12 @@ data:
   NEXT_PUBLIC_LOKI_ENABLED: {{ .Values.loki.enabled | quote }}
   NEXT_PUBLIC_TEMPO_ENABLED: {{ .Values.tempo.enabled | quote }}
 
+  # Enterprise features configuration
+  # enterpriseEnabled: Whether enterprise CRDs/controllers are deployed
+  # hideEnterprise: Whether to hide enterprise features completely (vs showing upgrade prompts)
+  NEXT_PUBLIC_ENTERPRISE_ENABLED: {{ .Values.enterprise.enabled | quote }}
+  NEXT_PUBLIC_HIDE_ENTERPRISE: {{ .Values.dashboard.hideEnterprise | default false | quote }}
+
   # WebSocket proxy URL (for agent console connections)
   {{- if .Values.dashboard.wsProxy.url }}
   NEXT_PUBLIC_WS_PROXY_URL: {{ .Values.dashboard.wsProxy.url | quote }}

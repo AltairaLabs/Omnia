@@ -965,7 +965,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 	})
 
 	Context("When storage is enabled", func() {
-		It("should create PVC for workspace storage", func() {
+		It("should set storage status to Pending when PVC does not exist yet", func() {
 			By("creating a workspace with storage enabled")
 			enabled := true
 			workspace := &omniav1alpha1.Workspace{
@@ -995,107 +995,87 @@ var _ = Describe("Workspace Controller Storage", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying PVC was created")
+			By("verifying PVC was NOT created (lazy creation by Arena)")
 			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
 			pvc := &corev1.PersistentVolumeClaim{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{
+			err = k8sClient.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
 				Namespace: namespaceName,
-			}, pvc)).To(Succeed())
+			}, pvc)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
 
-			Expect(pvc.Labels[labelWorkspace]).To(Equal(workspaceKey.Name))
-			Expect(pvc.Labels[labelWorkspaceManaged]).To(Equal("true"))
-
-			By("verifying storage status is set")
+			By("verifying storage status shows Pending")
 			updated := &omniav1alpha1.Workspace{}
 			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
 			Expect(updated.Status.Storage).NotTo(BeNil())
 			Expect(updated.Status.Storage.PVCName).To(Equal(pvcName))
+			Expect(updated.Status.Storage.Phase).To(Equal("Pending"))
 		})
 
-		It("should use custom storage class when specified", func() {
-			By("creating a workspace with storage class")
+		It("should track existing PVC status if PVC already exists", func() {
+			By("creating a workspace with storage enabled")
 			enabled := true
 			workspace := &omniav1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: workspaceKey.Name,
 				},
 				Spec: omniav1alpha1.WorkspaceSpec{
-					DisplayName: "Storage Class Test",
+					DisplayName: "Storage Test Workspace",
 					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
 					Namespace: omniav1alpha1.NamespaceConfig{
 						Name:   namespaceName,
 						Create: true,
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled:      &enabled,
-						Size:         "10Gi",
-						StorageClass: "standard",
+						Enabled: &enabled,
+						Size:    "5Gi",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
 
-			By("reconciling the workspace")
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			By("reconciling to create namespace and complete setup")
+			// Multiple reconciles needed for complete workspace setup
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
-
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying PVC has storage class")
+			By("verifying namespace exists")
+			ns := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: namespaceName}, ns)).To(Succeed())
+
+			By("creating PVC manually (simulating Arena controller)")
 			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
-			pvc := &corev1.PersistentVolumeClaim{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{
-				Name:      pvcName,
-				Namespace: namespaceName,
-			}, pvc)).To(Succeed())
-
-			Expect(pvc.Spec.StorageClassName).NotTo(BeNil())
-			Expect(*pvc.Spec.StorageClassName).To(Equal("standard"))
-		})
-
-		It("should use custom access modes when specified", func() {
-			By("creating a workspace with custom access modes")
-			enabled := true
-			workspace := &omniav1alpha1.Workspace{
+			pvc := &corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: workspaceKey.Name,
-				},
-				Spec: omniav1alpha1.WorkspaceSpec{
-					DisplayName: "Access Modes Test",
-					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
-					Namespace: omniav1alpha1.NamespaceConfig{
-						Name:   namespaceName,
-						Create: true,
+					Name:      pvcName,
+					Namespace: namespaceName,
+					Labels: map[string]string{
+						labelWorkspace:        workspaceKey.Name,
+						labelWorkspaceManaged: "true",
 					},
-					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled:     &enabled,
-						Size:        "10Gi",
-						AccessModes: []string{"ReadWriteOnce"},
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("5Gi"),
+						},
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+			Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
 
-			By("reconciling the workspace")
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
-
+			By("reconciling again")
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying PVC has correct access modes")
-			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
-			pvc := &corev1.PersistentVolumeClaim{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{
-				Name:      pvcName,
-				Namespace: namespaceName,
-			}, pvc)).To(Succeed())
-
-			Expect(pvc.Spec.AccessModes).To(ContainElement(corev1.ReadWriteOnce))
+			By("verifying storage status tracks existing PVC")
+			updated := &omniav1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, workspaceKey, updated)).To(Succeed())
+			Expect(updated.Status.Storage).NotTo(BeNil())
+			Expect(updated.Status.Storage.PVCName).To(Equal(pvcName))
 		})
 	})
 
@@ -1135,7 +1115,7 @@ var _ = Describe("Workspace Controller Storage", func() {
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 
-		It("should delete PVC when storage is disabled", func() {
+		It("should delete PVC when storage is disabled and PVC exists", func() {
 			By("creating a workspace with storage enabled")
 			enabled := true
 			workspace := &omniav1alpha1.Workspace{
@@ -1157,21 +1137,38 @@ var _ = Describe("Workspace Controller Storage", func() {
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
 
-			By("reconciling to create PVC")
-			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			By("reconciling to create namespace and complete setup")
+			// Multiple reconciles needed for complete workspace setup
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).NotTo(BeZero())
-
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying PVC exists")
+			By("verifying namespace exists")
+			ns := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: namespaceName}, ns)).To(Succeed())
+
+			By("creating PVC manually (simulating Arena controller)")
 			pvcName := fmt.Sprintf("workspace-%s-content", namespaceName)
-			pvc := &corev1.PersistentVolumeClaim{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{
-				Name:      pvcName,
-				Namespace: namespaceName,
-			}, pvc)).To(Succeed())
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      pvcName,
+					Namespace: namespaceName,
+					Labels: map[string]string{
+						labelWorkspace:        workspaceKey.Name,
+						labelWorkspaceManaged: "true",
+					},
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("5Gi"),
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
 
 			By("disabling storage")
 			updated := &omniav1alpha1.Workspace{}
@@ -1195,93 +1192,6 @@ var _ = Describe("Workspace Controller Storage", func() {
 		})
 	})
 
-	Context("Helper function tests", func() {
-		It("should parse storage config with defaults", func() {
-			config := &omniav1alpha1.WorkspaceStorageConfig{}
-			quantity, accessModes, err := reconciler.parseStorageConfig(config)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(quantity.String()).To(Equal("10Gi"))
-			Expect(accessModes).To(ContainElement(corev1.ReadWriteMany))
-		})
-
-		It("should parse storage config with custom values", func() {
-			config := &omniav1alpha1.WorkspaceStorageConfig{
-				Size:        "20Gi",
-				AccessModes: []string{"ReadWriteOnce", "ReadOnlyMany"},
-			}
-			quantity, accessModes, err := reconciler.parseStorageConfig(config)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(quantity.String()).To(Equal("20Gi"))
-			Expect(accessModes).To(HaveLen(2))
-		})
-
-		It("should return error for invalid storage size", func() {
-			config := &omniav1alpha1.WorkspaceStorageConfig{
-				Size: "invalid-size",
-			}
-			_, _, err := reconciler.parseStorageConfig(config)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("invalid storage size"))
-		})
-
-		It("should mutate PVC on creation", func() {
-			enabled := true
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-ws",
-				},
-				Spec: omniav1alpha1.WorkspaceSpec{
-					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled:      &enabled,
-						StorageClass: "fast-storage",
-					},
-				},
-			}
-			pvc := &corev1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pvc",
-				},
-			}
-			quantity, _ := resource.ParseQuantity("10Gi")
-			accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
-
-			err := reconciler.mutatePVC(pvc, workspace, workspace.Spec.Storage, quantity, accessModes)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvc.Labels[labelWorkspace]).To(Equal("test-ws"))
-			Expect(pvc.Labels[labelWorkspaceManaged]).To(Equal("true"))
-			Expect(pvc.Spec.StorageClassName).NotTo(BeNil())
-			Expect(*pvc.Spec.StorageClassName).To(Equal("fast-storage"))
-		})
-
-		It("should mutate existing PVC labels only", func() {
-			enabled := true
-			workspace := &omniav1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-ws",
-				},
-				Spec: omniav1alpha1.WorkspaceSpec{
-					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: &enabled,
-					},
-				},
-			}
-			pvc := &corev1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "test-pvc",
-					CreationTimestamp: metav1.Now(),
-				},
-			}
-			quantity, _ := resource.ParseQuantity("10Gi")
-			accessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}
-
-			err := reconciler.mutatePVC(pvc, workspace, workspace.Spec.Storage, quantity, accessModes)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvc.Labels[labelWorkspace]).To(Equal("test-ws"))
-			Expect(pvc.Labels[labelWorkspaceManaged]).To(Equal("true"))
-			// Spec should not be changed for existing PVC
-			Expect(pvc.Spec.StorageClassName).To(BeNil())
-		})
-	})
 })
 
 var _ = Describe("Workspace Controller Helpers", func() {

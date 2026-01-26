@@ -44,9 +44,6 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-          - --arena-worker-image=example.com/arena-worker:v0.0.1
-          - --arena-worker-image-pull-policy=IfNotPresent
-          - --redis-addr=redis.test-arena.svc.cluster.local:6379
         image: controller:latest
         name: manager
         securityContext:

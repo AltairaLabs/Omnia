@@ -123,6 +123,8 @@ func isKubernetesFlag(flag string) bool {
 		"namespace": true,
 		"name":      true,
 		"selector":  true,
+		// wget flags from test pod commands
+		"timeout": true,
 	}
 	return k8sFlags[flag]
 }

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: omnia
     app.kubernetes.io/managed-by: kustomize
     omnia.altairalabs.ai/rbac: workspace
-  name: omnia-workspace-viewer
+  name: workspace-viewer
 rules:
   # Read-only on all Omnia resources
   - apiGroups:
