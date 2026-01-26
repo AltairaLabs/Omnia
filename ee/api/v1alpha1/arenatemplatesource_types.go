@@ -227,10 +227,6 @@ type ArenaTemplateSourceStatus struct {
 	// +optional
 	TemplateCount int `json:"templateCount,omitempty"`
 
-	// templates contains metadata for all discovered templates.
-	// +optional
-	Templates []TemplateMetadata `json:"templates,omitempty"`
-
 	// lastFetchTime is the timestamp of the last fetch attempt.
 	// +optional
 	LastFetchTime *metav1.Time `json:"lastFetchTime,omitempty"`

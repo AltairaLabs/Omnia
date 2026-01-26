@@ -247,12 +247,9 @@ func TestArenaTemplateSourceStatus(t *testing.T) {
 		Phase:              ArenaTemplateSourcePhaseReady,
 		ObservedGeneration: 5,
 		TemplateCount:      3,
-		Templates: []TemplateMetadata{
-			{Name: "template-1", Path: "templates/template-1"},
-		},
-		LastFetchTime: &now,
-		HeadVersion:   "abc123",
-		Message:       "Successfully synced",
+		LastFetchTime:      &now,
+		HeadVersion:        "abc123",
+		Message:            "Successfully synced",
 	}
 
 	if status.Phase != ArenaTemplateSourcePhaseReady {
@@ -260,9 +257,6 @@ func TestArenaTemplateSourceStatus(t *testing.T) {
 	}
 	if status.TemplateCount != 3 {
 		t.Errorf("TemplateCount = %d, want %d", status.TemplateCount, 3)
-	}
-	if len(status.Templates) != 1 {
-		t.Errorf("len(Templates) = %d, want %d", len(status.Templates), 1)
 	}
 	if status.HeadVersion != "abc123" {
 		t.Errorf("HeadVersion = %q, want %q", status.HeadVersion, "abc123")

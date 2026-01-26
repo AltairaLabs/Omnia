@@ -12,6 +12,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -226,8 +227,12 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 			LastUpdateTime: metav1.Now(),
 		}
 
-		// Update template metadata in status
-		source.Status.Templates = r.convertTemplatesToCRD(result.templates)
+		// Write template index file for fast API lookups
+		if err := r.writeTemplateIndex(contentPath, result.templates); err != nil {
+			log.Error(err, "Failed to write template index")
+			r.handleFetchError(ctx, source, fmt.Errorf("failed to write template index: %w", err))
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 		source.Status.TemplateCount = len(result.templates)
 		source.Status.HeadVersion = version
 		source.Status.Phase = omniav1alpha1.ArenaTemplateSourcePhaseReady
@@ -768,54 +773,23 @@ func (r *ArenaTemplateSourceReconciler) gcOldVersions(workspacePath string) erro
 	return nil
 }
 
-// convertTemplatesToCRD converts internal template types to CRD types.
-func (r *ArenaTemplateSourceReconciler) convertTemplatesToCRD(templates []arenaTemplate.Template) []omniav1alpha1.TemplateMetadata {
-	result := make([]omniav1alpha1.TemplateMetadata, len(templates))
-	for i, t := range templates {
-		result[i] = omniav1alpha1.TemplateMetadata{
-			Name:        t.Name,
-			Version:     t.Version,
-			DisplayName: t.DisplayName,
-			Description: t.Description,
-			Category:    t.Category,
-			Tags:        t.Tags,
-			Variables:   r.convertVariablesToCRD(t.Variables),
-			Files:       r.convertFilesToCRD(t.Files),
-			Path:        t.Path,
-		}
-	}
-	return result
-}
+// TemplateIndexFileName is the name of the template index file written to artifact storage.
+const TemplateIndexFileName = "_template-index.json"
 
-// convertVariablesToCRD converts internal variable types to CRD types.
-func (r *ArenaTemplateSourceReconciler) convertVariablesToCRD(variables []arenaTemplate.Variable) []omniav1alpha1.TemplateVariable {
-	result := make([]omniav1alpha1.TemplateVariable, len(variables))
-	for i, v := range variables {
-		result[i] = omniav1alpha1.TemplateVariable{
-			Name:        v.Name,
-			Type:        omniav1alpha1.TemplateVariableType(v.Type),
-			Description: v.Description,
-			Required:    v.Required,
-			Default:     v.Default,
-			Pattern:     v.Pattern,
-			Options:     v.Options,
-			Min:         v.Min,
-			Max:         v.Max,
-		}
-	}
-	return result
-}
+// writeTemplateIndex writes the template index to a JSON file for fast API lookups.
+func (r *ArenaTemplateSourceReconciler) writeTemplateIndex(contentPath string, templates []arenaTemplate.Template) error {
+	indexPath := filepath.Join(contentPath, TemplateIndexFileName)
 
-// convertFilesToCRD converts internal file spec types to CRD types.
-func (r *ArenaTemplateSourceReconciler) convertFilesToCRD(files []arenaTemplate.FileSpec) []omniav1alpha1.TemplateFileSpec {
-	result := make([]omniav1alpha1.TemplateFileSpec, len(files))
-	for i, f := range files {
-		result[i] = omniav1alpha1.TemplateFileSpec{
-			Path:   f.Path,
-			Render: f.Render,
-		}
+	data, err := json.MarshalIndent(templates, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal template index: %w", err)
 	}
-	return result
+
+	if err := os.WriteFile(indexPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write template index file: %w", err)
+	}
+
+	return nil
 }
 
 // handleFetchError handles errors during fetch operations.

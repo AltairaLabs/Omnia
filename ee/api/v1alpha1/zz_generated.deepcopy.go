@@ -421,13 +421,6 @@ func (in *ArenaTemplateSourceStatus) DeepCopyInto(out *ArenaTemplateSourceStatus
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Templates != nil {
-		in, out := &in.Templates, &out.Templates
-		*out = make([]TemplateMetadata, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.LastFetchTime != nil {
 		in, out := &in.LastFetchTime, &out.LastFetchTime
 		*out = (*in).DeepCopy()

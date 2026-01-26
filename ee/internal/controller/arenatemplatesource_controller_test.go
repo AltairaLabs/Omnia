@@ -10,6 +10,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -235,9 +236,14 @@ spec:
 		})
 	})
 
-	Context("Helper functions", func() {
-		It("should convert templates to CRD format correctly", func() {
+	Context("Template index", func() {
+		It("should write template index file correctly", func() {
 			reconciler := &ArenaTemplateSourceReconciler{}
+
+			// Create temp directory for content
+			contentDir, err := os.MkdirTemp("", "content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(contentDir) }()
 
 			templates := []arenaTemplate.Template{
 				{
@@ -261,90 +267,49 @@ spec:
 				},
 			}
 
-			crdTemplates := reconciler.convertTemplatesToCRD(templates)
+			err = reconciler.writeTemplateIndex(contentDir, templates)
+			Expect(err).NotTo(HaveOccurred())
 
-			Expect(crdTemplates).To(HaveLen(1))
-			Expect(crdTemplates[0].Name).To(Equal("test-template"))
-			Expect(crdTemplates[0].Version).To(Equal("1.0.0"))
-			Expect(crdTemplates[0].DisplayName).To(Equal("Test Template"))
-			Expect(crdTemplates[0].Category).To(Equal("test"))
-			Expect(crdTemplates[0].Tags).To(Equal([]string{"test", "example"}))
-			Expect(crdTemplates[0].Variables).To(HaveLen(1))
-			Expect(crdTemplates[0].Variables[0].Name).To(Equal("projectName"))
-			Expect(crdTemplates[0].Variables[0].Required).To(BeTrue())
-			Expect(crdTemplates[0].Files).To(HaveLen(1))
-			Expect(crdTemplates[0].Files[0].Path).To(Equal("config.yaml"))
-			Expect(crdTemplates[0].Files[0].Render).To(BeTrue())
+			// Verify index file was created
+			indexPath := filepath.Join(contentDir, TemplateIndexFileName)
+			Expect(indexPath).To(BeAnExistingFile())
+
+			// Read and verify contents
+			data, err := os.ReadFile(indexPath)
+			Expect(err).NotTo(HaveOccurred())
+
+			var loadedTemplates []arenaTemplate.Template
+			err = json.Unmarshal(data, &loadedTemplates)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(loadedTemplates).To(HaveLen(1))
+			Expect(loadedTemplates[0].Name).To(Equal("test-template"))
+			Expect(loadedTemplates[0].Version).To(Equal("1.0.0"))
+			Expect(loadedTemplates[0].DisplayName).To(Equal("Test Template"))
+			Expect(loadedTemplates[0].Category).To(Equal("test"))
+			Expect(loadedTemplates[0].Tags).To(Equal([]string{"test", "example"}))
 		})
 
-		It("should convert variables to CRD format correctly", func() {
+		It("should handle empty template list", func() {
 			reconciler := &ArenaTemplateSourceReconciler{}
 
-			variables := []arenaTemplate.Variable{
-				{
-					Name:        "name",
-					Type:        arenaTemplate.VariableTypeString,
-					Description: "Project name",
-					Required:    true,
-					Pattern:     "^[a-z]+$",
-				},
-				{
-					Name:    "count",
-					Type:    arenaTemplate.VariableTypeNumber,
-					Default: "10",
-					Min:     "1",
-					Max:     "100",
-				},
-				{
-					Name:    "type",
-					Type:    arenaTemplate.VariableTypeEnum,
-					Options: []string{"a", "b", "c"},
-					Default: "a",
-				},
-				{
-					Name:    "enabled",
-					Type:    arenaTemplate.VariableTypeBoolean,
-					Default: "true",
-				},
-			}
+			contentDir, err := os.MkdirTemp("", "content-*")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = os.RemoveAll(contentDir) }()
 
-			crdVars := reconciler.convertVariablesToCRD(variables)
+			err = reconciler.writeTemplateIndex(contentDir, []arenaTemplate.Template{})
+			Expect(err).NotTo(HaveOccurred())
 
-			Expect(crdVars).To(HaveLen(4))
+			indexPath := filepath.Join(contentDir, TemplateIndexFileName)
+			Expect(indexPath).To(BeAnExistingFile())
 
-			Expect(crdVars[0].Name).To(Equal("name"))
-			Expect(crdVars[0].Type).To(Equal(omniav1alpha1.TemplateVariableTypeString))
-			Expect(crdVars[0].Required).To(BeTrue())
-			Expect(crdVars[0].Pattern).To(Equal("^[a-z]+$"))
+			data, err := os.ReadFile(indexPath)
+			Expect(err).NotTo(HaveOccurred())
 
-			Expect(crdVars[1].Name).To(Equal("count"))
-			Expect(crdVars[1].Type).To(Equal(omniav1alpha1.TemplateVariableTypeNumber))
-			Expect(crdVars[1].Min).To(Equal("1"))
-			Expect(crdVars[1].Max).To(Equal("100"))
-
-			Expect(crdVars[2].Name).To(Equal("type"))
-			Expect(crdVars[2].Type).To(Equal(omniav1alpha1.TemplateVariableTypeEnum))
-			Expect(crdVars[2].Options).To(Equal([]string{"a", "b", "c"}))
-
-			Expect(crdVars[3].Name).To(Equal("enabled"))
-			Expect(crdVars[3].Type).To(Equal(omniav1alpha1.TemplateVariableTypeBoolean))
-		})
-
-		It("should convert file specs to CRD format correctly", func() {
-			reconciler := &ArenaTemplateSourceReconciler{}
-
-			files := []arenaTemplate.FileSpec{
-				{Path: "config.yaml", Render: true},
-				{Path: "data/", Render: false},
-			}
-
-			crdFiles := reconciler.convertFilesToCRD(files)
-
-			Expect(crdFiles).To(HaveLen(2))
-			Expect(crdFiles[0].Path).To(Equal("config.yaml"))
-			Expect(crdFiles[0].Render).To(BeTrue())
-			Expect(crdFiles[1].Path).To(Equal("data/"))
-			Expect(crdFiles[1].Render).To(BeFalse())
+			var loadedTemplates []arenaTemplate.Template
+			err = json.Unmarshal(data, &loadedTemplates)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(loadedTemplates).To(BeEmpty())
 		})
 	})
 
