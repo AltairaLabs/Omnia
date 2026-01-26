@@ -15,6 +15,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  CheckCircle2,
 } from "lucide-react";
 import type { ArenaProject } from "@/types/arena-project";
 import { cn } from "@/lib/utils";
@@ -25,11 +26,13 @@ interface ProjectToolbarProps {
   hasUnsavedChanges: boolean;
   saving: boolean;
   loading: boolean;
+  validating?: boolean;
   onProjectSelect: (projectId: string) => void;
   onSave: () => void;
   onNewProject: () => void;
   onRefresh: () => void;
   onDeleteProject?: () => void;
+  onValidateAll?: () => void;
   className?: string;
 }
 
@@ -43,11 +46,13 @@ export function ProjectToolbar({
   hasUnsavedChanges,
   saving,
   loading,
+  validating = false,
   onProjectSelect,
   onSave,
   onNewProject,
   onRefresh,
   onDeleteProject,
+  onValidateAll,
   className,
 }: ProjectToolbarProps) {
   return (
@@ -105,6 +110,25 @@ export function ProjectToolbar({
         {/* Unsaved indicator */}
         {hasUnsavedChanges && (
           <span className="text-xs text-amber-500 mr-2">Unsaved changes</span>
+        )}
+
+        {/* Validate All button */}
+        {currentProject && onValidateAll && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onValidateAll}
+            disabled={loading || validating}
+            className="gap-2"
+            title="Validate all files in the project"
+          >
+            {validating ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            Validate All
+          </Button>
         )}
 
         {/* Save button */}

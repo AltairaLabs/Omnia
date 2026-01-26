@@ -38,6 +38,7 @@ export default defineConfig({
         "src/components/arena/editor-tabs.tsx", // Editor tab bar
         "src/components/arena/yaml-editor.tsx", // Monaco YAML editor
         "src/components/arena/lsp-yaml-editor.tsx", // Monaco LSP YAML editor
+        "src/components/arena/validation-results-dialog.tsx", // Validation results dialog
         "src/components/console/**",
         "src/components/cost/**",
         "src/components/credentials/**",

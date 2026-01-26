@@ -17,6 +17,10 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { getRuntimeConfig } from "@/lib/config";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
+import {
+  ValidationResultsDialog,
+  type ValidationResults,
+} from "./validation-results-dialog";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
@@ -75,7 +79,10 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   // Local state for dialogs
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
   const [deleteProjectDialogOpen, setDeleteProjectDialogOpen] = useState(false);
+  const [validationDialogOpen, setValidationDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationResults, setValidationResults] = useState<ValidationResults | null>(null);
 
   // Fetch project data when project ID changes
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -267,6 +274,87 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     }
   }, [currentProject, deleteProject, refetchProjects, toast]);
 
+  // Handle validate all
+  const handleValidateAll = useCallback(async () => {
+    if (!currentProject || !workspace) return;
+
+    setValidating(true);
+    try {
+      // Get the LSP service URL from runtime config
+      const config = await getRuntimeConfig();
+
+      // Construct the LSP API URL
+      // The LSP service runs alongside the dashboard, proxied through the WebSocket proxy
+      let apiUrl: string;
+      if (config.wsProxyUrl) {
+        const url = new URL(config.wsProxyUrl);
+        url.pathname = "/api/compile";
+        apiUrl = url.toString().replace(/^ws/, "http");
+      } else {
+        // Fallback: construct URL from current host with default port
+        const protocol = window.location.protocol;
+        const hostname = window.location.hostname;
+        apiUrl = `${protocol}//${hostname}:3002/api/compile`;
+      }
+
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workspace: workspace,
+          project: currentProject.id,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Validation failed: ${response.statusText}`);
+      }
+
+      const results: ValidationResults = await response.json();
+      setValidationResults(results);
+      setValidationDialogOpen(true);
+
+      // Show toast summary
+      if (results.valid) {
+        toast({
+          title: "Validation Passed",
+          description: `All ${results.summary?.totalFiles || 0} files are valid`,
+        });
+      } else {
+        toast({
+          title: "Validation Failed",
+          description: `${results.summary?.errorCount || 0} errors, ${results.summary?.warningCount || 0} warnings`,
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Validation Error",
+        description: err instanceof Error ? err.message : "Failed to validate project",
+        variant: "destructive",
+      });
+    } finally {
+      setValidating(false);
+    }
+  }, [currentProject, workspace, toast]);
+
+  // Handle jumping to a file from validation results
+  const handleValidationFileClick = useCallback(
+    async (path: string, _line: number) => {
+      if (!currentProject) return;
+
+      // Open the file
+      const fileName = path.split("/").pop() || path;
+      await handleSelectFile(path, fileName);
+
+      // Line navigation would need editor ref - for now just open the file
+      setValidationDialogOpen(false);
+    },
+    [currentProject, handleSelectFile]
+  );
+
   // Handle refresh
   const handleRefresh = useCallback(async () => {
     await refetchProjects();
@@ -286,11 +374,13 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         hasUnsavedChanges={hasUnsavedChanges}
         saving={saving}
         loading={isLoading}
+        validating={validating}
         onProjectSelect={handleProjectSelect}
         onSave={handleSave}
         onNewProject={() => setNewProjectDialogOpen(true)}
         onRefresh={handleRefresh}
         onDeleteProject={currentProject ? () => setDeleteProjectDialogOpen(true) : undefined}
+        onValidateAll={lspEnabled ? handleValidateAll : undefined}
       />
 
       {/* Main content */}
@@ -392,6 +482,13 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
           onConfirm={handleDeleteProject}
         />
       )}
+
+      <ValidationResultsDialog
+        open={validationDialogOpen}
+        onOpenChange={setValidationDialogOpen}
+        results={validationResults}
+        onFileClick={handleValidationFileClick}
+      />
     </div>
   );
 }
