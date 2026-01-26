@@ -174,28 +174,28 @@ jobs:
         go-version-file: go.mod
 
     - name: Download Go unit coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       continue-on-error: true
       with:
         name: go-unit-coverage
         path: coverage-unit
 
     - name: Download Go internal coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       continue-on-error: true
       with:
         name: go-internal-coverage
         path: coverage-internal
 
     - name: Download Dashboard unit coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       continue-on-error: true
       with:
         name: dashboard-unit-coverage
         path: dashboard/coverage
 
     - name: Download Dashboard E2E coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       continue-on-error: true
       with:
         name: dashboard-e2e-coverage
