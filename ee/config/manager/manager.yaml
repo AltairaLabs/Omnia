@@ -67,9 +67,11 @@ spec:
           mountPath: /workspace-content
       volumes:
       - name: tmp
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 100Mi
       - name: workspace-content
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 1Gi
       serviceAccountName: arena-controller-manager
       # Service account is bound to RBAC via config/rbac/role_binding.yaml
       automountServiceAccountToken: true
