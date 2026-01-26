@@ -10,6 +10,7 @@ rules:
   - configmaps
   - namespaces
   - persistentvolumeclaims
+  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -26,11 +27,15 @@ rules:
   - events
   verbs:
   - create
+  - get
+  - list
   - patch
+  - watch
 - apiGroups:
   - ""
   resources:
-  - secrets
+  - pods
+  - pods/log
   verbs:
   - get
   - list
@@ -39,6 +44,7 @@ rules:
   - apps
   resources:
   - deployments
+  - replicasets
   verbs:
   - create
   - delete
@@ -87,6 +93,8 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - agentruntimes
+  - arenajobs
+  - arenasources
   - promptpacks
   - providers
   - toolregistries
@@ -121,6 +129,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - omnia.altairalabs.ai
+  resources:
+  - arenajobs/status
+  - arenasources/status
+  verbs:
+  - get
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:

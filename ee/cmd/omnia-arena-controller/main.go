@@ -13,6 +13,7 @@ import (
 	"flag"
 	"os"
 
+	// Import all Kubernetes client auth plugins (e.g. GCP, Azure, OIDC) for kubeconfig authentication
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	corev1 "k8s.io/api/core/v1"
@@ -233,20 +234,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ArenaTemplateSource controller
-	if err := (&controller.ArenaTemplateSourceReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		Recorder:             mgr.GetEventRecorderFor("arenatemplatesource-controller"),
-		WorkspaceContentPath: workspaceContentPath,
-		MaxVersionsPerSource: 10,
-		LicenseValidator:     licenseValidator,
-		StorageManager:       storageManager,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaTemplateSource")
-		os.Exit(1)
-	}
-
 	// Setup license validation webhooks
 	if enableLicenseWebhooks {
 		if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
@@ -255,10 +242,6 @@ func main() {
 		}
 		if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaJob")
-			os.Exit(1)
-		}
-		if err := arenawebhook.SetupArenaTemplateSourceWebhookWithManager(mgr, licenseValidator); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaTemplateSource")
 			os.Exit(1)
 		}
 		setupLog.Info("license validation webhooks enabled")

@@ -77,6 +77,13 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	// Skip image building and cluster setup if running against a pre-deployed cluster
+	// This is useful for Arena E2E tests which use a Helm-deployed cluster
+	if os.Getenv("E2E_SKIP_SETUP") == "true" {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping BeforeSuite setup (E2E_SKIP_SETUP=true)\n")
+		return
+	}
+
 	// Build all images in parallel for faster setup
 	By("building all container images in parallel")
 	var wg sync.WaitGroup
@@ -109,11 +116,11 @@ var _ = BeforeSuite(func() {
 		results <- buildResult{name: "runtime", err: err}
 	}()
 
-	// Build arena-worker image
+	// Build arena-worker image (Enterprise)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cmd := exec.Command("docker", "build", "-t", arenaWorkerImage, "-f", "Dockerfile.arena-worker", ".")
+		cmd := exec.Command("docker", "build", "-t", arenaWorkerImage, "-f", "ee/Dockerfile.arena-worker", ".")
 		_, err := utils.Run(cmd)
 		results <- buildResult{name: "arena-worker", err: err}
 	}()

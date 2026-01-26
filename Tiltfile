@@ -275,7 +275,7 @@ if ENABLE_ENTERPRISE:
     docker_build(
         'omnia-arena-controller-dev',
         context='.',
-        dockerfile='./Dockerfile.arena-controller',
+        dockerfile='./ee/Dockerfile.arena-controller',
         only=[
             './ee/cmd/omnia-arena-controller',
             './ee/internal',
@@ -305,7 +305,7 @@ if ENABLE_ENTERPRISE:
     docker_build(
         'omnia-arena-worker-dev',
         context='.',
-        dockerfile='./Dockerfile.arena-worker',
+        dockerfile='./ee/Dockerfile.arena-worker',
         only=arena_worker_only,
     )
 

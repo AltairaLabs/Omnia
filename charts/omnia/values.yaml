@@ -98,31 +98,6 @@ enterprise:
         # -- Redis port
         port: 6379
 
-  # PromptKit LSP service for real-time YAML validation
-  promptkitLsp:
-    # -- Enable PromptKit LSP service
-    enabled: true
-    # -- Number of LSP service replicas
-    replicaCount: 2
-    image:
-      # -- LSP service image repository
-      repository: ghcr.io/altairalabs/omnia-promptkit-lsp
-      # -- LSP service image tag (defaults to Chart appVersion)
-      tag: ""
-      # -- LSP service image pull policy
-      pullPolicy: IfNotPresent
-    service:
-      # -- LSP service port
-      port: 8080
-    # -- Resource limits for LSP service
-    resources:
-      limits:
-        cpu: 200m
-        memory: 128Mi
-      requests:
-        cpu: 50m
-        memory: 32Mi
-
 # License configuration
 license:
   # -- License key (JWT). If set, creates the arena-license Secret.
