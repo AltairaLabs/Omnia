@@ -32,7 +32,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -88,6 +90,14 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// These permissions are required for workspace RoleBinding creation (RBAC escalation prevention)
+// The controller must have all permissions it grants via workspace ClusterRoles
+// +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
+// +kubebuilder:rbac:groups=core,resources=pods;pods/log,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments;replicasets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes;promptpacks;toolregistries;providers;arenasources;arenajobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/status;arenajobs/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -1015,6 +1025,31 @@ func sanitizeName(name string) string {
 func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&omniav1alpha1.Workspace{}).
+		// Watch PVCs with the workspace label to trigger reconciliation when PVC phase changes
+		Watches(
+			&corev1.PersistentVolumeClaim{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPVCToWorkspace),
+		).
 		Named("workspace").
 		Complete(r)
+}
+
+// mapPVCToWorkspace maps a PVC event to a Workspace reconciliation request
+// if the PVC has the workspace label.
+func (r *WorkspaceReconciler) mapPVCToWorkspace(_ context.Context, obj client.Object) []reconcile.Request {
+	pvc, ok := obj.(*corev1.PersistentVolumeClaim)
+	if !ok {
+		return nil
+	}
+
+	// Check if this PVC is managed by workspace controller
+	workspaceName := pvc.Labels[labelWorkspace]
+	if workspaceName == "" {
+		return nil
+	}
+
+	// Workspace is cluster-scoped, so we only need the name
+	return []reconcile.Request{
+		{NamespacedName: client.ObjectKey{Name: workspaceName}},
+	}
 }

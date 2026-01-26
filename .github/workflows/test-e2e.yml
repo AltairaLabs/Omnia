@@ -17,6 +17,8 @@ on:
       - 'pkg/**'
       - 'test/**'
       - 'hack/**'
+      - 'charts/**'
+      - 'scripts/setup-arena-e2e.sh'
       - '.github/workflows/test-e2e.yml'
   pull_request:
     paths:
@@ -32,6 +34,8 @@ on:
       - 'pkg/**'
       - 'test/**'
       - 'hack/**'
+      - 'charts/**'
+      - 'scripts/setup-arena-e2e.sh'
       - '.github/workflows/test-e2e.yml'
 
 permissions:
@@ -44,11 +48,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-e2e:
-    name: Operator E2E
+  # Core operator E2E tests (non-Arena tests)
+  test-e2e-core:
+    name: Core E2E
     runs-on: ubuntu-latest
-    # E2E tests are informational for PRs - they don't block merging
-    # They only block releases (enforced in release workflow)
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Clone the code
@@ -68,19 +71,17 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
-      - name: Running Test e2e
-        env:
-          ENABLE_ARENA_E2E: "true"
+      - name: Running Core E2E Tests
         run: |
-          # Skip go mod tidy - may fail on local replace directives for PromptKit
-          make test-e2e-junit
+          # Run only non-arena tests (excludes Label("arena"))
+          make test-e2e-junit GINKGO_LABEL_FILTER='!arena'
 
       - name: Publish Test Results
         uses: mikepenz/action-junit-report@v6
         if: always()
         with:
           report_paths: 'e2e-results.xml'
-          check_name: 'E2E Test Results'
+          check_name: 'Core E2E Test Results'
           detailed_summary: true
           include_passed: true
 
@@ -88,15 +89,109 @@ jobs:
         if: always()
         run: |
           if [ -f e2e-results.xml ]; then
-            echo "## ⏱️ E2E Test Timing" >> $GITHUB_STEP_SUMMARY
+            echo "## ⏱️ Core E2E Test Timing" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            # Extract test names and times from JUnit XML
             echo "| Test | Duration |" >> $GITHUB_STEP_SUMMARY
             echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
             grep -oP 'name="[^"]*"[^>]*time="[^"]*"' e2e-results.xml | \
               sed 's/name="\([^"]*\)".*time="\([^"]*\)"/| \1 | \2s |/' >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            # Total time
             TOTAL=$(grep -oP 'time="[^"]*"' e2e-results.xml | head -1 | grep -oP '[0-9.]+')
             echo "**Total Duration: ${TOTAL}s**" >> $GITHUB_STEP_SUMMARY
           fi
+
+  # Arena E2E tests (enterprise features)
+  test-e2e-arena:
+    name: Arena E2E
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install the latest version of kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Verify installations
+        run: |
+          kind version
+          helm version
+
+      - name: Set up Arena E2E environment
+        run: |
+          # Use the setup script that mirrors Tilt enterprise setup
+          ./scripts/setup-arena-e2e.sh
+        env:
+          KIND_CLUSTER: omnia-arena-e2e
+
+      - name: Running Arena E2E Tests
+        run: |
+          kubectl config use-context kind-omnia-arena-e2e
+          E2E_SKIP_SETUP=true ENABLE_ARENA_E2E=true E2E_SKIP_CLEANUP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+            -ginkgo.label-filter=arena \
+            -ginkgo.junit-report=arena-e2e-results.xml \
+            -ginkgo.show-node-events \
+            -ginkgo.poll-progress-after=30s \
+            -timeout 30m
+
+      - name: Dump debug info on failure
+        if: failure()
+        run: |
+          echo "=== Pods in omnia-system ==="
+          kubectl get pods -n omnia-system -o wide || true
+          echo ""
+          echo "=== Pods in test-arena ==="
+          kubectl get pods -n test-arena -o wide || true
+          echo ""
+          echo "=== Events in omnia-system ==="
+          kubectl get events -n omnia-system --sort-by=.lastTimestamp | tail -50 || true
+          echo ""
+          echo "=== Controller logs ==="
+          kubectl logs -n omnia-system -l control-plane=controller-manager --tail=100 || true
+          echo ""
+          echo "=== Arena controller logs ==="
+          kubectl logs -n omnia-system -l control-plane=arena-controller-manager --tail=100 || true
+
+      - name: Publish Test Results
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          report_paths: 'arena-e2e-results.xml'
+          check_name: 'Arena E2E Test Results'
+          detailed_summary: true
+          include_passed: true
+
+      - name: Generate Timing Summary
+        if: always()
+        run: |
+          if [ -f arena-e2e-results.xml ]; then
+            echo "## ⏱️ Arena E2E Test Timing" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Test | Duration |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
+            grep -oP 'name="[^"]*"[^>]*time="[^"]*"' arena-e2e-results.xml | \
+              sed 's/name="\([^"]*\)".*time="\([^"]*\)"/| \1 | \2s |/' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            TOTAL=$(grep -oP 'time="[^"]*"' arena-e2e-results.xml | head -1 | grep -oP '[0-9.]+')
+            echo "**Total Duration: ${TOTAL}s**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          ./scripts/setup-arena-e2e.sh clean || true
+        env:
+          KIND_CLUSTER: omnia-arena-e2e
