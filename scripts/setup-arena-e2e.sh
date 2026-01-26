@@ -86,6 +86,9 @@ wait
 log_info "Images loaded"
 
 # Deploy with Helm (matching Tilt enterprise setup - NO --wait flag)
+log_info "Building Helm dependencies..."
+helm dependency build charts/omnia
+
 log_info "Deploying via Helm..."
 
 helm upgrade --install omnia charts/omnia \
