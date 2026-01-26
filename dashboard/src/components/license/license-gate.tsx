@@ -306,7 +306,7 @@ export interface EnterpriseGateProps {
  * </EnterpriseGate>
  * ```
  */
-export function EnterpriseGate({ children, fallback, featureName = "This feature" }: EnterpriseGateProps) {
+export function EnterpriseGate({ children, fallback, featureName = "This feature" }: Readonly<EnterpriseGateProps>) {
   const { enterpriseEnabled, hideEnterprise, loading } = useEnterpriseConfig();
 
   // While loading, render nothing to avoid flash
@@ -342,7 +342,7 @@ export interface EnterpriseUpgradePageProps {
 /**
  * Full-page upgrade prompt for enterprise features.
  */
-export function EnterpriseUpgradePage({ featureName }: EnterpriseUpgradePageProps) {
+export function EnterpriseUpgradePage({ featureName }: Readonly<EnterpriseUpgradePageProps>) {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8">
       <div className="max-w-md text-center space-y-6">

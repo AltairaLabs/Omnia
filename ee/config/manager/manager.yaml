@@ -55,9 +55,11 @@ spec:
           limits:
             cpu: 500m
             memory: 256Mi
+            ephemeral-storage: 100Mi
           requests:
             cpu: 100m
             memory: 64Mi
+            ephemeral-storage: 50Mi
         volumeMounts:
         - name: tmp
           mountPath: /tmp
@@ -69,4 +71,6 @@ spec:
       - name: workspace-content
         emptyDir: {}
       serviceAccountName: arena-controller-manager
+      # Service account is bound to RBAC via config/rbac/role_binding.yaml
+      automountServiceAccountToken: true
       terminationGracePeriodSeconds: 10

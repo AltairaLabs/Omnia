@@ -6,9 +6,11 @@ ARG TARGETARCH
 WORKDIR /workspace
 COPY go.mod go.mod
 COPY go.sum go.sum
+# Copy source code (build context contains only source files via .dockerignore)
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o arena-controller ./ee/cmd/omnia-arena-controller
+RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
+    go build -a -o arena-controller ./ee/cmd/omnia-arena-controller
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
