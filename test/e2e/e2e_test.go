@@ -600,11 +600,14 @@ spec:
 			Eventually(verifyDeploymentCreated, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying the AgentRuntime creates a Service")
-			cmd = exec.Command("kubectl", "get", "service", "test-agent",
-				"-n", agentsNamespace, "-o", "jsonpath={.spec.ports[0].port}")
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal("8080"))
+			verifyServiceCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "service", "test-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.spec.ports[0].port}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("8080"))
+			}
+			Eventually(verifyServiceCreated, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying the AgentRuntime status")
 			verifyAgentRuntimeStatus := func(g Gomega) {
