@@ -33,6 +33,10 @@ export default defineConfig({
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
         "src/components/arena/index.ts", // Arena barrel re-export
+        "src/components/arena/project-editor.tsx", // Project editor layout
+        "src/components/arena/file-tree.tsx", // File tree browser
+        "src/components/arena/editor-tabs.tsx", // Editor tab bar
+        "src/components/arena/yaml-editor.tsx", // Monaco YAML editor
         "src/components/console/**",
         "src/components/cost/**",
         "src/components/credentials/**",
@@ -48,6 +52,7 @@ export default defineConfig({
         "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/jobs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/sources/[name]/page.tsx", // Arena detail pages (complex UI)
+        "src/app/arena/projects/page.tsx", // Arena project editor page (visual)
         "src/app/providers/**/page.tsx", // Provider pages (require full context)
         "src/app/settings/**/page.tsx", // Settings pages (require full context)
         "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)

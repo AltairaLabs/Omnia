@@ -24,6 +24,7 @@ import {
   Loader2,
   Clock,
   Target,
+  FileCode,
 } from "lucide-react";
 import Link from "next/link";
 import type { ArenaJob } from "@/types/arena";
@@ -235,7 +236,7 @@ function ArenaContent() {
         </div>
 
         {/* Quick Links */}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           <Link
             href="/arena/sources"
             className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
@@ -244,6 +245,17 @@ function ArenaContent() {
             <h3 className="font-semibold mb-1">Manage Sources</h3>
             <p className="text-sm text-muted-foreground">
               Configure Git, OCI, or S3 sources containing arena configurations and scenarios
+            </p>
+          </Link>
+
+          <Link
+            href="/arena/projects"
+            className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
+          >
+            <FileCode className="h-8 w-8 mb-3 text-muted-foreground" />
+            <h3 className="font-semibold mb-1">Project Editor</h3>
+            <p className="text-sm text-muted-foreground">
+              Create and edit arena project configurations with the built-in YAML editor
             </p>
           </Link>
 

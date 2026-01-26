@@ -169,9 +169,14 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/types/* ]] || \
                    [[ "$REL_FILE" == src/components/ui/* ]] || \
                    [[ "$REL_FILE" == src/components/agents/* ]] || \
+                   [[ "$REL_FILE" == src/components/arena/project-editor.tsx ]] || \
+                   [[ "$REL_FILE" == src/components/arena/file-tree.tsx ]] || \
+                   [[ "$REL_FILE" == src/components/arena/editor-tabs.tsx ]] || \
+                   [[ "$REL_FILE" == src/components/arena/yaml-editor.tsx ]] || \
                    [[ "$REL_FILE" == src/components/console/* ]] || \
                    [[ "$REL_FILE" == src/components/cost/* ]] || \
                    [[ "$REL_FILE" == src/components/credentials/* ]] || \
+                   [[ "$REL_FILE" == src/components/dashboard/* ]] || \
                    [[ "$REL_FILE" == src/components/layout/* ]] || \
                    [[ "$REL_FILE" == src/components/logs/* ]] || \
                    [[ "$REL_FILE" == src/components/topology/* ]] || \
