@@ -13,16 +13,55 @@ package fetcher
 import (
 	"context"
 	"fmt"
+	"net"
+	gohttp "net/http"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v5/plumbing/transport/client"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 )
+
+var (
+	httpClientOnce sync.Once
+)
+
+// installHTTPClientWithTimeouts installs a custom HTTP client with explicit timeouts
+// to prevent git operations from hanging indefinitely in containerized environments.
+func installHTTPClientWithTimeouts() {
+	httpClientOnce.Do(func() {
+		// Create a custom HTTP transport with explicit timeouts
+		transport := &gohttp.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second, // Connection timeout
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConns:          10,
+			MaxIdleConnsPerHost:   5,
+		}
+
+		// Create a custom HTTP client with the transport
+		httpClient := &gohttp.Client{
+			Transport: transport,
+			Timeout:   5 * time.Minute, // Overall request timeout
+		}
+
+		// Install the custom client for both HTTP and HTTPS protocols
+		client.InstallProtocol("https", http.NewClient(httpClient))
+		client.InstallProtocol("http", http.NewClient(httpClient))
+	})
+}
 
 // GitRef specifies which ref to checkout from a Git repository.
 type GitRef struct {
@@ -80,6 +119,9 @@ type GitFetcher struct {
 
 // NewGitFetcher creates a new Git fetcher with the given configuration.
 func NewGitFetcher(config GitFetcherConfig) *GitFetcher {
+	// Install custom HTTP client with timeouts to prevent hanging in containerized environments
+	installHTTPClientWithTimeouts()
+
 	if config.Options.Timeout == 0 {
 		config.Options = DefaultOptions()
 	}

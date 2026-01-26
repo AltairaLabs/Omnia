@@ -156,12 +156,33 @@ test-e2e-junit: setup-test-e2e manifests generate fmt vet ## Run e2e tests with 
 		-ginkgo.junit-report=e2e-results.xml \
 		-ginkgo.show-node-events \
 		-ginkgo.poll-progress-after=30s \
+		$(if $(GINKGO_LABEL_FILTER),-ginkgo.label-filter=$(GINKGO_LABEL_FILTER),) \
 		-timeout 20m
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+# Arena E2E environment (mirrors Tilt enterprise setup in Kind)
+ARENA_E2E_CLUSTER ?= omnia-arena-e2e
+
+.PHONY: setup-arena-e2e
+setup-arena-e2e: ## Set up Arena E2E environment in Kind (mirrors Tilt enterprise setup)
+	KIND_CLUSTER=$(ARENA_E2E_CLUSTER) ./scripts/setup-arena-e2e.sh
+
+.PHONY: setup-arena-e2e-skip-build
+setup-arena-e2e-skip-build: ## Set up Arena E2E environment without rebuilding images
+	KIND_CLUSTER=$(ARENA_E2E_CLUSTER) SKIP_BUILD=true ./scripts/setup-arena-e2e.sh
+
+.PHONY: cleanup-arena-e2e
+cleanup-arena-e2e: ## Tear down Arena E2E environment
+	KIND_CLUSTER=$(ARENA_E2E_CLUSTER) ./scripts/setup-arena-e2e.sh clean
+
+.PHONY: test-arena-e2e
+test-arena-e2e: setup-arena-e2e ## Run Arena E2E tests in dedicated Kind cluster
+	kubectl config use-context kind-$(ARENA_E2E_CLUSTER)
+	ENABLE_ARENA_E2E=true E2E_SKIP_CLEANUP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter=arena -timeout 30m
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
