@@ -42,6 +42,7 @@ jobs:
               - 'config/**'
               - 'internal/**'
               - 'pkg/**'
+              - 'ee/**'
               - 'test/**'
               - 'hack/**'
               - 'dashboard/**'
@@ -56,6 +57,7 @@ jobs:
               - 'config/**'
               - 'internal/**'
               - 'pkg/**'
+              - 'ee/**'
               - 'test/**'
               - 'hack/**'
             dashboard:
