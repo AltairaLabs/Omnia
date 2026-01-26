@@ -185,6 +185,7 @@ export const CRD_PROMPTPACKS = "promptpacks";
 export const CRD_ARENA_SOURCES = "arenasources";
 export const CRD_ARENA_CONFIGS = "arenaconfigs";
 export const CRD_ARENA_JOBS = "arenajobs";
+export const CRD_ARENA_TEMPLATE_SOURCES = "arenatemplatesources";
 
 /**
  * CRD API version for Omnia resources.

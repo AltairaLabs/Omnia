@@ -45,6 +45,9 @@ func disableSubcharts() []string {
 // by the Helm chart are actually defined in the controller binary.
 // This prevents runtime failures due to undefined flags.
 func TestHelmChartFlagsMatchController(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// Build the controller binary
 	buildCmd := exec.Command("go", "build", "-o", "/tmp/omnia-controller-test", "../../cmd/main.go")
 	output, err := buildCmd.CombinedOutput()
@@ -132,6 +135,9 @@ func isKubernetesFlag(flag string) bool {
 // TestHelmChartRenders verifies the Helm chart renders without errors
 // with various configuration combinations.
 func TestHelmChartRenders(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	testCases := []struct {
 		name   string
 		values []string
