@@ -54,6 +54,7 @@ spec:
             - --nfs-server={{ include "omnia.nfsServer" . }}
             - --nfs-path={{ include "omnia.nfsPath" . }}
             {{- end }}
+            - --workspace-content-path=/tmp/arena-artifacts
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}

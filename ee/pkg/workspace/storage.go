@@ -59,7 +59,10 @@ func (m *StorageManager) EnsureWorkspacePVC(ctx context.Context, workspaceName s
 
 	// Check if storage is enabled
 	if !m.isStorageEnabled(workspace) {
-		return "", fmt.Errorf("workspace storage is not enabled for workspace %s", workspaceName)
+		// Storage not enabled is a valid state when using local storage (emptyDir)
+		// Return empty PVC name and no error - the caller can proceed without a PVC
+		log.V(1).Info("workspace storage not enabled, skipping PVC creation", "workspace", workspaceName)
+		return "", nil
 	}
 
 	// Parse storage configuration

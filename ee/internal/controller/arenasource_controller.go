@@ -97,9 +97,11 @@ type ArenaSourceReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources/finalizers,verbs=update
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -361,9 +363,21 @@ func (r *ArenaSourceReconciler) doFetchAsync(ctx context.Context, key types.Name
 		Spec: *spec,
 	}
 
+	// Use a temp directory within WorkspaceContentPath for two reasons:
+	// 1. The workspace volume is writable, while /tmp may be read-only in restricted security contexts
+	// 2. os.Rename is atomic when source and destination are on the same filesystem
+	workDir := os.TempDir()
+	if r.WorkspaceContentPath != "" {
+		workDir = filepath.Join(r.WorkspaceContentPath, ".tmp")
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			log.Error(err, "Failed to create workspace temp directory, falling back to system temp")
+			workDir = os.TempDir()
+		}
+	}
+
 	opts := fetcher.Options{
 		Timeout: timeout,
-		WorkDir: os.TempDir(),
+		WorkDir: workDir,
 	}
 
 	f, err := r.createFetcherFromSpec(ctx, source, opts)

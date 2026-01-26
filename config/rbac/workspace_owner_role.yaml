@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/name: omnia
     app.kubernetes.io/managed-by: kustomize
     omnia.altairalabs.ai/rbac: workspace
-  name: omnia-workspace-owner
+  name: workspace-owner
 rules:
   # Full access to Omnia resources
   - apiGroups:

@@ -108,7 +108,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 			wantStorageClass: "default-storage",
 		},
 		{
-			name: "returns error when storage is disabled",
+			name: "returns empty PVC name when storage is disabled",
 			workspace: &omniav1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-workspace",
@@ -123,11 +123,11 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 					},
 				},
 			},
-			wantErr:         true,
-			wantErrContains: "not enabled",
+			wantErr:     false,
+			wantPVCName: "", // Empty PVC name when storage is disabled
 		},
 		{
-			name: "returns error when storage is nil",
+			name: "returns empty PVC name when storage is nil",
 			workspace: &omniav1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-workspace",
@@ -140,8 +140,8 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 					Storage: nil,
 				},
 			},
-			wantErr:         true,
-			wantErrContains: "not enabled",
+			wantErr:     false,
+			wantPVCName: "", // Empty PVC name when storage is nil
 		},
 		{
 			name: "is idempotent when PVC already exists",
@@ -297,6 +297,11 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 
 			if pvcName != tt.wantPVCName {
 				t.Errorf("got PVC name %q, want %q", pvcName, tt.wantPVCName)
+			}
+
+			// Skip PVC verification if no PVC is expected (storage disabled)
+			if tt.wantPVCName == "" {
+				return
 			}
 
 			// Verify PVC was created
