@@ -4,10 +4,12 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
-COPY go.mod go.mod
-COPY go.sum go.sum
-# Copy source code (build context contains only source files via .dockerignore)
-COPY . .
+COPY go.mod go.sum ./
+# Copy only source directories needed for the build
+COPY api/ api/
+COPY ee/ ee/
+COPY pkg/ pkg/
+COPY internal/ internal/
 
 RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
     go build -a -o arena-worker ./ee/cmd/arena-worker
