@@ -26,7 +26,21 @@ vi.mock("@/lib/k8s/workspace-route-helpers", async (importOriginal) => {
 vi.mock("@/lib/k8s/crd-operations", () => ({
   getCrd: vi.fn(),
   extractK8sErrorMessage: vi.fn((err: unknown) => err instanceof Error ? err.message : "Unknown error"),
+  isForbiddenError: vi.fn(),
 }));
+
+const mockReadFile = vi.fn();
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs/promises")>();
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      readFile: mockReadFile,
+    },
+    readFile: mockReadFile,
+  };
+});
 
 const mockUser = {
   id: "testuser-id",
@@ -52,11 +66,13 @@ const mockTemplateSource = {
   spec: { type: "git", git: { url: "https://github.com/test/repo" } },
   status: {
     phase: "Ready",
-    templates: [
-      { name: "basic-chatbot", displayName: "Basic Chatbot", path: "templates/basic-chatbot" },
-    ],
+    templateCount: 1,
   },
 };
+
+const mockTemplates = [
+  { name: "basic-chatbot", displayName: "Basic Chatbot", path: "templates/basic-chatbot" },
+];
 
 function createMockRequest(): NextRequest {
   return new NextRequest(
@@ -118,7 +134,6 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates", () 
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
     vi.mocked(validateWorkspace).mockResolvedValue({
@@ -127,6 +142,7 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates", () 
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
+    mockReadFile.mockResolvedValue(JSON.stringify(mockTemplates));
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());

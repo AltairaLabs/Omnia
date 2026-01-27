@@ -196,6 +196,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ArenaTemplateSource controller
+	if err := (&controller.ArenaTemplateSourceReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Recorder:             mgr.GetEventRecorderFor("arenatemplatesource-controller"),
+		WorkspaceContentPath: workspaceContentPath,
+		MaxVersionsPerSource: 10,
+		LicenseValidator:     licenseValidator,
+		StorageManager:       storageManager,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaTemplateSource")
+		os.Exit(1)
+	}
+
 	// Create Redis queue and aggregator
 	var arenaAggregator *aggregator.Aggregator
 	if redisAddr != "" {

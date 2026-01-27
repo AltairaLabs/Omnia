@@ -29,7 +29,9 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "omnia.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        # Run as root to write to shared workspace-content PVC
+        runAsNonRoot: false
+        runAsUser: 0
       containers:
         - name: manager
           image: {{ .Values.enterprise.arena.controller.image.repository | default "ghcr.io/altairalabs/omnia-arena-controller" }}:{{ .Values.enterprise.arena.controller.image.tag | default .Chart.AppVersion }}
@@ -54,7 +56,7 @@ spec:
             - --nfs-server={{ include "omnia.nfsServer" . }}
             - --nfs-path={{ include "omnia.nfsPath" . }}
             {{- end }}
-            - --workspace-content-path=/tmp/arena-artifacts
+            - --workspace-content-path=/workspace-content
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}
@@ -91,11 +93,12 @@ spec:
           resources:
             {{- toYaml .Values.enterprise.arena.controller.resources | default .Values.resources | nindent 12 }}
           volumeMounts:
-            - name: arena-artifacts
-              mountPath: /tmp/arena-artifacts
+            - name: workspace-content
+              mountPath: /workspace-content
       volumes:
-        - name: arena-artifacts
-          emptyDir: {}
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: {{ include "omnia.fullname" . }}-workspace-content
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   notFoundResponse,
   createAuditContext,
   auditSuccess,
@@ -190,7 +190,7 @@ export const GET = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "get", projectId, error, 500);
       }
-      return serverErrorResponse(error, "Failed to get project");
+      return handleK8sError(error, "get project");
     }
   }
 );
@@ -241,7 +241,7 @@ export const DELETE = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "delete", projectId, error, 500);
       }
-      return serverErrorResponse(error, "Failed to delete project");
+      return handleK8sError(error, "delete project");
     }
   }
 );

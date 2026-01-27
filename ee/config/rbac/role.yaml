@@ -60,6 +60,7 @@ rules:
   resources:
   - arenajobs
   - arenasources
+  - arenatemplatesources
   verbs:
   - create
   - delete
@@ -73,6 +74,7 @@ rules:
   resources:
   - arenajobs/finalizers
   - arenasources/finalizers
+  - arenatemplatesources/finalizers
   verbs:
   - update
 - apiGroups:
@@ -80,6 +82,7 @@ rules:
   resources:
   - arenajobs/status
   - arenasources/status
+  - arenatemplatesources/status
   verbs:
   - get
   - patch

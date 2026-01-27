@@ -26,6 +26,13 @@ vi.mock("@/lib/k8s/workspace-route-helpers", async (importOriginal) => {
 vi.mock("@/lib/k8s/crd-operations", () => ({
   getCrd: vi.fn(),
   extractK8sErrorMessage: vi.fn((err: unknown) => err instanceof Error ? err.message : "Unknown error"),
+  isForbiddenError: vi.fn(),
+}));
+
+vi.mock("node:fs/promises", () => ({
+  default: {
+    readFile: vi.fn(),
+  },
 }));
 
 const mockUser = {
@@ -139,6 +146,7 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates/[temp
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -148,6 +156,10 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates/[temp
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
+    // Mock the template index file read
+    vi.mocked(fs.default.readFile).mockResolvedValue(
+      JSON.stringify([{ name: "basic-chatbot", displayName: "Basic Chatbot", path: "templates/basic-chatbot" }])
+    );
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());

@@ -30,6 +30,9 @@ import {
 type TemplateWithSource = TemplateMetadata & { sourceName: string };
 
 export interface TemplateBrowserProps {
+  /** Templates to display (fetched from API) */
+  templates: TemplateWithSource[];
+  /** Sources for calculating stats */
   sources: ArenaTemplateSource[];
   loading?: boolean;
   error?: Error | null;
@@ -43,6 +46,7 @@ export interface TemplateBrowserProps {
  */
 // eslint-disable-next-line sonarjs/cognitive-complexity
 export function TemplateBrowser({
+  templates: allTemplates,
   sources,
   loading,
   error,
@@ -54,22 +58,6 @@ export function TemplateBrowser({
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-
-  // Aggregate all templates from ready sources
-  const allTemplates = useMemo((): TemplateWithSource[] => {
-    const templates: TemplateWithSource[] = [];
-    for (const source of sources) {
-      if (source.status?.phase === "Ready" && source.status.templates) {
-        for (const template of source.status.templates) {
-          templates.push({
-            ...template,
-            sourceName: source.metadata.name,
-          });
-        }
-      }
-    }
-    return templates;
-  }, [sources]);
 
   // Get unique categories and tags
   const categories = useMemo(

@@ -8,13 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { EnterpriseGate } from "@/components/license/license-gate";
 import { TemplateBrowser } from "@/components/arena/template-browser";
-import { TemplateWizard } from "@/components/arena/template-wizard";
+import { TemplateWizard, type ProviderOption } from "@/components/arena/template-wizard";
+import { useProviders } from "@/hooks/use-providers";
 import { TemplateSourceDialog } from "@/components/arena/template-source-dialog";
 import {
   useTemplateSources,
+  useAllTemplates,
   useTemplateRendering,
 } from "@/hooks/use-template-sources";
 import { useToast } from "@/hooks/use-toast";
@@ -29,8 +32,22 @@ import type { TemplateMetadata } from "@/types/arena-template";
 function TemplatesContent() {
   const router = useRouter();
   const { toast } = useToast();
-  const { sources, loading, error, refetch } = useTemplateSources();
+  const { sources, loading: sourcesLoading, refetch: refetchSources } = useTemplateSources();
+  const { templates, loading: templatesLoading, error, refetch: refetchTemplates } = useAllTemplates();
   const { preview, render } = useTemplateRendering();
+  const { data: providers = [] } = useProviders({ phase: "Ready" });
+
+  const loading = sourcesLoading || templatesLoading;
+
+  // Map providers to ProviderOption format for the wizard
+  // Filter out providers without a model (required for Select value)
+  const providerOptions: ProviderOption[] = providers
+    .filter((p) => p.spec?.model)
+    .map((p) => ({
+      name: p.metadata.name,
+      model: p.spec!.model!,
+      displayName: p.metadata.name,
+    }));
 
   const [sourceDialogOpen, setSourceDialogOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -47,11 +64,13 @@ function TemplatesContent() {
     total: sources.length,
   };
 
-  // Count total templates
-  const totalTemplates = sources.reduce(
-    (sum, s) => sum + (s.status?.templates?.length || 0),
-    0
-  );
+  // Total templates from fetched data
+  const totalTemplates = templates.length;
+
+  const refetch = useCallback(() => {
+    refetchSources();
+    refetchTemplates();
+  }, [refetchSources, refetchTemplates]);
 
   const handleSelectTemplate = useCallback(
     (template: TemplateMetadata, sourceName: string) => {
@@ -185,6 +204,7 @@ function TemplatesContent() {
         {/* Template browser */}
         {sources.length > 0 && (
           <TemplateBrowser
+            templates={templates}
             sources={sources}
             loading={loading}
             error={error}
@@ -201,13 +221,15 @@ function TemplatesContent() {
         onSuccess={handleSourceSuccess}
       />
 
-      {/* Template wizard dialog */}
+      {/* Template wizard dialog - full page */}
       <Dialog open={wizardOpen} onOpenChange={setWizardOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-6xl w-[95vw] h-[90vh] flex flex-col">
+          <DialogTitle className="sr-only">Create Project from Template</DialogTitle>
           {selectedTemplate && (
             <TemplateWizard
               template={selectedTemplate.template}
               sourceName={selectedTemplate.sourceName}
+              providers={providerOptions}
               onPreview={handlePreview}
               onSubmit={handleSubmit}
               onSuccess={handleSuccess}
@@ -215,6 +237,7 @@ function TemplatesContent() {
                 setWizardOpen(false);
                 setSelectedTemplate(null);
               }}
+              className="flex-1 overflow-hidden flex flex-col"
             />
           )}
         </DialogContent>

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { FileContextMenu } from "./file-context-menu";
 
 describe("FileContextMenu", () => {
@@ -8,6 +9,7 @@ describe("FileContextMenu", () => {
     isRoot: false,
     onNewFile: vi.fn(),
     onNewFolder: vi.fn(),
+    onNewTypedFile: vi.fn(),
     onRename: vi.fn(),
     onDelete: vi.fn(),
     onCopyPath: vi.fn(),
@@ -30,16 +32,16 @@ describe("FileContextMenu", () => {
     expect(await screen.findByText("Copy Path")).toBeInTheDocument();
   });
 
-  it("should show New File and New Folder options for directories", async () => {
+  it("should show New submenu for directories", async () => {
     render(<FileContextMenu {...defaultProps} isDirectory={true} />);
 
     fireEvent.contextMenu(screen.getByTestId("trigger"));
 
-    expect(await screen.findByText("New File")).toBeInTheDocument();
-    expect(screen.getByText("New Folder")).toBeInTheDocument();
+    // The "New" submenu trigger should be visible
+    expect(await screen.findByText("New")).toBeInTheDocument();
   });
 
-  it("should not show New File and New Folder for files", async () => {
+  it("should not show New submenu for files", async () => {
     render(<FileContextMenu {...defaultProps} isDirectory={false} />);
 
     fireEvent.contextMenu(screen.getByTestId("trigger"));
@@ -47,9 +49,8 @@ describe("FileContextMenu", () => {
     // Wait for menu to open
     expect(await screen.findByText("Copy Path")).toBeInTheDocument();
 
-    // These should not be present
-    expect(screen.queryByText("New File")).not.toBeInTheDocument();
-    expect(screen.queryByText("New Folder")).not.toBeInTheDocument();
+    // The "New" submenu should not be present for files
+    expect(screen.queryByText("New")).not.toBeInTheDocument();
   });
 
   it("should not show Rename and Delete for root items", async () => {
@@ -71,26 +72,78 @@ describe("FileContextMenu", () => {
     expect(screen.getByText("Delete")).toBeInTheDocument();
   });
 
-  it("should call onNewFile when New File is clicked", async () => {
+  it("should call onNewFile when File... is clicked in submenu", async () => {
+    const user = userEvent.setup();
     const onNewFile = vi.fn();
     render(<FileContextMenu {...defaultProps} isDirectory={true} onNewFile={onNewFile} />);
 
     fireEvent.contextMenu(screen.getByTestId("trigger"));
-    const newFileItem = await screen.findByText("New File");
-    fireEvent.click(newFileItem);
+
+    // Hover over the "New" submenu to open it
+    const newSubmenu = await screen.findByText("New");
+    await user.hover(newSubmenu);
+
+    // Wait for submenu to open and find "File..." option
+    const fileItem = await screen.findByText("File...");
+    fireEvent.click(fileItem);
 
     expect(onNewFile).toHaveBeenCalledTimes(1);
   });
 
-  it("should call onNewFolder when New Folder is clicked", async () => {
+  it("should call onNewFolder when Folder... is clicked in submenu", async () => {
+    const user = userEvent.setup();
     const onNewFolder = vi.fn();
     render(<FileContextMenu {...defaultProps} isDirectory={true} onNewFolder={onNewFolder} />);
 
     fireEvent.contextMenu(screen.getByTestId("trigger"));
-    const newFolderItem = await screen.findByText("New Folder");
-    fireEvent.click(newFolderItem);
+
+    // Hover over the "New" submenu to open it
+    const newSubmenu = await screen.findByText("New");
+    await user.hover(newSubmenu);
+
+    // Wait for submenu to open and find "Folder..." option
+    const folderItem = await screen.findByText("Folder...");
+    fireEvent.click(folderItem);
 
     expect(onNewFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it("should call onNewTypedFile with correct kind when typed file is clicked", async () => {
+    const user = userEvent.setup();
+    const onNewTypedFile = vi.fn();
+    render(<FileContextMenu {...defaultProps} isDirectory={true} onNewTypedFile={onNewTypedFile} />);
+
+    fireEvent.contextMenu(screen.getByTestId("trigger"));
+
+    // Hover over the "New" submenu to open it
+    const newSubmenu = await screen.findByText("New");
+    await user.hover(newSubmenu);
+
+    // Wait for submenu to open and click "Prompt" option
+    const promptItem = await screen.findByText("Prompt");
+    fireEvent.click(promptItem);
+
+    expect(onNewTypedFile).toHaveBeenCalledWith("prompt");
+  });
+
+  it("should show all Arena file types in submenu", async () => {
+    const user = userEvent.setup();
+    render(<FileContextMenu {...defaultProps} isDirectory={true} />);
+
+    fireEvent.contextMenu(screen.getByTestId("trigger"));
+
+    // Hover over the "New" submenu to open it
+    const newSubmenu = await screen.findByText("New");
+    await user.hover(newSubmenu);
+
+    // Wait for submenu to open and check all file types are present
+    await waitFor(() => {
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Provider")).toBeInTheDocument();
+    expect(screen.getByText("Scenario")).toBeInTheDocument();
+    expect(screen.getByText("Tool")).toBeInTheDocument();
+    expect(screen.getByText("Persona")).toBeInTheDocument();
   });
 
   it("should call onRename when Rename is clicked", async () => {

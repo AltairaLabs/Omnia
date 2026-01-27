@@ -17,7 +17,15 @@ import type { FileTreeNode, FileType } from "@/types/arena-project";
 import { FileContextMenu } from "./file-context-menu";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
+import { ImportProviderDialog } from "./import-provider-dialog";
+import { ImportToolDialog } from "./import-tool-dialog";
 import { useToast } from "@/hooks/use-toast";
+import {
+  type ArenaFileKind,
+  generateUniqueBaseName,
+  generateFileName,
+  generateFileContent,
+} from "@/lib/arena/file-templates";
 
 interface FileTreeProps {
   tree: FileTreeNode[];
@@ -25,7 +33,7 @@ interface FileTreeProps {
   error?: string | null;
   selectedPath?: string;
   onSelectFile: (path: string, name: string) => void;
-  onCreateFile?: (parentPath: string | null, name: string, isDirectory: boolean) => Promise<void>;
+  onCreateFile?: (parentPath: string | null, name: string, isDirectory: boolean, content?: string) => Promise<void>;
   onDeleteFile?: (path: string) => Promise<void>;
   className?: string;
 }
@@ -37,10 +45,10 @@ interface TreeNodeProps {
   expandedPaths: Set<string>;
   onToggleExpand: (path: string) => void;
   onSelectFile: (path: string, name: string) => void;
-  onContextAction: (action: ContextAction, node: FileTreeNode) => void;
+  onContextAction: (action: ContextAction, node: FileTreeNode, kind?: ArenaFileKind) => void;
 }
 
-type ContextAction = "newFile" | "newFolder" | "rename" | "delete" | "copyPath";
+type ContextAction = "newFile" | "newFolder" | "newTypedFile" | "importProvider" | "importTool" | "rename" | "delete" | "copyPath";
 
 /**
  * Get icon for file type
@@ -105,8 +113,8 @@ function TreeNode({
     }
   };
 
-  const handleContextAction = (action: ContextAction) => {
-    onContextAction(action, node);
+  const handleContextAction = (action: ContextAction, kind?: ArenaFileKind) => {
+    onContextAction(action, node, kind);
   };
 
   // Check if this is the project config file (should not be deletable)
@@ -168,6 +176,9 @@ function TreeNode({
         isRoot={isConfigFile}
         onNewFile={() => handleContextAction("newFile")}
         onNewFolder={() => handleContextAction("newFolder")}
+        onNewTypedFile={(kind) => handleContextAction("newTypedFile", kind)}
+        onImportProvider={() => handleContextAction("importProvider")}
+        onImportTool={() => handleContextAction("importTool")}
         onRename={() => handleContextAction("rename")}
         onDelete={() => handleContextAction("delete")}
         onCopyPath={() => handleContextAction("copyPath")}
@@ -221,6 +232,14 @@ export function FileTree({
     open: boolean;
     node: FileTreeNode | null;
   }>({ open: false, node: null });
+  const [importProviderDialog, setImportProviderDialog] = useState<{
+    open: boolean;
+    parentPath: string | null;
+  }>({ open: false, parentPath: null });
+  const [importToolDialog, setImportToolDialog] = useState<{
+    open: boolean;
+    parentPath: string | null;
+  }>({ open: false, parentPath: null });
 
   const handleToggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {
@@ -234,43 +253,54 @@ export function FileTree({
     });
   }, []);
 
+  const createTypedFile = useCallback(
+    async (kind: ArenaFileKind, parentPath: string | null) => {
+      if (!onCreateFile) return;
+      const baseName = generateUniqueBaseName(kind);
+      const fileName = generateFileName(baseName, kind);
+      const content = generateFileContent(baseName, kind);
+      try {
+        await onCreateFile(parentPath, fileName, false, content);
+      } catch {
+        // Error toast is handled by the parent component
+      }
+    },
+    [onCreateFile]
+  );
+
   const handleContextAction = useCallback(
-    (action: ContextAction, node: FileTreeNode) => {
+    async (action: ContextAction, node: FileTreeNode, kind?: ArenaFileKind) => {
+      const parentPath = node.isDirectory ? node.path : null;
+
       switch (action) {
         case "newFile":
-          setNewItemDialog({
-            open: true,
-            mode: "file",
-            parentPath: node.isDirectory ? node.path : null,
-          });
+          setNewItemDialog({ open: true, mode: "file", parentPath });
           break;
         case "newFolder":
-          setNewItemDialog({
-            open: true,
-            mode: "folder",
-            parentPath: node.isDirectory ? node.path : null,
-          });
+          setNewItemDialog({ open: true, mode: "folder", parentPath });
+          break;
+        case "newTypedFile":
+          if (kind) await createTypedFile(kind, parentPath);
+          break;
+        case "importProvider":
+          setImportProviderDialog({ open: true, parentPath });
+          break;
+        case "importTool":
+          setImportToolDialog({ open: true, parentPath });
           break;
         case "rename":
-          // Note: Rename dialog to be added in future iteration
-          toast({
-            title: "Not implemented",
-            description: "Rename functionality coming soon",
-          });
+          toast({ title: "Not implemented", description: "Rename functionality coming soon" });
           break;
         case "delete":
           setDeleteDialog({ open: true, node });
           break;
         case "copyPath":
           navigator.clipboard.writeText(node.path);
-          toast({
-            title: "Path copied",
-            description: node.path,
-          });
+          toast({ title: "Path copied", description: node.path });
           break;
       }
     },
-    [toast]
+    [toast, createTypedFile]
   );
 
   const handleCreateItem = async (name: string) => {
@@ -294,6 +324,60 @@ export function FileTree({
 
   const handleRootNewFolder = () => {
     setNewItemDialog({ open: true, mode: "folder", parentPath: null });
+  };
+
+  const handleRootNewTypedFile = async (kind: ArenaFileKind) => {
+    if (!onCreateFile) return;
+    const baseName = generateUniqueBaseName(kind);
+    const fileName = generateFileName(baseName, kind);
+    const content = generateFileContent(baseName, kind);
+    try {
+      await onCreateFile(null, fileName, false, content);
+    } catch {
+      // Error toast is handled by the parent component
+    }
+  };
+
+  const handleRootImportProvider = () => {
+    setImportProviderDialog({ open: true, parentPath: null });
+  };
+
+  const handleRootImportTool = () => {
+    setImportToolDialog({ open: true, parentPath: null });
+  };
+
+  /**
+   * Handle importing multiple files from a dialog.
+   * Creates each file in sequence at the specified parent path.
+   */
+  const handleImportFiles = async (
+    parentPath: string | null,
+    files: { name: string; content: string }[]
+  ) => {
+    if (!onCreateFile || files.length === 0) return;
+
+    let successCount = 0;
+    let lastError: Error | null = null;
+
+    for (const file of files) {
+      try {
+        await onCreateFile(parentPath, file.name, false, file.content);
+        successCount++;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error("Failed to create file");
+      }
+    }
+
+    if (successCount > 0) {
+      toast({
+        title: "Import complete",
+        description: `Successfully imported ${successCount} of ${files.length} file${files.length === 1 ? "" : "s"}`,
+      });
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
   };
 
   if (loading) {
@@ -348,6 +432,9 @@ export function FileTree({
         isRoot
         onNewFile={handleRootNewFile}
         onNewFolder={handleRootNewFolder}
+        onNewTypedFile={handleRootNewTypedFile}
+        onImportProvider={handleRootImportProvider}
+        onImportTool={handleRootImportTool}
         onCopyPath={() => {
           navigator.clipboard.writeText("/");
           toast({ title: "Path copied", description: "/" });
@@ -385,6 +472,28 @@ export function FileTree({
         itemPath={deleteDialog.node?.path || ""}
         isDirectory={deleteDialog.node?.isDirectory || false}
         onConfirm={handleDeleteItem}
+      />
+
+      <ImportProviderDialog
+        open={importProviderDialog.open}
+        onOpenChange={(open) =>
+          setImportProviderDialog((prev) => ({ ...prev, open }))
+        }
+        parentPath={importProviderDialog.parentPath}
+        onImport={(files) =>
+          handleImportFiles(importProviderDialog.parentPath, files)
+        }
+      />
+
+      <ImportToolDialog
+        open={importToolDialog.open}
+        onOpenChange={(open) =>
+          setImportToolDialog((prev) => ({ ...prev, open }))
+        }
+        parentPath={importToolDialog.parentPath}
+        onImport={(files) =>
+          handleImportFiles(importToolDialog.parentPath, files)
+        }
       />
     </div>
   );

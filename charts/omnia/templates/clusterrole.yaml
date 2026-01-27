@@ -220,12 +220,13 @@ rules:
       - watch
   {{- end }}
   {{- if .Values.enterprise.enabled }}
-  # Enterprise Arena CRDs (ArenaJob, ArenaSource)
+  # Enterprise Arena CRDs (ArenaJob, ArenaSource, ArenaTemplateSource)
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
       - arenajobs
       - arenasources
+      - arenatemplatesources
     verbs:
       - create
       - delete
@@ -239,6 +240,7 @@ rules:
     resources:
       - arenajobs/finalizers
       - arenasources/finalizers
+      - arenatemplatesources/finalizers
     verbs:
       - update
   - apiGroups:
@@ -246,6 +248,7 @@ rules:
     resources:
       - arenajobs/status
       - arenasources/status
+      - arenatemplatesources/status
     verbs:
       - get
       - patch

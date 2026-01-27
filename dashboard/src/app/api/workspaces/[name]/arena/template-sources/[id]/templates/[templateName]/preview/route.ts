@@ -5,6 +5,7 @@
  *   - Validates variables
  *   - Returns rendered files without creating a project
  *
+ * Templates are read from the index file written by the controller.
  * Protected by workspace access checks.
  */
 
@@ -13,7 +14,7 @@ import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import { getCrd } from "@/lib/k8s/crd-operations";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   notFoundResponse,
   CRD_ARENA_TEMPLATE_SOURCES,
   createAuditContext,
@@ -31,6 +32,8 @@ import {
 } from "@/types/arena-template";
 import * as fs from "fs/promises";
 import * as path from "path";
+
+const TEMPLATE_INDEX_DIR = "arena/template-indexes";
 
 type VariableValueType = string | number | boolean;
 
@@ -182,9 +185,31 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
         );
       }
 
-      // Find the template
-      const templates = source.status?.templates || [];
-      const template = templates.find((t) => t.name === templateName);
+      // Get workspace info for path construction
+      const workspace = await getWorkspace(name);
+      if (!workspace) {
+        return notFoundResponse(`Workspace not found: ${name}`);
+      }
+      const workspaceNamespace = workspace.spec.namespace.name;
+
+      // Read templates from the index file
+      const indexPath = path.join(
+        WORKSPACE_CONTENT_PATH,
+        name,
+        workspaceNamespace,
+        TEMPLATE_INDEX_DIR,
+        `${id}.json`
+      );
+
+      let templates: TemplateMetadata[] = [];
+      try {
+        const indexContent = await fs.readFile(indexPath, "utf-8");
+        templates = JSON.parse(indexContent);
+      } catch {
+        // Index file may not exist yet
+      }
+
+      const template = templates.find((t: TemplateMetadata) => t.name === templateName);
 
       if (!template) {
         return notFoundResponse(`Template not found: ${templateName}`);
@@ -207,14 +232,7 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
         variablesWithDefaults
       );
 
-      // Get workspace info for path construction
-      const workspace = await getWorkspace(name);
-      if (!workspace) {
-        return notFoundResponse(`Workspace not found: ${name}`);
-      }
-
       // Construct template path
-      const workspaceNamespace = workspace.spec.namespace.name;
       const templateSourcePath = path.join(
         WORKSPACE_CONTENT_PATH,
         name,
@@ -240,7 +258,7 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
       if (auditCtx) {
         auditError(auditCtx, "get", `${id}/templates/${templateName}/preview`, error, 500);
       }
-      return serverErrorResponse(error, "Failed to preview template");
+      return handleK8sError(error, "preview template");
     }
   }
 );

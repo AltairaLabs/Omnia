@@ -1,0 +1,19 @@
+{{- if and .Values.enterprise.enabled .Values.enterprise.communityTemplates.enabled }}
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaTemplateSource
+metadata:
+  name: {{ .Values.enterprise.communityTemplates.name | default "community-templates" }}
+  namespace: {{ .Values.enterprise.communityTemplates.namespace | default "dev-agents" }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: community-templates
+spec:
+  type: git
+  git:
+    url: {{ .Values.enterprise.communityTemplates.url | default "https://github.com/AltairaLabs/promptkit-templates.git" }}
+    ref:
+      branch: {{ .Values.enterprise.communityTemplates.branch | default "main" }}
+  templatesPath: {{ .Values.enterprise.communityTemplates.templatesPath | default "" | quote }}
+  syncInterval: {{ .Values.enterprise.communityTemplates.syncInterval | default "1h" }}
+  timeout: {{ .Values.enterprise.communityTemplates.timeout | default "2m" }}
+{{- end }}

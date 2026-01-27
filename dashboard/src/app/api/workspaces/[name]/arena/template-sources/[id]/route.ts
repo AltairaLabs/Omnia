@@ -13,7 +13,7 @@ import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import { getCrd, updateCrd, deleteCrd } from "@/lib/k8s/crd-operations";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   notFoundResponse,
   CRD_ARENA_TEMPLATE_SOURCES,
   createAuditContext,
@@ -69,7 +69,7 @@ export const GET = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "get", id, error, 500);
       }
-      return serverErrorResponse(error, "Failed to get template source");
+      return handleK8sError(error, "get template source");
     }
   }
 );
@@ -132,7 +132,7 @@ export const PUT = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "update", id, error, 500);
       }
-      return serverErrorResponse(error, "Failed to update template source");
+      return handleK8sError(error, "update template source");
     }
   }
 );
@@ -168,7 +168,7 @@ export const DELETE = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "delete", id, error, 500);
       }
-      return serverErrorResponse(error, "Failed to delete template source");
+      return handleK8sError(error, "delete template source");
     }
   }
 );

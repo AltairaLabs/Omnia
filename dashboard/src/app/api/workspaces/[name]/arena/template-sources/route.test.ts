@@ -27,6 +27,7 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   listCrd: vi.fn(),
   createCrd: vi.fn(),
   extractK8sErrorMessage: vi.fn((err: unknown) => err instanceof Error ? err.message : "Unknown error"),
+  isForbiddenError: vi.fn(),
 }));
 
 const mockUser = {
@@ -141,7 +142,7 @@ describe("GET /api/workspaces/[name]/arena/template-sources", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const { listCrd } = await import("@/lib/k8s/crd-operations");
+    const { listCrd, isForbiddenError } = await import("@/lib/k8s/crd-operations");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -151,11 +152,41 @@ describe("GET /api/workspaces/[name]/arena/template-sources", () => {
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(listCrd).mockRejectedValue(new Error("K8s error"));
+    vi.mocked(isForbiddenError).mockReturnValue(false);
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
 
     expect(response.status).toBe(500);
+  });
+
+  it("returns 403 with helpful message when K8s RBAC denies access", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { listCrd, isForbiddenError } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+      clientOptions: {},
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+
+    // Simulate K8s RBAC error
+    const rbacError = Object.assign(new Error("arenatemplatesources.omnia.altairalabs.ai is forbidden"), { statusCode: 403 });
+    vi.mocked(listCrd).mockRejectedValue(rbacError);
+    vi.mocked(isForbiddenError).mockReturnValue(true);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error).toBe("Forbidden");
+    expect(body.message).toContain("Insufficient permissions");
+    expect(body.message).toContain("list template sources");
   });
 });
 
@@ -217,7 +248,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources", () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const { createCrd } = await import("@/lib/k8s/crd-operations");
+    const { createCrd, isForbiddenError } = await import("@/lib/k8s/crd-operations");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
@@ -227,6 +258,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources", () => {
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(createCrd).mockRejectedValue(new Error("Creation failed"));
+    vi.mocked(isForbiddenError).mockReturnValue(false);
 
     const { POST } = await import("./route");
     const response = await POST(
@@ -235,5 +267,37 @@ describe("POST /api/workspaces/[name]/arena/template-sources", () => {
     );
 
     expect(response.status).toBe(500);
+  });
+
+  it("returns 403 with helpful message when K8s RBAC denies create access", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { createCrd, isForbiddenError } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+      clientOptions: {},
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+
+    // Simulate K8s RBAC error
+    const rbacError = Object.assign(new Error("arenatemplatesources.omnia.altairalabs.ai is forbidden"), { statusCode: 403 });
+    vi.mocked(createCrd).mockRejectedValue(rbacError);
+    vi.mocked(isForbiddenError).mockReturnValue(true);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      createMockRequest("POST", { name: "test-source", spec: { type: "git" } }),
+      createMockContext()
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error).toBe("Forbidden");
+    expect(body.message).toContain("Insufficient permissions");
+    expect(body.message).toContain("create template source");
   });
 });

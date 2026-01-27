@@ -238,12 +238,26 @@ spec:
 
 	Context("Template index", func() {
 		It("should write template index file correctly", func() {
-			reconciler := &ArenaTemplateSourceReconciler{}
-
-			// Create temp directory for content
-			contentDir, err := os.MkdirTemp("", "content-*")
+			// Create temp directory structure: {base}/{workspace}/{namespace}/{contentPath}
+			baseDir, err := os.MkdirTemp("", "workspace-*")
 			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(contentDir) }()
+			defer func() { _ = os.RemoveAll(baseDir) }()
+
+			// Create nested directory structure
+			contentPath := "arena/template-sources/test-source/.arena/versions/abc123"
+			fullPath := filepath.Join(baseDir, "test-ns", "test-ns", contentPath)
+			Expect(os.MkdirAll(fullPath, 0755)).To(Succeed())
+
+			source := &omniav1alpha1.ArenaTemplateSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-source",
+					Namespace: "test-ns",
+				},
+			}
+
+			reconciler := &ArenaTemplateSourceReconciler{
+				WorkspaceContentPath: baseDir,
+			}
 
 			templates := []arenaTemplate.Template{
 				{
@@ -267,11 +281,11 @@ spec:
 				},
 			}
 
-			err = reconciler.writeTemplateIndex(contentDir, templates)
+			err = reconciler.writeTemplateIndex(source, contentPath, templates)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify index file was created
-			indexPath := filepath.Join(contentDir, TemplateIndexFileName)
+			// Verify index file was created at the new path structure
+			indexPath := filepath.Join(baseDir, "test-ns", "test-ns", TemplateIndexDir, "test-source.json")
 			Expect(indexPath).To(BeAnExistingFile())
 
 			// Read and verify contents
@@ -291,16 +305,30 @@ spec:
 		})
 
 		It("should handle empty template list", func() {
-			reconciler := &ArenaTemplateSourceReconciler{}
-
-			contentDir, err := os.MkdirTemp("", "content-*")
+			// Create temp directory structure
+			baseDir, err := os.MkdirTemp("", "workspace-*")
 			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = os.RemoveAll(contentDir) }()
+			defer func() { _ = os.RemoveAll(baseDir) }()
 
-			err = reconciler.writeTemplateIndex(contentDir, []arenaTemplate.Template{})
+			contentPath := "arena/template-sources/test-source/.arena/versions/abc123"
+			fullPath := filepath.Join(baseDir, "test-ns", "test-ns", contentPath)
+			Expect(os.MkdirAll(fullPath, 0755)).To(Succeed())
+
+			source := &omniav1alpha1.ArenaTemplateSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-source",
+					Namespace: "test-ns",
+				},
+			}
+
+			reconciler := &ArenaTemplateSourceReconciler{
+				WorkspaceContentPath: baseDir,
+			}
+
+			err = reconciler.writeTemplateIndex(source, contentPath, []arenaTemplate.Template{})
 			Expect(err).NotTo(HaveOccurred())
 
-			indexPath := filepath.Join(contentDir, TemplateIndexFileName)
+			indexPath := filepath.Join(baseDir, "test-ns", "test-ns", TemplateIndexDir, "test-source.json")
 			Expect(indexPath).To(BeAnExistingFile())
 
 			data, err := os.ReadFile(indexPath)

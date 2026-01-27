@@ -17,6 +17,38 @@ import { GitSourceSpec, OCISourceSpec, ConfigMapSourceSpec, Artifact } from "./a
 /** Variable types supported in templates */
 export type TemplateVariableType = "string" | "number" | "boolean" | "enum";
 
+// =============================================================================
+// Variable Binding Types
+// =============================================================================
+
+/** Kind of resource a variable can bind to */
+export type VariableBindingKind =
+  | "project"
+  | "provider"
+  | "workspace"
+  | "secret"
+  | "configmap";
+
+/** Filter criteria for bound resources */
+export interface VariableBindingFilter {
+  /** Filter by capability (e.g., "chat", "embeddings") */
+  capability?: string;
+  /** Filter by label selectors */
+  labels?: Record<string, string>;
+}
+
+/** Variable binding definition for connecting to system resources */
+export interface VariableBinding {
+  /** Kind of resource to bind to */
+  kind: VariableBindingKind;
+  /** Field of the resource to bind (e.g., "name", "model") */
+  field?: string;
+  /** Enable automatic population from the bound resource */
+  autoPopulate?: boolean;
+  /** Filter criteria for resources */
+  filter?: VariableBindingFilter;
+}
+
 /** Variable value type - can be string, number, or boolean */
 export type TemplateVariableValue = string | number | boolean;
 
@@ -40,6 +72,8 @@ export interface TemplateVariable {
   min?: string;
   /** Maximum value for number type (as string) */
   max?: string;
+  /** Binding to system resources for automatic population */
+  binding?: VariableBinding;
 }
 
 /** Template file specification */
@@ -121,8 +155,6 @@ export interface ArenaTemplateSourceStatus {
   observedGeneration?: number;
   /** Number of templates discovered */
   templateCount?: number;
-  /** Discovered template metadata */
-  templates?: TemplateMetadata[];
   /** Last fetch timestamp */
   lastFetchTime?: string;
   /** Next scheduled fetch */

@@ -10,6 +10,26 @@ vi.mock("@/hooks/use-toast", () => ({
   }),
 }));
 
+// Mock the providers hook used by import dialogs
+vi.mock("@/hooks/use-providers", () => ({
+  useProviders: () => ({
+    data: [],
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+
+// Mock the tool registries hook used by import dialogs
+vi.mock("@/hooks/use-tool-registries", () => ({
+  useToolRegistries: () => ({
+    data: [],
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+
 describe("FileTree", () => {
   const defaultProps = {
     tree: [] as FileTreeNode[],

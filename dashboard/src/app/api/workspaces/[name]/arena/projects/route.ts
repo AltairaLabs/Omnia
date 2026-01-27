@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   createAuditContext,
   auditSuccess,
   auditError,
@@ -171,7 +171,7 @@ export const GET = withWorkspaceAccess(
       if (auditCtx) {
         auditError(auditCtx, "list", undefined, error, 500);
       }
-      return serverErrorResponse(error, "Failed to list projects");
+      return handleK8sError(error, "list projects");
     }
   }
 );
@@ -261,7 +261,7 @@ export const POST = withWorkspaceAccess(
       if (auditCtx) {
         auditError(auditCtx, "create", projectId, error, 500);
       }
-      return serverErrorResponse(error, "Failed to create project");
+      return handleK8sError(error, "create project");
     }
   }
 );

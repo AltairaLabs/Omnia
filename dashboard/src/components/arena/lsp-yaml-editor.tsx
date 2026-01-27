@@ -8,18 +8,13 @@ import { Loader2, AlertTriangle, CheckCircle, Circle, Wifi, WifiOff } from "luci
 import type { FileType } from "@/types/arena-project";
 import { getRuntimeConfig } from "@/lib/config";
 
-// Monaco languageclient imports
-import { MonacoLanguageClient } from "monaco-languageclient";
-import {
-  CloseAction,
-  ErrorAction,
-  type MessageTransports,
-} from "vscode-languageclient/lib/common/client.js";
-import {
-  toSocket,
-  WebSocketMessageReader,
-  WebSocketMessageWriter,
-} from "vscode-ws-jsonrpc";
+// Note: MonacoLanguageClient is dynamically imported via @/lib/lsp/monaco-lsp-client
+// to avoid SSR issues with Node.js-specific modules in the vscode package
+// Type defined inline to avoid any import that might trigger Turbopack analysis
+interface MonacoLanguageClient {
+  start(): void;
+  stop(): Promise<void>;
+}
 
 interface LspYamlEditorProps {
   value: string;
@@ -107,29 +102,6 @@ async function createLspConnection(
   return new WebSocket(wsUrl);
 }
 
-/**
- * Create language client with WebSocket transport
- */
-function createLanguageClient(
-  transports: MessageTransports
-): MonacoLanguageClient {
-  return new MonacoLanguageClient({
-    name: "PromptKit LSP Client",
-    clientOptions: {
-      documentSelector: [
-        { scheme: "file", language: "yaml" },
-        { scheme: "inmemory", language: "yaml" },
-      ],
-      errorHandler: {
-        error: () => ({ action: ErrorAction.Continue }),
-        closed: () => ({ action: CloseAction.Restart }),
-      },
-    },
-    connectionProvider: {
-      get: () => Promise.resolve(transports),
-    },
-  });
-}
 
 /**
  * Monaco-based YAML editor with LSP support for real-time validation,
@@ -198,6 +170,14 @@ export function LspYamlEditor({
       setConnectionStatus("connecting");
 
       try {
+        // Dynamically import LSP client module to avoid SSR issues
+        const { ensureServicesInitialized, createLanguageClient } = await import(
+          "@/lib/lsp/monaco-lsp-client"
+        );
+
+        // Ensure VSCode services are initialized before creating the language client
+        await ensureServicesInitialized();
+
         const webSocket = await createLspConnection(workspace!, projectId!);
         if (!mounted) {
           webSocket.close();
@@ -207,16 +187,19 @@ export function LspYamlEditor({
 
         webSocket.onopen = () => {
           if (!mounted) return;
-          const socket = toSocket(webSocket);
-          const reader = new WebSocketMessageReader(socket);
-          const writer = new WebSocketMessageWriter(socket);
 
-          const client = createLanguageClient({ reader, writer });
-          clientRef.current = client;
+          try {
+            const client = createLanguageClient(webSocket);
+            if (!mounted) return;
+            clientRef.current = client;
 
-          // Start the client
-          client.start();
-          setConnectionStatus("connected");
+            // Start the client
+            client.start();
+            setConnectionStatus("connected");
+          } catch (error) {
+            console.error("Failed to create language client:", error);
+            setConnectionStatus("error");
+          }
         };
 
         webSocket.onerror = () => {

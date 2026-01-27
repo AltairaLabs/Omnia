@@ -11,6 +11,29 @@ Functional Source License. See ee/LICENSE for details.
 // Package template provides template discovery and rendering for Arena.
 package template
 
+import (
+	promptkitTemplates "github.com/AltairaLabs/PromptKit/tools/arena/templates"
+)
+
+// Re-export PromptKit binding types for convenience
+type (
+	// VariableBinding defines how a variable binds to system resources.
+	VariableBinding = promptkitTemplates.VariableBinding
+	// VariableBindingKind defines the type of resource a variable binds to.
+	VariableBindingKind = promptkitTemplates.VariableBindingKind
+	// VariableBindingFilter specifies criteria for filtering bound resources.
+	VariableBindingFilter = promptkitTemplates.VariableBindingFilter
+)
+
+// Re-export binding kind constants
+const (
+	BindingKindProject   = promptkitTemplates.BindingKindProject
+	BindingKindProvider  = promptkitTemplates.BindingKindProvider
+	BindingKindWorkspace = promptkitTemplates.BindingKindWorkspace
+	BindingKindSecret    = promptkitTemplates.BindingKindSecret
+	BindingKindConfigMap = promptkitTemplates.BindingKindConfigMap
+)
+
 // TemplateVariableType defines the type of a template variable.
 type TemplateVariableType string
 
@@ -26,6 +49,7 @@ const (
 )
 
 // Variable defines a configurable parameter for a template.
+// This is a CRD-compatible version with string defaults (vs PromptKit's interface{}).
 type Variable struct {
 	// Name is the variable name used in templates.
 	Name string `json:"name" yaml:"name"`
@@ -39,7 +63,7 @@ type Variable struct {
 	// Required indicates whether the variable must be provided.
 	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
 
-	// Default is the default value for the variable.
+	// Default is the default value for the variable (as string for CRD compatibility).
 	Default string `json:"default,omitempty" yaml:"default,omitempty"`
 
 	// Pattern is a regex pattern for validating string values.
@@ -53,6 +77,10 @@ type Variable struct {
 
 	// Max is the maximum value for number variables (as string).
 	Max string `json:"max,omitempty" yaml:"max,omitempty"`
+
+	// Binding defines how this variable binds to system resources.
+	// When set, enables automatic population and type-safe UI selection.
+	Binding *VariableBinding `json:"binding,omitempty" yaml:"binding,omitempty"`
 }
 
 // FileSpec defines how a file in the template should be processed.

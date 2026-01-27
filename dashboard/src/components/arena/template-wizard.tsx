@@ -62,6 +62,8 @@ export interface TemplateWizardProps {
   template: TemplateMetadata;
   sourceName: string;
   loading?: boolean;
+  /** Available providers for provider bindings */
+  providers?: ProviderOption[];
   onPreview?: (input: Omit<TemplateRenderInput, "projectName">) => Promise<{ files: RenderedFile[]; errors?: VariableValidationError[] }>;
   onSubmit: (input: TemplateRenderInput) => Promise<{ projectId?: string }>;
   onSuccess?: (projectId: string) => void;
@@ -74,27 +76,132 @@ export interface TemplateWizardProps {
 // =============================================================================
 
 function getInitialFormState(template: TemplateMetadata): WizardFormState {
+  // Check if there's a project-bound variable with a default value to use as project name
+  const projectNameVar = template.variables?.find(
+    (v) => v.binding?.kind === "project" && v.binding?.field === "name" && v.binding?.autoPopulate
+  );
+  const initialProjectName = projectNameVar?.default || "";
+
   return {
     variables: getDefaultVariableValues(template.variables || []),
-    projectName: "",
+    projectName: initialProjectName,
     projectDescription: template.description || "",
     projectTags: [],
   };
+}
+
+interface StepValidationResult {
+  valid: boolean;
+  message?: string;
+  errorMap?: Record<string, string>;
+}
+
+function validateProjectName(projectName: string): StepValidationResult | null {
+  if (!projectName.trim()) {
+    return { valid: false, message: "Project name is required" };
+  }
+  if (!/^[a-z][a-z0-9-]*$/.test(projectName)) {
+    return {
+      valid: false,
+      message: "Project name must start with a letter and contain only lowercase letters, numbers, and hyphens",
+    };
+  }
+  return null;
+}
+
+function validateStep0(
+  template: TemplateMetadata,
+  form: WizardFormState,
+  visibleVariables: TemplateVariable[]
+): StepValidationResult {
+  const errors = validateVariables(template.variables || [], form.variables);
+  const errorMap: Record<string, string> = {};
+  for (const err of errors) {
+    errorMap[err.variable] = err.message;
+  }
+
+  const projectNameError = validateProjectName(form.projectName);
+  if (projectNameError) {
+    return projectNameError;
+  }
+
+  // Check required provider-bound variables have a selection
+  for (const v of visibleVariables) {
+    if (v.binding?.kind === "provider" && v.required) {
+      const value = form.variables[v.name];
+      if (!value || value === "") {
+        errorMap[v.name] = `${v.name} is required - please select a provider`;
+      }
+    }
+  }
+
+  if (errors.length > 0 || Object.keys(errorMap).length > 0) {
+    return { valid: false, message: "Please fix variable errors", errorMap };
+  }
+  return { valid: true, errorMap };
 }
 
 // =============================================================================
 // Variable Input Component
 // =============================================================================
 
+export interface ProviderOption {
+  name: string;
+  model: string;
+  displayName?: string;
+}
+
 interface VariableInputProps {
   variable: TemplateVariable;
   value: string | number | boolean | undefined;
   onChange: (value: string | number | boolean) => void;
   error?: string;
+  /** Available providers for provider binding */
+  providers?: ProviderOption[];
 }
 
-function VariableInput({ variable, value, onChange, error }: VariableInputProps) {
+function VariableInput({ variable, value, onChange, error, providers }: VariableInputProps) {
   const id = `var-${variable.name}`;
+  const binding = variable.binding;
+
+  // For provider bindings, render a provider selector
+  if (binding?.kind === "provider" && providers && providers.length > 0) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label htmlFor={id} className="text-sm font-medium">
+            {variable.name}
+            {variable.required && <span className="text-destructive ml-1">*</span>}
+          </Label>
+          <Badge variant="outline" className="text-xs">Provider</Badge>
+        </div>
+
+        {variable.description && (
+          <p className="text-xs text-muted-foreground">{variable.description}</p>
+        )}
+
+        <Select
+          value={String(value || "")}
+          onValueChange={(v) => onChange(v)}
+        >
+          <SelectTrigger id={id}>
+            <SelectValue placeholder="Select a provider model" />
+          </SelectTrigger>
+          <SelectContent>
+            {providers.map((provider) => (
+              <SelectItem key={`${provider.name}-${provider.model}`} value={provider.model}>
+                {provider.displayName || provider.name} ({provider.model})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {error && (
+          <p className="text-xs text-destructive">{error}</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
@@ -174,6 +281,7 @@ export function TemplateWizard({
   template,
   sourceName,
   loading,
+  providers = [],
   onPreview,
   onSubmit,
   onSuccess,
@@ -192,43 +300,28 @@ export function TemplateWizard({
     Record<string, string>
   >({});
 
-  const hasVariables = template.variables && template.variables.length > 0;
+  // Filter out auto-populated project variables (they're synced with projectName)
+  const visibleVariables = useMemo(() => {
+    if (!template.variables) return [];
+    return template.variables.filter(
+      (v) => !(v.binding?.kind === "project" && v.binding?.autoPopulate)
+    );
+  }, [template.variables]);
+
+  const hasVariables = visibleVariables.length > 0;
   const displayName = template.displayName || template.name;
 
   // Validate current step
-  const stepValidation = useMemo(() => {
+  const stepValidation = useMemo((): StepValidationResult => {
     if (currentStep === 0) {
-      // Validate variables
-      const errors = validateVariables(
-        template.variables || [],
-        form.variables
-      );
-      const errorMap: Record<string, string> = {};
-      for (const err of errors) {
-        errorMap[err.variable] = err.message;
-      }
-
-      // Also check project name
-      if (!form.projectName.trim()) {
-        return { valid: false, message: "Project name is required" };
-      }
-      if (!/^[a-z][a-z0-9-]*$/.test(form.projectName)) {
-        return {
-          valid: false,
-          message: "Project name must start with a letter and contain only lowercase letters, numbers, and hyphens",
-        };
-      }
-      if (errors.length > 0) {
-        return { valid: false, message: "Please fix variable errors", errorMap };
-      }
-      return { valid: true, errorMap };
+      return validateStep0(template, form, visibleVariables);
     }
     if (currentStep === 1) {
       // Preview step - always valid after preview is loaded
       return { valid: previewFiles.length > 0 };
     }
     return { valid: true };
-  }, [currentStep, form, template.variables, previewFiles]);
+  }, [currentStep, form, template, visibleVariables, previewFiles]);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -323,9 +416,9 @@ export function TemplateWizard({
   }, [form, onSubmit, onSuccess]);
 
   return (
-    <div className={cn("space-y-6", className)}>
+    <div className={cn("space-y-4", className)}>
       {/* Header */}
-      <div>
+      <div className="flex-shrink-0">
         <div className="flex items-center gap-2 mb-2">
           <Badge variant="outline">{sourceName}</Badge>
           {template.version && (
@@ -341,7 +434,7 @@ export function TemplateWizard({
       </div>
 
       {/* Progress */}
-      <div className="space-y-2">
+      <div className="space-y-2 flex-shrink-0">
         <div className="flex items-center justify-between text-sm">
           <span className="font-medium">{STEPS[currentStep].title}</span>
           <span className="text-muted-foreground">
@@ -381,7 +474,7 @@ export function TemplateWizard({
       )}
 
       {/* Step content */}
-      <div className="min-h-[300px]">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {currentStep === 0 && (
           <div className="space-y-6">
             {/* Project name (always required) */}
@@ -426,15 +519,19 @@ export function TemplateWizard({
                   <h3 className="font-medium">Template Variables</h3>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {template.variables!.map((variable) => (
-                    <VariableInput
-                      key={variable.name}
-                      variable={variable}
-                      value={form.variables[variable.name]}
-                      onChange={(value) => handleVariableChange(variable.name, value)}
-                      error={validationErrors[variable.name]}
-                    />
-                  ))}
+                  {visibleVariables.map((variable) => {
+                    const isProviderBinding = variable.binding?.kind === "provider";
+                    return (
+                      <VariableInput
+                        key={variable.name}
+                        variable={variable}
+                        value={form.variables[variable.name]}
+                        onChange={(value) => handleVariableChange(variable.name, value)}
+                        error={validationErrors[variable.name]}
+                        providers={isProviderBinding ? providers : undefined}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -489,7 +586,7 @@ export function TemplateWizard({
       </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between pt-4 border-t">
+      <div className="flex items-center justify-between pt-4 border-t flex-shrink-0">
         <Button
           variant="outline"
           onClick={currentStep === 0 ? onClose : handleBack}

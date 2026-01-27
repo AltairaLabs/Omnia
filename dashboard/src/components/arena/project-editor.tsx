@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useState } from "react";
+import dynamic from "next/dynamic";
 import { useProjectEditorStore, useActiveFile, useHasUnsavedChanges } from "@/stores";
 import {
   useArenaProjects,
@@ -11,7 +12,6 @@ import {
 import { FileTree } from "./file-tree";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
-import { LspYamlEditor, LspYamlEditorEmptyState } from "./lsp-yaml-editor";
 import { ProjectToolbar } from "./project-toolbar";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { getRuntimeConfig } from "@/lib/config";
@@ -29,6 +29,33 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+
+// Dynamically import LspYamlEditor to avoid SSR issues with monaco-languageclient
+// The vscode package has Node.js-specific code that doesn't work in SSR context
+// In development mode with Turbopack, we skip loading the LSP editor entirely
+// because Turbopack can't handle the vscode package's Node.js-specific code
+const isDev = process.env.NODE_ENV === "development";
+
+const LspYamlEditor = isDev
+  ? null
+  : dynamic(
+      () => import("./lsp-yaml-editor").then((mod) => mod.LspYamlEditor),
+      {
+        ssr: false,
+        loading: () => (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ),
+      }
+    );
+
+const LspYamlEditorEmptyState = isDev
+  ? null
+  : dynamic(
+      () => import("./lsp-yaml-editor").then((mod) => mod.LspYamlEditorEmptyState),
+      { ssr: false }
+    );
 
 interface ProjectEditorProps {
   className?: string;
@@ -179,11 +206,11 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
 
   // Handle create file
   const handleCreateFile = useCallback(
-    async (parentPath: string | null, name: string, isDirectory: boolean) => {
+    async (parentPath: string | null, name: string, isDirectory: boolean, content?: string) => {
       if (!currentProject) return;
 
       try {
-        await createFile(currentProject.id, parentPath, name, isDirectory);
+        await createFile(currentProject.id, parentPath, name, isDirectory, content);
         // Refresh file tree
         const newTree = await refreshFileTree(currentProject.id);
         setFileTree(newTree);
@@ -191,6 +218,12 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
           title: "Created",
           description: `${isDirectory ? "Folder" : "File"} "${name}" created`,
         });
+
+        // Open and focus the newly created file (not for directories)
+        if (!isDirectory) {
+          const fullPath = parentPath ? `${parentPath}/${name}` : name;
+          await handleSelectFile(fullPath, name);
+        }
       } catch (err) {
         toast({
           title: "Error",
@@ -200,7 +233,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         throw err;
       }
     },
-    [currentProject, createFile, refreshFileTree, setFileTree, toast]
+    [currentProject, createFile, refreshFileTree, setFileTree, toast, handleSelectFile]
   );
 
   // Handle delete file
@@ -430,7 +463,8 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
               {/* Editor */}
               <div className="flex-1 min-h-0">
                 {activeFile ? (
-                  lspEnabled && workspace && currentProject ? (
+                  // Use LSP editor in production when enabled, fall back to basic editor in dev
+                  lspEnabled && workspace && currentProject && LspYamlEditor ? (
                     <LspYamlEditor
                       value={activeFile.content}
                       onChange={handleEditorChange}
@@ -452,7 +486,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
                   )
                 ) : openFiles.length > 0 ? (
                   <EditorTabsEmptyState />
-                ) : lspEnabled ? (
+                ) : lspEnabled && LspYamlEditorEmptyState ? (
                   <LspYamlEditorEmptyState />
                 ) : (
                   <YamlEditorEmptyState />

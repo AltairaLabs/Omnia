@@ -20,6 +20,7 @@ rules:
       {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
+      - arenatemplatesources
       {{- end }}
     verbs:
       - create
@@ -40,6 +41,7 @@ rules:
       {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
+      - arenatemplatesources/status
       {{- end }}
     verbs:
       - get
@@ -115,6 +117,7 @@ rules:
       {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
+      - arenatemplatesources
       {{- end }}
     verbs:
       - create
@@ -133,6 +136,7 @@ rules:
       {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
+      - arenatemplatesources/status
       {{- end }}
     verbs:
       - get
@@ -226,6 +230,7 @@ rules:
       {{- if .Values.enterprise.enabled }}
       - arenasources
       - arenajobs
+      - arenatemplatesources
       {{- end }}
     verbs:
       - get
@@ -242,6 +247,7 @@ rules:
       {{- if .Values.enterprise.enabled }}
       - arenasources/status
       - arenajobs/status
+      - arenatemplatesources/status
       {{- end }}
     verbs:
       - get

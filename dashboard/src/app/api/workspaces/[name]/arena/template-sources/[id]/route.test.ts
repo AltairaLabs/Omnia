@@ -28,6 +28,7 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   updateCrd: vi.fn(),
   deleteCrd: vi.fn(),
   extractK8sErrorMessage: vi.fn((err: unknown) => err instanceof Error ? err.message : "Unknown error"),
+  isForbiddenError: vi.fn(),
 }));
 
 const mockUser = {

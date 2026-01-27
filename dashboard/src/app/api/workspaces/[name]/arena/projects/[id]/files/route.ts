@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   notFoundResponse,
   createAuditContext,
   auditSuccess,
@@ -150,7 +150,7 @@ export const GET = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "list", projectId, error, 500);
       }
-      return serverErrorResponse(error, "Failed to list project files");
+      return handleK8sError(error, "list project files");
     }
   }
 );
@@ -239,7 +239,7 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
       if (auditCtx) {
         auditError(auditCtx, "create", projectId, error, 500);
       }
-      return serverErrorResponse(error, "Failed to create file");
+      return handleK8sError(error, "create file");
     }
   }
 );

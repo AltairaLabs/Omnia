@@ -3,15 +3,18 @@
  *
  * GET /api/workspaces/:name/arena/template-sources/:id/templates/:templateName - Get template details
  *
+ * Templates are read from the _template-index.json file written by the controller.
  * Protected by workspace access checks.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import { getCrd } from "@/lib/k8s/crd-operations";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   notFoundResponse,
   CRD_ARENA_TEMPLATE_SOURCES,
   createAuditContext,
@@ -20,9 +23,12 @@ import {
 } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import type { ArenaTemplateSource } from "@/types/arena-template";
+import type { ArenaTemplateSource, TemplateMetadata } from "@/types/arena-template";
 
 const CRD_KIND = "ArenaTemplateSource";
+const TEMPLATE_INDEX_DIR = "arena/template-indexes";
+const WORKSPACE_CONTENT_BASE =
+  process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
 
 interface RouteParams {
   params: Promise<{ name: string; id: string; templateName: string }>;
@@ -43,9 +49,11 @@ export const GET = withWorkspaceAccess<{ name: string; id: string; templateName:
       const result = await validateWorkspace(name, access.role!);
       if (!result.ok) return result.response;
 
+      const namespace = result.workspace.spec.namespace.name;
+
       auditCtx = createAuditContext(
         name,
-        result.workspace.spec.namespace.name,
+        namespace,
         user,
         access.role!,
         CRD_KIND
@@ -61,8 +69,23 @@ export const GET = withWorkspaceAccess<{ name: string; id: string; templateName:
         return notFoundResponse(`Template source not found: ${id}`);
       }
 
-      // Find the template in the source's status
-      const templates = source.status?.templates || [];
+      // Read templates from the index file
+      const indexPath = path.join(
+        WORKSPACE_CONTENT_BASE,
+        name,
+        namespace,
+        TEMPLATE_INDEX_DIR,
+        `${id}.json`
+      );
+
+      let templates: TemplateMetadata[] = [];
+      try {
+        const indexContent = await fs.readFile(indexPath, "utf-8");
+        templates = JSON.parse(indexContent);
+      } catch {
+        // Index file may not exist yet
+      }
+
       const template = templates.find((t) => t.name === templateName);
 
       if (!template) {
@@ -79,7 +102,7 @@ export const GET = withWorkspaceAccess<{ name: string; id: string; templateName:
       if (auditCtx) {
         auditError(auditCtx, "get", `${id}/templates/${templateName}`, error, 500);
       }
-      return serverErrorResponse(error, "Failed to get template");
+      return handleK8sError(error, "get template");
     }
   }
 );

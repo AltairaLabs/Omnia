@@ -98,6 +98,25 @@ enterprise:
         # -- Redis port
         port: 6379
 
+  # Community templates source (deployed automatically when enabled)
+  communityTemplates:
+    # -- Enable community templates source
+    enabled: true
+    # -- Name of the ArenaTemplateSource resource
+    name: community-templates
+    # -- Namespace to deploy the ArenaTemplateSource
+    namespace: dev-agents
+    # -- Git repository URL for community templates
+    url: https://github.com/AltairaLabs/promptkit-templates.git
+    # -- Branch to track
+    branch: main
+    # -- Path within fetched content where templates are located (empty = root)
+    templatesPath: ""
+    # -- Sync interval for fetching updates
+    syncInterval: 1h
+    # -- Fetch timeout
+    timeout: 2m
+
   # PromptKit LSP server for YAML validation
   promptkitLsp:
     # -- Enable PromptKit LSP server

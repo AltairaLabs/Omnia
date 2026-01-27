@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type {
   ArenaTemplateSource,
@@ -388,32 +388,87 @@ interface UseAllTemplatesResult {
 
 /**
  * Hook to fetch all templates from all sources.
+ * Templates are fetched from the API endpoint for each ready source.
  */
 export function useAllTemplates(): UseAllTemplatesResult {
+  const { currentWorkspace } = useWorkspace();
+  const workspace = currentWorkspace?.name;
   const { sources, loading: sourcesLoading, error: sourcesError, refetch: refetchSources } =
     useTemplateSources();
+  const [templates, setTemplates] = useState<Array<TemplateMetadata & { sourceName: string }>>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<Error | null>(null);
 
-  // Compute templates from sources using useMemo
-  const templates = useMemo(() => {
-    const allTemplates: Array<TemplateMetadata & { sourceName: string }> = [];
-    for (const source of sources) {
-      if (source.status?.phase === "Ready" && source.status.templates) {
-        for (const template of source.status.templates) {
-          allTemplates.push({
-            ...template,
-            sourceName: source.metadata.name,
-          });
+  // Fetch templates from API for each ready source
+  const fetchTemplates = useCallback(async () => {
+    if (!workspace || sources.length === 0) {
+      setTemplates([]);
+      return;
+    }
+
+    const readySources = sources.filter(s => s.status?.phase === "Ready");
+    if (readySources.length === 0) {
+      setTemplates([]);
+      return;
+    }
+
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+
+    try {
+      const allTemplates: Array<TemplateMetadata & { sourceName: string }> = [];
+
+      // Fetch templates from each ready source in parallel
+      const results = await Promise.allSettled(
+        readySources.map(async (source) => {
+          const response = await fetch(
+            `/api/workspaces/${workspace}/arena/template-sources/${source.metadata.name}/templates`
+          );
+          if (!response.ok) {
+            console.warn(`Failed to fetch templates from ${source.metadata.name}: ${response.statusText}`);
+            return { sourceName: source.metadata.name, templates: [] };
+          }
+          const data = await response.json();
+          return { sourceName: source.metadata.name, templates: data.templates || [] };
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          for (const template of result.value.templates) {
+            allTemplates.push({
+              ...template,
+              sourceName: result.value.sourceName,
+            });
+          }
         }
       }
+
+      setTemplates(allTemplates);
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err : new Error(String(err)));
+      setTemplates([]);
+    } finally {
+      setTemplatesLoading(false);
     }
-    return allTemplates;
-  }, [sources]);
+  }, [workspace, sources]);
+
+  // Fetch templates when sources change
+  useEffect(() => {
+    if (!sourcesLoading) {
+      fetchTemplates();
+    }
+  }, [sourcesLoading, fetchTemplates]);
+
+  const refetch = useCallback(() => {
+    refetchSources();
+  }, [refetchSources]);
 
   return {
     templates,
-    loading: sourcesLoading,
-    error: sourcesError,
-    refetch: refetchSources,
+    loading: sourcesLoading || templatesLoading,
+    error: sourcesError || templatesError,
+    refetch,
   };
 }
 

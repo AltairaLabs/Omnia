@@ -228,7 +228,7 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		}
 
 		// Write template index file for fast API lookups
-		if err := r.writeTemplateIndex(contentPath, result.templates); err != nil {
+		if err := r.writeTemplateIndex(source, contentPath, result.templates); err != nil {
 			log.Error(err, "Failed to write template index")
 			r.handleFetchError(ctx, source, fmt.Errorf("failed to write template index: %w", err))
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -283,9 +283,12 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	if !needsFetch {
 		// Already up to date
-		nextCheck := time.Until(source.Status.NextFetchTime.Time)
-		if nextCheck < 0 {
-			nextCheck = syncInterval
+		nextCheck := syncInterval
+		if source.Status.NextFetchTime != nil {
+			nextCheck = time.Until(source.Status.NextFetchTime.Time)
+			if nextCheck < 0 {
+				nextCheck = syncInterval
+			}
 		}
 		return ctrl.Result{RequeueAfter: nextCheck}, nil
 	}
@@ -773,20 +776,37 @@ func (r *ArenaTemplateSourceReconciler) gcOldVersions(workspacePath string) erro
 	return nil
 }
 
-// TemplateIndexFileName is the name of the template index file written to artifact storage.
-const TemplateIndexFileName = "_template-index.json"
+// TemplateIndexDir is the directory for template index files.
+const TemplateIndexDir = "arena/template-indexes"
 
 // writeTemplateIndex writes the template index to a JSON file for fast API lookups.
-func (r *ArenaTemplateSourceReconciler) writeTemplateIndex(contentPath string, templates []arenaTemplate.Template) error {
-	indexPath := filepath.Join(contentPath, TemplateIndexFileName)
+// Path: {WorkspaceContentPath}/{workspace}/{namespace}/arena/template-indexes/{source}.json
+func (r *ArenaTemplateSourceReconciler) writeTemplateIndex(source *omniav1alpha1.ArenaTemplateSource, _ string, templates []arenaTemplate.Template) error {
+	// Get workspace name for the namespace
+	workspaceName := r.getWorkspaceForNamespace(context.Background(), source.Namespace)
+
+	// Build index directory path
+	indexDir := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, TemplateIndexDir)
+	if err := os.MkdirAll(indexDir, 0755); err != nil {
+		return fmt.Errorf("failed to create template index directory: %w", err)
+	}
+
+	// Write to {source}.json
+	indexPath := filepath.Join(indexDir, source.Name+".json")
 
 	data, err := json.MarshalIndent(templates, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal template index: %w", err)
 	}
 
-	if err := os.WriteFile(indexPath, data, 0644); err != nil {
+	// Write atomically using temp file + rename
+	tempPath := indexPath + ".tmp"
+	if err := os.WriteFile(tempPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write template index file: %w", err)
+	}
+	if err := os.Rename(tempPath, indexPath); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("failed to rename template index file: %w", err)
 	}
 
 	return nil

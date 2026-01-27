@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   notFoundResponse,
   createAuditContext,
   auditSuccess,
@@ -194,7 +194,7 @@ export const GET = withWorkspaceAccess<{ name: string; id: string; path: string[
       if (auditCtx) {
         auditError(auditCtx, "get", `${projectId}/${filePath}`, error, 500);
       }
-      return serverErrorResponse(error, "Failed to get file content");
+      return handleK8sError(error, "get file content");
     }
   }
 );
@@ -278,7 +278,7 @@ export const PUT = withWorkspaceAccess<{ name: string; id: string; path: string[
       if (auditCtx) {
         auditError(auditCtx, "update", `${projectId}/${filePath}`, error, 500);
       }
-      return serverErrorResponse(error, "Failed to update file");
+      return handleK8sError(error, "update file");
     }
   }
 );
@@ -381,7 +381,7 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; path: string
       if (auditCtx) {
         auditError(auditCtx, "create", `${projectId}/${parentPath}`, error, 500);
       }
-      return serverErrorResponse(error, "Failed to create file");
+      return handleK8sError(error, "create file");
     }
   }
 );
@@ -455,7 +455,7 @@ export const DELETE = withWorkspaceAccess<{ name: string; id: string; path: stri
       if (auditCtx) {
         auditError(auditCtx, "delete", `${projectId}/${filePath}`, error, 500);
       }
-      return serverErrorResponse(error, "Failed to delete file");
+      return handleK8sError(error, "delete file");
     }
   }
 );
