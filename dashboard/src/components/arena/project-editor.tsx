@@ -553,7 +553,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
             </ResizablePanelGroup>
           </ResizablePanel>
 
-          {/* Results panel */}
+          {/* Results panel - expanded state with resizable */}
           {resultsPanelOpen && (
             <>
               <ResizableHandle withHandle />
@@ -578,6 +578,14 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
             </>
           )}
         </ResizablePanelGroup>
+      )}
+
+      {/* Collapsed results panel bar - shown when panel is closed */}
+      {!resultsPanelOpen && (
+        <ResultsPanel
+          problems={problems}
+          onProblemClick={handleProblemClick}
+        />
       )}
 
       {/* Dialogs */}
