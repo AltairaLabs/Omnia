@@ -4,6 +4,29 @@ import userEvent from "@testing-library/user-event";
 import { ProjectToolbar, NewProjectButton } from "./project-toolbar";
 import type { ArenaProject } from "@/types/arena-project";
 
+// Mock workspace context
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: { name: "test-workspace", namespace: "test-ns" },
+  }),
+}));
+
+// Mock deployment hooks
+vi.mock("@/hooks/use-project-deployment", () => ({
+  useProjectDeployment: () => ({
+    status: null,
+    isDeployed: false,
+    isLoading: false,
+    deploy: vi.fn(),
+    isDeploying: false,
+  }),
+}));
+
+// Mock results panel store
+vi.mock("@/stores/results-panel-store", () => ({
+  useResultsPanelStore: () => vi.fn(),
+}));
+
 describe("ProjectToolbar", () => {
   const mockProject: ArenaProject = {
     id: "project-1",

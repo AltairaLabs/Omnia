@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import type { ArenaProject } from "@/types/arena-project";
 import { cn } from "@/lib/utils";
+import { DeployButton } from "./deploy-button";
+import { RunDropdown } from "./run-dropdown";
 
 interface ProjectToolbarProps {
   projects: ArenaProject[];
@@ -129,6 +131,22 @@ export function ProjectToolbar({
             )}
             Validate All
           </Button>
+        )}
+
+        {/* Deploy button */}
+        {currentProject && (
+          <DeployButton
+            projectId={currentProject.id}
+            disabled={loading || saving}
+          />
+        )}
+
+        {/* Run button */}
+        {currentProject && (
+          <RunDropdown
+            projectId={currentProject.id}
+            disabled={loading || saving}
+          />
         )}
 
         {/* Save button */}

@@ -8,6 +8,7 @@ import {
   useArenaProject,
   useArenaProjectMutations,
   useArenaProjectFiles,
+  useProviders,
 } from "@/hooks";
 import { FileTree } from "./file-tree";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
@@ -29,6 +30,9 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+import { ResultsPanel, type Problem } from "./results-panel";
+import { DevConsolePanel } from "./dev-console-panel";
+import { useResultsPanelStore } from "@/stores/results-panel-store";
 
 // Dynamically import LspYamlEditor to avoid SSR issues with monaco-languageclient
 // The vscode package has Node.js-specific code that doesn't work in SSR context
@@ -98,6 +102,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const { projects, loading: projectsLoading, refetch: refetchProjects } = useArenaProjects();
   const { createProject, deleteProject } = useArenaProjectMutations();
   const { getFileContent, updateFileContent: saveFileContent, createFile, deleteFile, refreshFileTree } = useArenaProjectFiles();
+  const { data: providers = [] } = useProviders();
 
   // Derived state
   const activeFile = useActiveFile();
@@ -110,6 +115,18 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationResults, setValidationResults] = useState<ValidationResults | null>(null);
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
+
+  // Provider options for dev console
+  const providerOptions = providers.map((p) => ({
+    id: p.metadata.name,
+    name: `${p.metadata.name} (${p.spec.type})`,
+  }));
+
+  // Results panel store
+  const resultsPanelOpen = useResultsPanelStore((state) => state.isOpen);
+  const openResultsPanel = useResultsPanelStore((state) => state.open);
 
   // Fetch project data when project ID changes
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -349,6 +366,29 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
       setValidationResults(results);
       setValidationDialogOpen(true);
 
+      // Convert validation results to problems for the panel
+      const newProblems: Problem[] = [];
+      if (results.diagnostics) {
+        for (const [file, diagnostics] of Object.entries(results.diagnostics)) {
+          for (const diag of diagnostics) {
+            newProblems.push({
+              severity: diag.severity === 1 ? "error" : diag.severity === 2 ? "warning" : "info",
+              message: diag.message,
+              file,
+              line: diag.range?.start?.line ? diag.range.start.line + 1 : undefined,
+              column: diag.range?.start?.character ? diag.range.start.character + 1 : undefined,
+              source: diag.source,
+            });
+          }
+        }
+      }
+      setProblems(newProblems);
+
+      // Open problems panel if there are issues
+      if (newProblems.length > 0) {
+        openResultsPanel("problems");
+      }
+
       // Show toast summary
       if (results.valid) {
         toast({
@@ -371,11 +411,12 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     } finally {
       setValidating(false);
     }
-  }, [currentProject, workspace, toast]);
+  }, [currentProject, workspace, toast, openResultsPanel]);
 
   // Handle jumping to a file from validation results
   const handleValidationFileClick = useCallback(
-    async (path: string, _line: number) => {
+    // Line parameter required by ValidationResultsDialog callback signature
+    async (path: string, _line?: number) => {
       if (!currentProject) return;
 
       // Open the file
@@ -386,6 +427,15 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
       setValidationDialogOpen(false);
     },
     [currentProject, handleSelectFile]
+  );
+
+  // Handle problem click in results panel
+  const handleProblemClick = useCallback(
+    async (problem: Problem) => {
+      const fileName = problem.file.split("/").pop() || problem.file;
+      await handleSelectFile(problem.file, fileName);
+    },
+    [handleSelectFile]
   );
 
   // Handle refresh
@@ -429,71 +479,104 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         </div>
       ) : (
         <ResizablePanelGroup
-          direction="horizontal"
+          direction="vertical"
           className="flex-1 min-h-0"
         >
-          {/* File tree panel */}
-          <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
-            <div className="h-full overflow-auto border-r">
-              <div className="p-2 border-b bg-muted/30">
-                <h3 className="text-sm font-medium truncate">
-                  {currentProject?.name || "Project Files"}
-                </h3>
-              </div>
-              <FileTree
-                tree={fileTree}
-                loading={projectLoading}
-                error={projectError}
-                selectedPath={activeFilePath || undefined}
-                onSelectFile={handleSelectFile}
-                onCreateFile={handleCreateFile}
-                onDeleteFile={handleDeleteFile}
-              />
-            </div>
+          {/* Main content area */}
+          <ResizablePanel defaultSize={resultsPanelOpen ? 70 : 100} minSize={30}>
+            <ResizablePanelGroup
+              direction="horizontal"
+              className="h-full"
+            >
+              {/* File tree panel */}
+              <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
+                <div className="h-full overflow-auto border-r">
+                  <div className="p-2 border-b bg-muted/30">
+                    <h3 className="text-sm font-medium truncate">
+                      {currentProject?.name || "Project Files"}
+                    </h3>
+                  </div>
+                  <FileTree
+                    tree={fileTree}
+                    loading={projectLoading}
+                    error={projectError}
+                    selectedPath={activeFilePath || undefined}
+                    onSelectFile={handleSelectFile}
+                    onCreateFile={handleCreateFile}
+                    onDeleteFile={handleDeleteFile}
+                  />
+                </div>
+              </ResizablePanel>
+
+              <ResizableHandle withHandle />
+
+              {/* Editor panel */}
+              <ResizablePanel defaultSize={75}>
+                <div className="flex flex-col h-full">
+                  {/* Tabs */}
+                  <EditorTabs />
+
+                  {/* Editor */}
+                  <div className="flex-1 min-h-0">
+                    {activeFile ? (
+                      // Use LSP editor in production when enabled, fall back to basic editor in dev
+                      lspEnabled && workspace && currentProject && LspYamlEditor ? (
+                        <LspYamlEditor
+                          value={activeFile.content}
+                          onChange={handleEditorChange}
+                          onSave={handleSave}
+                          fileType={activeFile.type}
+                          loading={activeFile.loading}
+                          workspace={workspace}
+                          projectId={currentProject.id}
+                          filePath={activeFile.path}
+                        />
+                      ) : (
+                        <YamlEditor
+                          value={activeFile.content}
+                          onChange={handleEditorChange}
+                          onSave={handleSave}
+                          fileType={activeFile.type}
+                          loading={activeFile.loading}
+                        />
+                      )
+                    ) : openFiles.length > 0 ? (
+                      <EditorTabsEmptyState />
+                    ) : lspEnabled && LspYamlEditorEmptyState ? (
+                      <LspYamlEditorEmptyState />
+                    ) : (
+                      <YamlEditorEmptyState />
+                    )}
+                  </div>
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
           </ResizablePanel>
 
-          <ResizableHandle withHandle />
-
-          {/* Editor panel */}
-          <ResizablePanel defaultSize={75}>
-            <div className="flex flex-col h-full">
-              {/* Tabs */}
-              <EditorTabs />
-
-              {/* Editor */}
-              <div className="flex-1 min-h-0">
-                {activeFile ? (
-                  // Use LSP editor in production when enabled, fall back to basic editor in dev
-                  lspEnabled && workspace && currentProject && LspYamlEditor ? (
-                    <LspYamlEditor
-                      value={activeFile.content}
-                      onChange={handleEditorChange}
-                      onSave={handleSave}
-                      fileType={activeFile.type}
-                      loading={activeFile.loading}
-                      workspace={workspace}
-                      projectId={currentProject.id}
-                      filePath={activeFile.path}
-                    />
-                  ) : (
-                    <YamlEditor
-                      value={activeFile.content}
-                      onChange={handleEditorChange}
-                      onSave={handleSave}
-                      fileType={activeFile.type}
-                      loading={activeFile.loading}
-                    />
-                  )
-                ) : openFiles.length > 0 ? (
-                  <EditorTabsEmptyState />
-                ) : lspEnabled && LspYamlEditorEmptyState ? (
-                  <LspYamlEditorEmptyState />
-                ) : (
-                  <YamlEditorEmptyState />
-                )}
-              </div>
-            </div>
-          </ResizablePanel>
+          {/* Results panel */}
+          {resultsPanelOpen && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize={30} minSize={15} maxSize={60}>
+                <ResultsPanel
+                  problems={problems}
+                  onProblemClick={handleProblemClick}
+                  consoleContent={
+                    currentProject ? (
+                      <DevConsolePanel
+                        projectId={currentProject.id}
+                        workspace={workspace}
+                        configPath={activeFile?.path}
+                        providers={providerOptions}
+                        selectedProvider={selectedProvider}
+                        onProviderChange={setSelectedProvider}
+                      />
+                    ) : undefined
+                  }
+                />
+              </ResizablePanel>
+            </>
+          )}
         </ResizablePanelGroup>
       )}
 

@@ -49,6 +49,11 @@ vi.mock("@/hooks", () => ({
     deleteFile: vi.fn(),
     refreshFileTree: vi.fn(),
   })),
+  useProviders: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+  })),
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
