@@ -1,4 +1,4 @@
-{{- if and .Values.enterprise.enabled .Values.enterprise.arena.devConsole.enabled }}
+{{- if and .Values.enterprise.enabled ((.Values.enterprise.arena).devConsole).enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
