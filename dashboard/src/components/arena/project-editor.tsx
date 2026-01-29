@@ -77,6 +77,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
   const namespace = currentWorkspace?.namespace;
+  const canWrite = currentWorkspace?.permissions?.write ?? false;
 
   // Enterprise feature check for LSP
   const [lspEnabled, setLspEnabled] = useState(false);
@@ -167,20 +168,22 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     setProjectLoading(projectDataLoading);
   }, [projectDataLoading, setProjectLoading]);
 
-  // Create dev session when Console tab is activated
+  // Create dev session when Console tab is activated (only if user has write permissions)
   useEffect(() => {
     if (
       activeResultsTab === "console" &&
       currentProject &&
       workspace &&
+      canWrite &&
       !devSession &&
-      !devSessionLoading
+      !devSessionLoading &&
+      !devSessionError
     ) {
       createDevSession().catch((err) => {
         console.error("Failed to create dev session:", err);
       });
     }
-  }, [activeResultsTab, currentProject, workspace, devSession, devSessionLoading, createDevSession]);
+  }, [activeResultsTab, currentProject, workspace, canWrite, devSession, devSessionLoading, devSessionError, createDevSession]);
 
   // Handle project selection
   const handleProjectSelect = useCallback((projectId: string) => {
@@ -491,6 +494,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         saving={saving}
         loading={isLoading}
         validating={validating}
+        canWrite={canWrite}
         onProjectSelect={handleProjectSelect}
         onSave={handleSave}
         onNewProject={() => setNewProjectDialogOpen(true)}
@@ -596,33 +600,46 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
                   onProblemClick={handleProblemClick}
                   consoleContent={
                     currentProject ? (
-                      devSessionLoading ? (
-                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                          <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                          <p className="text-sm">Starting dev session...</p>
-                          <p className="text-xs mt-1">This may take a moment</p>
-                        </div>
-                      ) : devSessionError ? (
-                        <div className="flex flex-col items-center justify-center h-full text-destructive">
-                          <p className="text-sm">Failed to start dev session</p>
-                          <p className="text-xs mt-1">{devSessionError.message}</p>
-                        </div>
-                      ) : devSessionReady ? (
-                        <DevConsolePanel
-                          projectId={currentProject.id}
-                          workspace={workspace}
-                          namespace={namespace}
-                          service={devSession?.status?.serviceName}
-                          configPath={activeFile?.path}
-                          providers={providerOptions}
-                          selectedProvider={selectedProvider}
-                          onProviderChange={setSelectedProvider}
-                        />
+                      canWrite ? (
+                        devSessionLoading ? (
+                          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                            <Loader2 className="h-6 w-6 animate-spin mb-2" />
+                            <p className="text-sm">Starting dev session...</p>
+                            <p className="text-xs mt-1">This may take a moment</p>
+                          </div>
+                        ) : devSessionError ? (
+                          <div className="flex flex-col items-center justify-center h-full text-destructive">
+                            <p className="text-sm">Failed to start dev session</p>
+                            <p className="text-xs mt-1 text-center max-w-xs">
+                              {devSessionError.message.includes("permission") || devSessionError.message.includes("Forbidden")
+                                ? "You don't have permission to create dev sessions. Contact a workspace owner for editor access."
+                                : devSessionError.message}
+                            </p>
+                          </div>
+                        ) : devSessionReady ? (
+                          <DevConsolePanel
+                            projectId={currentProject.id}
+                            workspace={workspace}
+                            namespace={namespace}
+                            service={devSession?.status?.serviceName}
+                            configPath={activeFile?.path}
+                            providers={providerOptions}
+                            selectedProvider={selectedProvider}
+                            onProviderChange={setSelectedProvider}
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                            <Loader2 className="h-6 w-6 animate-spin mb-2" />
+                            <p className="text-sm">Session starting...</p>
+                            <p className="text-xs mt-1">Waiting for service to be ready</p>
+                          </div>
+                        )
                       ) : (
                         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                          <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                          <p className="text-sm">Session starting...</p>
-                          <p className="text-xs mt-1">Waiting for service to be ready</p>
+                          <p className="text-sm font-medium">Editor access required</p>
+                          <p className="text-xs mt-1 text-center max-w-xs">
+                            You have viewer access to this workspace. Contact a workspace owner to request editor permissions to use the dev console.
+                          </p>
                         </div>
                       )
                     ) : undefined

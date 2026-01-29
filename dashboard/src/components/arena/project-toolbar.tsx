@@ -29,6 +29,8 @@ interface ProjectToolbarProps {
   saving: boolean;
   loading: boolean;
   validating?: boolean;
+  /** Whether the user has write permissions */
+  canWrite?: boolean;
   onProjectSelect: (projectId: string) => void;
   onSave: () => void;
   onNewProject: () => void;
@@ -49,6 +51,7 @@ export function ProjectToolbar({
   saving,
   loading,
   validating = false,
+  canWrite = true,
   onProjectSelect,
   onSave,
   onNewProject,
@@ -89,8 +92,8 @@ export function ProjectToolbar({
           size="icon"
           className="h-8 w-8"
           onClick={onNewProject}
-          disabled={loading}
-          title="New Project"
+          disabled={loading || !canWrite}
+          title={canWrite ? "New Project" : "Editor access required to create projects"}
         >
           <Plus className="h-4 w-4" />
         </Button>
@@ -137,7 +140,7 @@ export function ProjectToolbar({
         {currentProject && (
           <DeployButton
             projectId={currentProject.id}
-            disabled={loading || saving}
+            disabled={loading || saving || !canWrite}
           />
         )}
 
@@ -145,7 +148,7 @@ export function ProjectToolbar({
         {currentProject && (
           <RunDropdown
             projectId={currentProject.id}
-            disabled={loading || saving}
+            disabled={loading || saving || !canWrite}
           />
         )}
 
@@ -154,8 +157,9 @@ export function ProjectToolbar({
           variant={hasUnsavedChanges ? "default" : "outline"}
           size="sm"
           onClick={onSave}
-          disabled={!hasUnsavedChanges || saving}
+          disabled={!hasUnsavedChanges || saving || !canWrite}
           className="gap-2"
+          title={canWrite ? "Save changes" : "Editor access required to save"}
         >
           {saving ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -172,8 +176,8 @@ export function ProjectToolbar({
             size="icon"
             className="h-8 w-8 text-destructive hover:text-destructive"
             onClick={onDeleteProject}
-            disabled={loading || saving}
-            title="Delete Project"
+            disabled={loading || saving || !canWrite}
+            title={canWrite ? "Delete Project" : "Editor access required to delete"}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
