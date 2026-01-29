@@ -412,7 +412,9 @@ func (h *PromptKitHandler) InvalidateProviderCache() {
 
 	namespace := h.k8sLoader.Namespace()
 	if registry, ok := h.nsRegistries[namespace]; ok {
-		_ = registry.Close()
+		if err := registry.Close(); err != nil {
+			h.log.Error(err, "failed to close namespace registry", "namespace", namespace)
+		}
 		delete(h.nsRegistries, namespace)
 	}
 }

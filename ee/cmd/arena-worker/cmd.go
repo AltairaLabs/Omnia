@@ -69,7 +69,11 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to queue: %w", err)
 	}
-	defer func() { _ = q.Close() }()
+	defer func() {
+		if err := q.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close queue: %v\n", err)
+		}
+	}()
 
 	fmt.Printf("  Connected to Redis at %s\n", cfg.RedisAddr)
 

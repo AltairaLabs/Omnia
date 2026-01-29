@@ -160,7 +160,7 @@ jobs:
       run: helm dependency build ./charts/omnia
 
     - name: Run integration tests
-      run: go test -tags=integration ./test/integration/... -v -timeout 5m
+      run: go test -race -tags=integration ./test/integration/... -v -timeout 5m
 
   integration-skip:
     name: Integration Tests
@@ -461,7 +461,7 @@ jobs:
       run: |
         export KUBEBUILDER_ASSETS=$(setup-envtest use -p path --bin-dir ${{ github.workspace }}/bin/k8s)
         # Run all internal package tests (PromptKit v1.1.6 is published)
-        go test -v ./internal/... -coverprofile=internal-coverage.out
+        go test -race -v ./internal/... -coverprofile=internal-coverage.out
 
     - name: Upload internal coverage
       uses: actions/upload-artifact@v6
