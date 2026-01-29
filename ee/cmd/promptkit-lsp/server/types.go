@@ -109,11 +109,12 @@ type InitializeResult struct {
 
 // ServerCapabilities describes the server's capabilities.
 type ServerCapabilities struct {
-	TextDocumentSync   *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
-	CompletionProvider *CompletionOptions       `json:"completionProvider,omitempty"`
-	HoverProvider      bool                     `json:"hoverProvider,omitempty"`
-	DefinitionProvider bool                     `json:"definitionProvider,omitempty"`
-	DiagnosticProvider *DiagnosticOptions       `json:"diagnosticProvider,omitempty"`
+	TextDocumentSync       *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
+	CompletionProvider     *CompletionOptions       `json:"completionProvider,omitempty"`
+	HoverProvider          bool                     `json:"hoverProvider,omitempty"`
+	DefinitionProvider     bool                     `json:"definitionProvider,omitempty"`
+	DiagnosticProvider     *DiagnosticOptions       `json:"diagnosticProvider,omitempty"`
+	SemanticTokensProvider *SemanticTokensOptions   `json:"semanticTokensProvider,omitempty"`
 }
 
 // TextDocumentSyncOptions describes document sync options.

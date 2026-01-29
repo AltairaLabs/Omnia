@@ -34,8 +34,9 @@ func (s *Server) handleInitialize(_ context.Context, c *Connection, msg *Message
 				TriggerCharacters: []string{":", " ", "\n", "-"},
 				ResolveProvider:   false,
 			},
-			HoverProvider:      true,
-			DefinitionProvider: true,
+			HoverProvider:          true,
+			DefinitionProvider:     true,
+			SemanticTokensProvider: GetSemanticTokensOptions(),
 		},
 		ServerInfo: &ServerInfo{
 			Name:    "promptkit-lsp",

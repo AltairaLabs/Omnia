@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import type { editor, IDisposable } from "monaco-editor";
 import { cn } from "@/lib/utils";
 import { Loader2, AlertTriangle, CheckCircle, Circle, Wifi, WifiOff } from "lucide-react";
@@ -297,6 +297,23 @@ export function LspYamlEditor({
     };
   }, []);
 
+  // Define custom theme before editor mounts to ensure semantic token colors are ready
+  const handleEditorWillMount: BeforeMount = useCallback((monaco) => {
+    // Configure semantic token highlighting for template variables
+    // This makes {{variable}} patterns stand out in prompt templates
+    monaco.editor.defineTheme("vs-dark-promptkit", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        // Template variable delimiters {{ and }}
+        { token: "variable", foreground: "4EC9B0", fontStyle: "bold" },
+        // Variable names inside template expressions
+        { token: "parameter", foreground: "9CDCFE", fontStyle: "italic" },
+      ],
+      colors: {},
+    });
+  }, []);
+
   const handleEditorDidMount: OnMount = useCallback(
     (editor, monaco) => {
       editorRef.current = editor;
@@ -426,8 +443,9 @@ export function LspYamlEditor({
           language={monacoLanguage}
           value={value}
           onChange={handleChange}
+          beforeMount={handleEditorWillMount}
           onMount={handleEditorDidMount}
-          theme="vs-dark"
+          theme={isYaml ? "vs-dark-promptkit" : "vs-dark"}
           options={{
             readOnly,
             minimap: { enabled: false },
@@ -451,6 +469,8 @@ export function LspYamlEditor({
             quickSuggestions: true,
             suggestOnTriggerCharacters: true,
             parameterHints: { enabled: true },
+            // Enable semantic highlighting for template variables
+            "semanticHighlighting.enabled": true,
           }}
           loading={
             <div className="flex items-center justify-center h-full">

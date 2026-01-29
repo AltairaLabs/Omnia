@@ -265,6 +265,8 @@ func (s *Server) handleMessage(ctx context.Context, c *Connection, msg *Message)
 		s.handleHover(ctx, c, msg)
 	case "textDocument/definition":
 		s.handleDefinition(ctx, c, msg)
+	case "textDocument/semanticTokens/full":
+		s.handleSemanticTokensFull(ctx, c, msg)
 	default:
 		log.V(1).Info("unhandled method")
 		// Send method not found error for requests
