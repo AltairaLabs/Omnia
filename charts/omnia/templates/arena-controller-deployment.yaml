@@ -45,6 +45,7 @@ spec:
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             - --arena-worker-image={{ .Values.enterprise.arena.worker.image.repository | default "ghcr.io/altairalabs/omnia-arena-worker" }}:{{ .Values.enterprise.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.enterprise.arena.worker.image.pullPolicy | default "IfNotPresent" }}
+            - --arena-dev-console-image={{ .Values.enterprise.arena.devConsole.image.repository | default "ghcr.io/altairalabs/omnia-arena-dev-console" }}:{{ .Values.enterprise.arena.devConsole.image.tag | default .Chart.AppVersion }}
             {{- if and .Values.enterprise.arena.queue (eq .Values.enterprise.arena.queue.type "redis") }}
             {{- if .Values.redis.enabled }}
             - --redis-addr={{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}

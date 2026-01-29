@@ -1,8 +1,72 @@
 {{- if and .Values.enterprise.enabled ((.Values.enterprise.arena).devConsole).enabled }}
+# NOTE: This template deploys a dev console to a SINGLE namespace (Release.Namespace by default).
+# For per-workspace dev consoles, either:
+# 1. Deploy this chart to each workspace namespace
+# 2. Add dev console provisioning to the workspace controller
+# 3. Use the arena-dev-console standalone chart (see charts/arena-dev-console)
+
+{{- $namespace := .Values.enterprise.arena.devConsole.namespace | default .Release.Namespace }}
+
+# ServiceAccount for arena-dev-console
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arena-dev-console
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: arena-dev-console
+---
+# Role for reading providers and tools in THIS namespace only
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arena-dev-console
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: arena-dev-console
+rules:
+  # Read providers in this namespace
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["providers"]
+    verbs: ["get", "list", "watch"]
+  # Read tool registries in this namespace
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["toolregistries"]
+    verbs: ["get", "list", "watch"]
+  # Read secrets for provider credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # Read configmaps for arena source content
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+---
+# RoleBinding (namespace-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arena-dev-console
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: arena-dev-console
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arena-dev-console
+subjects:
+  - kind: ServiceAccount
+    name: arena-dev-console
+    namespace: {{ $namespace }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "omnia.fullname" . }}-arena-dev-console
+  name: arena-dev-console
+  namespace: {{ $namespace }}
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
     app.kubernetes.io/component: arena-dev-console
@@ -26,7 +90,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "omnia.serviceAccountName" . }}
+      serviceAccountName: arena-dev-console
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -73,7 +137,7 @@ spec:
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           resources:
-            {{- toYaml .Values.enterprise.arena.devConsole.resources | default .Values.resources | nindent 12 }}
+            {{- toYaml (.Values.enterprise.arena.devConsole.resources | default .Values.resources) | nindent 12 }}
           volumeMounts:
             - name: workspace-content
               mountPath: /workspace-content
@@ -99,7 +163,8 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "omnia.fullname" . }}-arena-dev-console
+  name: arena-dev-console
+  namespace: {{ $namespace }}
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
     app.kubernetes.io/component: arena-dev-console

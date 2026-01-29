@@ -19,6 +19,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/go-logr/logr"
 )
 
@@ -32,6 +33,11 @@ type PromptKitHandler struct {
 
 	// Session state for conversations
 	sessions map[string]*SessionState
+
+	// K8s provider loading (optional, for dynamic namespace-based provider resolution)
+	k8sLoader *K8sProviderLoader
+	// Cache of provider registries per namespace
+	nsRegistries map[string]*providers.Registry
 }
 
 // SessionState holds conversation state for a session.
@@ -44,14 +50,26 @@ type SessionState struct {
 // NewPromptKitHandler creates a new handler with the given configuration.
 func NewPromptKitHandler(cfg *config.Config, log logr.Logger) (*PromptKitHandler, error) {
 	h := &PromptKitHandler{
-		config:   cfg,
-		log:      log.WithName("promptkit-handler"),
-		sessions: make(map[string]*SessionState),
+		config:       cfg,
+		log:          log.WithName("promptkit-handler"),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
 	}
 
-	// Build the components
-	if err := h.buildComponents(); err != nil {
-		return nil, fmt.Errorf("failed to build components: %w", err)
+	// Try to initialize K8s provider loader (will fail if not in cluster, which is ok)
+	k8sLoader, err := NewK8sProviderLoader(log)
+	if err != nil {
+		log.Info("K8s provider loader not available (may be running outside cluster)", "error", err.Error())
+	} else {
+		h.k8sLoader = k8sLoader
+		log.Info("K8s provider loader initialized for dynamic provider resolution")
+	}
+
+	// Build the components (only if we have a static config)
+	if cfg != nil && len(cfg.LoadedProviders) > 0 {
+		if err := h.buildComponents(); err != nil {
+			return nil, fmt.Errorf("failed to build components: %w", err)
+		}
 	}
 
 	return h, nil
@@ -69,13 +87,17 @@ func (h *PromptKitHandler) HandleMessage(
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {
-	h.mu.RLock()
-	registry := h.providerRegistry
-	cfg := h.config
-	h.mu.RUnlock()
+	// Extract namespace from context for K8s provider resolution
+	namespace := logctx.Namespace(ctx)
+
+	// Get registry and config (potentially namespace-specific)
+	registry, cfg, err := h.getRegistryAndConfig(ctx, namespace)
+	if err != nil {
+		return writer.WriteError("PROVIDER_LOAD_ERROR", err.Error())
+	}
 
 	if registry == nil {
-		return writer.WriteError("ENGINE_NOT_READY", "PromptKit engine is not initialized")
+		return writer.WriteError("ENGINE_NOT_READY", "PromptKit engine is not initialized. No providers available.")
 	}
 
 	// Get or create session state
@@ -311,6 +333,90 @@ func (h *PromptKitHandler) ReloadFromPath(configPath string) error {
 	return h.Reload(cfg)
 }
 
+// getRegistryAndConfig returns the provider registry and config.
+// If K8s provider loading is enabled, it loads providers from the pod's namespace.
+// Otherwise, it falls back to the static configuration.
+func (h *PromptKitHandler) getRegistryAndConfig(
+	ctx context.Context,
+	_ string,
+) (*providers.Registry, *config.Config, error) {
+	// If K8s loading is enabled, use dynamic loading from the pod's namespace
+	if h.k8sLoader != nil {
+		return h.getOrLoadK8sRegistry(ctx)
+	}
+
+	// Fall back to static config
+	h.mu.RLock()
+	registry := h.providerRegistry
+	cfg := h.config
+	h.mu.RUnlock()
+
+	return registry, cfg, nil
+}
+
+// getOrLoadK8sRegistry returns a cached registry or loads providers from K8s.
+// The dev console only accesses providers in its own namespace for security.
+func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers.Registry, *config.Config, error) {
+	namespace := h.k8sLoader.Namespace()
+
+	h.mu.RLock()
+	if registry, ok := h.nsRegistries[namespace]; ok {
+		h.mu.RUnlock()
+		return registry, h.config, nil
+	}
+	h.mu.RUnlock()
+
+	// Load providers from K8s (only from this pod's namespace)
+	h.log.Info("loading providers from K8s", "namespace", namespace)
+	loadedProviders, err := h.k8sLoader.LoadProviders(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load providers: %w", err)
+	}
+
+	if len(loadedProviders) == 0 {
+		h.log.Info("no providers found in namespace, falling back to static config", "namespace", namespace)
+		h.mu.RLock()
+		registry := h.providerRegistry
+		cfg := h.config
+		h.mu.RUnlock()
+		return registry, cfg, nil
+	}
+
+	// Build config from loaded providers
+	cfg := BuildConfigFromProviders(loadedProviders)
+
+	// Build registry from providers
+	registry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build provider registry: %w", err)
+	}
+
+	// Cache the registry
+	h.mu.Lock()
+	h.nsRegistries[namespace] = registry
+	h.mu.Unlock()
+
+	h.log.Info("loaded providers from K8s", "namespace", namespace, "count", len(loadedProviders))
+	return registry, cfg, nil
+}
+
+// InvalidateProviderCache invalidates the cached provider registry.
+// Call this when providers in the namespace change.
+func (h *PromptKitHandler) InvalidateProviderCache() {
+	if h.k8sLoader == nil {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	namespace := h.k8sLoader.Namespace()
+	if registry, ok := h.nsRegistries[namespace]; ok {
+		_ = registry.Close()
+		delete(h.nsRegistries, namespace)
+	}
+}
+
 // buildComponents creates the PromptKit components from configuration.
 func (h *PromptKitHandler) buildComponents() error {
 	h.mu.Lock()
@@ -391,11 +497,24 @@ func (h *PromptKitHandler) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Close all providers in registry
-	if h.providerRegistry != nil {
-		return h.providerRegistry.Close()
+	var lastErr error
+
+	// Close all namespace registries
+	for ns, registry := range h.nsRegistries {
+		if err := registry.Close(); err != nil {
+			h.log.Error(err, "failed to close namespace registry", "namespace", ns)
+			lastErr = err
+		}
 	}
-	return nil
+	h.nsRegistries = make(map[string]*providers.Registry)
+
+	// Close main registry
+	if h.providerRegistry != nil {
+		if err := h.providerRegistry.Close(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
 }
 
 // Interface assertion

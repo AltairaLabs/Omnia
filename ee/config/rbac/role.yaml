@@ -8,6 +8,8 @@ rules:
   - ""
   resources:
   - configmaps
+  - serviceaccounts
+  - services
   verbs:
   - create
   - delete
@@ -44,6 +46,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - batch
   resources:
   - jobs
@@ -58,6 +72,7 @@ rules:
 - apiGroups:
   - omnia.altairalabs.ai
   resources:
+  - arenadevsessions
   - arenajobs
   - arenasources
   - arenatemplatesources
@@ -72,6 +87,7 @@ rules:
 - apiGroups:
   - omnia.altairalabs.ai
   resources:
+  - arenadevsessions/finalizers
   - arenajobs/finalizers
   - arenasources/finalizers
   - arenatemplatesources/finalizers
@@ -80,6 +96,7 @@ rules:
 - apiGroups:
   - omnia.altairalabs.ai
   resources:
+  - arenadevsessions/status
   - arenajobs/status
   - arenasources/status
   - arenatemplatesources/status
@@ -95,4 +112,17 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch

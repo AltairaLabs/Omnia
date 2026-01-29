@@ -17,6 +17,10 @@ interface UseDevConsoleOptions {
   projectId?: string;
   /** Workspace name for context */
   workspace?: string;
+  /** Namespace for provider/tool access */
+  namespace?: string;
+  /** Service name for dynamic ArenaDevSession (e.g., "arena-dev-console-test-session") */
+  service?: string;
 }
 
 interface UseDevConsoleReturn extends ConsoleState {
@@ -112,6 +116,9 @@ function extractAttachmentsFromParts(parts: ContentPart[]): FileAttachment[] {
 export function useDevConsole({
   sessionId: customSessionId,
   projectId,
+  workspace,
+  namespace,
+  service,
 }: UseDevConsoleOptions = {}): UseDevConsoleReturn {
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -267,10 +274,16 @@ export function useDevConsole({
 
     setStatus("connecting");
 
-    // Build WebSocket URL
+    // Build WebSocket URL with workspace/namespace context
+    // If service is provided (from ArenaDevSession), use it for dynamic routing
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.hostname;
-    const wsUrl = `${protocol}//${host}:${WS_PROXY_PORT}/api/dev-console?agent=dev-console`;
+    const params = new URLSearchParams();
+    params.set("agent", "dev-console");
+    if (workspace) params.set("workspace", workspace);
+    if (namespace) params.set("namespace", namespace);
+    if (service) params.set("service", service);
+    const wsUrl = `${protocol}//${host}:${WS_PROXY_PORT}/api/dev-console?${params.toString()}`;
 
     const ws = new WebSocket(wsUrl);
 
@@ -305,7 +318,7 @@ export function useDevConsole({
     };
 
     wsRef.current = ws;
-  }, [handleMessage, setStatus, addMessageToStore]);
+  }, [handleMessage, setStatus, addMessageToStore, workspace, namespace, service]);
 
   // Disconnect from the dev console
   const disconnect = useCallback(() => {

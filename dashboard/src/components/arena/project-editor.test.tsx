@@ -54,6 +54,17 @@ vi.mock("@/hooks", () => ({
     isLoading: false,
     error: null,
   })),
+  useDevSession: vi.fn(() => ({
+    session: null,
+    isLoading: false,
+    error: null,
+    isReady: false,
+    endpoint: null,
+    createSession: vi.fn(),
+    deleteSession: vi.fn(),
+    sendHeartbeat: vi.fn(),
+    refresh: vi.fn(),
+  })),
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
@@ -66,6 +77,29 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({
     currentWorkspace: { name: "test-workspace" },
   }),
+}));
+
+vi.mock("@/stores/results-panel-store", () => ({
+  useResultsPanelStore: vi.fn((selector) => {
+    const state = {
+      isOpen: false,
+      activeTab: "problems",
+      height: 30,
+      currentJobName: null,
+      problemsCount: 0,
+      open: vi.fn(),
+      close: vi.fn(),
+      toggle: vi.fn(),
+      setActiveTab: vi.fn(),
+      setHeight: vi.fn(),
+      setCurrentJob: vi.fn(),
+      setProblemsCount: vi.fn(),
+      openJobLogs: vi.fn(),
+      openJobResults: vi.fn(),
+    };
+    return selector(state);
+  }),
+  useResultsPanelActiveTab: vi.fn(() => "problems"),
 }));
 
 vi.mock("@/lib/config", () => ({

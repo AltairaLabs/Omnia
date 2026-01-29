@@ -36,8 +36,9 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		return err
 	}
 
-	// Enrich context with session ID
+	// Enrich context with session ID and namespace
 	ctx = logctx.WithSessionID(ctx, sessionID)
+	ctx = logctx.WithNamespace(ctx, c.namespace)
 	log = logctx.LoggerWithContext(s.log, ctx)
 
 	// Update connection's session ID

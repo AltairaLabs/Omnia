@@ -220,10 +220,11 @@ rules:
       - watch
   {{- end }}
   {{- if .Values.enterprise.enabled }}
-  # Enterprise Arena CRDs (ArenaJob, ArenaSource, ArenaTemplateSource)
+  # Enterprise Arena CRDs (ArenaJob, ArenaSource, ArenaTemplateSource, ArenaDevSession)
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - arenadevsessions
       - arenajobs
       - arenasources
       - arenatemplatesources
@@ -238,6 +239,7 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - arenadevsessions/finalizers
       - arenajobs/finalizers
       - arenasources/finalizers
       - arenatemplatesources/finalizers
@@ -246,6 +248,7 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - arenadevsessions/status
       - arenajobs/status
       - arenasources/status
       - arenatemplatesources/status
@@ -258,6 +261,32 @@ rules:
       - batch
     resources:
       - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # RBAC for ArenaDevSession controller (creates ServiceAccount, Role, RoleBinding per session)
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - roles
+      - rolebindings
     verbs:
       - create
       - delete

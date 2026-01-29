@@ -85,7 +85,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev'])
+    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-arena-dev-console-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -329,6 +329,28 @@ if ENABLE_ENTERPRISE:
         ],
     )
 
+    # Build arena-dev-console image (interactive agent testing in project editor)
+    arena_dev_console_only = [
+        './ee/cmd/arena-dev-console',
+        './ee/internal',
+        './ee/pkg',
+        './ee/api',
+        './internal',
+        './pkg',
+        './api',
+        './go.mod',
+        './go.sum',
+    ]
+    if USE_LOCAL_PROMPTKIT:
+        arena_dev_console_only.append('./promptkit-local')
+
+    docker_build(
+        'omnia-arena-dev-console-dev',
+        context='.',
+        dockerfile='./ee/Dockerfile.arena-dev-console',
+        only=arena_dev_console_only,
+    )
+
 # ============================================================================
 # LangChain Runtime - Python-based agent framework
 # ============================================================================
@@ -413,6 +435,13 @@ if ENABLE_ENTERPRISE:
         'enterprise.promptkitLsp.image.repository=omnia-promptkit-lsp-dev',
         'enterprise.promptkitLsp.image.tag=latest',
         'enterprise.promptkitLsp.image.pullPolicy=Never',
+        # Arena Dev Console for interactive agent testing (deployed per workspace namespace)
+        'enterprise.arena.devConsole.enabled=true',
+        'enterprise.arena.devConsole.namespace=dev-agents',
+        'enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev',
+        'enterprise.arena.devConsole.image.tag=latest',
+        'enterprise.arena.devConsole.image.pullPolicy=Never',
+        'enterprise.arena.devConsole.devMode=true',
     ])
 else:
     # Disable enterprise features
@@ -692,6 +721,15 @@ if ENABLE_ENTERPRISE:
     k8s_resource(
         'omnia-promptkit-lsp',
         labels=['enterprise'],
+        resource_deps=['omnia-dashboard'],
+    )
+
+    # Arena Dev Console for interactive agent testing in project editor
+    # Deployed to dev-agents namespace (per-workspace deployment for security)
+    k8s_resource(
+        'arena-dev-console',
+        labels=['enterprise'],
+        port_forwards=['8085:8080'],  # Dev console WebSocket/HTTP
         resource_deps=['omnia-dashboard'],
     )
 

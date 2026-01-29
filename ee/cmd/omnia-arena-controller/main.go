@@ -61,6 +61,7 @@ func main() {
 	var enableHTTP2 bool
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
+	var arenaDevConsoleImage string
 	var workspaceContentPath string
 	var workspaceStorageClass string
 	var nfsServer string
@@ -77,6 +78,8 @@ func main() {
 		"The image to use for Arena worker containers.")
 	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent.")
+	flag.StringVar(&arenaDevConsoleImage, "arena-dev-console-image", "",
+		"The image to use for Arena dev console containers.")
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
 		"Base path for workspace content volumes.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
@@ -245,6 +248,16 @@ func main() {
 		StorageManager:        storageManager,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
+		os.Exit(1)
+	}
+
+	// ArenaDevSession controller
+	if err := (&controller.ArenaDevSessionReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		DevConsoleImage: arenaDevConsoleImage,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaDevSession")
 		os.Exit(1)
 	}
 

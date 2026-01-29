@@ -183,6 +183,13 @@ func main() {
 
 // createHandler creates the PromptKit handler.
 // Returns the handler and an optional cleanup function.
+//
+// The handler supports two modes:
+//  1. Static config: Load from a config file at startup
+//  2. K8s dynamic: No config file, providers loaded dynamically from K8s based on namespace
+//
+// When running in K8s without a config file, providers are loaded dynamically
+// from Provider CRDs in the namespace specified in the WebSocket connection.
 func createHandler(log logr.Logger, configFile string) (*server.PromptKitHandler, func(), error) {
 	// Load initial configuration if provided
 	var cfg *config.Config
@@ -194,20 +201,16 @@ func createHandler(log logr.Logger, configFile string) (*server.PromptKitHandler
 		}
 		log.Info("loaded initial configuration", "file", configFile)
 	} else {
-		// Create minimal default configuration
-		cfg = &config.Config{
-			LoadedProviders: make(map[string]*config.Provider),
-		}
-		log.Info("using empty configuration (will be loaded via reload)")
+		// No config file - handler will use K8s provider loading
+		// or accept configuration via reload endpoint
+		log.Info("no config file provided, will use K8s dynamic provider loading or reload endpoint")
 	}
 
 	// Create the handler
+	// With K8s support, it can work without an initial config
 	handler, err := server.NewPromptKitHandler(cfg, log.WithName("handler"))
 	if err != nil {
-		// Handler creation failed, but this might be expected if no config is provided
-		// Return a nil handler that will be configured later via reload
-		log.Info("handler creation deferred (no initial config)", "error", err.Error())
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("failed to create handler: %w", err)
 	}
 
 	cleanup := func() {

@@ -99,9 +99,14 @@ enterprise:
         port: 6379
 
     # Dev console for interactive agent testing
+    # NOTE: Dev console is deployed per-namespace for security isolation.
+    # Each workspace should have its own dev console deployment.
     devConsole:
       # -- Enable arena dev console
       enabled: false
+      # -- Namespace to deploy dev console to (defaults to Release.Namespace)
+      # For per-workspace deployments, set this to the workspace namespace
+      namespace: ""
       # -- Number of dev console replicas
       replicaCount: 1
       image:

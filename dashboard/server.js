@@ -31,8 +31,9 @@ const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 const DEFAULT_FACADE_PORT = parseInt(process.env.DEFAULT_FACADE_PORT || "8080", 10);
 // PromptKit LSP service URL (overridable via env var)
 const LSP_SERVICE_URL = process.env.LSP_SERVICE_URL || `ws://omnia-promptkit-lsp.omnia-system.${SERVICE_DOMAIN}:8080/lsp`;
-// Arena Dev Console service URL (overridable via env var)
-const DEV_CONSOLE_SERVICE_URL = process.env.DEV_CONSOLE_SERVICE_URL || `ws://omnia-arena-dev-console.omnia-system.${SERVICE_DOMAIN}:8080/ws`;
+// Arena Dev Console service name (deployed per workspace namespace)
+const DEV_CONSOLE_SERVICE_NAME = process.env.DEV_CONSOLE_SERVICE_NAME || "arena-dev-console";
+const DEV_CONSOLE_SERVICE_PORT = process.env.DEV_CONSOLE_SERVICE_PORT || "8080";
 
 // Common WebSocket close reasons
 const WS_CLOSE_REASON_TIMEOUT = "Connection timeout";
@@ -363,15 +364,40 @@ function proxyLspWebSocket(clientSocket, workspace, project) {
 }
 
 /**
- * Proxy a WebSocket connection to the Arena Dev Console service.
+ * Build the dev console service URL for a given namespace and service name.
+ * Dev console is deployed per-workspace/namespace for security isolation.
+ * With dynamic sessions, each session creates its own service (arena-dev-console-{sessionId}).
+ * @param {string} namespace - Namespace where the dev console is deployed
+ * @param {string} serviceName - Service name (defaults to static DEV_CONSOLE_SERVICE_NAME)
  */
-function proxyDevConsoleWebSocket(clientSocket, agentName) {
-  // Build upstream URL with agent query param (required by facade pattern)
-  const upstreamUrl = agentName
-    ? `${DEV_CONSOLE_SERVICE_URL}?agent=${encodeURIComponent(agentName)}`
-    : `${DEV_CONSOLE_SERVICE_URL}?agent=dev-console`;
+function getDevConsoleUrl(namespace, serviceName) {
+  if (!namespace) {
+    namespace = "dev-agents"; // Default test namespace
+  }
+  const svcName = serviceName || DEV_CONSOLE_SERVICE_NAME;
+  return `ws://${svcName}.${namespace}.${SERVICE_DOMAIN}:${DEV_CONSOLE_SERVICE_PORT}/ws`;
+}
 
-  console.log(`[WS DevConsole Proxy] Connecting to upstream: ${upstreamUrl}`);
+/**
+ * Proxy a WebSocket connection to the Arena Dev Console service.
+ * The dev console is deployed per-namespace for security isolation.
+ * With dynamic sessions (ArenaDevSession), each session creates its own service.
+ * @param {WebSocket} clientSocket - Client WebSocket connection
+ * @param {string} agentName - Agent identifier for the facade pattern
+ * @param {string} workspace - Workspace name (for context)
+ * @param {string} namespace - Namespace where the dev console is deployed
+ * @param {string} serviceName - Service name (for dynamic sessions like arena-dev-console-{sessionId})
+ */
+function proxyDevConsoleWebSocket(clientSocket, agentName, workspace, namespace, serviceName) {
+  // Build upstream URL - connect to dev console in the workspace's namespace
+  const params = new URLSearchParams();
+  params.set("agent", agentName || "dev-console");
+  if (workspace) params.set("workspace", workspace);
+
+  const baseUrl = getDevConsoleUrl(namespace, serviceName);
+  const upstreamUrl = `${baseUrl}?${params.toString()}`;
+
+  console.log(`[WS DevConsole Proxy] Connecting to dev console service '${serviceName || DEV_CONSOLE_SERVICE_NAME}' in namespace '${namespace || "dev-agents"}': ${upstreamUrl}`);
 
   let upstream = null;
   let upstreamConnected = false;
@@ -505,9 +531,10 @@ app.prepare().then(() => {
       const params = parseQueryParams(req.url);
       proxyLspWebSocket(ws, params.workspace, params.project);
     } else if (isDevConsolePath(pathname)) {
-      // Parse query params for dev console context
+      // Parse query params for dev console context (workspace/namespace for provider access)
+      // service param is used for dynamic sessions (ArenaDevSession creates arena-dev-console-{sessionId})
       const params = parseQueryParams(req.url);
-      proxyDevConsoleWebSocket(ws, params.agent || "dev-console");
+      proxyDevConsoleWebSocket(ws, params.agent || "dev-console", params.workspace, params.namespace, params.service);
     } else {
       console.warn(`[WS] Unknown WebSocket path: ${pathname}`);
       ws.close(1008, "Unknown path");

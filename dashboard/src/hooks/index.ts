@@ -10,6 +10,7 @@ export { useStats } from "./use-stats";
 export { useCosts } from "./use-costs";
 export { useAgentConsole } from "./use-agent-console";
 export { useDevConsole } from "./use-dev-console";
+export { useDevSession } from "./use-dev-session";
 export { useLogs } from "./use-logs";
 export { useArenaJobLogs } from "./use-arena-job-logs";
 export { useNamespaces } from "./use-namespaces";

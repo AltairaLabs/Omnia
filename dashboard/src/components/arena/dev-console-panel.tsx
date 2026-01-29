@@ -45,6 +45,10 @@ interface DevConsolePanelProps {
   projectId: string;
   /** Workspace name */
   workspace?: string;
+  /** Namespace for provider/tool access */
+  namespace?: string;
+  /** Service name from ArenaDevSession (e.g., "arena-dev-console-test-session") */
+  service?: string;
   /** Path to the agent configuration file (for reload) */
   configPath?: string;
   /** Available providers for selection */
@@ -183,6 +187,8 @@ function ThinkingIndicator() {
 export function DevConsolePanel({
   projectId,
   workspace,
+  namespace,
+  service,
   configPath,
   providers = [],
   selectedProvider,
@@ -217,6 +223,8 @@ export function DevConsolePanel({
     sessionId: `project-${projectId}`,
     projectId,
     workspace,
+    namespace,
+    service,
   });
 
   // Auto-connect on mount

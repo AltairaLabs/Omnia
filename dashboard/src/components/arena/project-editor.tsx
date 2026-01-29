@@ -9,6 +9,7 @@ import {
   useArenaProjectMutations,
   useArenaProjectFiles,
   useProviders,
+  useDevSession,
 } from "@/hooks";
 import { FileTree } from "./file-tree";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui/resizable";
 import { ResultsPanel, type Problem } from "./results-panel";
 import { DevConsolePanel } from "./dev-console-panel";
-import { useResultsPanelStore } from "@/stores/results-panel-store";
+import { useResultsPanelStore, useResultsPanelActiveTab } from "@/stores/results-panel-store";
 
 // Dynamically import LspYamlEditor to avoid SSR issues with monaco-languageclient
 // The vscode package has Node.js-specific code that doesn't work in SSR context
@@ -75,6 +76,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const { toast } = useToast();
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
+  const namespace = currentWorkspace?.namespace;
 
   // Enterprise feature check for LSP
   const [lspEnabled, setLspEnabled] = useState(false);
@@ -103,6 +105,22 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const { createProject, deleteProject } = useArenaProjectMutations();
   const { getFileContent, updateFileContent: saveFileContent, createFile, deleteFile, refreshFileTree } = useArenaProjectFiles();
   const { data: providers = [] } = useProviders();
+
+  // Dev session for interactive testing (ArenaDevSession)
+  const {
+    session: devSession,
+    isLoading: devSessionLoading,
+    error: devSessionError,
+    isReady: devSessionReady,
+    createSession: createDevSession,
+  } = useDevSession({
+    workspace: workspace || "",
+    projectId: currentProject?.id || "",
+    autoCreate: false, // Only create when console tab is opened
+  });
+
+  // Track active results panel tab to trigger session creation
+  const activeResultsTab = useResultsPanelActiveTab();
 
   // Derived state
   const activeFile = useActiveFile();
@@ -148,6 +166,21 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   useEffect(() => {
     setProjectLoading(projectDataLoading);
   }, [projectDataLoading, setProjectLoading]);
+
+  // Create dev session when Console tab is activated
+  useEffect(() => {
+    if (
+      activeResultsTab === "console" &&
+      currentProject &&
+      workspace &&
+      !devSession &&
+      !devSessionLoading
+    ) {
+      createDevSession().catch((err) => {
+        console.error("Failed to create dev session:", err);
+      });
+    }
+  }, [activeResultsTab, currentProject, workspace, devSession, devSessionLoading, createDevSession]);
 
   // Handle project selection
   const handleProjectSelect = useCallback((projectId: string) => {
@@ -563,14 +596,35 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
                   onProblemClick={handleProblemClick}
                   consoleContent={
                     currentProject ? (
-                      <DevConsolePanel
-                        projectId={currentProject.id}
-                        workspace={workspace}
-                        configPath={activeFile?.path}
-                        providers={providerOptions}
-                        selectedProvider={selectedProvider}
-                        onProviderChange={setSelectedProvider}
-                      />
+                      devSessionLoading ? (
+                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                          <Loader2 className="h-6 w-6 animate-spin mb-2" />
+                          <p className="text-sm">Starting dev session...</p>
+                          <p className="text-xs mt-1">This may take a moment</p>
+                        </div>
+                      ) : devSessionError ? (
+                        <div className="flex flex-col items-center justify-center h-full text-destructive">
+                          <p className="text-sm">Failed to start dev session</p>
+                          <p className="text-xs mt-1">{devSessionError.message}</p>
+                        </div>
+                      ) : devSessionReady ? (
+                        <DevConsolePanel
+                          projectId={currentProject.id}
+                          workspace={workspace}
+                          namespace={namespace}
+                          service={devSession?.status?.serviceName}
+                          configPath={activeFile?.path}
+                          providers={providerOptions}
+                          selectedProvider={selectedProvider}
+                          onProviderChange={setSelectedProvider}
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                          <Loader2 className="h-6 w-6 animate-spin mb-2" />
+                          <p className="text-sm">Session starting...</p>
+                          <p className="text-xs mt-1">Waiting for service to be ready</p>
+                        </div>
+                      )
                     ) : undefined
                   }
                 />

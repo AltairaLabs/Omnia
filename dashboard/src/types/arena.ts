@@ -930,3 +930,64 @@ export interface ArenaSourceContentResponse {
   /** Total number of directories */
   directoryCount: number;
 }
+
+// =============================================================================
+// ArenaDevSession - Interactive agent testing session
+// =============================================================================
+
+export type ArenaDevSessionPhase =
+  | "Pending"
+  | "Starting"
+  | "Ready"
+  | "Stopping"
+  | "Stopped"
+  | "Failed";
+
+/** ArenaDevSession resource requirements */
+export interface ArenaDevSessionResources {
+  /** Resource requests */
+  requests?: Record<string, string>;
+  /** Resource limits */
+  limits?: Record<string, string>;
+}
+
+/** ArenaDevSession specification */
+export interface ArenaDevSessionSpec {
+  /** Project ID being tested */
+  projectId: string;
+  /** Workspace name for reference */
+  workspace: string;
+  /** Idle timeout before cleanup (default: 30m) */
+  idleTimeout?: string;
+  /** Override dev console image */
+  image?: string;
+  /** Resource requirements */
+  resources?: ArenaDevSessionResources;
+}
+
+/** ArenaDevSession status */
+export interface ArenaDevSessionStatus {
+  /** Current phase */
+  phase?: ArenaDevSessionPhase;
+  /** WebSocket endpoint URL */
+  endpoint?: string;
+  /** Service name */
+  serviceName?: string;
+  /** Last activity timestamp */
+  lastActivityAt?: string;
+  /** When the session became ready */
+  startedAt?: string;
+  /** Status message */
+  message?: string;
+  /** Standard conditions */
+  conditions?: Condition[];
+}
+
+/** ArenaDevSession resource - ephemeral dev console for interactive testing */
+export interface ArenaDevSession {
+  apiVersion: "omnia.altairalabs.ai/v1alpha1";
+  kind: "ArenaDevSession";
+  metadata: ObjectMeta;
+  spec: ArenaDevSessionSpec;
+  status?: ArenaDevSessionStatus;
+}
