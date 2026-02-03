@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   useResultsPanelStore,
@@ -34,53 +33,13 @@ export function ResultsPanel({
 }: ResultsPanelProps) {
   const isOpen = useResultsPanelStore((state) => state.isOpen);
   const activeTab = useResultsPanelStore((state) => state.activeTab);
-  const height = useResultsPanelStore((state) => state.height);
   const close = useResultsPanelStore((state) => state.close);
   const toggle = useResultsPanelStore((state) => state.toggle);
-  const setHeight = useResultsPanelStore((state) => state.setHeight);
-
-  // Resize handling
-  const [isResizing, setIsResizing] = useState(false);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsResizing(true);
-
-      const startY = e.clientY;
-      const startHeight = height;
-
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        const container = (e.target as HTMLElement).closest(
-          "[data-results-panel-container]"
-        );
-        if (!container) return;
-
-        const containerRect = container.getBoundingClientRect();
-        const deltaY = startY - moveEvent.clientY;
-        const deltaPercent = (deltaY / containerRect.height) * 100;
-        const newHeight = startHeight + deltaPercent;
-
-        setHeight(newHeight);
-      };
-
-      const handleMouseUp = () => {
-        setIsResizing(false);
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    },
-    [height, setHeight]
-  );
 
   return (
     <div
       data-results-panel-container
-      className={cn("flex flex-col", className)}
-      style={{ height: isOpen ? `${height}%` : "auto" }}
+      className={cn("flex flex-col", isOpen && "h-full", className)}
     >
       {/* Collapsed header */}
       {!isOpen && (
@@ -99,28 +58,6 @@ export function ResultsPanel({
       {/* Expanded panel */}
       {isOpen && (
         <>
-          {/* Resize handle */}
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="Resize results panel"
-            tabIndex={0}
-            onMouseDown={handleMouseDown}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setHeight(height + 5);
-              } else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setHeight(height - 5);
-              }
-            }}
-            className={cn(
-              "h-1 border-t cursor-ns-resize hover:bg-primary/20 transition-colors focus:outline-none focus:bg-primary/30",
-              isResizing && "bg-primary/30"
-            )}
-          />
-
           {/* Header with tabs */}
           <div className="flex items-center justify-between border-b bg-muted/30">
             <ResultsPanelTabs />

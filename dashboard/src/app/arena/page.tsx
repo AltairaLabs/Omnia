@@ -189,7 +189,7 @@ function ArenaContent() {
       <div className="flex-1 p-6 space-y-6 overflow-auto">
         {/* Stats Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Link href="/arena/sources">
+          <Link href="/arena/sources" className="h-full">
             <StatCard
               title="Active Sources"
               value={stats?.sources.active || 0}
@@ -198,7 +198,7 @@ function ArenaContent() {
             />
           </Link>
 
-          <Link href="/arena/jobs">
+          <Link href="/arena/jobs" className="h-full">
             <StatCard
               title="Running Jobs"
               value={stats?.jobs.running || 0}

@@ -6,10 +6,8 @@ import { ResultsPanel, type Problem } from "./results-panel";
 // Mock state values
 let mockIsOpen = true;
 let mockActiveTab = "problems";
-let mockHeight = 30;
 const mockClose = vi.fn();
 const mockToggle = vi.fn();
-const mockSetHeight = vi.fn();
 
 // Mock the results panel store
 vi.mock("@/stores/results-panel-store", () => ({
@@ -17,10 +15,8 @@ vi.mock("@/stores/results-panel-store", () => ({
     const state = {
       isOpen: mockIsOpen,
       activeTab: mockActiveTab,
-      height: mockHeight,
       close: mockClose,
       toggle: mockToggle,
-      setHeight: mockSetHeight,
       setProblemsCount: vi.fn(),
       problemsCount: 0,
       setActiveTab: vi.fn(),
@@ -54,7 +50,6 @@ describe("ResultsPanel", () => {
     vi.clearAllMocks();
     mockIsOpen = true;
     mockActiveTab = "problems";
-    mockHeight = 30;
   });
 
   it("should render when open", () => {
@@ -165,92 +160,17 @@ describe("ResultsPanel", () => {
     expect(screen.getByText(/no job selected/i)).toBeInTheDocument();
   });
 
-  it("should handle keyboard navigation for resize", async () => {
+  it("should apply h-full class only when open", () => {
     mockIsOpen = true;
-    const user = userEvent.setup();
-    render(<ResultsPanel problems={[]} />);
+    const { container, rerender } = render(<ResultsPanel problems={[]} />);
 
-    // Find the resize handle by its role
-    const resizeHandle = screen.getByRole("separator");
+    let panelContainer = container.querySelector("[data-results-panel-container]");
+    expect(panelContainer).toHaveClass("h-full");
 
-    // Focus the resize handle
-    resizeHandle.focus();
-
-    // Test ArrowUp (increase height)
-    await user.keyboard("{ArrowUp}");
-    expect(mockSetHeight).toHaveBeenCalledWith(35); // 30 + 5
-
-    vi.clearAllMocks();
-
-    // Test ArrowDown (decrease height)
-    await user.keyboard("{ArrowDown}");
-    expect(mockSetHeight).toHaveBeenCalledWith(25); // 30 - 5
-  });
-
-  it("should handle mouse resize interaction", async () => {
-    mockIsOpen = true;
-    render(<ResultsPanel problems={[]} />);
-
-    const resizeHandle = screen.getByRole("separator");
-    expect(resizeHandle).toBeInTheDocument();
-
-    // Simulate mouse down
-    const mouseDownEvent = new MouseEvent("mousedown", {
-      bubbles: true,
-      cancelable: true,
-      clientY: 100,
-    });
-    resizeHandle.dispatchEvent(mouseDownEvent);
-
-    // Simulate mouse move
-    const mouseMoveEvent = new MouseEvent("mousemove", {
-      bubbles: true,
-      cancelable: true,
-      clientY: 80, // moved up 20px
-    });
-    document.dispatchEvent(mouseMoveEvent);
-
-    // Simulate mouse up
-    const mouseUpEvent = new MouseEvent("mouseup", {
-      bubbles: true,
-      cancelable: true,
-    });
-    document.dispatchEvent(mouseUpEvent);
-
-    // After resize interaction completes, the panel should still be rendered
-    expect(screen.getByRole("separator")).toBeInTheDocument();
-  });
-
-  it("should set height to isOpen style correctly", () => {
-    mockIsOpen = true;
-    mockHeight = 40;
-    const { container } = render(<ResultsPanel problems={[]} />);
-
-    const panelContainer = container.querySelector("[data-results-panel-container]");
-    expect(panelContainer).toHaveStyle({ height: "40%" });
-  });
-
-  it("should set height to auto when closed", () => {
+    // Re-render with closed state
     mockIsOpen = false;
-    const { container } = render(<ResultsPanel problems={[]} />);
-
-    const panelContainer = container.querySelector("[data-results-panel-container]");
-    expect(panelContainer).toHaveStyle({ height: "auto" });
-  });
-
-  it("should show resize handle only when open", () => {
-    mockIsOpen = true;
-    render(<ResultsPanel problems={[]} />);
-    expect(screen.getByRole("separator")).toBeInTheDocument();
-
-    // Cleanup and re-render with closed state
-    vi.clearAllMocks();
-    mockIsOpen = false;
-  });
-
-  it("should not show resize handle when closed", () => {
-    mockIsOpen = false;
-    render(<ResultsPanel problems={[]} />);
-    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+    rerender(<ResultsPanel problems={[]} />);
+    panelContainer = container.querySelector("[data-results-panel-container]");
+    expect(panelContainer).not.toHaveClass("h-full");
   });
 });
