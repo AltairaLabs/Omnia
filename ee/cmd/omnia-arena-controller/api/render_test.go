@@ -435,6 +435,69 @@ func TestValidateOutputPath(t *testing.T) {
 	}
 }
 
+func TestReadProjectFiles(t *testing.T) {
+	// Create a temp directory with test files
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "test-project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "subdir"), 0755); err != nil {
+		t.Fatalf("failed to create test directory: %v", err)
+	}
+
+	// Create test files
+	if err := os.WriteFile(filepath.Join(projectDir, "file1.yaml"), []byte("content1"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "subdir", "file2.yaml"), []byte("content2"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	files, err := readProjectFiles(projectDir)
+	if err != nil {
+		t.Fatalf("readProjectFiles() error = %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Errorf("expected 2 files, got %d", len(files))
+	}
+
+	// Check file contents
+	fileMap := make(map[string]string)
+	for _, f := range files {
+		fileMap[f.Path] = f.Content
+	}
+
+	if content, ok := fileMap["file1.yaml"]; !ok || content != "content1" {
+		t.Errorf("file1.yaml not found or has wrong content")
+	}
+	if content, ok := fileMap[filepath.Join("subdir", "file2.yaml")]; !ok || content != "content2" {
+		t.Errorf("subdir/file2.yaml not found or has wrong content")
+	}
+}
+
+func TestReadProjectFiles_EmptyDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "empty-project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("failed to create test directory: %v", err)
+	}
+
+	files, err := readProjectFiles(projectDir)
+	if err != nil {
+		t.Fatalf("readProjectFiles() error = %v", err)
+	}
+
+	if len(files) != 0 {
+		t.Errorf("expected 0 files for empty directory, got %d", len(files))
+	}
+}
+
+func TestReadProjectFiles_NonexistentDir(t *testing.T) {
+	_, err := readProjectFiles("/nonexistent/path/that/does/not/exist")
+	if err == nil {
+		t.Error("readProjectFiles() should error for nonexistent directory")
+	}
+}
+
 func TestRenderTemplate_OutputPathRestriction(t *testing.T) {
 	// Test that output paths outside allowed directories are rejected
 	tests := []struct {

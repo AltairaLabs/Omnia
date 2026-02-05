@@ -677,6 +677,139 @@ func TestValidateCrossReferences_APIError(t *testing.T) {
 	}
 }
 
+func TestCountDiagnostics(t *testing.T) {
+	tests := []struct {
+		name             string
+		diags            []Diagnostic
+		expectedErrors   int
+		expectedWarnings int
+	}{
+		{
+			name:             "empty diagnostics",
+			diags:            []Diagnostic{},
+			expectedErrors:   0,
+			expectedWarnings: 0,
+		},
+		{
+			name: "only errors",
+			diags: []Diagnostic{
+				{Severity: SeverityError, Message: "error1"},
+				{Severity: SeverityError, Message: "error2"},
+			},
+			expectedErrors:   2,
+			expectedWarnings: 0,
+		},
+		{
+			name: "only warnings",
+			diags: []Diagnostic{
+				{Severity: SeverityWarning, Message: "warning1"},
+				{Severity: SeverityWarning, Message: "warning2"},
+				{Severity: SeverityWarning, Message: "warning3"},
+			},
+			expectedErrors:   0,
+			expectedWarnings: 3,
+		},
+		{
+			name: "mixed errors and warnings",
+			diags: []Diagnostic{
+				{Severity: SeverityError, Message: "error1"},
+				{Severity: SeverityWarning, Message: "warning1"},
+				{Severity: SeverityError, Message: "error2"},
+				{Severity: SeverityWarning, Message: "warning2"},
+			},
+			expectedErrors:   2,
+			expectedWarnings: 2,
+		},
+		{
+			name: "includes info severity",
+			diags: []Diagnostic{
+				{Severity: SeverityError, Message: "error"},
+				{Severity: SeverityWarning, Message: "warning"},
+				{Severity: SeverityInformation, Message: "info"},
+				{Severity: SeverityHint, Message: "hint"},
+			},
+			expectedErrors:   1,
+			expectedWarnings: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errors, warnings := countDiagnostics(tt.diags)
+			if errors != tt.expectedErrors {
+				t.Errorf("expected %d errors, got %d", tt.expectedErrors, errors)
+			}
+			if warnings != tt.expectedWarnings {
+				t.Errorf("expected %d warnings, got %d", tt.expectedWarnings, warnings)
+			}
+		})
+	}
+}
+
+func TestCollectWarnings(t *testing.T) {
+	tests := []struct {
+		name             string
+		filePath         string
+		diags            []Diagnostic
+		expectedWarnings []string
+	}{
+		{
+			name:             "empty diagnostics",
+			filePath:         "test.yaml",
+			diags:            []Diagnostic{},
+			expectedWarnings: nil,
+		},
+		{
+			name:     "no warnings only errors",
+			filePath: "test.yaml",
+			diags: []Diagnostic{
+				{Severity: SeverityError, Message: "error1"},
+				{Severity: SeverityError, Message: "error2"},
+			},
+			expectedWarnings: nil,
+		},
+		{
+			name:     "only warnings",
+			filePath: "tools/tool.yaml",
+			diags: []Diagnostic{
+				{Severity: SeverityWarning, Message: "warning1"},
+				{Severity: SeverityWarning, Message: "warning2"},
+			},
+			expectedWarnings: []string{
+				"tools/tool.yaml: warning1",
+				"tools/tool.yaml: warning2",
+			},
+		},
+		{
+			name:     "mixed errors and warnings",
+			filePath: "providers/provider.yaml",
+			diags: []Diagnostic{
+				{Severity: SeverityError, Message: "error1"},
+				{Severity: SeverityWarning, Message: "warning1"},
+				{Severity: SeverityError, Message: "error2"},
+			},
+			expectedWarnings: []string{
+				"providers/provider.yaml: warning1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := collectWarnings(tt.filePath, tt.diags)
+			if len(warnings) != len(tt.expectedWarnings) {
+				t.Errorf("expected %d warnings, got %d", len(tt.expectedWarnings), len(warnings))
+				return
+			}
+			for i, w := range warnings {
+				if w != tt.expectedWarnings[i] {
+					t.Errorf("warning %d: expected %q, got %q", i, tt.expectedWarnings[i], w)
+				}
+			}
+		})
+	}
+}
+
 func TestGetProjectFiles_Cached(t *testing.T) {
 	callCount := 0
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
