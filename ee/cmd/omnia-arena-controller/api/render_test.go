@@ -292,3 +292,111 @@ func TestRenderTemplate_VerifyContent(t *testing.T) {
 		t.Errorf("config.yaml should contain 'Greetings', got: %s", string(content))
 	}
 }
+
+// =============================================================================
+// Path Validation Tests
+// =============================================================================
+
+func TestValidateProjectName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid name", "my-project", false},
+		{"valid name with underscore", "my_project", false},
+		{"valid name with numbers", "project123", false},
+		{"empty name", "", true},
+		{"path traversal", "../escape", true},
+		{"path traversal middle", "foo/../bar", true},
+		{"forward slash", "foo/bar", true},
+		{"backslash", "foo\\bar", true},
+		{"hidden file", ".hidden", true},
+		{"starts with dot", ".secret", true},
+		{"double dot only", "..", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateProjectName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateProjectName(%q) error = %v, wantErr = %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidatePathWithinBase(t *testing.T) {
+	baseDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		base    string
+		target  string
+		wantErr bool
+	}{
+		{"path within base", baseDir, filepath.Join(baseDir, "subdir"), false},
+		{"path equal to base", baseDir, baseDir, false},
+		{"nested path within base", baseDir, filepath.Join(baseDir, "a", "b", "c"), false},
+		{"path outside base", baseDir, "/tmp/other", true},
+		{"path traversal escape", baseDir, filepath.Join(baseDir, "..", "escape"), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePathWithinBase(tt.base, tt.target)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validatePathWithinBase(%q, %q) error = %v, wantErr = %v", tt.base, tt.target, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRenderTemplate_PathTraversalInOutputPath(t *testing.T) {
+	// Test that output paths with traversal sequences are rejected
+	_, err := RenderTemplate("/some/template", "../escape/path", "test", nil)
+	if err == nil {
+		t.Error("RenderTemplate() should reject output path with path traversal")
+	}
+	if err != nil && !strings.Contains(err.Error(), "path") {
+		t.Logf("Error message: %v", err)
+	}
+}
+
+func TestRenderTemplate_PathTraversalInProjectName(t *testing.T) {
+	// Test that project names with traversal sequences are rejected
+	_, err := RenderTemplate("/some/template", t.TempDir(), "../escape", nil)
+	if err == nil {
+		t.Error("RenderTemplate() should reject project name with path traversal")
+	}
+	if err != nil && !strings.Contains(err.Error(), "invalid project name") {
+		t.Errorf("Expected 'invalid project name' error, got: %v", err)
+	}
+}
+
+func TestPreviewTemplate_PathTraversalInProjectName(t *testing.T) {
+	// Test that project names with traversal sequences are rejected
+	_, err := PreviewTemplate("/some/template", "../escape", nil)
+	if err == nil {
+		t.Error("PreviewTemplate() should reject project name with path traversal")
+	}
+	if err != nil && !strings.Contains(err.Error(), "invalid project name") {
+		t.Errorf("Expected 'invalid project name' error, got: %v", err)
+	}
+}
+
+func TestRenderTemplate_HiddenProjectName(t *testing.T) {
+	// Test that hidden project names (starting with .) are rejected
+	_, err := RenderTemplate("/some/template", t.TempDir(), ".hidden", nil)
+	if err == nil {
+		t.Error("RenderTemplate() should reject hidden project names")
+	}
+}
+
+func TestPreviewTemplate_HiddenProjectName(t *testing.T) {
+	// Test that hidden project names (starting with .) are rejected
+	_, err := PreviewTemplate("/some/template", ".hidden", nil)
+	if err == nil {
+		t.Error("PreviewTemplate() should reject hidden project names")
+	}
+}

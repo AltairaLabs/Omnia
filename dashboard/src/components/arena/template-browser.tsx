@@ -31,14 +31,14 @@ type TemplateWithSource = TemplateMetadata & { sourceName: string };
 
 export interface TemplateBrowserProps {
   /** Templates to display (fetched from API) */
-  templates: TemplateWithSource[];
+  readonly templates: TemplateWithSource[];
   /** Sources for calculating stats */
-  sources: ArenaTemplateSource[];
-  loading?: boolean;
-  error?: Error | null;
-  onRefetch?: () => void;
-  onSelectTemplate?: (template: TemplateMetadata, sourceName: string) => void;
-  className?: string;
+  readonly sources: ArenaTemplateSource[];
+  readonly loading?: boolean;
+  readonly error?: Error | null;
+  readonly onRefetch?: () => void;
+  readonly onSelectTemplate?: (template: TemplateMetadata, sourceName: string) => void;
+  readonly className?: string;
 }
 
 /**

@@ -20,11 +20,11 @@ import { useProjectDeployment } from "@/hooks/use-project-deployment";
 import type { ArenaJobType } from "@/types/arena";
 
 interface QuickRunDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  projectId: string | undefined;
-  type: ArenaJobType;
-  onJobCreated?: (jobName: string) => void;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly projectId: string | undefined;
+  readonly type: ArenaJobType;
+  readonly onJobCreated?: (jobName: string) => void;
 }
 
 const JOB_TYPE_LABELS: Record<ArenaJobType, string> = {

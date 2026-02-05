@@ -23,21 +23,21 @@ import { DeployButton } from "./deploy-button";
 import { RunDropdown } from "./run-dropdown";
 
 interface ProjectToolbarProps {
-  projects: ArenaProject[];
-  currentProject: ArenaProject | null;
-  hasUnsavedChanges: boolean;
-  saving: boolean;
-  loading: boolean;
-  validating?: boolean;
+  readonly projects: ArenaProject[];
+  readonly currentProject: ArenaProject | null;
+  readonly hasUnsavedChanges: boolean;
+  readonly saving: boolean;
+  readonly loading: boolean;
+  readonly validating?: boolean;
   /** Whether the user has write permissions */
-  canWrite?: boolean;
-  onProjectSelect: (projectId: string) => void;
-  onSave: () => void;
-  onNewProject: () => void;
-  onRefresh: () => void;
-  onDeleteProject?: () => void;
-  onValidateAll?: () => void;
-  className?: string;
+  readonly canWrite?: boolean;
+  readonly onProjectSelect: (projectId: string) => void;
+  readonly onSave: () => void;
+  readonly onNewProject: () => void;
+  readonly onRefresh: () => void;
+  readonly onDeleteProject?: () => void;
+  readonly onValidateAll?: () => void;
+  readonly className?: string;
 }
 
 /**

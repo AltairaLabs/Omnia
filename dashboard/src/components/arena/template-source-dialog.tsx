@@ -36,11 +36,11 @@ import type {
 import type { GitSourceSpec, OCISourceSpec, ConfigMapSourceSpec } from "@/types/arena";
 
 interface TemplateSourceDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  source?: ArenaTemplateSource | null;
-  onSuccess?: () => void;
-  onClose?: () => void;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly source?: ArenaTemplateSource | null;
+  readonly onSuccess?: () => void;
+  readonly onClose?: () => void;
 }
 
 interface FormState {

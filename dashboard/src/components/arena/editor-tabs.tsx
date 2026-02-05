@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/tooltip";
 
 interface EditorTabsProps {
-  className?: string;
+  readonly className?: string;
 }
 
 /**

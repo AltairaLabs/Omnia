@@ -18,10 +18,10 @@ import { cn } from "@/lib/utils";
 import { QuickRunDialog } from "./quick-run-dialog";
 
 interface RunDropdownProps {
-  projectId: string | undefined;
-  disabled?: boolean;
-  className?: string;
-  onJobCreated?: (jobName: string) => void;
+  readonly projectId: string | undefined;
+  readonly disabled?: boolean;
+  readonly className?: string;
+  readonly onJobCreated?: (jobName: string) => void;
 }
 
 const JOB_TYPE_ICONS: Record<ArenaJobType, React.ReactNode> = {

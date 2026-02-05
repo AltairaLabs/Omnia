@@ -39,17 +39,17 @@ const FILE_TYPE_ICONS: Record<ArenaFileKind, typeof FileCode> = {
 };
 
 export interface FileContextMenuProps {
-  children: ReactNode;
-  isDirectory: boolean;
-  isRoot?: boolean;
-  onNewFile?: () => void;
-  onNewFolder?: () => void;
-  onNewTypedFile?: (kind: ArenaFileKind) => void;
-  onImportProvider?: () => void;
-  onImportTool?: () => void;
-  onRename?: () => void;
-  onDelete?: () => void;
-  onCopyPath?: () => void;
+  readonly children: ReactNode;
+  readonly isDirectory: boolean;
+  readonly isRoot?: boolean;
+  readonly onNewFile?: () => void;
+  readonly onNewFolder?: () => void;
+  readonly onNewTypedFile?: (kind: ArenaFileKind) => void;
+  readonly onImportProvider?: () => void;
+  readonly onImportTool?: () => void;
+  readonly onRename?: () => void;
+  readonly onDelete?: () => void;
+  readonly onCopyPath?: () => void;
 }
 
 /**

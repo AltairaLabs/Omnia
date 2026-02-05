@@ -23,10 +23,10 @@ import {
 import type { ToolRegistry } from "@/types";
 
 export interface ImportToolDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  parentPath: string | null;
-  onImport: (files: { name: string; content: string }[]) => Promise<void>;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly parentPath: string | null;
+  readonly onImport: (files: { name: string; content: string }[]) => Promise<void>;
 }
 
 type WizardStep = "selectRegistry" | "selectTools";
@@ -158,21 +158,23 @@ export function ImportToolDialog({
         </DialogHeader>
 
         <div className="py-4">
-          {loadingRegistries ? (
+          {loadingRegistries && (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               <span className="ml-2 text-sm text-muted-foreground">
                 Loading tool registries...
               </span>
             </div>
-          ) : step === "selectRegistry" ? (
+          )}
+          {!loadingRegistries && step === "selectRegistry" && (
             // Step 1: Select Registry
             <div className="space-y-4">
-              {!registries || registries.length === 0 ? (
+              {(!registries || registries.length === 0) && (
                 <div className="text-sm text-muted-foreground py-4 text-center">
                   No tool registries found in the workspace.
                 </div>
-              ) : (
+              )}
+              {registries && registries.length > 0 && (
                 <>
                   <div className="text-sm text-muted-foreground">
                     Select a tool registry:
@@ -209,7 +211,8 @@ export function ImportToolDialog({
                 </>
               )}
             </div>
-          ) : (
+          )}
+          {!loadingRegistries && step === "selectTools" && (
             // Step 2: Select Tools
             <div className="space-y-4">
               <div className="text-sm text-muted-foreground">

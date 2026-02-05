@@ -296,11 +296,13 @@ function ResultRow({ result }: ResultRowProps) {
         {result.durationMs ? formatDuration(result.durationMs) : "—"}
       </td>
       <td className="px-4 py-2">
-        {result.error ? (
+        {result.error && (
           <span className="text-destructive text-xs">{result.error}</span>
-        ) : result.assertions && result.assertions.length > 0 ? (
+        )}
+        {!result.error && result.assertions && result.assertions.length > 0 && (
           <AssertionBadges assertions={result.assertions} />
-        ) : (
+        )}
+        {!result.error && (!result.assertions || result.assertions.length === 0) && (
           <span className="text-muted-foreground">—</span>
         )}
       </td>

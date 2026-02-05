@@ -14,12 +14,12 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 
 interface ResultsPanelProps {
   /** Validation problems to display */
-  problems?: Problem[];
+  readonly problems?: Problem[];
   /** Callback when clicking on a problem */
-  onProblemClick?: (problem: Problem) => void;
+  readonly onProblemClick?: (problem: Problem) => void;
   /** Custom content for the console tab */
-  consoleContent?: React.ReactNode;
-  className?: string;
+  readonly consoleContent?: React.ReactNode;
+  readonly className?: string;
 }
 
 /**
@@ -103,10 +103,10 @@ export function ResultsPanel({
 // =============================================================================
 
 interface TabContentProps {
-  activeTab: ResultsPanelTab;
-  problems: Problem[];
-  onProblemClick?: (problem: Problem) => void;
-  consoleContent?: React.ReactNode;
+  readonly activeTab: ResultsPanelTab;
+  readonly problems: Problem[];
+  readonly onProblemClick?: (problem: Problem) => void;
+  readonly consoleContent?: React.ReactNode;
 }
 
 function TabContent({

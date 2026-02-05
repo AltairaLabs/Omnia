@@ -269,7 +269,7 @@ export function useDevConsole({
 
   // Connect to the dev console
   const connect = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       return; // Already connected
     }
 
@@ -355,7 +355,7 @@ export function useDevConsole({
 
     const parts = attachments?.length ? convertAttachmentsToParts(attachments) : undefined;
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "chat",
         content: content.trim(),
@@ -369,7 +369,7 @@ export function useDevConsole({
 
   // Reload configuration
   const reload = useCallback((configPath: string) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "chat",
         content: configPath,
@@ -388,7 +388,7 @@ export function useDevConsole({
 
   // Reset conversation history
   const resetConversation = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "chat",
         content: "",
@@ -401,7 +401,7 @@ export function useDevConsole({
 
   // Set active provider
   const setProvider = useCallback((providerId: string) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "chat",
         content: "",

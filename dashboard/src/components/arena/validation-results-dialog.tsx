@@ -50,10 +50,10 @@ export interface ValidationResults {
 }
 
 interface ValidationResultsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  results: ValidationResults | null;
-  onFileClick?: (path: string, line: number) => void;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly results: ValidationResults | null;
+  readonly onFileClick?: (path: string, line: number) => void;
 }
 
 function getSeverityIcon(severity: number) {

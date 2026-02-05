@@ -8,12 +8,12 @@ import { FileCode, Play, Tag, Folder } from "lucide-react";
 import type { TemplateMetadata } from "@/types/arena-template";
 
 export interface TemplateCardProps {
-  template: TemplateMetadata;
-  sourceName?: string;
-  selected?: boolean;
-  onSelect?: () => void;
-  onUse?: () => void;
-  className?: string;
+  readonly template: TemplateMetadata;
+  readonly sourceName?: string;
+  readonly selected?: boolean;
+  readonly onSelect?: () => void;
+  readonly onUse?: () => void;
+  readonly className?: string;
 }
 
 /**

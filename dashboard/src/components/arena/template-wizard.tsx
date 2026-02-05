@@ -59,16 +59,16 @@ interface WizardFormState {
 }
 
 export interface TemplateWizardProps {
-  template: TemplateMetadata;
-  sourceName: string;
-  loading?: boolean;
+  readonly template: TemplateMetadata;
+  readonly sourceName: string;
+  readonly loading?: boolean;
   /** Available providers for provider bindings */
-  providers?: ProviderOption[];
-  onPreview?: (input: Omit<TemplateRenderInput, "projectName">) => Promise<{ files: RenderedFile[]; errors?: VariableValidationError[] }>;
-  onSubmit: (input: TemplateRenderInput) => Promise<{ projectId?: string }>;
-  onSuccess?: (projectId: string) => void;
-  onClose?: () => void;
-  className?: string;
+  readonly providers?: ProviderOption[];
+  readonly onPreview?: (input: Omit<TemplateRenderInput, "projectName">) => Promise<{ files: RenderedFile[]; errors?: VariableValidationError[] }>;
+  readonly onSubmit: (input: TemplateRenderInput) => Promise<{ projectId?: string }>;
+  readonly onSuccess?: (projectId: string) => void;
+  readonly onClose?: () => void;
+  readonly className?: string;
 }
 
 // =============================================================================
@@ -152,12 +152,12 @@ export interface ProviderOption {
 }
 
 interface VariableInputProps {
-  variable: TemplateVariable;
-  value: string | number | boolean | undefined;
-  onChange: (value: string | number | boolean) => void;
-  error?: string;
+  readonly variable: TemplateVariable;
+  readonly value: string | number | boolean | undefined;
+  readonly onChange: (value: string | number | boolean) => void;
+  readonly error?: string;
   /** Available providers for provider binding */
-  providers?: ProviderOption[];
+  readonly providers?: ProviderOption[];
 }
 
 function VariableInput({ variable, value, onChange, error, providers }: VariableInputProps) {

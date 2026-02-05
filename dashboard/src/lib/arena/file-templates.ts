@@ -146,5 +146,5 @@ export function generateFileContent(name: string, kind: ArenaFileKind): string {
   if (!config) {
     return "";
   }
-  return config.template.replace(/\{\{name\}\}/g, name);
+  return config.template.replaceAll("{{name}}", name);
 }

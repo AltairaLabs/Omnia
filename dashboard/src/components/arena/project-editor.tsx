@@ -399,8 +399,8 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         apiUrl = url.toString().replace(/^ws/, "http");
       } else {
         // Fallback: construct URL from current host with default port
-        const protocol = window.location.protocol;
-        const hostname = window.location.hostname;
+        const protocol = globalThis.location.protocol;
+        const hostname = globalThis.location.hostname;
         apiUrl = `${protocol}//${hostname}:3002/api/compile`;
       }
 
@@ -428,8 +428,17 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
       if (results.diagnostics) {
         for (const [file, diagnostics] of Object.entries(results.diagnostics)) {
           for (const diag of diagnostics) {
+            // Map diagnostic severity to problem severity
+            let severity: "error" | "warning" | "info";
+            if (diag.severity === 1) {
+              severity = "error";
+            } else if (diag.severity === 2) {
+              severity = "warning";
+            } else {
+              severity = "info";
+            }
             newProblems.push({
-              severity: diag.severity === 1 ? "error" : diag.severity === 2 ? "warning" : "info",
+              severity,
               message: diag.message,
               file,
               line: diag.range?.start?.line ? diag.range.start.line + 1 : undefined,
@@ -505,6 +514,186 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
 
   const isLoading = projectsLoading || projectLoading;
 
+  // Helper function to render the editor content
+  const renderEditorContent = () => {
+    if (activeFile) {
+      // Use LSP editor in production when enabled, fall back to basic editor in dev
+      if (lspEnabled && workspace && currentProject && LspYamlEditor) {
+        return (
+          <LspYamlEditor
+            value={activeFile.content}
+            onChange={handleEditorChange}
+            onSave={handleSave}
+            fileType={activeFile.type}
+            loading={activeFile.loading}
+            workspace={workspace}
+            projectId={currentProject.id}
+            filePath={activeFile.path}
+          />
+        );
+      }
+      return (
+        <YamlEditor
+          value={activeFile.content}
+          onChange={handleEditorChange}
+          onSave={handleSave}
+          fileType={activeFile.type}
+          loading={activeFile.loading}
+        />
+      );
+    }
+    if (openFiles.length > 0) {
+      return <EditorTabsEmptyState />;
+    }
+    if (lspEnabled && LspYamlEditorEmptyState) {
+      return <LspYamlEditorEmptyState />;
+    }
+    return <YamlEditorEmptyState />;
+  };
+
+  // Helper function to render the console content
+  const renderConsoleContent = () => {
+    if (!currentProject) {
+      return undefined;
+    }
+    if (!canWrite) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <p className="text-sm font-medium">Editor access required</p>
+          <p className="text-xs mt-1 text-center max-w-xs">
+            You have viewer access to this workspace. Contact a workspace owner to request editor permissions to use the dev console.
+          </p>
+        </div>
+      );
+    }
+    if (devSessionLoading) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin mb-2" />
+          <p className="text-sm">Starting dev session...</p>
+          <p className="text-xs mt-1">This may take a moment</p>
+        </div>
+      );
+    }
+    if (devSessionError) {
+      const errorMessage = devSessionError.message.includes("permission") || devSessionError.message.includes("Forbidden")
+        ? "You don't have permission to create dev sessions. Contact a workspace owner for editor access."
+        : devSessionError.message;
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-destructive">
+          <p className="text-sm">Failed to start dev session</p>
+          <p className="text-xs mt-1 text-center max-w-xs">
+            {errorMessage}
+          </p>
+        </div>
+      );
+    }
+    if (devSessionReady) {
+      return (
+        <DevConsolePanel
+          projectId={currentProject.id}
+          workspace={workspace}
+          namespace={namespace}
+          service={devSession?.status?.serviceName}
+          configPath={activeFile?.path}
+          providers={providerOptions}
+          selectedProvider={selectedProvider}
+          onProviderChange={setSelectedProvider}
+        />
+      );
+    }
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin mb-2" />
+        <p className="text-sm">Session starting...</p>
+        <p className="text-xs mt-1">Waiting for service to be ready</p>
+      </div>
+    );
+  };
+
+  // Helper function to render main content area
+  const renderMainContent = () => {
+    if (!currentProject && !isLoading) {
+      return (
+        <EmptyProjectState
+          hasProjects={projects.length > 0}
+          onNewProject={() => setNewProjectDialogOpen(true)}
+        />
+      );
+    }
+    if (isLoading && !currentProject) {
+      return (
+        <div className="flex items-center justify-center flex-1">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <span className="ml-2 text-muted-foreground">Loading...</span>
+        </div>
+      );
+    }
+    return (
+      <ResizablePanelGroup
+        orientation="vertical"
+        className="flex-1 min-h-0"
+      >
+        {/* Main content area */}
+        <ResizablePanel defaultSize={resultsPanelOpen ? 70 : 100} minSize={30}>
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="h-full"
+          >
+            {/* File tree panel */}
+            <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
+              <div className="h-full overflow-auto border-r">
+                <div className="p-2 border-b bg-muted/30">
+                  <h3 className="text-sm font-medium truncate">
+                    {currentProject?.name || "Project Files"}
+                  </h3>
+                </div>
+                <FileTree
+                  tree={fileTree}
+                  loading={projectLoading}
+                  error={projectError}
+                  selectedPath={activeFilePath || undefined}
+                  onSelectFile={handleSelectFile}
+                  onCreateFile={handleCreateFile}
+                  onDeleteFile={handleDeleteFile}
+                />
+              </div>
+            </ResizablePanel>
+
+            <ResizableHandle withHandle />
+
+            {/* Editor panel */}
+            <ResizablePanel defaultSize={75}>
+              <div className="flex flex-col h-full">
+                {/* Tabs */}
+                <EditorTabs />
+
+                {/* Editor */}
+                <div className="flex-1 min-h-0">
+                  {renderEditorContent()}
+                </div>
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </ResizablePanel>
+
+        {/* Results panel - expanded state with resizable */}
+        {resultsPanelOpen && (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={30} minSize={15} maxSize={60}>
+              <ResultsPanel
+                problems={problems}
+                onProblemClick={handleProblemClick}
+                consoleContent={renderConsoleContent()}
+              />
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+    );
+  };
+
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Toolbar */}
@@ -525,152 +714,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
       />
 
       {/* Main content */}
-      {!currentProject && !isLoading ? (
-        <EmptyProjectState
-          hasProjects={projects.length > 0}
-          onNewProject={() => setNewProjectDialogOpen(true)}
-        />
-      ) : isLoading && !currentProject ? (
-        <div className="flex items-center justify-center flex-1">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-muted-foreground">Loading...</span>
-        </div>
-      ) : (
-        <ResizablePanelGroup
-          orientation="vertical"
-          className="flex-1 min-h-0"
-        >
-          {/* Main content area */}
-          <ResizablePanel defaultSize={resultsPanelOpen ? 70 : 100} minSize={30}>
-            <ResizablePanelGroup
-              orientation="horizontal"
-              className="h-full"
-            >
-              {/* File tree panel */}
-              <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
-                <div className="h-full overflow-auto border-r">
-                  <div className="p-2 border-b bg-muted/30">
-                    <h3 className="text-sm font-medium truncate">
-                      {currentProject?.name || "Project Files"}
-                    </h3>
-                  </div>
-                  <FileTree
-                    tree={fileTree}
-                    loading={projectLoading}
-                    error={projectError}
-                    selectedPath={activeFilePath || undefined}
-                    onSelectFile={handleSelectFile}
-                    onCreateFile={handleCreateFile}
-                    onDeleteFile={handleDeleteFile}
-                  />
-                </div>
-              </ResizablePanel>
-
-              <ResizableHandle withHandle />
-
-              {/* Editor panel */}
-              <ResizablePanel defaultSize={75}>
-                <div className="flex flex-col h-full">
-                  {/* Tabs */}
-                  <EditorTabs />
-
-                  {/* Editor */}
-                  <div className="flex-1 min-h-0">
-                    {activeFile ? (
-                      // Use LSP editor in production when enabled, fall back to basic editor in dev
-                      lspEnabled && workspace && currentProject && LspYamlEditor ? (
-                        <LspYamlEditor
-                          value={activeFile.content}
-                          onChange={handleEditorChange}
-                          onSave={handleSave}
-                          fileType={activeFile.type}
-                          loading={activeFile.loading}
-                          workspace={workspace}
-                          projectId={currentProject.id}
-                          filePath={activeFile.path}
-                        />
-                      ) : (
-                        <YamlEditor
-                          value={activeFile.content}
-                          onChange={handleEditorChange}
-                          onSave={handleSave}
-                          fileType={activeFile.type}
-                          loading={activeFile.loading}
-                        />
-                      )
-                    ) : openFiles.length > 0 ? (
-                      <EditorTabsEmptyState />
-                    ) : lspEnabled && LspYamlEditorEmptyState ? (
-                      <LspYamlEditorEmptyState />
-                    ) : (
-                      <YamlEditorEmptyState />
-                    )}
-                  </div>
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </ResizablePanel>
-
-          {/* Results panel - expanded state with resizable */}
-          {resultsPanelOpen && (
-            <>
-              <ResizableHandle withHandle />
-              <ResizablePanel defaultSize={30} minSize={15} maxSize={60}>
-                <ResultsPanel
-                  problems={problems}
-                  onProblemClick={handleProblemClick}
-                  consoleContent={
-                    currentProject ? (
-                      canWrite ? (
-                        devSessionLoading ? (
-                          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                            <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                            <p className="text-sm">Starting dev session...</p>
-                            <p className="text-xs mt-1">This may take a moment</p>
-                          </div>
-                        ) : devSessionError ? (
-                          <div className="flex flex-col items-center justify-center h-full text-destructive">
-                            <p className="text-sm">Failed to start dev session</p>
-                            <p className="text-xs mt-1 text-center max-w-xs">
-                              {devSessionError.message.includes("permission") || devSessionError.message.includes("Forbidden")
-                                ? "You don't have permission to create dev sessions. Contact a workspace owner for editor access."
-                                : devSessionError.message}
-                            </p>
-                          </div>
-                        ) : devSessionReady ? (
-                          <DevConsolePanel
-                            projectId={currentProject.id}
-                            workspace={workspace}
-                            namespace={namespace}
-                            service={devSession?.status?.serviceName}
-                            configPath={activeFile?.path}
-                            providers={providerOptions}
-                            selectedProvider={selectedProvider}
-                            onProviderChange={setSelectedProvider}
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                            <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                            <p className="text-sm">Session starting...</p>
-                            <p className="text-xs mt-1">Waiting for service to be ready</p>
-                          </div>
-                        )
-                      ) : (
-                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                          <p className="text-sm font-medium">Editor access required</p>
-                          <p className="text-xs mt-1 text-center max-w-xs">
-                            You have viewer access to this workspace. Contact a workspace owner to request editor permissions to use the dev console.
-                          </p>
-                        </div>
-                      )
-                    ) : undefined
-                  }
-                />
-              </ResizablePanel>
-            </>
-          )}
-        </ResizablePanelGroup>
-      )}
+      {renderMainContent()}
 
       {/* Collapsed results panel bar - shown when panel is closed */}
       {!resultsPanelOpen && (

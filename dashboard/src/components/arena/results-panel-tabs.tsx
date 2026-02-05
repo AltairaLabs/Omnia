@@ -8,7 +8,7 @@ import {
 import { AlertCircle, ScrollText, BarChart3, MessageSquare } from "lucide-react";
 
 interface ResultsPanelTabsProps {
-  className?: string;
+  readonly className?: string;
 }
 
 const TABS: Array<{

@@ -25,6 +25,9 @@ var ErrInvalidPath = errors.New("invalid path: contains path traversal sequences
 // ErrInvalidProjectName is returned when a project name contains invalid characters.
 var ErrInvalidProjectName = errors.New("invalid project name: contains path separators or traversal sequences")
 
+// ErrPathOutsideBase is returned when a path resolves outside the allowed base directory.
+var ErrPathOutsideBase = errors.New("path resolves outside allowed base directory")
+
 // validateProjectName ensures a project name doesn't contain path separators or traversal sequences.
 func validateProjectName(name string) error {
 	// Check for path traversal sequences
@@ -45,13 +48,42 @@ func validateProjectName(name string) error {
 	return nil
 }
 
+// validatePathWithinBase ensures that a path resolves within the given base directory.
+// This prevents path traversal attacks even with cleaned paths.
+func validatePathWithinBase(basePath, targetPath string) error {
+	// Get absolute paths for comparison
+	absBase, err := filepath.Abs(basePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve base path: %w", err)
+	}
+
+	absTarget, err := filepath.Abs(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve target path: %w", err)
+	}
+
+	// Ensure target is within base (using filepath.Rel to check containment)
+	rel, err := filepath.Rel(absBase, absTarget)
+	if err != nil {
+		return ErrPathOutsideBase
+	}
+
+	// If the relative path starts with "..", target is outside base
+	if strings.HasPrefix(rel, "..") {
+		return ErrPathOutsideBase
+	}
+
+	return nil
+}
+
 // RenderTemplate renders a template using PromptKit's Generator.
 // This is the canonical way to generate projects from Arena templates.
+// The outputPath must be an absolute path within /workspace-content or similar safe directory.
 func RenderTemplate(
 	templatePath string,
 	outputPath string,
 	projectName string,
-	variables map[string]interface{},
+	variables map[string]any,
 ) (*RenderTemplateResponse, error) {
 	// Validate project name to prevent path traversal
 	if err := validateProjectName(projectName); err != nil {
@@ -61,6 +93,16 @@ func RenderTemplate(
 	// Clean and validate output path
 	cleanOutputPath := filepath.Clean(outputPath)
 	if strings.Contains(cleanOutputPath, "..") {
+		return nil, ErrInvalidPath
+	}
+
+	// Ensure output path is absolute and doesn't escape intended directory
+	absOutputPath, err := filepath.Abs(cleanOutputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve output path: %w", err)
+	}
+	// Re-check for traversal after resolution
+	if strings.Contains(absOutputPath, "..") {
 		return nil, ErrInvalidPath
 	}
 
@@ -78,8 +120,9 @@ func RenderTemplate(
 		return nil, fmt.Errorf("failed to load template from %s: %w", templatePath, err)
 	}
 
-	// Ensure output directory exists (use cleaned path)
-	if err := os.MkdirAll(cleanOutputPath, 0755); err != nil {
+	// Ensure output directory exists (use absolute path)
+	// #nosec G301 - directory permissions are intentionally 0755 for workspace content
+	if err := os.MkdirAll(absOutputPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -87,7 +130,7 @@ func RenderTemplate(
 	generator := templates.NewGenerator(tmpl, loader)
 	config := &templates.TemplateConfig{
 		ProjectName: projectName,
-		OutputDir:   cleanOutputPath,
+		OutputDir:   absOutputPath,
 		Variables:   variables,
 		Verbose:     false,
 	}
@@ -106,7 +149,7 @@ func RenderTemplate(
 	// Make file paths relative to output directory for cleaner response
 	relativeFiles := make([]string, 0, len(result.FilesCreated))
 	for _, f := range result.FilesCreated {
-		rel, err := filepath.Rel(cleanOutputPath, filepath.Join(result.ProjectPath, f))
+		rel, err := filepath.Rel(absOutputPath, filepath.Join(result.ProjectPath, f))
 		if err != nil {
 			rel = f
 		}
@@ -126,7 +169,7 @@ func RenderTemplate(
 func PreviewTemplate(
 	templatePath string,
 	projectName string,
-	variables map[string]interface{},
+	variables map[string]any,
 ) (*PreviewTemplateResponse, error) {
 	// Validate project name to prevent path traversal
 	if err := validateProjectName(projectName); err != nil {
@@ -175,9 +218,14 @@ func PreviewTemplate(
 	}
 
 	// Read rendered files from temp directory
-	// projectPath is safe because projectName has been validated and tempDir is a controlled temp directory
+	// Construct and validate project path to ensure it stays within tempDir
 	var files []PreviewFile
 	projectPath := filepath.Join(tempDir, projectName)
+
+	// Validate that projectPath is within tempDir (defense in depth)
+	if err := validatePathWithinBase(tempDir, projectPath); err != nil {
+		return nil, fmt.Errorf("invalid project path: %w", err)
+	}
 
 	err = filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

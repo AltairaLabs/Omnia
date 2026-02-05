@@ -480,8 +480,8 @@ export function DevConsolePanel({
   const isWaitingForResponse = useMemo(() => {
     if (messages.length === 0) return false;
     if (status === "error" || status === "disconnected") return false;
-    const lastMessage = messages[messages.length - 1];
-    return lastMessage.role === "user";
+    const lastMessage = messages.at(-1);
+    return lastMessage?.role === "user";
   }, [messages, status]);
 
   // Determine if we can send a message

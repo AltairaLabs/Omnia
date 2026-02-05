@@ -16,8 +16,8 @@ import {
 import type { RenderedFile } from "@/types/arena-template";
 
 export interface TemplatePreviewProps {
-  files: RenderedFile[];
-  className?: string;
+  readonly files: RenderedFile[];
+  readonly className?: string;
 }
 
 /**
@@ -57,9 +57,9 @@ function getLanguage(path: string): string {
  * File item in the preview tree.
  */
 interface FileItemProps {
-  file: RenderedFile;
-  selected: boolean;
-  onSelect: () => void;
+  readonly file: RenderedFile;
+  readonly selected: boolean;
+  readonly onSelect: () => void;
 }
 
 function FileItem({ file, selected, onSelect }: FileItemProps) {
@@ -85,9 +85,9 @@ function FileItem({ file, selected, onSelect }: FileItemProps) {
  * Code preview with copy functionality.
  */
 interface CodePreviewProps {
-  content: string;
-  language: string;
-  path: string;
+  readonly content: string;
+  readonly language: string;
+  readonly path: string;
 }
 
 function CodePreview({ content, language, path }: CodePreviewProps) {

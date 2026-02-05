@@ -21,10 +21,10 @@ import {
 import type { Provider } from "@/types";
 
 export interface ImportProviderDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  parentPath: string | null;
-  onImport: (files: { name: string; content: string }[]) => Promise<void>;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly parentPath: string | null;
+  readonly onImport: (files: { name: string; content: string }[]) => Promise<void>;
 }
 
 /**
@@ -120,18 +120,20 @@ export function ImportProviderDialog({
         </DialogHeader>
 
         <div className="py-4">
-          {loadingProviders ? (
+          {loadingProviders && (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               <span className="ml-2 text-sm text-muted-foreground">
                 Loading providers...
               </span>
             </div>
-          ) : !providers || providers.length === 0 ? (
+          )}
+          {!loadingProviders && (!providers || providers.length === 0) && (
             <div className="text-sm text-muted-foreground py-4 text-center">
               No providers found in the workspace.
             </div>
-          ) : (
+          )}
+          {!loadingProviders && providers && providers.length > 0 && (
             <div className="space-y-4">
               <div className="text-sm text-muted-foreground">
                 Select providers to import:

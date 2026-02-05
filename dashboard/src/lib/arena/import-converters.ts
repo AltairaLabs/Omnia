@@ -29,8 +29,8 @@ export function convertProviderToArena(provider: Provider): string {
   const defaults: Record<string, unknown> = {};
   if (provider.spec.defaults?.temperature !== undefined) {
     // Convert string temperature to number
-    const temp = parseFloat(provider.spec.defaults.temperature);
-    if (!isNaN(temp)) {
+    const temp = Number.parseFloat(provider.spec.defaults.temperature);
+    if (!Number.isNaN(temp)) {
       defaults.temperature = temp;
     }
   }
@@ -38,8 +38,8 @@ export function convertProviderToArena(provider: Provider): string {
     defaults.max_tokens = provider.spec.defaults.maxTokens;
   }
   if (provider.spec.defaults?.topP !== undefined) {
-    const topP = parseFloat(provider.spec.defaults.topP);
-    if (!isNaN(topP)) {
+    const topP = Number.parseFloat(provider.spec.defaults.topP);
+    if (!Number.isNaN(topP)) {
       defaults.top_p = topP;
     }
   }
@@ -196,8 +196,11 @@ export function convertToolToArena(tool: DiscoveredTool, options: ToolConversion
  * Format: {registryName}-{toolName}.tool.yaml
  */
 export function generateToolFilename(tool: DiscoveredTool, registryName: string): string {
-  // Sanitize tool name for use in filename
-  const sanitizedToolName = tool.name.replace(/[^a-zA-Z0-9-_]/g, "-");
+  // Sanitize tool name for use in filename - replace invalid characters with dashes
+  const sanitizedToolName = tool.name
+    .split("")
+    .map((char) => (/[a-zA-Z0-9-_]/.test(char) ? char : "-"))
+    .join("");
   return `${registryName}-${sanitizedToolName}.tool.yaml`;
 }
 
@@ -216,7 +219,7 @@ function quoteYamlString(str: string): string {
     str.endsWith(" ")
   ) {
     // Use double quotes and escape internal double quotes
-    return `"${str.replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+    return `"${str.replaceAll('"', '\\"').replaceAll("\n", "\\n")}"`;
   }
   return str;
 }

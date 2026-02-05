@@ -17,20 +17,20 @@ interface MonacoLanguageClient {
 }
 
 interface LspYamlEditorProps {
-  value: string;
-  onChange?: (value: string) => void;
-  onSave?: () => void;
-  readOnly?: boolean;
-  language?: string;
-  fileType?: FileType;
-  className?: string;
-  loading?: boolean;
+  readonly value: string;
+  readonly onChange?: (value: string) => void;
+  readonly onSave?: () => void;
+  readonly readOnly?: boolean;
+  readonly language?: string;
+  readonly fileType?: FileType;
+  readonly className?: string;
+  readonly loading?: boolean;
   /** Workspace name for LSP context */
-  workspace?: string;
+  readonly workspace?: string;
   /** Project ID for LSP context */
-  projectId?: string;
+  readonly projectId?: string;
   /** File path within the project */
-  filePath?: string;
+  readonly filePath?: string;
 }
 
 interface DiagnosticInfo {
@@ -77,8 +77,8 @@ async function createLspConnection(
   // We connect to /api/lsp on that proxy server
   let wsUrl: string;
 
-  if (typeof window === "undefined") {
-    throw new Error("Cannot create WebSocket connection outside browser");
+  if (typeof globalThis === "undefined" || typeof globalThis.location === "undefined") {
+    throw new TypeError("Cannot create WebSocket connection outside browser");
   }
 
   // Check if we have a configured WebSocket proxy URL
@@ -92,8 +92,8 @@ async function createLspConnection(
     wsUrl = url.toString();
   } else {
     // Fallback: construct URL from current host with default WebSocket proxy port
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const hostname = window.location.hostname;
+    const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
+    const hostname = globalThis.location.hostname;
     // Default WebSocket proxy port is 3002
     const wsProxyPort = "3002";
     wsUrl = `${protocol}//${hostname}:${wsProxyPort}/api/lsp?workspace=${encodeURIComponent(workspace)}&project=${encodeURIComponent(projectId)}`;
