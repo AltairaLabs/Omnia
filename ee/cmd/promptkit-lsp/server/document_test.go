@@ -153,3 +153,166 @@ func TestDocument_OffsetToPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestDocument_OffsetToPosition_OutOfBounds(t *testing.T) {
+	store := NewDocumentStore()
+	doc := store.Open("file:///test.yaml", "yaml", 1, "short")
+
+	// Test negative offset
+	pos := doc.OffsetToPosition(-1)
+	if pos.Line != 0 || pos.Character != 0 {
+		t.Errorf("expected position (0,0) for negative offset, got %v", pos)
+	}
+
+	// Test offset beyond content length
+	pos = doc.OffsetToPosition(100)
+	if pos.Line != 0 {
+		t.Errorf("expected last line for large offset, got line %d", pos.Line)
+	}
+}
+
+func TestDocument_GetWordAtPosition(t *testing.T) {
+	store := NewDocumentStore()
+	doc := store.Open("file:///test.yaml", "yaml", 1, "kind: Tool\nname: my_tool")
+
+	tests := []struct {
+		name string
+		pos  Position
+		word string
+	}{
+		{"word at start of line", Position{Line: 0, Character: 2}, "kind"},
+		{"word after colon", Position{Line: 0, Character: 7}, "Tool"},
+		{"word with underscore", Position{Line: 1, Character: 9}, "my_tool"},
+		{"at colon", Position{Line: 0, Character: 4}, "kind"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			word := doc.GetWordAtPosition(tc.pos)
+			if word != tc.word {
+				t.Errorf("GetWordAtPosition(%v) = %q, want %q", tc.pos, word, tc.word)
+			}
+		})
+	}
+}
+
+func TestDocument_GetWordAtPosition_EdgeCases(t *testing.T) {
+	store := NewDocumentStore()
+	doc := store.Open("file:///test.yaml", "yaml", 1, "")
+
+	// Empty document
+	word := doc.GetWordAtPosition(Position{Line: 0, Character: 0})
+	if word != "" {
+		t.Errorf("expected empty word for empty document, got %q", word)
+	}
+
+	// Out of bounds line
+	doc2 := store.Open("file:///test2.yaml", "yaml", 1, "hello")
+	word = doc2.GetWordAtPosition(Position{Line: 5, Character: 0})
+	if word != "" {
+		t.Errorf("expected empty word for out of bounds line, got %q", word)
+	}
+}
+
+func TestDocument_GetLineContent(t *testing.T) {
+	store := NewDocumentStore()
+	doc := store.Open("file:///test.yaml", "yaml", 1, "line1\nline2\nline3")
+
+	// Valid line
+	line := doc.GetLineContent(1)
+	if line != "line2" {
+		t.Errorf("GetLineContent(1) = %q, want %q", line, "line2")
+	}
+
+	// First line
+	line = doc.GetLineContent(0)
+	if line != "line1" {
+		t.Errorf("GetLineContent(0) = %q, want %q", line, "line1")
+	}
+
+	// Last line
+	line = doc.GetLineContent(2)
+	if line != "line3" {
+		t.Errorf("GetLineContent(2) = %q, want %q", line, "line3")
+	}
+
+	// Out of bounds
+	line = doc.GetLineContent(10)
+	if line != "" {
+		t.Errorf("GetLineContent(10) = %q, want empty string", line)
+	}
+
+	// Negative line
+	line = doc.GetLineContent(-1)
+	if line != "" {
+		t.Errorf("GetLineContent(-1) = %q, want empty string", line)
+	}
+}
+
+func TestIsWordChar(t *testing.T) {
+	tests := []struct {
+		b    byte
+		want bool
+	}{
+		{'a', true},
+		{'Z', true},
+		{'0', true},
+		{'_', true},
+		{'-', true}, // '-' is considered a word char
+		{' ', false},
+		{':', false},
+		{'.', false},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.b), func(t *testing.T) {
+			if got := isWordChar(tc.b); got != tc.want {
+				t.Errorf("isWordChar(%q) = %v, want %v", tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDocument_ApplyChange_MultipleLinesInsertion(t *testing.T) {
+	store := NewDocumentStore()
+	store.Open("file:///test.yaml", "yaml", 1, "line1\nline2")
+
+	// Insert multiple lines at the end of line1
+	changes := []TextDocumentContentChangeEvent{
+		{
+			Range: &Range{
+				Start: Position{Line: 0, Character: 5},
+				End:   Position{Line: 0, Character: 5},
+			},
+			Text: "\nnewline1\nnewline2",
+		},
+	}
+	doc := store.Update("file:///test.yaml", 2, changes)
+
+	expected := "line1\nnewline1\nnewline2\nline2"
+	if doc.Content != expected {
+		t.Errorf("expected %q, got %q", expected, doc.Content)
+	}
+}
+
+func TestDocument_ApplyChange_DeleteAcrossLines(t *testing.T) {
+	store := NewDocumentStore()
+	store.Open("file:///test.yaml", "yaml", 1, "line1\nline2\nline3")
+
+	// Delete from end of line1 to start of line3 (removes line2 entirely)
+	changes := []TextDocumentContentChangeEvent{
+		{
+			Range: &Range{
+				Start: Position{Line: 0, Character: 5},
+				End:   Position{Line: 2, Character: 0},
+			},
+			Text: "",
+		},
+	}
+	doc := store.Update("file:///test.yaml", 2, changes)
+
+	expected := "line1line3"
+	if doc.Content != expected {
+		t.Errorf("expected %q, got %q", expected, doc.Content)
+	}
+}

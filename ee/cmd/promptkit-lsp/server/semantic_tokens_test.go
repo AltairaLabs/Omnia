@@ -9,8 +9,12 @@ Functional Source License. See ee/LICENSE for details.
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/go-logr/logr"
 )
 
 func TestFindVariablesInLine(t *testing.T) {
@@ -299,4 +303,123 @@ func TestVariablePatternMatches(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleSemanticTokensFullInvalidParams(t *testing.T) {
+	srv, _ := newTestServer()
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/semanticTokens/full",
+		Params:  []byte("invalid json"),
+	}
+
+	// Should not panic
+	srv.handleSemanticTokensFull(context.Background(), c, msg)
+}
+
+func TestHandleSemanticTokensFullDocumentNotFound(t *testing.T) {
+	srv, _ := newTestServer()
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := SemanticTokensParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///nonexistent.yaml",
+		},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/semanticTokens/full",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleSemanticTokensFull(context.Background(), c, msg)
+}
+
+func TestHandleSemanticTokensFullWithVariables(t *testing.T) {
+	srv, _ := newTestServer()
+
+	// Open a document with variables
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "Hello {{name}}!")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := SemanticTokensParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/semanticTokens/full",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleSemanticTokensFull(context.Background(), c, msg)
+}
+
+func TestHandleSemanticTokensFullNoVariables(t *testing.T) {
+	srv, _ := newTestServer()
+
+	// Open a document without variables
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "kind: Tool\nname: test")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := SemanticTokensParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/semanticTokens/full",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleSemanticTokensFull(context.Background(), c, msg)
+}
+
+func newTestServer() (*Server, error) {
+	cfg := Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}
+	return New(cfg, logr.Discard())
 }

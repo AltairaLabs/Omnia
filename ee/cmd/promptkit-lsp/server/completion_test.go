@@ -9,6 +9,8 @@ Functional Source License. See ee/LICENSE for details.
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -118,4 +120,375 @@ func TestGetFieldCompletions(t *testing.T) {
 	if !fields["description"] {
 		t.Error("expected 'description' field in completions")
 	}
+}
+
+func TestHandleCompletionInvalidParams(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  []byte("invalid json"),
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionDocumentNotFound(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///nonexistent.yaml",
+		},
+		Position: Position{Line: 0, Character: 0},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionEmptyLine(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with empty content
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 0},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionKindField(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with kind field
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "kind:")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 5},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionTypeField(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with type field
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "type:")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 5},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionListItem(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with list item
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "-")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 1},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionToolRef(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with tool reference
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "  - tool:")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 9},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionProviderRef(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with provider reference
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "  - provider:")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 13},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionPromptRef(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with prompt reference
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "  - prompt:")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 11},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionPersonaRef(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with persona reference
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "persona:")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 0, Character: 8},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
+}
+
+func TestHandleCompletionDefaultField(t *testing.T) {
+	srv, _ := New(Config{
+		Addr:            ":8080",
+		DashboardAPIURL: "http://localhost:3000",
+	}, logr.Discard())
+
+	// Open a document with some content
+	srv.documents.Open("file:///test.yaml", "yaml", 1, "spec:\n  ")
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{
+			URI: "file:///test.yaml",
+		},
+		Position: Position{Line: 1, Character: 2},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      []byte("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic
+	srv.handleCompletion(context.Background(), c, msg)
 }
