@@ -56,7 +56,7 @@ const fetcher = async (url: string) => {
 export function useDevSession({
   workspace,
   projectId,
-  pollingInterval = 2000,
+  pollingInterval = 5000, // Increased from 2000ms to reduce API call frequency
   autoCreate = false,
 }: UseDevSessionOptions): UseDevSessionResult {
   const [isCreating, setIsCreating] = useState(false);

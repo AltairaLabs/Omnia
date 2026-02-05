@@ -99,31 +99,16 @@ enterprise:
         port: 6379
 
     # Dev console for interactive agent testing
-    # NOTE: Dev console is deployed per-namespace for security isolation.
-    # Each workspace should have its own dev console deployment.
+    # Dev console image settings used by ArenaDevSession controller to create
+    # dynamic per-project pods. No static deployment - pods are created on-demand.
     devConsole:
-      # -- Enable arena dev console
-      enabled: false
-      # -- Namespace to deploy dev console to (defaults to Release.Namespace)
-      # For per-workspace deployments, set this to the workspace namespace
-      namespace: ""
-      # -- Number of dev console replicas
-      replicaCount: 1
       image:
-        # -- Dev console image repository
+        # -- Dev console image repository (used by ArenaDevSession controller)
         repository: ghcr.io/altairalabs/omnia-arena-dev-console
         # -- Dev console image tag (defaults to Chart appVersion)
         tag: ""
         # -- Dev console image pull policy
         pullPolicy: IfNotPresent
-      # -- Session TTL for dev console sessions
-      sessionTTL: "30m"
-      # -- Enable dev mode (more verbose logging)
-      devMode: false
-      # -- Extra environment variables for dev console
-      extraEnv: []
-      # -- Resource limits for dev console
-      resources: {}
 
   # Community templates source (deployed automatically when enabled)
   communityTemplates:

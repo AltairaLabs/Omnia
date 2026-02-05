@@ -37,8 +37,8 @@ export function useToolRegistries(options: UseToolRegistriesOptions = {}) {
       return registries;
     },
     enabled: !!currentWorkspace,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }
 
@@ -65,7 +65,7 @@ export function useToolRegistry(name: string, _namespace?: string) {
       return (registry as unknown as ToolRegistry) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }

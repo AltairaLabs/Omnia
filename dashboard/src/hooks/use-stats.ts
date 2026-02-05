@@ -106,7 +106,7 @@ export function useStats() {
     },
     enabled: !!currentWorkspace,
     refetchInterval: 30000, // Refetch every 30 seconds
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds - matches refetch interval
+    refetchOnMount: true, // Only refetch if stale
   });
 }

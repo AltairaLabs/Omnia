@@ -3,7 +3,7 @@
  *
  * POST /api/workspaces/:name/arena/template-sources/:id/templates/:templateName/render
  *   - Validates variables
- *   - Renders template files
+ *   - Calls arena-controller to render template using PromptKit
  *   - Creates a new Arena project
  *
  * Templates are read from the index file written by the controller.
@@ -38,131 +38,44 @@ import * as path from "path";
 
 const TEMPLATE_INDEX_DIR = "arena/template-indexes";
 
-type VariableValueType = string | number | boolean;
-
 const CRD_KIND = "ArenaTemplateSource";
 const WORKSPACE_CONTENT_PATH = process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
+// Service domain for K8s cluster DNS
+const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
+// Arena controller API URL for template rendering
+const ARENA_CONTROLLER_URL = process.env.ARENA_CONTROLLER_URL ||
+  `http://omnia-arena-controller.omnia-system.${SERVICE_DOMAIN}:8082`;
 
 interface RouteParams {
   params: Promise<{ name: string; id: string; templateName: string }>;
 }
 
 /**
- * Simple Go template rendering (subset of functionality).
- * Replaces {{ .variableName }} with variable values.
+ * Render a template using the arena-controller API (which uses PromptKit).
  */
-function renderTemplate(content: string, variables: Record<string, VariableValueType>): string {
-  let result = content;
+async function renderTemplateViaController(
+  templatePath: string,
+  outputPath: string,
+  projectName: string,
+  variables: Record<string, unknown>
+): Promise<{ success: boolean; filesCreated: string[]; errors: string[]; warnings: string[] }> {
+  const response = await fetch(`${ARENA_CONTROLLER_URL}/api/render-template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templatePath,
+      outputPath,
+      projectName,
+      variables,
+    }),
+  });
 
-  // Replace {{ .variableName }} patterns
-  for (const [name, value] of Object.entries(variables)) {
-    // Handle both {{ .name }} and {{.name}} formats
-    const patterns = [
-      new RegExp(`\\{\\{\\s*\\.${name}\\s*\\}\\}`, "g"),
-      new RegExp(`\\{\\{-\\s*\\.${name}\\s*-?\\}\\}`, "g"),
-    ];
-
-    for (const pattern of patterns) {
-      result = result.replace(pattern, String(value));
-    }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Arena controller returned ${response.status}: ${text}`);
   }
 
-  return result;
-}
-
-/**
- * Recursively copy and render template files to project directory.
- */
-async function renderTemplateFiles(
-  sourcePath: string,
-  destPath: string,
-  variables: Record<string, VariableValueType>,
-  template: TemplateMetadata
-): Promise<string[]> {
-  const renderedFiles: string[] = [];
-  const files = template.files || [];
-
-  // If no files specified, copy everything except template.yaml
-  if (files.length === 0) {
-    await copyAndRenderDirectory(sourcePath, destPath, variables, true, renderedFiles);
-    return renderedFiles;
-  }
-
-  for (const fileSpec of files) {
-    const srcPath = path.join(sourcePath, fileSpec.path);
-    const dstPath = path.join(destPath, fileSpec.path);
-
-    try {
-      const stat = await fs.stat(srcPath);
-
-      if (stat.isDirectory()) {
-        await copyAndRenderDirectory(srcPath, dstPath, variables, fileSpec.render !== false, renderedFiles);
-      } else {
-        await copyAndRenderFile(srcPath, dstPath, variables, fileSpec.render !== false);
-        renderedFiles.push(fileSpec.path);
-      }
-    } catch {
-      // Skip files that don't exist
-      continue;
-    }
-  }
-
-  return renderedFiles;
-}
-
-/**
- * Copy and optionally render a directory recursively.
- */
-async function copyAndRenderDirectory(
-  srcDir: string,
-  dstDir: string,
-  variables: Record<string, VariableValueType>,
-  render: boolean,
-  renderedFiles: string[]
-): Promise<void> {
-  await fs.mkdir(dstDir, { recursive: true });
-
-  const entries = await fs.readdir(srcDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    // Skip template.yaml
-    if (entry.name === "template.yaml") continue;
-
-    const srcPath = path.join(srcDir, entry.name);
-    const dstPath = path.join(dstDir, entry.name);
-
-    if (entry.isDirectory()) {
-      await copyAndRenderDirectory(srcPath, dstPath, variables, render, renderedFiles);
-    } else {
-      const shouldRender = render && shouldRenderFile(entry.name);
-      await copyAndRenderFile(srcPath, dstPath, variables, shouldRender);
-      renderedFiles.push(entry.name);
-    }
-  }
-}
-
-/**
- * Copy and optionally render a single file.
- */
-async function copyAndRenderFile(
-  srcPath: string,
-  dstPath: string,
-  variables: Record<string, VariableValueType>,
-  render: boolean
-): Promise<void> {
-  await fs.mkdir(path.dirname(dstPath), { recursive: true });
-
-  const content = await fs.readFile(srcPath, "utf-8");
-  const output = render ? renderTemplate(content, variables) : content;
-  await fs.writeFile(dstPath, output, "utf-8");
-}
-
-/**
- * Determine if a file should be rendered based on extension.
- */
-function shouldRenderFile(filename: string): boolean {
-  const renderExtensions = [".yaml", ".yml", ".json", ".txt", ".md", ".arena.yaml"];
-  return renderExtensions.some((ext) => filename.endsWith(ext));
+  return response.json();
 }
 
 /**
@@ -285,7 +198,7 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
       );
       const templatePath = path.join(templateSourcePath, template.path);
 
-      // Generate project ID and create project directory
+      // Generate project ID and create project directory path
       const projectId = generateProjectId();
       const projectsPath = path.join(
         WORKSPACE_CONTENT_PATH,
@@ -296,13 +209,24 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
       );
       const projectPath = path.join(projectsPath, projectId);
 
-      // Render template files to project directory
-      const renderedFiles = await renderTemplateFiles(
+      // Call arena-controller to render the template using PromptKit
+      const renderResult = await renderTemplateViaController(
         templatePath,
-        projectPath,
-        variablesWithDefaults,
-        template
+        projectsPath, // PromptKit will create projectName subdirectory
+        projectId,    // Use projectId as the project name for the directory
+        variablesWithDefaults
       );
+
+      if (!renderResult.success) {
+        return NextResponse.json(
+          {
+            error: "Template rendering failed",
+            errors: renderResult.errors,
+            warnings: renderResult.warnings,
+          },
+          { status: 500 }
+        );
+      }
 
       // Create project metadata file
       const projectMeta = {
@@ -335,7 +259,8 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
       return NextResponse.json({
         projectId,
         projectName: body.projectName,
-        files: renderedFiles,
+        files: renderResult.filesCreated,
+        warnings: renderResult.warnings,
         template: {
           source: source.metadata.name,
           name: template.name,

@@ -9,9 +9,12 @@ Functional Source License. See ee/LICENSE for details.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. GCP, Azure, OIDC) for kubeconfig authentication
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -35,6 +38,8 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
+
+	"github.com/altairalabs/omnia/ee/cmd/omnia-arena-controller/api"
 )
 
 const logKeyController = "controller"
@@ -53,6 +58,7 @@ func init() {
 
 func main() {
 	var metricsAddr string
+	var apiAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
@@ -74,6 +80,7 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to.")
+	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the template API server binds to.")
 	flag.StringVar(&arenaWorkerImage, "arena-worker-image", "",
 		"The image to use for Arena worker containers.")
 	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
@@ -285,9 +292,24 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
+	// Start API server for template rendering
+	apiServer := api.NewServer(apiAddr, ctrl.Log)
+	go func() {
+		if err := apiServer.Start(ctx); err != nil && err != http.ErrServerClosed {
+			setupLog.Error(err, "API server error")
+		}
+	}()
+
 	setupLog.Info("starting arena controller manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
+	}
+
+	// Shutdown API server when manager stops
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := apiServer.Shutdown(shutdownCtx); err != nil {
+		setupLog.Error(err, "API server shutdown error")
 	}
 }

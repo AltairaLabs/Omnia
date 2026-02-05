@@ -66,7 +66,11 @@ spec:
             - --metrics-secure=false
             {{- end }}
             {{- end }}
+            - --api-bind-address=:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
           ports:
+            - name: api
+              containerPort: {{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
+              protocol: TCP
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

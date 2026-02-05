@@ -235,4 +235,135 @@ describe("POST /api/workspaces/[name]/arena/projects", () => {
     expect(vi.mocked(fs.mkdir)).toHaveBeenCalled();
     expect(vi.mocked(fs.writeFile)).toHaveBeenCalled();
   });
+
+  it("constructs correct path using workspace name and namespace", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const fs = await import("node:fs/promises");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace, // workspace name: test-ws, namespace: test-ns
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+    vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+    const { POST } = await import("./route");
+    await POST(
+      createMockRequest("POST", { name: "Test Project" }),
+      createMockContext()
+    );
+
+    // Verify mkdir was called with correct path structure:
+    // /workspace-content/{workspaceName}/{namespace}/arena/projects/{projectId}
+    const mkdirCalls = vi.mocked(fs.mkdir).mock.calls;
+    expect(mkdirCalls.length).toBeGreaterThan(0);
+
+    // First mkdir call should be for the projects directory
+    const projectsPath = mkdirCalls[0][0] as string;
+    expect(projectsPath).toContain("/workspace-content/test-ws/test-ns/arena/projects");
+  });
+
+  it("handles EACCES (permission denied) error gracefully", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const fs = await import("node:fs/promises");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+
+    // Simulate permission denied error
+    const permissionError = new Error("EACCES: permission denied, mkdir '/workspace-content/test-ws'");
+    (permissionError as NodeJS.ErrnoException).code = "EACCES";
+    vi.mocked(fs.mkdir).mockRejectedValue(permissionError);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      createMockRequest("POST", { name: "Test Project" }),
+      createMockContext()
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error).toBe("Internal Server Error");
+  });
+
+  it("handles ESTALE (stale NFS handle) error gracefully", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const fs = await import("node:fs/promises");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+
+    // Simulate stale NFS handle error (error code -116 on Linux)
+    const staleError = new Error("Unknown system error -116");
+    (staleError as NodeJS.ErrnoException).code = "UNKNOWN";
+    (staleError as NodeJS.ErrnoException).errno = -116;
+    vi.mocked(fs.mkdir).mockRejectedValue(staleError);
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      createMockRequest("POST", { name: "Test Project" }),
+      createMockContext()
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error).toBe("Internal Server Error");
+  });
+
+  it("handles workspace where namespace equals workspace name", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const fs = await import("node:fs/promises");
+
+    // Workspace where name and namespace are the same (like dev-agents)
+    const sameNameWorkspace = {
+      metadata: { name: "dev-agents", namespace: "omnia-system" },
+      spec: { namespace: { name: "dev-agents" } },
+    };
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: sameNameWorkspace,
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+    vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+    // Need to use the correct workspace name in the request
+    const customContext = {
+      params: Promise.resolve({ name: "dev-agents" }),
+    };
+
+    const { POST } = await import("./route");
+    await POST(
+      createMockRequest("POST", { name: "Test Project" }),
+      customContext
+    );
+
+    // Verify the path has workspace name and namespace (both "dev-agents")
+    const mkdirCalls = vi.mocked(fs.mkdir).mock.calls;
+    const projectsPath = mkdirCalls[0][0] as string;
+
+    // Path should be /workspace-content/dev-agents/dev-agents/arena/projects/...
+    // This is the expected behavior - workspace name and namespace are both in the path
+    expect(projectsPath).toContain("/workspace-content/dev-agents/dev-agents/arena/projects");
+  });
 });

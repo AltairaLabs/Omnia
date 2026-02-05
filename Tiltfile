@@ -435,13 +435,10 @@ if ENABLE_ENTERPRISE:
         'enterprise.promptkitLsp.image.repository=omnia-promptkit-lsp-dev',
         'enterprise.promptkitLsp.image.tag=latest',
         'enterprise.promptkitLsp.image.pullPolicy=Never',
-        # Arena Dev Console for interactive agent testing (deployed per workspace namespace)
-        'enterprise.arena.devConsole.enabled=true',
-        'enterprise.arena.devConsole.namespace=dev-agents',
+        # Arena Dev Console image for ArenaDevSession controller (creates dynamic pods)
         'enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev',
         'enterprise.arena.devConsole.image.tag=latest',
         'enterprise.arena.devConsole.image.pullPolicy=Never',
-        'enterprise.arena.devConsole.devMode=true',
     ])
 else:
     # Disable enterprise features
@@ -721,15 +718,6 @@ if ENABLE_ENTERPRISE:
     k8s_resource(
         'omnia-promptkit-lsp',
         labels=['enterprise'],
-        resource_deps=['omnia-dashboard'],
-    )
-
-    # Arena Dev Console for interactive agent testing in project editor
-    # Deployed to dev-agents namespace (per-workspace deployment for security)
-    k8s_resource(
-        'arena-dev-console',
-        labels=['enterprise'],
-        port_forwards=['8085:8080'],  # Dev console WebSocket/HTTP
         resource_deps=['omnia-dashboard'],
     )
 

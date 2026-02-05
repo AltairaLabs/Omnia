@@ -180,7 +180,7 @@ describe("useDevConsole", () => {
     vi.stubGlobal("WebSocket", MockWebSocketClass);
 
     const { result } = renderHook(() =>
-      useDevConsole({ projectId: "test-project" })
+      useDevConsole({ projectId: "test-project", service: "test-service" })
     );
 
     act(() => {

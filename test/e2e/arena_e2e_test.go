@@ -530,4 +530,166 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 	})
+
+	Context("ArenaDevSession Test", func() {
+		const devSessionName = "e2e-dev-session"
+
+		AfterEach(func() {
+			// Clean up dev session after each test
+			cmd := exec.Command("kubectl", "delete", "arenadevsession", devSessionName,
+				"-n", arenaNamespace, "--ignore-not-found", "--timeout=30s")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should create a dev console pod that starts without permission errors", func() {
+			By("creating an ArenaDevSession")
+			devSessionManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaDevSession
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  projectId: test-project
+  ttl: 5m
+`, devSessionName, arenaNamespace)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(devSessionManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create ArenaDevSession")
+
+			By("waiting for the dev session to become Ready")
+			verifyDevSessionReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "arenadevsession", devSessionName,
+					"-n", arenaNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "ArenaDevSession should be Ready, got: "+output)
+			}
+			Eventually(verifyDevSessionReady, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+			By("verifying the dev console pod is running")
+			verifyPodRunning := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", arenaNamespace,
+					"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+					"-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"), "Dev console pod should be Running, got: "+output)
+			}
+			Eventually(verifyPodRunning, time.Minute, 2*time.Second).Should(Succeed())
+
+			By("checking dev console pod logs for startup errors")
+			cmd = exec.Command("kubectl", "logs", "-n", arenaNamespace,
+				"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+				"--tail=50")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify no permission denied errors in logs
+			Expect(output).NotTo(ContainSubstring("permission denied"),
+				"Dev console should not have permission denied errors")
+			Expect(output).NotTo(ContainSubstring("mkdir out:"),
+				"Dev console should not fail to create out directory")
+
+			// Log the output for debugging
+			_, _ = fmt.Fprintf(GinkgoWriter, "Dev console pod logs:\n%s\n", output)
+
+			By("verifying the dev console health endpoint")
+			// Port-forward to the dev console pod and check health
+			podName := ""
+			cmd = exec.Command("kubectl", "get", "pods", "-n", arenaNamespace,
+				"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+				"-o", "jsonpath={.items[0].metadata.name}")
+			podNameOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			podName = strings.TrimSpace(podNameOutput)
+
+			// Check readiness probe
+			cmd = exec.Command("kubectl", "get", "pod", podName, "-n", arenaNamespace,
+				"-o", "jsonpath={.status.containerStatuses[0].ready}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("true"), "Dev console container should be ready")
+		})
+
+		It("should handle provider loading without permission errors", func() {
+			By("creating a Provider for the dev session")
+			providerManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: dev-session-mock-provider
+  namespace: %s
+spec:
+  type: mock
+  model: mock-model
+`, arenaNamespace)
+
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(providerManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Provider")
+
+			By("waiting for Provider to be Ready")
+			verifyProviderReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "provider", "dev-session-mock-provider",
+					"-n", arenaNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "Provider should be Ready")
+			}
+			Eventually(verifyProviderReady, time.Minute, time.Second).Should(Succeed())
+
+			By("creating an ArenaDevSession")
+			devSessionManifest := fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaDevSession
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  projectId: test-project-with-provider
+  ttl: 5m
+`, devSessionName, arenaNamespace)
+
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(devSessionManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create ArenaDevSession")
+
+			By("waiting for the dev session to become Ready")
+			verifyDevSessionReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "arenadevsession", devSessionName,
+					"-n", arenaNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready"), "ArenaDevSession should be Ready")
+			}
+			Eventually(verifyDevSessionReady, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+			By("checking for any BuildEngineComponents errors in logs")
+			cmd = exec.Command("kubectl", "logs", "-n", arenaNamespace,
+				"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+				"--tail=100")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify no engine build errors
+			Expect(output).NotTo(ContainSubstring("failed to build provider registry"),
+				"Dev console should not fail to build provider registry")
+			Expect(output).NotTo(ContainSubstring("failed to build engine components"),
+				"Dev console should not fail to build engine components")
+			Expect(output).NotTo(ContainSubstring("failed to create media file store"),
+				"Dev console should not fail to create media file store")
+
+			_, _ = fmt.Fprintf(GinkgoWriter, "Dev console logs with provider:\n%s\n", output)
+
+			By("cleaning up Provider")
+			cmd = exec.Command("kubectl", "delete", "provider", "dev-session-mock-provider",
+				"-n", arenaNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+	})
 })

@@ -38,8 +38,9 @@ export function useProviders(options: UseProvidersOptions = {}) {
       return providers;
     },
     enabled: !!currentWorkspace,
-    staleTime: 0,
-    refetchOnMount: "always",
+    // Reasonable stale time to prevent duplicate fetches during component re-renders
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }
 
@@ -62,7 +63,8 @@ export function useProvider(name: string | undefined, _namespace?: string) {
       return (provider as unknown as Provider) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 0,
-    refetchOnMount: "always",
+    // Reasonable stale time to prevent duplicate fetches during component re-renders
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }

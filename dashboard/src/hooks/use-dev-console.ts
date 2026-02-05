@@ -121,6 +121,7 @@ export function useDevConsole({
   service,
 }: UseDevConsoleOptions = {}): UseDevConsoleReturn {
   const wsRef = useRef<WebSocket | null>(null);
+  const mountedRef = useRef(true);
 
   // Use persistent store for state
   const tabId = customSessionId || `dev-console-${projectId || "default"}`;
@@ -272,6 +273,11 @@ export function useDevConsole({
       return; // Already connected
     }
 
+    // Don't attempt connection without a service name
+    if (!service) {
+      return;
+    }
+
     setStatus("connecting");
 
     // Build WebSocket URL with workspace/namespace context
@@ -288,10 +294,12 @@ export function useDevConsole({
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      if (!mountedRef.current) return;
       setStatus("connected");
     };
 
     ws.onmessage = (event) => {
+      if (!mountedRef.current) return;
       try {
         const message = JSON.parse(event.data) as ServerMessage;
         handleMessage(message);
@@ -301,6 +309,7 @@ export function useDevConsole({
     };
 
     ws.onclose = () => {
+      if (!mountedRef.current) return;
       if (statusRef.current === "connected") {
         addMessageToStore({
           id: generateId(),
@@ -313,6 +322,8 @@ export function useDevConsole({
     };
 
     ws.onerror = (event) => {
+      // Don't log errors during unmount (React Strict Mode double-invokes effects)
+      if (!mountedRef.current) return;
       console.error("[DevConsole] WebSocket error:", event);
       setStatus("error", "Connection error");
     };
@@ -412,10 +423,17 @@ export function useDevConsole({
     storeClearMessages(tabId);
   }, [storeClearMessages, tabId]);
 
-  // Cleanup on unmount
+  // Track mount state and cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       if (wsRef.current) {
+        // Clear event handlers before closing to prevent error logging during cleanup
+        wsRef.current.onopen = null;
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onmessage = null;
         wsRef.current.close();
         wsRef.current = null;
       }

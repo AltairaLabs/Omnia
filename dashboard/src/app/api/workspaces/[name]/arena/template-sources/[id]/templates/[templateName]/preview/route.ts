@@ -3,6 +3,7 @@
  *
  * POST /api/workspaces/:name/arena/template-sources/:id/templates/:templateName/preview
  *   - Validates variables
+ *   - Calls arena-controller to render template using PromptKit
  *   - Returns rendered files without creating a project
  *
  * Templates are read from the index file written by the controller.
@@ -35,113 +36,42 @@ import * as path from "path";
 
 const TEMPLATE_INDEX_DIR = "arena/template-indexes";
 
-type VariableValueType = string | number | boolean;
-
 const CRD_KIND = "ArenaTemplateSource";
 const WORKSPACE_CONTENT_PATH = process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
+// Service domain for K8s cluster DNS
+const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
+// Arena controller API URL for template rendering
+const ARENA_CONTROLLER_URL = process.env.ARENA_CONTROLLER_URL ||
+  `http://omnia-arena-controller.omnia-system.${SERVICE_DOMAIN}:8082`;
 
 interface RouteParams {
   params: Promise<{ name: string; id: string; templateName: string }>;
 }
 
 /**
- * Simple Go template rendering (subset of functionality).
- * Replaces {{ .variableName }} with variable values.
+ * Preview a template using the arena-controller API (which uses PromptKit).
  */
-function renderTemplate(content: string, variables: Record<string, VariableValueType>): string {
-  let result = content;
+async function previewTemplateViaController(
+  templatePath: string,
+  projectName: string,
+  variables: Record<string, unknown>
+): Promise<{ files: Array<{ path: string; content: string }>; errors?: string[] }> {
+  const response = await fetch(`${ARENA_CONTROLLER_URL}/api/preview-template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templatePath,
+      projectName,
+      variables,
+    }),
+  });
 
-  // Replace {{ .variableName }} patterns
-  for (const [name, value] of Object.entries(variables)) {
-    const patterns = [
-      new RegExp(`\\{\\{\\s*\\.${name}\\s*\\}\\}`, "g"),
-      new RegExp(`\\{\\{-\\s*\\.${name}\\s*-?\\}\\}`, "g"),
-    ];
-
-    for (const pattern of patterns) {
-      result = result.replace(pattern, String(value));
-    }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Arena controller returned ${response.status}: ${text}`);
   }
 
-  return result;
-}
-
-/**
- * Determine if a file should be rendered based on extension.
- */
-function shouldRenderFile(filename: string): boolean {
-  const renderExtensions = [".yaml", ".yml", ".json", ".txt", ".md", ".arena.yaml"];
-  return renderExtensions.some((ext) => filename.endsWith(ext));
-}
-
-/**
- * Read and render template files for preview.
- */
-async function previewTemplateFiles(
-  sourcePath: string,
-  variables: Record<string, VariableValueType>,
-  template: TemplateMetadata
-): Promise<Array<{ path: string; content: string }>> {
-  const renderedFiles: Array<{ path: string; content: string }> = [];
-  const files = template.files || [];
-
-  // If no files specified, preview all files except template.yaml
-  if (files.length === 0) {
-    await previewDirectory(sourcePath, "", variables, true, renderedFiles);
-    return renderedFiles;
-  }
-
-  for (const fileSpec of files) {
-    const srcPath = path.join(sourcePath, fileSpec.path);
-
-    try {
-      const stat = await fs.stat(srcPath);
-
-      if (stat.isDirectory()) {
-        await previewDirectory(srcPath, fileSpec.path, variables, fileSpec.render !== false, renderedFiles);
-      } else {
-        const content = await fs.readFile(srcPath, "utf-8");
-        const shouldRender = fileSpec.render !== false && shouldRenderFile(fileSpec.path);
-        const renderedContent = shouldRender ? renderTemplate(content, variables) : content;
-        renderedFiles.push({ path: fileSpec.path, content: renderedContent });
-      }
-    } catch {
-      // Skip files that don't exist
-      continue;
-    }
-  }
-
-  return renderedFiles;
-}
-
-/**
- * Preview files in a directory recursively.
- */
-async function previewDirectory(
-  srcDir: string,
-  relativePath: string,
-  variables: Record<string, VariableValueType>,
-  render: boolean,
-  renderedFiles: Array<{ path: string; content: string }>
-): Promise<void> {
-  const entries = await fs.readdir(srcDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    // Skip template.yaml
-    if (entry.name === "template.yaml") continue;
-
-    const srcPath = path.join(srcDir, entry.name);
-    const filePath = relativePath ? path.join(relativePath, entry.name) : entry.name;
-
-    if (entry.isDirectory()) {
-      await previewDirectory(srcPath, filePath, variables, render, renderedFiles);
-    } else {
-      const content = await fs.readFile(srcPath, "utf-8");
-      const shouldRender = render && shouldRenderFile(entry.name);
-      const renderedContent = shouldRender ? renderTemplate(content, variables) : content;
-      renderedFiles.push({ path: filePath, content: renderedContent });
-    }
-  }
+  return response.json();
 }
 
 export const POST = withWorkspaceAccess<{ name: string; id: string; templateName: string }>(
@@ -241,18 +171,18 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
       );
       const templatePath = path.join(templateSourcePath, template.path);
 
-      // Render template files for preview
-      const renderedFiles = await previewTemplateFiles(
+      // Call arena-controller to preview the template using PromptKit
+      const previewResult = await previewTemplateViaController(
         templatePath,
-        variablesWithDefaults,
-        template
+        body.projectName || "preview-project",
+        variablesWithDefaults
       );
 
       auditSuccess(auditCtx, "get", `${id}/templates/${templateName}/preview`);
 
       return NextResponse.json({
-        files: renderedFiles,
-        errors: validationErrors.length > 0 ? validationErrors : undefined,
+        files: previewResult.files,
+        errors: validationErrors.length > 0 ? validationErrors : previewResult.errors,
       });
     } catch (error) {
       if (auditCtx) {

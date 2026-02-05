@@ -125,6 +125,16 @@ function createMockContext() {
 describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[templateName]/render", () => {
   beforeEach(() => {
     vi.resetModules();
+    // Mock global fetch for arena controller API calls
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        success: true,
+        filesCreated: ["config.yaml"],
+        errors: [],
+        warnings: [],
+      }),
+    });
   });
 
   afterEach(() => {
@@ -312,7 +322,13 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
     // Mock readFile to return template index for index path
     vi.mocked(fs.readFile).mockImplementation(createReadFileMock("name: {{ .projectName }}"));
-    vi.mocked(fs.mkdir).mockRejectedValue(new Error("Disk full"));
+
+    // Mock fetch to fail for this test
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: () => Promise.resolve("Render failed"),
+    });
 
     const { POST } = await import("./route");
     const response = await POST(

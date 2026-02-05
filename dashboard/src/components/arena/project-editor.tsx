@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useProjectEditorStore, useActiveFile, useHasUnsavedChanges } from "@/stores";
 import {
@@ -17,6 +17,7 @@ import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
 import { ProjectToolbar } from "./project-toolbar";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { getRuntimeConfig } from "@/lib/config";
+import { useEnterpriseConfig } from "@/hooks/use-runtime-config";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import {
@@ -38,7 +39,7 @@ import { useResultsPanelStore, useResultsPanelActiveTab } from "@/stores/results
 // Dynamically import LspYamlEditor to avoid SSR issues with monaco-languageclient
 // The vscode package has Node.js-specific code that doesn't work in SSR context
 // In development mode with Turbopack, we skip loading the LSP editor entirely
-// because Turbopack can't handle the vscode package's Node.js-specific code
+// because Turbopack can't resolve monaco-languageclient at runtime
 const isDev = process.env.NODE_ENV === "development";
 
 const LspYamlEditor = isDev
@@ -80,12 +81,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const canWrite = currentWorkspace?.permissions?.write ?? false;
 
   // Enterprise feature check for LSP
-  const [lspEnabled, setLspEnabled] = useState(false);
-  useEffect(() => {
-    getRuntimeConfig().then((config) => {
-      setLspEnabled(config.enterpriseEnabled);
-    });
-  }, []);
+  const { enterpriseEnabled: lspEnabled } = useEnterpriseConfig();
 
   // Store state
   const currentProject = useProjectEditorStore((state) => state.currentProject);
@@ -105,7 +101,8 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const { projects, loading: projectsLoading, refetch: refetchProjects } = useArenaProjects();
   const { createProject, deleteProject } = useArenaProjectMutations();
   const { getFileContent, updateFileContent: saveFileContent, createFile, deleteFile, refreshFileTree } = useArenaProjectFiles();
-  const { data: providers = [] } = useProviders();
+  // Only show Ready providers in the dev console dropdown
+  const { data: providers = [] } = useProviders({ phase: "Ready" });
 
   // Dev session for interactive testing (ArenaDevSession)
   const {
@@ -137,11 +134,14 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const [problems, setProblems] = useState<Problem[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
 
-  // Provider options for dev console
-  const providerOptions = providers.map((p) => ({
-    id: p.metadata.name,
-    name: `${p.metadata.name} (${p.spec.type})`,
-  }));
+  // Provider options for dev console - memoized to prevent unnecessary re-renders
+  const providerOptions = useMemo(
+    () => providers.map((p) => ({
+      id: p.metadata.name,
+      name: `${p.metadata.name} (${p.spec.type})`,
+    })),
+    [providers]
+  );
 
   // Results panel store
   const resultsPanelOpen = useResultsPanelStore((state) => state.isOpen);
@@ -163,27 +163,48 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     }
   }, [projectData, setCurrentProject]);
 
+  // Auto-select first provider when none is selected and providers are available
+  useEffect(() => {
+    if (!selectedProvider && providerOptions.length > 0) {
+      setSelectedProvider(providerOptions[0].id);
+    }
+  }, [selectedProvider, providerOptions]);
+
   // Set loading state
   useEffect(() => {
     setProjectLoading(projectDataLoading);
   }, [projectDataLoading, setProjectLoading]);
 
+  // Track if session creation was attempted to prevent duplicate requests
+  const sessionCreationAttemptedRef = useRef(false);
+  const currentProjectId = currentProject?.id;
+
+  // Reset session creation flag when project changes
+  useEffect(() => {
+    sessionCreationAttemptedRef.current = false;
+  }, [currentProjectId]);
+
   // Create dev session when Console tab is activated (only if user has write permissions)
+  // Using primitive dependencies to avoid unnecessary effect runs
   useEffect(() => {
     if (
       activeResultsTab === "console" &&
-      currentProject &&
+      currentProjectId &&
       workspace &&
       canWrite &&
       !devSession &&
       !devSessionLoading &&
-      !devSessionError
+      !devSessionError &&
+      !sessionCreationAttemptedRef.current
     ) {
+      sessionCreationAttemptedRef.current = true;
       createDevSession().catch((err) => {
         console.error("Failed to create dev session:", err);
+        // Reset flag on error to allow retry
+        sessionCreationAttemptedRef.current = false;
       });
     }
-  }, [activeResultsTab, currentProject, workspace, canWrite, devSession, devSessionLoading, devSessionError, createDevSession]);
+  }, [activeResultsTab, currentProjectId, workspace, canWrite, devSession, devSessionLoading, devSessionError, createDevSession]);
 
   // Handle project selection
   const handleProjectSelect = useCallback((projectId: string) => {
@@ -516,13 +537,13 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         </div>
       ) : (
         <ResizablePanelGroup
-          direction="vertical"
+          orientation="vertical"
           className="flex-1 min-h-0"
         >
           {/* Main content area */}
           <ResizablePanel defaultSize={resultsPanelOpen ? 70 : 100} minSize={30}>
             <ResizablePanelGroup
-              direction="horizontal"
+              orientation="horizontal"
               className="h-full"
             >
               {/* File tree panel */}

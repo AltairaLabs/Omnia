@@ -118,6 +118,13 @@ function createMockContext() {
 describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[templateName]/preview", () => {
   beforeEach(() => {
     vi.resetModules();
+    // Mock global fetch for arena controller API calls
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        files: [{ path: "config.yaml", content: "rendered: content" }],
+      }),
+    });
   });
 
   afterEach(() => {
@@ -257,7 +264,13 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
     vi.mocked(fs.readFile).mockImplementation(createReadFileMock("content"));
-    vi.mocked(fs.readdir).mockRejectedValue(new Error("File system error"));
+
+    // Mock fetch to fail for this test
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: () => Promise.resolve("Internal server error"),
+    });
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest({ variables: {} }), createMockContext());
@@ -316,6 +329,17 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
     vi.mocked(fs.stat).mockResolvedValue({ isDirectory: () => false } as Awaited<ReturnType<typeof fs.stat>>);
     vi.mocked(fs.readFile).mockImplementation(createReadFileMock("name: {{ .projectName }}", [templateWithFiles]));
+
+    // Mock fetch to return 2 files for this test
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        files: [
+          { path: "config.yaml", content: "name: my-project" },
+          { path: "static.txt", content: "static content" },
+        ],
+      }),
+    });
 
     const { POST } = await import("./route");
     const response = await POST(
@@ -401,6 +425,17 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
       ] as unknown as Awaited<ReturnType<typeof fs.readdir>>;
     });
     vi.mocked(fs.readFile).mockImplementation(createReadFileMock("content"));
+
+    // Mock fetch to return multiple files for nested directories
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        files: [
+          { path: "root.yaml", content: "content" },
+          { path: "subdir/nested.yaml", content: "content" },
+        ],
+      }),
+    });
 
     const { POST } = await import("./route");
     const response = await POST(

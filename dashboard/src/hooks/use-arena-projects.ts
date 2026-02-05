@@ -34,41 +34,60 @@ export function useArenaProjects(): UseArenaProjectsResult {
   const [projects, setProjects] = useState<ArenaProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
-  const fetchData = useCallback(async () => {
+  // Use effect with primitive dependencies only to avoid double-fetch
+  useEffect(() => {
     if (!workspace) {
       setProjects([]);
       setLoading(false);
       return;
     }
 
+    let cancelled = false;
     setLoading(true);
     setError(null);
 
-    try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/projects`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch projects: ${response.statusText}`);
+    const fetchData = async () => {
+      try {
+        const response = await fetch(`/api/workspaces/${workspace}/arena/projects`);
+        if (cancelled) return;
+        if (!response.ok) {
+          throw new Error(`Failed to fetch projects: ${response.statusText}`);
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          setProjects(data.projects || []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setProjects([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-      const data = await response.json();
-      setProjects(data.projects || []);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setProjects([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace]);
+    };
 
-  useEffect(() => {
     fetchData();
-  }, [fetchData]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace, refetchTrigger]);
+
+  // Stable refetch function
+  const refetch = useCallback(() => {
+    setRefetchTrigger((prev) => prev + 1);
+  }, []);
 
   return {
     projects,
     loading,
     error,
-    refetch: fetchData,
+    refetch,
   };
 }
 
@@ -92,48 +111,68 @@ export function useArenaProject(projectId: string | undefined): UseArenaProjectR
   const [project, setProject] = useState<ArenaProjectWithTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
 
-  const fetchData = useCallback(async () => {
+  // Use effect with primitive dependencies only to avoid double-fetch
+  useEffect(() => {
     if (!workspace || !projectId) {
       setProject(null);
       setLoading(false);
       return;
     }
 
+    let cancelled = false;
     setLoading(true);
     setError(null);
 
-    try {
-      const response = await fetch(
-        `/api/workspaces/${workspace}/arena/projects/${projectId}`
-      );
+    const fetchData = async () => {
+      try {
+        const response = await fetch(
+          `/api/workspaces/${workspace}/arena/projects/${projectId}`
+        );
 
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error("Project not found");
+        if (cancelled) return;
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error("Project not found");
+          }
+          throw new Error(`Failed to fetch project: ${response.statusText}`);
         }
-        throw new Error(`Failed to fetch project: ${response.statusText}`);
+
+        const projectData = await response.json();
+        if (!cancelled) {
+          setProject(projectData);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setProject(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
+    };
 
-      const projectData = await response.json();
-      setProject(projectData);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setProject(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, projectId]);
-
-  useEffect(() => {
     fetchData();
-  }, [fetchData]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace, projectId, refetchTrigger]);
+
+  // Stable refetch function
+  const refetch = useCallback(() => {
+    setRefetchTrigger((prev) => prev + 1);
+  }, []);
 
   return {
     project,
     loading,
     error,
-    refetch: fetchData,
+    refetch,
   };
 }
 

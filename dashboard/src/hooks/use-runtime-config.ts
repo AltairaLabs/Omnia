@@ -1,20 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-interface RuntimeConfig {
-  demoMode: boolean;
-  readOnlyMode: boolean;
-  readOnlyMessage: string;
-  wsProxyUrl: string;
-  grafanaUrl: string;
-  lokiEnabled: boolean;
-  tempoEnabled: boolean;
-  /** Whether enterprise features are deployed (enterprise.enabled=true in Helm) */
-  enterpriseEnabled: boolean;
-  /** Whether to hide enterprise features completely instead of showing upgrade prompts */
-  hideEnterprise: boolean;
-}
+import { getRuntimeConfig, type RuntimeConfig } from "@/lib/config";
 
 // Use NEXT_PUBLIC_* as build-time defaults to avoid flash of wrong state
 // The API route will provide the runtime values if different
@@ -30,31 +17,39 @@ const defaultConfig: RuntimeConfig = {
   hideEnterprise: process.env.NEXT_PUBLIC_HIDE_ENTERPRISE === "true",
 };
 
+// Track if config has been fetched to avoid duplicate requests
+let configFetched = false;
 let cachedConfig: RuntimeConfig | null = null;
 
 /**
  * Hook to fetch runtime configuration from the server.
  * This allows config values to be set via environment variables
  * at runtime (e.g., from Kubernetes ConfigMaps).
+ *
+ * Uses the centralized getRuntimeConfig() which has its own deduplication.
  */
 export function useRuntimeConfig() {
+  // Initialize with cached config if available, avoiding unnecessary fetches
   const [config, setConfig] = useState<RuntimeConfig>(cachedConfig || defaultConfig);
-  const [loading, setLoading] = useState(!cachedConfig);
+  const [loading, setLoading] = useState(!configFetched);
 
   useEffect(() => {
-    if (cachedConfig) {
+    // Skip fetch if config was already cached (state initialized correctly above)
+    if (configFetched) {
       return;
     }
 
-    fetch("/api/config")
-      .then((res) => res.json())
-      .then((data: RuntimeConfig) => {
+    // Use centralized getRuntimeConfig which deduplicates concurrent requests
+    getRuntimeConfig()
+      .then((data) => {
         cachedConfig = data;
+        configFetched = true;
         setConfig(data);
         setLoading(false);
       })
       .catch((err) => {
         console.error("Failed to fetch runtime config:", err);
+        configFetched = true;
         setLoading(false);
       });
   }, []);
