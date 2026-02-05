@@ -1654,6 +1654,78 @@ func TestPromptKitHandlerCloseWithRegistry(t *testing.T) {
 	assert.Empty(t, handler.nsRegistries)
 }
 
+// TestPromptKitHandlerCloseWithNamespaceRegistries tests closing with namespace registries.
+func TestPromptKitHandlerCloseWithNamespaceRegistries(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "output")
+	outputDir2 := filepath.Join(tmpDir, "output2")
+
+	cfg := &config.Config{
+		Defaults: config.Defaults{
+			Output: config.OutputConfig{
+				Dir: outputDir,
+			},
+			OutDir:    outputDir,
+			ConfigDir: tmpDir,
+		},
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {
+				ID:    "mock",
+				Type:  "mock",
+				Model: "mock-model",
+			},
+		},
+	}
+
+	// Create a second config for namespace registry
+	cfg2 := &config.Config{
+		Defaults: config.Defaults{
+			Output: config.OutputConfig{
+				Dir: outputDir2,
+			},
+			OutDir:    outputDir2,
+			ConfigDir: tmpDir,
+		},
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {
+				ID:    "mock",
+				Type:  "mock",
+				Model: "mock-model",
+			},
+		},
+	}
+
+	// Build the second registry separately
+	nsRegistry, _, _, _, _, err := engine.BuildEngineComponents(cfg2)
+	require.NoError(t, err)
+	require.NotNil(t, nsRegistry)
+
+	handler := &PromptKitHandler{
+		config:   cfg,
+		log:      logr.Discard(),
+		sessions: make(map[string]*SessionState),
+		nsRegistries: map[string]*providers.Registry{
+			"test-namespace": nsRegistry,
+		},
+	}
+
+	// Build main components
+	err = handler.buildComponents()
+	require.NoError(t, err)
+	require.NotNil(t, handler.providerRegistry)
+
+	// Verify we have both main and namespace registries
+	assert.NotNil(t, handler.providerRegistry)
+	assert.Len(t, handler.nsRegistries, 1)
+
+	// Now close the handler
+	err = handler.Close()
+	assert.NoError(t, err)
+
+	// Verify nsRegistries is cleared
+	assert.Empty(t, handler.nsRegistries)
+}
+
 // TestNewPromptKitHandlerBuildComponentsError tests NewPromptKitHandler when
 // buildComponents fails (invalid config).
 func TestNewPromptKitHandlerBuildComponentsError(t *testing.T) {
