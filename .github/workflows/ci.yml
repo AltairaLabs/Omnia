@@ -699,12 +699,27 @@ jobs:
         if [ -f dashboard/coverage/lcov.info ]; then
           echo "Dashboard unit test coverage:"
           wc -l dashboard/coverage/lcov.info
+          echo "Sample paths from unit test coverage:"
+          grep "^SF:" dashboard/coverage/lcov.info | head -5
 
           # Check if E2E coverage exists and merge it
           # Note: artifact upload flattens paths, so lcov.info ends up at dashboard/e2e-coverage/lcov.info
           if [ -f dashboard/e2e-coverage/lcov.info ]; then
-            echo "E2E coverage found, merging..."
+            echo "E2E coverage found..."
             wc -l dashboard/e2e-coverage/lcov.info
+            echo "Sample paths from E2E coverage before fixing:"
+            grep "^SF:" dashboard/e2e-coverage/lcov.info | head -5
+
+            # Fix E2E coverage paths that might have different formats
+            # Some E2E paths may be absolute or have different prefixes
+            sed -i 's|^SF:\[project\]/src/|SF:dashboard/src/|g' dashboard/e2e-coverage/lcov.info
+            sed -i 's|^SF:app/src/|SF:dashboard/src/|g' dashboard/e2e-coverage/lcov.info
+            sed -i 's|^SF:src/|SF:dashboard/src/|g' dashboard/e2e-coverage/lcov.info
+            # Handle absolute paths that might sneak through
+            sed -i 's|^SF:/home/runner/work/Omnia/Omnia/dashboard/src/|SF:dashboard/src/|g' dashboard/e2e-coverage/lcov.info
+
+            echo "Sample paths from E2E coverage after fixing:"
+            grep "^SF:" dashboard/e2e-coverage/lcov.info | head -5
 
             # Merge lcov files - append E2E coverage to unit test coverage
             cat dashboard/e2e-coverage/lcov.info >> dashboard/coverage/lcov.info
@@ -714,6 +729,12 @@ jobs:
           else
             echo "No E2E coverage found, using unit test coverage only"
           fi
+
+          # Final verification of merged file paths
+          echo "Final sample paths in merged coverage:"
+          grep "^SF:" dashboard/coverage/lcov.info | head -10
+          echo "Path prefixes found:"
+          grep "^SF:" dashboard/coverage/lcov.info | sed 's|^SF:||' | cut -d'/' -f1 | sort | uniq -c
         else
           echo "No dashboard coverage files to merge"
         fi
