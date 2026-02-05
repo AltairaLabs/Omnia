@@ -1,0 +1,35 @@
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Template
+metadata:
+  name: simple-test
+  labels:
+    version: "1.0.0"
+  annotations:
+    description: "Minimal template for unit testing"
+    author: "test"
+
+spec:
+  variables:
+    - name: project_name
+      description: "Project name"
+      type: string
+      default: "my-project"
+      required: true
+
+    - name: greeting
+      description: "Greeting message"
+      type: string
+      default: "Hello"
+
+  files:
+    - path: "config.yaml"
+      content: |
+        name: {{ .project_name }}
+        greeting: {{ .greeting }}
+        version: 1.0.0
+
+    - path: "README.md"
+      content: |
+        # {{ .project_name }}
+
+        {{ .greeting }}, welcome to your project!
