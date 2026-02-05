@@ -44,7 +44,6 @@ export interface TemplateBrowserProps {
 /**
  * Template browser component with filtering and search.
  */
-// eslint-disable-next-line sonarjs/cognitive-complexity
 export function TemplateBrowser({
   templates: allTemplates,
   sources,

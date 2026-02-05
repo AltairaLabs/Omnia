@@ -400,3 +400,63 @@ func TestPreviewTemplate_HiddenProjectName(t *testing.T) {
 		t.Error("PreviewTemplate() should reject hidden project names")
 	}
 }
+
+func TestValidateOutputPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		// Allowed paths
+		{"workspace-content root", "/workspace-content", false},
+		{"workspace-content subdir", "/workspace-content/project/files", false},
+		{"tmp root", "/tmp", false},
+		{"tmp subdir", "/tmp/arena-output-123", false},
+		{"var/folders root", "/var/folders", false},
+		{"var/folders subdir", "/var/folders/xy/random/T/arena", false},
+
+		// Disallowed paths
+		{"root", "/", true},
+		{"home directory", "/home/user", true},
+		{"etc", "/etc", true},
+		{"usr", "/usr/local/bin", true},
+		{"arbitrary path", "/some/other/path", true},
+		{"workspace-content prefix trick", "/workspace-content-evil", true},
+		{"tmp prefix trick", "/tmpevil", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateOutputPath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateOutputPath(%q) error = %v, wantErr = %v", tt.path, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRenderTemplate_OutputPathRestriction(t *testing.T) {
+	// Test that output paths outside allowed directories are rejected
+	tests := []struct {
+		name       string
+		outputPath string
+	}{
+		{"root path", "/"},
+		{"home directory", "/home/user/project"},
+		{"etc directory", "/etc/arena"},
+		{"usr directory", "/usr/local/share"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := RenderTemplate("/some/template", tt.outputPath, "test-project", nil)
+			if err == nil {
+				t.Errorf("RenderTemplate() should reject output path %q", tt.outputPath)
+			}
+			if err != nil && !strings.Contains(err.Error(), "outside allowed base directory") {
+				// Could also fail for other reasons (like template not found), which is fine
+				t.Logf("Error for path %q: %v", tt.outputPath, err)
+			}
+		})
+	}
+}

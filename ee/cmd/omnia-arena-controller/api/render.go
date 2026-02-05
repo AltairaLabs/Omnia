@@ -28,6 +28,25 @@ var ErrInvalidProjectName = errors.New("invalid project name: contains path sepa
 // ErrPathOutsideBase is returned when a path resolves outside the allowed base directory.
 var ErrPathOutsideBase = errors.New("path resolves outside allowed base directory")
 
+// allowedOutputPrefixes defines the allowed output path prefixes for template rendering.
+// This prevents path traversal attacks by ensuring output is only written to safe locations.
+// - /workspace-content: Production workspace storage mounted in containers
+// - /tmp: For tests and temporary operations
+// - /var/folders: macOS test temp directories
+var allowedOutputPrefixes = []string{"/workspace-content", "/tmp", "/var/folders"}
+
+// validateOutputPath ensures the output path is within an allowed directory prefix.
+// This is a security check to prevent writing files to arbitrary locations.
+func validateOutputPath(absPath string) error {
+	for _, prefix := range allowedOutputPrefixes {
+		// Check if path equals the prefix exactly, or starts with prefix followed by separator
+		if absPath == prefix || strings.HasPrefix(absPath, prefix+"/") {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: output path must be within an allowed directory", ErrPathOutsideBase)
+}
+
 // validateProjectName ensures a project name doesn't contain path separators or traversal sequences.
 func validateProjectName(name string) error {
 	// Check for path traversal sequences
@@ -104,6 +123,11 @@ func RenderTemplate(
 	// Re-check for traversal after resolution
 	if strings.Contains(absOutputPath, "..") {
 		return nil, ErrInvalidPath
+	}
+
+	// Validate that output path is within an allowed directory (security check)
+	if err := validateOutputPath(absOutputPath); err != nil {
+		return nil, err
 	}
 
 	// Create a temporary cache directory for the loader

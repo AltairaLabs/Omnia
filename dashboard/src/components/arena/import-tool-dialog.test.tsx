@@ -52,10 +52,9 @@ const mockRegistries: ToolRegistry[] = [
   },
 ];
 
-// Helper to create mock return value - cast to any to satisfy TypeScript
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mockQueryResult(data: unknown, isLoading = false): any {
-  return { data, isLoading, error: null, refetch: vi.fn() };
+/** Helper to create mock UseQuery result */
+function mockQueryResult(data: unknown, isLoading = false) {
+  return { data, isLoading, error: null, refetch: vi.fn() } as unknown as ReturnType<typeof import("@/hooks/use-tool-registries").useToolRegistries>;
 }
 
 describe("ImportToolDialog", () => {
