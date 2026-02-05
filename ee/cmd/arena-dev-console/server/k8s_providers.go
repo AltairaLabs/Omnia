@@ -118,7 +118,7 @@ func (l *K8sProviderLoader) LoadProvidersForNamespace(
 
 	l.log.Info("found providers", "namespace", namespace, "count", len(providerList.Items))
 
-	providers := make(map[string]*config.Provider)
+	providerMap := make(map[string]*config.Provider)
 	for i := range providerList.Items {
 		p := &providerList.Items[i]
 
@@ -130,11 +130,11 @@ func (l *K8sProviderLoader) LoadProvidersForNamespace(
 
 		// Convert to PromptKit config
 		pkProvider := l.convertProvider(p)
-		providers[p.Name] = pkProvider
+		providerMap[p.Name] = pkProvider
 		l.log.V(1).Info("loaded provider", "name", p.Name, "type", p.Spec.Type)
 	}
 
-	return providers, nil
+	return providerMap, nil
 }
 
 // convertProvider converts a Provider CRD to PromptKit config.Provider.
@@ -184,9 +184,9 @@ func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Pr
 // BuildConfigFromProviders creates a PromptKit config.Config with the given providers.
 // Sets the output directory to a writable location since the container's working
 // directory may be read-only.
-func BuildConfigFromProviders(providers map[string]*config.Provider) *config.Config {
+func BuildConfigFromProviders(providerMap map[string]*config.Provider) *config.Config {
 	return &config.Config{
-		LoadedProviders: providers,
+		LoadedProviders: providerMap,
 		// Set ConfigDir to a writable location for any file operations
 		ConfigDir: devConsoleConfigDir,
 		Defaults: config.Defaults{
