@@ -228,9 +228,14 @@ enterprise:
 ```
 
 When `enterprise.enabled` is `true`:
-- Arena CRDs (ArenaSource, ArenaJob) are installed
+- Arena CRDs are installed:
+  - [ArenaSource](/reference/arenasource) - PromptKit bundle sources
+  - [ArenaJob](/reference/arenajob) - Test execution
+  - [ArenaTemplateSource](/reference/arena-template-source) - Project templates
+  - [ArenaDevSession](/reference/arena-dev-session) - Interactive testing sessions
 - Arena controllers are deployed
 - Workspace shared filesystem features are available
+- Project Editor with LSP validation (when `promptkitLsp.enabled`)
 
 :::note[License Required]
 Enterprise features require a valid license. See [Installing a License](/how-to/install-license/) for details.
@@ -366,6 +371,82 @@ enterprise:
           name: redis-credentials
           key: redis-password
 ```
+
+### Arena Controller
+
+The Arena controller manages ArenaSource, ArenaJob, ArenaTemplateSource, and ArenaDevSession resources.
+
+```yaml
+enterprise:
+  arena:
+    controller:
+      replicaCount: 1
+      image:
+        repository: ghcr.io/altairalabs/omnia-arena-controller
+        tag: ""  # Defaults to Chart appVersion
+        pullPolicy: IfNotPresent
+      resources: {}
+```
+
+### Dev Console
+
+The dev console provides interactive agent testing. Pods are created on-demand by the ArenaDevSession controller.
+
+```yaml
+enterprise:
+  arena:
+    devConsole:
+      image:
+        repository: ghcr.io/altairalabs/omnia-arena-dev-console
+        tag: ""  # Defaults to Chart appVersion
+        pullPolicy: IfNotPresent
+```
+
+See [ArenaDevSession CRD](/reference/arena-dev-session) for details on interactive testing.
+
+### Community Templates
+
+Omnia can automatically deploy a community templates source with pre-built Arena project templates.
+
+```yaml
+enterprise:
+  communityTemplates:
+    enabled: true  # Deploy community templates ArenaTemplateSource
+    name: community-templates
+    namespace: ""  # Defaults to workspace namespace
+    git:
+      url: https://github.com/AltairaLabs/arena-templates
+      branch: main
+    syncInterval: 1h
+```
+
+See [ArenaTemplateSource CRD](/reference/arena-template-source) for details on template sources.
+
+### PromptKit LSP
+
+The PromptKit LSP server provides real-time YAML validation and code intelligence for the Project Editor.
+
+```yaml
+enterprise:
+  promptkitLsp:
+    enabled: false  # Enable for Project Editor validation
+    replicaCount: 2
+    image:
+      repository: ghcr.io/altairalabs/omnia-promptkit-lsp
+      tag: ""  # Defaults to Chart appVersion
+      pullPolicy: IfNotPresent
+    service:
+      port: 8080
+    resources: {}
+```
+
+When enabled, the LSP provides:
+- Real-time YAML syntax validation
+- PromptKit schema validation
+- Semantic token highlighting for template variables
+- Diagnostic messages in the Project Editor
+
+See the [PromptKit documentation](https://promptkit.dev) for details on the configuration format.
 
 #### Redis Subchart Configuration
 
