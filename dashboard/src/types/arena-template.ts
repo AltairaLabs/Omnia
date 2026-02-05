@@ -424,7 +424,7 @@ export function getTemplateCategories(templates: TemplateMetadata[]): string[] {
       categories.add(t.category);
     }
   }
-  return Array.from(categories).sort();
+  return Array.from(categories).sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -437,7 +437,7 @@ export function getTemplateTags(templates: TemplateMetadata[]): string[] {
       tags.add(tag);
     }
   }
-  return Array.from(tags).sort();
+  return Array.from(tags).sort((a, b) => a.localeCompare(b));
 }
 
 /**

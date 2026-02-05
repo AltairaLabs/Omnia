@@ -9,13 +9,41 @@ Functional Source License. See ee/LICENSE for details.
 package api
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	templates "github.com/AltairaLabs/PromptKit/tools/arena/templates"
 )
+
+// ErrInvalidPath is returned when a path contains path traversal sequences.
+var ErrInvalidPath = errors.New("invalid path: contains path traversal sequences")
+
+// ErrInvalidProjectName is returned when a project name contains invalid characters.
+var ErrInvalidProjectName = errors.New("invalid project name: contains path separators or traversal sequences")
+
+// validateProjectName ensures a project name doesn't contain path separators or traversal sequences.
+func validateProjectName(name string) error {
+	// Check for path traversal sequences
+	if strings.Contains(name, "..") {
+		return ErrInvalidProjectName
+	}
+
+	// Check for path separators
+	if strings.ContainsAny(name, "/\\") {
+		return ErrInvalidProjectName
+	}
+
+	// Ensure name is not empty and doesn't start with a dot (hidden file)
+	if name == "" || strings.HasPrefix(name, ".") {
+		return ErrInvalidProjectName
+	}
+
+	return nil
+}
 
 // RenderTemplate renders a template using PromptKit's Generator.
 // This is the canonical way to generate projects from Arena templates.
@@ -25,6 +53,17 @@ func RenderTemplate(
 	projectName string,
 	variables map[string]interface{},
 ) (*RenderTemplateResponse, error) {
+	// Validate project name to prevent path traversal
+	if err := validateProjectName(projectName); err != nil {
+		return nil, fmt.Errorf("invalid project name: %w", err)
+	}
+
+	// Clean and validate output path
+	cleanOutputPath := filepath.Clean(outputPath)
+	if strings.Contains(cleanOutputPath, "..") {
+		return nil, ErrInvalidPath
+	}
+
 	// Create a temporary cache directory for the loader
 	cacheDir, err := os.MkdirTemp("", "arena-template-cache-")
 	if err != nil {
@@ -39,8 +78,8 @@ func RenderTemplate(
 		return nil, fmt.Errorf("failed to load template from %s: %w", templatePath, err)
 	}
 
-	// Ensure output directory exists
-	if err := os.MkdirAll(outputPath, 0755); err != nil {
+	// Ensure output directory exists (use cleaned path)
+	if err := os.MkdirAll(cleanOutputPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -48,7 +87,7 @@ func RenderTemplate(
 	generator := templates.NewGenerator(tmpl, loader)
 	config := &templates.TemplateConfig{
 		ProjectName: projectName,
-		OutputDir:   outputPath,
+		OutputDir:   cleanOutputPath,
 		Variables:   variables,
 		Verbose:     false,
 	}
@@ -67,7 +106,7 @@ func RenderTemplate(
 	// Make file paths relative to output directory for cleaner response
 	relativeFiles := make([]string, 0, len(result.FilesCreated))
 	for _, f := range result.FilesCreated {
-		rel, err := filepath.Rel(outputPath, filepath.Join(result.ProjectPath, f))
+		rel, err := filepath.Rel(cleanOutputPath, filepath.Join(result.ProjectPath, f))
 		if err != nil {
 			rel = f
 		}
@@ -89,6 +128,11 @@ func PreviewTemplate(
 	projectName string,
 	variables map[string]interface{},
 ) (*PreviewTemplateResponse, error) {
+	// Validate project name to prevent path traversal
+	if err := validateProjectName(projectName); err != nil {
+		return nil, fmt.Errorf("invalid project name: %w", err)
+	}
+
 	// Create a temporary output directory
 	tempDir, err := os.MkdirTemp("", "arena-template-preview-")
 	if err != nil {
@@ -131,6 +175,7 @@ func PreviewTemplate(
 	}
 
 	// Read rendered files from temp directory
+	// projectPath is safe because projectName has been validated and tempDir is a controlled temp directory
 	var files []PreviewFile
 	projectPath := filepath.Join(tempDir, projectName)
 
