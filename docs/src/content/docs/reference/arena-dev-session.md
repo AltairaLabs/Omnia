@@ -414,4 +414,4 @@ enterprise:
 - **[Project Editor](/how-to/use-arena-project-editor)**: Where dev sessions are started
 - **[Provider](/reference/provider)**: LLM provider configuration
 - **[WebSocket Protocol](/reference/websocket-protocol)**: Base WebSocket message types
-- **[PromptKit Documentation](https://promptkit.dev)**: Agent configuration format
+- **[PromptKit Documentation](https://promptkit.altairalabs.ai)**: Agent configuration format

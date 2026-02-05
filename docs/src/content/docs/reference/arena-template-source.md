@@ -12,7 +12,7 @@ sidebar:
 ArenaTemplateSource is an enterprise feature. The CRD is only installed when `enterprise.enabled=true` in your Helm values. See [Installing a License](/how-to/install-license/) for details.
 :::
 
-The ArenaTemplateSource custom resource defines a source for discovering and fetching project templates. Templates are [PromptKit](https://promptkit.dev) projects that can be customized with variables and rendered to create new Arena projects.
+The ArenaTemplateSource custom resource defines a source for discovering and fetching project templates. Templates are [PromptKit](https://promptkit.altairalabs.ai) projects that can be customized with variables and rendered to create new Arena projects.
 
 ## API Version
 
@@ -297,7 +297,7 @@ provider:
   temperature: {{ .temperature }}
 ```
 
-For more information on PromptKit project structure, see the [PromptKit documentation](https://promptkit.dev/docs/getting-started).
+For more information on PromptKit project structure, see the [PromptKit documentation](https://promptkit.altairalabs.ai/docs/getting-started).
 
 ## Complete Examples
 

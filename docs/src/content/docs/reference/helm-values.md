@@ -446,7 +446,7 @@ When enabled, the LSP provides:
 - Semantic token highlighting for template variables
 - Diagnostic messages in the Project Editor
 
-See the [PromptKit documentation](https://promptkit.dev) for details on the configuration format.
+See the [PromptKit documentation](https://promptkit.altairalabs.ai) for details on the configuration format.
 
 #### Redis Subchart Configuration
 

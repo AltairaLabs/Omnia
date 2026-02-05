@@ -88,7 +88,7 @@ Click a problem to jump to its location in the editor.
 
 ## File Types
 
-Arena projects use the [PromptKit](https://promptkit.dev) format:
+Arena projects use the [PromptKit](https://promptkit.altairalabs.ai) format:
 
 ### `arena.config.yaml`
 
@@ -146,7 +146,7 @@ steps:
         value: "error"
 ```
 
-See the [PromptKit documentation](https://promptkit.dev/docs/configuration) for the complete configuration reference.
+See the [PromptKit documentation](https://promptkit.altairalabs.ai/docs/configuration) for the complete configuration reference.
 
 ## Importing Resources
 
@@ -337,4 +337,4 @@ If deployment fails:
 - **[ArenaTemplateSource CRD](/reference/arena-template-source)**: Template source configuration
 - **[ArenaDevSession CRD](/reference/arena-dev-session)**: Interactive testing sessions
 - **[Monitor Arena Jobs](/how-to/monitor-arena-jobs)**: Track evaluation progress
-- **[PromptKit Documentation](https://promptkit.dev)**: Configuration reference
+- **[PromptKit Documentation](https://promptkit.altairalabs.ai)**: Configuration reference
