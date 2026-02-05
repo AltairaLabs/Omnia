@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
@@ -93,6 +94,7 @@ func (h *PromptKitHandler) HandleMessage(
 	// Get registry and config (potentially namespace-specific)
 	registry, cfg, err := h.getRegistryAndConfig(ctx, namespace)
 	if err != nil {
+		h.log.Error(err, "HandleMessage: failed to get registry and config", "namespace", namespace)
 		return writer.WriteError("PROVIDER_LOAD_ERROR", err.Error())
 	}
 
@@ -384,10 +386,58 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 
 	// Build config from loaded providers
 	cfg := BuildConfigFromProviders(loadedProviders)
+	h.log.Info("built config from providers",
+		"outputDir", cfg.Defaults.Output.Dir,
+		"outDir", cfg.Defaults.OutDir,
+		"configDir", cfg.Defaults.ConfigDir,
+		"providerCount", len(cfg.LoadedProviders))
+
+	// Ensure the output and media directories exist before building engine components.
+	// This is a defensive measure in case PromptKit's buildMediaStorage uses a different
+	// code path that doesn't respect our config settings.
+	outputDir := cfg.Defaults.Output.Dir
+	if outputDir == "" {
+		// This should never happen since BuildConfigFromProviders sets it,
+		// but if it does, use the expected path anyway
+		outputDir = devConsoleOutputDir
+		cfg.Defaults.Output.Dir = outputDir
+		cfg.Defaults.OutDir = outputDir
+		h.log.Info("WARNING: Output.Dir was empty, setting fallback", "path", outputDir)
+	}
+	// Pre-create the configured media directory
+	if err := os.MkdirAll(outputDir+"/media", 0750); err != nil {
+		h.log.Error(err, "failed to pre-create media directory", "path", outputDir+"/media")
+	} else {
+		h.log.Info("pre-created media directory", "path", outputDir+"/media")
+	}
+
+	// Change to /tmp directory before building engine components.
+	// This ensures that if PromptKit ignores our config and uses the default "out" directory,
+	// it will create /tmp/out/media instead of /out/media (which fails on read-only root fs).
+	origDir, _ := os.Getwd()
+	h.log.Info("getOrLoadK8sRegistry: current working directory", "cwd", origDir)
+	if err := os.Chdir("/tmp"); err != nil {
+		h.log.Error(err, "failed to change to /tmp directory")
+	} else {
+		newDir, _ := os.Getwd()
+		h.log.Info("changed working directory to /tmp for engine build", "newCwd", newDir)
+		defer func() {
+			if err := os.Chdir(origDir); err != nil {
+				h.log.Error(err, "failed to restore original working directory")
+			}
+		}()
+	}
 
 	// Build registry from providers
+	h.log.Info("getOrLoadK8sRegistry: calling BuildEngineComponents",
+		"outputDir", cfg.Defaults.Output.Dir,
+		"outDir", cfg.Defaults.OutDir,
+		"configDir", cfg.Defaults.ConfigDir)
 	registry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	if err != nil {
+		h.log.Error(err, "getOrLoadK8sRegistry: BuildEngineComponents failed",
+			"outputDir", cfg.Defaults.Output.Dir,
+			"outDir", cfg.Defaults.OutDir)
 		return nil, nil, fmt.Errorf("failed to build provider registry: %w", err)
 	}
 
@@ -429,9 +479,45 @@ func (h *PromptKitHandler) buildComponents() error {
 		return fmt.Errorf("no configuration provided")
 	}
 
+	// Ensure output directory is set to a writable location
+	if cfg.Defaults.Output.Dir == "" {
+		cfg.Defaults.Output.Dir = devConsoleOutputDir
+		cfg.Defaults.OutDir = devConsoleOutputDir
+		h.log.Info("buildComponents: set output directory", "path", cfg.Defaults.Output.Dir)
+	}
+
+	// Pre-create the configured media directory
+	mediaDir := cfg.Defaults.Output.Dir + "/media"
+	if err := os.MkdirAll(mediaDir, 0750); err != nil {
+		h.log.Error(err, "buildComponents: failed to pre-create media directory", "path", mediaDir)
+	}
+
+	// Change to /tmp directory before building engine components.
+	// This ensures that if PromptKit ignores our config and uses the default "out" directory,
+	// it will create /tmp/out/media instead of /out/media (which fails on read-only root fs).
+	origDir, _ := os.Getwd()
+	h.log.Info("buildComponents: current working directory", "cwd", origDir)
+	if err := os.Chdir("/tmp"); err != nil {
+		h.log.Error(err, "buildComponents: failed to change to /tmp directory")
+	} else {
+		newDir, _ := os.Getwd()
+		h.log.Info("buildComponents: changed working directory", "newCwd", newDir)
+		defer func() {
+			if err := os.Chdir(origDir); err != nil {
+				h.log.Error(err, "buildComponents: failed to restore original working directory")
+			}
+		}()
+	}
+
 	// Build engine components using the same pattern as arena-worker
+	h.log.Info("buildComponents: calling BuildEngineComponents",
+		"outputDir", cfg.Defaults.Output.Dir,
+		"outDir", cfg.Defaults.OutDir)
 	providerRegistry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	if err != nil {
+		h.log.Error(err, "buildComponents: BuildEngineComponents failed",
+			"outputDir", cfg.Defaults.Output.Dir,
+			"outDir", cfg.Defaults.OutDir)
 		return fmt.Errorf("failed to build engine components: %w", err)
 	}
 

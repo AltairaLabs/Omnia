@@ -10,6 +10,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -27,7 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 )
 
 const (
@@ -84,6 +88,10 @@ func (r *ArenaDevSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if !controllerutil.ContainsFinalizer(session, ArenaDevSessionFinalizerName) {
 		controllerutil.AddFinalizer(session, ArenaDevSessionFinalizerName)
 		if err := r.Update(ctx, session); err != nil {
+			if apierrors.IsConflict(err) {
+				// Conflict - requeue to retry with fresh object
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -93,6 +101,9 @@ func (r *ArenaDevSessionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if session.Status.Phase == "" {
 		session.Status.Phase = omniav1alpha1.ArenaDevSessionPhasePending
 		if err := r.Status().Update(ctx, session); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
@@ -128,6 +139,9 @@ func (r *ArenaDevSessionReconciler) reconcileStart(ctx context.Context, session 
 	session.Status.Phase = omniav1alpha1.ArenaDevSessionPhaseStarting
 	session.Status.Message = "Creating dev console resources"
 	if err := r.Status().Update(ctx, session); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -191,6 +205,9 @@ func (r *ArenaDevSessionReconciler) reconcileWaitReady(ctx context.Context, sess
 			Message: "Dev console deployment is ready",
 		})
 		if err := r.Status().Update(ctx, session); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
@@ -199,6 +216,9 @@ func (r *ArenaDevSessionReconciler) reconcileWaitReady(ctx context.Context, sess
 	// Still waiting
 	session.Status.Message = "Waiting for dev console to start"
 	if err := r.Status().Update(ctx, session); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -215,6 +235,9 @@ func (r *ArenaDevSessionReconciler) reconcileCleanup(ctx context.Context, sessio
 		session.Status.Phase = omniav1alpha1.ArenaDevSessionPhaseStopping
 		session.Status.Message = "Cleaning up resources"
 		if err := r.Status().Update(ctx, session); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
@@ -266,6 +289,9 @@ func (r *ArenaDevSessionReconciler) reconcileCleanup(ctx context.Context, sessio
 	session.Status.Message = "Session stopped"
 	session.Status.Endpoint = ""
 	if err := r.Status().Update(ctx, session); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -288,6 +314,9 @@ func (r *ArenaDevSessionReconciler) reconcileDelete(ctx context.Context, session
 	// Remove finalizer
 	controllerutil.RemoveFinalizer(session, ArenaDevSessionFinalizerName)
 	if err := r.Update(ctx, session); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -334,8 +363,32 @@ func (r *ArenaDevSessionReconciler) setFailed(ctx context.Context, session *omni
 }
 
 // resourceName returns the name for child resources.
+// Uses a shortened prefix and hash to ensure the name stays under the
+// 63-character Kubernetes DNS label limit.
 func (r *ArenaDevSessionReconciler) resourceName(session *omniav1alpha1.ArenaDevSession) string {
-	return fmt.Sprintf("arena-dev-console-%s", session.Name)
+	// Prefix "adc-" = 4 chars, leaving 59 chars for name + hash
+	prefix := "adc-"
+	maxLen := 63
+
+	// If name already fits, use it directly with prefix
+	fullName := prefix + session.Name
+	if len(fullName) <= maxLen {
+		return fullName
+	}
+
+	// Otherwise, truncate and add a hash suffix for uniqueness
+	// Hash suffix: 8 chars, separator: 1 char = 9 chars reserved
+	hash := sha256.Sum256([]byte(session.Name))
+	hashSuffix := hex.EncodeToString(hash[:])[:8]
+
+	// Available for name portion: 63 - 4 (prefix) - 1 (dash) - 8 (hash) = 50 chars
+	maxNameLen := maxLen - len(prefix) - 1 - 8
+	truncatedName := session.Name
+	if len(truncatedName) > maxNameLen {
+		truncatedName = truncatedName[:maxNameLen]
+	}
+
+	return fmt.Sprintf("%s%s-%s", prefix, truncatedName, hashSuffix)
 }
 
 // reconcileServiceAccount creates or updates the ServiceAccount.
@@ -447,6 +500,7 @@ func (r *ArenaDevSessionReconciler) reconcileRoleBinding(ctx context.Context, se
 
 // reconcileDeployment creates or updates the Deployment.
 func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, session *omniav1alpha1.ArenaDevSession) error {
+	log := logf.FromContext(ctx)
 	resourceName := r.resourceName(session)
 	image := r.DevConsoleImage
 	if session.Spec.Image != "" {
@@ -455,6 +509,26 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 	if image == "" {
 		image = defaultDevConsoleImage
 	}
+
+	// List all providers in the namespace to mount their credentials as env vars
+	providerEnvVars, err := r.buildProviderEnvVars(ctx, session.Namespace)
+	if err != nil {
+		log.Error(err, "failed to build provider env vars, continuing without provider credentials")
+		providerEnvVars = []corev1.EnvVar{}
+	}
+
+	// Build the complete env var list
+	envVars := []corev1.EnvVar{
+		{
+			Name: "POD_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
+		},
+	}
+	envVars = append(envVars, providerEnvVars...)
 
 	replicas := int32(1)
 	deployment := &appsv1.Deployment{
@@ -489,16 +563,7 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 								{Name: "http", ContainerPort: 8080, Protocol: corev1.ProtocolTCP},
 								{Name: "health", ContainerPort: 8081, Protocol: corev1.ProtocolTCP},
 							},
-							Env: []corev1.EnvVar{
-								{
-									Name: "POD_NAMESPACE",
-									ValueFrom: &corev1.EnvVarSource{
-										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "metadata.namespace",
-										},
-									},
-								},
-							},
+							Env: envVars,
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -624,6 +689,24 @@ func (r *ArenaDevSessionReconciler) getResources(session *omniav1alpha1.ArenaDev
 	}
 
 	return resources
+}
+
+// buildProviderEnvVars lists all Provider CRDs in the namespace and builds
+// environment variables for their credentials using the shared providers package.
+func (r *ArenaDevSessionReconciler) buildProviderEnvVars(ctx context.Context, namespace string) ([]corev1.EnvVar, error) {
+	// List all Provider CRDs in the namespace
+	providerList := &corev1alpha1.ProviderList{}
+	if err := r.List(ctx, providerList, client.InNamespace(namespace)); err != nil {
+		return nil, fmt.Errorf("failed to list providers: %w", err)
+	}
+
+	// Convert to pointer slice for the shared function
+	providerPtrs := make([]*corev1alpha1.Provider, len(providerList.Items))
+	for i := range providerList.Items {
+		providerPtrs[i] = &providerList.Items[i]
+	}
+
+	return providers.BuildEnvVarsFromProviders(providerPtrs), nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -24,7 +24,15 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/go-logr/logr"
+)
+
+const (
+	// devConsoleOutputDir is the output directory for the dev console.
+	devConsoleOutputDir = "/tmp/arena-dev-console-output"
+	// devConsoleConfigDir is the config directory for the dev console.
+	devConsoleConfigDir = "/tmp/arena-dev-console"
 )
 
 // K8sProviderLoader loads Provider CRDs from Kubernetes and converts them to PromptKit config.
@@ -121,12 +129,7 @@ func (l *K8sProviderLoader) LoadProvidersForNamespace(
 		}
 
 		// Convert to PromptKit config
-		pkProvider, err := l.convertProvider(ctx, p)
-		if err != nil {
-			l.log.Error(err, "failed to convert provider", "name", p.Name)
-			continue
-		}
-
+		pkProvider := l.convertProvider(p)
 		providers[p.Name] = pkProvider
 		l.log.V(1).Info("loaded provider", "name", p.Name, "type", p.Spec.Type)
 	}
@@ -135,7 +138,9 @@ func (l *K8sProviderLoader) LoadProvidersForNamespace(
 }
 
 // convertProvider converts a Provider CRD to PromptKit config.Provider.
-func (l *K8sProviderLoader) convertProvider(ctx context.Context, p *corev1alpha1.Provider) (*config.Provider, error) {
+// Credentials are expected to be mounted as environment variables by the
+// ArenaDevSession controller (using the same logic as ArenaJob controller).
+func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Provider {
 	provider := &config.Provider{
 		ID:      p.Name,
 		Type:    string(p.Spec.Type),
@@ -155,58 +160,42 @@ func (l *K8sProviderLoader) convertProvider(ctx context.Context, p *corev1alpha1
 		}
 	}
 
-	// Resolve credential from secret
-	if p.Spec.SecretRef != nil {
-		apiKey, err := l.resolveSecret(ctx, p.Namespace, p.Spec.SecretRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve credential: %w", err)
+	// Get the expected env var name for this provider type's credentials
+	// The ArenaDevSession controller mounts secrets as env vars using the same
+	// logic as the ArenaJob controller (via providers.BuildEnvVarsFromProviders)
+	envVarNames := providers.GetAPIKeyEnvVars(string(p.Spec.Type))
+	if len(envVarNames) > 0 {
+		// Use the primary env var for this provider type
+		envVarName := envVarNames[0]
+		// Check if the env var is set (controller should have mounted it)
+		if apiKey := os.Getenv(envVarName); apiKey != "" {
+			provider.Credential = &config.CredentialConfig{
+				CredentialEnv: envVarName,
+			}
+			l.log.V(1).Info("using credential from env var", "provider", p.Name, "envVar", envVarName)
+		} else {
+			l.log.V(1).Info("credential env var not set", "provider", p.Name, "envVar", envVarName)
 		}
-		// Create a unique env var name and set it in the process environment
-		// This is a workaround since PromptKit expects credentials in env vars
-		envVarName := fmt.Sprintf("PROVIDER_%s_API_KEY", p.Name)
-		if err := os.Setenv(envVarName, apiKey); err != nil {
-			return nil, fmt.Errorf("failed to set env var for credential: %w", err)
-		}
-		provider.Credential = &config.CredentialConfig{
-			CredentialEnv: envVarName,
-		}
 	}
 
-	return provider, nil
-}
-
-// resolveSecret reads the API key from a Kubernetes secret.
-func (l *K8sProviderLoader) resolveSecret(
-	ctx context.Context,
-	namespace string,
-	secretRef *corev1alpha1.SecretKeyRef,
-) (string, error) {
-	secret := &corev1.Secret{}
-	err := l.client.Get(ctx, client.ObjectKey{
-		Namespace: namespace,
-		Name:      secretRef.Name,
-	}, secret)
-	if err != nil {
-		return "", fmt.Errorf("failed to get secret %s: %w", secretRef.Name, err)
-	}
-
-	// Use the specified key, or fall back to "api-key"
-	key := "api-key"
-	if secretRef.Key != nil && *secretRef.Key != "" {
-		key = *secretRef.Key
-	}
-
-	value, ok := secret.Data[key]
-	if !ok {
-		return "", fmt.Errorf("key %q not found in secret %s", key, secretRef.Name)
-	}
-
-	return string(value), nil
+	return provider
 }
 
 // BuildConfigFromProviders creates a PromptKit config.Config with the given providers.
+// Sets the output directory to a writable location since the container's working
+// directory may be read-only.
 func BuildConfigFromProviders(providers map[string]*config.Provider) *config.Config {
 	return &config.Config{
 		LoadedProviders: providers,
+		// Set ConfigDir to a writable location for any file operations
+		ConfigDir: devConsoleConfigDir,
+		Defaults: config.Defaults{
+			// Set both Output.Dir and the deprecated OutDir for compatibility
+			Output: config.OutputConfig{
+				Dir: devConsoleOutputDir,
+			},
+			OutDir:    devConsoleOutputDir,
+			ConfigDir: devConsoleConfigDir,
+		},
 	}
 }
