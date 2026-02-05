@@ -467,3 +467,150 @@ func TestValidateAndPublish(t *testing.T) {
 	// Should not panic
 	s.validateAndPublish(context.Background(), c, doc)
 }
+
+// TestHandleMessageCompletion tests handleMessage routing for completion.
+func TestHandleMessageCompletion(t *testing.T) {
+	cfg := Config{
+		Addr:            ":8080",
+		HealthAddr:      ":8081",
+		DashboardAPIURL: "http://localhost:3000",
+	}
+
+	s, err := New(cfg, logr.Discard())
+	require.NoError(t, err)
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	s.documents.Open("file:///test.yaml", "yaml", 1, "kind: Tool")
+
+	params := CompletionParams{
+		TextDocument: TextDocumentIdentifier{URI: "file:///test.yaml"},
+		Position:     Position{Line: 0, Character: 5},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "textDocument/completion",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic and routes to completion handler
+	s.handleMessage(context.Background(), c, msg)
+}
+
+// TestHandleMessageHover tests handleMessage routing for hover.
+func TestHandleMessageHover(t *testing.T) {
+	cfg := Config{
+		Addr:            ":8080",
+		HealthAddr:      ":8081",
+		DashboardAPIURL: "http://localhost:3000",
+	}
+
+	s, err := New(cfg, logr.Discard())
+	require.NoError(t, err)
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	s.documents.Open("file:///test.yaml", "yaml", 1, "kind: Tool")
+
+	params := HoverParams{
+		TextDocument: TextDocumentIdentifier{URI: "file:///test.yaml"},
+		Position:     Position{Line: 0, Character: 2},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "textDocument/hover",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic and routes to hover handler
+	s.handleMessage(context.Background(), c, msg)
+}
+
+// TestHandleMessageDefinition tests handleMessage routing for definition.
+func TestHandleMessageDefinition(t *testing.T) {
+	cfg := Config{
+		Addr:            ":8080",
+		HealthAddr:      ":8081",
+		DashboardAPIURL: "http://localhost:3000",
+	}
+
+	s, err := New(cfg, logr.Discard())
+	require.NoError(t, err)
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	s.documents.Open("file:///test.yaml", "yaml", 1, "tool: my-tool")
+
+	params := DefinitionParams{
+		TextDocument: TextDocumentIdentifier{URI: "file:///test.yaml"},
+		Position:     Position{Line: 0, Character: 8},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "textDocument/definition",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic and routes to definition handler
+	s.handleMessage(context.Background(), c, msg)
+}
+
+// TestHandleMessageSemanticTokens tests handleMessage routing for semantic tokens.
+func TestHandleMessageSemanticTokens(t *testing.T) {
+	cfg := Config{
+		Addr:            ":8080",
+		HealthAddr:      ":8081",
+		DashboardAPIURL: "http://localhost:3000",
+	}
+
+	s, err := New(cfg, logr.Discard())
+	require.NoError(t, err)
+
+	c := &Connection{
+		workspace:  "test",
+		projectID:  "proj",
+		closed:     true,
+		pendingReq: make(map[int]chan *Response),
+	}
+
+	s.documents.Open("file:///test.yaml", "yaml", 1, "Hello {{name}}")
+
+	params := SemanticTokensParams{
+		TextDocument: TextDocumentIdentifier{URI: "file:///test.yaml"},
+	}
+	paramsBytes, _ := json.Marshal(params)
+
+	msg := &Message{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "textDocument/semanticTokens/full",
+		Params:  paramsBytes,
+	}
+
+	// Should not panic and routes to semantic tokens handler
+	s.handleMessage(context.Background(), c, msg)
+}
