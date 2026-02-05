@@ -190,11 +190,20 @@ func RenderTemplate(
 }
 
 // readProjectFiles walks the project directory and reads all files into PreviewFile structs.
-// The caller must validate that projectPath is within an allowed directory before calling this function.
+// Security: This function validates that projectPath is within /tmp before proceeding.
 func readProjectFiles(projectPath string) ([]PreviewFile, error) {
+	// Validate that projectPath is within an allowed temporary directory
+	// This prevents path traversal attacks even if caller doesn't validate
+	absPath, err := filepath.Abs(projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve project path: %w", err)
+	}
+	if !strings.HasPrefix(absPath, "/tmp") && !strings.HasPrefix(absPath, "/var/folders") {
+		return nil, fmt.Errorf("%w: readProjectFiles only allows paths within /tmp", ErrPathOutsideBase)
+	}
+
 	var files []PreviewFile
-	// NOSONAR(S2083): projectPath is validated by caller via validatePathWithinBase
-	err := filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error { //nolint:gosec // path validated above
 		if err != nil {
 			return err
 		}
@@ -202,12 +211,12 @@ func readProjectFiles(projectPath string) ([]PreviewFile, error) {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(projectPath, path)
+		relPath, err := filepath.Rel(absPath, path)
 		if err != nil {
 			return err
 		}
 
-		content, err := os.ReadFile(path) // NOSONAR - path is within validated tempDir
+		content, err := os.ReadFile(path) //nolint:gosec // path is within validated temp directory
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", relPath, err)
 		}

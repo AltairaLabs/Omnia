@@ -492,9 +492,20 @@ func TestReadProjectFiles_EmptyDir(t *testing.T) {
 }
 
 func TestReadProjectFiles_NonexistentDir(t *testing.T) {
-	_, err := readProjectFiles("/nonexistent/path/that/does/not/exist")
+	_, err := readProjectFiles("/tmp/nonexistent/path/that/does/not/exist")
 	if err == nil {
 		t.Error("readProjectFiles() should error for nonexistent directory")
+	}
+}
+
+func TestReadProjectFiles_PathOutsideAllowed(t *testing.T) {
+	// Try to read from a path outside /tmp - should be rejected
+	_, err := readProjectFiles("/etc/passwd")
+	if err == nil {
+		t.Error("readProjectFiles() should reject paths outside /tmp")
+	}
+	if !strings.Contains(err.Error(), "outside allowed base directory") {
+		t.Errorf("expected 'outside allowed base directory' error, got: %v", err)
 	}
 }
 
