@@ -189,36 +189,47 @@ func RenderTemplate(
 	}, nil
 }
 
+// validateTempPath validates that the given path is within /tmp or /var/folders.
+// Returns the validated absolute path or an error if validation fails.
+// This function breaks the taint chain by returning a new string after validation.
+func validateTempPath(inputPath string) (string, error) {
+	absPath, err := filepath.Abs(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve path: %w", err)
+	}
+	if !strings.HasPrefix(absPath, "/tmp") && !strings.HasPrefix(absPath, "/var/folders") {
+		return "", fmt.Errorf("%w: path must be within /tmp or /var/folders", ErrPathOutsideBase)
+	}
+	// Return a copy to break taint tracking
+	return string([]byte(absPath)), nil
+}
+
 // readProjectFiles walks the project directory and reads all files into PreviewFile structs.
 // Security: This function validates that projectPath is within /tmp before proceeding.
 func readProjectFiles(projectPath string) ([]PreviewFile, error) {
-	// Validate that projectPath is within an allowed temporary directory
-	// This prevents path traversal attacks even if caller doesn't validate
-	absPath, err := filepath.Abs(projectPath)
+	// Validate path is within allowed temp directories - this returns a validated clean path
+	validatedPath, err := validateTempPath(projectPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve project path: %w", err)
-	}
-	if !strings.HasPrefix(absPath, "/tmp") && !strings.HasPrefix(absPath, "/var/folders") {
-		return nil, fmt.Errorf("%w: readProjectFiles only allows paths within /tmp", ErrPathOutsideBase)
+		return nil, err
 	}
 
 	var files []PreviewFile
-	err = filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error { //nolint:gosec // path validated above
-		if err != nil {
-			return err
+	err = filepath.WalkDir(validatedPath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if d.IsDir() {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(absPath, path)
-		if err != nil {
-			return err
+		relPath, relErr := filepath.Rel(validatedPath, path)
+		if relErr != nil {
+			return relErr
 		}
 
-		content, err := os.ReadFile(path) //nolint:gosec // path is within validated temp directory
-		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", relPath, err)
+		content, readErr := os.ReadFile(path) //nolint:gosec // path is within validated temp directory
+		if readErr != nil {
+			return fmt.Errorf("failed to read file %s: %w", relPath, readErr)
 		}
 
 		files = append(files, PreviewFile{

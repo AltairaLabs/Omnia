@@ -509,6 +509,34 @@ func TestReadProjectFiles_PathOutsideAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateTempPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid tmp path", "/tmp/arena-123", false},
+		{"valid tmp root", "/tmp", false},
+		{"valid var/folders", "/var/folders/xy/random/T/arena", false},
+		{"root path", "/", true},
+		{"etc path", "/etc/passwd", true},
+		{"home path", "/home/user", true},
+		{"workspace-content", "/workspace-content/project", true}, // validateTempPath only allows /tmp and /var/folders
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := validateTempPath(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateTempPath(%q) error = %v, wantErr = %v", tt.input, err, tt.wantErr)
+			}
+			if err == nil && result == "" {
+				t.Errorf("validateTempPath(%q) returned empty result", tt.input)
+			}
+		})
+	}
+}
+
 func TestRenderTemplate_OutputPathRestriction(t *testing.T) {
 	// Test that output paths outside allowed directories are rejected
 	tests := []struct {
