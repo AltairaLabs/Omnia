@@ -37,9 +37,9 @@ import {
 import { cn } from "@/lib/utils";
 
 interface DeployButtonProps {
-  projectId: string | undefined;
-  disabled?: boolean;
-  className?: string;
+  readonly projectId: string | undefined;
+  readonly disabled?: boolean;
+  readonly className?: string;
 }
 
 /**
@@ -149,8 +149,8 @@ export function DeployButton({ projectId, disabled, className }: DeployButtonPro
 // =============================================================================
 
 interface DeployStatusIndicatorProps {
-  status: DeploymentStatus | null;
-  loading: boolean;
+  readonly status: DeploymentStatus | null;
+  readonly loading: boolean;
 }
 
 function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) {
@@ -193,11 +193,32 @@ function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) 
 // =============================================================================
 
 interface AdvancedDeployDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  status: DeploymentStatus | null;
-  deploying: boolean;
-  onDeploy: (options: DeployRequest) => Promise<void>;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly status: DeploymentStatus | null;
+  readonly deploying: boolean;
+  readonly onDeploy: (options: DeployRequest) => Promise<void>;
+}
+
+function DeployButtonContent({
+  deploying,
+  deployed,
+}: {
+  readonly deploying: boolean;
+  readonly deployed?: boolean;
+}) {
+  if (deploying) {
+    return (
+      <>
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        Deploying...
+      </>
+    );
+  }
+  if (deployed) {
+    return <>Redeploy</>;
+  }
+  return <>Deploy</>;
 }
 
 function AdvancedDeployDialog({
@@ -287,16 +308,7 @@ function AdvancedDeployDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={deploying}>
-              {deploying ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deploying...
-                </>
-              ) : status?.deployed ? (
-                "Redeploy"
-              ) : (
-                "Deploy"
-              )}
+              <DeployButtonContent deploying={deploying} deployed={status?.deployed} />
             </Button>
           </DialogFooter>
         </form>

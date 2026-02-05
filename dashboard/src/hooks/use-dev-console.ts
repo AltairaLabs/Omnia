@@ -282,8 +282,8 @@ export function useDevConsole({
 
     // Build WebSocket URL with workspace/namespace context
     // If service is provided (from ArenaDevSession), use it for dynamic routing
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.hostname;
+    const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = globalThis.location.hostname;
     const params = new URLSearchParams();
     params.set("agent", "dev-console");
     if (workspace) params.set("workspace", workspace);

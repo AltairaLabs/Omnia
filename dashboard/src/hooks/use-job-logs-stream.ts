@@ -235,7 +235,7 @@ export function formatLogTimestamp(timestamp: string): string {
   try {
     const date = new Date(timestamp);
     // Check if the date is valid
-    if (isNaN(date.getTime())) {
+    if (Number.isNaN(date.getTime())) {
       return timestamp;
     }
     return date.toLocaleTimeString("en-US", {

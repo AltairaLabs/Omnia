@@ -19,7 +19,7 @@ import {
 import type { EvaluationResult } from "@/types/arena";
 
 interface JobResultsTabProps {
-  className?: string;
+  readonly className?: string;
 }
 
 interface JobResultsData {
@@ -202,17 +202,18 @@ export function JobResultsTab({ className }: JobResultsTabProps) {
 // =============================================================================
 
 interface ResultsSummaryProps {
-  summary: NonNullable<JobResultsData["summary"]>;
+  readonly summary: NonNullable<JobResultsData["summary"]>;
+}
+
+function getPassRateColor(passRate: number): string {
+  if (passRate >= 0.9) return "text-green-500";
+  if (passRate >= 0.7) return "text-amber-500";
+  return "text-destructive";
 }
 
 function ResultsSummary({ summary }: ResultsSummaryProps) {
   const passRate = summary.passRate ?? 0;
-  const passRateColor =
-    passRate >= 0.9
-      ? "text-green-500"
-      : passRate >= 0.7
-        ? "text-amber-500"
-        : "text-destructive";
+  const passRateColor = getPassRateColor(passRate);
 
   return (
     <div className="flex items-center gap-6 text-sm">
@@ -255,7 +256,7 @@ function ResultsSummary({ summary }: ResultsSummaryProps) {
 // =============================================================================
 
 interface ResultRowProps {
-  result: EvaluationResult;
+  readonly result: EvaluationResult;
 }
 
 function ResultRow({ result }: ResultRowProps) {
@@ -312,7 +313,7 @@ function ResultRow({ result }: ResultRowProps) {
 // =============================================================================
 
 interface AssertionBadgesProps {
-  assertions: NonNullable<EvaluationResult["assertions"]>;
+  readonly assertions: NonNullable<EvaluationResult["assertions"]>;
 }
 
 function AssertionBadges({ assertions }: AssertionBadgesProps) {

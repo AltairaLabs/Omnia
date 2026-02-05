@@ -52,7 +52,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
 
   // On server-side, return defaults without fetching
   // (the client will fetch the real config during hydration)
-  if (typeof window === "undefined") {
+  if (typeof globalThis.window === "undefined") {
     return defaultConfig;
   }
 

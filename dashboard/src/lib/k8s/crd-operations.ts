@@ -592,7 +592,7 @@ function extractStatusCode(error: unknown): number | null {
   if (typeof err.message === "string" && /HTTP-Code:\s*(\d+)/.test(err.message)) {
     const match = /HTTP-Code:\s*(\d+)/.exec(err.message);
     if (match) {
-      return parseInt(match[1], 10);
+      return Number.parseInt(match[1], 10);
     }
   }
 

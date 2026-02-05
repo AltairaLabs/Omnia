@@ -105,7 +105,7 @@ async function readAllFiles(
  * Encode file path for ConfigMap key (replace / with __)
  */
 function encodeFilePathForConfigMap(filePath: string): string {
-  return filePath.replace(/\//g, "__");
+  return filePath.replaceAll("/", "__");
 }
 
 /**

@@ -19,9 +19,9 @@ export interface Problem {
 }
 
 interface ProblemsTabProps {
-  problems: Problem[];
-  onProblemClick?: (problem: Problem) => void;
-  className?: string;
+  readonly problems: Problem[];
+  readonly onProblemClick?: (problem: Problem) => void;
+  readonly className?: string;
 }
 
 // =============================================================================
@@ -104,8 +104,8 @@ export function ProblemsTab({
 // =============================================================================
 
 interface ProblemRowProps {
-  problem: Problem;
-  onClick?: () => void;
+  readonly problem: Problem;
+  readonly onClick?: () => void;
 }
 
 function ProblemRow({ problem, onClick }: ProblemRowProps) {
@@ -153,8 +153,8 @@ function ProblemRow({ problem, onClick }: ProblemRowProps) {
 // =============================================================================
 
 interface ProblemsSummaryProps {
-  problems: Problem[];
-  className?: string;
+  readonly problems: Problem[];
+  readonly className?: string;
 }
 
 export function ProblemsSummary({ problems, className }: ProblemsSummaryProps) {

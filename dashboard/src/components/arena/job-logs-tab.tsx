@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 interface JobLogsTabProps {
-  className?: string;
+  readonly className?: string;
 }
 
 /**
@@ -160,7 +160,7 @@ export function JobLogsTab({ className }: JobLogsTabProps) {
 // =============================================================================
 
 interface LogLineProps {
-  log: LogEntry;
+  readonly log: LogEntry;
 }
 
 function LogLine({ log }: LogLineProps) {

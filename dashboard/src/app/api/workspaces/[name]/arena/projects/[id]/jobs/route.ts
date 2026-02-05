@@ -116,8 +116,8 @@ export const GET = withWorkspaceAccess<{ name: string; id: string }>(
 
       // Apply limit
       if (limit) {
-        const limitNum = parseInt(limit, 10);
-        if (!isNaN(limitNum) && limitNum > 0) {
+        const limitNum = Number.parseInt(limit, 10);
+        if (!Number.isNaN(limitNum) && limitNum > 0) {
           jobs = jobs.slice(0, limitNum);
         }
       }
