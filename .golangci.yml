@@ -31,7 +31,6 @@ linters:
       # Match SonarCloud S1192 - flag strings duplicated 4+ times
       min-len: 3
       min-occurrences: 4
-      ignore-tests: true
     gocyclo:
       # Cyclomatic complexity threshold - allow 20 for gradual improvement
       # TODO: Lower to 15 once existing issues are fixed
