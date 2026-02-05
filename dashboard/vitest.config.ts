@@ -110,7 +110,9 @@ export default defineConfig({
         // Type definitions only (no executable code)
         "src/lib/data/types.ts",
         "src/lib/auth/types.ts",
-        "src/types/**",
+        "src/types/generated/**", // Generated CRD types
+        "src/types/workspace.ts", // Workspace types (pure type definitions)
+        "src/types/api.ts", // API types (pure type definitions)
 
         // Mock/demo data (not production code)
         "src/lib/mock-data.ts",
