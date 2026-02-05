@@ -308,8 +308,8 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		r.Recorder.Event(source, corev1.EventTypeNormal, EventReasonTemplateFetchStarted, "Started fetching templates")
 	}
 
-	// Start async fetch
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	// Start async fetch - use Background context intentionally since fetch outlives the request
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout) // NOSONAR - async operation must outlive request ctx
 	job := &templateFetchJob{
 		startTime: time.Now(),
 		cancel:    cancel,

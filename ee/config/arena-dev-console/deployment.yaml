@@ -21,7 +21,8 @@ spec:
       serviceAccountName: arena-dev-console
       containers:
         - name: arena-dev-console
-          image: arena-dev-console:latest
+          # Image tag is overridden by Kustomize or Tilt in development
+          image: arena-dev-console:dev
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -56,9 +57,11 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
+              ephemeral-storage: 100Mi
             limits:
               cpu: 500m
               memory: 512Mi
+              ephemeral-storage: 500Mi
           volumeMounts:
             - name: workspace-content
               mountPath: /workspace-content

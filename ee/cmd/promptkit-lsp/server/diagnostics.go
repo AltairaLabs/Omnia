@@ -10,7 +10,7 @@ package server
 
 import (
 	"context"
-	_ "embed"
+	_ "embed" // Required for //go:embed directives to embed JSON schema files
 	"encoding/json"
 	"fmt"
 	"io"

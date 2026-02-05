@@ -106,11 +106,11 @@ function formatSchemaProperty(propName: string, propValue: unknown): string[] {
 
   const prop = propValue as Record<string, unknown>;
 
-  if (prop.type) {
-    lines.push(`        type: ${String(prop.type)}`);
+  if (prop.type && typeof prop.type === "string") {
+    lines.push(`        type: ${prop.type}`);
   }
-  if (prop.description) {
-    lines.push(`        description: ${quoteYamlString(String(prop.description))}`);
+  if (prop.description && typeof prop.description === "string") {
+    lines.push(`        description: ${quoteYamlString(prop.description)}`);
   }
   if (prop.enum && Array.isArray(prop.enum)) {
     const enumValues = prop.enum.map((e) => quoteYamlString(String(e))).join(", ");
@@ -135,7 +135,8 @@ function formatInputSchema(inputSchema: unknown): string[] {
   }
 
   const schema = inputSchema as Record<string, unknown>;
-  lines.push(`    type: ${String(schema.type || "object")}`);
+  const schemaType = typeof schema.type === "string" ? schema.type : "object";
+  lines.push(`    type: ${schemaType}`);
 
   if (schema.properties && typeof schema.properties === "object") {
     lines.push("    properties:");
@@ -207,6 +208,10 @@ export function generateToolFilename(tool: DiscoveredTool, registryName: string)
 /**
  * Quote a string for YAML if needed.
  */
+// Escape sequences for YAML string quoting
+const ESCAPED_QUOTE = String.raw`\"`;
+const ESCAPED_NEWLINE = String.raw`\n`;
+
 function quoteYamlString(str: string): string {
   // If the string contains special characters, quote it
   if (
@@ -218,8 +223,8 @@ function quoteYamlString(str: string): string {
     str.startsWith(" ") ||
     str.endsWith(" ")
   ) {
-    // Use double quotes and escape internal double quotes
-    const escaped = str.replaceAll('"', '\\"').replaceAll("\n", "\\n");
+    // Use double quotes and escape internal double quotes and newlines
+    const escaped = str.replaceAll('"', ESCAPED_QUOTE).replaceAll("\n", ESCAPED_NEWLINE);
     return `"${escaped}"`;
   }
   return str;

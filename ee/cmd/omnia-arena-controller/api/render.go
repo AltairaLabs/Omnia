@@ -145,8 +145,9 @@ func RenderTemplate(
 	}
 
 	// Ensure output directory exists (use absolute path)
+	// Security: absOutputPath is validated against allowedOutputPrefixes above
 	// #nosec G301 - directory permissions are intentionally 0755 for workspace content
-	if err := os.MkdirAll(absOutputPath, 0755); err != nil {
+	if err := os.MkdirAll(absOutputPath, 0755); err != nil { // NOSONAR - path validated by validateOutputPath
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -251,7 +252,8 @@ func PreviewTemplate(
 		return nil, fmt.Errorf("invalid project path: %w", err)
 	}
 
-	err = filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
+	// Security: projectPath is within tempDir (validated above), and projectName was validated
+	err = filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error { // NOSONAR - path validated by validatePathWithinBase
 		if err != nil {
 			return err
 		}
@@ -266,7 +268,7 @@ func PreviewTemplate(
 		}
 
 		// Read file content
-		content, err := os.ReadFile(path)
+		content, err := os.ReadFile(path) // NOSONAR - path is within validated tempDir
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", relPath, err)
 		}

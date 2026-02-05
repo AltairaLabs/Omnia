@@ -18,6 +18,12 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// HTTP header and content type constants.
+const (
+	headerContentType = "Content-Type"
+	contentTypeJSON   = "application/json"
+)
+
 // Server provides HTTP API endpoints for arena operations.
 type Server struct {
 	addr   string
@@ -117,7 +123,7 @@ func (s *Server) handleRenderTemplate(w http.ResponseWriter, r *http.Request) {
 		s.log.Error(err, "failed to render template",
 			"templatePath", req.TemplatePath,
 			"outputPath", req.OutputPath)
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(headerContentType, contentTypeJSON)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(RenderTemplateResponse{
 			Success: false,
@@ -126,7 +132,7 @@ func (s *Server) handleRenderTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		s.log.Error(err, "failed to encode response")
 	}
@@ -184,7 +190,7 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	result, err := PreviewTemplate(req.TemplatePath, req.ProjectName, req.Variables)
 	if err != nil {
 		s.log.Error(err, "failed to preview template", "templatePath", req.TemplatePath)
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(headerContentType, contentTypeJSON)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(PreviewTemplateResponse{
 			Errors: []string{err.Error()},
@@ -192,7 +198,7 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		s.log.Error(err, "failed to encode response")
 	}
