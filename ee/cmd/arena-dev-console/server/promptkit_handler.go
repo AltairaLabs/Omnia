@@ -24,6 +24,9 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// mediaSubdir is the subdirectory name for media files within the output directory.
+const mediaSubdir = "/media"
+
 // PromptKitHandler implements facade.MessageHandler using a local PromptKit engine.
 // It supports dynamic reload of the configuration without dropping the WebSocket connection.
 type PromptKitHandler struct {
@@ -405,10 +408,11 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 		h.log.Info("WARNING: Output.Dir was empty, setting fallback", "path", outputDir)
 	}
 	// Pre-create the configured media directory
-	if err := os.MkdirAll(outputDir+"/media", 0750); err != nil {
-		h.log.Error(err, "failed to pre-create media directory", "path", outputDir+"/media")
+	mediaPath := outputDir + mediaSubdir
+	if err := os.MkdirAll(mediaPath, 0750); err != nil {
+		h.log.Error(err, "failed to pre-create media directory", "path", mediaPath)
 	} else {
-		h.log.Info("pre-created media directory", "path", outputDir+"/media")
+		h.log.Info("pre-created media directory", "path", mediaPath)
 	}
 
 	// Change to /tmp directory before building engine components.
@@ -487,7 +491,7 @@ func (h *PromptKitHandler) buildComponents() error {
 	}
 
 	// Pre-create the configured media directory
-	mediaDir := cfg.Defaults.Output.Dir + "/media"
+	mediaDir := cfg.Defaults.Output.Dir + mediaSubdir
 	if err := os.MkdirAll(mediaDir, 0750); err != nil {
 		h.log.Error(err, "buildComponents: failed to pre-create media directory", "path", mediaDir)
 	}

@@ -189,6 +189,36 @@ func RenderTemplate(
 	}, nil
 }
 
+// readProjectFiles walks the project directory and reads all files into PreviewFile structs.
+func readProjectFiles(projectPath string) ([]PreviewFile, error) {
+	var files []PreviewFile
+	err := filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(projectPath, path)
+		if err != nil {
+			return err
+		}
+
+		content, err := os.ReadFile(path) // NOSONAR - path is within validated tempDir
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", relPath, err)
+		}
+
+		files = append(files, PreviewFile{
+			Path:    relPath,
+			Content: string(content),
+		})
+		return nil
+	})
+	return files, err
+}
+
 // PreviewTemplate renders a template to a temp directory using PromptKit's Generator,
 // reads the rendered files, and returns their contents without persisting them.
 func PreviewTemplate(
@@ -243,8 +273,6 @@ func PreviewTemplate(
 	}
 
 	// Read rendered files from temp directory
-	// Construct and validate project path to ensure it stays within tempDir
-	var files []PreviewFile
 	projectPath := filepath.Join(tempDir, projectName)
 
 	// Validate that projectPath is within tempDir (defense in depth)
@@ -252,34 +280,8 @@ func PreviewTemplate(
 		return nil, fmt.Errorf("invalid project path: %w", err)
 	}
 
-	// Security: projectPath is within tempDir (validated above), and projectName was validated
-	err = filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error { // NOSONAR - path validated by validatePathWithinBase
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(projectPath, path)
-		if err != nil {
-			return err
-		}
-
-		// Read file content
-		content, err := os.ReadFile(path) // NOSONAR - path is within validated tempDir
-		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", relPath, err)
-		}
-
-		files = append(files, PreviewFile{
-			Path:    relPath,
-			Content: string(content),
-		})
-		return nil
-	})
-
+	// Read all files from the generated project
+	files, err := readProjectFiles(projectPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rendered files: %w", err)
 	}

@@ -308,8 +308,10 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		r.Recorder.Event(source, corev1.EventTypeNormal, EventReasonTemplateFetchStarted, "Started fetching templates")
 	}
 
-	// Start async fetch - use Background context intentionally since fetch outlives the request
-	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout) // NOSONAR - async operation must outlive request ctx
+	// Start async fetch - use Background context intentionally since fetch outlives the request.
+	// The request context (ctx) is unsuitable because this goroutine must continue running
+	// after the reconciliation loop returns to process the async template fetch.
+	fetchCtx, cancel := context.WithTimeout(context.Background(), timeout) // NOSONAR(S8239)
 	job := &templateFetchJob{
 		startTime: time.Now(),
 		cancel:    cancel,

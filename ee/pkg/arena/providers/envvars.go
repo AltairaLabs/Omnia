@@ -18,6 +18,41 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// buildEnvVarFromRef creates a corev1.EnvVar from a SecretRef and optional provider secret config.
+func buildEnvVarFromRef(ref SecretRef, providerSecretRef *corev1alpha1.SecretKeyRef) corev1.EnvVar {
+	if providerSecretRef != nil {
+		secretKey := ref.Key
+		if providerSecretRef.Key != nil && *providerSecretRef.Key != "" {
+			secretKey = *providerSecretRef.Key
+		}
+		return corev1.EnvVar{
+			Name: ref.EnvVar,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: providerSecretRef.Name,
+					},
+					Key:      secretKey,
+					Optional: ptr.To(true),
+				},
+			},
+		}
+	}
+	// Fall back to default secret naming convention
+	return corev1.EnvVar{
+		Name: ref.EnvVar,
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: ref.SecretName,
+				},
+				Key:      ref.Key,
+				Optional: ptr.To(true),
+			},
+		},
+	}
+}
+
 // BuildEnvVarsFromProviders builds environment variables for Provider CRDs.
 // This extracts credentials from each provider's secretRef and maps them
 // to the appropriate environment variable names for PromptKit.
@@ -29,12 +64,8 @@ func BuildEnvVarsFromProviders(providers []*corev1alpha1.Provider) []corev1.EnvV
 	seen := make(map[string]bool)
 
 	for _, provider := range providers {
-		providerType := string(provider.Spec.Type)
-
-		// Get the expected env var names for this provider type
-		secretRefs := GetSecretRefsForProvider(providerType)
+		secretRefs := GetSecretRefsForProvider(string(provider.Spec.Type))
 		if len(secretRefs) == 0 {
-			// Provider doesn't need credentials (e.g., mock, ollama)
 			continue
 		}
 
@@ -43,43 +74,7 @@ func BuildEnvVarsFromProviders(providers []*corev1alpha1.Provider) []corev1.EnvV
 				continue
 			}
 			seen[ref.EnvVar] = true
-
-			var envVar corev1.EnvVar
-			if provider.Spec.SecretRef != nil {
-				// Use the provider's explicit secretRef
-				secretKey := ref.Key
-				if provider.Spec.SecretRef.Key != nil && *provider.Spec.SecretRef.Key != "" {
-					// Provider specifies a custom key
-					secretKey = *provider.Spec.SecretRef.Key
-				}
-				envVar = corev1.EnvVar{
-					Name: ref.EnvVar,
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: provider.Spec.SecretRef.Name,
-							},
-							Key:      secretKey,
-							Optional: ptr.To(true),
-						},
-					},
-				}
-			} else {
-				// Fall back to default secret naming convention
-				envVar = corev1.EnvVar{
-					Name: ref.EnvVar,
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: ref.SecretName,
-							},
-							Key:      ref.Key,
-							Optional: ptr.To(true),
-						},
-					},
-				}
-			}
-			envVars = append(envVars, envVar)
+			envVars = append(envVars, buildEnvVarFromRef(ref, provider.Spec.SecretRef))
 		}
 	}
 
