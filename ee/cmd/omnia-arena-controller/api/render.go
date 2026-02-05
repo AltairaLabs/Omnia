@@ -190,8 +190,10 @@ func RenderTemplate(
 }
 
 // readProjectFiles walks the project directory and reads all files into PreviewFile structs.
+// The caller must validate that projectPath is within an allowed directory before calling this function.
 func readProjectFiles(projectPath string) ([]PreviewFile, error) {
 	var files []PreviewFile
+	// NOSONAR(S2083): projectPath is validated by caller via validatePathWithinBase
 	err := filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

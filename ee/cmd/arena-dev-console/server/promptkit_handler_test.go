@@ -894,7 +894,7 @@ func TestHandleMessageProviderNotFound(t *testing.T) {
 	err = handler.HandleMessage(context.Background(), "test-session", msg, writer)
 	assert.NoError(t, err)
 	assert.Equal(t, "PROVIDER_ERROR", writer.ErrorCode)
-	assert.Contains(t, writer.ErrorMessage, "Provider not found")
+	assert.Contains(t, writer.ErrorMessage, "provider not found")
 }
 
 // TestReloadFromPathInvalid tests ReloadFromPath with an invalid path.

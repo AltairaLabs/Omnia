@@ -168,7 +168,7 @@ func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Pr
 		// Use the primary env var for this provider type
 		envVarName := envVarNames[0]
 		// Check if the env var is set (controller should have mounted it)
-		if apiKey := os.Getenv(envVarName); apiKey != "" {
+		if os.Getenv(envVarName) != "" {
 			provider.Credential = &config.CredentialConfig{
 				CredentialEnv: envVarName,
 			}

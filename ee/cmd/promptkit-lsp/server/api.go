@@ -99,6 +99,30 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// countDiagnostics counts errors and warnings in a slice of diagnostics.
+func countDiagnostics(diags []Diagnostic) (errors, warnings int) {
+	for _, diag := range diags {
+		switch diag.Severity {
+		case SeverityError:
+			errors++
+		case SeverityWarning:
+			warnings++
+		}
+	}
+	return errors, warnings
+}
+
+// collectWarnings extracts warning messages from diagnostics.
+func collectWarnings(filePath string, diags []Diagnostic) []string {
+	var warnings []string
+	for _, diag := range diags {
+		if diag.Severity == SeverityWarning {
+			warnings = append(warnings, filePath+": "+diag.Message)
+		}
+	}
+	return warnings
+}
+
 // handleCompile handles POST /api/compile.
 func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -118,8 +142,6 @@ func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-
-	// Get all files in the project
 	files, err := s.validator.getProjectFiles(ctx, req.Workspace, req.Project)
 	if err != nil {
 		s.log.Error(err, "failed to get project files")
@@ -131,14 +153,10 @@ func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 		Valid:       true,
 		Diagnostics: make(map[string][]Diagnostic),
 		Warnings:    []string{},
-		Summary: &CompileSummary{
-			TotalFiles: len(files),
-		},
+		Summary:     &CompileSummary{TotalFiles: len(files)},
 	}
 
-	// Fetch and validate each file
 	for _, filePath := range files {
-		// Fetch file content from dashboard API
 		content, err := s.fetchFileContent(ctx, req.Workspace, req.Project, filePath)
 		if err != nil {
 			s.log.Error(err, "failed to fetch file", "path", filePath)
@@ -154,32 +172,16 @@ func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		doc := &Document{
-			URI:        filePath,
-			LanguageID: "yaml",
-			Version:    1,
-			Content:    content,
-			Lines:      splitLines(content),
-		}
-
-		// Full validation including cross-references
+		doc := &Document{URI: filePath, LanguageID: "yaml", Version: 1, Content: content, Lines: splitLines(content)}
 		diags := s.validator.ValidateDocument(ctx, doc, req.Workspace, req.Project)
 		response.Diagnostics[filePath] = diags
 
-		// Count errors and warnings
-		hasError := false
-		for _, diag := range diags {
-			switch diag.Severity {
-			case SeverityError:
-				response.Summary.ErrorCount++
-				hasError = true
-			case SeverityWarning:
-				response.Summary.WarningCount++
-				response.Warnings = append(response.Warnings, filePath+": "+diag.Message)
-			}
-		}
+		errors, warnings := countDiagnostics(diags)
+		response.Summary.ErrorCount += errors
+		response.Summary.WarningCount += warnings
+		response.Warnings = append(response.Warnings, collectWarnings(filePath, diags)...)
 
-		if hasError {
+		if errors > 0 {
 			response.Valid = false
 			response.Summary.InvalidFiles++
 		} else {

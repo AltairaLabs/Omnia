@@ -84,6 +84,55 @@ func (h *PromptKitHandler) Name() string {
 	return "promptkit"
 }
 
+// handleMetadataCommand handles special commands in message metadata.
+// Returns true if a command was handled, false otherwise.
+func (h *PromptKitHandler) handleMetadataCommand(
+	ctx context.Context,
+	sessionID string,
+	msg *facade.ClientMessage,
+	session *SessionState,
+	writer facade.ResponseWriter,
+) (bool, error) {
+	if msg.Metadata == nil {
+		return false, nil
+	}
+	if _, isReload := msg.Metadata["reload"]; isReload {
+		return true, h.handleReload(ctx, msg, writer)
+	}
+	if _, isReset := msg.Metadata["reset"]; isReset {
+		h.ResetSession(sessionID)
+		return true, writer.WriteDone("Session reset")
+	}
+	if providerID, ok := msg.Metadata["provider"]; ok {
+		session.mu.Lock()
+		session.ProviderID = providerID
+		session.mu.Unlock()
+	}
+	return false, nil
+}
+
+// selectProvider determines which provider to use for the request.
+func (h *PromptKitHandler) selectProvider(
+	providerID string,
+	cfg *config.Config,
+	registry *providers.Registry,
+) (providers.Provider, string, error) {
+	if providerID == "" {
+		for id := range cfg.LoadedProviders {
+			providerID = id
+			break
+		}
+	}
+	if providerID == "" {
+		return nil, "", fmt.Errorf("no provider configured")
+	}
+	provider, ok := registry.Get(providerID)
+	if !ok {
+		return nil, "", fmt.Errorf("provider not found: %s", providerID)
+	}
+	return provider, providerID, nil
+}
+
 // HandleMessage processes a client message and streams responses via the ResponseWriter.
 func (h *PromptKitHandler) HandleMessage(
 	ctx context.Context,
@@ -91,48 +140,31 @@ func (h *PromptKitHandler) HandleMessage(
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {
-	// Extract namespace from context for K8s provider resolution
 	namespace := logctx.Namespace(ctx)
-
-	// Get registry and config (potentially namespace-specific)
 	registry, cfg, err := h.getRegistryAndConfig(ctx, namespace)
 	if err != nil {
 		h.log.Error(err, "HandleMessage: failed to get registry and config", "namespace", namespace)
 		return writer.WriteError("PROVIDER_LOAD_ERROR", err.Error())
 	}
-
 	if registry == nil {
 		return writer.WriteError("ENGINE_NOT_READY", "PromptKit engine is not initialized. No providers available.")
 	}
 
-	// Get or create session state
 	session := h.getOrCreateSession(sessionID)
 
-	// Check for special commands in metadata
-	if msg.Metadata != nil {
-		if _, isReload := msg.Metadata["reload"]; isReload {
-			return h.handleReload(ctx, msg, writer)
-		}
-		if _, isReset := msg.Metadata["reset"]; isReset {
-			h.ResetSession(sessionID)
-			return writer.WriteDone("Session reset")
-		}
-		if providerID, ok := msg.Metadata["provider"]; ok {
-			session.mu.Lock()
-			session.ProviderID = providerID
-			session.mu.Unlock()
-		}
+	// Handle special commands in metadata
+	handled, err := h.handleMetadataCommand(ctx, sessionID, msg, session, writer)
+	if handled || err != nil {
+		return err
 	}
 
 	// Build user message
 	userMsg := types.NewUserMessage(msg.Content)
-
-	// Handle multimodal content
 	if len(msg.Parts) > 0 {
 		userMsg = h.convertToPKMessage("user", msg.Parts)
 	}
 
-	// Add user message to history
+	// Get session state
 	session.mu.Lock()
 	session.Messages = append(session.Messages, userMsg)
 	messages := make([]types.Message, len(session.Messages))
@@ -140,33 +172,18 @@ func (h *PromptKitHandler) HandleMessage(
 	providerID := session.ProviderID
 	session.mu.Unlock()
 
-	// Determine which provider to use
-	if providerID == "" {
-		// Use first available provider
-		for id := range cfg.LoadedProviders {
-			providerID = id
-			break
-		}
+	// Select and validate provider
+	provider, providerID, err := h.selectProvider(providerID, cfg, registry)
+	if err != nil {
+		return writer.WriteError("PROVIDER_ERROR", err.Error())
 	}
 
-	if providerID == "" {
-		return writer.WriteError("NO_PROVIDER", "No provider configured")
-	}
-
-	// Get provider from registry
-	provider, ok := registry.Get(providerID)
-	if !ok {
-		return writer.WriteError("PROVIDER_ERROR", fmt.Sprintf("Provider not found: %s", providerID))
-	}
-
-	// Build prediction request
+	// Build prediction request with provider defaults
 	req := providers.PredictionRequest{
 		Messages:    messages,
 		Temperature: 0.7,
 		MaxTokens:   4096,
 	}
-
-	// Apply provider defaults if available
 	if p, ok := cfg.LoadedProviders[providerID]; ok {
 		req.Temperature = p.Defaults.Temperature
 		if p.Defaults.MaxTokens > 0 {
@@ -181,12 +198,44 @@ func (h *PromptKitHandler) HandleMessage(
 		return writer.WriteError("EXECUTION_ERROR", err.Error())
 	}
 
-	// Add assistant response to history
 	session.mu.Lock()
 	session.Messages = append(session.Messages, types.NewAssistantMessage(response))
 	session.mu.Unlock()
-
 	return nil
+}
+
+// executeNonStreaming executes a non-streaming prediction.
+func (h *PromptKitHandler) executeNonStreaming(
+	ctx context.Context,
+	provider providers.Provider,
+	req providers.PredictionRequest,
+	writer facade.ResponseWriter,
+) (string, error) {
+	resp, err := provider.Predict(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if err := writer.WriteDone(resp.Content); err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+// writeToolCalls writes tool call information to the response writer.
+func (h *PromptKitHandler) writeToolCalls(toolCalls []types.MessageToolCall, writer facade.ResponseWriter) {
+	for _, tc := range toolCalls {
+		args := make(map[string]interface{})
+		if len(tc.Args) > 0 {
+			_ = json.Unmarshal(tc.Args, &args)
+		}
+		if err := writer.WriteToolCall(&facade.ToolCallInfo{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Arguments: args,
+		}); err != nil {
+			h.log.Error(err, "failed to write tool call")
+		}
+	}
 }
 
 // executeStreaming runs a streaming prediction and forwards chunks to the writer.
@@ -197,18 +246,9 @@ func (h *PromptKitHandler) executeStreaming(
 	writer facade.ResponseWriter,
 ) (string, error) {
 	if !provider.SupportsStreaming() {
-		// Fall back to non-streaming
-		resp, err := provider.Predict(ctx, req)
-		if err != nil {
-			return "", err
-		}
-		if err := writer.WriteDone(resp.Content); err != nil {
-			return "", err
-		}
-		return resp.Content, nil
+		return h.executeNonStreaming(ctx, provider, req, writer)
 	}
 
-	// Stream the response
 	stream, err := provider.PredictStream(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to start stream: %w", err)
@@ -219,78 +259,64 @@ func (h *PromptKitHandler) executeStreaming(
 		if chunk.Error != nil {
 			return "", chunk.Error
 		}
-
-		// Send delta as chunk
 		if chunk.Delta != "" {
 			if err := writer.WriteChunk(chunk.Delta); err != nil {
 				h.log.Error(err, "failed to write chunk")
 			}
 		}
-
-		// Handle tool calls
 		if len(chunk.ToolCalls) > 0 {
-			for _, tc := range chunk.ToolCalls {
-				args := make(map[string]interface{})
-				if len(tc.Args) > 0 {
-					_ = json.Unmarshal(tc.Args, &args)
-				}
-				if err := writer.WriteToolCall(&facade.ToolCallInfo{
-					ID:        tc.ID,
-					Name:      tc.Name,
-					Arguments: args,
-				}); err != nil {
-					h.log.Error(err, "failed to write tool call")
-				}
-			}
+			h.writeToolCalls(chunk.ToolCalls, writer)
 		}
-
 		fullContent = chunk.Content
-
-		// Check for completion
 		if chunk.FinishReason != nil {
 			break
 		}
 	}
 
-	// Signal completion
 	if err := writer.WriteDone(fullContent); err != nil {
 		return "", fmt.Errorf("failed to write done: %w", err)
 	}
-
 	return fullContent, nil
+}
+
+// addImagePart adds an image part to the message from the given media.
+func addImagePart(msg *types.Message, media *facade.MediaContent) {
+	if media == nil {
+		return
+	}
+	if media.URL != "" {
+		msg.AddImagePartFromURL(media.URL, nil)
+	} else if media.Data != "" {
+		msg.AddPart(types.NewImagePartFromData(media.Data, media.MimeType, nil))
+	}
+}
+
+// addMediaPart adds audio or video parts to the message from the given media.
+func addMediaPart(msg *types.Message, media *facade.MediaContent, partType facade.ContentPartType) {
+	if media == nil || media.Data == "" {
+		return
+	}
+	switch partType {
+	case facade.ContentPartTypeAudio:
+		msg.AddPart(types.NewAudioPartFromData(media.Data, media.MimeType))
+	case facade.ContentPartTypeVideo:
+		msg.AddPart(types.NewVideoPartFromData(media.Data, media.MimeType))
+	}
 }
 
 // convertToPKMessage converts facade content parts to a PromptKit message.
 func (h *PromptKitHandler) convertToPKMessage(role string, parts []facade.ContentPart) types.Message {
 	msg := types.Message{Role: role}
-
 	for _, part := range parts {
 		switch part.Type {
 		case facade.ContentPartTypeText:
 			msg.AddTextPart(part.Text)
 		case facade.ContentPartTypeImage:
-			if part.Media != nil {
-				if part.Media.URL != "" {
-					msg.AddImagePartFromURL(part.Media.URL, nil)
-				} else if part.Media.Data != "" {
-					// Create image part from base64 data
-					imagePart := types.NewImagePartFromData(part.Media.Data, part.Media.MimeType, nil)
-					msg.AddPart(imagePart)
-				}
-			}
-		case facade.ContentPartTypeAudio:
-			if part.Media != nil && part.Media.Data != "" {
-				audioPart := types.NewAudioPartFromData(part.Media.Data, part.Media.MimeType)
-				msg.AddPart(audioPart)
-			}
-		case facade.ContentPartTypeVideo:
-			if part.Media != nil && part.Media.Data != "" {
-				videoPart := types.NewVideoPartFromData(part.Media.Data, part.Media.MimeType)
-				msg.AddPart(videoPart)
-			}
+			addImagePart(&msg, part.Media)
+		case facade.ContentPartTypeAudio, facade.ContentPartTypeVideo:
+			addMediaPart(&msg, part.Media, part.Type)
 		}
 	}
-
 	return msg
 }
 
