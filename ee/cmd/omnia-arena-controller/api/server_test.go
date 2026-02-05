@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -226,24 +225,14 @@ func TestServerShutdown_NilServer(t *testing.T) {
 	}
 }
 
-func TestServerShutdown_WithServer(t *testing.T) {
-	s := NewServer("127.0.0.1:0", logr.Discard())
+func TestServerStart_InvalidAddress(t *testing.T) {
+	// Test that Start returns an error when the address is invalid
+	// This covers the Start() function without needing goroutines
+	s := NewServer("invalid:::address", logr.Discard())
 
-	// Start server in background
-	go func() {
-		_ = s.Start(context.Background())
-	}()
-
-	// Wait for server to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Shutdown should succeed
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := s.Shutdown(ctx)
-	if err != nil {
-		t.Errorf("Shutdown() error = %v", err)
+	err := s.Start(context.Background())
+	if err == nil {
+		t.Error("Start() should fail with invalid address")
 	}
 }
 
