@@ -23,6 +23,19 @@ linters:
     - unparam
     - unused
   settings:
+    gocognit:
+      # SonarCloud S3776 uses 15, but allow 20 for gradual improvement
+      # TODO: Lower to 15 once existing issues are fixed
+      min-complexity: 20
+    goconst:
+      # Match SonarCloud S1192 - flag strings duplicated 4+ times
+      min-len: 3
+      min-occurrences: 4
+      ignore-tests: true
+    gocyclo:
+      # Cyclomatic complexity threshold - allow 20 for gradual improvement
+      # TODO: Lower to 15 once existing issues are fixed
+      min-complexity: 20
     revive:
       rules:
         - name: comment-spacings
@@ -41,6 +54,35 @@ linters:
       - linters:
           - gocognit
         path: _test\.go$
+      # TODO: Refactor these high-complexity functions (tracked for SonarCloud compliance)
+      # Exclude existing complex functions until they can be refactored
+      - linters:
+          - gocognit
+          - gocyclo
+        path: ee/cmd/arena-dev-console/server/promptkit_handler\.go
+        text: "executeStreaming"
+      - linters:
+          - gocognit
+          - gocyclo
+        path: ee/cmd/arena-worker/worker\.go
+        text: "(executeWorkItem|applyProviderOverrides)"
+      - linters:
+          - gocognit
+          - gocyclo
+        path: ee/cmd/omnia-arena-controller/main\.go
+        text: "main"
+      - linters:
+          - gocognit
+        path: ee/pkg/arena/fetcher/dir\.go
+        text: "CopyDirectoryExcluding"
+      - linters:
+          - gocognit
+        path: ee/pkg/arena/fetcher/oci\.go
+        text: "extractOCITarToDir"
+      - linters:
+          - gocyclo
+        path: ee/internal/controller/arenajob_controller\.go
+        text: "Reconcile"
     paths:
       - third_party$
       - builtin$
