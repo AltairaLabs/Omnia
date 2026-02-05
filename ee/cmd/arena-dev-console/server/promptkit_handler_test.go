@@ -18,10 +18,12 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // TestBuildEngineComponentsOutputDirectory tests that BuildEngineComponents
@@ -1751,4 +1753,379 @@ func TestNewPromptKitHandlerBuildComponentsError(t *testing.T) {
 	_, err := NewPromptKitHandler(cfg, logr.Discard())
 	// May or may not error depending on system - the key is testing the code path
 	_ = err
+}
+
+// mockStreamingProvider implements providers.Provider with streaming support.
+type mockStreamingProvider struct {
+	chunks        []providers.StreamChunk
+	streamErr     error
+	supportsStr   bool
+	predictResp   providers.PredictionResponse
+	predictErr    error
+	shouldRaw     bool
+	providerID    string
+	providerModel string
+}
+
+func (m *mockStreamingProvider) ID() string {
+	if m.providerID != "" {
+		return m.providerID
+	}
+	return "mock-streaming"
+}
+
+func (m *mockStreamingProvider) Model() string {
+	if m.providerModel != "" {
+		return m.providerModel
+	}
+	return "mock-model"
+}
+
+func (m *mockStreamingProvider) Predict(
+	_ context.Context, _ providers.PredictionRequest,
+) (providers.PredictionResponse, error) {
+	return m.predictResp, m.predictErr
+}
+
+func (m *mockStreamingProvider) PredictStream(
+	_ context.Context, _ providers.PredictionRequest,
+) (<-chan providers.StreamChunk, error) {
+	if m.streamErr != nil {
+		return nil, m.streamErr
+	}
+	ch := make(chan providers.StreamChunk, len(m.chunks))
+	for _, chunk := range m.chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (m *mockStreamingProvider) SupportsStreaming() bool {
+	return m.supportsStr
+}
+
+func (m *mockStreamingProvider) ShouldIncludeRawOutput() bool {
+	return m.shouldRaw
+}
+
+func (m *mockStreamingProvider) Close() error {
+	return nil
+}
+
+func (m *mockStreamingProvider) CalculateCost(_, _, _ int) types.CostInfo {
+	return types.CostInfo{}
+}
+
+// TestExecuteStreamingWithStreamingProvider tests the streaming code path.
+func TestExecuteStreamingWithStreamingProvider(t *testing.T) {
+	finishReason := "stop"
+	handler := &PromptKitHandler{
+		log: logr.Discard(),
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: true,
+		chunks: []providers.StreamChunk{
+			{Delta: "Hello, ", Content: "Hello, "},
+			{Delta: "world!", Content: "Hello, world!"},
+			{Content: "Hello, world!", FinishReason: &finishReason},
+		},
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Hi")},
+	}
+
+	content, err := handler.executeStreaming(context.Background(), provider, req, writer)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, world!", content)
+	assert.Len(t, writer.Chunks, 2) // Two deltas were written
+	assert.Equal(t, "Hello, world!", writer.DoneContent)
+}
+
+// TestExecuteStreamingWithToolCalls tests streaming with tool calls.
+func TestExecuteStreamingWithToolCalls(t *testing.T) {
+	finishReason := "tool_calls"
+	handler := &PromptKitHandler{
+		log: logr.Discard(),
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: true,
+		chunks: []providers.StreamChunk{
+			{
+				Delta: "Let me search for that.",
+				ToolCalls: []types.MessageToolCall{
+					{
+						ID:   "call_123",
+						Name: "search",
+						Args: []byte(`{"query": "test"}`),
+					},
+				},
+			},
+			{Content: "Let me search for that.", FinishReason: &finishReason},
+		},
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Search for something")},
+	}
+
+	_, err := handler.executeStreaming(context.Background(), provider, req, writer)
+	assert.NoError(t, err)
+	assert.Len(t, writer.ToolCalls, 1)
+	assert.Equal(t, "call_123", writer.ToolCalls[0].ID)
+	assert.Equal(t, "search", writer.ToolCalls[0].Name)
+}
+
+// TestExecuteStreamingError tests streaming when an error occurs mid-stream.
+func TestExecuteStreamingError(t *testing.T) {
+	handler := &PromptKitHandler{
+		log: logr.Discard(),
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: true,
+		chunks: []providers.StreamChunk{
+			{Delta: "Starting..."},
+			{Error: assert.AnError}, // Error in stream
+		},
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Hi")},
+	}
+
+	_, err := handler.executeStreaming(context.Background(), provider, req, writer)
+	assert.Error(t, err)
+}
+
+// TestExecuteStreamingStartError tests streaming when PredictStream fails to start.
+func TestExecuteStreamingStartError(t *testing.T) {
+	handler := &PromptKitHandler{
+		log: logr.Discard(),
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: true,
+		streamErr:   assert.AnError,
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Hi")},
+	}
+
+	_, err := handler.executeStreaming(context.Background(), provider, req, writer)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start stream")
+}
+
+// TestExecuteStreamingNonStreamingFallback tests the non-streaming fallback.
+func TestExecuteStreamingNonStreamingFallback(t *testing.T) {
+	handler := &PromptKitHandler{
+		log: logr.Discard(),
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: false,
+		predictResp: providers.PredictionResponse{
+			Content: "Non-streaming response",
+		},
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Hi")},
+	}
+
+	content, err := handler.executeStreaming(context.Background(), provider, req, writer)
+	assert.NoError(t, err)
+	assert.Equal(t, "Non-streaming response", content)
+	assert.Equal(t, "Non-streaming response", writer.DoneContent)
+}
+
+// TestExecuteStreamingNonStreamingError tests error in non-streaming fallback.
+func TestExecuteStreamingNonStreamingError(t *testing.T) {
+	handler := &PromptKitHandler{
+		log: logr.Discard(),
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: false,
+		predictErr:  assert.AnError,
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Hi")},
+	}
+
+	_, err := handler.executeStreaming(context.Background(), provider, req, writer)
+	assert.Error(t, err)
+}
+
+// TestGetOrLoadK8sRegistryWithProviders tests loading registry from K8s providers.
+func TestGetOrLoadK8sRegistryWithProviders(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "output")
+
+	cfg := &config.Config{
+		Defaults: config.Defaults{
+			Output: config.OutputConfig{
+				Dir: outputDir,
+			},
+			OutDir:    outputDir,
+			ConfigDir: tmpDir,
+		},
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {
+				ID:    "mock",
+				Type:  "mock",
+				Model: "mock-model",
+			},
+		},
+	}
+
+	// Create a K8s loader with test providers
+	loader := newTestK8sProviderLoader(t, "test-namespace",
+		&corev1alpha1.Provider{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-provider",
+				Namespace: "test-namespace",
+			},
+			Spec: corev1alpha1.ProviderSpec{
+				Type:  corev1alpha1.ProviderTypeMock,
+				Model: "mock-model",
+			},
+			Status: corev1alpha1.ProviderStatus{
+				Phase: corev1alpha1.ProviderPhaseReady,
+			},
+		},
+	)
+
+	handler := &PromptKitHandler{
+		config:       cfg,
+		log:          logr.Discard(),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+		k8sLoader:    loader,
+	}
+
+	// Call getOrLoadK8sRegistry
+	registry, gotCfg, err := handler.getOrLoadK8sRegistry(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, registry)
+	assert.NotNil(t, gotCfg)
+
+	// Verify registry is cached
+	cached, ok := handler.nsRegistries["test-namespace"]
+	assert.True(t, ok)
+	assert.Equal(t, registry, cached)
+
+	// Clean up
+	if registry != nil {
+		_ = registry.Close()
+	}
+}
+
+// TestGetOrLoadK8sRegistryCached tests that cached registry is returned.
+func TestGetOrLoadK8sRegistryCached(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "output")
+
+	cfg := &config.Config{
+		Defaults: config.Defaults{
+			Output: config.OutputConfig{
+				Dir: outputDir,
+			},
+			OutDir:    outputDir,
+			ConfigDir: tmpDir,
+		},
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {
+				ID:    "mock",
+				Type:  "mock",
+				Model: "mock-model",
+			},
+		},
+	}
+
+	// Pre-build a registry
+	cachedRegistry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	require.NoError(t, err)
+	defer func() {
+		_ = cachedRegistry.Close()
+	}()
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	handler := &PromptKitHandler{
+		config:   cfg,
+		log:      logr.Discard(),
+		sessions: make(map[string]*SessionState),
+		nsRegistries: map[string]*providers.Registry{
+			"test-namespace": cachedRegistry,
+		},
+		k8sLoader: loader,
+	}
+
+	// Should return cached registry
+	registry, gotCfg, err := handler.getOrLoadK8sRegistry(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, cachedRegistry, registry)
+	assert.Equal(t, cfg, gotCfg)
+}
+
+// TestGetOrLoadK8sRegistryNoProviders tests fallback when no K8s providers found.
+func TestGetOrLoadK8sRegistryNoProviders(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "output")
+
+	cfg := &config.Config{
+		Defaults: config.Defaults{
+			Output: config.OutputConfig{
+				Dir: outputDir,
+			},
+			OutDir:    outputDir,
+			ConfigDir: tmpDir,
+		},
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {
+				ID:    "mock",
+				Type:  "mock",
+				Model: "mock-model",
+			},
+		},
+	}
+
+	// Create K8s loader with NO providers
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	handler := &PromptKitHandler{
+		config:       cfg,
+		log:          logr.Discard(),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+		k8sLoader:    loader,
+	}
+
+	// Build the static registry first
+	err := handler.buildComponents()
+	require.NoError(t, err)
+	defer func() {
+		if handler.providerRegistry != nil {
+			_ = handler.providerRegistry.Close()
+		}
+	}()
+
+	// Should fallback to static config
+	registry, gotCfg, err := handler.getOrLoadK8sRegistry(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, handler.providerRegistry, registry)
+	assert.Equal(t, cfg, gotCfg)
 }
