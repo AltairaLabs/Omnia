@@ -158,7 +158,7 @@ function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) 
     return null;
   }
 
-  if (!status || !status.deployed) {
+  if (!status?.deployed) {
     return null;
   }
 

@@ -64,8 +64,8 @@ const LspYamlEditorEmptyState = isDev
     );
 
 interface ProjectEditorProps {
-  className?: string;
-  initialProjectId?: string;
+  readonly className?: string;
+  readonly initialProjectId?: string;
 }
 
 /**
@@ -210,7 +210,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const handleProjectSelect = useCallback((projectId: string) => {
     // Check for unsaved changes
     if (hasUnsavedChanges) {
-      const confirmed = window.confirm(
+      const confirmed = globalThis.confirm(
         "You have unsaved changes. Do you want to discard them?"
       );
       if (!confirmed) return;
@@ -257,7 +257,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
 
   // Handle save
   const handleSave = useCallback(async () => {
-    if (!currentProject || !activeFile || !activeFile.isDirty) return;
+    if (!currentProject || !activeFile?.isDirty) return;
 
     setSaving(true);
     try {
@@ -342,7 +342,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const handleNewProject = useCallback(async (name: string) => {
     try {
       const project = await createProject({ name });
-      await refetchProjects();
+      refetchProjects();
       setSelectedProjectId(project.id);
       toast({
         title: "Created",
@@ -366,7 +366,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
       await deleteProject(currentProject.id);
       setSelectedProjectId(null);
       useProjectEditorStore.getState().clearProject();
-      await refetchProjects();
+      refetchProjects();
       toast({
         title: "Deleted",
         description: `Project "${currentProject.name}" deleted`,
@@ -505,8 +505,8 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   );
 
   // Handle refresh
-  const handleRefresh = useCallback(async () => {
-    await refetchProjects();
+  const handleRefresh = useCallback(() => {
+    refetchProjects();
     if (currentProject) {
       refetchProject();
     }
@@ -756,8 +756,8 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
 /* eslint-enable sonarjs/cognitive-complexity */
 
 interface EmptyProjectStateProps {
-  hasProjects: boolean;
-  onNewProject: () => void;
+  readonly hasProjects: boolean;
+  readonly onNewProject: () => void;
 }
 
 function EmptyProjectState({ hasProjects, onNewProject }: EmptyProjectStateProps) {

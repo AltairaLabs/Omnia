@@ -28,24 +28,24 @@ import {
 } from "@/lib/arena/file-templates";
 
 interface FileTreeProps {
-  tree: FileTreeNode[];
-  loading?: boolean;
-  error?: string | null;
-  selectedPath?: string;
-  onSelectFile: (path: string, name: string) => void;
-  onCreateFile?: (parentPath: string | null, name: string, isDirectory: boolean, content?: string) => Promise<void>;
-  onDeleteFile?: (path: string) => Promise<void>;
-  className?: string;
+  readonly tree: FileTreeNode[];
+  readonly loading?: boolean;
+  readonly error?: string | null;
+  readonly selectedPath?: string;
+  readonly onSelectFile: (path: string, name: string) => void;
+  readonly onCreateFile?: (parentPath: string | null, name: string, isDirectory: boolean, content?: string) => Promise<void>;
+  readonly onDeleteFile?: (path: string) => Promise<void>;
+  readonly className?: string;
 }
 
 interface TreeNodeProps {
-  node: FileTreeNode;
-  level: number;
-  selectedPath?: string;
-  expandedPaths: Set<string>;
-  onToggleExpand: (path: string) => void;
-  onSelectFile: (path: string, name: string) => void;
-  onContextAction: (action: ContextAction, node: FileTreeNode, kind?: ArenaFileKind) => void;
+  readonly node: FileTreeNode;
+  readonly level: number;
+  readonly selectedPath?: string;
+  readonly expandedPaths: Set<string>;
+  readonly onToggleExpand: (path: string) => void;
+  readonly onSelectFile: (path: string, name: string) => void;
+  readonly onContextAction: (action: ContextAction, node: FileTreeNode, kind?: ArenaFileKind) => void;
 }
 
 type ContextAction = "newFile" | "newFolder" | "newTypedFile" | "importProvider" | "importTool" | "rename" | "delete" | "copyPath";
@@ -154,15 +154,13 @@ function TreeNode({
       )}
 
       {/* Icon */}
-      {node.isDirectory ? (
-        isExpanded ? (
-          <FolderOpen className="h-4 w-4 text-amber-500 flex-shrink-0" />
-        ) : (
-          <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
-        )
-      ) : (
-        getFileIcon(node.type, node.name)
+      {node.isDirectory && isExpanded && (
+        <FolderOpen className="h-4 w-4 text-amber-500 flex-shrink-0" />
       )}
+      {node.isDirectory && !isExpanded && (
+        <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+      )}
+      {!node.isDirectory && getFileIcon(node.type, node.name)}
 
       {/* Name */}
       <span className="truncate text-sm">{node.name}</span>

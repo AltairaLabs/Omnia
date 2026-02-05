@@ -80,11 +80,11 @@ export function EditorTabs({ className }: EditorTabsProps) {
 }
 
 interface EditorTabProps {
-  file: OpenFile;
-  isActive: boolean;
-  onTabClick: (path: string) => void;
-  onCloseTab: (e: React.MouseEvent, path: string) => void;
-  onKeyDown: (e: React.KeyboardEvent, path: string) => void;
+  readonly file: OpenFile;
+  readonly isActive: boolean;
+  readonly onTabClick: (path: string) => void;
+  readonly onCloseTab: (e: React.MouseEvent, path: string) => void;
+  readonly onKeyDown: (e: React.KeyboardEvent, path: string) => void;
 }
 
 function EditorTab({

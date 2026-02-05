@@ -94,6 +94,55 @@ export function TemplateBrowser({
     );
   };
 
+  // Helper to render the content section (avoids nested ternary)
+  const renderTemplateContent = () => {
+    const gridClassName = cn(
+      viewMode === "grid"
+        ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+        : "space-y-2"
+    );
+
+    if (loading && allTemplates.length === 0) {
+      return (
+        <div className={gridClassName}>
+          {Array.from({ length: 8 }).map((_, i) => (
+            // eslint-disable-next-line react/no-array-index-key
+            <Skeleton key={`skeleton-${i}`} className="h-48 rounded-lg" />
+          ))}
+        </div>
+      );
+    }
+
+    if (filteredTemplates.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <FolderOpen className="h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="font-medium">No templates found</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            {searchQuery || selectedTags.length > 0
+              ? "Try adjusting your search or filters"
+              : "Add a template source to get started"}
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className={gridClassName}>
+        {filteredTemplates.map((template) => (
+          <TemplateCard
+            key={`${template.sourceName}-${template.name}`}
+            template={template}
+            sourceName={template.sourceName}
+            onSelect={() => onSelectTemplate?.(template, template.sourceName)}
+            onUse={() => onSelectTemplate?.(template, template.sourceName)}
+            className={viewMode === "list" ? "flex-row" : undefined}
+          />
+        ))}
+      </div>
+    );
+  };
+
   if (error) {
     return (
       <Alert variant="destructive" className={className}>
@@ -214,49 +263,7 @@ export function TemplateBrowser({
       </div>
 
       {/* Template grid/list */}
-      {loading && allTemplates.length === 0 ? (
-        <div
-          className={cn(
-            viewMode === "grid"
-              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-              : "space-y-2"
-          )}
-        >
-          {Array.from({ length: 8 }).map((_, i) => (
-            // eslint-disable-next-line react/no-array-index-key
-            <Skeleton key={`skeleton-${i}`} className="h-48 rounded-lg" />
-          ))}
-        </div>
-      ) : filteredTemplates.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <FolderOpen className="h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="font-medium">No templates found</h3>
-          <p className="text-sm text-muted-foreground mt-1">
-            {searchQuery || selectedTags.length > 0
-              ? "Try adjusting your search or filters"
-              : "Add a template source to get started"}
-          </p>
-        </div>
-      ) : (
-        <div
-          className={cn(
-            viewMode === "grid"
-              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-              : "space-y-2"
-          )}
-        >
-          {filteredTemplates.map((template) => (
-            <TemplateCard
-              key={`${template.sourceName}-${template.name}`}
-              template={template}
-              sourceName={template.sourceName}
-              onSelect={() => onSelectTemplate?.(template, template.sourceName)}
-              onUse={() => onSelectTemplate?.(template, template.sourceName)}
-              className={viewMode === "list" ? "flex-row" : undefined}
-            />
-          ))}
-        </div>
-      )}
+      {renderTemplateContent()}
     </div>
   );
 }

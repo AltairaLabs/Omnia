@@ -188,8 +188,8 @@ export function ProjectToolbar({
 }
 
 interface NewProjectButtonProps {
-  onClick: () => void;
-  disabled?: boolean;
+  readonly onClick: () => void;
+  readonly disabled?: boolean;
 }
 
 /**

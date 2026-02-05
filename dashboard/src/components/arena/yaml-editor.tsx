@@ -9,14 +9,14 @@ import { Loader2, AlertTriangle, CheckCircle } from "lucide-react";
 import type { FileType } from "@/types/arena-project";
 
 interface YamlEditorProps {
-  value: string;
-  onChange?: (value: string) => void;
-  onSave?: () => void;
-  readOnly?: boolean;
-  language?: string;
-  fileType?: FileType;
-  className?: string;
-  loading?: boolean;
+  readonly value: string;
+  readonly onChange?: (value: string) => void;
+  readonly onSave?: () => void;
+  readonly readOnly?: boolean;
+  readonly language?: string;
+  readonly fileType?: FileType;
+  readonly className?: string;
+  readonly loading?: boolean;
 }
 
 interface ValidationResult {

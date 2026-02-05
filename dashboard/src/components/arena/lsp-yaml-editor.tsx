@@ -77,7 +77,7 @@ async function createLspConnection(
   // We connect to /api/lsp on that proxy server
   let wsUrl: string;
 
-  if (typeof globalThis === "undefined" || typeof globalThis.location === "undefined") {
+  if (globalThis.location === undefined) {
     throw new TypeError("Cannot create WebSocket connection outside browser");
   }
 
@@ -135,6 +135,9 @@ export function LspYamlEditor({
   const monacoLanguage = language || getLanguage(fileType);
   const isYaml = monacoLanguage === "yaml";
   const canUseLsp = isYaml && workspace && projectId;
+  // Extract values for use in async functions where TypeScript narrowing doesn't persist
+  const wsWorkspace = workspace ?? "";
+  const wsProjectId = projectId ?? "";
 
   // Initialize and manage LSP connection
   useEffect(() => {
@@ -178,7 +181,7 @@ export function LspYamlEditor({
         // Ensure VSCode services are initialized before creating the language client
         await ensureServicesInitialized();
 
-        const webSocket = await createLspConnection(workspace!, projectId!);
+        const webSocket = await createLspConnection(wsWorkspace, wsProjectId);
         if (!mounted) {
           webSocket.close();
           return;
@@ -243,7 +246,7 @@ export function LspYamlEditor({
       disposablesRef.current.forEach((d) => d.dispose());
       disposablesRef.current = [];
     };
-  }, [canUseLsp, monacoReady, workspace, projectId, reconnectTrigger]);
+  }, [canUseLsp, monacoReady, wsWorkspace, wsProjectId, reconnectTrigger]);
 
   // Track diagnostics from Monaco markers
   useEffect(() => {

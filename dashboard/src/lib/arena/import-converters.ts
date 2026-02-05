@@ -107,7 +107,7 @@ function formatSchemaProperty(propName: string, propValue: unknown): string[] {
   const prop = propValue as Record<string, unknown>;
 
   if (prop.type) {
-    lines.push(`        type: ${prop.type}`);
+    lines.push(`        type: ${String(prop.type)}`);
   }
   if (prop.description) {
     lines.push(`        description: ${quoteYamlString(String(prop.description))}`);
@@ -135,7 +135,7 @@ function formatInputSchema(inputSchema: unknown): string[] {
   }
 
   const schema = inputSchema as Record<string, unknown>;
-  lines.push(`    type: ${schema.type || "object"}`);
+  lines.push(`    type: ${String(schema.type || "object")}`);
 
   if (schema.properties && typeof schema.properties === "object") {
     lines.push("    properties:");
@@ -219,7 +219,8 @@ function quoteYamlString(str: string): string {
     str.endsWith(" ")
   ) {
     // Use double quotes and escape internal double quotes
-    return `"${str.replaceAll('"', '\\"').replaceAll("\n", "\\n")}"`;
+    const escaped = str.replaceAll('"', '\\"').replaceAll("\n", "\\n");
+    return `"${escaped}"`;
   }
   return str;
 }

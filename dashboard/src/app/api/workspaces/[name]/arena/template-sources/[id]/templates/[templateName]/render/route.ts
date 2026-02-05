@@ -32,9 +32,9 @@ import {
   type TemplateRenderInput,
   type TemplateMetadata,
 } from "@/types/arena-template";
-import crypto from "crypto";
-import * as fs from "fs/promises";
-import * as path from "path";
+import crypto from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 const TEMPLATE_INDEX_DIR = "arena/template-indexes";
 

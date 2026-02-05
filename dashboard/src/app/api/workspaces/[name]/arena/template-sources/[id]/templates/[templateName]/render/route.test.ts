@@ -29,7 +29,7 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   isForbiddenError: vi.fn(),
 }));
 
-vi.mock("fs/promises", () => ({
+vi.mock("node:fs/promises", () => ({
   stat: vi.fn(),
   readFile: vi.fn(),
   readdir: vi.fn(),
@@ -37,7 +37,7 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
 }));
 
-vi.mock("crypto", () => ({
+vi.mock("node:crypto", () => ({
   default: { randomUUID: vi.fn(() => "test-uuid-1234") },
   randomUUID: vi.fn(() => "test-uuid-1234"),
 }));
@@ -162,7 +162,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
@@ -242,7 +242,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
@@ -273,7 +273,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
@@ -309,7 +309,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });

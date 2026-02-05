@@ -31,8 +31,8 @@ import {
   type ArenaTemplateSource,
   type TemplateMetadata,
 } from "@/types/arena-template";
-import * as fs from "fs/promises";
-import * as path from "path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 const TEMPLATE_INDEX_DIR = "arena/template-indexes";
 

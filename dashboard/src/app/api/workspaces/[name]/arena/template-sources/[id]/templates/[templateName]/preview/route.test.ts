@@ -29,7 +29,7 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   isForbiddenError: vi.fn(),
 }));
 
-vi.mock("fs/promises", () => ({
+vi.mock("node:fs/promises", () => ({
   stat: vi.fn(),
   readFile: vi.fn(),
   readdir: vi.fn(),
@@ -220,7 +220,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -252,7 +252,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -305,7 +305,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     const templateWithFiles = {
       name: "basic-chatbot",
@@ -357,7 +357,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     const templateWithDirSpec = {
       name: "basic-chatbot",
@@ -398,7 +398,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -453,7 +453,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     const templateWithMissingFile = {
       name: "basic-chatbot",
@@ -502,7 +502,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
 
     const templateWithVariables = {
       name: "basic-chatbot",

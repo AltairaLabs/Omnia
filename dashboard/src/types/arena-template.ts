@@ -371,7 +371,7 @@ export function validateVariables(
         }
         break;
 
-      case "number":
+      case "number": {
         const numValue = typeof value === "number" ? value : Number.parseFloat(String(value));
         if (Number.isNaN(numValue)) {
           errors.push({
@@ -399,6 +399,7 @@ export function validateVariables(
           }
         }
         break;
+      }
 
       case "enum":
         if (v.options && !v.options.includes(String(value))) {

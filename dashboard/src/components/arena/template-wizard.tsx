@@ -164,6 +164,66 @@ function VariableInput({ variable, value, onChange, error, providers }: Variable
   const id = `var-${variable.name}`;
   const binding = variable.binding;
 
+  // Helper to render the appropriate input based on variable type
+  const renderInputElement = () => {
+    if (variable.type === "boolean") {
+      return (
+        <Switch
+          id={id}
+          checked={value === true || value === "true"}
+          onCheckedChange={(checked) => onChange(checked)}
+        />
+      );
+    }
+
+    if (variable.type === "enum" && variable.options) {
+      return (
+        <Select
+          value={String(value || "")}
+          onValueChange={(v) => onChange(v)}
+        >
+          <SelectTrigger id={id}>
+            <SelectValue placeholder="Select an option" />
+          </SelectTrigger>
+          <SelectContent>
+            {variable.options.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (variable.type === "number") {
+      return (
+        <Input
+          id={id}
+          type="number"
+          value={value === undefined ? "" : String(value)}
+          onChange={(e) => {
+            const num = Number.parseFloat(e.target.value);
+            onChange(Number.isNaN(num) ? e.target.value : num);
+          }}
+          min={variable.min}
+          max={variable.max}
+          placeholder={variable.default || "Enter a number"}
+        />
+      );
+    }
+
+    return (
+      <Input
+        id={id}
+        type="text"
+        value={String(value || "")}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={variable.default || `Enter ${variable.name}`}
+      />
+    );
+  };
+
   // For provider bindings, render a provider selector
   if (binding?.kind === "provider" && providers && providers.length > 0) {
     return (
@@ -221,50 +281,7 @@ function VariableInput({ variable, value, onChange, error, providers }: Variable
         <p className="text-xs text-muted-foreground">{variable.description}</p>
       )}
 
-      {variable.type === "boolean" ? (
-        <Switch
-          id={id}
-          checked={value === true || value === "true"}
-          onCheckedChange={(checked) => onChange(checked)}
-        />
-      ) : variable.type === "enum" && variable.options ? (
-        <Select
-          value={String(value || "")}
-          onValueChange={(v) => onChange(v)}
-        >
-          <SelectTrigger id={id}>
-            <SelectValue placeholder="Select an option" />
-          </SelectTrigger>
-          <SelectContent>
-            {variable.options.map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : variable.type === "number" ? (
-        <Input
-          id={id}
-          type="number"
-          value={value === undefined ? "" : String(value)}
-          onChange={(e) => {
-            const num = Number.parseFloat(e.target.value);
-            onChange(Number.isNaN(num) ? e.target.value : num);
-          }}
-          min={variable.min}
-          max={variable.max}
-          placeholder={variable.default || "Enter a number"}
-        />
-      ) : (
-        <Input
-          id={id}
-          type="text"
-          value={String(value || "")}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={variable.default || `Enter ${variable.name}`}
-        />
-      )}
+      {renderInputElement()}
 
       {error && (
         <p className="text-xs text-destructive">{error}</p>

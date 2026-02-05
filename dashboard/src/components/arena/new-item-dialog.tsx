@@ -15,11 +15,11 @@ import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 
 export interface NewItemDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  mode: "file" | "folder";
-  parentPath: string | null;
-  onConfirm: (name: string) => Promise<void>;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly mode: "file" | "folder";
+  readonly parentPath: string | null;
+  readonly onConfirm: (name: string) => Promise<void>;
 }
 
 /**
