@@ -317,7 +317,7 @@ export function getDefaultVariableValues(
     if (v.default !== undefined) {
       switch (v.type) {
         case "number":
-          values[v.name] = parseFloat(v.default) || 0;
+          values[v.name] = Number.parseFloat(v.default) || 0;
           break;
         case "boolean":
           values[v.name] = v.default === "true";
@@ -372,16 +372,16 @@ export function validateVariables(
         break;
 
       case "number":
-        const numValue = typeof value === "number" ? value : parseFloat(String(value));
-        if (isNaN(numValue)) {
+        const numValue = typeof value === "number" ? value : Number.parseFloat(String(value));
+        if (Number.isNaN(numValue)) {
           errors.push({
             variable: v.name,
             message: `${v.name} must be a number`,
           });
         } else {
           if (v.min !== undefined && v.min !== "") {
-            const minVal = parseFloat(v.min);
-            if (!isNaN(minVal) && numValue < minVal) {
+            const minVal = Number.parseFloat(v.min);
+            if (!Number.isNaN(minVal) && numValue < minVal) {
               errors.push({
                 variable: v.name,
                 message: `${v.name} must be >= ${v.min}`,
@@ -389,8 +389,8 @@ export function validateVariables(
             }
           }
           if (v.max !== undefined && v.max !== "") {
-            const maxVal = parseFloat(v.max);
-            if (!isNaN(maxVal) && numValue > maxVal) {
+            const maxVal = Number.parseFloat(v.max);
+            if (!Number.isNaN(maxVal) && numValue > maxVal) {
               errors.push({
                 variable: v.name,
                 message: `${v.name} must be <= ${v.max}`,

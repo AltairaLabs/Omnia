@@ -96,8 +96,8 @@ async function readProjectConfig(
 function generateProjectId(name: string): string {
   const slug = name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(?:^-)|(?:-$)/g, "")
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/(?:^-)|(?:-$)/g, "")
     .slice(0, 40);
   const timestamp = Date.now().toString(36);
   return `${slug}-${timestamp}`;

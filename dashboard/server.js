@@ -21,14 +21,14 @@ const { WebSocket, WebSocketServer } = require("ws");
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
-const port = parseInt(process.env.PORT || "3000", 10);
+const port = Number.parseInt(process.env.PORT || "3000", 10);
 // WebSocket proxy runs on separate port to avoid interfering with Next.js HMR
-const wsProxyPort = parseInt(process.env.WS_PROXY_PORT || "3002", 10);
+const wsProxyPort = Number.parseInt(process.env.WS_PROXY_PORT || "3002", 10);
 
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 // Default facade port
-const DEFAULT_FACADE_PORT = parseInt(process.env.DEFAULT_FACADE_PORT || "8080", 10);
+const DEFAULT_FACADE_PORT = Number.parseInt(process.env.DEFAULT_FACADE_PORT || "8080", 10);
 // PromptKit LSP service URL (overridable via env var)
 const LSP_SERVICE_URL = process.env.LSP_SERVICE_URL || `ws://omnia-promptkit-lsp.omnia-system.${SERVICE_DOMAIN}:8080/lsp`;
 // Arena Dev Console service name (deployed per workspace namespace)

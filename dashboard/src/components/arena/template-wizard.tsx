@@ -249,8 +249,8 @@ function VariableInput({ variable, value, onChange, error, providers }: Variable
           type="number"
           value={value === undefined ? "" : String(value)}
           onChange={(e) => {
-            const num = parseFloat(e.target.value);
-            onChange(isNaN(num) ? e.target.value : num);
+            const num = Number.parseFloat(e.target.value);
+            onChange(Number.isNaN(num) ? e.target.value : num);
           }}
           min={variable.min}
           max={variable.max}

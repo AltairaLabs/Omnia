@@ -151,18 +151,18 @@ export interface JobWizardProps {
 function validateJobTypeOptions(form: JobWizardFormState): string | null {
   switch (form.type) {
     case "evaluation": {
-      const threshold = parseFloat(form.passingThreshold);
-      const isValidThreshold = !isNaN(threshold) && threshold >= 0 && threshold <= 1;
+      const threshold = Number.parseFloat(form.passingThreshold);
+      const isValidThreshold = !Number.isNaN(threshold) && threshold >= 0 && threshold <= 1;
       return isValidThreshold ? null : "Passing threshold must be a number between 0 and 1";
     }
     case "loadtest": {
       const rps = Number.parseInt(form.targetRPS, 10);
-      const isValidRps = !isNaN(rps) && rps >= 1;
+      const isValidRps = !Number.isNaN(rps) && rps >= 1;
       return isValidRps ? null : "Target RPS must be a positive integer";
     }
     case "datagen": {
       const count = Number.parseInt(form.sampleCount, 10);
-      const isValidCount = !isNaN(count) && count >= 1;
+      const isValidCount = !Number.isNaN(count) && count >= 1;
       return isValidCount ? null : "Sample count must be a positive integer";
     }
     default:
@@ -191,7 +191,7 @@ function validateForm(
   }
 
   const workers = Number.parseInt(form.workers, 10);
-  if (isNaN(workers) || workers < 1) {
+  if (Number.isNaN(workers) || workers < 1) {
     return "Workers must be a positive integer";
   }
 
@@ -274,7 +274,7 @@ function buildSpec(form: JobWizardFormState): ArenaJobSpec {
   if (form.type === "evaluation") {
     spec.evaluation = {
       continueOnFailure: form.continueOnFailure,
-      passingThreshold: parseFloat(form.passingThreshold),
+      passingThreshold: Number.parseFloat(form.passingThreshold),
       outputFormats: ["json", "junit"],
     };
   } else if (form.type === "loadtest") {
@@ -555,7 +555,7 @@ export function JobWizard({
                 onChange={(e) =>
                   updateField(
                     "name",
-                    e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-")
+                    e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-")
                   )
                 }
               />

@@ -70,7 +70,7 @@ async function main() {
     process.exit(1);
   }
 
-  const expiresDays = parseInt(args.expires ?? "90", 10);
+  const expiresDays = Number.parseInt(args.expires ?? "90", 10);
 
   // Generate the key
   const key = generateKey();

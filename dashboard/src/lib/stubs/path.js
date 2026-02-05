@@ -20,7 +20,7 @@ export const parse = (pathString) => {
 };
 
 export const join = (...parts) => {
-  return parts.filter(Boolean).join('/').replace(/\/+/g, '/');
+  return parts.filter(Boolean).join('/').replaceAll(/\/+/g, '/');
 };
 
 export const resolve = (...parts) => {
@@ -49,7 +49,7 @@ export const extname = (p) => {
 
 export const isAbsolute = (p) => p.startsWith('/');
 
-export const normalize = (p) => p.replace(/\/+/g, '/');
+export const normalize = (p) => p.replaceAll(/\/+/g, '/');
 
 export const relative = (from, to) => {
   // Simplified implementation
