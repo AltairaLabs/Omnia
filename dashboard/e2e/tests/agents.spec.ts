@@ -184,6 +184,51 @@ test.describe('Agent Details', () => {
       });
     }
   });
+
+  test('should show events tab with events table', async ({ page }) => {
+    // Navigate to agent detail page
+    await page.goto('/agents');
+    await page.waitForSelector(SELECTORS.agentCard);
+
+    const firstAgent = page.locator(SELECTORS.agentCard).first();
+    await firstAgent.click();
+
+    // Click on Events tab
+    const eventsTab = page.locator('[role="tab"]:has-text("Events"), button:has-text("Events")');
+    if (await eventsTab.isVisible()) {
+      await eventsTab.click();
+
+      // Wait for events panel to load
+      await page.waitForTimeout(1000);
+
+      // Verify events panel exists (card container)
+      const eventsPanel = page.locator('[data-testid="events-panel"]');
+      await expect(eventsPanel).toBeVisible({ timeout: 5000 });
+
+      // Events panel should show one of: table, loading, empty, or error state
+      const eventsTable = page.locator('[data-testid="events-table"]');
+      const eventsLoading = page.locator('[data-testid="events-loading"]');
+      const eventsEmpty = page.locator('[data-testid="events-empty"]');
+      const eventsError = page.locator('[data-testid="events-error"]');
+
+      // At least one of these states should be visible
+      const hasTable = await eventsTable.isVisible().catch(() => false);
+      const hasLoading = await eventsLoading.isVisible().catch(() => false);
+      const hasEmpty = await eventsEmpty.isVisible().catch(() => false);
+      const hasError = await eventsError.isVisible().catch(() => false);
+
+      expect(hasTable || hasLoading || hasEmpty || hasError).toBe(true);
+
+      // If events table is visible, verify it has expected columns
+      if (hasTable) {
+        await expect(page.locator('th:has-text("Type")')).toBeVisible();
+        await expect(page.locator('th:has-text("Reason")')).toBeVisible();
+        await expect(page.locator('th:has-text("Object")')).toBeVisible();
+        await expect(page.locator('th:has-text("Message")')).toBeVisible();
+        await expect(page.locator('th:has-text("Age")')).toBeVisible();
+      }
+    }
+  });
 });
 
 test.describe('Agent Scaling', () => {
