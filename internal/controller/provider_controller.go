@@ -340,7 +340,9 @@ func (r *ProviderReconciler) validateCredentialFilePath(provider *omniav1alpha1.
 // providerRequiresCredentials returns whether the given provider type requires credentials.
 func providerRequiresCredentials(providerType omniav1alpha1.ProviderType) bool {
 	switch providerType {
-	case omniav1alpha1.ProviderTypeMock, omniav1alpha1.ProviderTypeOllama:
+	case omniav1alpha1.ProviderTypeMock, omniav1alpha1.ProviderTypeOllama,
+		omniav1alpha1.ProviderTypeBedrock, omniav1alpha1.ProviderTypeVertex,
+		omniav1alpha1.ProviderTypeAzureAI:
 		return false
 	default:
 		return true
@@ -398,6 +400,12 @@ func getExpectedKeysForProvider(providerType omniav1alpha1.ProviderType) []strin
 		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", secretKeyAPIKey}
 	case omniav1alpha1.ProviderTypeGemini:
 		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", secretKeyAPIKey}
+	case omniav1alpha1.ProviderTypeBedrock:
+		return []string{"AWS_ACCESS_KEY_ID", secretKeyAPIKey}
+	case omniav1alpha1.ProviderTypeVertex:
+		return []string{"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_API_KEY", secretKeyAPIKey}
+	case omniav1alpha1.ProviderTypeAzureAI:
+		return []string{"AZURE_OPENAI_API_KEY", "AZURE_API_KEY", secretKeyAPIKey}
 	default:
 		return []string{secretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
 	}

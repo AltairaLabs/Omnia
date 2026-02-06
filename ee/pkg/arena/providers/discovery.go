@@ -34,7 +34,9 @@ var ProviderCredentials = map[string][]string{
 	"vllm":     {"VLLM_API_KEY"},
 	"voyageai": {"VOYAGE_API_KEY"},
 	"azure":    {"AZURE_OPENAI_API_KEY"},
+	"azure-ai": {"AZURE_OPENAI_API_KEY"},
 	"bedrock":  {"AWS_ACCESS_KEY_ID"}, // Also requires AWS_SECRET_ACCESS_KEY
+	"vertex":   {"GOOGLE_APPLICATION_CREDENTIALS"},
 	"groq":     {"GROQ_API_KEY"},
 	"together": {"TOGETHER_API_KEY"},
 	"ollama":   {}, // No API key required for local Ollama

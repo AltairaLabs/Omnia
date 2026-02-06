@@ -82,8 +82,41 @@ type CredentialConfig struct {
 	FilePath string `json:"filePath,omitempty"`
 }
 
+// PlatformType defines the cloud platform type.
+// +kubebuilder:validation:Enum=aws;gcp;azure
+type PlatformType string
+
+const (
+	// PlatformTypeAWS represents Amazon Web Services.
+	PlatformTypeAWS PlatformType = "aws"
+	// PlatformTypeGCP represents Google Cloud Platform.
+	PlatformTypeGCP PlatformType = "gcp"
+	// PlatformTypeAzure represents Microsoft Azure.
+	PlatformTypeAzure PlatformType = "azure"
+)
+
+// PlatformConfig defines hyperscaler-specific configuration.
+type PlatformConfig struct {
+	// type is the cloud platform type.
+	// +kubebuilder:validation:Required
+	Type PlatformType `json:"type"`
+
+	// region is the cloud region (e.g., us-east-1, us-central1, eastus).
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// project is the GCP project ID. Required for Vertex AI.
+	// +optional
+	Project string `json:"project,omitempty"`
+
+	// endpoint overrides the default platform API endpoint.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
 // ProviderSpec defines the desired state of Provider.
 // +kubebuilder:validation:XValidation:rule="!(has(self.secretRef) && has(self.credential))",message="secretRef and credential are mutually exclusive; use credential.secretRef instead"
+// +kubebuilder:validation:XValidation:rule="!(self.type in ['bedrock', 'vertex', 'azure-ai']) || has(self.platform)",message="platform is required for hyperscaler provider types (bedrock, vertex, azure-ai)"
 type ProviderSpec struct {
 	// type specifies the provider type.
 	// +kubebuilder:validation:Required
@@ -98,6 +131,11 @@ type ProviderSpec struct {
 	// Useful for proxies or self-hosted models.
 	// +optional
 	BaseURL string `json:"baseURL,omitempty"`
+
+	// platform defines hyperscaler-specific configuration.
+	// Required for provider types: bedrock, vertex, azure-ai.
+	// +optional
+	Platform *PlatformConfig `json:"platform,omitempty"`
 
 	// secretRef references a Secret containing API credentials.
 	// Optional for providers that don't require credentials (e.g., mock, ollama).

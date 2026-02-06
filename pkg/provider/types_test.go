@@ -40,6 +40,9 @@ func TestType_IsValid(t *testing.T) {
 		{"gemini", TypeGemini, true},
 		{"ollama", TypeOllama, true},
 		{"mock", TypeMock, true},
+		{"bedrock", TypeBedrock, true},
+		{"vertex", TypeVertex, true},
+		{"azure-ai", TypeAzureAI, true},
 		{"invalid", Type("invalid"), false},
 		{"empty", Type(""), false},
 	}
@@ -67,6 +70,9 @@ func TestType_RequiresCredentials(t *testing.T) {
 		{"gemini", TypeGemini, true},
 		{"ollama", TypeOllama, false},
 		{"mock", TypeMock, false},
+		{"bedrock", TypeBedrock, false},
+		{"vertex", TypeVertex, false},
+		{"azure-ai", TypeAzureAI, false},
 	}
 
 	for _, tt := range tests {
@@ -78,7 +84,7 @@ func TestType_RequiresCredentials(t *testing.T) {
 
 func TestValidTypes_Complete(t *testing.T) {
 	// Ensure ValidTypes contains all defined constants
-	expected := []Type{TypeClaude, TypeOpenAI, TypeGemini, TypeOllama, TypeMock}
+	expected := []Type{TypeClaude, TypeOpenAI, TypeGemini, TypeOllama, TypeMock, TypeBedrock, TypeVertex, TypeAzureAI}
 	assert.ElementsMatch(t, expected, ValidTypes)
 }
 
@@ -100,7 +106,7 @@ func TestKubebuilderEnumAnnotation(t *testing.T) {
 
 	// Look for the pattern: enum annotation followed by "type ProviderType string"
 	// This ensures we find the right enum, not FacadeType or other enums
-	enumRegex := regexp.MustCompile(`\+kubebuilder:validation:Enum=([a-z;]+)\s*\n\s*type ProviderType string`)
+	enumRegex := regexp.MustCompile(`\+kubebuilder:validation:Enum=([a-z;-]+)\s*\n\s*type ProviderType string`)
 
 	matches := enumRegex.FindStringSubmatch(string(content))
 	require.Len(t, matches, 2, "kubebuilder enum annotation for ProviderType not found in agentruntime_types.go")
