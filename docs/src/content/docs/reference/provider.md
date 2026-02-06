@@ -84,6 +84,32 @@ spec:
   baseURL: https://my-openai-proxy.internal/v1
 ```
 
+### `capabilities`
+
+Lists what modalities and features this provider supports. Used for capability-based filtering when binding Arena providers. The field is optional — existing providers continue to work without it.
+
+| Value | Description |
+|-------|-------------|
+| `text` | Text generation |
+| `streaming` | Streaming responses |
+| `vision` | Image/visual input |
+| `tools` | Tool/function calling |
+| `json` | Structured JSON output |
+| `audio` | Audio input/output |
+| `video` | Video input |
+| `documents` | Document (PDF) input |
+| `duplex` | Full-duplex (bidirectional streaming) |
+
+```yaml
+spec:
+  capabilities:
+    - text
+    - streaming
+    - vision
+    - tools
+    - json
+```
+
 ### `defaults`
 
 Tuning parameters applied to all requests using this provider.
@@ -172,6 +198,13 @@ spec:
 
   secretRef:
     name: anthropic-credentials
+
+  capabilities:
+    - text
+    - streaming
+    - vision
+    - tools
+    - json
 
   defaults:
     temperature: "0.7"
