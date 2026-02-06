@@ -550,10 +550,10 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  workspace: default
+  workspace: %s
   projectId: test-project
   idleTimeout: 5m
-`, devSessionName, arenaNamespace)
+`, devSessionName, arenaNamespace, arenaNamespace)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(devSessionManifest)
@@ -651,10 +651,10 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  workspace: default
+  workspace: %s
   projectId: test-project-with-provider
   idleTimeout: 5m
-`, devSessionName, arenaNamespace)
+`, devSessionName, arenaNamespace, arenaNamespace)
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(devSessionManifest)
