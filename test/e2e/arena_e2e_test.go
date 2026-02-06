@@ -551,7 +551,7 @@ metadata:
   namespace: %s
 spec:
   projectId: test-project
-  ttl: 5m
+  idleTimeout: 5m
 `, devSessionName, arenaNamespace)
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -651,7 +651,7 @@ metadata:
   namespace: %s
 spec:
   projectId: test-project-with-provider
-  ttl: 5m
+  idleTimeout: 5m
 `, devSessionName, arenaNamespace)
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
