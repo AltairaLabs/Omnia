@@ -718,10 +718,14 @@ func applyProviderOverrides(
 				},
 			}
 
-			// Set credential from env var if specified
+			// Set credential from override config
 			if p.SecretEnvVar != "" {
 				provider.Credential = &config.CredentialConfig{
 					CredentialEnv: p.SecretEnvVar,
+				}
+			} else if p.CredentialFile != "" {
+				provider.Credential = &config.CredentialConfig{
+					CredentialFile: p.CredentialFile,
 				}
 			}
 
@@ -742,6 +746,12 @@ func applyProviderOverrides(
 						credStatus = fmt.Sprintf("✓ %s set", p.SecretEnvVar)
 					} else {
 						credStatus = fmt.Sprintf("✗ %s MISSING", p.SecretEnvVar)
+					}
+				} else if p.CredentialFile != "" {
+					if _, err := os.Stat(p.CredentialFile); err == nil {
+						credStatus = fmt.Sprintf("✓ file %s exists", p.CredentialFile)
+					} else {
+						credStatus = fmt.Sprintf("✗ file %s MISSING", p.CredentialFile)
 					}
 				}
 				fmt.Printf("  Provider override: %s (%s/%s) group=%s [%s]\n",

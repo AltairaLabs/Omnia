@@ -328,6 +328,187 @@ func TestLoadProvidersMultiple(t *testing.T) {
 	assert.Contains(t, result, "claude-provider")
 }
 
+// TestConvertProviderWithCredentialEnvVar tests provider with credential.envVar set.
+func TestConvertProviderWithCredentialEnvVar(t *testing.T) {
+	t.Setenv("CUSTOM_API_KEY", "test-key-value")
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "envvar-provider",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeClaude,
+			Model: "claude-3",
+			Credential: &corev1alpha1.CredentialConfig{
+				EnvVar: "CUSTOM_API_KEY",
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	require.NotNil(t, result.Credential)
+	assert.Equal(t, "CUSTOM_API_KEY", result.Credential.CredentialEnv)
+}
+
+// TestConvertProviderWithCredentialEnvVarNotSet tests provider with credential.envVar when env is not set.
+func TestConvertProviderWithCredentialEnvVarNotSet(t *testing.T) {
+	t.Setenv("CUSTOM_API_KEY", "")
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "envvar-provider-unset",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeClaude,
+			Model: "claude-3",
+			Credential: &corev1alpha1.CredentialConfig{
+				EnvVar: "CUSTOM_API_KEY",
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	assert.Nil(t, result.Credential)
+}
+
+// TestConvertProviderWithCredentialFilePath tests provider with credential.filePath.
+func TestConvertProviderWithCredentialFilePath(t *testing.T) {
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "filepath-provider",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeClaude,
+			Model: "claude-3",
+			Credential: &corev1alpha1.CredentialConfig{
+				FilePath: "/var/secrets/api-key",
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	require.NotNil(t, result.Credential)
+	assert.Equal(t, "/var/secrets/api-key", result.Credential.CredentialFile)
+}
+
+// TestConvertProviderWithCredentialSecretRef tests provider with credential.secretRef and env set.
+func TestConvertProviderWithCredentialSecretRef(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key-from-secret")
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "secretref-provider",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeClaude,
+			Model: "claude-3",
+			Credential: &corev1alpha1.CredentialConfig{
+				SecretRef: &corev1alpha1.SecretKeyRef{
+					Name: "my-secret",
+				},
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	require.NotNil(t, result.Credential)
+	assert.Equal(t, "ANTHROPIC_API_KEY", result.Credential.CredentialEnv)
+}
+
+// TestConvertProviderWithCredentialSecretRefNotSet tests provider with credential.secretRef when env is not set.
+func TestConvertProviderWithCredentialSecretRefNotSet(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "secretref-provider-unset",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeClaude,
+			Model: "claude-3",
+			Credential: &corev1alpha1.CredentialConfig{
+				SecretRef: &corev1alpha1.SecretKeyRef{
+					Name: "my-secret",
+				},
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	assert.Nil(t, result.Credential)
+}
+
+// TestConvertProviderWithLegacySecretRef tests provider with legacy top-level secretRef.
+func TestConvertProviderWithLegacySecretRef(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-legacy-key")
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-provider",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeOpenAI,
+			Model: "gpt-4",
+			SecretRef: &corev1alpha1.SecretKeyRef{
+				Name: "my-secret",
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	require.NotNil(t, result.Credential)
+	assert.Equal(t, "OPENAI_API_KEY", result.Credential.CredentialEnv)
+}
+
+// TestConvertProviderWithLegacySecretRefNotSet tests legacy secretRef when env is not set.
+func TestConvertProviderWithLegacySecretRefNotSet(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+
+	loader := newTestK8sProviderLoader(t, "test-namespace")
+
+	provider := &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-provider-unset",
+			Namespace: "test-namespace",
+		},
+		Spec: corev1alpha1.ProviderSpec{
+			Type:  corev1alpha1.ProviderTypeOpenAI,
+			Model: "gpt-4",
+			SecretRef: &corev1alpha1.SecretKeyRef{
+				Name: "my-secret",
+			},
+		},
+	}
+
+	result := loader.convertProvider(provider)
+
+	assert.Nil(t, result.Credential)
+}
+
 // TestDevConsoleConstants tests that the constants are set correctly.
 func TestDevConsoleConstants(t *testing.T) {
 	assert.Equal(t, "/tmp/arena-dev-console-output", devConsoleOutputDir)

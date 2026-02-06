@@ -275,6 +275,110 @@ func TestValidateProviderCredentials(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 	})
+
+	t.Run("explicit CredentialEnv set and present", func(t *testing.T) {
+		t.Setenv("CUSTOM_API_KEY", "my-key")
+		explicitCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"custom-provider": {
+					ID:   "custom-provider",
+					Type: "openai",
+					Credential: &config.CredentialConfig{
+						CredentialEnv: "CUSTOM_API_KEY",
+					},
+				},
+			},
+		}
+		err := ValidateProviderCredentials(explicitCfg, "custom-provider")
+		assert.NoError(t, err)
+	})
+
+	t.Run("explicit CredentialEnv set but missing", func(t *testing.T) {
+		_ = os.Unsetenv("CUSTOM_API_KEY_MISSING")
+		explicitCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"custom-provider": {
+					ID:   "custom-provider",
+					Type: "openai",
+					Credential: &config.CredentialConfig{
+						CredentialEnv: "CUSTOM_API_KEY_MISSING",
+					},
+				},
+			},
+		}
+		err := ValidateProviderCredentials(explicitCfg, "custom-provider")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "CUSTOM_API_KEY_MISSING")
+	})
+
+	t.Run("explicit CredentialFile set and exists", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "credential-test-*")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name()) //nolint:errcheck
+		require.NoError(t, tmpFile.Close())
+
+		explicitCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"file-provider": {
+					ID:   "file-provider",
+					Type: "openai",
+					Credential: &config.CredentialConfig{
+						CredentialFile: tmpFile.Name(),
+					},
+				},
+			},
+		}
+		err = ValidateProviderCredentials(explicitCfg, "file-provider")
+		assert.NoError(t, err)
+	})
+
+	t.Run("explicit CredentialFile set but missing", func(t *testing.T) {
+		explicitCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"file-provider": {
+					ID:   "file-provider",
+					Type: "openai",
+					Credential: &config.CredentialConfig{
+						CredentialFile: "/nonexistent/path/to/credential",
+					},
+				},
+			},
+		}
+		err := ValidateProviderCredentials(explicitCfg, "file-provider")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "credential file")
+	})
+
+	t.Run("explicit APIKey set", func(t *testing.T) {
+		explicitCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"apikey-provider": {
+					ID:   "apikey-provider",
+					Type: "openai",
+					Credential: &config.CredentialConfig{
+						APIKey: "sk-hardcoded-key",
+					},
+				},
+			},
+		}
+		err := ValidateProviderCredentials(explicitCfg, "apikey-provider")
+		assert.NoError(t, err)
+	})
+
+	t.Run("no credential config falls back to legacy", func(t *testing.T) {
+		_ = os.Unsetenv("OPENAI_API_KEY")
+		legacyCfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"legacy-provider": {
+					ID:   "legacy-provider",
+					Type: "openai",
+				},
+			},
+		}
+		err := ValidateProviderCredentials(legacyCfg, "legacy-provider")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "missing credentials")
+	})
 }
 
 func TestValidateProviderCredentialsByType(t *testing.T) {

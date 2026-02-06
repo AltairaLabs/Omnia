@@ -171,15 +171,37 @@ func GetSecretRefsForProvider(providerType string) []SecretRef {
 	return refs
 }
 
-// ValidateProviderCredentials checks if the required environment variables
-// are set for a provider. This is used by workers to validate credentials
-// before executing.
+// ValidateProviderCredentials checks if credentials are available for a provider.
+// It first checks the provider's explicit Credential config (APIKey, CredentialEnv,
+// CredentialFile), then falls back to the legacy default env var lookup.
 func ValidateProviderCredentials(cfg *config.Config, providerID string) error {
 	provider := cfg.LoadedProviders[providerID]
 	if provider == nil {
 		return fmt.Errorf("provider %s not found in config", providerID)
 	}
 
+	// If the provider has an explicit credential config, validate that
+	if provider.Credential != nil {
+		if provider.Credential.APIKey != "" {
+			return nil
+		}
+		if provider.Credential.CredentialEnv != "" {
+			if os.Getenv(provider.Credential.CredentialEnv) != "" {
+				return nil
+			}
+			return fmt.Errorf("missing credentials for provider %s: env var %s is not set",
+				providerID, provider.Credential.CredentialEnv)
+		}
+		if provider.Credential.CredentialFile != "" {
+			if _, err := os.Stat(provider.Credential.CredentialFile); err == nil {
+				return nil
+			}
+			return fmt.Errorf("missing credentials for provider %s: credential file %s not found",
+				providerID, provider.Credential.CredentialFile)
+		}
+	}
+
+	// Legacy fallback: check default env vars for this provider type
 	envVars := GetAPIKeyEnvVars(provider.Type)
 	if len(envVars) == 0 {
 		// Provider doesn't require credentials
