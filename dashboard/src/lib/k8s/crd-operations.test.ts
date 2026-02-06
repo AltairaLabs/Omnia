@@ -80,6 +80,21 @@ const mockEventList = {
   ],
 };
 
+const mockPodEventList = {
+  items: [
+    {
+      type: "Warning",
+      reason: "BackOff",
+      message: "Back-off restarting failed container runtime",
+      firstTimestamp: new Date("2024-01-01T10:05:00Z"),
+      lastTimestamp: new Date("2024-01-01T10:10:00Z"),
+      count: 5,
+      source: { component: "kubelet", host: "node-1" },
+      involvedObject: { kind: "Pod", name: "agent-1-pod-abc123", namespace: "workspace-ns" },
+    },
+  ],
+};
+
 // Mock API classes
 const mockListNamespacedCustomObject = vi.fn();
 const mockGetNamespacedCustomObject = vi.fn();
@@ -423,8 +438,48 @@ describe("crd-operations", () => {
   });
 
   describe("getResourceEvents", () => {
-    it("should get events for a resource", async () => {
+    it("should get events for a resource and its pods", async () => {
+      // Mock resource events
+      mockListNamespacedEvent
+        .mockResolvedValueOnce(mockEventList) // First call: resource events
+        .mockResolvedValueOnce(mockPodEventList); // Second call: pod events
+
+      // Mock pod list
+      mockListNamespacedPod.mockResolvedValue(mockPodList);
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      // Should have both resource and pod events
+      expect(result).toHaveLength(2);
+      expect(result.find((e) => e.reason === "Created")).toBeDefined();
+      expect(result.find((e) => e.reason === "BackOff")).toBeDefined();
+
+      // Verify resource events were fetched
+      expect(mockListNamespacedEvent).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        fieldSelector: "involvedObject.kind=AgentRuntime,involvedObject.name=agent-1",
+      });
+
+      // Verify pods were fetched
+      expect(mockListNamespacedPod).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        labelSelector: "app.kubernetes.io/instance=agent-1",
+      });
+
+      // Verify pod events were fetched
+      expect(mockListNamespacedEvent).toHaveBeenCalledWith({
+        namespace: "workspace-ns",
+        fieldSelector: "involvedObject.kind=Pod,involvedObject.name=agent-1-pod-abc123",
+      });
+    });
+
+    it("should return only resource events when no pods found", async () => {
       mockListNamespacedEvent.mockResolvedValue(mockEventList);
+      mockListNamespacedPod.mockResolvedValue({ items: [] });
 
       const result = await crdOperations.getResourceEvents(
         defaultOptions,
@@ -434,15 +489,11 @@ describe("crd-operations", () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].reason).toBe("Created");
-      expect(result[0].type).toBe("Normal");
-      expect(mockListNamespacedEvent).toHaveBeenCalledWith({
-        namespace: "workspace-ns",
-        fieldSelector: "involvedObject.kind=AgentRuntime,involvedObject.name=agent-1",
-      });
     });
 
     it("should return empty array when no events found", async () => {
       mockListNamespacedEvent.mockResolvedValue({ items: [] });
+      mockListNamespacedPod.mockResolvedValue({ items: [] });
 
       const result = await crdOperations.getResourceEvents(
         defaultOptions,
@@ -451,6 +502,45 @@ describe("crd-operations", () => {
       );
 
       expect(result).toHaveLength(0);
+    });
+
+    it("should deduplicate events with same key", async () => {
+      const duplicateEvent = {
+        items: [
+          {
+            type: "Warning",
+            reason: "BackOff",
+            message: "Back-off restarting failed container runtime",
+            firstTimestamp: new Date("2024-01-01T10:05:00Z"),
+            lastTimestamp: new Date("2024-01-01T10:15:00Z"), // Different timestamp
+            count: 10,
+            source: { component: "kubelet", host: "node-1" },
+            involvedObject: { kind: "Pod", name: "agent-1-pod-abc123", namespace: "workspace-ns" },
+          },
+        ],
+      };
+
+      mockListNamespacedEvent
+        .mockResolvedValueOnce({ items: [] }) // No resource events
+        .mockResolvedValueOnce(mockPodEventList) // First pod event
+        .mockResolvedValueOnce(duplicateEvent); // Duplicate pod event (e.g., from second pod)
+
+      mockListNamespacedPod.mockResolvedValue({
+        items: [
+          { metadata: { name: "agent-1-pod-abc123" } },
+          { metadata: { name: "agent-1-pod-def456" } },
+        ],
+      });
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      // Should deduplicate based on kind:name:reason:message
+      expect(result).toHaveLength(1);
+      expect(result[0].reason).toBe("BackOff");
     });
   });
 

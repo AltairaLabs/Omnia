@@ -304,54 +304,63 @@ export async function getPodLogs(
   });
 }
 
+type K8sEventResult = {
+  type: "Normal" | "Warning";
+  reason: string;
+  message: string;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  count: number;
+  source: { component?: string; host?: string };
+  involvedObject: { kind: string; name: string; namespace?: string };
+};
+
 /**
- * Get Kubernetes events related to a resource.
+ * Get Kubernetes events related to a resource and its associated pods.
+ *
+ * This fetches events for both the CRD resource itself (e.g., AgentRuntime)
+ * and any pods that belong to it (via app.kubernetes.io/instance label).
+ * This provides visibility into pod-level issues like CrashLoopBackOff,
+ * ImagePullBackOff, OOMKilled, etc.
  *
  * @param options - Workspace client options
  * @param resourceKind - Kind of the resource (e.g., "AgentRuntime")
  * @param resourceName - Name of the resource
- * @returns Array of events
+ * @returns Array of events from both the resource and its pods
  */
 export async function getResourceEvents(
   options: WorkspaceClientOptions,
   resourceKind: string,
   resourceName: string
-): Promise<
-  Array<{
-    type: "Normal" | "Warning";
-    reason: string;
-    message: string;
-    firstTimestamp: string;
-    lastTimestamp: string;
-    count: number;
-    source: { component?: string; host?: string };
-    involvedObject: { kind: string; name: string; namespace?: string };
-  }>
-> {
+): Promise<K8sEventResult[]> {
   return withTokenRefresh(options, async () => {
     const coreApi = await getWorkspaceCoreApi(options);
 
-    // Field selector for events related to this resource
-    const fieldSelector = `involvedObject.kind=${resourceKind},involvedObject.name=${resourceName}`;
+    // Helper to safely convert timestamp to ISO string
+    // K8s client may return Date objects or strings depending on the field
+    const toISOString = (ts: Date | string | undefined): string => {
+      if (!ts) return "";
+      if (typeof ts === "string") return ts;
+      if (ts instanceof Date) return ts.toISOString();
+      // Handle any other object with toISOString method
+      if (typeof (ts as { toISOString?: () => string }).toISOString === "function") {
+        return (ts as { toISOString: () => string }).toISOString();
+      }
+      return String(ts);
+    };
 
-    const eventsResponse = await coreApi.listNamespacedEvent({
-      namespace: options.namespace,
-      fieldSelector,
-    });
-
-    const events = eventsResponse.items || [];
-
-    return events.map((event) => ({
+    // Helper to map K8s event to our result type
+    const mapEvent = (event: k8s.CoreV1Event): K8sEventResult => ({
       type: (event.type as "Normal" | "Warning") || "Normal",
       reason: event.reason || "",
       message: event.message || "",
       firstTimestamp:
-        event.firstTimestamp?.toISOString() ||
-        event.eventTime?.toISOString() ||
+        toISOString(event.firstTimestamp) ||
+        toISOString(event.eventTime) ||
         "",
       lastTimestamp:
-        event.lastTimestamp?.toISOString() ||
-        event.eventTime?.toISOString() ||
+        toISOString(event.lastTimestamp) ||
+        toISOString(event.eventTime) ||
         "",
       count: event.count || 1,
       source: {
@@ -359,11 +368,64 @@ export async function getResourceEvents(
         host: event.source?.host,
       },
       involvedObject: {
-        kind: event.involvedObject?.kind || resourceKind,
-        name: event.involvedObject?.name || resourceName,
+        kind: event.involvedObject?.kind || "",
+        name: event.involvedObject?.name || "",
         namespace: event.involvedObject?.namespace,
       },
-    }));
+    });
+
+    // 1. Fetch events for the CRD resource itself
+    const resourceFieldSelector = `involvedObject.kind=${resourceKind},involvedObject.name=${resourceName}`;
+    const resourceEventsResponse = await coreApi.listNamespacedEvent({
+      namespace: options.namespace,
+      fieldSelector: resourceFieldSelector,
+    });
+    const resourceEvents = (resourceEventsResponse.items || []).map(mapEvent);
+
+    // 2. Find pods belonging to this resource and fetch their events
+    const podEvents: K8sEventResult[] = [];
+    try {
+      // Pods are labeled with app.kubernetes.io/instance=<resourceName>
+      const podsResponse = await coreApi.listNamespacedPod({
+        namespace: options.namespace,
+        labelSelector: `app.kubernetes.io/instance=${resourceName}`,
+      });
+
+      const pods = podsResponse.items || [];
+
+      // Fetch events for each pod
+      for (const pod of pods) {
+        const podName = pod.metadata?.name;
+        if (!podName) continue;
+
+        const podFieldSelector = `involvedObject.kind=Pod,involvedObject.name=${podName}`;
+        const podEventsResponse = await coreApi.listNamespacedEvent({
+          namespace: options.namespace,
+          fieldSelector: podFieldSelector,
+        });
+
+        const mappedPodEvents = (podEventsResponse.items || []).map(mapEvent);
+        podEvents.push(...mappedPodEvents);
+      }
+    } catch (error) {
+      // Log but don't fail if pod events can't be fetched
+      console.warn(`Failed to fetch pod events for ${resourceName}:`, error);
+    }
+
+    // 3. Combine and deduplicate events (by involvedObject.name + reason + message)
+    const allEvents = [...resourceEvents, ...podEvents];
+    const seen = new Set<string>();
+    const deduped: K8sEventResult[] = [];
+
+    for (const event of allEvents) {
+      const key = `${event.involvedObject.kind}:${event.involvedObject.name}:${event.reason}:${event.message}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(event);
+      }
+    }
+
+    return deduped;
   });
 }
 
