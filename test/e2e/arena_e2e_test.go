@@ -573,7 +573,7 @@ spec:
 			By("verifying the dev console pod is running")
 			verifyPodRunning := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "pods", "-n", arenaNamespace,
-					"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+					"-l", fmt.Sprintf("arena.omnia.altairalabs.ai/dev-session=%s", devSessionName),
 					"-o", "jsonpath={.items[0].status.phase}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -583,7 +583,7 @@ spec:
 
 			By("checking dev console pod logs for startup errors")
 			cmd = exec.Command("kubectl", "logs", "-n", arenaNamespace,
-				"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+				"-l", fmt.Sprintf("arena.omnia.altairalabs.ai/dev-session=%s", devSessionName),
 				"--tail=50")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -601,7 +601,7 @@ spec:
 			// Port-forward to the dev console pod and check health
 			podName := ""
 			cmd = exec.Command("kubectl", "get", "pods", "-n", arenaNamespace,
-				"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+				"-l", fmt.Sprintf("arena.omnia.altairalabs.ai/dev-session=%s", devSessionName),
 				"-o", "jsonpath={.items[0].metadata.name}")
 			podNameOutput, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -673,7 +673,7 @@ spec:
 
 			By("checking for any BuildEngineComponents errors in logs")
 			cmd = exec.Command("kubectl", "logs", "-n", arenaNamespace,
-				"-l", fmt.Sprintf("arena.altairalabs.ai/dev-session=%s", devSessionName),
+				"-l", fmt.Sprintf("arena.omnia.altairalabs.ai/dev-session=%s", devSessionName),
 				"--tail=100")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
