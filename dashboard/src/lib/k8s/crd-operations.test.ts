@@ -504,6 +504,184 @@ describe("crd-operations", () => {
       expect(result).toHaveLength(0);
     });
 
+    it("should handle string timestamps in events", async () => {
+      const stringTimestampEvents = {
+        items: [
+          {
+            type: "Normal",
+            reason: "Scheduled",
+            message: "Successfully assigned pod",
+            firstTimestamp: "2024-01-01T10:00:00Z",
+            lastTimestamp: "2024-01-01T10:00:00Z",
+            count: 1,
+            source: { component: "scheduler" },
+            involvedObject: { kind: "AgentRuntime", name: "agent-1", namespace: "workspace-ns" },
+          },
+        ],
+      };
+
+      mockListNamespacedEvent.mockResolvedValue(stringTimestampEvents);
+      mockListNamespacedPod.mockResolvedValue({ items: [] });
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].firstTimestamp).toBe("2024-01-01T10:00:00Z");
+      expect(result[0].lastTimestamp).toBe("2024-01-01T10:00:00Z");
+    });
+
+    it("should handle missing timestamps in events", async () => {
+      const noTimestampEvents = {
+        items: [
+          {
+            type: "Normal",
+            reason: "Created",
+            message: "Created container",
+            // No firstTimestamp or lastTimestamp, but has eventTime
+            eventTime: new Date("2024-01-01T12:00:00Z"),
+            count: 1,
+            source: {},
+            involvedObject: { kind: "AgentRuntime", name: "agent-1", namespace: "workspace-ns" },
+          },
+          {
+            type: "Warning",
+            reason: "Failed",
+            message: "Failed to pull image",
+            // No timestamps at all
+            count: 1,
+            source: {},
+            involvedObject: { kind: "AgentRuntime", name: "agent-1", namespace: "workspace-ns" },
+          },
+        ],
+      };
+
+      mockListNamespacedEvent.mockResolvedValue(noTimestampEvents);
+      mockListNamespacedPod.mockResolvedValue({ items: [] });
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      expect(result).toHaveLength(2);
+      // Event with eventTime should use it as fallback
+      expect(result[0].firstTimestamp).toBe("2024-01-01T12:00:00.000Z");
+      // Event with no timestamps should return empty string
+      expect(result[1].firstTimestamp).toBe("");
+      expect(result[1].lastTimestamp).toBe("");
+    });
+
+    it("should handle non-Date object with toISOString method", async () => {
+      const customTimestamp = { toISOString: () => "2024-06-15T08:00:00Z" };
+      const eventWithCustomTimestamp = {
+        items: [
+          {
+            type: "Normal",
+            reason: "Synced",
+            message: "Synced successfully",
+            firstTimestamp: customTimestamp,
+            lastTimestamp: customTimestamp,
+            count: 1,
+            source: { component: "controller" },
+            involvedObject: { kind: "AgentRuntime", name: "agent-1", namespace: "workspace-ns" },
+          },
+        ],
+      };
+
+      mockListNamespacedEvent.mockResolvedValue(eventWithCustomTimestamp);
+      mockListNamespacedPod.mockResolvedValue({ items: [] });
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].firstTimestamp).toBe("2024-06-15T08:00:00Z");
+    });
+
+    it("should handle unexpected timestamp type with String fallback", async () => {
+      const eventWithNumericTimestamp = {
+        items: [
+          {
+            type: "Normal",
+            reason: "Updated",
+            message: "Updated resource",
+            firstTimestamp: 1704067200000,
+            lastTimestamp: 1704067200000,
+            count: 1,
+            source: {},
+            involvedObject: { kind: "AgentRuntime", name: "agent-1", namespace: "workspace-ns" },
+          },
+        ],
+      };
+
+      mockListNamespacedEvent.mockResolvedValue(eventWithNumericTimestamp);
+      mockListNamespacedPod.mockResolvedValue({ items: [] });
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].firstTimestamp).toBe("1704067200000");
+    });
+
+    it("should continue fetching events when pod listing fails", async () => {
+      mockListNamespacedEvent.mockResolvedValue(mockEventList);
+      mockListNamespacedPod.mockRejectedValue(new Error("Forbidden"));
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      // Should still return resource events
+      expect(result).toHaveLength(1);
+      expect(result[0].reason).toBe("Created");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to fetch pod events for agent-1:",
+        expect.any(Error)
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it("should skip pods without metadata.name", async () => {
+      mockListNamespacedEvent
+        .mockResolvedValueOnce(mockEventList) // Resource events
+        .mockResolvedValueOnce(mockPodEventList); // Pod events for valid pod
+
+      mockListNamespacedPod.mockResolvedValue({
+        items: [
+          { metadata: {} }, // Pod without name - should be skipped
+          { metadata: { name: "agent-1-pod-abc123" } }, // Valid pod
+        ],
+      });
+
+      const result = await crdOperations.getResourceEvents(
+        defaultOptions,
+        "AgentRuntime",
+        "agent-1"
+      );
+
+      // Should have resource event + valid pod event
+      expect(result).toHaveLength(2);
+      // Should only fetch events for the named pod
+      expect(mockListNamespacedEvent).toHaveBeenCalledTimes(2);
+    });
+
     it("should deduplicate events with same key", async () => {
       const duplicateEvent = {
         items: [
@@ -711,6 +889,33 @@ describe("crd-operations", () => {
       expect(result?.["test.yaml"]).toContain("kind: Test");
     });
 
+    it("should fall back to empty object on tar.gz extraction error", async () => {
+      // Create invalid gzip data that will cause extraction error
+      const invalidTarGz = gzipSync(Buffer.from("not a valid tar archive"));
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      mockReadNamespacedConfigMap.mockResolvedValue({
+        binaryData: {
+          "pack.tar.gz": invalidTarGz.toString("base64"),
+        },
+        data: {
+          "fallback.yaml": "fallback content",
+        },
+      });
+
+      const result = await crdOperations.getConfigMapContent(
+        defaultOptions,
+        "my-corrupt-tar-config"
+      );
+
+      // Should fall back to data since tar extraction yielded no valid files
+      expect(result).toBeDefined();
+      expect(result?.["fallback.yaml"]).toBe("fallback content");
+
+      errorSpy.mockRestore();
+    });
+
     it("should fall back to data when tar.gz extraction yields no files", async () => {
       // Create an empty tar.gz (just end-of-archive markers)
       const emptyTarGz = gzipSync(Buffer.alloc(1024, 0));
@@ -800,11 +1005,57 @@ describe("crd-operations", () => {
         expect(crdOperations.isForbiddenError({ response: { statusCode: 403 } })).toBe(true);
       });
 
+      it("should return true for HTTP-Code message format", () => {
+        expect(crdOperations.isForbiddenError({ message: "HTTP-Code: 403" })).toBe(true);
+      });
+
+      it("should return true for JSON body with code", () => {
+        expect(crdOperations.isForbiddenError({ body: JSON.stringify({ code: 403 }) })).toBe(true);
+      });
+
+      it("should return true for object body with code", () => {
+        expect(crdOperations.isForbiddenError({ body: { code: 403 } })).toBe(true);
+      });
+
+      it("should return false for non-JSON string body", () => {
+        expect(crdOperations.isForbiddenError({ body: "not json" })).toBe(false);
+      });
+
       it("should return false for other errors", () => {
         expect(crdOperations.isForbiddenError({ statusCode: 404 })).toBe(false);
         expect(crdOperations.isForbiddenError(new Error("test"))).toBe(false);
         expect(crdOperations.isForbiddenError(null)).toBe(false);
       });
+    });
+  });
+
+  describe("getCrd - extractStatusCode edge cases", () => {
+    it("should handle HTTP-Code format in error message as 404", async () => {
+      mockGetNamespacedCustomObject.mockRejectedValue({ message: "HTTP-Code: 404" });
+
+      const result = await crdOperations.getCrd(defaultOptions, "agentruntimes", "missing");
+
+      expect(result).toBeNull();
+    });
+
+    it("should handle JSON body with 404 code", async () => {
+      mockGetNamespacedCustomObject.mockRejectedValue({
+        body: JSON.stringify({ code: 404, message: "Not Found" }),
+      });
+
+      const result = await crdOperations.getCrd(defaultOptions, "agentruntimes", "missing");
+
+      expect(result).toBeNull();
+    });
+
+    it("should handle object body with 404 code", async () => {
+      mockGetNamespacedCustomObject.mockRejectedValue({
+        body: { code: 404, message: "Not Found" },
+      });
+
+      const result = await crdOperations.getCrd(defaultOptions, "agentruntimes", "missing");
+
+      expect(result).toBeNull();
     });
   });
 });
