@@ -121,6 +121,8 @@ helm upgrade --install omnia charts/omnia \
     --set redis.master.persistence.enabled=false \
     --set nfs.server.enabled=false \
     --set nfs.csiDriver.enabled=false \
+    --set workspaceContent.persistence.accessModes[0]=ReadWriteOnce \
+    --set workspaceContent.persistence.storageClass=standard \
     --set prometheus.enabled=false \
     --set grafana.enabled=false \
     --set loki.enabled=false \
