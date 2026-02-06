@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"regexp"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -26,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -44,16 +47,28 @@ const (
 	secretKeyAPIKey = "api-key"
 )
 
+// Event reason constants
+const (
+	EventReasonCredentialInvalid   = "CredentialInvalid"
+	EventReasonMultipleCredentials = "MultipleCredentials"
+	EventReasonLegacySecretRefUsed = "LegacySecretRefUsed"
+)
+
+// envVarNameRegex validates environment variable names.
+var envVarNameRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
 // ProviderReconciler reconciles a Provider object
 type ProviderReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -77,43 +92,12 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
 	}
 
-	// Resolve the effective secret ref: credential.secretRef takes precedence over legacy secretRef
-	effectiveSecretRef := provider.Spec.SecretRef
-	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
-		effectiveSecretRef = provider.Spec.Credential.SecretRef
-	}
-
-	// Validate the secret reference (if specified)
-	if effectiveSecretRef != nil {
-		if err := r.validateSecretRefFrom(ctx, provider, effectiveSecretRef); err != nil {
-			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
-				"SecretNotFound", err.Error())
-			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
-			if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
-				log.Error(statusErr, "Failed to update status")
-			}
-			return ctrl.Result{}, err
+	// Validate credential configuration
+	if err := r.validateCredentialConfig(ctx, provider); err != nil {
+		if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
+			log.Error(statusErr, "Failed to update status")
 		}
-		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
-			"SecretFound", "Referenced secret exists")
-		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
-			"SecretRef", "Credential configured via secret reference")
-	} else if provider.Spec.Credential != nil && provider.Spec.Credential.EnvVar != "" {
-		// envVar credential — cannot validate at controller level, trust the user
-		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
-			"NoSecretRequired", "Credential provided via environment variable")
-		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
-			"EnvVar", fmt.Sprintf("Credential configured via environment variable %q", provider.Spec.Credential.EnvVar))
-	} else if provider.Spec.Credential != nil && provider.Spec.Credential.FilePath != "" {
-		// filePath credential — cannot validate at controller level, trust the user
-		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
-			"NoSecretRequired", "Credential provided via file path")
-		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
-			"FilePath", fmt.Sprintf("Credential configured via file path %q", provider.Spec.Credential.FilePath))
-	} else {
-		// No secret required for this provider
-		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
-			"NoSecretRequired", "Provider does not require credentials")
+		return ctrl.Result{}, err
 	}
 
 	// Validate credentials if enabled
@@ -150,11 +134,231 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-// validateSecretRefFrom validates a specific SecretKeyRef for the given provider.
-func (r *ProviderReconciler) validateSecretRefFrom(ctx context.Context, provider *omniav1alpha1.Provider, ref *omniav1alpha1.SecretKeyRef) error {
+// validateCredentialConfig dispatches to the appropriate credential validation strategy.
+func (r *ProviderReconciler) validateCredentialConfig(ctx context.Context, provider *omniav1alpha1.Provider) error {
+	if provider.Spec.Credential != nil {
+		// New credential block takes precedence
+		return r.validateCredentialBlock(ctx, provider)
+	}
+
+	if provider.Spec.SecretRef != nil {
+		// Legacy secretRef path
+		if err := r.validateSecretRef(ctx, provider); err != nil {
+			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+				"SecretNotFound", err.Error())
+			r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+				"SecretNotFound", err.Error())
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+			return err
+		}
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+			"SecretFound", "Referenced secret exists")
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+			"LegacySecretRef", "Credential configured via legacy secretRef")
+		r.emitWarningEvent(provider, EventReasonLegacySecretRefUsed,
+			"Provider uses deprecated top-level secretRef; migrate to spec.credential.secretRef")
+		return nil
+	}
+
+	// No credentials specified
+	if providerRequiresCredentials(provider.Spec.Type) {
+		msg := fmt.Sprintf("provider type %q requires credentials but none are configured", provider.Spec.Type)
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+			"NoSecretRequired", "Provider does not require credentials")
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"CredentialRequired", msg)
+		r.emitWarningEvent(provider, EventReasonCredentialInvalid, msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+		"NoSecretRequired", "Provider does not require credentials")
+	r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+		"NoCredentialRequired", "Provider type does not require credentials")
+	return nil
+}
+
+// validateCredentialBlock validates the credential block and dispatches to the correct strategy.
+func (r *ProviderReconciler) validateCredentialBlock(ctx context.Context, provider *omniav1alpha1.Provider) error {
+	cred := provider.Spec.Credential
+
+	// Count how many strategies are set
+	count := 0
+	if cred.SecretRef != nil {
+		count++
+	}
+	if cred.EnvVar != "" {
+		count++
+	}
+	if cred.FilePath != "" {
+		count++
+	}
+
+	if count == 0 {
+		msg := "credential block is set but no strategy is specified (secretRef, envVar, or filePath)"
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"NoStrategySpecified", msg)
+		r.emitWarningEvent(provider, EventReasonCredentialInvalid, msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	if count > 1 {
+		msg := "credential block has multiple strategies set; exactly one of secretRef, envVar, or filePath must be specified"
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"MultipleStrategies", msg)
+		r.emitWarningEvent(provider, EventReasonMultipleCredentials, msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	// Dispatch to the single strategy
+	switch {
+	case cred.SecretRef != nil:
+		return r.validateCredentialSecretRef(ctx, provider, cred.SecretRef)
+	case cred.EnvVar != "":
+		return r.validateCredentialEnvVar(provider, cred.EnvVar)
+	default:
+		return r.validateCredentialFilePath(provider, cred.FilePath)
+	}
+}
+
+// validateCredentialSecretRef validates a SecretKeyRef from the credential block.
+func (r *ProviderReconciler) validateCredentialSecretRef(ctx context.Context, provider *omniav1alpha1.Provider, ref *omniav1alpha1.SecretKeyRef) error {
 	secret := &corev1.Secret{}
 	key := types.NamespacedName{
 		Name:      ref.Name,
+		Namespace: provider.Namespace,
+	}
+
+	if err := r.Get(ctx, key, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			msg := fmt.Sprintf("secret %q not found in namespace %q", key.Name, key.Namespace)
+			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+				"SecretNotFound", msg)
+			r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+				"SecretNotFound", msg)
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+			return fmt.Errorf("%s", msg)
+		}
+		msg := fmt.Sprintf("failed to get secret %q: %v", key.Name, err)
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+			"SecretNotFound", msg)
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"SecretNotFound", msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	// Check for expected key if specified
+	if ref.Key != nil {
+		expectedKey := *ref.Key
+		if _, exists := secret.Data[expectedKey]; !exists {
+			msg := fmt.Sprintf("secret %q does not contain key %q", key.Name, expectedKey)
+			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+				"SecretKeyMissing", msg)
+			r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+				"SecretKeyMissing", msg)
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+			return fmt.Errorf("%s", msg)
+		}
+	} else {
+		// Check for provider-appropriate key
+		expectedKeys := getExpectedKeysForProvider(provider.Spec.Type)
+		found := false
+		for _, k := range expectedKeys {
+			if _, exists := secret.Data[k]; exists {
+				found = true
+				break
+			}
+		}
+		if !found {
+			msg := fmt.Sprintf("secret %q does not contain any expected API key (%v)", key.Name, expectedKeys)
+			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
+				"SecretKeyMissing", msg)
+			r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+				"SecretKeyMissing", msg)
+			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+			return fmt.Errorf("%s", msg)
+		}
+	}
+
+	r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+		"SecretFound", "Referenced secret exists")
+	r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+		"SecretFound", "Credential configured via secret reference")
+	return nil
+}
+
+// validateCredentialEnvVar validates an environment variable name.
+func (r *ProviderReconciler) validateCredentialEnvVar(provider *omniav1alpha1.Provider, envVar string) error {
+	if !envVarNameRegex.MatchString(envVar) {
+		msg := fmt.Sprintf("invalid environment variable name %q: must match [a-zA-Z_][a-zA-Z0-9_]*", envVar)
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"InvalidEnvVar", msg)
+		r.emitWarningEvent(provider, EventReasonCredentialInvalid, msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+		"NoSecretRequired", "Credential uses environment variable, no secret required")
+	r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+		"EnvVarConfigured", fmt.Sprintf("Credential configured via environment variable %q", envVar))
+	return nil
+}
+
+// validateCredentialFilePath validates that a file path is absolute and clean.
+func (r *ProviderReconciler) validateCredentialFilePath(provider *omniav1alpha1.Provider, path string) error {
+	if !filepath.IsAbs(path) {
+		msg := fmt.Sprintf("credential file path %q must be absolute", path)
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"InvalidFilePath", msg)
+		r.emitWarningEvent(provider, EventReasonCredentialInvalid, msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	cleaned := filepath.Clean(path)
+	if cleaned != path {
+		msg := fmt.Sprintf("credential file path %q is not clean (resolved to %q)", path, cleaned)
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionFalse,
+			"InvalidFilePath", msg)
+		r.emitWarningEvent(provider, EventReasonCredentialInvalid, msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+		"NoSecretRequired", "Credential uses file path, no secret required")
+	r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+		"FilePathConfigured", fmt.Sprintf("Credential configured via file path %q", path))
+	return nil
+}
+
+// providerRequiresCredentials returns whether the given provider type requires credentials.
+func providerRequiresCredentials(providerType omniav1alpha1.ProviderType) bool {
+	switch providerType {
+	case omniav1alpha1.ProviderTypeMock, omniav1alpha1.ProviderTypeOllama:
+		return false
+	default:
+		return true
+	}
+}
+
+// emitWarningEvent emits a Kubernetes warning event if a Recorder is available.
+func (r *ProviderReconciler) emitWarningEvent(provider *omniav1alpha1.Provider, reason, message string) {
+	if r.Recorder != nil {
+		r.Recorder.Event(provider, corev1.EventTypeWarning, reason, message)
+	}
+}
+
+// validateSecretRef validates that the referenced secret exists and has the expected key.
+func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *omniav1alpha1.Provider) error {
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{
+		Name:      provider.Spec.SecretRef.Name,
 		Namespace: provider.Namespace,
 	}
 
@@ -166,8 +370,8 @@ func (r *ProviderReconciler) validateSecretRefFrom(ctx context.Context, provider
 	}
 
 	// Check for expected key if specified
-	if ref.Key != nil {
-		expectedKey := *ref.Key
+	if provider.Spec.SecretRef.Key != nil {
+		expectedKey := *provider.Spec.SecretRef.Key
 		if _, exists := secret.Data[expectedKey]; !exists {
 			return fmt.Errorf("secret %q does not contain key %q", key.Name, expectedKey)
 		}
@@ -236,13 +440,14 @@ func (r *ProviderReconciler) findProvidersForSecret(ctx context.Context, obj cli
 
 	var requests []reconcile.Request
 	for _, p := range providerList.Items {
-		matched := false
+		matches := false
 		if p.Spec.SecretRef != nil && p.Spec.SecretRef.Name == secret.Name {
-			matched = true
-		} else if p.Spec.Credential != nil && p.Spec.Credential.SecretRef != nil && p.Spec.Credential.SecretRef.Name == secret.Name {
-			matched = true
+			matches = true
 		}
-		if matched {
+		if p.Spec.Credential != nil && p.Spec.Credential.SecretRef != nil && p.Spec.Credential.SecretRef.Name == secret.Name {
+			matches = true
+		}
+		if matches {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      p.Name,
