@@ -603,6 +603,9 @@ spec:
                     - gemini
                     - ollama
                     - mock
+                    - bedrock
+                    - vertex
+                    - azure-ai
                     type: string
                 required:
                 - type

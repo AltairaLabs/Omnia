@@ -1665,6 +1665,154 @@ var _ = Describe("Provider Controller", func() {
 		})
 	})
 
+	Context("providerRequiresCredentials for hyperscaler types", func() {
+		It("should return false for bedrock", func() {
+			Expect(providerRequiresCredentials(omniav1alpha1.ProviderTypeBedrock)).To(BeFalse())
+		})
+
+		It("should return false for vertex", func() {
+			Expect(providerRequiresCredentials(omniav1alpha1.ProviderTypeVertex)).To(BeFalse())
+		})
+
+		It("should return false for azure-ai", func() {
+			Expect(providerRequiresCredentials(omniav1alpha1.ProviderTypeAzureAI)).To(BeFalse())
+		})
+	})
+
+	Context("reconcile hyperscaler providers without credentials", func() {
+		var (
+			ctx      context.Context
+			provider *omniav1alpha1.Provider
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+		})
+
+		AfterEach(func() {
+			if provider != nil {
+				_ = k8sClient.Delete(ctx, provider)
+			}
+		})
+
+		It("should succeed when bedrock provider has no credentials", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-nocred",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			var credCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeCredentialConfigured {
+					credCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(credCondition).NotTo(BeNil())
+			Expect(credCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(credCondition.Reason).To(Equal("NoCredentialRequired"))
+		})
+
+		It("should succeed when vertex provider has no credentials", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vertex-nocred",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeVertex,
+					Model: "gemini-1.5-pro",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:    omniav1alpha1.PlatformTypeGCP,
+						Region:  "us-central1",
+						Project: "my-project",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+		})
+
+		It("should succeed when azure-ai provider has no credentials", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "azure-ai-nocred",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeAzureAI,
+					Model: "gpt-4o",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeAzure,
+						Region: "eastus",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+		})
+	})
+
 	Context("getExpectedKeysForProvider", func() {
 		It("should return correct keys for Claude", func() {
 			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeClaude)
@@ -1699,6 +1847,26 @@ var _ = Describe("Provider Controller", func() {
 
 		It("should return default keys for ollama provider", func() {
 			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeOllama)
+			Expect(keys).To(ContainElement("api-key"))
+		})
+
+		It("should return correct keys for Bedrock", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeBedrock)
+			Expect(keys).To(ContainElement("AWS_ACCESS_KEY_ID"))
+			Expect(keys).To(ContainElement("api-key"))
+		})
+
+		It("should return correct keys for Vertex", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeVertex)
+			Expect(keys).To(ContainElement("GOOGLE_APPLICATION_CREDENTIALS"))
+			Expect(keys).To(ContainElement("GOOGLE_API_KEY"))
+			Expect(keys).To(ContainElement("api-key"))
+		})
+
+		It("should return correct keys for Azure AI", func() {
+			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeAzureAI)
+			Expect(keys).To(ContainElement("AZURE_OPENAI_API_KEY"))
+			Expect(keys).To(ContainElement("AZURE_API_KEY"))
 			Expect(keys).To(ContainElement("api-key"))
 		})
 	})

@@ -163,6 +163,32 @@ spec:
                   model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
                   If not specified, the provider's default model is used.
                 type: string
+              platform:
+                description: |-
+                  platform defines hyperscaler-specific configuration.
+                  Required for provider types: bedrock, vertex, azure-ai.
+                properties:
+                  endpoint:
+                    description: endpoint overrides the default platform API endpoint.
+                    type: string
+                  project:
+                    description: project is the GCP project ID. Required for Vertex
+                      AI.
+                    type: string
+                  region:
+                    description: region is the cloud region (e.g., us-east-1, us-central1,
+                      eastus).
+                    type: string
+                  type:
+                    description: type is the cloud platform type.
+                    enum:
+                    - aws
+                    - gcp
+                    - azure
+                    type: string
+                required:
+                - type
+                type: object
               pricing:
                 description: |-
                   pricing configures cost tracking for this provider.
@@ -211,6 +237,9 @@ spec:
                 - gemini
                 - ollama
                 - mock
+                - bedrock
+                - vertex
+                - azure-ai
                 type: string
               validateCredentials:
                 default: false
@@ -225,6 +254,9 @@ spec:
             - message: secretRef and credential are mutually exclusive; use credential.secretRef
                 instead
               rule: '!(has(self.secretRef) && has(self.credential))'
+            - message: platform is required for hyperscaler provider types (bedrock,
+                vertex, azure-ai)
+              rule: '!(self.type in [''bedrock'', ''vertex'', ''azure-ai'']) || has(self.platform)'
           status:
             description: status defines the observed state of Provider
             properties:

@@ -248,7 +248,7 @@ type AutoscalingConfig struct {
 }
 
 // ProviderType defines the LLM provider type.
-// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock
+// +kubebuilder:validation:Enum=claude;openai;gemini;ollama;mock;bedrock;vertex;azure-ai
 type ProviderType string
 
 const (
@@ -264,6 +264,15 @@ const (
 	// ProviderTypeMock uses PromptKit's mock provider for testing.
 	// Does not require secretRef. Returns canned responses based on scenario.
 	ProviderTypeMock ProviderType = "mock"
+	// ProviderTypeBedrock uses AWS Bedrock for LLM access.
+	// Uses IAM-based authentication; does not require traditional API key credentials.
+	ProviderTypeBedrock ProviderType = "bedrock"
+	// ProviderTypeVertex uses GCP Vertex AI for LLM access.
+	// Uses workload identity or service account credentials.
+	ProviderTypeVertex ProviderType = "vertex"
+	// ProviderTypeAzureAI uses Azure AI Foundry for LLM access.
+	// Uses Azure-native authentication.
+	ProviderTypeAzureAI ProviderType = "azure-ai"
 )
 
 // TruncationStrategy defines how to handle context overflow.

@@ -273,7 +273,7 @@ export interface AgentRuntimeSpec {
     };
     /** type specifies the provider type.
      * "claude", "openai", "gemini", "ollama", or "mock". */
-    type: "claude" | "openai" | "gemini" | "ollama" | "mock";
+    type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "bedrock" | "vertex" | "azure-ai";
   };
   /** providerRef references a Provider resource for LLM configuration.
    * If specified, the referenced Provider's configuration is used.

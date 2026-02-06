@@ -41,6 +41,15 @@ const (
 	// TypeMock uses PromptKit's mock provider for testing.
 	// Does not require API credentials. Returns canned responses.
 	TypeMock Type = "mock"
+	// TypeBedrock uses AWS Bedrock for LLM access.
+	// Uses IAM-based authentication; does not require traditional API key credentials.
+	TypeBedrock Type = "bedrock"
+	// TypeVertex uses GCP Vertex AI for LLM access.
+	// Uses workload identity or service account credentials.
+	TypeVertex Type = "vertex"
+	// TypeAzureAI uses Azure AI Foundry for LLM access.
+	// Uses Azure-native authentication.
+	TypeAzureAI Type = "azure-ai"
 )
 
 // ValidTypes contains all valid provider types.
@@ -51,6 +60,9 @@ var ValidTypes = []Type{
 	TypeGemini,
 	TypeOllama,
 	TypeMock,
+	TypeBedrock,
+	TypeVertex,
+	TypeAzureAI,
 }
 
 // IsValid returns true if the provider type is valid.
@@ -71,7 +83,7 @@ func (t Type) String() string {
 // RequiresCredentials returns true if the provider type requires API credentials.
 func (t Type) RequiresCredentials() bool {
 	switch t {
-	case TypeOllama, TypeMock:
+	case TypeOllama, TypeMock, TypeBedrock, TypeVertex, TypeAzureAI:
 		return false
 	default:
 		return true

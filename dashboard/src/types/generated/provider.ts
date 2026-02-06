@@ -55,6 +55,18 @@ export interface ProviderSpec {
   /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
    * If not specified, the provider's default model is used. */
   model?: string;
+  /** platform defines hyperscaler-specific configuration.
+   * Required for provider types: bedrock, vertex, azure-ai. */
+  platform?: {
+    /** endpoint overrides the default platform API endpoint. */
+    endpoint?: string;
+    /** project is the GCP project ID. Required for Vertex AI. */
+    project?: string;
+    /** region is the cloud region (e.g., us-east-1, us-central1, eastus). */
+    region?: string;
+    /** type is the cloud platform type. */
+    type: "aws" | "gcp" | "azure";
+  };
   /** pricing configures cost tracking for this provider.
    * If not specified, PromptKit's built-in pricing is used. */
   pricing?: {
@@ -80,7 +92,7 @@ export interface ProviderSpec {
     name: string;
   };
   /** type specifies the provider type. */
-  type: "claude" | "openai" | "gemini" | "ollama" | "mock";
+  type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "bedrock" | "vertex" | "azure-ai";
   /** validateCredentials enables credential validation on reconciliation.
    * When enabled, the controller attempts to verify credentials with the provider. */
   validateCredentials?: boolean;
