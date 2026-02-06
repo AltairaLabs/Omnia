@@ -4,6 +4,7 @@ import { use, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Activity, Settings, Zap, DollarSign, FileText, AlertCircle, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Header } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -192,6 +193,16 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
                       <span className="font-medium text-sm truncate max-w-[200px]" title={spec.baseURL}>
                         {spec.baseURL}
                       </span>
+                    </div>
+                  )}
+                  {spec?.capabilities && spec.capabilities.length > 0 && (
+                    <div className="flex justify-between items-start">
+                      <span className="text-muted-foreground">Capabilities</span>
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {spec.capabilities.map((cap) => (
+                          <Badge key={cap} variant="secondary" className="text-xs">{cap}</Badge>
+                        ))}
+                      </div>
                     </div>
                   )}
                   <div className="flex justify-between">

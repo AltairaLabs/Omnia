@@ -7,6 +7,9 @@ export interface ProviderSpec {
   /** baseURL overrides the provider's default API endpoint.
    * Useful for proxies or self-hosted models. */
   baseURL?: string;
+  /** capabilities lists what this provider supports.
+   * Used for capability-based filtering when binding arena providers. */
+  capabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
   /** defaults contains provider tuning parameters. */
   defaults?: {
     /** contextWindow is the model's maximum context size in tokens.

@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { CostSparkline } from "@/components/cost";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
@@ -110,6 +111,15 @@ function ProviderCard({ provider }: Readonly<{ provider: ProviderWithSource }>) 
               </p>
             </div>
           </div>
+
+          {/* Capabilities */}
+          {spec?.capabilities && spec.capabilities.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {spec.capabilities.map((cap) => (
+                <Badge key={cap} variant="outline" className="text-xs">{cap}</Badge>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </Link>
@@ -128,6 +138,7 @@ function ProviderTable({ providers }: Readonly<{ providers: ProviderWithSource[]
             <TableHead>Type</TableHead>
             <TableHead>Model</TableHead>
             <TableHead>Base URL</TableHead>
+            <TableHead>Capabilities</TableHead>
             <TableHead>Status</TableHead>
           </TableRow>
         </TableHeader>
@@ -159,6 +170,11 @@ function ProviderTable({ providers }: Readonly<{ providers: ProviderWithSource[]
               </TableCell>
               <TableCell className="max-w-[200px] truncate" title={provider.spec?.baseURL}>
                 {provider.spec?.baseURL || "-"}
+              </TableCell>
+              <TableCell>
+                {provider.spec?.capabilities && provider.spec.capabilities.length > 0
+                  ? provider.spec.capabilities.join(", ")
+                  : "-"}
               </TableCell>
               <TableCell>
                 <ProviderStatusBadge phase={provider.status?.phase} />

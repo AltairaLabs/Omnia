@@ -182,6 +182,66 @@ describe("convertProviderToArena", () => {
     expect(yaml).toContain("base_url: https://api.example.com");
   });
 
+  it("should include capabilities when present", () => {
+    const provider: Provider = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "Provider",
+      metadata: {
+        name: "test",
+        namespace: "ns",
+      },
+      spec: {
+        type: "claude",
+        capabilities: ["text", "streaming", "vision", "tools"],
+      },
+    };
+
+    const yaml = convertProviderToArena(provider);
+
+    expect(yaml).toContain("  capabilities:");
+    expect(yaml).toContain("    - text");
+    expect(yaml).toContain("    - streaming");
+    expect(yaml).toContain("    - vision");
+    expect(yaml).toContain("    - tools");
+  });
+
+  it("should omit capabilities when empty", () => {
+    const provider: Provider = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "Provider",
+      metadata: {
+        name: "test",
+        namespace: "ns",
+      },
+      spec: {
+        type: "openai",
+        capabilities: [],
+      },
+    };
+
+    const yaml = convertProviderToArena(provider);
+
+    expect(yaml).not.toContain("capabilities:");
+  });
+
+  it("should omit capabilities when not specified", () => {
+    const provider: Provider = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "Provider",
+      metadata: {
+        name: "test",
+        namespace: "ns",
+      },
+      spec: {
+        type: "openai",
+      },
+    };
+
+    const yaml = convertProviderToArena(provider);
+
+    expect(yaml).not.toContain("capabilities:");
+  });
+
   it("should skip invalid temperature", () => {
     const provider: Provider = {
       apiVersion: "omnia.altairalabs.ai/v1alpha1",

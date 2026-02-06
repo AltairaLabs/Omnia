@@ -20,35 +20,46 @@ const ANNOTATION_PREFIX = "omnia.altairalabs.ai";
  * - omnia.altairalabs.ai/provider-name: original provider name
  * - omnia.altairalabs.ai/provider-namespace: original provider namespace
  */
+/**
+ * Build the defaults section for Arena YAML from provider defaults.
+ */
+function buildProviderDefaults(
+  defaults: Provider["spec"]["defaults"],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  if (!defaults) return result;
+
+  if (defaults.temperature !== undefined) {
+    const temp = Number.parseFloat(defaults.temperature);
+    if (!Number.isNaN(temp)) {
+      result.temperature = temp;
+    }
+  }
+  if (defaults.maxTokens !== undefined) {
+    result.max_tokens = defaults.maxTokens;
+  }
+  if (defaults.topP !== undefined) {
+    const topP = Number.parseFloat(defaults.topP);
+    if (!Number.isNaN(topP)) {
+      result.top_p = topP;
+    }
+  }
+  if (defaults.contextWindow !== undefined) {
+    result.context_window = defaults.contextWindow;
+  }
+  if (defaults.truncationStrategy !== undefined) {
+    result.truncation_strategy = defaults.truncationStrategy;
+  }
+
+  return result;
+}
+
 export function convertProviderToArena(provider: Provider): string {
   const namespace = provider.metadata.namespace || "default";
   const name = provider.metadata.name;
   const id = `${namespace}-${name}`;
 
-  // Build defaults section
-  const defaults: Record<string, unknown> = {};
-  if (provider.spec.defaults?.temperature !== undefined) {
-    // Convert string temperature to number
-    const temp = Number.parseFloat(provider.spec.defaults.temperature);
-    if (!Number.isNaN(temp)) {
-      defaults.temperature = temp;
-    }
-  }
-  if (provider.spec.defaults?.maxTokens !== undefined) {
-    defaults.max_tokens = provider.spec.defaults.maxTokens;
-  }
-  if (provider.spec.defaults?.topP !== undefined) {
-    const topP = Number.parseFloat(provider.spec.defaults.topP);
-    if (!Number.isNaN(topP)) {
-      defaults.top_p = topP;
-    }
-  }
-  if (provider.spec.defaults?.contextWindow !== undefined) {
-    defaults.context_window = provider.spec.defaults.contextWindow;
-  }
-  if (provider.spec.defaults?.truncationStrategy !== undefined) {
-    defaults.truncation_strategy = provider.spec.defaults.truncationStrategy;
-  }
+  const defaults = buildProviderDefaults(provider.spec.defaults);
 
   // Build the YAML lines with reconciliation annotations
   const lines: string[] = [
@@ -72,6 +83,13 @@ export function convertProviderToArena(provider: Provider): string {
 
   if (provider.spec.baseURL) {
     lines.push(`  base_url: ${provider.spec.baseURL}`);
+  }
+
+  if (provider.spec.capabilities && provider.spec.capabilities.length > 0) {
+    lines.push("  capabilities:");
+    for (const cap of provider.spec.capabilities) {
+      lines.push(`    - ${cap}`);
+    }
   }
 
   if (Object.keys(defaults).length > 0) {
