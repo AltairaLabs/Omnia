@@ -59,6 +59,25 @@ spec:
                   baseURL overrides the provider's default API endpoint.
                   Useful for proxies or self-hosted models.
                 type: string
+              capabilities:
+                description: |-
+                  capabilities lists what this provider supports.
+                  Used for capability-based filtering when binding arena providers.
+                items:
+                  description: ProviderCapability defines a capability that a provider
+                    supports.
+                  enum:
+                  - text
+                  - streaming
+                  - vision
+                  - tools
+                  - json
+                  - audio
+                  - video
+                  - documents
+                  - duplex
+                  type: string
+                type: array
               defaults:
                 description: defaults contains provider tuning parameters.
                 properties:

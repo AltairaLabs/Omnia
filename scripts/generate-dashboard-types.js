@@ -51,6 +51,11 @@ function openApiTypeToTs(schema, indent = '') {
       return 'boolean';
     case 'array':
       const itemType = openApiTypeToTs(schema.items, indent);
+      // Wrap top-level union types in parens for correct precedence: ("a" | "b")[] not "a" | "b"[]
+      // Object types ({...}) don't need wrapping even if they contain unions internally
+      if (itemType.includes(' | ') && !itemType.startsWith('{')) {
+        return `(${itemType})[]`;
+      }
       return `${itemType}[]`;
     case 'object':
       // Handle additionalProperties (maps)

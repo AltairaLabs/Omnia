@@ -20,6 +20,31 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ProviderCapability defines a capability that a provider supports.
+// +kubebuilder:validation:Enum=text;streaming;vision;tools;json;audio;video;documents;duplex
+type ProviderCapability string
+
+const (
+	// ProviderCapabilityText indicates the provider supports text generation.
+	ProviderCapabilityText ProviderCapability = "text"
+	// ProviderCapabilityStreaming indicates the provider supports streaming responses.
+	ProviderCapabilityStreaming ProviderCapability = "streaming"
+	// ProviderCapabilityVision indicates the provider supports image/vision inputs.
+	ProviderCapabilityVision ProviderCapability = "vision"
+	// ProviderCapabilityTools indicates the provider supports tool/function calling.
+	ProviderCapabilityTools ProviderCapability = "tools"
+	// ProviderCapabilityJSON indicates the provider supports structured JSON output.
+	ProviderCapabilityJSON ProviderCapability = "json"
+	// ProviderCapabilityAudio indicates the provider supports audio inputs/outputs.
+	ProviderCapabilityAudio ProviderCapability = "audio"
+	// ProviderCapabilityVideo indicates the provider supports video inputs.
+	ProviderCapabilityVideo ProviderCapability = "video"
+	// ProviderCapabilityDocuments indicates the provider supports document inputs.
+	ProviderCapabilityDocuments ProviderCapability = "documents"
+	// ProviderCapabilityDuplex indicates the provider supports full-duplex communication.
+	ProviderCapabilityDuplex ProviderCapability = "duplex"
+)
+
 // SecretKeyRef references a key within a Secret.
 type SecretKeyRef struct {
 	// name is the name of the Secret.
@@ -71,6 +96,11 @@ type ProviderSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	ValidateCredentials bool `json:"validateCredentials,omitempty"`
+
+	// capabilities lists what this provider supports.
+	// Used for capability-based filtering when binding arena providers.
+	// +optional
+	Capabilities []ProviderCapability `json:"capabilities,omitempty"`
 }
 
 // ProviderPhase represents the current phase of the Provider.
