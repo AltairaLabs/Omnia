@@ -617,6 +617,21 @@ if [ -n "$STAGED_DASHBOARD_FILES" ] || [ -n "$GO_CHANGES" ]; then
 fi
 
 #
+# 7. Helm template validation (if chart files changed)
+#
+STAGED_HELM_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^charts/' || true)
+if [ -n "$STAGED_HELM_FILES" ]; then
+    print_header "Validating Helm Templates"
+
+    if "$REPO_ROOT/hack/validate-helm.sh" 2>&1; then
+        print_success "Helm validation passed"
+    else
+        print_error "Helm validation failed"
+        CHECKS_FAILED=1
+    fi
+fi
+
+#
 # Summary
 #
 print_header "Summary"
