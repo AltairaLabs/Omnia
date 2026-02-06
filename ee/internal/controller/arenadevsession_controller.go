@@ -595,6 +595,20 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 									Type: corev1.SeccompProfileTypeRuntimeDefault,
 								},
 							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "tmp",
+									MountPath: "/tmp",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "tmp",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							},
 						},
 					},
 				},
