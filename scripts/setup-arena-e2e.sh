@@ -25,6 +25,7 @@ FACADE_IMAGE="omnia-facade-dev:latest"
 RUNTIME_IMAGE="omnia-runtime-dev:latest"
 ARENA_CONTROLLER_IMAGE="omnia-arena-controller-dev:latest"
 ARENA_WORKER_IMAGE="omnia-arena-worker-dev:latest"
+ARENA_DEV_CONSOLE_IMAGE="omnia-arena-dev-console-dev:latest"
 
 cd "$PROJECT_ROOT"
 
@@ -70,6 +71,7 @@ if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
     docker build -t "$RUNTIME_IMAGE" -f Dockerfile.runtime . &
     docker build -t "$ARENA_CONTROLLER_IMAGE" -f ee/Dockerfile.arena-controller . &
     docker build -t "$ARENA_WORKER_IMAGE" -f ee/Dockerfile.arena-worker . &
+    docker build -t "$ARENA_DEV_CONSOLE_IMAGE" -f ee/Dockerfile.arena-dev-console . &
 
     wait
     log_info "All images built"
@@ -79,7 +81,7 @@ fi
 
 # Load images into kind
 log_info "Loading images into kind..."
-for img in "$OPERATOR_IMAGE" "$FACADE_IMAGE" "$RUNTIME_IMAGE" "$ARENA_CONTROLLER_IMAGE" "$ARENA_WORKER_IMAGE"; do
+for img in "$OPERATOR_IMAGE" "$FACADE_IMAGE" "$RUNTIME_IMAGE" "$ARENA_CONTROLLER_IMAGE" "$ARENA_WORKER_IMAGE" "$ARENA_DEV_CONSOLE_IMAGE"; do
     kind load docker-image "$img" --name "$KIND_CLUSTER" &
 done
 wait
@@ -112,6 +114,9 @@ helm upgrade --install omnia charts/omnia \
     --set enterprise.arena.worker.image.repository=omnia-arena-worker-dev \
     --set enterprise.arena.worker.image.tag=latest \
     --set enterprise.arena.worker.image.pullPolicy=Never \
+    --set enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev \
+    --set enterprise.arena.devConsole.image.tag=latest \
+    --set enterprise.arena.devConsole.image.pullPolicy=Never \
     --set enterprise.arena.queue.type=redis \
     --set enterprise.arena.queue.redis.host=omnia-redis-master \
     --set enterprise.arena.queue.redis.port=6379 \
