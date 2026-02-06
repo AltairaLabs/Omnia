@@ -160,21 +160,67 @@ func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Pr
 		}
 	}
 
-	// Get the expected env var name for this provider type's credentials
-	// The ArenaDevSession controller mounts secrets as env vars using the same
-	// logic as the ArenaJob controller (via providers.BuildEnvVarsFromProviders)
-	envVarNames := providers.GetAPIKeyEnvVars(string(p.Spec.Type))
-	if len(envVarNames) > 0 {
-		// Use the primary env var for this provider type
-		envVarName := envVarNames[0]
-		// Check if the env var is set (controller should have mounted it)
-		if os.Getenv(envVarName) != "" {
-			provider.Credential = &config.CredentialConfig{
-				CredentialEnv: envVarName,
+	// Resolve credentials: check explicit credential config first, then fall back to legacy behavior
+	if p.Spec.Credential != nil {
+		switch {
+		case p.Spec.Credential.EnvVar != "":
+			// Explicit env var specified in credential block
+			if os.Getenv(p.Spec.Credential.EnvVar) != "" {
+				provider.Credential = &config.CredentialConfig{
+					CredentialEnv: p.Spec.Credential.EnvVar,
+				}
+				l.log.V(1).Info("using credential from explicit env var", "provider", p.Name, "envVar", p.Spec.Credential.EnvVar)
+			} else {
+				l.log.V(1).Info("credential env var not set", "provider", p.Name, "envVar", p.Spec.Credential.EnvVar)
 			}
-			l.log.V(1).Info("using credential from env var", "provider", p.Name, "envVar", envVarName)
-		} else {
-			l.log.V(1).Info("credential env var not set", "provider", p.Name, "envVar", envVarName)
+		case p.Spec.Credential.FilePath != "":
+			// File-based credential
+			provider.Credential = &config.CredentialConfig{
+				CredentialFile: p.Spec.Credential.FilePath,
+			}
+			l.log.V(1).Info("using credential from file", "provider", p.Name, "filePath", p.Spec.Credential.FilePath)
+		case p.Spec.Credential.SecretRef != nil:
+			// Secret ref in credential block — controller mounts as env var
+			envVarNames := providers.GetAPIKeyEnvVars(string(p.Spec.Type))
+			if len(envVarNames) > 0 {
+				envVarName := envVarNames[0]
+				if os.Getenv(envVarName) != "" {
+					provider.Credential = &config.CredentialConfig{
+						CredentialEnv: envVarName,
+					}
+					l.log.V(1).Info("using credential from secret env var", "provider", p.Name, "envVar", envVarName)
+				} else {
+					l.log.V(1).Info("credential secret env var not set", "provider", p.Name, "envVar", envVarName)
+				}
+			}
+		}
+	} else if p.Spec.SecretRef != nil {
+		// Legacy: top-level secretRef
+		envVarNames := providers.GetAPIKeyEnvVars(string(p.Spec.Type))
+		if len(envVarNames) > 0 {
+			envVarName := envVarNames[0]
+			if os.Getenv(envVarName) != "" {
+				provider.Credential = &config.CredentialConfig{
+					CredentialEnv: envVarName,
+				}
+				l.log.V(1).Info("using credential from env var", "provider", p.Name, "envVar", envVarName)
+			} else {
+				l.log.V(1).Info("credential env var not set", "provider", p.Name, "envVar", envVarName)
+			}
+		}
+	} else {
+		// No explicit credential config or secretRef — try default env vars
+		envVarNames := providers.GetAPIKeyEnvVars(string(p.Spec.Type))
+		if len(envVarNames) > 0 {
+			envVarName := envVarNames[0]
+			if os.Getenv(envVarName) != "" {
+				provider.Credential = &config.CredentialConfig{
+					CredentialEnv: envVarName,
+				}
+				l.log.V(1).Info("using credential from default env var", "provider", p.Name, "envVar", envVarName)
+			} else {
+				l.log.V(1).Info("credential env var not set", "provider", p.Name, "envVar", envVarName)
+			}
 		}
 	}
 

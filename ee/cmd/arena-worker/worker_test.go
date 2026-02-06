@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -512,5 +513,113 @@ func TestToolOverrideConfigParsing(t *testing.T) {
 		assert.Empty(t, override.Description)
 		assert.Empty(t, override.HandlerName)
 		assert.Empty(t, override.RegistryName)
+	})
+}
+
+func TestApplyProviderOverrides(t *testing.T) {
+	t.Run("override with SecretEnvVar sets CredentialEnv", func(t *testing.T) {
+		cfg := &config.Config{}
+		providersByGroup := map[string][]overrides.ProviderOverride{
+			"default": {
+				{
+					ID:           "test-openai",
+					Type:         "openai",
+					Model:        "gpt-4",
+					SecretEnvVar: "OPENAI_API_KEY",
+				},
+			},
+		}
+
+		applyProviderOverrides(cfg, providersByGroup, false)
+
+		require.NotNil(t, cfg.LoadedProviders)
+		require.Contains(t, cfg.LoadedProviders, "test-openai")
+		provider := cfg.LoadedProviders["test-openai"]
+		require.NotNil(t, provider.Credential)
+		assert.Equal(t, "OPENAI_API_KEY", provider.Credential.CredentialEnv)
+		assert.Empty(t, provider.Credential.CredentialFile)
+	})
+
+	t.Run("override with CredentialFile sets CredentialFile", func(t *testing.T) {
+		cfg := &config.Config{}
+		providersByGroup := map[string][]overrides.ProviderOverride{
+			"default": {
+				{
+					ID:             "test-file-provider",
+					Type:           "openai",
+					Model:          "gpt-4",
+					CredentialFile: "/secrets/openai/api-key",
+				},
+			},
+		}
+
+		applyProviderOverrides(cfg, providersByGroup, false)
+
+		require.NotNil(t, cfg.LoadedProviders)
+		require.Contains(t, cfg.LoadedProviders, "test-file-provider")
+		provider := cfg.LoadedProviders["test-file-provider"]
+		require.NotNil(t, provider.Credential)
+		assert.Equal(t, "/secrets/openai/api-key", provider.Credential.CredentialFile)
+		assert.Empty(t, provider.Credential.CredentialEnv)
+	})
+
+	t.Run("override with neither sets no credential", func(t *testing.T) {
+		cfg := &config.Config{}
+		providersByGroup := map[string][]overrides.ProviderOverride{
+			"default": {
+				{
+					ID:    "test-mock",
+					Type:  "mock",
+					Model: "mock-model",
+				},
+			},
+		}
+
+		applyProviderOverrides(cfg, providersByGroup, false)
+
+		require.NotNil(t, cfg.LoadedProviders)
+		require.Contains(t, cfg.LoadedProviders, "test-mock")
+		provider := cfg.LoadedProviders["test-mock"]
+		assert.Nil(t, provider.Credential)
+	})
+
+	t.Run("SecretEnvVar takes precedence over CredentialFile", func(t *testing.T) {
+		cfg := &config.Config{}
+		providersByGroup := map[string][]overrides.ProviderOverride{
+			"default": {
+				{
+					ID:             "test-both",
+					Type:           "openai",
+					Model:          "gpt-4",
+					SecretEnvVar:   "OPENAI_API_KEY",
+					CredentialFile: "/secrets/openai/api-key",
+				},
+			},
+		}
+
+		applyProviderOverrides(cfg, providersByGroup, false)
+
+		provider := cfg.LoadedProviders["test-both"]
+		require.NotNil(t, provider.Credential)
+		assert.Equal(t, "OPENAI_API_KEY", provider.Credential.CredentialEnv)
+		assert.Empty(t, provider.Credential.CredentialFile)
+	})
+
+	t.Run("sets provider group mapping", func(t *testing.T) {
+		cfg := &config.Config{}
+		providersByGroup := map[string][]overrides.ProviderOverride{
+			"judge": {
+				{
+					ID:    "judge-claude",
+					Type:  "claude",
+					Model: "claude-3-opus",
+				},
+			},
+		}
+
+		applyProviderOverrides(cfg, providersByGroup, false)
+
+		require.NotNil(t, cfg.ProviderGroups)
+		assert.Equal(t, "judge", cfg.ProviderGroups["judge-claude"])
 	})
 }
