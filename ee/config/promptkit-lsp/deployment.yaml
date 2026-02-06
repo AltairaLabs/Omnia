@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promptkit-lsp
+  namespace: omnia-system
+  labels:
+    app: promptkit-lsp
+    app.kubernetes.io/name: omnia-promptkit-lsp
+    app.kubernetes.io/component: lsp-server
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      app: promptkit-lsp
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: promptkit-lsp
+        app.kubernetes.io/name: omnia-promptkit-lsp
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: lsp
+        # Image tag is overridden by Kustomize or Tilt in development
+        image: promptkit-lsp:dev
+        command:
+        - /promptkit-lsp
+        args:
+          - --addr=:8080
+          - --health-addr=:8081
+          - --dashboard-api-url=http://omnia-dashboard:3000
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+            ephemeral-storage: 100Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+            ephemeral-storage: 50Mi
+      serviceAccountName: promptkit-lsp
+      terminationGracePeriodSeconds: 30

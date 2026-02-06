@@ -13,6 +13,7 @@
 // Message types
 export type MessageType =
   | "message"         // Client → Server: user message
+  | "chat"            // Client → Server: dev console chat message
   | "upload_request"  // Client → Server: file upload request
   | "chunk"           // Server → Client: streaming text chunk
   | "done"            // Server → Client: response complete
@@ -20,6 +21,7 @@ export type MessageType =
   | "tool_result"     // Server → Client: tool execution result
   | "error"           // Server → Client: error occurred
   | "connected"       // Server → Client: connection established
+  | "reloaded"        // Server → Client: configuration reloaded (dev console)
   | "upload_ready"    // Server → Client: upload URL ready
   | "upload_complete" // Server → Client: upload complete
   | "media_chunk";    // Server → Client: streaming media chunk

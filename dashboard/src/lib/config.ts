@@ -23,6 +23,18 @@ export interface RuntimeConfig {
 let cachedConfig: RuntimeConfig | null = null;
 let configPromise: Promise<RuntimeConfig> | null = null;
 
+const defaultConfig: RuntimeConfig = {
+  demoMode: false,
+  readOnlyMode: false,
+  readOnlyMessage: "This dashboard is in read-only mode",
+  wsProxyUrl: "",
+  grafanaUrl: "",
+  lokiEnabled: false,
+  tempoEnabled: false,
+  enterpriseEnabled: false,
+  hideEnterprise: false,
+};
+
 /**
  * Fetch runtime configuration from the server.
  * Results are cached to avoid repeated fetches.
@@ -36,6 +48,12 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   // If a fetch is already in progress, wait for it
   if (configPromise) {
     return configPromise;
+  }
+
+  // On server-side, return defaults without fetching
+  // (the client will fetch the real config during hydration)
+  if (globalThis.window === undefined) {
+    return defaultConfig;
   }
 
   // Fetch config from the API
@@ -52,18 +70,9 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     })
     .catch((err) => {
       console.error("Failed to fetch runtime config:", err);
-      // Return defaults on error
-      return {
-        demoMode: false,
-        readOnlyMode: false,
-        readOnlyMessage: "This dashboard is in read-only mode",
-        wsProxyUrl: "",
-        grafanaUrl: "",
-        lokiEnabled: false,
-        tempoEnabled: false,
-        enterpriseEnabled: false,
-        hideEnterprise: false,
-      };
+      // Cache the defaults on error to prevent retry loops
+      cachedConfig = defaultConfig;
+      return defaultConfig;
     })
     .finally(() => {
       configPromise = null;

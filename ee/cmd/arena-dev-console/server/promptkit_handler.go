@@ -1,0 +1,639 @@
+/*
+Copyright 2026 Altaira Labs.
+
+SPDX-License-Identifier: FSL-1.1-Apache-2.0
+This file is part of Omnia Enterprise and is subject to the
+Functional Source License. See ee/LICENSE for details.
+*/
+
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sync"
+
+	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/go-logr/logr"
+)
+
+// mediaSubdir is the subdirectory name for media files within the output directory.
+const mediaSubdir = "/media"
+
+// PromptKitHandler implements facade.MessageHandler using a local PromptKit engine.
+// It supports dynamic reload of the configuration without dropping the WebSocket connection.
+type PromptKitHandler struct {
+	mu               sync.RWMutex
+	config           *config.Config
+	providerRegistry *providers.Registry
+	log              logr.Logger
+
+	// Session state for conversations
+	sessions map[string]*SessionState
+
+	// K8s provider loading (optional, for dynamic namespace-based provider resolution)
+	k8sLoader *K8sProviderLoader
+	// Cache of provider registries per namespace
+	nsRegistries map[string]*providers.Registry
+}
+
+// SessionState holds conversation state for a session.
+type SessionState struct {
+	Messages   []types.Message
+	ProviderID string // Selected provider for this session
+	mu         sync.Mutex
+}
+
+// NewPromptKitHandler creates a new handler with the given configuration.
+func NewPromptKitHandler(cfg *config.Config, log logr.Logger) (*PromptKitHandler, error) {
+	h := &PromptKitHandler{
+		config:       cfg,
+		log:          log.WithName("promptkit-handler"),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+	}
+
+	// Try to initialize K8s provider loader (will fail if not in cluster, which is ok)
+	k8sLoader, err := NewK8sProviderLoader(log)
+	if err != nil {
+		log.Info("K8s provider loader not available (may be running outside cluster)", "error", err.Error())
+	} else {
+		h.k8sLoader = k8sLoader
+		log.Info("K8s provider loader initialized for dynamic provider resolution")
+	}
+
+	// Build the components (only if we have a static config)
+	if cfg != nil && len(cfg.LoadedProviders) > 0 {
+		if err := h.buildComponents(); err != nil {
+			return nil, fmt.Errorf("failed to build components: %w", err)
+		}
+	}
+
+	return h, nil
+}
+
+// Name returns the handler name for metrics labeling.
+func (h *PromptKitHandler) Name() string {
+	return "promptkit"
+}
+
+// handleMetadataCommand handles special commands in message metadata.
+// Returns true if a command was handled, false otherwise.
+func (h *PromptKitHandler) handleMetadataCommand(
+	ctx context.Context,
+	sessionID string,
+	msg *facade.ClientMessage,
+	session *SessionState,
+	writer facade.ResponseWriter,
+) (bool, error) {
+	if msg.Metadata == nil {
+		return false, nil
+	}
+	if _, isReload := msg.Metadata["reload"]; isReload {
+		return true, h.handleReload(ctx, msg, writer)
+	}
+	if _, isReset := msg.Metadata["reset"]; isReset {
+		h.ResetSession(sessionID)
+		return true, writer.WriteDone("Session reset")
+	}
+	if providerID, ok := msg.Metadata["provider"]; ok {
+		session.mu.Lock()
+		session.ProviderID = providerID
+		session.mu.Unlock()
+	}
+	return false, nil
+}
+
+// selectProvider determines which provider to use for the request.
+func (h *PromptKitHandler) selectProvider(
+	providerID string,
+	cfg *config.Config,
+	registry *providers.Registry,
+) (providers.Provider, string, error) {
+	if providerID == "" {
+		for id := range cfg.LoadedProviders {
+			providerID = id
+			break
+		}
+	}
+	if providerID == "" {
+		return nil, "", fmt.Errorf("no provider configured")
+	}
+	provider, ok := registry.Get(providerID)
+	if !ok {
+		return nil, "", fmt.Errorf("provider not found: %s", providerID)
+	}
+	return provider, providerID, nil
+}
+
+// HandleMessage processes a client message and streams responses via the ResponseWriter.
+func (h *PromptKitHandler) HandleMessage(
+	ctx context.Context,
+	sessionID string,
+	msg *facade.ClientMessage,
+	writer facade.ResponseWriter,
+) error {
+	namespace := logctx.Namespace(ctx)
+	registry, cfg, err := h.getRegistryAndConfig(ctx, namespace)
+	if err != nil {
+		h.log.Error(err, "HandleMessage: failed to get registry and config", "namespace", namespace)
+		return writer.WriteError("PROVIDER_LOAD_ERROR", err.Error())
+	}
+	if registry == nil {
+		return writer.WriteError("ENGINE_NOT_READY", "PromptKit engine is not initialized. No providers available.")
+	}
+
+	session := h.getOrCreateSession(sessionID)
+
+	// Handle special commands in metadata
+	handled, err := h.handleMetadataCommand(ctx, sessionID, msg, session, writer)
+	if handled || err != nil {
+		return err
+	}
+
+	// Build user message
+	userMsg := types.NewUserMessage(msg.Content)
+	if len(msg.Parts) > 0 {
+		userMsg = h.convertToPKMessage("user", msg.Parts)
+	}
+
+	// Get session state
+	session.mu.Lock()
+	session.Messages = append(session.Messages, userMsg)
+	messages := make([]types.Message, len(session.Messages))
+	copy(messages, session.Messages)
+	providerID := session.ProviderID
+	session.mu.Unlock()
+
+	// Select and validate provider
+	provider, providerID, err := h.selectProvider(providerID, cfg, registry)
+	if err != nil {
+		return writer.WriteError("PROVIDER_ERROR", err.Error())
+	}
+
+	// Build prediction request with provider defaults
+	req := providers.PredictionRequest{
+		Messages:    messages,
+		Temperature: 0.7,
+		MaxTokens:   4096,
+	}
+	if p, ok := cfg.LoadedProviders[providerID]; ok {
+		req.Temperature = p.Defaults.Temperature
+		if p.Defaults.MaxTokens > 0 {
+			req.MaxTokens = p.Defaults.MaxTokens
+		}
+	}
+
+	// Execute with streaming
+	response, err := h.executeStreaming(ctx, provider, req, writer)
+	if err != nil {
+		h.log.Error(err, "prediction failed", "sessionID", sessionID)
+		return writer.WriteError("EXECUTION_ERROR", err.Error())
+	}
+
+	session.mu.Lock()
+	session.Messages = append(session.Messages, types.NewAssistantMessage(response))
+	session.mu.Unlock()
+	return nil
+}
+
+// executeNonStreaming executes a non-streaming prediction.
+func (h *PromptKitHandler) executeNonStreaming(
+	ctx context.Context,
+	provider providers.Provider,
+	req providers.PredictionRequest,
+	writer facade.ResponseWriter,
+) (string, error) {
+	resp, err := provider.Predict(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if err := writer.WriteDone(resp.Content); err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+// writeToolCalls writes tool call information to the response writer.
+func (h *PromptKitHandler) writeToolCalls(toolCalls []types.MessageToolCall, writer facade.ResponseWriter) {
+	for _, tc := range toolCalls {
+		args := make(map[string]interface{})
+		if len(tc.Args) > 0 {
+			_ = json.Unmarshal(tc.Args, &args)
+		}
+		if err := writer.WriteToolCall(&facade.ToolCallInfo{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Arguments: args,
+		}); err != nil {
+			h.log.Error(err, "failed to write tool call")
+		}
+	}
+}
+
+// executeStreaming runs a streaming prediction and forwards chunks to the writer.
+func (h *PromptKitHandler) executeStreaming(
+	ctx context.Context,
+	provider providers.Provider,
+	req providers.PredictionRequest,
+	writer facade.ResponseWriter,
+) (string, error) {
+	if !provider.SupportsStreaming() {
+		return h.executeNonStreaming(ctx, provider, req, writer)
+	}
+
+	stream, err := provider.PredictStream(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to start stream: %w", err)
+	}
+
+	var fullContent string
+	for chunk := range stream {
+		if chunk.Error != nil {
+			return "", chunk.Error
+		}
+		if chunk.Delta != "" {
+			if err := writer.WriteChunk(chunk.Delta); err != nil {
+				h.log.Error(err, "failed to write chunk")
+			}
+		}
+		if len(chunk.ToolCalls) > 0 {
+			h.writeToolCalls(chunk.ToolCalls, writer)
+		}
+		fullContent = chunk.Content
+		if chunk.FinishReason != nil {
+			break
+		}
+	}
+
+	if err := writer.WriteDone(fullContent); err != nil {
+		return "", fmt.Errorf("failed to write done: %w", err)
+	}
+	return fullContent, nil
+}
+
+// addImagePart adds an image part to the message from the given media.
+func addImagePart(msg *types.Message, media *facade.MediaContent) {
+	if media == nil {
+		return
+	}
+	if media.URL != "" {
+		msg.AddImagePartFromURL(media.URL, nil)
+	} else if media.Data != "" {
+		msg.AddPart(types.NewImagePartFromData(media.Data, media.MimeType, nil))
+	}
+}
+
+// addMediaPart adds audio or video parts to the message from the given media.
+func addMediaPart(msg *types.Message, media *facade.MediaContent, partType facade.ContentPartType) {
+	if media == nil || media.Data == "" {
+		return
+	}
+	switch partType {
+	case facade.ContentPartTypeAudio:
+		msg.AddPart(types.NewAudioPartFromData(media.Data, media.MimeType))
+	case facade.ContentPartTypeVideo:
+		msg.AddPart(types.NewVideoPartFromData(media.Data, media.MimeType))
+	}
+}
+
+// convertToPKMessage converts facade content parts to a PromptKit message.
+func (h *PromptKitHandler) convertToPKMessage(role string, parts []facade.ContentPart) types.Message {
+	msg := types.Message{Role: role}
+	for _, part := range parts {
+		switch part.Type {
+		case facade.ContentPartTypeText:
+			msg.AddTextPart(part.Text)
+		case facade.ContentPartTypeImage:
+			addImagePart(&msg, part.Media)
+		case facade.ContentPartTypeAudio, facade.ContentPartTypeVideo:
+			addMediaPart(&msg, part.Media, part.Type)
+		}
+	}
+	return msg
+}
+
+// handleReload reloads the engine configuration.
+func (h *PromptKitHandler) handleReload(
+	_ context.Context,
+	msg *facade.ClientMessage,
+	writer facade.ResponseWriter,
+) error {
+	// Parse new configuration from message content
+	var newConfig config.Config
+	if err := json.Unmarshal([]byte(msg.Content), &newConfig); err != nil {
+		return writer.WriteError("INVALID_CONFIG", fmt.Sprintf("failed to parse config: %v", err))
+	}
+
+	h.mu.Lock()
+	h.config = &newConfig
+	h.mu.Unlock()
+
+	// Rebuild components
+	if err := h.buildComponents(); err != nil {
+		return writer.WriteError("RELOAD_ERROR", fmt.Sprintf("failed to rebuild components: %v", err))
+	}
+
+	h.log.Info("configuration reloaded successfully")
+	return writer.WriteDone("Configuration reloaded successfully")
+}
+
+// Reload updates the configuration and rebuilds components.
+// This is called externally (e.g., from file watcher).
+func (h *PromptKitHandler) Reload(cfg *config.Config) error {
+	h.mu.Lock()
+	h.config = cfg
+	h.mu.Unlock()
+
+	return h.buildComponents()
+}
+
+// ReloadFromPath loads configuration from a file path and reloads.
+func (h *PromptKitHandler) ReloadFromPath(configPath string) error {
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	return h.Reload(cfg)
+}
+
+// getRegistryAndConfig returns the provider registry and config.
+// If K8s provider loading is enabled, it loads providers from the pod's namespace.
+// Otherwise, it falls back to the static configuration.
+func (h *PromptKitHandler) getRegistryAndConfig(
+	ctx context.Context,
+	_ string,
+) (*providers.Registry, *config.Config, error) {
+	// If K8s loading is enabled, use dynamic loading from the pod's namespace
+	if h.k8sLoader != nil {
+		return h.getOrLoadK8sRegistry(ctx)
+	}
+
+	// Fall back to static config
+	h.mu.RLock()
+	registry := h.providerRegistry
+	cfg := h.config
+	h.mu.RUnlock()
+
+	return registry, cfg, nil
+}
+
+// getOrLoadK8sRegistry returns a cached registry or loads providers from K8s.
+// The dev console only accesses providers in its own namespace for security.
+func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers.Registry, *config.Config, error) {
+	namespace := h.k8sLoader.Namespace()
+
+	h.mu.RLock()
+	if registry, ok := h.nsRegistries[namespace]; ok {
+		h.mu.RUnlock()
+		return registry, h.config, nil
+	}
+	h.mu.RUnlock()
+
+	// Load providers from K8s (only from this pod's namespace)
+	h.log.Info("loading providers from K8s", "namespace", namespace)
+	loadedProviders, err := h.k8sLoader.LoadProviders(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load providers: %w", err)
+	}
+
+	if len(loadedProviders) == 0 {
+		h.log.Info("no providers found in namespace, falling back to static config", "namespace", namespace)
+		h.mu.RLock()
+		registry := h.providerRegistry
+		cfg := h.config
+		h.mu.RUnlock()
+		return registry, cfg, nil
+	}
+
+	// Build config from loaded providers
+	cfg := BuildConfigFromProviders(loadedProviders)
+	h.log.Info("built config from providers",
+		"outputDir", cfg.Defaults.Output.Dir,
+		"outDir", cfg.Defaults.OutDir,
+		"configDir", cfg.Defaults.ConfigDir,
+		"providerCount", len(cfg.LoadedProviders))
+
+	// Ensure the output and media directories exist before building engine components.
+	// This is a defensive measure in case PromptKit's buildMediaStorage uses a different
+	// code path that doesn't respect our config settings.
+	outputDir := cfg.Defaults.Output.Dir
+	if outputDir == "" {
+		// This should never happen since BuildConfigFromProviders sets it,
+		// but if it does, use the expected path anyway
+		outputDir = devConsoleOutputDir
+		cfg.Defaults.Output.Dir = outputDir
+		cfg.Defaults.OutDir = outputDir
+		h.log.Info("WARNING: Output.Dir was empty, setting fallback", "path", outputDir)
+	}
+	// Pre-create the configured media directory
+	mediaPath := outputDir + mediaSubdir
+	if err := os.MkdirAll(mediaPath, 0750); err != nil {
+		h.log.Error(err, "failed to pre-create media directory", "path", mediaPath)
+	} else {
+		h.log.Info("pre-created media directory", "path", mediaPath)
+	}
+
+	// Change to /tmp directory before building engine components.
+	// This ensures that if PromptKit ignores our config and uses the default "out" directory,
+	// it will create /tmp/out/media instead of /out/media (which fails on read-only root fs).
+	origDir, _ := os.Getwd()
+	h.log.Info("getOrLoadK8sRegistry: current working directory", "cwd", origDir)
+	if err := os.Chdir("/tmp"); err != nil {
+		h.log.Error(err, "failed to change to /tmp directory")
+	} else {
+		newDir, _ := os.Getwd()
+		h.log.Info("changed working directory to /tmp for engine build", "newCwd", newDir)
+		defer func() {
+			if err := os.Chdir(origDir); err != nil {
+				h.log.Error(err, "failed to restore original working directory")
+			}
+		}()
+	}
+
+	// Build registry from providers
+	h.log.Info("getOrLoadK8sRegistry: calling BuildEngineComponents",
+		"outputDir", cfg.Defaults.Output.Dir,
+		"outDir", cfg.Defaults.OutDir,
+		"configDir", cfg.Defaults.ConfigDir)
+	registry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	if err != nil {
+		h.log.Error(err, "getOrLoadK8sRegistry: BuildEngineComponents failed",
+			"outputDir", cfg.Defaults.Output.Dir,
+			"outDir", cfg.Defaults.OutDir)
+		return nil, nil, fmt.Errorf("failed to build provider registry: %w", err)
+	}
+
+	// Cache the registry
+	h.mu.Lock()
+	h.nsRegistries[namespace] = registry
+	h.mu.Unlock()
+
+	h.log.Info("loaded providers from K8s", "namespace", namespace, "count", len(loadedProviders))
+	return registry, cfg, nil
+}
+
+// InvalidateProviderCache invalidates the cached provider registry.
+// Call this when providers in the namespace change.
+func (h *PromptKitHandler) InvalidateProviderCache() {
+	if h.k8sLoader == nil {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	namespace := h.k8sLoader.Namespace()
+	if registry, ok := h.nsRegistries[namespace]; ok {
+		if err := registry.Close(); err != nil {
+			h.log.Error(err, "failed to close namespace registry", "namespace", namespace)
+		}
+		delete(h.nsRegistries, namespace)
+	}
+}
+
+// buildComponents creates the PromptKit components from configuration.
+func (h *PromptKitHandler) buildComponents() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	cfg := h.config
+	if cfg == nil {
+		return fmt.Errorf("no configuration provided")
+	}
+
+	// Ensure output directory is set to a writable location
+	if cfg.Defaults.Output.Dir == "" {
+		cfg.Defaults.Output.Dir = devConsoleOutputDir
+		cfg.Defaults.OutDir = devConsoleOutputDir
+		h.log.Info("buildComponents: set output directory", "path", cfg.Defaults.Output.Dir)
+	}
+
+	// Pre-create the configured media directory
+	mediaDir := cfg.Defaults.Output.Dir + mediaSubdir
+	if err := os.MkdirAll(mediaDir, 0750); err != nil {
+		h.log.Error(err, "buildComponents: failed to pre-create media directory", "path", mediaDir)
+	}
+
+	// Change to /tmp directory before building engine components.
+	// This ensures that if PromptKit ignores our config and uses the default "out" directory,
+	// it will create /tmp/out/media instead of /out/media (which fails on read-only root fs).
+	origDir, _ := os.Getwd()
+	h.log.Info("buildComponents: current working directory", "cwd", origDir)
+	if err := os.Chdir("/tmp"); err != nil {
+		h.log.Error(err, "buildComponents: failed to change to /tmp directory")
+	} else {
+		newDir, _ := os.Getwd()
+		h.log.Info("buildComponents: changed working directory", "newCwd", newDir)
+		defer func() {
+			if err := os.Chdir(origDir); err != nil {
+				h.log.Error(err, "buildComponents: failed to restore original working directory")
+			}
+		}()
+	}
+
+	// Build engine components using the same pattern as arena-worker
+	h.log.Info("buildComponents: calling BuildEngineComponents",
+		"outputDir", cfg.Defaults.Output.Dir,
+		"outDir", cfg.Defaults.OutDir)
+	providerRegistry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	if err != nil {
+		h.log.Error(err, "buildComponents: BuildEngineComponents failed",
+			"outputDir", cfg.Defaults.Output.Dir,
+			"outDir", cfg.Defaults.OutDir)
+		return fmt.Errorf("failed to build engine components: %w", err)
+	}
+
+	h.providerRegistry = providerRegistry
+	h.log.Info("components built successfully")
+	return nil
+}
+
+// getOrCreateSession gets or creates session state for the given session ID.
+func (h *PromptKitHandler) getOrCreateSession(sessionID string) *SessionState {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if session, ok := h.sessions[sessionID]; ok {
+		return session
+	}
+
+	session := &SessionState{
+		Messages: make([]types.Message, 0),
+	}
+	h.sessions[sessionID] = session
+	return session
+}
+
+// ResetSession clears the conversation history for a session.
+func (h *PromptKitHandler) ResetSession(sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if session, ok := h.sessions[sessionID]; ok {
+		session.mu.Lock()
+		session.Messages = make([]types.Message, 0)
+		session.mu.Unlock()
+	}
+}
+
+// GetSessionHistory returns the message history for a session.
+func (h *PromptKitHandler) GetSessionHistory(sessionID string) []types.Message {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if session, ok := h.sessions[sessionID]; ok {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		messages := make([]types.Message, len(session.Messages))
+		copy(messages, session.Messages)
+		return messages
+	}
+	return nil
+}
+
+// ListProviders returns the list of available provider IDs.
+func (h *PromptKitHandler) ListProviders() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if h.providerRegistry == nil {
+		return nil
+	}
+	return h.providerRegistry.List()
+}
+
+// Close shuts down the handler and releases resources.
+func (h *PromptKitHandler) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	var lastErr error
+
+	// Close all namespace registries
+	for ns, registry := range h.nsRegistries {
+		if err := registry.Close(); err != nil {
+			h.log.Error(err, "failed to close namespace registry", "namespace", ns)
+			lastErr = err
+		}
+	}
+	h.nsRegistries = make(map[string]*providers.Registry)
+
+	// Close main registry
+	if h.providerRegistry != nil {
+		if err := h.providerRegistry.Close(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+// Interface assertion
+var _ facade.MessageHandler = (*PromptKitHandler)(nil)

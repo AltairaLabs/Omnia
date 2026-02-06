@@ -17,8 +17,8 @@ export function useSharedToolRegistries() {
       const registries = await service.getSharedToolRegistries();
       return registries as unknown as ToolRegistry[];
     },
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }
 
@@ -35,7 +35,7 @@ export function useSharedToolRegistry(name: string) {
       return (registry as unknown as ToolRegistry) || null;
     },
     enabled: !!name,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }

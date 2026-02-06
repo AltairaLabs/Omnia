@@ -1,0 +1,19 @@
+{{- if .Values.enterprise.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-arena-controller
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: arena-controller
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: {{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
+      targetPort: api
+      protocol: TCP
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: arena-controller
+{{- end }}

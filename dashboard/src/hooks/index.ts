@@ -9,6 +9,8 @@ export { useToolRegistries, useToolRegistry } from "./use-tool-registries";
 export { useStats } from "./use-stats";
 export { useCosts } from "./use-costs";
 export { useAgentConsole } from "./use-agent-console";
+export { useDevConsole } from "./use-dev-console";
+export { useDevSession } from "./use-dev-session";
 export { useLogs } from "./use-logs";
 export { useArenaJobLogs } from "./use-arena-job-logs";
 export { useNamespaces } from "./use-namespaces";
@@ -41,6 +43,33 @@ export { useArenaStats } from "./use-arena-stats";
 export { useArenaSources, useArenaSource, useArenaSourceMutations } from "./use-arena-sources";
 export { useArenaSourceVersions, useArenaSourceVersionMutations } from "./use-arena-source-versions";
 export { useArenaSourceContent } from "./use-arena-source-content";
+export {
+  useArenaProjects,
+  useArenaProject,
+  useArenaProjectMutations,
+  useArenaProjectFiles,
+} from "./use-arena-projects";
+export {
+  useProjectDeploymentStatus,
+  useProjectDeploymentMutations,
+  useProjectDeployment,
+} from "./use-project-deployment";
+export type {
+  DeploymentStatus,
+  DeployRequest,
+  DeployResponse,
+} from "./use-project-deployment";
+export {
+  useProjectJobs,
+  useProjectRunMutations,
+  useProjectJobsWithRun,
+} from "./use-project-jobs";
+export type {
+  ProjectJobsResponse,
+  QuickRunRequest,
+  QuickRunResponse,
+  ProjectJobsFilter,
+} from "./use-project-jobs";
 export type { WorkspaceCostData } from "./use-workspace-costs";
 export type { DashboardStats } from "./use-stats";
 export type { K8sEvent } from "./use-agent-events";

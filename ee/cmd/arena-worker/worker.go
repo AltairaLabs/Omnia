@@ -344,7 +344,11 @@ func executeWorkItem(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create engine: %w", err)
 	}
-	defer func() { _ = eng.Close() }()
+	defer func() {
+		if err := eng.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close engine: %v\n", err)
+		}
+	}()
 
 	// Validate provider credentials before execution
 	if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {

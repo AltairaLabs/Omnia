@@ -15,7 +15,7 @@ import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/work
 import { listCrd } from "@/lib/k8s/crd-operations";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   CRD_ARENA_SOURCES,
   CRD_ARENA_JOBS,
   createAuditContext,
@@ -89,7 +89,7 @@ export const GET = withWorkspaceAccess(
       if (auditCtx) {
         auditError(auditCtx, "get", undefined, error, 500);
       }
-      return serverErrorResponse(error, "Failed to get arena stats");
+      return handleK8sError(error, "get arena stats");
     }
   }
 );

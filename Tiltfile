@@ -85,7 +85,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev'])
+    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-arena-dev-console-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -281,6 +281,7 @@ if ENABLE_ENTERPRISE:
             './ee/internal',
             './ee/pkg',
             './ee/api',
+            './internal',
             './pkg',
             './api',
             './go.mod',
@@ -294,6 +295,7 @@ if ENABLE_ENTERPRISE:
         './ee/internal',
         './ee/pkg',
         './ee/api',
+        './internal',
         './pkg',
         './api',
         './go.mod',
@@ -307,6 +309,46 @@ if ENABLE_ENTERPRISE:
         context='.',
         dockerfile='./ee/Dockerfile.arena-worker',
         only=arena_worker_only,
+    )
+
+    # Build promptkit-lsp image (LSP server for PromptKit YAML validation)
+    docker_build(
+        'omnia-promptkit-lsp-dev',
+        context='.',
+        dockerfile='./ee/Dockerfile.promptkit-lsp',
+        only=[
+            './ee/cmd/promptkit-lsp',
+            './ee/internal',
+            './ee/pkg',
+            './ee/api',
+            './internal',
+            './pkg',
+            './api',
+            './go.mod',
+            './go.sum',
+        ],
+    )
+
+    # Build arena-dev-console image (interactive agent testing in project editor)
+    arena_dev_console_only = [
+        './ee/cmd/arena-dev-console',
+        './ee/internal',
+        './ee/pkg',
+        './ee/api',
+        './internal',
+        './pkg',
+        './api',
+        './go.mod',
+        './go.sum',
+    ]
+    if USE_LOCAL_PROMPTKIT:
+        arena_dev_console_only.append('./promptkit-local')
+
+    docker_build(
+        'omnia-arena-dev-console-dev',
+        context='.',
+        dockerfile='./ee/Dockerfile.arena-dev-console',
+        only=arena_dev_console_only,
     )
 
 # ============================================================================
@@ -388,6 +430,15 @@ if ENABLE_ENTERPRISE:
         'redis.architecture=standalone',
         'redis.auth.enabled=false',
         'redis.master.persistence.enabled=false',
+        # PromptKit LSP server for YAML validation
+        'enterprise.promptkitLsp.enabled=true',
+        'enterprise.promptkitLsp.image.repository=omnia-promptkit-lsp-dev',
+        'enterprise.promptkitLsp.image.tag=latest',
+        'enterprise.promptkitLsp.image.pullPolicy=Never',
+        # Arena Dev Console image for ArenaDevSession controller (creates dynamic pods)
+        'enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev',
+        'enterprise.arena.devConsole.image.tag=latest',
+        'enterprise.arena.devConsole.image.pullPolicy=Never',
     ])
 else:
     # Disable enterprise features
@@ -661,6 +712,13 @@ if ENABLE_ENTERPRISE:
         'omnia-arena-controller',
         labels=['enterprise'],
         resource_deps=arena_deps + ['omnia-redis-master'],
+    )
+
+    # PromptKit LSP server for YAML validation in project editor
+    k8s_resource(
+        'omnia-promptkit-lsp',
+        labels=['enterprise'],
+        resource_deps=['omnia-dashboard'],
     )
 
 # ============================================================================

@@ -568,28 +568,53 @@ export async function scaleDeployment(
 
 // Helper functions
 
-function isNotFoundError(error: unknown): boolean {
-  if (typeof error === "object" && error !== null) {
-    // Check for statusCode property
-    if (
-      "statusCode" in error &&
-      (error as { statusCode?: number }).statusCode === 404
-    ) {
-      return true;
-    }
-    // Check for response.statusCode
-    if (
-      "response" in error &&
-      typeof (error as { response: unknown }).response === "object" &&
-      (error as { response: unknown }).response !== null
-    ) {
-      const response = (error as { response: { statusCode?: number } }).response;
-      if (response?.statusCode === 404) {
-        return true;
-      }
+/**
+ * Extract status code from various Kubernetes client error formats.
+ */
+function extractStatusCode(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+
+  const err = error as Record<string, unknown>;
+
+  // Direct statusCode property
+  if (typeof err.statusCode === "number") {
+    return err.statusCode;
+  }
+
+  // Response statusCode
+  if (err.response && typeof (err.response as Record<string, unknown>).statusCode === "number") {
+    return (err.response as Record<string, unknown>).statusCode as number;
+  }
+
+  // Kubernetes client error format: "HTTP-Code: 404" in message
+  if (typeof err.message === "string" && /HTTP-Code:\s*(\d+)/.test(err.message)) {
+    const match = /HTTP-Code:\s*(\d+)/.exec(err.message);
+    if (match) {
+      return Number.parseInt(match[1], 10);
     }
   }
-  return false;
+
+  // Kubernetes API response body
+  if (typeof err.body === "string") {
+    try {
+      const parsed = JSON.parse(err.body) as Record<string, unknown>;
+      if (typeof parsed.code === "number") {
+        return parsed.code;
+      }
+    } catch {
+      // Not JSON, ignore
+    }
+  } else if (err.body && typeof (err.body as Record<string, unknown>).code === "number") {
+    return (err.body as Record<string, unknown>).code as number;
+  }
+
+  return null;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return extractStatusCode(error) === 404;
 }
 
 /**
@@ -617,23 +642,5 @@ export function extractK8sErrorMessage(error: unknown): string {
  * Check if an error indicates insufficient permissions.
  */
 export function isForbiddenError(error: unknown): boolean {
-  if (typeof error === "object" && error !== null) {
-    if (
-      "statusCode" in error &&
-      (error as { statusCode?: number }).statusCode === 403
-    ) {
-      return true;
-    }
-    if (
-      "response" in error &&
-      typeof (error as { response: unknown }).response === "object" &&
-      (error as { response: unknown }).response !== null
-    ) {
-      const response = (error as { response: { statusCode?: number } }).response;
-      if (response?.statusCode === 403) {
-        return true;
-      }
-    }
-  }
-  return false;
+  return extractStatusCode(error) === 403;
 }

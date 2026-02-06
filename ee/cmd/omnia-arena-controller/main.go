@@ -9,9 +9,12 @@ Functional Source License. See ee/LICENSE for details.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. GCP, Azure, OIDC) for kubeconfig authentication
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -35,6 +38,8 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
+
+	"github.com/altairalabs/omnia/ee/cmd/omnia-arena-controller/api"
 )
 
 const logKeyController = "controller"
@@ -53,6 +58,7 @@ func init() {
 
 func main() {
 	var metricsAddr string
+	var apiAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
@@ -61,6 +67,7 @@ func main() {
 	var enableHTTP2 bool
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
+	var arenaDevConsoleImage string
 	var workspaceContentPath string
 	var workspaceStorageClass string
 	var nfsServer string
@@ -73,10 +80,13 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to.")
+	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address the template API server binds to.")
 	flag.StringVar(&arenaWorkerImage, "arena-worker-image", "",
 		"The image to use for Arena worker containers.")
 	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent.")
+	flag.StringVar(&arenaDevConsoleImage, "arena-dev-console-image", "",
+		"The image to use for Arena dev console containers.")
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "",
 		"Base path for workspace content volumes.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
@@ -196,6 +206,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ArenaTemplateSource controller
+	if err := (&controller.ArenaTemplateSourceReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Recorder:             mgr.GetEventRecorderFor("arenatemplatesource-controller"),
+		WorkspaceContentPath: workspaceContentPath,
+		MaxVersionsPerSource: 10,
+		LicenseValidator:     licenseValidator,
+		StorageManager:       storageManager,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaTemplateSource")
+		os.Exit(1)
+	}
+
 	// Create Redis queue and aggregator
 	var arenaAggregator *aggregator.Aggregator
 	if redisAddr != "" {
@@ -234,6 +258,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ArenaDevSession controller
+	if err := (&controller.ArenaDevSessionReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		DevConsoleImage: arenaDevConsoleImage,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaDevSession")
+		os.Exit(1)
+	}
+
 	// Setup license validation webhooks
 	if enableLicenseWebhooks {
 		if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
@@ -258,9 +292,24 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
+	// Start API server for template rendering
+	apiServer := api.NewServer(apiAddr, ctrl.Log)
+	go func() {
+		if err := apiServer.Start(ctx); err != nil && err != http.ErrServerClosed {
+			setupLog.Error(err, "API server error")
+		}
+	}()
+
 	setupLog.Info("starting arena controller manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
+	}
+
+	// Shutdown API server when manager stops
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := apiServer.Shutdown(shutdownCtx); err != nil {
+		setupLog.Error(err, "API server shutdown error")
 	}
 }

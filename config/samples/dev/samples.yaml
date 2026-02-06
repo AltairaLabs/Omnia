@@ -17,11 +17,12 @@ spec:
   environment: development
   namespace:
     name: dev-agents
-  # Enable anonymous access with viewer role for development
+  # Enable anonymous access with editor role for development
   # WARNING: Only use viewer/none in production. editor/owner grants write access.
+  # Editor role allows creating agents, dev sessions, arena jobs, etc.
   anonymousAccess:
     enabled: true
-    role: viewer
+    role: editor
 ---
 # =============================================================================
 # Credential Secrets for Providers

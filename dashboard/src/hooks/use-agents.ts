@@ -39,8 +39,8 @@ export function useAgents(options: UseAgentsOptions = {}) {
     },
     enabled: !!currentWorkspace,
     // Ensure fresh data on workspace change
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }
 
@@ -67,7 +67,7 @@ export function useAgent(name: string, _namespace?: string) {
       return (agent as unknown as AgentRuntime) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }

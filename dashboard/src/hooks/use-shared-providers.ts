@@ -17,8 +17,8 @@ export function useSharedProviders() {
       const providers = await service.getSharedProviders();
       return providers as unknown as Provider[];
     },
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }
 
@@ -35,7 +35,7 @@ export function useSharedProvider(name: string) {
       return (provider as unknown as Provider) || null;
     },
     enabled: !!name,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }

@@ -39,8 +39,8 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
     },
     enabled: !!currentWorkspace,
     // Ensure fresh data on workspace change
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }
 
@@ -67,7 +67,7 @@ export function usePromptPack(name: string, _namespace?: string) {
       return (pack as unknown as PromptPack) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true, // Only refetch if stale
   });
 }

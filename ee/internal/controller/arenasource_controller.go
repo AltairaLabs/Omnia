@@ -808,7 +808,11 @@ func copyFileWithMode(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = sourceFile.Close() }()
+	defer func() {
+		if err := sourceFile.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close source file %s: %v\n", src, err)
+		}
+	}()
 
 	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
@@ -816,12 +820,16 @@ func copyFileWithMode(src, dst string, mode os.FileMode) error {
 	}
 
 	if _, err := io.Copy(destFile, sourceFile); err != nil {
-		_ = destFile.Close()
+		if closeErr := destFile.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close dest file %s after copy error: %v\n", dst, closeErr)
+		}
 		return err
 	}
 
 	if err := destFile.Sync(); err != nil {
-		_ = destFile.Close()
+		if closeErr := destFile.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close dest file %s after sync error: %v\n", dst, closeErr)
+		}
 		return err
 	}
 

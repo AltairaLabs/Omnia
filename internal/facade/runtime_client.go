@@ -86,7 +86,10 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 
 	_, err = client.Health(ctx)
 	if err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			// Log close error but return the primary connection error
+			fmt.Printf("Warning: failed to close connection after health check failure: %v\n", closeErr)
+		}
 		return nil, fmt.Errorf("failed to connect to runtime at %s: %w", cfg.Address, err)
 	}
 

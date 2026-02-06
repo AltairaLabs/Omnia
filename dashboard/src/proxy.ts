@@ -1,5 +1,5 @@
 /**
- * Next.js middleware for authentication.
+ * Next.js proxy for authentication.
  *
  * Handles:
  * - OAuth session validation
@@ -42,7 +42,7 @@ function isPublicRoute(pathname: string): boolean {
   return PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Skip public routes

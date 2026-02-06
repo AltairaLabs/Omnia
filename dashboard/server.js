@@ -21,14 +21,26 @@ const { WebSocket, WebSocketServer } = require("ws");
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
-const port = parseInt(process.env.PORT || "3000", 10);
+const port = Number.parseInt(process.env.PORT || "3000", 10);
 // WebSocket proxy runs on separate port to avoid interfering with Next.js HMR
-const wsProxyPort = parseInt(process.env.WS_PROXY_PORT || "3002", 10);
+const wsProxyPort = Number.parseInt(process.env.WS_PROXY_PORT || "3002", 10);
 
 // Service domain for K8s cluster DNS
 const SERVICE_DOMAIN = process.env.SERVICE_DOMAIN || "svc.cluster.local";
 // Default facade port
-const DEFAULT_FACADE_PORT = parseInt(process.env.DEFAULT_FACADE_PORT || "8080", 10);
+const DEFAULT_FACADE_PORT = Number.parseInt(process.env.DEFAULT_FACADE_PORT || "8080", 10);
+// PromptKit LSP service URL (overridable via env var)
+const LSP_SERVICE_URL = process.env.LSP_SERVICE_URL || `ws://omnia-promptkit-lsp.omnia-system.${SERVICE_DOMAIN}:8080/lsp`;
+// Arena Dev Console service name (deployed per workspace namespace)
+const DEV_CONSOLE_SERVICE_NAME = process.env.DEV_CONSOLE_SERVICE_NAME || "arena-dev-console";
+const DEV_CONSOLE_SERVICE_PORT = process.env.DEV_CONSOLE_SERVICE_PORT || "8080";
+
+// Common WebSocket close reasons
+const WS_CLOSE_REASON_TIMEOUT = "Connection timeout";
+const WS_CLOSE_REASON_UPSTREAM_FAILED = "Upstream connection failed";
+const WS_CLOSE_REASON_CONNECTION_CLOSED = "Connection closed";
+const WS_CLOSE_REASON_CLIENT_ERROR = "Client connection error";
+const WS_CLOSE_CODE_INTERNAL_ERROR = 1011;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -43,6 +55,40 @@ function parseAgentWsPath(pathname) {
     return { namespace: match[1], name: match[2] };
   }
   return null;
+}
+
+/**
+ * Check if the path is an LSP WebSocket request.
+ * Expected format: /api/lsp
+ */
+function isLspPath(pathname) {
+  return pathname === "/api/lsp";
+}
+
+/**
+ * Check if the path is a Dev Console WebSocket request.
+ * Expected format: /api/dev-console
+ */
+function isDevConsolePath(pathname) {
+  return pathname === "/api/dev-console";
+}
+
+/**
+ * Parse query parameters from URL.
+ */
+function parseQueryParams(url) {
+  const params = {};
+  const queryStart = url.indexOf("?");
+  if (queryStart !== -1) {
+    const queryString = url.slice(queryStart + 1);
+    for (const pair of queryString.split("&")) {
+      const [key, value] = pair.split("=");
+      if (key) {
+        params[decodeURIComponent(key)] = value ? decodeURIComponent(value) : "";
+      }
+    }
+  }
+  return params;
 }
 
 /**
@@ -108,7 +154,7 @@ function proxyWebSocket(clientSocket, namespace, name) {
     if (!upstreamConnected) {
       console.error(`[WS Proxy] Connection timeout for ${namespace}/${name}`);
       sendError(clientSocket, `Connection to agent ${name} timed out`, "CONNECTION_TIMEOUT");
-      clientSocket.close(1011, "Connection timeout");
+      clientSocket.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_TIMEOUT);
     }
   }, 10000);
 
@@ -136,7 +182,7 @@ function proxyWebSocket(clientSocket, namespace, name) {
         if (!upstreamConnected) {
           sendError(clientSocket, `Agent ${name} is not available`, "AGENT_UNAVAILABLE");
         }
-        clientSocket.close(sanitizeCloseCode(code), reasonStr || "Connection closed");
+        clientSocket.close(sanitizeCloseCode(code), reasonStr || WS_CLOSE_REASON_CONNECTION_CLOSED);
       }
     });
 
@@ -168,7 +214,7 @@ function proxyWebSocket(clientSocket, namespace, name) {
       sendError(clientSocket, errorMessage, errorCode);
 
       if (clientSocket.readyState === WebSocket.OPEN) {
-        clientSocket.close(1011, "Upstream connection failed");
+        clientSocket.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_UPSTREAM_FAILED);
       }
     });
 
@@ -195,7 +241,7 @@ function proxyWebSocket(clientSocket, namespace, name) {
       clearTimeout(connectionTimeout);
       console.error(`[WS Proxy] Client error:`, err.message);
       if (upstream && upstream.readyState === WebSocket.OPEN) {
-        upstream.close(1011, "Client connection error");
+        upstream.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_CLIENT_ERROR);
       }
     });
   } catch (err) {
@@ -203,6 +249,253 @@ function proxyWebSocket(clientSocket, namespace, name) {
     console.error(`[WS Proxy] Failed to create upstream connection:`, err.message);
     sendError(clientSocket, `Failed to connect to agent ${name}: ${err.message}`, "CONNECTION_ERROR");
     clientSocket.close(1011, "Failed to connect to agent");
+  }
+}
+
+/**
+ * Proxy a WebSocket connection to the LSP service.
+ */
+function proxyLspWebSocket(clientSocket, workspace, project) {
+  // Build upstream URL with query params
+  const upstreamUrl = workspace && project
+    ? `${LSP_SERVICE_URL}?workspace=${encodeURIComponent(workspace)}&project=${encodeURIComponent(project)}`
+    : LSP_SERVICE_URL;
+
+  console.log(`[WS LSP Proxy] Connecting to upstream: ${upstreamUrl}`);
+
+  let upstream = null;
+  let upstreamConnected = false;
+  let connectionTimeout = null;
+
+  // Set a connection timeout (10 seconds)
+  connectionTimeout = setTimeout(() => {
+    if (!upstreamConnected) {
+      console.error(`[WS LSP Proxy] Connection timeout`);
+      sendError(clientSocket, `Connection to LSP service timed out`, "CONNECTION_TIMEOUT");
+      clientSocket.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_TIMEOUT);
+    }
+  }, 10000);
+
+  try {
+    upstream = new WebSocket(upstreamUrl);
+
+    upstream.on("open", () => {
+      upstreamConnected = true;
+      clearTimeout(connectionTimeout);
+      console.log(`[WS LSP Proxy] Connected to LSP service`);
+    });
+
+    upstream.on("message", (data, isBinary) => {
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.send(data, { binary: isBinary });
+      }
+    });
+
+    upstream.on("close", (code, reason) => {
+      clearTimeout(connectionTimeout);
+      const reasonStr = reason ? reason.toString() : "";
+      console.log(`[WS LSP Proxy] Upstream closed: ${code} ${reasonStr}`);
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        if (!upstreamConnected) {
+          sendError(clientSocket, `LSP service is not available`, "LSP_UNAVAILABLE");
+        }
+        clientSocket.close(sanitizeCloseCode(code), reasonStr || WS_CLOSE_REASON_CONNECTION_CLOSED);
+      }
+    });
+
+    upstream.on("error", (err) => {
+      clearTimeout(connectionTimeout);
+      console.error(`[WS LSP Proxy] Upstream error:`);
+      console.error(`[WS LSP Proxy]   message: ${err.message}`);
+      console.error(`[WS LSP Proxy]   code: ${err.code}`);
+
+      let errorMessage = `Failed to connect to LSP service`;
+      let errorCode = "CONNECTION_ERROR";
+
+      if (err.code === "ENOTFOUND" || err.code === "EAI_AGAIN") {
+        errorMessage = `LSP service not found. Check that enterprise features are enabled.`;
+        errorCode = "LSP_NOT_FOUND";
+      } else if (err.code === "ECONNREFUSED") {
+        errorMessage = `LSP service is not accepting connections.`;
+        errorCode = "CONNECTION_REFUSED";
+      } else if (err.code === "ETIMEDOUT") {
+        errorMessage = `Connection to LSP service timed out.`;
+        errorCode = "CONNECTION_TIMEOUT";
+      }
+
+      sendError(clientSocket, errorMessage, errorCode);
+
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_UPSTREAM_FAILED);
+      }
+    });
+
+    // Forward client messages to upstream
+    clientSocket.on("message", (data, isBinary) => {
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.send(data, { binary: isBinary });
+      } else if (!upstreamConnected) {
+        console.warn(`[WS LSP Proxy] Client sent message before upstream connected`);
+      }
+    });
+
+    clientSocket.on("close", (code, reason) => {
+      clearTimeout(connectionTimeout);
+      const reasonStr = reason ? reason.toString() : "";
+      console.log(`[WS LSP Proxy] Client closed: ${code} ${reasonStr}`);
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close(sanitizeCloseCode(code), reasonStr);
+      }
+    });
+
+    clientSocket.on("error", (err) => {
+      clearTimeout(connectionTimeout);
+      console.error(`[WS LSP Proxy] Client error:`, err.message);
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_CLIENT_ERROR);
+      }
+    });
+  } catch (err) {
+    clearTimeout(connectionTimeout);
+    console.error(`[WS LSP Proxy] Failed to create upstream connection:`, err.message);
+    sendError(clientSocket, `Failed to connect to LSP service: ${err.message}`, "CONNECTION_ERROR");
+    clientSocket.close(1011, "Failed to connect to LSP service");
+  }
+}
+
+/**
+ * Build the dev console service URL for a given namespace and service name.
+ * Dev console is deployed per-workspace/namespace for security isolation.
+ * With dynamic sessions, each session creates its own service (arena-dev-console-{sessionId}).
+ * @param {string} namespace - Namespace where the dev console is deployed
+ * @param {string} serviceName - Service name (defaults to static DEV_CONSOLE_SERVICE_NAME)
+ */
+function getDevConsoleUrl(namespace, serviceName) {
+  if (!namespace) {
+    namespace = "dev-agents"; // Default test namespace
+  }
+  const svcName = serviceName || DEV_CONSOLE_SERVICE_NAME;
+  return `ws://${svcName}.${namespace}.${SERVICE_DOMAIN}:${DEV_CONSOLE_SERVICE_PORT}/ws`;
+}
+
+/**
+ * Proxy a WebSocket connection to the Arena Dev Console service.
+ * The dev console is deployed per-namespace for security isolation.
+ * With dynamic sessions (ArenaDevSession), each session creates its own service.
+ * @param {WebSocket} clientSocket - Client WebSocket connection
+ * @param {string} agentName - Agent identifier for the facade pattern
+ * @param {string} workspace - Workspace name (for context)
+ * @param {string} namespace - Namespace where the dev console is deployed
+ * @param {string} serviceName - Service name (for dynamic sessions like arena-dev-console-{sessionId})
+ */
+function proxyDevConsoleWebSocket(clientSocket, agentName, workspace, namespace, serviceName) {
+  // Build upstream URL - connect to dev console in the workspace's namespace
+  const params = new URLSearchParams();
+  params.set("agent", agentName || "dev-console");
+  if (workspace) params.set("workspace", workspace);
+
+  const baseUrl = getDevConsoleUrl(namespace, serviceName);
+  const upstreamUrl = `${baseUrl}?${params.toString()}`;
+
+  console.log(`[WS DevConsole Proxy] Connecting to dev console service '${serviceName || DEV_CONSOLE_SERVICE_NAME}' in namespace '${namespace || "dev-agents"}': ${upstreamUrl}`);
+
+  let upstream = null;
+  let upstreamConnected = false;
+  let connectionTimeout = null;
+
+  // Set a connection timeout (10 seconds)
+  connectionTimeout = setTimeout(() => {
+    if (!upstreamConnected) {
+      console.error(`[WS DevConsole Proxy] Connection timeout`);
+      sendError(clientSocket, `Connection to Dev Console service timed out`, "CONNECTION_TIMEOUT");
+      clientSocket.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_TIMEOUT);
+    }
+  }, 10000);
+
+  try {
+    upstream = new WebSocket(upstreamUrl);
+
+    upstream.on("open", () => {
+      upstreamConnected = true;
+      clearTimeout(connectionTimeout);
+      console.log(`[WS DevConsole Proxy] Connected to Dev Console service`);
+    });
+
+    upstream.on("message", (data, isBinary) => {
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.send(data, { binary: isBinary });
+      }
+    });
+
+    upstream.on("close", (code, reason) => {
+      clearTimeout(connectionTimeout);
+      const reasonStr = reason ? reason.toString() : "";
+      console.log(`[WS DevConsole Proxy] Upstream closed: ${code} ${reasonStr}`);
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        if (!upstreamConnected) {
+          sendError(clientSocket, `Dev Console service is not available`, "DEV_CONSOLE_UNAVAILABLE");
+        }
+        clientSocket.close(sanitizeCloseCode(code), reasonStr || WS_CLOSE_REASON_CONNECTION_CLOSED);
+      }
+    });
+
+    upstream.on("error", (err) => {
+      clearTimeout(connectionTimeout);
+      console.error(`[WS DevConsole Proxy] Upstream error:`);
+      console.error(`[WS DevConsole Proxy]   message: ${err.message}`);
+      console.error(`[WS DevConsole Proxy]   code: ${err.code}`);
+
+      let errorMessage = `Failed to connect to Dev Console service`;
+      let errorCode = "CONNECTION_ERROR";
+
+      if (err.code === "ENOTFOUND" || err.code === "EAI_AGAIN") {
+        errorMessage = `Dev Console service not found. Check that enterprise features are enabled.`;
+        errorCode = "DEV_CONSOLE_NOT_FOUND";
+      } else if (err.code === "ECONNREFUSED") {
+        errorMessage = `Dev Console service is not accepting connections.`;
+        errorCode = "CONNECTION_REFUSED";
+      } else if (err.code === "ETIMEDOUT") {
+        errorMessage = `Connection to Dev Console service timed out.`;
+        errorCode = "CONNECTION_TIMEOUT";
+      }
+
+      sendError(clientSocket, errorMessage, errorCode);
+
+      if (clientSocket.readyState === WebSocket.OPEN) {
+        clientSocket.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_UPSTREAM_FAILED);
+      }
+    });
+
+    // Forward client messages to upstream
+    clientSocket.on("message", (data, isBinary) => {
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.send(data, { binary: isBinary });
+      } else if (!upstreamConnected) {
+        console.warn(`[WS DevConsole Proxy] Client sent message before upstream connected`);
+      }
+    });
+
+    clientSocket.on("close", (code, reason) => {
+      clearTimeout(connectionTimeout);
+      const reasonStr = reason ? reason.toString() : "";
+      console.log(`[WS DevConsole Proxy] Client closed: ${code} ${reasonStr}`);
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close(sanitizeCloseCode(code), reasonStr);
+      }
+    });
+
+    clientSocket.on("error", (err) => {
+      clearTimeout(connectionTimeout);
+      console.error(`[WS DevConsole Proxy] Client error:`, err.message);
+      if (upstream && upstream.readyState === WebSocket.OPEN) {
+        upstream.close(WS_CLOSE_CODE_INTERNAL_ERROR, WS_CLOSE_REASON_CLIENT_ERROR);
+      }
+    });
+  } catch (err) {
+    clearTimeout(connectionTimeout);
+    console.error(`[WS DevConsole Proxy] Failed to create upstream connection:`, err.message);
+    sendError(clientSocket, `Failed to connect to Dev Console service: ${err.message}`, "CONNECTION_ERROR");
+    clientSocket.close(1011, "Failed to connect to Dev Console service");
   }
 }
 
@@ -233,6 +526,15 @@ app.prepare().then(() => {
 
     if (agent) {
       proxyWebSocket(ws, agent.namespace, agent.name);
+    } else if (isLspPath(pathname)) {
+      // Parse query params for LSP context
+      const params = parseQueryParams(req.url);
+      proxyLspWebSocket(ws, params.workspace, params.project);
+    } else if (isDevConsolePath(pathname)) {
+      // Parse query params for dev console context (workspace/namespace for provider access)
+      // service param is used for dynamic sessions (ArenaDevSession creates arena-dev-console-{sessionId})
+      const params = parseQueryParams(req.url);
+      proxyDevConsoleWebSocket(ws, params.agent || "dev-console", params.workspace, params.namespace, params.service);
     } else {
       console.warn(`[WS] Unknown WebSocket path: ${pathname}`);
       ws.close(1008, "Unknown path");
@@ -247,6 +549,16 @@ app.prepare().then(() => {
 
     if (agent) {
       console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } else if (isLspPath(pathname)) {
+      console.log(`[WS Upgrade] LSP connection request`);
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } else if (isDevConsolePath(pathname)) {
+      console.log(`[WS Upgrade] Dev Console connection request`);
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });

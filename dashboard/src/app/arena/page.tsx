@@ -24,6 +24,8 @@ import {
   Loader2,
   Clock,
   Target,
+  FileCode,
+  LayoutTemplate,
 } from "lucide-react";
 import Link from "next/link";
 import type { ArenaJob } from "@/types/arena";
@@ -187,7 +189,7 @@ function ArenaContent() {
       <div className="flex-1 p-6 space-y-6 overflow-auto">
         {/* Stats Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Link href="/arena/sources">
+          <Link href="/arena/sources" className="h-full">
             <StatCard
               title="Active Sources"
               value={stats?.sources.active || 0}
@@ -196,7 +198,7 @@ function ArenaContent() {
             />
           </Link>
 
-          <Link href="/arena/jobs">
+          <Link href="/arena/jobs" className="h-full">
             <StatCard
               title="Running Jobs"
               value={stats?.jobs.running || 0}
@@ -235,7 +237,7 @@ function ArenaContent() {
         </div>
 
         {/* Quick Links */}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Link
             href="/arena/sources"
             className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
@@ -244,6 +246,28 @@ function ArenaContent() {
             <h3 className="font-semibold mb-1">Manage Sources</h3>
             <p className="text-sm text-muted-foreground">
               Configure Git, OCI, or S3 sources containing arena configurations and scenarios
+            </p>
+          </Link>
+
+          <Link
+            href="/arena/templates"
+            className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
+          >
+            <LayoutTemplate className="h-8 w-8 mb-3 text-muted-foreground" />
+            <h3 className="font-semibold mb-1">Templates</h3>
+            <p className="text-sm text-muted-foreground">
+              Browse and use templates to create new arena projects with pre-configured settings
+            </p>
+          </Link>
+
+          <Link
+            href="/arena/projects"
+            className="rounded-lg border bg-card p-6 hover:bg-muted/50 transition-colors"
+          >
+            <FileCode className="h-8 w-8 mb-3 text-muted-foreground" />
+            <h3 className="font-semibold mb-1">Project Editor</h3>
+            <p className="text-sm text-muted-foreground">
+              Create and edit arena project configurations with the built-in YAML editor
             </p>
           </Link>
 

@@ -12,7 +12,7 @@ import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/work
 import { listCrd, createCrd } from "@/lib/k8s/crd-operations";
 import {
   validateWorkspace,
-  serverErrorResponse,
+  handleK8sError,
   buildCrdResource,
   CRD_ARENA_SOURCES,
   createAuditContext,
@@ -56,7 +56,7 @@ export const GET = withWorkspaceAccess(
       if (auditCtx) {
         auditError(auditCtx, "list", undefined, error, 500);
       }
-      return serverErrorResponse(error, "Failed to list arena sources");
+      return handleK8sError(error, "list arena sources");
     }
   }
 );
@@ -110,7 +110,7 @@ export const POST = withWorkspaceAccess(
       if (auditCtx) {
         auditError(auditCtx, "create", resourceName, error, 500);
       }
-      return serverErrorResponse(error, "Failed to create arena source");
+      return handleK8sError(error, "create arena source");
     }
   }
 );

@@ -33,6 +33,19 @@ export default defineConfig({
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
         "src/components/arena/index.ts", // Arena barrel re-export
+        "src/components/arena/project-editor.tsx", // Project editor layout
+        "src/components/arena/file-tree.tsx", // File tree browser
+        "src/components/arena/editor-tabs.tsx", // Editor tab bar
+        "src/components/arena/yaml-editor.tsx", // Monaco YAML editor
+        "src/components/arena/lsp-yaml-editor.tsx", // Monaco LSP YAML editor
+        "src/components/arena/dev-console-panel.tsx", // Dev console visual component
+        "src/components/arena/job-logs-tab.tsx", // Job logs visual component
+        "src/components/arena/job-results-tab.tsx", // Job results visual component
+        "src/components/arena/run-dropdown.tsx", // Run dropdown visual component
+        "src/components/arena/quick-run-dialog.tsx", // Quick run dialog visual component
+        "src/lib/lsp/**", // Monaco LSP client infrastructure (browser-specific)
+        "src/lib/stubs/**", // Node.js polyfills for browser builds
+        "src/components/arena/validation-results-dialog.tsx", // Validation results dialog
         "src/components/console/**",
         "src/components/cost/**",
         "src/components/credentials/**",
@@ -48,6 +61,7 @@ export default defineConfig({
         "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/jobs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/sources/[name]/page.tsx", // Arena detail pages (complex UI)
+        "src/app/arena/projects/page.tsx", // Arena project editor page (visual)
         "src/app/providers/**/page.tsx", // Provider pages (require full context)
         "src/app/settings/**/page.tsx", // Settings pages (require full context)
         "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)
@@ -63,6 +77,9 @@ export default defineConfig({
         // License API routes - require license server
         "src/app/api/license/**",
 
+        // Arena project API routes - require K8s infrastructure
+        "src/app/api/workspaces/[name]/arena/projects/**",
+
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",
         "src/app/api/workspaces/[name]/costs/**",
@@ -77,6 +94,10 @@ export default defineConfig({
         "src/app/api/health/**",
         "src/app/api/settings/**",
 
+        // WebSocket hooks - require server infrastructure
+        "src/hooks/use-dev-console.ts", // WebSocket client for dev console
+        "src/hooks/use-job-logs-stream.ts", // Job logs streaming client
+
         // Requires external infrastructure (K8s, Prometheus, etc.)
         "src/lib/data/live-service.ts", // K8s API
         "src/lib/data/operator-service.ts", // Operator API
@@ -89,7 +110,9 @@ export default defineConfig({
         // Type definitions only (no executable code)
         "src/lib/data/types.ts",
         "src/lib/auth/types.ts",
-        "src/types/**",
+        "src/types/generated/**", // Generated CRD types
+        "src/types/workspace.ts", // Workspace types (pure type definitions)
+        "src/types/api.ts", // API types (pure type definitions)
 
         // Mock/demo data (not production code)
         "src/lib/mock-data.ts",

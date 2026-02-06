@@ -2,12 +2,37 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import sonarjs from "eslint-plugin-sonarjs";
+import unicorn from "eslint-plugin-unicorn";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   // SonarJS recommended rules for SonarCloud compatibility
   sonarjs.configs.recommended,
+  // Unicorn plugin for additional SonarCloud rule coverage
+  {
+    plugins: { unicorn },
+    rules: {
+      // S7773: Use Number.parseInt/parseFloat/isNaN instead of globals
+      "unicorn/prefer-number-properties": "error",
+      // S7781: Use String.replaceAll() instead of replace with global regex
+      "unicorn/prefer-string-replace-all": "error",
+      // S6582: Prefer optional catch binding
+      "unicorn/prefer-optional-catch-binding": "error",
+      // Prefer modern array methods - disabled, too noisy for existing code
+      "unicorn/no-array-for-each": "off",
+      // Prefer ternary over if-else for simple assignments
+      "unicorn/prefer-ternary": "off", // Too aggressive for readability
+      // Prefer Array.isArray()
+      "unicorn/no-instanceof-array": "error",
+      // Prefer negative index check
+      "unicorn/prefer-negative-index": "warn",
+      // Prefer includes over indexOf
+      "unicorn/prefer-includes": "error",
+      // Prefer startsWith/endsWith
+      "unicorn/prefer-string-starts-ends-with": "error",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

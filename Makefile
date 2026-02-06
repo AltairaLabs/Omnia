@@ -206,6 +206,10 @@ helm-lint: ## Lint Helm chart
 helm-template: ## Test Helm chart template rendering
 	helm template omnia charts/omnia --debug
 
+.PHONY: helm-validate
+helm-validate: ## Validate Helm templates (lint + render)
+	./hack/validate-helm.sh
+
 .PHONY: helm-package
 helm-package: ## Package Helm chart locally
 	helm dependency update charts/omnia

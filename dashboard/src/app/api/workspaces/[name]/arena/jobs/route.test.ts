@@ -20,6 +20,7 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   extractK8sErrorMessage: vi.fn((error: unknown) =>
     error instanceof Error ? error.message : String(error)
   ),
+  isForbiddenError: vi.fn(),
 }));
 
 vi.mock("@/lib/k8s/workspace-route-helpers", async (importOriginal) => {

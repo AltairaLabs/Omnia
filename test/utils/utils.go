@@ -173,6 +173,31 @@ func GetProjectDir() (string, error) {
 	return wd, nil
 }
 
+// ValidateManifest validates a Kubernetes manifest against the server's CRD schema
+// using kubectl apply --dry-run=server. This catches schema validation errors
+// like missing required fields before the actual apply.
+func ValidateManifest(manifest string) error {
+	cmd := exec.Command("kubectl", "apply", "-f", "-", "--dry-run=server")
+	cmd.Stdin = strings.NewReader(manifest)
+	_, err := Run(cmd)
+	return err
+}
+
+// ApplyManifestWithValidation first validates the manifest with --dry-run=server,
+// then applies it. This ensures schema errors are caught early with clear messages.
+func ApplyManifestWithValidation(manifest string) error {
+	// First validate
+	if err := ValidateManifest(manifest); err != nil {
+		return fmt.Errorf("manifest validation failed: %w", err)
+	}
+
+	// Then apply
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(manifest)
+	_, err := Run(cmd)
+	return err
+}
+
 // UncommentCode searches for target in the file and remove the comment prefix
 // of the target content. The target content may span multiple lines.
 func UncommentCode(filename, target, prefix string) error {

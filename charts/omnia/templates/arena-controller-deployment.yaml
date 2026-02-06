@@ -29,7 +29,9 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "omnia.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        # Run as root to write to shared workspace-content PVC
+        runAsNonRoot: false
+        runAsUser: 0
       containers:
         - name: manager
           image: {{ .Values.enterprise.arena.controller.image.repository | default "ghcr.io/altairalabs/omnia-arena-controller" }}:{{ .Values.enterprise.arena.controller.image.tag | default .Chart.AppVersion }}
@@ -43,6 +45,7 @@ spec:
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             - --arena-worker-image={{ .Values.enterprise.arena.worker.image.repository | default "ghcr.io/altairalabs/omnia-arena-worker" }}:{{ .Values.enterprise.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.enterprise.arena.worker.image.pullPolicy | default "IfNotPresent" }}
+            - --arena-dev-console-image={{ .Values.enterprise.arena.devConsole.image.repository | default "ghcr.io/altairalabs/omnia-arena-dev-console" }}:{{ .Values.enterprise.arena.devConsole.image.tag | default .Chart.AppVersion }}
             {{- if and .Values.enterprise.arena.queue (eq .Values.enterprise.arena.queue.type "redis") }}
             {{- if .Values.redis.enabled }}
             - --redis-addr={{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
@@ -54,7 +57,7 @@ spec:
             - --nfs-server={{ include "omnia.nfsServer" . }}
             - --nfs-path={{ include "omnia.nfsPath" . }}
             {{- end }}
-            - --workspace-content-path=/tmp/arena-artifacts
+            - --workspace-content-path=/workspace-content
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
             {{- if .Values.metrics.secure }}
@@ -63,7 +66,11 @@ spec:
             - --metrics-secure=false
             {{- end }}
             {{- end }}
+            - --api-bind-address=:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
           ports:
+            - name: api
+              containerPort: {{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
+              protocol: TCP
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}
@@ -91,11 +98,12 @@ spec:
           resources:
             {{- toYaml .Values.enterprise.arena.controller.resources | default .Values.resources | nindent 12 }}
           volumeMounts:
-            - name: arena-artifacts
-              mountPath: /tmp/arena-artifacts
+            - name: workspace-content
+              mountPath: /workspace-content
       volumes:
-        - name: arena-artifacts
-          emptyDir: {}
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: {{ include "omnia.fullname" . }}-workspace-content
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

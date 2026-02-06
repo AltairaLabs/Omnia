@@ -338,89 +338,11 @@ func (r *ArenaJobReconciler) resolveProviderOverrides(ctx context.Context, arena
 	return resolvedByGroup, nil
 }
 
-// flattenProviders returns a deduplicated flat list of providers from grouped providers.
-// Used for building env vars from provider secrets.
-func flattenProviders(providersByGroup map[string][]*corev1alpha1.Provider) []*corev1alpha1.Provider {
-	if len(providersByGroup) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]bool)
-	var allProviders []*corev1alpha1.Provider
-
-	for _, groupProviders := range providersByGroup {
-		for _, p := range groupProviders {
-			key := fmt.Sprintf("%s/%s", p.Namespace, p.Name)
-			if !seen[key] {
-				seen[key] = true
-				allProviders = append(allProviders, p)
-			}
-		}
-	}
-
-	return allProviders
-}
-
 // buildProviderEnvVarsFromCRDs builds environment variables for Provider CRDs.
 // This extracts credentials from each provider's secretRef.
+// Delegates to the shared providers.BuildEnvVarsFromProviders function.
 func (r *ArenaJobReconciler) buildProviderEnvVarsFromCRDs(providerCRDs []*corev1alpha1.Provider) []corev1.EnvVar {
-	envVars := []corev1.EnvVar{}
-	seen := make(map[string]bool)
-
-	for _, provider := range providerCRDs {
-		// Get the provider type for determining which env var to use
-		providerType := string(provider.Spec.Type)
-
-		// If provider has a secretRef, use it directly
-		if provider.Spec.SecretRef != nil {
-			// Get the expected env var name for this provider type
-			secretRefs := providers.GetSecretRefsForProvider(providerType)
-			for _, ref := range secretRefs {
-				if seen[ref.EnvVar] {
-					continue
-				}
-				seen[ref.EnvVar] = true
-
-				// Use the provider's secretRef instead of the default
-				envVars = append(envVars, corev1.EnvVar{
-					Name: ref.EnvVar,
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: provider.Spec.SecretRef.Name,
-							},
-							Key:      ref.Key,
-							Optional: ptr(true),
-						},
-					},
-				})
-			}
-		} else {
-			// Fall back to default secret naming convention
-			secretRefs := providers.GetSecretRefsForProvider(providerType)
-			for _, ref := range secretRefs {
-				if seen[ref.EnvVar] {
-					continue
-				}
-				seen[ref.EnvVar] = true
-
-				envVars = append(envVars, corev1.EnvVar{
-					Name: ref.EnvVar,
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: ref.SecretName,
-							},
-							Key:      ref.Key,
-							Optional: ptr(true),
-						},
-					},
-				})
-			}
-		}
-	}
-
-	return envVars
+	return providers.BuildEnvVarsFromProviders(providerCRDs)
 }
 
 // getProviderIDsFromCRDs extracts provider IDs from Provider CRDs for work queue.
@@ -694,7 +616,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Flatten providers for env var injection (secrets still passed as env vars)
-	providerCRDs := flattenProviders(providersByGroup)
+	providerCRDs := providers.FlattenProviderGroups(providersByGroup)
 
 	// Determine arena file path
 	arenaFile := arenaJob.Spec.ArenaFile

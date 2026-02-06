@@ -98,6 +98,55 @@ enterprise:
         # -- Redis port
         port: 6379
 
+    # Dev console for interactive agent testing
+    # Dev console image settings used by ArenaDevSession controller to create
+    # dynamic per-project pods. No static deployment - pods are created on-demand.
+    devConsole:
+      image:
+        # -- Dev console image repository (used by ArenaDevSession controller)
+        repository: ghcr.io/altairalabs/omnia-arena-dev-console
+        # -- Dev console image tag (defaults to Chart appVersion)
+        tag: ""
+        # -- Dev console image pull policy
+        pullPolicy: IfNotPresent
+
+  # Community templates source (deployed automatically when enabled)
+  communityTemplates:
+    # -- Enable community templates source
+    enabled: true
+    # -- Name of the ArenaTemplateSource resource
+    name: community-templates
+    # -- Namespace to deploy the ArenaTemplateSource
+    namespace: dev-agents
+    # -- Git repository URL for community templates
+    url: https://github.com/AltairaLabs/promptkit-templates.git
+    # -- Branch to track
+    branch: main
+    # -- Path within fetched content where templates are located (empty = root)
+    templatesPath: ""
+    # -- Sync interval for fetching updates
+    syncInterval: 1h
+    # -- Fetch timeout
+    timeout: 2m
+
+  # PromptKit LSP server for YAML validation
+  promptkitLsp:
+    # -- Enable PromptKit LSP server
+    enabled: false
+    # -- Number of PromptKit LSP replicas
+    replicaCount: 2
+    image:
+      # -- PromptKit LSP image repository
+      repository: ghcr.io/altairalabs/omnia-promptkit-lsp
+      # -- PromptKit LSP image tag (defaults to Chart appVersion)
+      tag: ""
+      # -- PromptKit LSP image pull policy
+      pullPolicy: IfNotPresent
+    service:
+      # -- PromptKit LSP service port
+      port: 8080
+    resources: {}
+
 # License configuration
 license:
   # -- License key (JWT). If set, creates the arena-license Secret.
