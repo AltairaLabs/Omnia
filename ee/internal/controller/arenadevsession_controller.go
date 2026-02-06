@@ -585,6 +585,16 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 								PeriodSeconds:       5,
 							},
 							Resources: r.getResources(session),
+							SecurityContext: &corev1.SecurityContext{
+								AllowPrivilegeEscalation: ptr[bool](false),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+								RunAsNonRoot: ptr[bool](true),
+								SeccompProfile: &corev1.SeccompProfile{
+									Type: corev1.SeccompProfileTypeRuntimeDefault,
+								},
+							},
 						},
 					},
 				},
