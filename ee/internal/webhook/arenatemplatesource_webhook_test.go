@@ -277,34 +277,6 @@ func TestValidateLicenseNoValidator(t *testing.T) {
 	}
 }
 
-func TestValidateCreateWrongType(t *testing.T) {
-	validator := &ArenaTemplateSourceValidator{LicenseValidator: nil}
-
-	// Pass wrong type to ValidateCreate
-	_, err := validator.ValidateCreate(context.Background(), &omniav1alpha1.ArenaSource{})
-	if err == nil {
-		t.Error("expected error for wrong type")
-	}
-}
-
-func TestValidateUpdateWrongType(t *testing.T) {
-	validator := &ArenaTemplateSourceValidator{LicenseValidator: nil}
-
-	validSource := &omniav1alpha1.ArenaTemplateSource{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-source", Namespace: "default"},
-		Spec: omniav1alpha1.ArenaTemplateSourceSpec{
-			Type: omniav1alpha1.ArenaTemplateSourceTypeGit,
-			Git:  &omniav1alpha1.GitSource{URL: "https://github.com/test/repo"},
-		},
-	}
-
-	// Pass wrong type as newObj to ValidateUpdate
-	_, err := validator.ValidateUpdate(context.Background(), validSource, &omniav1alpha1.ArenaSource{})
-	if err == nil {
-		t.Error("expected error for wrong type")
-	}
-}
-
 func TestValidateLicenseWithDevModeValidator(t *testing.T) {
 	// Create a dev mode validator which allows all features
 	licenseValidator, err := license.NewValidator(nil, license.WithDevMode())

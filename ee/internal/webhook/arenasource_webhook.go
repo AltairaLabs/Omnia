@@ -14,10 +14,8 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -34,40 +32,29 @@ var arenasourcelog = logf.Log.WithName("arenasource-webhook")
 
 // SetupArenaSourceWebhookWithManager registers the ArenaSource webhook with the manager.
 func SetupArenaSourceWebhookWithManager(mgr ctrl.Manager, licenseValidator *license.Validator) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&omniav1alpha1.ArenaSource{}).
+	return ctrl.NewWebhookManagedBy(mgr, &omniav1alpha1.ArenaSource{}).
 		WithValidator(&ArenaSourceValidator{LicenseValidator: licenseValidator}).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/validate-omnia-altairalabs-ai-v1alpha1-arenasource,mutating=false,failurePolicy=fail,sideEffects=None,groups=omnia.altairalabs.ai,resources=arenasources,verbs=create;update,versions=v1alpha1,name=varenasource.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &ArenaSourceValidator{}
+var _ admission.Validator[*omniav1alpha1.ArenaSource] = &ArenaSourceValidator{}
 
-// ValidateCreate implements webhook.CustomValidator.
-func (v *ArenaSourceValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	source, ok := obj.(*omniav1alpha1.ArenaSource)
-	if !ok {
-		return nil, fmt.Errorf("expected ArenaSource but got %T", obj)
-	}
+// ValidateCreate implements admission.Validator.
+func (v *ArenaSourceValidator) ValidateCreate(ctx context.Context, source *omniav1alpha1.ArenaSource) (admission.Warnings, error) {
 	arenasourcelog.Info("validating create", "name", source.Name)
-
 	return v.validateLicense(ctx, source)
 }
 
-// ValidateUpdate implements webhook.CustomValidator.
-func (v *ArenaSourceValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	source, ok := newObj.(*omniav1alpha1.ArenaSource)
-	if !ok {
-		return nil, fmt.Errorf("expected ArenaSource but got %T", newObj)
-	}
+// ValidateUpdate implements admission.Validator.
+func (v *ArenaSourceValidator) ValidateUpdate(ctx context.Context, _ *omniav1alpha1.ArenaSource, source *omniav1alpha1.ArenaSource) (admission.Warnings, error) {
 	arenasourcelog.Info("validating update", "name", source.Name)
-
 	return v.validateLicense(ctx, source)
 }
 
-// ValidateDelete implements webhook.CustomValidator.
-func (v *ArenaSourceValidator) ValidateDelete(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator.
+func (v *ArenaSourceValidator) ValidateDelete(_ context.Context, _ *omniav1alpha1.ArenaSource) (admission.Warnings, error) {
 	// No license validation needed for delete
 	return nil, nil
 }

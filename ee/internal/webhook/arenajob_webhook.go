@@ -14,10 +14,8 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -34,40 +32,29 @@ var arenajoblog = logf.Log.WithName("arenajob-webhook")
 
 // SetupArenaJobWebhookWithManager registers the ArenaJob webhook with the manager.
 func SetupArenaJobWebhookWithManager(mgr ctrl.Manager, licenseValidator *license.Validator) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&omniav1alpha1.ArenaJob{}).
+	return ctrl.NewWebhookManagedBy(mgr, &omniav1alpha1.ArenaJob{}).
 		WithValidator(&ArenaJobValidator{LicenseValidator: licenseValidator}).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/validate-omnia-altairalabs-ai-v1alpha1-arenajob,mutating=false,failurePolicy=fail,sideEffects=None,groups=omnia.altairalabs.ai,resources=arenajobs,verbs=create;update,versions=v1alpha1,name=varenajob.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &ArenaJobValidator{}
+var _ admission.Validator[*omniav1alpha1.ArenaJob] = &ArenaJobValidator{}
 
-// ValidateCreate implements webhook.CustomValidator.
-func (v *ArenaJobValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	job, ok := obj.(*omniav1alpha1.ArenaJob)
-	if !ok {
-		return nil, fmt.Errorf("expected ArenaJob but got %T", obj)
-	}
+// ValidateCreate implements admission.Validator.
+func (v *ArenaJobValidator) ValidateCreate(ctx context.Context, job *omniav1alpha1.ArenaJob) (admission.Warnings, error) {
 	arenajoblog.Info("validating create", "name", job.Name)
-
 	return v.validateLicense(ctx, job)
 }
 
-// ValidateUpdate implements webhook.CustomValidator.
-func (v *ArenaJobValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	job, ok := newObj.(*omniav1alpha1.ArenaJob)
-	if !ok {
-		return nil, fmt.Errorf("expected ArenaJob but got %T", newObj)
-	}
+// ValidateUpdate implements admission.Validator.
+func (v *ArenaJobValidator) ValidateUpdate(ctx context.Context, _ *omniav1alpha1.ArenaJob, job *omniav1alpha1.ArenaJob) (admission.Warnings, error) {
 	arenajoblog.Info("validating update", "name", job.Name)
-
 	return v.validateLicense(ctx, job)
 }
 
-// ValidateDelete implements webhook.CustomValidator.
-func (v *ArenaJobValidator) ValidateDelete(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator.
+func (v *ArenaJobValidator) ValidateDelete(_ context.Context, _ *omniav1alpha1.ArenaJob) (admission.Warnings, error) {
 	// No license validation needed for delete
 	return nil, nil
 }
