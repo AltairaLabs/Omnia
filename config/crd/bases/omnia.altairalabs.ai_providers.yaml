@@ -78,6 +78,47 @@ spec:
                   - duplex
                   type: string
                 type: array
+              credential:
+                description: |-
+                  credential defines how to obtain credentials for this provider.
+                  Mutually exclusive with secretRef. If both are set, credential takes precedence.
+                properties:
+                  envVar:
+                    description: |-
+                      envVar specifies an environment variable name containing the credential.
+                      The variable must be available in the runtime pod.
+                    pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                    type: string
+                  filePath:
+                    description: |-
+                      filePath specifies a path to a file containing the credential.
+                      The file must be mounted in the runtime pod.
+                    pattern: ^/.*
+                    type: string
+                  secretRef:
+                    description: secretRef references a Kubernetes Secret containing
+                      the credential.
+                    properties:
+                      key:
+                        description: |-
+                          key is the key within the Secret to use.
+                          If not specified, the provider-appropriate key is used:
+                          - ANTHROPIC_API_KEY for Claude
+                          - OPENAI_API_KEY for OpenAI
+                          - GEMINI_API_KEY for Gemini
+                        type: string
+                      name:
+                        description: name is the name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: at most one credential method may be specified
+                  rule: '(has(self.secretRef) ? 1 : 0) + (has(self.envVar) ? 1 : 0)
+                    + (has(self.filePath) ? 1 : 0) <= 1'
               defaults:
                 description: defaults contains provider tuning parameters.
                 properties:
@@ -145,6 +186,7 @@ spec:
                 description: |-
                   secretRef references a Secret containing API credentials.
                   Optional for providers that don't require credentials (e.g., mock, ollama).
+                  Deprecated: Use credential.secretRef instead.
                 properties:
                   key:
                     description: |-
@@ -179,6 +221,10 @@ spec:
             required:
             - type
             type: object
+            x-kubernetes-validations:
+            - message: secretRef and credential are mutually exclusive; use credential.secretRef
+                instead
+              rule: '!(has(self.secretRef) && has(self.credential))'
           status:
             description: status defines the observed state of Provider
             properties:

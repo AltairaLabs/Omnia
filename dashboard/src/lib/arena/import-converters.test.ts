@@ -242,6 +242,75 @@ describe("convertProviderToArena", () => {
     expect(yaml).not.toContain("capabilities:");
   });
 
+  it("should emit credential.credential_env for provider with credential.envVar", () => {
+    const provider: Provider = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "Provider",
+      metadata: {
+        name: "test",
+        namespace: "ns",
+      },
+      spec: {
+        type: "claude",
+        credential: {
+          envVar: "MY_CLAUDE_KEY",
+        },
+      },
+    };
+
+    const yaml = convertProviderToArena(provider);
+
+    expect(yaml).toContain("  credential:");
+    expect(yaml).toContain("    credential_env: MY_CLAUDE_KEY");
+  });
+
+  it("should emit credential.credential_file for provider with credential.filePath", () => {
+    const provider: Provider = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "Provider",
+      metadata: {
+        name: "test",
+        namespace: "ns",
+      },
+      spec: {
+        type: "claude",
+        credential: {
+          filePath: "/var/secrets/api-key",
+        },
+      },
+    };
+
+    const yaml = convertProviderToArena(provider);
+
+    expect(yaml).toContain("  credential:");
+    expect(yaml).toContain("    credential_file: /var/secrets/api-key");
+  });
+
+  it("should omit credential section for provider with credential.secretRef", () => {
+    const provider: Provider = {
+      apiVersion: "omnia.altairalabs.ai/v1alpha1",
+      kind: "Provider",
+      metadata: {
+        name: "test",
+        namespace: "ns",
+      },
+      spec: {
+        type: "claude",
+        credential: {
+          secretRef: {
+            name: "my-secret",
+          },
+        },
+      },
+    };
+
+    const yaml = convertProviderToArena(provider);
+
+    expect(yaml).not.toContain("credential:");
+    expect(yaml).not.toContain("credential_env:");
+    expect(yaml).not.toContain("credential_file:");
+  });
+
   it("should skip invalid temperature", () => {
     const provider: Provider = {
       apiVersion: "omnia.altairalabs.ai/v1alpha1",

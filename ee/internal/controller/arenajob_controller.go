@@ -414,8 +414,23 @@ func convertProviderToOverride(p *corev1alpha1.Provider) overrides.ProviderOverr
 		BaseURL: p.Spec.BaseURL,
 	}
 
-	// Set the env var name for credentials
-	if p.Spec.SecretRef != nil {
+	// Set credential configuration
+	if p.Spec.Credential != nil {
+		if p.Spec.Credential.SecretRef != nil {
+			// credential.secretRef — use the standard env var name
+			secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
+			if len(secretRefs) > 0 {
+				override.SecretEnvVar = secretRefs[0].EnvVar
+			}
+		} else if p.Spec.Credential.EnvVar != "" {
+			// credential.envVar — the env var is pre-injected, pass it through
+			override.SecretEnvVar = p.Spec.Credential.EnvVar
+		} else if p.Spec.Credential.FilePath != "" {
+			// credential.filePath — pass to worker via override config
+			override.CredentialFile = p.Spec.Credential.FilePath
+		}
+	} else if p.Spec.SecretRef != nil {
+		// Legacy secretRef
 		secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
 		if len(secretRefs) > 0 {
 			override.SecretEnvVar = secretRefs[0].EnvVar

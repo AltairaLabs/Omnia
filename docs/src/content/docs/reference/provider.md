@@ -74,6 +74,55 @@ If `key` is not specified, the controller looks for provider-appropriate keys:
 - **OpenAI**: `OPENAI_API_KEY` or `api-key`
 - **Gemini**: `GEMINI_API_KEY` or `api-key`
 
+### `credential`
+
+Flexible credential configuration supporting multiple credential strategies. Mutually exclusive with `secretRef`. Exactly one sub-field must be specified.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `credential.secretRef.name` | string | Name of a Kubernetes Secret |
+| `credential.secretRef.key` | string | Specific key within the Secret (auto-detected if omitted) |
+| `credential.envVar` | string | Environment variable name containing the credential |
+| `credential.filePath` | string | Path to a file containing the credential |
+
+#### Using a Kubernetes Secret
+
+Equivalent to the legacy `secretRef` field, but nested under `credential`:
+
+```yaml
+spec:
+  credential:
+    secretRef:
+      name: anthropic-credentials
+      key: ANTHROPIC_API_KEY  # optional
+```
+
+#### Using an environment variable
+
+For CI/CD pipelines or environments where credentials are pre-injected as environment variables:
+
+```yaml
+spec:
+  credential:
+    envVar: ANTHROPIC_API_KEY
+```
+
+The variable must be available in the runtime pod. The controller cannot validate its presence — a `CredentialConfigured` condition is set with reason `EnvVar`.
+
+#### Using a mounted file
+
+For credentials mounted as files (e.g., via a volume mount or CSI driver):
+
+```yaml
+spec:
+  credential:
+    filePath: /var/secrets/api-key
+```
+
+The file must be mounted in the runtime pod. The controller cannot validate its presence — a `CredentialConfigured` condition is set with reason `FilePath`.
+
+> **Migration from `secretRef`**: The legacy `secretRef` field continues to work, but new providers should use `credential.secretRef` instead. Setting both `secretRef` and `credential` on the same Provider is rejected by CEL validation.
+
 ### `baseURL`
 
 Override the provider's default API endpoint. Useful for proxies, Azure OpenAI, or self-hosted models.
@@ -169,8 +218,9 @@ spec:
 | Type | Description |
 |------|-------------|
 | `Ready` | Overall readiness of the Provider |
-| `SecretValid` | Referenced Secret exists and contains required key |
-| `CredentialsValidated` | Credentials validated with provider (if enabled) |
+| `SecretFound` | Referenced Secret exists and contains required key |
+| `CredentialConfigured` | Credential source is configured (secretRef, envVar, or filePath) |
+| `CredentialsValid` | Credentials validated with provider (if `validateCredentials` enabled) |
 
 ### `lastValidatedAt`
 

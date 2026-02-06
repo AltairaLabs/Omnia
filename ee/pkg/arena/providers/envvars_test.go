@@ -247,6 +247,75 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 		assert.True(t, envVarNames["GEMINI_API_KEY"])
 	})
 
+	t.Run("provider with credential.secretRef uses it instead of legacy secretRef", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-openai",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type: "openai",
+					Credential: &corev1alpha1.CredentialConfig{
+						SecretRef: &corev1alpha1.SecretKeyRef{
+							Name: "new-openai-creds",
+						},
+					},
+				},
+			},
+		}
+
+		envVars := BuildEnvVarsFromProviders(providers)
+
+		require.Len(t, envVars, 1)
+		assert.Equal(t, "OPENAI_API_KEY", envVars[0].Name)
+		assert.NotNil(t, envVars[0].ValueFrom)
+		assert.NotNil(t, envVars[0].ValueFrom.SecretKeyRef)
+		assert.Equal(t, "new-openai-creds", envVars[0].ValueFrom.SecretKeyRef.Name)
+	})
+
+	t.Run("provider with credential.envVar skips env var creation", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-claude",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type: "claude",
+					Credential: &corev1alpha1.CredentialConfig{
+						EnvVar: "MY_CUSTOM_KEY",
+					},
+				},
+			},
+		}
+
+		envVars := BuildEnvVarsFromProviders(providers)
+
+		assert.Len(t, envVars, 0)
+	})
+
+	t.Run("provider with credential.filePath skips env var creation", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-claude",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type: "claude",
+					Credential: &corev1alpha1.CredentialConfig{
+						FilePath: "/var/secrets/api-key",
+					},
+				},
+			},
+		}
+
+		envVars := BuildEnvVarsFromProviders(providers)
+
+		assert.Len(t, envVars, 0)
+	})
+
 	t.Run("empty providers list", func(t *testing.T) {
 		envVars := BuildEnvVarsFromProviders([]*corev1alpha1.Provider{})
 		assert.Len(t, envVars, 0)

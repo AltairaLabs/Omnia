@@ -402,6 +402,164 @@ var _ = Describe("Provider Controller", func() {
 			// Clean up
 			_ = k8sClient.Delete(ctx, provider)
 		})
+
+		It("should successfully reconcile a Provider with credential.secretRef", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerName + "-credsecret",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: secretName,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updatedProvider omniav1alpha1.Provider
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      provider.Name,
+				Namespace: providerNamespace,
+			}, &updatedProvider)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			// Verify CredentialConfigured condition
+			var credCond *metav1.Condition
+			for i := range updatedProvider.Status.Conditions {
+				if updatedProvider.Status.Conditions[i].Type == ProviderConditionTypeCredentialConfigured {
+					credCond = &updatedProvider.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(credCond).NotTo(BeNil())
+			Expect(credCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(credCond.Reason).To(Equal("SecretRef"))
+
+			_ = k8sClient.Delete(ctx, provider)
+		})
+
+		It("should successfully reconcile a Provider with credential.envVar", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerName + "-credenv",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						EnvVar: "MY_CLAUDE_API_KEY",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updatedProvider omniav1alpha1.Provider
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      provider.Name,
+				Namespace: providerNamespace,
+			}, &updatedProvider)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			// Verify CredentialConfigured condition
+			var credCond *metav1.Condition
+			for i := range updatedProvider.Status.Conditions {
+				if updatedProvider.Status.Conditions[i].Type == ProviderConditionTypeCredentialConfigured {
+					credCond = &updatedProvider.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(credCond).NotTo(BeNil())
+			Expect(credCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(credCond.Reason).To(Equal("EnvVar"))
+
+			_ = k8sClient.Delete(ctx, provider)
+		})
+
+		It("should successfully reconcile a Provider with credential.filePath", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      providerName + "-credfile",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						FilePath: "/var/secrets/api-key",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updatedProvider omniav1alpha1.Provider
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      provider.Name,
+				Namespace: providerNamespace,
+			}, &updatedProvider)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			// Verify CredentialConfigured condition
+			var credCond *metav1.Condition
+			for i := range updatedProvider.Status.Conditions {
+				if updatedProvider.Status.Conditions[i].Type == ProviderConditionTypeCredentialConfigured {
+					credCond = &updatedProvider.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(credCond).NotTo(BeNil())
+			Expect(credCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(credCond.Reason).To(Equal("FilePath"))
+
+			_ = k8sClient.Delete(ctx, provider)
+		})
 	})
 
 	Context("findProvidersForSecret", func() {
@@ -459,6 +617,35 @@ var _ = Describe("Provider Controller", func() {
 			requests := reconciler.findProvidersForSecret(ctx, secret)
 			Expect(requests).To(HaveLen(1))
 			Expect(requests[0].Name).To(Equal("mapping-test-provider"))
+			Expect(requests[0].Namespace).To(Equal(providerNamespace))
+		})
+
+		It("should find providers that reference a secret via credential.secretRef", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mapping-test-cred-provider",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "mapping-test-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			requests := reconciler.findProvidersForSecret(ctx, secret)
+			Expect(requests).To(HaveLen(1))
+			Expect(requests[0].Name).To(Equal("mapping-test-cred-provider"))
 			Expect(requests[0].Namespace).To(Equal(providerNamespace))
 		})
 

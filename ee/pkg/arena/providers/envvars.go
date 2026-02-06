@@ -53,28 +53,50 @@ func buildEnvVarFromRef(ref SecretRef, providerSecretRef *corev1alpha1.SecretKey
 	}
 }
 
+// getEffectiveSecretRef returns the effective SecretKeyRef for a provider,
+// preferring credential.secretRef over the legacy secretRef field.
+func getEffectiveSecretRef(provider *corev1alpha1.Provider) *corev1alpha1.SecretKeyRef {
+	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
+		return provider.Spec.Credential.SecretRef
+	}
+	return provider.Spec.SecretRef
+}
+
 // BuildEnvVarsFromProviders builds environment variables for Provider CRDs.
-// This extracts credentials from each provider's secretRef and maps them
-// to the appropriate environment variable names for PromptKit.
+// This extracts credentials from each provider's credential config (or legacy secretRef)
+// and maps them to the appropriate environment variable names for PromptKit.
 //
-// For example, an OpenAI provider with secretRef pointing to "openai-credentials"
-// will create an env var OPENAI_API_KEY sourced from that secret.
+// For credential.envVar providers, the env var is passed through directly (no secret mount).
+// For credential.filePath providers, no env var is created (handled via override config).
 func BuildEnvVarsFromProviders(providers []*corev1alpha1.Provider) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{}
 	seen := make(map[string]bool)
 
 	for _, provider := range providers {
+		// For credential.envVar, the env var is pre-injected in the pod.
+		// No secret mount is needed; the override config tells the worker which var to read.
+		if provider.Spec.Credential != nil && provider.Spec.Credential.EnvVar != "" {
+			continue
+		}
+
+		// For credential.filePath, no env var is needed (handled via override config).
+		if provider.Spec.Credential != nil && provider.Spec.Credential.FilePath != "" {
+			continue
+		}
+
 		secretRefs := GetSecretRefsForProvider(string(provider.Spec.Type))
 		if len(secretRefs) == 0 {
 			continue
 		}
+
+		effectiveRef := getEffectiveSecretRef(provider)
 
 		for _, ref := range secretRefs {
 			if seen[ref.EnvVar] {
 				continue
 			}
 			seen[ref.EnvVar] = true
-			envVars = append(envVars, buildEnvVarFromRef(ref, provider.Spec.SecretRef))
+			envVars = append(envVars, buildEnvVarFromRef(ref, effectiveRef))
 		}
 	}
 
