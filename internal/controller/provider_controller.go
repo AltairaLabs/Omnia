@@ -37,8 +37,9 @@ import (
 
 // Provider condition types
 const (
-	ProviderConditionTypeCredentialsValid = "CredentialsValid"
-	ProviderConditionTypeSecretFound      = "SecretFound"
+	ProviderConditionTypeCredentialsValid     = "CredentialsValid"
+	ProviderConditionTypeSecretFound          = "SecretFound"
+	ProviderConditionTypeCredentialConfigured = "CredentialConfigured"
 	// secretKeyAPIKey is the common secret key name for API keys.
 	secretKeyAPIKey = "api-key"
 )
@@ -76,9 +77,15 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		provider.Status.Phase = omniav1alpha1.ProviderPhaseReady
 	}
 
+	// Resolve the effective secret ref: credential.secretRef takes precedence over legacy secretRef
+	effectiveSecretRef := provider.Spec.SecretRef
+	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
+		effectiveSecretRef = provider.Spec.Credential.SecretRef
+	}
+
 	// Validate the secret reference (if specified)
-	if provider.Spec.SecretRef != nil {
-		if err := r.validateSecretRef(ctx, provider); err != nil {
+	if effectiveSecretRef != nil {
+		if err := r.validateSecretRefFrom(ctx, provider, effectiveSecretRef); err != nil {
 			r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionFalse,
 				"SecretNotFound", err.Error())
 			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
@@ -89,6 +96,20 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
 			"SecretFound", "Referenced secret exists")
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+			"SecretRef", "Credential configured via secret reference")
+	} else if provider.Spec.Credential != nil && provider.Spec.Credential.EnvVar != "" {
+		// envVar credential — cannot validate at controller level, trust the user
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+			"NoSecretRequired", "Credential provided via environment variable")
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+			"EnvVar", fmt.Sprintf("Credential configured via environment variable %q", provider.Spec.Credential.EnvVar))
+	} else if provider.Spec.Credential != nil && provider.Spec.Credential.FilePath != "" {
+		// filePath credential — cannot validate at controller level, trust the user
+		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
+			"NoSecretRequired", "Credential provided via file path")
+		r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
+			"FilePath", fmt.Sprintf("Credential configured via file path %q", provider.Spec.Credential.FilePath))
 	} else {
 		// No secret required for this provider
 		r.setCondition(provider, ProviderConditionTypeSecretFound, metav1.ConditionTrue,
@@ -129,11 +150,11 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-// validateSecretRef validates that the referenced secret exists and has the expected key.
-func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *omniav1alpha1.Provider) error {
+// validateSecretRefFrom validates a specific SecretKeyRef for the given provider.
+func (r *ProviderReconciler) validateSecretRefFrom(ctx context.Context, provider *omniav1alpha1.Provider, ref *omniav1alpha1.SecretKeyRef) error {
 	secret := &corev1.Secret{}
 	key := types.NamespacedName{
-		Name:      provider.Spec.SecretRef.Name,
+		Name:      ref.Name,
 		Namespace: provider.Namespace,
 	}
 
@@ -145,8 +166,8 @@ func (r *ProviderReconciler) validateSecretRef(ctx context.Context, provider *om
 	}
 
 	// Check for expected key if specified
-	if provider.Spec.SecretRef.Key != nil {
-		expectedKey := *provider.Spec.SecretRef.Key
+	if ref.Key != nil {
+		expectedKey := *ref.Key
 		if _, exists := secret.Data[expectedKey]; !exists {
 			return fmt.Errorf("secret %q does not contain key %q", key.Name, expectedKey)
 		}
@@ -215,7 +236,13 @@ func (r *ProviderReconciler) findProvidersForSecret(ctx context.Context, obj cli
 
 	var requests []reconcile.Request
 	for _, p := range providerList.Items {
+		matched := false
 		if p.Spec.SecretRef != nil && p.Spec.SecretRef.Name == secret.Name {
+			matched = true
+		} else if p.Spec.Credential != nil && p.Spec.Credential.SecretRef != nil && p.Spec.Credential.SecretRef.Name == secret.Name {
+			matched = true
+		}
+		if matched {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      p.Name,

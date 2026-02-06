@@ -92,6 +92,15 @@ export function convertProviderToArena(provider: Provider): string {
     }
   }
 
+  // Emit credential block for envVar and filePath (secrets stay in K8s)
+  if (provider.spec.credential?.envVar) {
+    lines.push("  credential:");
+    lines.push(`    credential_env: ${provider.spec.credential.envVar}`);
+  } else if (provider.spec.credential?.filePath) {
+    lines.push("  credential:");
+    lines.push(`    credential_file: ${provider.spec.credential.filePath}`);
+  }
+
   if (Object.keys(defaults).length > 0) {
     lines.push("  defaults:");
     for (const [key, value] of Object.entries(defaults)) {

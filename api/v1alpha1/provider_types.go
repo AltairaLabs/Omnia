@@ -61,7 +61,29 @@ type SecretKeyRef struct {
 	Key *string `json:"key,omitempty"`
 }
 
+// CredentialConfig defines how to obtain credentials for this provider.
+// Exactly one field must be specified.
+// +kubebuilder:validation:XValidation:rule="(has(self.secretRef) ? 1 : 0) + (has(self.envVar) ? 1 : 0) + (has(self.filePath) ? 1 : 0) <= 1",message="at most one credential method may be specified"
+type CredentialConfig struct {
+	// secretRef references a Kubernetes Secret containing the credential.
+	// +optional
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
+
+	// envVar specifies an environment variable name containing the credential.
+	// The variable must be available in the runtime pod.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	EnvVar string `json:"envVar,omitempty"`
+
+	// filePath specifies a path to a file containing the credential.
+	// The file must be mounted in the runtime pod.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^/.*`
+	FilePath string `json:"filePath,omitempty"`
+}
+
 // ProviderSpec defines the desired state of Provider.
+// +kubebuilder:validation:XValidation:rule="!(has(self.secretRef) && has(self.credential))",message="secretRef and credential are mutually exclusive; use credential.secretRef instead"
 type ProviderSpec struct {
 	// type specifies the provider type.
 	// +kubebuilder:validation:Required
@@ -79,8 +101,14 @@ type ProviderSpec struct {
 
 	// secretRef references a Secret containing API credentials.
 	// Optional for providers that don't require credentials (e.g., mock, ollama).
+	// Deprecated: Use credential.secretRef instead.
 	// +optional
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
+
+	// credential defines how to obtain credentials for this provider.
+	// Mutually exclusive with secretRef. If both are set, credential takes precedence.
+	// +optional
+	Credential *CredentialConfig `json:"credential,omitempty"`
 
 	// defaults contains provider tuning parameters.
 	// +optional

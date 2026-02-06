@@ -10,6 +10,27 @@ export interface ProviderSpec {
   /** capabilities lists what this provider supports.
    * Used for capability-based filtering when binding arena providers. */
   capabilities?: ("text" | "streaming" | "vision" | "tools" | "json" | "audio" | "video" | "documents" | "duplex")[];
+  /** credential defines how to obtain credentials for this provider.
+   * Mutually exclusive with secretRef. If both are set, credential takes precedence. */
+  credential?: {
+    /** envVar specifies an environment variable name containing the credential.
+     * The variable must be available in the runtime pod. */
+    envVar?: string;
+    /** filePath specifies a path to a file containing the credential.
+     * The file must be mounted in the runtime pod. */
+    filePath?: string;
+    /** secretRef references a Kubernetes Secret containing the credential. */
+    secretRef?: {
+      /** key is the key within the Secret to use.
+       * If not specified, the provider-appropriate key is used:
+       * - ANTHROPIC_API_KEY for Claude
+       * - OPENAI_API_KEY for OpenAI
+       * - GEMINI_API_KEY for Gemini */
+      key?: string;
+      /** name is the name of the Secret. */
+      name: string;
+    };
+  };
   /** defaults contains provider tuning parameters. */
   defaults?: {
     /** contextWindow is the model's maximum context size in tokens.
@@ -46,7 +67,8 @@ export interface ProviderSpec {
     outputCostPer1K?: string;
   };
   /** secretRef references a Secret containing API credentials.
-   * Optional for providers that don't require credentials (e.g., mock, ollama). */
+   * Optional for providers that don't require credentials (e.g., mock, ollama).
+   * Deprecated: Use credential.secretRef instead. */
   secretRef?: {
     /** key is the key within the Secret to use.
      * If not specified, the provider-appropriate key is used:

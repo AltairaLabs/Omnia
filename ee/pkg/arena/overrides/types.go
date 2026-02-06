@@ -45,6 +45,9 @@ type ProviderOverride struct {
 	// Empty for providers that don't require credentials (ollama, mock).
 	SecretEnvVar string `json:"secretEnvVar,omitempty"`
 
+	// CredentialFile is a file path containing the credential (mounted in pod).
+	CredentialFile string `json:"credentialFile,omitempty"`
+
 	// Default parameters for this provider.
 	Temperature float64 `json:"temperature,omitempty"`
 	TopP        float64 `json:"topP,omitempty"`
