@@ -550,6 +550,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  workspace: default
   projectId: test-project
   idleTimeout: 5m
 `, devSessionName, arenaNamespace)
@@ -650,6 +651,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  workspace: default
   projectId: test-project-with-provider
   idleTimeout: 5m
 `, devSessionName, arenaNamespace)
