@@ -23,6 +23,7 @@ import {
   Wrench,
   User,
   Download,
+  Link,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { ARENA_FILE_TYPES, type ArenaFileKind } from "@/lib/arena/file-templates";
@@ -42,11 +43,13 @@ export interface FileContextMenuProps {
   readonly children: ReactNode;
   readonly isDirectory: boolean;
   readonly isRoot?: boolean;
+  readonly isProviderFile?: boolean;
   readonly onNewFile?: () => void;
   readonly onNewFolder?: () => void;
   readonly onNewTypedFile?: (kind: ArenaFileKind) => void;
   readonly onImportProvider?: () => void;
   readonly onImportTool?: () => void;
+  readonly onBindProvider?: () => void;
   readonly onRename?: () => void;
   readonly onDelete?: () => void;
   readonly onCopyPath?: () => void;
@@ -60,11 +63,13 @@ export function FileContextMenu({
   children,
   isDirectory,
   isRoot = false,
+  isProviderFile = false,
   onNewFile,
   onNewFolder,
   onNewTypedFile,
   onImportProvider,
   onImportTool,
+  onBindProvider,
   onRename,
   onDelete,
   onCopyPath,
@@ -129,6 +134,17 @@ export function FileContextMenu({
               </ContextMenuSubContent>
             </ContextMenuSub>
 
+            <ContextMenuSeparator />
+          </>
+        )}
+
+        {/* Bind to Provider (for provider files only) */}
+        {!isDirectory && isProviderFile && (
+          <>
+            <ContextMenuItem onClick={onBindProvider} className="gap-2">
+              <Link className="h-4 w-4" />
+              Bind to Provider...
+            </ContextMenuItem>
             <ContextMenuSeparator />
           </>
         )}

@@ -14,7 +14,9 @@ import {
   Settings,
 } from "lucide-react";
 import type { FileTreeNode, FileType } from "@/types/arena-project";
+import type { ProviderBindingInfo } from "@/hooks/use-provider-binding-status";
 import { FileContextMenu } from "./file-context-menu";
+import { ProviderBindingIndicator } from "./provider-binding-indicator";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { ImportProviderDialog } from "./import-provider-dialog";
@@ -32,9 +34,11 @@ interface FileTreeProps {
   readonly loading?: boolean;
   readonly error?: string | null;
   readonly selectedPath?: string;
+  readonly providerBindingStatus?: Map<string, ProviderBindingInfo>;
   readonly onSelectFile: (path: string, name: string) => void;
   readonly onCreateFile?: (parentPath: string | null, name: string, isDirectory: boolean, content?: string) => Promise<void>;
   readonly onDeleteFile?: (path: string) => Promise<void>;
+  readonly onBindProvider?: (node: FileTreeNode) => void;
   readonly className?: string;
 }
 
@@ -42,13 +46,14 @@ interface TreeNodeProps {
   readonly node: FileTreeNode;
   readonly level: number;
   readonly selectedPath?: string;
+  readonly providerBindingStatus?: Map<string, ProviderBindingInfo>;
   readonly expandedPaths: Set<string>;
   readonly onToggleExpand: (path: string) => void;
   readonly onSelectFile: (path: string, name: string) => void;
   readonly onContextAction: (action: ContextAction, node: FileTreeNode, kind?: ArenaFileKind) => void;
 }
 
-type ContextAction = "newFile" | "newFolder" | "newTypedFile" | "importProvider" | "importTool" | "rename" | "delete" | "copyPath";
+type ContextAction = "newFile" | "newFolder" | "newTypedFile" | "importProvider" | "importTool" | "bindProvider" | "rename" | "delete" | "copyPath";
 
 /**
  * Get icon for file type
@@ -81,6 +86,7 @@ function TreeNode({
   node,
   level,
   selectedPath,
+  providerBindingStatus,
   expandedPaths,
   onToggleExpand,
   onSelectFile,
@@ -164,19 +170,28 @@ function TreeNode({
 
       {/* Name */}
       <span className="truncate text-sm">{node.name}</span>
+
+      {/* Provider binding indicator */}
+      {!node.isDirectory && node.type === "provider" && providerBindingStatus?.has(node.path) && (
+        <ProviderBindingIndicator bindingInfo={providerBindingStatus.get(node.path)!} />
+      )}
     </div>
   );
+
+  const isProviderFile = !node.isDirectory && node.type === "provider";
 
   return (
     <div>
       <FileContextMenu
         isDirectory={node.isDirectory}
         isRoot={isConfigFile}
+        isProviderFile={isProviderFile}
         onNewFile={() => handleContextAction("newFile")}
         onNewFolder={() => handleContextAction("newFolder")}
         onNewTypedFile={(kind) => handleContextAction("newTypedFile", kind)}
         onImportProvider={() => handleContextAction("importProvider")}
         onImportTool={() => handleContextAction("importTool")}
+        onBindProvider={() => handleContextAction("bindProvider")}
         onRename={() => handleContextAction("rename")}
         onDelete={() => handleContextAction("delete")}
         onCopyPath={() => handleContextAction("copyPath")}
@@ -193,6 +208,7 @@ function TreeNode({
               node={child}
               level={level + 1}
               selectedPath={selectedPath}
+              providerBindingStatus={providerBindingStatus}
               expandedPaths={expandedPaths}
               onToggleExpand={onToggleExpand}
               onSelectFile={onSelectFile}
@@ -214,9 +230,11 @@ export function FileTree({
   loading = false,
   error = null,
   selectedPath,
+  providerBindingStatus,
   onSelectFile,
   onCreateFile,
   onDeleteFile,
+  onBindProvider,
   className,
 }: Readonly<FileTreeProps>) {
   const { toast } = useToast();
@@ -286,6 +304,9 @@ export function FileTree({
         case "importTool":
           setImportToolDialog({ open: true, parentPath });
           break;
+        case "bindProvider":
+          onBindProvider?.(node);
+          break;
         case "rename":
           toast({ title: "Not implemented", description: "Rename functionality coming soon" });
           break;
@@ -298,7 +319,7 @@ export function FileTree({
           break;
       }
     },
-    [toast, createTypedFile]
+    [toast, createTypedFile, onBindProvider]
   );
 
   const handleCreateItem = async (name: string) => {
@@ -445,6 +466,7 @@ export function FileTree({
               node={node}
               level={0}
               selectedPath={selectedPath}
+              providerBindingStatus={providerBindingStatus}
               expandedPaths={expandedPaths}
               onToggleExpand={handleToggleExpand}
               onSelectFile={onSelectFile}

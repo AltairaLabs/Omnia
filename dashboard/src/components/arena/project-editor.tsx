@@ -12,6 +12,8 @@ import {
   useDevSession,
 } from "@/hooks";
 import { FileTree } from "./file-tree";
+import { BindProviderDialog } from "./bind-provider-dialog";
+import { useProviderBindingStatus } from "@/hooks/use-provider-binding-status";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
 import { ProjectToolbar } from "./project-toolbar";
@@ -104,6 +106,9 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   // Only show Ready providers in the dev console dropdown
   const { data: providers = [] } = useProviders({ phase: "Ready" });
 
+  // Provider binding status for file tree indicators
+  const providerBindingStatus = useProviderBindingStatus(fileTree);
+
   // Dev session for interactive testing (ArenaDevSession)
   const {
     session: devSession,
@@ -133,6 +138,10 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const [validationResults, setValidationResults] = useState<ValidationResults | null>(null);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
+  const [bindProviderDialog, setBindProviderDialog] = useState<{
+    open: boolean;
+    filePath: string;
+  }>({ open: false, filePath: "" });
 
   // Provider options for dev console - memoized to prevent unnecessary re-renders
   const providerOptions = useMemo(
@@ -337,6 +346,53 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     },
     [currentProject, deleteFile, refreshFileTree, setFileTree, toast]
   );
+
+  // Handle bind provider action from file tree context menu
+  const handleBindProvider = useCallback(
+    (node: { path: string }) => {
+      setBindProviderDialog({ open: true, filePath: node.path });
+    },
+    []
+  );
+
+  // Get file content for bind dialog (from open files store or API)
+  const getBindFileContent = useCallback(async (): Promise<string> => {
+    if (!currentProject) throw new Error("No project selected");
+    const filePath = bindProviderDialog.filePath;
+
+    // Check if file is already open in editor
+    const openFileEntry = openFiles.find((f) => f.path === filePath);
+    if (openFileEntry) {
+      return openFileEntry.content;
+    }
+
+    // Fetch from API
+    const fileData = await getFileContent(currentProject.id, filePath);
+    return fileData.content;
+  }, [currentProject, bindProviderDialog.filePath, openFiles, getFileContent]);
+
+  // Save updated file content after binding
+  const saveBindFileContent = useCallback(async (content: string) => {
+    if (!currentProject) throw new Error("No project selected");
+    const filePath = bindProviderDialog.filePath;
+
+    await saveFileContent(currentProject.id, filePath, content);
+
+    // If file is open in editor, update its content in store
+    const openFileEntry = openFiles.find((f) => f.path === filePath);
+    if (openFileEntry) {
+      updateFileContent(filePath, content);
+      markFileSaved(filePath);
+    }
+  }, [currentProject, bindProviderDialog.filePath, openFiles, saveFileContent, updateFileContent, markFileSaved]);
+
+  // Handle post-bind tree refresh
+  const handleBound = useCallback(async () => {
+    if (!currentProject) return;
+    const newTree = await refreshFileTree(currentProject.id);
+    setFileTree(newTree);
+    toast({ title: "Bound", description: "Provider binding annotations added" });
+  }, [currentProject, refreshFileTree, setFileTree, toast]);
 
   // Handle new project
   const handleNewProject = useCallback(async (name: string) => {
@@ -653,9 +709,11 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
                   loading={projectLoading}
                   error={projectError}
                   selectedPath={activeFilePath || undefined}
+                  providerBindingStatus={providerBindingStatus}
                   onSelectFile={handleSelectFile}
                   onCreateFile={handleCreateFile}
                   onDeleteFile={handleDeleteFile}
+                  onBindProvider={handleBindProvider}
                 />
               </div>
             </ResizablePanel>
@@ -749,6 +807,15 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         onOpenChange={setValidationDialogOpen}
         results={validationResults}
         onFileClick={handleValidationFileClick}
+      />
+
+      <BindProviderDialog
+        open={bindProviderDialog.open}
+        onOpenChange={(open) => setBindProviderDialog((prev) => ({ ...prev, open }))}
+        filePath={bindProviderDialog.filePath}
+        getContent={getBindFileContent}
+        saveContent={saveBindFileContent}
+        onBound={handleBound}
       />
     </div>
   );

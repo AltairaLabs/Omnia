@@ -19,7 +19,8 @@ import {
 } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import { getFileType, type ArenaProjectWithTree, type FileTreeNode } from "@/types/arena-project";
+import { getFileType, type ArenaProjectWithTree, type FileTreeNode, type ProviderBinding } from "@/types/arena-project";
+import { extractBindingAnnotations } from "@/lib/arena/provider-binding";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as yaml from "js-yaml";
@@ -57,6 +58,19 @@ function getProjectPath(workspaceName: string, namespace: string, projectId: str
 }
 
 /**
+ * Read provider binding annotations from a file, if it is a provider YAML.
+ */
+async function readProviderBinding(fullPath: string, fileType: string): Promise<ProviderBinding | undefined> {
+  if (fileType !== "provider") return undefined;
+  try {
+    const content = await fs.readFile(fullPath, "utf-8");
+    return extractBindingAnnotations(content) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Build file tree recursively from directory
  */
 async function buildFileTree(dirPath: string, relativePath: string = ""): Promise<FileTreeNode[]> {
@@ -81,13 +95,15 @@ async function buildFileTree(dirPath: string, relativePath: string = ""): Promis
         modifiedAt: stats.mtime.toISOString(),
       });
     } else {
+      const fileType = getFileType(entry.name);
       nodes.push({
         name: entry.name,
         path: entryPath,
         isDirectory: false,
         size: stats.size,
         modifiedAt: stats.mtime.toISOString(),
-        type: getFileType(entry.name),
+        type: fileType,
+        providerBinding: await readProviderBinding(fullPath, fileType),
       });
     }
   }
