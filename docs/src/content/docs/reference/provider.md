@@ -21,21 +21,23 @@ kind: Provider
 
 The LLM provider type.
 
-| Value | Description | Requires Secret |
-|-------|-------------|-----------------|
+| Value | Description | Requires Credentials |
+|-------|-------------|----------------------|
 | `claude` | Anthropic's Claude models | Yes |
 | `openai` | OpenAI's GPT models | Yes |
 | `gemini` | Google's Gemini models | Yes |
+| `bedrock` | AWS Bedrock | No — uses `platform` + `auth` |
+| `vertex` | Google Vertex AI | No — uses `platform` + `auth` |
+| `azure-ai` | Azure AI Services | No — uses `platform` + `auth` |
 | `ollama` | Local Ollama models (for development) | No |
 | `mock` | Mock provider (for testing) | No |
-| `auto` | Auto-detect based on available credentials | Yes |
 
 ```yaml
 spec:
   type: claude
 ```
 
-> **Note**: For `ollama` and `mock` providers, `secretRef` is not required. Use inline `provider` configuration in AgentRuntime instead of the Provider CRD for these types.
+> **Note**: For `ollama` and `mock` providers, credentials are not required. Hyperscaler types (`bedrock`, `vertex`, `azure-ai`) use platform-native authentication via the `platform` and `auth` fields instead of API key credentials.
 
 ### `model`
 
@@ -46,6 +48,9 @@ The model identifier to use. If not specified, the provider's default model is u
 | Claude | `claude-sonnet-4-20250514`, `claude-opus-4-20250514` |
 | OpenAI | `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo` |
 | Gemini | `gemini-pro`, `gemini-1.5-pro` |
+| Bedrock | `anthropic.claude-3-5-sonnet-20241022-v2:0`, `amazon.titan-text-express-v1` |
+| Vertex | `gemini-1.5-pro`, `gemini-1.5-flash` |
+| Azure AI | `gpt-4o`, `gpt-4-turbo` |
 | Ollama | `llava:13b`, `llama3.2-vision:11b`, `llama3:8b` |
 
 ```yaml
@@ -55,6 +60,10 @@ spec:
 ```
 
 ### `secretRef`
+
+:::caution[Deprecated]
+The top-level `secretRef` field is deprecated. Use `credential.secretRef` instead for new providers. See the [migration guide](/how-to/migrate-provider-credentials/) for details.
+:::
 
 Reference to a Secret containing API credentials.
 
@@ -123,6 +132,102 @@ The file must be mounted in the runtime pod. The controller cannot validate its 
 
 > **Migration from `secretRef`**: The legacy `secretRef` field continues to work, but new providers should use `credential.secretRef` instead. Setting both `secretRef` and `credential` on the same Provider is rejected by CEL validation.
 
+### `platform`
+
+Hyperscaler-specific configuration. Required for provider types `bedrock`, `vertex`, and `azure-ai`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `platform.type` | string | Yes | Cloud platform: `aws`, `gcp`, or `azure` |
+| `platform.region` | string | No | Cloud region (e.g., `us-east-1`, `us-central1`, `eastus`) |
+| `platform.project` | string | No | GCP project ID (required for Vertex AI) |
+| `platform.endpoint` | string | No | Override the default platform API endpoint |
+
+A CEL validation rule enforces that `platform` is present when `type` is `bedrock`, `vertex`, or `azure-ai`.
+
+#### AWS Bedrock
+
+```yaml
+spec:
+  type: bedrock
+  platform:
+    type: aws
+    region: us-east-1
+```
+
+#### GCP Vertex AI
+
+```yaml
+spec:
+  type: vertex
+  platform:
+    type: gcp
+    region: us-central1
+    project: my-gcp-project
+```
+
+#### Azure AI
+
+```yaml
+spec:
+  type: azure-ai
+  platform:
+    type: azure
+    region: eastus
+    endpoint: https://my-resource.openai.azure.com
+```
+
+### `auth`
+
+Authentication configuration for hyperscaler providers. Only valid for provider types `bedrock`, `vertex`, and `azure-ai`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `auth.type` | string | Yes | Authentication method (see table below) |
+| `auth.roleArn` | string | No | AWS IAM role ARN for IRSA (only when `platform.type` is `aws`) |
+| `auth.serviceAccountEmail` | string | No | GCP service account email (only when `platform.type` is `gcp`) |
+| `auth.credentialsSecretRef` | SecretKeyRef | No | Secret containing platform credentials |
+
+#### Authentication methods
+
+| Value | Platform | Description |
+|-------|----------|-------------|
+| `workloadIdentity` | All | Kubernetes-native identity federation (IRSA, GCP WI, Azure AD WI) |
+| `accessKey` | AWS | Static AWS access key credentials |
+| `serviceAccount` | GCP | GCP service account key |
+| `servicePrincipal` | Azure | Azure service principal credentials |
+
+**CEL validation rules:**
+- `credentialsSecretRef` is **required** for `accessKey`, `serviceAccount`, and `servicePrincipal` auth types.
+- `credentialsSecretRef` is **disallowed** for `workloadIdentity` (workload identity relies on pod-level identity, not secrets).
+
+#### Workload identity (recommended)
+
+```yaml
+spec:
+  type: bedrock
+  platform:
+    type: aws
+    region: us-east-1
+  auth:
+    type: workloadIdentity
+    roleArn: arn:aws:iam::123456789012:role/omnia-bedrock-role
+```
+
+#### Access key
+
+```yaml
+spec:
+  type: bedrock
+  platform:
+    type: aws
+    region: us-east-1
+  auth:
+    type: accessKey
+    credentialsSecretRef:
+      name: aws-credentials
+```
+
 ### `baseURL`
 
 Override the provider's default API endpoint. Useful for proxies, Azure OpenAI, or self-hosted models.
@@ -168,6 +273,8 @@ Tuning parameters applied to all requests using this provider.
 | `temperature` | string | 0.0-2.0 | Controls randomness (lower = more focused) |
 | `topP` | string | 0.0-1.0 | Nucleus sampling threshold |
 | `maxTokens` | integer | - | Maximum tokens in response |
+| `contextWindow` | integer | - | Model's maximum context size in tokens. When conversation history exceeds this budget, truncation is applied. If not specified, no automatic truncation is performed. |
+| `truncationStrategy` | string | - | How to handle context overflow: `sliding` (default — remove oldest messages first), `summarize` (summarize old messages before removing), `custom` (delegate to custom runtime implementation) |
 
 ```yaml
 spec:
@@ -175,6 +282,8 @@ spec:
     temperature: "0.7"
     topP: "0.9"
     maxTokens: 4096
+    contextWindow: 200000
+    truncationStrategy: sliding
 ```
 
 ### `pricing`
@@ -221,12 +330,15 @@ spec:
 | `SecretFound` | Referenced Secret exists and contains required key |
 | `CredentialConfigured` | Credential source is configured (secretRef, envVar, or filePath) |
 | `CredentialsValid` | Credentials validated with provider (if `validateCredentials` enabled) |
+| `AuthConfigured` | Auth configuration is valid (hyperscaler providers only) |
 
 ### `lastValidatedAt`
 
 Timestamp of the last successful credential validation (only set when `validateCredentials: true`).
 
-## Complete Example
+## Complete Examples
+
+### API key provider
 
 ```yaml
 apiVersion: v1
@@ -246,8 +358,9 @@ spec:
   type: claude
   model: claude-sonnet-4-20250514
 
-  secretRef:
-    name: anthropic-credentials
+  credential:
+    secretRef:
+      name: anthropic-credentials
 
   capabilities:
     - text
@@ -259,12 +372,45 @@ spec:
   defaults:
     temperature: "0.7"
     maxTokens: 4096
+    contextWindow: 200000
+    truncationStrategy: sliding
 
   pricing:
     inputCostPer1K: "0.003"
     outputCostPer1K: "0.015"
 
   validateCredentials: true
+```
+
+### AWS Bedrock with workload identity
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: bedrock-production
+  namespace: agents
+spec:
+  type: bedrock
+  model: anthropic.claude-3-5-sonnet-20241022-v2:0
+
+  platform:
+    type: aws
+    region: us-east-1
+
+  auth:
+    type: workloadIdentity
+    roleArn: arn:aws:iam::123456789012:role/omnia-bedrock-role
+
+  capabilities:
+    - text
+    - streaming
+    - vision
+    - tools
+
+  defaults:
+    temperature: "0.7"
+    maxTokens: 4096
 ```
 
 ## Using Provider in AgentRuntime
@@ -302,8 +448,9 @@ metadata:
 spec:
   type: claude
   model: claude-sonnet-4-20250514
-  secretRef:
-    name: prod-credentials
+  credential:
+    secretRef:
+      name: prod-credentials
   defaults:
     temperature: "0.3"  # More deterministic
 ---
@@ -314,8 +461,9 @@ metadata:
 spec:
   type: claude
   model: claude-haiku-20250514
-  secretRef:
-    name: dev-credentials
+  credential:
+    secretRef:
+      name: dev-credentials
   defaults:
     temperature: "0.7"
 ```
@@ -337,3 +485,10 @@ spec:
 ```
 
 Note: Ensure appropriate RBAC permissions are configured for cross-namespace access.
+
+## Related Guides
+
+- [Configure AWS Bedrock Provider](/how-to/configure-bedrock-provider/)
+- [Configure GCP Vertex AI Provider](/how-to/configure-vertex-provider/)
+- [Configure Azure AI Provider](/how-to/configure-azure-ai-provider/)
+- [Migrate Provider Credentials](/how-to/migrate-provider-credentials/)
