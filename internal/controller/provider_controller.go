@@ -53,6 +53,8 @@ const (
 	EventReasonCredentialInvalid   = "CredentialInvalid"
 	EventReasonMultipleCredentials = "MultipleCredentials"
 	EventReasonLegacySecretRefUsed = "LegacySecretRefUsed"
+	// errMsgFailedToUpdateStatus is a shared log message for status update failures.
+	errMsgFailedToUpdateStatus = "Failed to update status"
 )
 
 // envVarNameRegex validates environment variable names.
@@ -96,7 +98,7 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Validate credential configuration
 	if err := r.validateCredentialConfig(ctx, provider); err != nil {
 		if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
+			log.Error(statusErr, errMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, err
 	}
@@ -104,7 +106,7 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Validate auth configuration for hyperscaler providers
 	if err := r.validateAuthConfig(ctx, provider); err != nil {
 		if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
+			log.Error(statusErr, errMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, err
 	}
@@ -116,7 +118,7 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				"CredentialsInvalid", err.Error())
 			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
 			if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
-				log.Error(statusErr, "Failed to update status")
+				log.Error(statusErr, errMsgFailedToUpdateStatus)
 			}
 			return ctrl.Result{}, nil // Don't requeue for invalid credentials
 		}
