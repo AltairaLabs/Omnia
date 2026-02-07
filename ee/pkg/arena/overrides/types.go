@@ -20,6 +20,12 @@ type OverrideConfig struct {
 	// Groups correspond to ArenaJob.spec.providerOverrides keys.
 	Providers map[string][]ProviderOverride `json:"providers,omitempty"`
 
+	// Bindings maps "{namespace}/{name}" to ProviderOverride for annotation-based
+	// credential resolution. The worker uses this registry to match arena provider
+	// YAML files (with binding annotations) to their corresponding Provider CRDs.
+	// Old workers without binding support ignore this field.
+	Bindings map[string]ProviderOverride `json:"bindings,omitempty"`
+
 	// Tools contains tool override configurations from ToolRegistry CRDs.
 	Tools []ToolOverride `json:"tools,omitempty"`
 }

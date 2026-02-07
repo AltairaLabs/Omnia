@@ -372,6 +372,61 @@ func (r *ArenaJobReconciler) getProviderIDsFromCRDs(providerCRDs []*corev1alpha1
 	return ids
 }
 
+// resolveBindingRegistry lists all Provider CRDs in the given namespace and converts them
+// to a binding registry for annotation-based credential resolution. Returns the registry
+// map and the list of Provider CRDs for env var injection.
+func (r *ArenaJobReconciler) resolveBindingRegistry(ctx context.Context, namespace string) (map[string]overrides.ProviderOverride, []*corev1alpha1.Provider, error) {
+	log := logf.FromContext(ctx)
+
+	providerList := &corev1alpha1.ProviderList{}
+	if err := r.List(ctx, providerList, client.InNamespace(namespace)); err != nil {
+		return nil, nil, fmt.Errorf("failed to list providers in namespace %s: %w", namespace, err)
+	}
+
+	if len(providerList.Items) == 0 {
+		return nil, nil, nil
+	}
+
+	registry := make(map[string]overrides.ProviderOverride, len(providerList.Items))
+	providerCRDs := make([]*corev1alpha1.Provider, 0, len(providerList.Items))
+
+	for i := range providerList.Items {
+		p := &providerList.Items[i]
+		key := p.Namespace + "/" + p.Name
+		registry[key] = convertProviderToOverride(p)
+		providerCRDs = append(providerCRDs, p)
+	}
+
+	log.V(1).Info("resolved binding registry", "namespace", namespace, "providers", len(registry))
+	return registry, providerCRDs, nil
+}
+
+// deduplicateProviders merges additional providers into an existing list, skipping duplicates
+// by namespace/name. This ensures env vars are injected for all relevant providers.
+func deduplicateProviders(existing, additional []*corev1alpha1.Provider) []*corev1alpha1.Provider {
+	if len(additional) == 0 {
+		return existing
+	}
+
+	seen := make(map[string]bool, len(existing))
+	for _, p := range existing {
+		seen[p.Namespace+"/"+p.Name] = true
+	}
+
+	result := make([]*corev1alpha1.Provider, len(existing))
+	copy(result, existing)
+
+	for _, p := range additional {
+		key := p.Namespace + "/" + p.Name
+		if !seen[key] {
+			result = append(result, p)
+			seen[key] = true
+		}
+	}
+
+	return result
+}
+
 // resolveToolRegistryOverride resolves tool registry CRDs based on ArenaJob's toolRegistryOverride.
 // Returns the resolved tool overrides configuration for the worker.
 func (r *ArenaJobReconciler) resolveToolRegistryOverride(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (map[string]selector.ToolOverrideConfig, error) {
@@ -656,8 +711,21 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		return fmt.Errorf("failed to resolve tool registry override: %w", err)
 	}
 
-	// Build and create override ConfigMap if there are any overrides
+	// Resolve binding registry (all namespace providers for annotation-based binding)
+	bindingRegistry, bindingProviders, err := r.resolveBindingRegistry(ctx, arenaJob.Namespace)
+	if err != nil {
+		log.Error(err, "failed to resolve binding registry, continuing without bindings")
+		// Non-fatal: bindings are best-effort
+	}
+
+	// Build and create override ConfigMap if there are any overrides or bindings
 	overrideConfig := r.buildOverrideConfig(ctx, providersByGroup, toolOverrides)
+	if len(bindingRegistry) > 0 {
+		if overrideConfig == nil {
+			overrideConfig = &overrides.OverrideConfig{}
+		}
+		overrideConfig.Bindings = bindingRegistry
+	}
 	hasOverrides := overrideConfig != nil
 	if hasOverrides {
 		if err := r.createOverrideConfigMap(ctx, arenaJob, overrideConfig); err != nil {
@@ -666,7 +734,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Flatten providers for env var injection (secrets still passed as env vars)
+	// Merge explicit override providers with binding providers for env var injection
 	providerCRDs := providers.FlattenProviderGroups(providersByGroup)
+	providerCRDs = deduplicateProviders(providerCRDs, bindingProviders)
 
 	// Determine arena file path
 	arenaFile := arenaJob.Spec.ArenaFile
