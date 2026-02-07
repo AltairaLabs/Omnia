@@ -43,6 +43,7 @@ const (
 	ProviderConditionTypeCredentialsValid     = "CredentialsValid"
 	ProviderConditionTypeSecretFound          = "SecretFound"
 	ProviderConditionTypeCredentialConfigured = "CredentialConfigured"
+	ProviderConditionTypeAuthConfigured       = "AuthConfigured"
 	// secretKeyAPIKey is the common secret key name for API keys.
 	secretKeyAPIKey = "api-key"
 )
@@ -94,6 +95,14 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Validate credential configuration
 	if err := r.validateCredentialConfig(ctx, provider); err != nil {
+		if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
+			log.Error(statusErr, "Failed to update status")
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Validate auth configuration for hyperscaler providers
+	if err := r.validateAuthConfig(ctx, provider); err != nil {
 		if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
 			log.Error(statusErr, "Failed to update status")
 		}
@@ -334,6 +343,61 @@ func (r *ProviderReconciler) validateCredentialFilePath(provider *omniav1alpha1.
 		"NoSecretRequired", "Credential uses file path, no secret required")
 	r.setCondition(provider, ProviderConditionTypeCredentialConfigured, metav1.ConditionTrue,
 		"FilePathConfigured", fmt.Sprintf("Credential configured via file path %q", path))
+	return nil
+}
+
+// isHyperscalerProvider returns whether the given provider type is a hyperscaler provider.
+func isHyperscalerProvider(providerType omniav1alpha1.ProviderType) bool {
+	switch providerType {
+	case omniav1alpha1.ProviderTypeBedrock, omniav1alpha1.ProviderTypeVertex, omniav1alpha1.ProviderTypeAzureAI:
+		return true
+	default:
+		return false
+	}
+}
+
+// validateAuthConfig validates the auth configuration for hyperscaler providers.
+func (r *ProviderReconciler) validateAuthConfig(ctx context.Context, provider *omniav1alpha1.Provider) error {
+	if !isHyperscalerProvider(provider.Spec.Type) {
+		// Non-hyperscaler providers don't use auth config
+		return nil
+	}
+
+	if provider.Spec.Auth == nil {
+		// No auth config for hyperscaler - this is fine, workload identity can work without explicit auth
+		r.setCondition(provider, ProviderConditionTypeAuthConfigured, metav1.ConditionTrue,
+			"AuthNotConfigured", "No auth configuration specified; workload identity may be used via default credential chain")
+		return nil
+	}
+
+	auth := provider.Spec.Auth
+
+	// Workload identity - no secret needed
+	if auth.Type == omniav1alpha1.AuthMethodWorkloadIdentity {
+		r.setCondition(provider, ProviderConditionTypeAuthConfigured, metav1.ConditionTrue,
+			"WorkloadIdentityConfigured", "Workload identity authentication configured")
+		return nil
+	}
+
+	// Non-workload-identity types require credentialsSecretRef
+	if auth.CredentialsSecretRef == nil {
+		msg := fmt.Sprintf("auth type %q requires credentialsSecretRef", auth.Type)
+		r.setCondition(provider, ProviderConditionTypeAuthConfigured, metav1.ConditionFalse,
+			"CredentialsSecretRefRequired", msg)
+		provider.Status.Phase = omniav1alpha1.ProviderPhaseError
+		return fmt.Errorf("%s", msg)
+	}
+
+	// Validate the referenced secret exists
+	if err := r.validateCredentialSecretRef(ctx, provider, auth.CredentialsSecretRef); err != nil {
+		r.setCondition(provider, ProviderConditionTypeAuthConfigured, metav1.ConditionFalse,
+			"CredentialsSecretNotFound", err.Error())
+		// Phase already set by validateCredentialSecretRef
+		return err
+	}
+
+	r.setCondition(provider, ProviderConditionTypeAuthConfigured, metav1.ConditionTrue,
+		"AuthConfigured", fmt.Sprintf("Auth type %q configured with credentials secret", auth.Type))
 	return nil
 }
 

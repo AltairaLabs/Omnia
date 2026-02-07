@@ -98,6 +98,10 @@ type ArenaJobReconciler struct {
 	// When set, the reconciler will ensure workspace PVC exists before creating worker jobs
 	// that mount the PVC. Ignored when NFSServer/NFSPath are set (direct NFS mount).
 	StorageManager *workspace.StorageManager
+	// WorkerServiceAccountName is the ServiceAccount name for worker pods.
+	// Used for workload identity authentication with hyperscaler providers.
+	// When set and a provider uses workloadIdentity auth, worker pods will use this SA.
+	WorkerServiceAccountName string
 }
 
 // getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
@@ -311,6 +315,20 @@ func (r *ArenaJobReconciler) getWorkerImagePullPolicy() corev1.PullPolicy {
 	return corev1.PullIfNotPresent
 }
 
+// getWorkerServiceAccountName returns the ServiceAccount name for worker pods if any
+// provider uses workload identity authentication. Returns empty string if not needed.
+func (r *ArenaJobReconciler) getWorkerServiceAccountName(providerCRDs []*corev1alpha1.Provider) string {
+	if r.WorkerServiceAccountName == "" {
+		return ""
+	}
+	for _, p := range providerCRDs {
+		if p.Spec.Auth != nil && p.Spec.Auth.Type == corev1alpha1.AuthMethodWorkloadIdentity {
+			return r.WorkerServiceAccountName
+		}
+	}
+	return ""
+}
+
 // resolveProviderOverrides resolves provider CRDs based on ArenaJob's providerOverrides.
 // Returns providers grouped by their selector group name (e.g., "default", "judge").
 // If no overrides are specified, returns nil (use ArenaConfig providers).
@@ -435,6 +453,23 @@ func convertProviderToOverride(p *corev1alpha1.Provider) overrides.ProviderOverr
 		if len(secretRefs) > 0 {
 			override.SecretEnvVar = secretRefs[0].EnvVar
 		}
+	}
+
+	// Set platform configuration
+	if p.Spec.Platform != nil {
+		override.Platform = &overrides.PlatformOverride{
+			Type:     string(p.Spec.Platform.Type),
+			Region:   p.Spec.Platform.Region,
+			Project:  p.Spec.Platform.Project,
+			Endpoint: p.Spec.Platform.Endpoint,
+		}
+	}
+
+	// Set auth configuration
+	if p.Spec.Auth != nil {
+		override.AuthMethod = string(p.Spec.Auth.Type)
+		override.RoleARN = p.Spec.Auth.RoleArn
+		override.ServiceAccountEmail = p.Spec.Auth.ServiceAccountEmail
 	}
 
 	// Set defaults if specified
@@ -748,6 +783,10 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 	env = append(env, providerEnvVars...)
 
+	// Add platform environment variables for hyperscaler providers
+	platformEnvVars := providers.BuildPlatformEnvVars(providerCRDs)
+	env = append(env, platformEnvVars...)
+
 	// Add overrides path env var if ConfigMap was created
 	if hasOverrides {
 		env = append(env, corev1.EnvVar{
@@ -887,6 +926,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 				},
 			},
 		},
+	}
+
+	// Set ServiceAccountName for workload identity
+	if saName := r.getWorkerServiceAccountName(providerCRDs); saName != "" {
+		job.Spec.Template.Spec.ServiceAccountName = saName
+		log.Info("setting worker ServiceAccountName for workload identity", "serviceAccount", saName)
 	}
 
 	// Set TTL if specified

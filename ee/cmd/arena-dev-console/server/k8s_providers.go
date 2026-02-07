@@ -160,6 +160,29 @@ func (l *K8sProviderLoader) convertProvider(p *corev1alpha1.Provider) *config.Pr
 		}
 	}
 
+	// Set platform configuration for hyperscaler providers
+	if p.Spec.Platform != nil {
+		provider.Platform = &config.PlatformConfig{
+			Type:     string(p.Spec.Platform.Type),
+			Region:   p.Spec.Platform.Region,
+			Project:  p.Spec.Platform.Project,
+			Endpoint: p.Spec.Platform.Endpoint,
+		}
+
+		// Pass auth info via platform AdditionalConfig
+		if p.Spec.Auth != nil {
+			provider.Platform.AdditionalConfig = map[string]interface{}{
+				"authMethod": string(p.Spec.Auth.Type),
+			}
+			if p.Spec.Auth.RoleArn != "" {
+				provider.Platform.AdditionalConfig["roleArn"] = p.Spec.Auth.RoleArn
+			}
+			if p.Spec.Auth.ServiceAccountEmail != "" {
+				provider.Platform.AdditionalConfig["serviceAccountEmail"] = p.Spec.Auth.ServiceAccountEmail
+			}
+		}
+	}
+
 	// Resolve credentials: check explicit credential config first, then fall back to legacy behavior
 	if p.Spec.Credential != nil {
 		switch {

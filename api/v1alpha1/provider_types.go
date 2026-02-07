@@ -114,9 +114,50 @@ type PlatformConfig struct {
 	Endpoint string `json:"endpoint,omitempty"`
 }
 
+// AuthMethod defines the authentication method for hyperscaler providers.
+// +kubebuilder:validation:Enum=workloadIdentity;accessKey;serviceAccount;servicePrincipal
+type AuthMethod string
+
+const (
+	// AuthMethodWorkloadIdentity uses Kubernetes-native identity federation (IRSA, GCP WI, Azure AD WI).
+	AuthMethodWorkloadIdentity AuthMethod = "workloadIdentity"
+	// AuthMethodAccessKey uses static access key credentials (e.g., AWS access key).
+	AuthMethodAccessKey AuthMethod = "accessKey"
+	// AuthMethodServiceAccount uses GCP service account key credentials.
+	AuthMethodServiceAccount AuthMethod = "serviceAccount"
+	// AuthMethodServicePrincipal uses Azure service principal credentials.
+	AuthMethodServicePrincipal AuthMethod = "servicePrincipal"
+)
+
+// AuthConfig defines authentication configuration for hyperscaler providers.
+// +kubebuilder:validation:XValidation:rule="self.type != 'workloadIdentity' || !has(self.credentialsSecretRef)",message="credentialsSecretRef is not used with workloadIdentity auth"
+type AuthConfig struct {
+	// type is the authentication method.
+	// +kubebuilder:validation:Required
+	Type AuthMethod `json:"type"`
+
+	// roleArn is the AWS IAM role ARN for IRSA (optional override).
+	// Only applicable when platform.type is aws.
+	// +optional
+	RoleArn string `json:"roleArn,omitempty"`
+
+	// serviceAccountEmail is the GCP service account email for workload identity.
+	// Only applicable when platform.type is gcp.
+	// +optional
+	ServiceAccountEmail string `json:"serviceAccountEmail,omitempty"`
+
+	// credentialsSecretRef references a secret containing platform credentials.
+	// Required for accessKey, serviceAccount, and servicePrincipal auth types.
+	// Not used with workloadIdentity.
+	// +optional
+	CredentialsSecretRef *SecretKeyRef `json:"credentialsSecretRef,omitempty"`
+}
+
 // ProviderSpec defines the desired state of Provider.
 // +kubebuilder:validation:XValidation:rule="!(has(self.secretRef) && has(self.credential))",message="secretRef and credential are mutually exclusive; use credential.secretRef instead"
 // +kubebuilder:validation:XValidation:rule="!(self.type in ['bedrock', 'vertex', 'azure-ai']) || has(self.platform)",message="platform is required for hyperscaler provider types (bedrock, vertex, azure-ai)"
+// +kubebuilder:validation:XValidation:rule="!has(self.auth) || (self.type in ['bedrock', 'vertex', 'azure-ai'])",message="auth is only valid for hyperscaler provider types (bedrock, vertex, azure-ai)"
+// +kubebuilder:validation:XValidation:rule="!(has(self.auth) && self.auth.type != 'workloadIdentity') || has(self.auth.credentialsSecretRef)",message="credentialsSecretRef is required for non-workloadIdentity auth types"
 type ProviderSpec struct {
 	// type specifies the provider type.
 	// +kubebuilder:validation:Required
@@ -136,6 +177,11 @@ type ProviderSpec struct {
 	// Required for provider types: bedrock, vertex, azure-ai.
 	// +optional
 	Platform *PlatformConfig `json:"platform,omitempty"`
+
+	// auth defines authentication configuration for hyperscaler providers.
+	// Required for provider types that use platform authentication (bedrock, vertex, azure-ai).
+	// +optional
+	Auth *AuthConfig `json:"auth,omitempty"`
 
 	// secretRef references a Secret containing API credentials.
 	// Optional for providers that don't require credentials (e.g., mock, ollama).

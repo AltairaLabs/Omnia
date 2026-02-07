@@ -48,10 +48,37 @@ type ProviderOverride struct {
 	// CredentialFile is a file path containing the credential (mounted in pod).
 	CredentialFile string `json:"credentialFile,omitempty"`
 
+	// AuthMethod is the authentication method (workloadIdentity, accessKey, etc.).
+	AuthMethod string `json:"authMethod,omitempty"`
+
+	// RoleARN is the AWS IAM role ARN for IRSA.
+	RoleARN string `json:"roleArn,omitempty"`
+
+	// ServiceAccountEmail is the GCP service account email for workload identity.
+	ServiceAccountEmail string `json:"serviceAccountEmail,omitempty"`
+
+	// Platform contains hyperscaler platform configuration.
+	Platform *PlatformOverride `json:"platform,omitempty"`
+
 	// Default parameters for this provider.
 	Temperature float64 `json:"temperature,omitempty"`
 	TopP        float64 `json:"topP,omitempty"`
 	MaxTokens   int     `json:"maxTokens,omitempty"`
+}
+
+// PlatformOverride contains resolved platform configuration from a Provider CRD.
+type PlatformOverride struct {
+	// Type is the cloud platform type (aws, gcp, azure).
+	Type string `json:"type"`
+
+	// Region is the cloud region.
+	Region string `json:"region,omitempty"`
+
+	// Project is the GCP project ID.
+	Project string `json:"project,omitempty"`
+
+	// Endpoint overrides the default platform API endpoint.
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 // ToolOverride contains tool config resolved from a ToolRegistry CRD.

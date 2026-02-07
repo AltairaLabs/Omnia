@@ -1813,6 +1813,326 @@ var _ = Describe("Provider Controller", func() {
 		})
 	})
 
+	Context("auth config validation", func() {
+		var (
+			ctx      context.Context
+			provider *omniav1alpha1.Provider
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+		})
+
+		AfterEach(func() {
+			if provider != nil {
+				_ = k8sClient.Delete(ctx, provider)
+			}
+		})
+
+		It("should set AuthConfigured condition for bedrock with workloadIdentity", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-wi",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			var authCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
+					authCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(authCondition).NotTo(BeNil())
+			Expect(authCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(authCondition.Reason).To(Equal("WorkloadIdentityConfigured"))
+		})
+
+		It("should set AuthConfigured condition for vertex with workloadIdentity", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vertex-wi",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeVertex,
+					Model: "gemini-1.5-pro",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:    omniav1alpha1.PlatformTypeGCP,
+						Region:  "us-central1",
+						Project: "my-project",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodWorkloadIdentity,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			var authCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
+					authCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(authCondition).NotTo(BeNil())
+			Expect(authCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(authCondition.Reason).To(Equal("WorkloadIdentityConfigured"))
+		})
+
+		It("should reject accessKey auth without credentialsSecretRef at CRD level", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-accesskey-nosecret",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodAccessKey,
+						// No CredentialsSecretRef — rejected by CEL validation
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, provider)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("credentialsSecretRef is required"))
+			provider = nil // prevent cleanup of non-existent resource
+		})
+
+		It("should succeed when accessKey auth has valid credentialsSecretRef", func() {
+			// Create the credentials secret
+			authSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "aws-credentials",
+					Namespace: providerNamespace,
+				},
+				Data: map[string][]byte{
+					"AWS_ACCESS_KEY_ID": []byte("test-access-key"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, authSecret)).To(Succeed())
+
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-accesskey-valid",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+					Auth: &omniav1alpha1.AuthConfig{
+						Type: omniav1alpha1.AuthMethodAccessKey,
+						CredentialsSecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "aws-credentials",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			var authCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
+					authCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(authCondition).NotTo(BeNil())
+			Expect(authCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(authCondition.Reason).To(Equal("AuthConfigured"))
+
+			// Clean up
+			_ = k8sClient.Delete(ctx, authSecret)
+		})
+
+		It("should set AuthNotConfigured when hyperscaler has no auth block", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-noauth",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &omniav1alpha1.PlatformConfig{
+						Type:   omniav1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+					// No Auth block
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
+
+			var authCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
+					authCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(authCondition).NotTo(BeNil())
+			Expect(authCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(authCondition.Reason).To(Equal("AuthNotConfigured"))
+		})
+
+		It("should not set AuthConfigured condition for non-hyperscaler providers", func() {
+			provider = &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "claude-no-auth-condition",
+					Namespace: providerNamespace,
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeMock,
+					Model: "mock-model",
+				},
+			}
+			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+
+			reconciler := &ProviderReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      provider.Name,
+					Namespace: providerNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.Provider
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: providerNamespace}, &updated)).To(Succeed())
+
+			var authCondition *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == ProviderConditionTypeAuthConfigured {
+					authCondition = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(authCondition).To(BeNil())
+		})
+	})
+
+	Context("isHyperscalerProvider", func() {
+		It("should return true for bedrock", func() {
+			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeBedrock)).To(BeTrue())
+		})
+
+		It("should return true for vertex", func() {
+			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeVertex)).To(BeTrue())
+		})
+
+		It("should return true for azure-ai", func() {
+			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeAzureAI)).To(BeTrue())
+		})
+
+		It("should return false for claude", func() {
+			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeClaude)).To(BeFalse())
+		})
+
+		It("should return false for openai", func() {
+			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeOpenAI)).To(BeFalse())
+		})
+
+		It("should return false for mock", func() {
+			Expect(isHyperscalerProvider(omniav1alpha1.ProviderTypeMock)).To(BeFalse())
+		})
+	})
+
 	Context("getExpectedKeysForProvider", func() {
 		It("should return correct keys for Claude", func() {
 			keys := getExpectedKeysForProvider(omniav1alpha1.ProviderTypeClaude)
