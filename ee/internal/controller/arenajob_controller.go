@@ -35,6 +35,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
+	"github.com/altairalabs/omnia/ee/pkg/arena/partitioner"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
@@ -1020,9 +1021,18 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	}
 
 	// Enqueue work items (lazily connects to queue if configured)
-	if err := r.enqueueWorkItems(ctx, arenaJob, source, providerCRDs); err != nil {
-		log.Error(err, "failed to enqueue work items")
+	workItemCount, enqueueErr := r.enqueueWorkItems(ctx, arenaJob, source, providerCRDs)
+	if enqueueErr != nil {
+		log.Error(enqueueErr, "failed to enqueue work items")
 		// Don't return error - job is created, workers will wait for items
+	}
+
+	// Set initial progress based on work item count
+	if workItemCount > 0 {
+		arenaJob.Status.Progress = &omniav1alpha1.JobProgress{
+			Total:   int32(workItemCount),
+			Pending: int32(workItemCount),
+		}
 	}
 
 	return nil
@@ -1054,19 +1064,150 @@ func (r *ArenaJobReconciler) getOrCreateQueue() (queue.WorkQueue, error) {
 	return q, nil
 }
 
+// getContentBasePath computes the filesystem base path for workspace content.
+// Returns empty string if filesystem access is not configured.
+func (r *ArenaJobReconciler) getContentBasePath(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource) string {
+	if r.WorkspaceContentPath == "" {
+		return ""
+	}
+	if source.Status.Artifact == nil || source.Status.Artifact.ContentPath == "" {
+		return ""
+	}
+
+	workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+
+	// Extract root path from arenaFile
+	var rootPath string
+	if arenaJob.Spec.ArenaFile != "" {
+		rootPath = filepath.Dir(arenaJob.Spec.ArenaFile)
+		if rootPath == "." {
+			rootPath = ""
+		}
+	}
+
+	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}/{rootPath}
+	basePath := filepath.Join(r.WorkspaceContentPath, workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
+	if rootPath != "" {
+		basePath = filepath.Join(basePath, rootPath)
+	}
+	return basePath
+}
+
+// listScenarios attempts to enumerate scenarios from the arena config file on the filesystem.
+// Returns nil if filesystem access is unavailable or scenarios cannot be enumerated.
+func (r *ArenaJobReconciler) listScenarios(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource) ([]partitioner.Scenario, error) {
+	basePath := r.getContentBasePath(ctx, arenaJob, source)
+	if basePath == "" {
+		return nil, nil
+	}
+
+	arenaFile := arenaJob.Spec.ArenaFile
+	if arenaFile == "" {
+		arenaFile = "config.arena.yaml"
+	}
+	// Use just the filename since basePath already includes rootPath
+	arenaFileName := filepath.Base(arenaFile)
+	fullPath := filepath.Join(basePath, arenaFileName)
+
+	scenarios, err := partitioner.ListScenariosFromConfig(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return scenarios, nil
+}
+
+// buildMatrixWorkItems creates scenario × provider work items using the partitioner.
+// Returns nil if partitioning fails or inputs are empty.
+func (r *ArenaJobReconciler) buildMatrixWorkItems(ctx context.Context, jobName, bundleURL string, scenarios []partitioner.Scenario, providerCRDs []*corev1alpha1.Provider) []queue.WorkItem {
+	log := logf.FromContext(ctx)
+
+	partProviders := make([]partitioner.Provider, len(providerCRDs))
+	for i, p := range providerCRDs {
+		partProviders[i] = partitioner.Provider{
+			ID:        p.Name,
+			Name:      p.Name,
+			Namespace: p.Namespace,
+		}
+	}
+
+	result, err := partitioner.Partition(partitioner.PartitionInput{
+		JobID:      jobName,
+		BundleURL:  bundleURL,
+		Scenarios:  scenarios,
+		Providers:  partProviders,
+		MaxRetries: 3,
+	})
+	if err != nil {
+		log.Error(err, "partitioning failed, falling back to per-provider mode")
+		return nil
+	}
+
+	now := time.Now()
+	for i := range result.Items {
+		result.Items[i].Status = queue.ItemStatusPending
+		result.Items[i].Attempt = 1
+		result.Items[i].CreatedAt = now
+	}
+	log.Info("created scenario × provider work items",
+		"scenarios", result.ScenarioCount,
+		"providers", result.ProviderCount,
+		"items", result.TotalCombinations)
+	return result.Items
+}
+
+// buildFallbackWorkItems creates per-provider work items (or a single default item).
+// Used when scenario enumeration is not available.
+func buildFallbackWorkItems(jobName, bundleURL string, providerIDs []string) []queue.WorkItem {
+	now := time.Now()
+	if len(providerIDs) == 0 {
+		return []queue.WorkItem{{
+			ID:          fmt.Sprintf("%s-default-0", jobName),
+			JobID:       jobName,
+			ScenarioID:  "default",
+			ProviderID:  "",
+			BundleURL:   bundleURL,
+			Status:      queue.ItemStatusPending,
+			Attempt:     1,
+			MaxAttempts: 3,
+			CreatedAt:   now,
+		}}
+	}
+
+	items := make([]queue.WorkItem, 0, len(providerIDs))
+	for i, provider := range providerIDs {
+		items = append(items, queue.WorkItem{
+			ID:          fmt.Sprintf("%s-%s-%d", jobName, provider, i),
+			JobID:       jobName,
+			ScenarioID:  "default",
+			ProviderID:  provider,
+			BundleURL:   bundleURL,
+			Status:      queue.ItemStatusPending,
+			Attempt:     1,
+			MaxAttempts: 3,
+			CreatedAt:   now,
+		})
+	}
+	return items
+}
+
 // enqueueWorkItems creates and enqueues work items for the Arena job.
-// Work items are scenario × provider combinations.
-func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource, providerCRDs []*corev1alpha1.Provider) error {
+// When scenarios can be enumerated from the filesystem, work items are created
+// for each scenario × provider combination for maximum parallelism.
+// Falls back to per-provider items (with ScenarioID "default") when filesystem
+// access is unavailable.
+// Returns the number of work items enqueued and any error.
+func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob, source *omniav1alpha1.ArenaSource, providerCRDs []*corev1alpha1.Provider) (int, error) {
 	log := logf.FromContext(ctx)
 
 	// Get queue (lazily connect if needed)
 	q, err := r.getOrCreateQueue()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if q == nil {
 		log.Info("no work queue configured, skipping work item enqueueing")
-		return nil
+		return 0, nil
 	}
 
 	// Get bundle URL from source artifact
@@ -1075,56 +1216,44 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 		bundleURL = source.Status.Artifact.URL
 	}
 
-	// Get providers from provider overrides (if any)
+	// Attempt scenario enumeration from the filesystem
+	scenarios, scenarioErr := r.listScenarios(ctx, arenaJob, source)
+	if scenarioErr != nil {
+		log.V(1).Info("could not enumerate scenarios, falling back to per-provider mode", "error", scenarioErr)
+	}
+
+	// Apply scenario filters if scenarios were enumerated
+	if len(scenarios) > 0 && arenaJob.Spec.Scenarios != nil {
+		filtered, filterErr := partitioner.Filter(scenarios, arenaJob.Spec.Scenarios.Include, arenaJob.Spec.Scenarios.Exclude)
+		if filterErr != nil {
+			log.Error(filterErr, "failed to filter scenarios, using unfiltered list")
+		} else {
+			scenarios = filtered
+		}
+	}
+
+	// Build provider list
 	var providerIDs []string
 	if len(providerCRDs) > 0 {
 		providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
 		log.V(1).Info("using providers for work items", "count", len(providerIDs))
 	}
 
-	// Create work items - one per provider, or a single "default" item if no overrides
-	// When no provider overrides are configured, the worker uses providers from arena config
-	now := time.Now()
+	// Try scenario × provider matrix, fall back to per-provider items
 	var items []queue.WorkItem
-
-	if len(providerIDs) == 0 {
-		// No provider overrides - create a single work item that runs all providers from config
-		log.Info("no provider overrides configured, creating default work item")
-		items = []queue.WorkItem{{
-			ID:          fmt.Sprintf("%s-default-0", arenaJob.Name),
-			JobID:       arenaJob.Name,
-			ScenarioID:  "default", // Worker will run all scenarios in the bundle
-			ProviderID:  "",        // Empty means worker uses all providers from arena config
-			BundleURL:   bundleURL,
-			Status:      queue.ItemStatusPending,
-			Attempt:     1,
-			MaxAttempts: 3,
-			CreatedAt:   now,
-		}}
-	} else {
-		// Create one work item per provider override
-		items = make([]queue.WorkItem, 0, len(providerIDs))
-		for i, provider := range providerIDs {
-			items = append(items, queue.WorkItem{
-				ID:          fmt.Sprintf("%s-%s-%d", arenaJob.Name, provider, i),
-				JobID:       arenaJob.Name,
-				ScenarioID:  "default", // Worker will run all scenarios in the bundle
-				ProviderID:  provider,
-				BundleURL:   bundleURL,
-				Status:      queue.ItemStatusPending,
-				Attempt:     1,
-				MaxAttempts: 3,
-				CreatedAt:   now,
-			})
-		}
+	if len(scenarios) > 0 && len(providerIDs) > 0 {
+		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, providerCRDs)
+	}
+	if len(items) == 0 {
+		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
 	}
 
 	log.Info("enqueueing work items", "count", len(items), "providers", providerIDs)
 	if err := q.Push(ctx, arenaJob.Name, items); err != nil {
-		return fmt.Errorf("failed to push work items to queue: %w", err)
+		return 0, fmt.Errorf("failed to push work items to queue: %w", err)
 	}
 
-	return nil
+	return len(items), nil
 }
 
 // updateStatusFromJob updates the ArenaJob status based on the K8s Job status.

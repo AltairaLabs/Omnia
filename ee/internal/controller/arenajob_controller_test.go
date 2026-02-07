@@ -12,6 +12,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/alicebob/miniredis/v2"
 	. "github.com/onsi/ginkgo/v2"
@@ -1339,8 +1341,9 @@ var _ = Describe("ArenaJob Controller", func() {
 				RedisAddr: "", // No Redis configured
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(0))
 		})
 
 		It("should enqueue work items for providers", func() {
@@ -1374,8 +1377,9 @@ var _ = Describe("ArenaJob Controller", func() {
 				Queue:  memQueue,
 			}
 
-			err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(3))
 
 			// Verify items were enqueued
 			progress, err := memQueue.Progress(ctx, "enqueue-test-job")
@@ -1390,6 +1394,315 @@ var _ = Describe("ArenaJob Controller", func() {
 				Expect(item.JobID).To(Equal("enqueue-test-job"))
 				Expect(item.ScenarioID).To(Equal("default"))
 				Expect(item.MaxAttempts).To(Equal(3))
+			}
+		})
+	})
+
+	Context("When testing scenario × provider matrix distribution", func() {
+		It("should create matrix work items when filesystem content is available", func() {
+			// Set up a temp directory with arena config and scenario files
+			dir := GinkgoT().TempDir()
+
+			// Create scenario files
+			Expect(os.WriteFile(filepath.Join(dir, "billing.scenario.yaml"), []byte(`
+metadata:
+  name: Billing Test
+spec:
+  id: billing
+`), 0o644)).To(Succeed())
+
+			Expect(os.WriteFile(filepath.Join(dir, "auth.scenario.yaml"), []byte(`
+metadata:
+  name: Auth Test
+spec:
+  id: auth
+`), 0o644)).To(Succeed())
+
+			// Create arena config
+			Expect(os.WriteFile(filepath.Join(dir, "config.arena.yaml"), []byte(`
+spec:
+  scenarios:
+    - file: billing.scenario.yaml
+    - file: auth.scenario.yaml
+`), 0o644)).To(Succeed())
+
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "matrix-test-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision:    "v1.0.0",
+						ContentPath: "test-source",
+					},
+				},
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "openai-gpt4", Namespace: "default"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "claude-sonnet", Namespace: "default"}},
+			}
+
+			// Set WorkspaceContentPath so that getContentBasePath resolves to dir
+			// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}
+			// We need: dir == WorkspaceContentPath/default/default/test-source
+			reconciler := &ArenaJobReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Queue:                memQueue,
+				WorkspaceContentPath: filepath.Join(dir, ".."),
+			}
+			// Actually compute the path so it matches
+			// dir needs to be {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}
+			// workspace = namespace for nil client fallback, namespace = "default"
+			basePath := filepath.Join(dir, "..", "default", "default", "test-source")
+			Expect(os.MkdirAll(basePath, 0o755)).To(Succeed())
+
+			// Copy scenario files and config to the correct path
+			for _, f := range []string{"billing.scenario.yaml", "auth.scenario.yaml", "config.arena.yaml"} {
+				data, err := os.ReadFile(filepath.Join(dir, f))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(os.WriteFile(filepath.Join(basePath, f), data, 0o644)).To(Succeed())
+			}
+
+			// Update WorkspaceContentPath to parent of the workspace tree
+			reconciler.WorkspaceContentPath = filepath.Join(dir, "..")
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			Expect(err).NotTo(HaveOccurred())
+			// 2 scenarios × 2 providers = 4 work items
+			Expect(count).To(Equal(4))
+
+			// Verify items in queue
+			progress, err := memQueue.Progress(ctx, "matrix-test-job")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(progress.Total).To(Equal(4))
+			Expect(progress.Pending).To(Equal(4))
+
+			// Pop all items and verify scenario × provider combinations
+			scenarioProviderPairs := make(map[string]bool)
+			for range 4 {
+				item, popErr := memQueue.Pop(ctx, "matrix-test-job")
+				Expect(popErr).NotTo(HaveOccurred())
+				pair := item.ScenarioID + "/" + item.ProviderID
+				scenarioProviderPairs[pair] = true
+			}
+			Expect(scenarioProviderPairs).To(HaveLen(4))
+			Expect(scenarioProviderPairs).To(HaveKey("billing/openai-gpt4"))
+			Expect(scenarioProviderPairs).To(HaveKey("billing/claude-sonnet"))
+			Expect(scenarioProviderPairs).To(HaveKey("auth/openai-gpt4"))
+			Expect(scenarioProviderPairs).To(HaveKey("auth/claude-sonnet"))
+		})
+
+		It("should fall back to per-provider items when filesystem is unavailable", func() {
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fallback-test-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision: "v1.0.0",
+					},
+				},
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-2"}},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+				// No WorkspaceContentPath — filesystem unavailable
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(2))
+
+			// All items should have ScenarioID "default"
+			for range 2 {
+				item, popErr := memQueue.Pop(ctx, "fallback-test-job")
+				Expect(popErr).NotTo(HaveOccurred())
+				Expect(item.ScenarioID).To(Equal("default"))
+			}
+		})
+
+		It("should apply ScenarioFilter include/exclude when creating matrix", func() {
+			dir := GinkgoT().TempDir()
+			basePath := filepath.Join(dir, "default", "default", "test-source")
+			Expect(os.MkdirAll(basePath, 0o755)).To(Succeed())
+
+			// Create scenario files
+			Expect(os.WriteFile(filepath.Join(basePath, "billing.scenario.yaml"), []byte(`
+spec:
+  id: billing
+`), 0o644)).To(Succeed())
+
+			Expect(os.WriteFile(filepath.Join(basePath, "auth.scenario.yaml"), []byte(`
+spec:
+  id: auth
+`), 0o644)).To(Succeed())
+
+			Expect(os.WriteFile(filepath.Join(basePath, "wip-test.scenario.yaml"), []byte(`
+spec:
+  id: wip-test
+`), 0o644)).To(Succeed())
+
+			// Create arena config referencing all three
+			Expect(os.WriteFile(filepath.Join(basePath, "config.arena.yaml"), []byte(`
+spec:
+  scenarios:
+    - file: billing.scenario.yaml
+    - file: auth.scenario.yaml
+    - file: wip-test.scenario.yaml
+`), 0o644)).To(Succeed())
+
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "filter-test-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					Scenarios: &omniav1alpha1.ScenarioFilter{
+						Exclude: []string{"wip-*"},
+					},
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision:    "v1.0.0",
+						ContentPath: "test-source",
+					},
+				},
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1", Namespace: "default"}},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Queue:                memQueue,
+				WorkspaceContentPath: dir,
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			Expect(err).NotTo(HaveOccurred())
+			// 2 scenarios (wip-test excluded) × 1 provider = 2 items
+			Expect(count).To(Equal(2))
+
+			// Verify wip-test was excluded
+			scenarioIDs := make(map[string]bool)
+			for range 2 {
+				item, popErr := memQueue.Pop(ctx, "filter-test-job")
+				Expect(popErr).NotTo(HaveOccurred())
+				scenarioIDs[item.ScenarioID] = true
+			}
+			Expect(scenarioIDs).To(HaveKey("billing"))
+			Expect(scenarioIDs).To(HaveKey("auth"))
+			Expect(scenarioIDs).NotTo(HaveKey("wip-test"))
+		})
+
+		It("should create single default item when no providers", func() {
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-providers-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision: "v1.0.0",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Queue:  memQueue,
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(1))
+
+			item, err := memQueue.Pop(ctx, "no-providers-job")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(item.ScenarioID).To(Equal("default"))
+			Expect(item.ProviderID).To(BeEmpty())
+		})
+
+		It("should fall back to per-provider when no scenarios found on filesystem", func() {
+			dir := GinkgoT().TempDir()
+			basePath := filepath.Join(dir, "default", "default", "test-source")
+			Expect(os.MkdirAll(basePath, 0o755)).To(Succeed())
+
+			// Create arena config with no scenarios section
+			Expect(os.WriteFile(filepath.Join(basePath, "config.arena.yaml"), []byte(`
+spec:
+  providers:
+    - name: openai
+`), 0o644)).To(Succeed())
+
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-scenarios-job",
+					Namespace: arenaJobNamespace,
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision:    "v1.0.0",
+						ContentPath: "test-source",
+					},
+				},
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1", Namespace: "default"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-2", Namespace: "default"}},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Queue:                memQueue,
+				WorkspaceContentPath: dir,
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			Expect(err).NotTo(HaveOccurred())
+			// Falls back to per-provider: 2 items with ScenarioID "default"
+			Expect(count).To(Equal(2))
+
+			for range 2 {
+				item, popErr := memQueue.Pop(ctx, "no-scenarios-job")
+				Expect(popErr).NotTo(HaveOccurred())
+				Expect(item.ScenarioID).To(Equal("default"))
 			}
 		})
 	})
