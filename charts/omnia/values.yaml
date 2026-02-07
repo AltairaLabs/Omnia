@@ -546,6 +546,33 @@ dashboard:
     existingClaim: ""
 
 # ============================================================================
+# Session Retention Policy Configuration
+# Defines how long session history is retained across hot/warm/cold tiers
+# ============================================================================
+
+sessionRetention:
+  defaultPolicy:
+    # -- Create a default SessionRetentionPolicy resource
+    create: true
+    hotCache:
+      # -- Enable Redis hot cache for active sessions
+      enabled: true
+      # -- TTL for inactive sessions in the hot cache
+      ttlAfterInactive: "24h"
+      # -- Maximum number of sessions in the hot cache
+      maxSessions: 500
+      # -- Maximum messages per session in the hot cache
+      maxMessagesPerSession: 200
+    warmStore:
+      # -- Number of days to retain data in the Postgres warm store
+      retentionDays: 7
+      # -- Partitioning strategy for warm store tables
+      partitionBy: "week"
+    coldArchive:
+      # -- Enable cold archival (e.g., S3, GCS)
+      enabled: false
+
+# ============================================================================
 # Workspace Multi-Tenancy Configuration
 # Multi-tenant workspace isolation with namespace, RBAC, and quotas
 # ============================================================================

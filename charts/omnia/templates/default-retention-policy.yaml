@@ -1,0 +1,20 @@
+{{- if .Values.sessionRetention.defaultPolicy.create -}}
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SessionRetentionPolicy
+metadata:
+  name: default
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  default:
+    hotCache:
+      enabled: {{ .Values.sessionRetention.defaultPolicy.hotCache.enabled }}
+      ttlAfterInactive: {{ .Values.sessionRetention.defaultPolicy.hotCache.ttlAfterInactive | quote }}
+      maxSessions: {{ .Values.sessionRetention.defaultPolicy.hotCache.maxSessions }}
+      maxMessagesPerSession: {{ .Values.sessionRetention.defaultPolicy.hotCache.maxMessagesPerSession }}
+    warmStore:
+      retentionDays: {{ .Values.sessionRetention.defaultPolicy.warmStore.retentionDays }}
+      partitionBy: {{ .Values.sessionRetention.defaultPolicy.warmStore.partitionBy | quote }}
+    coldArchive:
+      enabled: {{ .Values.sessionRetention.defaultPolicy.coldArchive.enabled }}
+{{- end }}
