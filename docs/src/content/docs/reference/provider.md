@@ -304,15 +304,6 @@ spec:
     cachedCostPer1K: "0.0003"
 ```
 
-### `validateCredentials`
-
-When enabled, the controller validates credentials with the provider during reconciliation.
-
-```yaml
-spec:
-  validateCredentials: true
-```
-
 ## Status Fields
 
 ### `phase`
@@ -329,12 +320,7 @@ spec:
 | `Ready` | Overall readiness of the Provider |
 | `SecretFound` | Referenced Secret exists and contains required key |
 | `CredentialConfigured` | Credential source is configured (secretRef, envVar, or filePath) |
-| `CredentialsValid` | Credentials validated with provider (if `validateCredentials` enabled) |
 | `AuthConfigured` | Auth configuration is valid (hyperscaler providers only) |
-
-### `lastValidatedAt`
-
-Timestamp of the last successful credential validation (only set when `validateCredentials: true`).
 
 ## Complete Examples
 
@@ -378,8 +364,6 @@ spec:
   pricing:
     inputCostPer1K: "0.003"
     outputCostPer1K: "0.015"
-
-  validateCredentials: true
 ```
 
 ### AWS Bedrock with workload identity

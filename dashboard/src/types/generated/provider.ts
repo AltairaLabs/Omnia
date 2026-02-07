@@ -118,9 +118,6 @@ export interface ProviderSpec {
   };
   /** type specifies the provider type. */
   type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "bedrock" | "vertex" | "azure-ai";
-  /** validateCredentials enables credential validation on reconciliation.
-   * When enabled, the controller attempts to verify credentials with the provider. */
-  validateCredentials?: boolean;
 }
 
 export interface ProviderStatus {
@@ -147,8 +144,6 @@ export interface ProviderStatus {
     /** type of condition in CamelCase or in foo.example.com/CamelCase. */
     type: string;
   }[];
-  /** lastValidatedAt is the timestamp of the last successful credential validation. */
-  lastValidatedAt?: string;
   /** observedGeneration is the most recent generation observed by the controller. */
   observedGeneration?: number;
   /** phase represents the current lifecycle phase of the Provider. */

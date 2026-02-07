@@ -40,7 +40,6 @@ import (
 
 // Provider condition types
 const (
-	ProviderConditionTypeCredentialsValid     = "CredentialsValid"
 	ProviderConditionTypeSecretFound          = "SecretFound"
 	ProviderConditionTypeCredentialConfigured = "CredentialConfigured"
 	ProviderConditionTypeAuthConfigured       = "AuthConfigured"
@@ -109,27 +108,6 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Error(statusErr, errMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, err
-	}
-
-	// Validate credentials if enabled
-	if provider.Spec.ValidateCredentials {
-		if err := r.validateCredentials(ctx, provider); err != nil {
-			r.setCondition(provider, ProviderConditionTypeCredentialsValid, metav1.ConditionFalse,
-				"CredentialsInvalid", err.Error())
-			provider.Status.Phase = omniav1alpha1.ProviderPhaseError
-			if statusErr := r.Status().Update(ctx, provider); statusErr != nil {
-				log.Error(statusErr, errMsgFailedToUpdateStatus)
-			}
-			return ctrl.Result{}, nil // Don't requeue for invalid credentials
-		}
-		now := metav1.Now()
-		provider.Status.LastValidatedAt = &now
-		r.setCondition(provider, ProviderConditionTypeCredentialsValid, metav1.ConditionTrue,
-			"CredentialsValid", "Credentials validated successfully")
-	} else {
-		// Clear validation condition if not enabled
-		r.setCondition(provider, ProviderConditionTypeCredentialsValid, metav1.ConditionTrue,
-			"ValidationDisabled", "Credential validation is disabled")
 	}
 
 	// Set phase to Ready if all validations pass
@@ -475,14 +453,6 @@ func getExpectedKeysForProvider(providerType omniav1alpha1.ProviderType) []strin
 	default:
 		return []string{secretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
 	}
-}
-
-// validateCredentials validates the credentials by making a test API call.
-// This is a placeholder for future implementation.
-func (r *ProviderReconciler) validateCredentials(_ context.Context, _ *omniav1alpha1.Provider) error {
-	// TODO: Implement credential validation by making a lightweight API call
-	// For now, we just verify the secret exists (done in validateSecretRef)
-	return nil
 }
 
 // setCondition sets a condition on the Provider status.

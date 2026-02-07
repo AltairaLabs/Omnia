@@ -324,50 +324,6 @@ var _ = Describe("Provider Controller", func() {
 			Expect(result).To(Equal(reconcile.Result{}))
 		})
 
-		It("should reconcile with ValidateCredentials enabled", func() {
-			provider = &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      providerName + "-validate",
-					Namespace: providerNamespace,
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type:  omniav1alpha1.ProviderTypeClaude,
-					Model: "claude-sonnet-4-20250514",
-					SecretRef: &omniav1alpha1.SecretKeyRef{
-						Name: secretName,
-					},
-					ValidateCredentials: true,
-				},
-			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
-
-			reconciler := &ProviderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      provider.Name,
-					Namespace: providerNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify status includes LastValidatedAt
-			var updatedProvider omniav1alpha1.Provider
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      provider.Name,
-				Namespace: providerNamespace,
-			}, &updatedProvider)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedProvider.Status.Phase).To(Equal(omniav1alpha1.ProviderPhaseReady))
-			Expect(updatedProvider.Status.LastValidatedAt).NotTo(BeNil())
-
-			// Clean up
-			_ = k8sClient.Delete(ctx, provider)
-		})
-
 		It("should fail when specified custom key doesn't exist in secret", func() {
 			customKey := "nonexistent-key"
 			provider = &omniav1alpha1.Provider{
