@@ -75,6 +75,7 @@ func main() {
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
+	var workerServiceAccountName string
 	var enableLicenseWebhooks bool
 	var devMode bool
 	var tlsOpts []func(*tls.Config)
@@ -101,6 +102,8 @@ func main() {
 		"Redis password for Arena work queue.")
 	flag.IntVar(&redisDB, "redis-db", 0,
 		"Redis database number for Arena work queue.")
+	flag.StringVar(&workerServiceAccountName, "worker-service-account-name", "",
+		"ServiceAccount name for worker pods (for workload identity).")
 	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
 		"Enable license validation webhooks for Arena resources.")
 	flag.BoolVar(&devMode, "dev-mode", false,
@@ -239,20 +242,21 @@ func main() {
 
 	// ArenaJob controller
 	if err := (&controller.ArenaJobReconciler{
-		Client:                mgr.GetClient(),
-		Scheme:                mgr.GetScheme(),
-		Recorder:              mgr.GetEventRecorderFor("arenajob-controller"),
-		WorkerImage:           arenaWorkerImage,
-		WorkerImagePullPolicy: corev1.PullPolicy(arenaWorkerImagePullPolicy),
-		LicenseValidator:      licenseValidator,
-		Aggregator:            arenaAggregator,
-		RedisAddr:             redisAddr,
-		RedisPassword:         redisPassword,
-		RedisDB:               redisDB,
-		WorkspaceContentPath:  workspaceContentPath,
-		NFSServer:             nfsServer,
-		NFSPath:               nfsPath,
-		StorageManager:        storageManager,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		Recorder:                 mgr.GetEventRecorderFor("arenajob-controller"),
+		WorkerImage:              arenaWorkerImage,
+		WorkerImagePullPolicy:    corev1.PullPolicy(arenaWorkerImagePullPolicy),
+		LicenseValidator:         licenseValidator,
+		Aggregator:               arenaAggregator,
+		RedisAddr:                redisAddr,
+		RedisPassword:            redisPassword,
+		RedisDB:                  redisDB,
+		WorkspaceContentPath:     workspaceContentPath,
+		NFSServer:                nfsServer,
+		NFSPath:                  nfsPath,
+		StorageManager:           storageManager,
+		WorkerServiceAccountName: workerServiceAccountName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)

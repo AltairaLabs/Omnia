@@ -77,6 +77,15 @@ enterprise:
         # -- Worker image pull policy
         pullPolicy: IfNotPresent
 
+      # ServiceAccount for arena worker pods (for workload identity)
+      serviceAccount:
+        # -- Create a ServiceAccount for worker pods
+        create: false
+        # -- Annotations for the worker ServiceAccount (e.g., IRSA role ARN)
+        annotations: {}
+        # -- Name of the worker ServiceAccount (auto-generated if not set)
+        name: ""
+
       # -- Default resource limits for worker pods
       resources:
         limits:

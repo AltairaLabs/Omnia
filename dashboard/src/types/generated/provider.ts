@@ -4,6 +4,31 @@
 import type { ObjectMeta } from "../common";
 
 export interface ProviderSpec {
+  /** auth defines authentication configuration for hyperscaler providers.
+   * Required for provider types that use platform authentication (bedrock, vertex, azure-ai). */
+  auth?: {
+    /** credentialsSecretRef references a secret containing platform credentials.
+     * Required for accessKey, serviceAccount, and servicePrincipal auth types.
+     * Not used with workloadIdentity. */
+    credentialsSecretRef?: {
+      /** key is the key within the Secret to use.
+       * If not specified, the provider-appropriate key is used:
+       * - ANTHROPIC_API_KEY for Claude
+       * - OPENAI_API_KEY for OpenAI
+       * - GEMINI_API_KEY for Gemini */
+      key?: string;
+      /** name is the name of the Secret. */
+      name: string;
+    };
+    /** roleArn is the AWS IAM role ARN for IRSA (optional override).
+     * Only applicable when platform.type is aws. */
+    roleArn?: string;
+    /** serviceAccountEmail is the GCP service account email for workload identity.
+     * Only applicable when platform.type is gcp. */
+    serviceAccountEmail?: string;
+    /** type is the authentication method. */
+    type: "workloadIdentity" | "accessKey" | "serviceAccount" | "servicePrincipal";
+  };
   /** baseURL overrides the provider's default API endpoint.
    * Useful for proxies or self-hosted models. */
   baseURL?: string;

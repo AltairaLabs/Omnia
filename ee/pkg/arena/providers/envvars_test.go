@@ -327,6 +327,184 @@ func TestBuildEnvVarsFromProviders(t *testing.T) {
 	})
 }
 
+func TestBuildPlatformEnvVars(t *testing.T) {
+	t.Run("bedrock provider with AWS platform injects region env vars", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-bedrock",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  "bedrock",
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+				},
+			},
+		}
+
+		envVars := BuildPlatformEnvVars(providers)
+
+		require.Len(t, envVars, 2)
+		envVarMap := make(map[string]string)
+		for _, ev := range envVars {
+			envVarMap[ev.Name] = ev.Value
+		}
+		assert.Equal(t, "us-east-1", envVarMap["AWS_REGION"])
+		assert.Equal(t, "us-east-1", envVarMap["AWS_DEFAULT_REGION"])
+	})
+
+	t.Run("vertex provider with GCP platform injects project and region env vars", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-vertex",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  "vertex",
+					Model: "gemini-1.5-pro",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:    corev1alpha1.PlatformTypeGCP,
+						Region:  "us-central1",
+						Project: "my-gcp-project",
+					},
+				},
+			},
+		}
+
+		envVars := BuildPlatformEnvVars(providers)
+
+		require.Len(t, envVars, 2)
+		envVarMap := make(map[string]string)
+		for _, ev := range envVars {
+			envVarMap[ev.Name] = ev.Value
+		}
+		assert.Equal(t, "my-gcp-project", envVarMap["GOOGLE_CLOUD_PROJECT"])
+		assert.Equal(t, "us-central1", envVarMap["CLOUD_ML_REGION"])
+	})
+
+	t.Run("azure-ai provider with Azure platform injects region env var", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-azure",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  "azure-ai",
+					Model: "gpt-4o",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeAzure,
+						Region: "eastus",
+					},
+				},
+			},
+		}
+
+		envVars := BuildPlatformEnvVars(providers)
+
+		require.Len(t, envVars, 1)
+		assert.Equal(t, "AZURE_REGION", envVars[0].Name)
+		assert.Equal(t, "eastus", envVars[0].Value)
+	})
+
+	t.Run("non-hyperscaler provider returns empty", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-claude",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  "claude",
+					Model: "claude-sonnet-4-20250514",
+					// No platform config
+				},
+			},
+		}
+
+		envVars := BuildPlatformEnvVars(providers)
+		assert.Len(t, envVars, 0)
+	})
+
+	t.Run("empty providers list", func(t *testing.T) {
+		envVars := BuildPlatformEnvVars([]*corev1alpha1.Provider{})
+		assert.Len(t, envVars, 0)
+	})
+
+	t.Run("nil providers list", func(t *testing.T) {
+		envVars := BuildPlatformEnvVars(nil)
+		assert.Len(t, envVars, 0)
+	})
+
+	t.Run("deduplicates platform env vars across multiple providers", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-1",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type: "bedrock",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-2",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type: "bedrock",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeAWS,
+						Region: "eu-west-1",
+					},
+				},
+			},
+		}
+
+		envVars := BuildPlatformEnvVars(providers)
+
+		// Should only have one set of AWS env vars (from first provider)
+		require.Len(t, envVars, 2)
+		assert.Equal(t, "AWS_REGION", envVars[0].Name)
+		assert.Equal(t, "us-east-1", envVars[0].Value)
+	})
+
+	t.Run("GCP without project only injects region", func(t *testing.T) {
+		providers := []*corev1alpha1.Provider{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vertex-no-project",
+					Namespace: "test-ns",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type: "vertex",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeGCP,
+						Region: "us-central1",
+						// No project
+					},
+				},
+			},
+		}
+
+		envVars := BuildPlatformEnvVars(providers)
+
+		require.Len(t, envVars, 1)
+		assert.Equal(t, "CLOUD_ML_REGION", envVars[0].Name)
+		assert.Equal(t, "us-central1", envVars[0].Value)
+	})
+}
+
 func TestFlattenProviderGroups(t *testing.T) {
 	t.Run("flattens multiple groups", func(t *testing.T) {
 		providersByGroup := map[string][]*corev1alpha1.Provider{

@@ -69,43 +69,16 @@ export type {
 
 export type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
 
-// Provider types (not yet in dedicated file, define here)
-export interface ProviderSpec {
-  type?: string;
-  model?: string;
-  endpoint?: string;
-  secretRef?: { name: string };
-}
-
-export interface ProviderStatus {
-  phase?: string;
-  conditions?: Array<{
-    type: string;
-    status: "True" | "False" | "Unknown";
-    lastTransitionTime?: string;
-    reason?: string;
-    message?: string;
-  }>;
-  message?: string;
-}
-
-export interface Provider {
-  apiVersion?: string;
-  kind?: string;
-  metadata: {
-    name: string;
-    namespace?: string;
-    uid?: string;
-    resourceVersion?: string;
-    creationTimestamp?: string;
-    labels?: Record<string, string>;
-    annotations?: Record<string, string>;
-  };
-  spec: ProviderSpec;
-  status?: ProviderStatus;
-}
-
-export type ProviderPhase = "Pending" | "Ready" | "Failed";
+// Provider types (re-exported from generated types)
+import type {
+  Provider as ProviderType,
+  ProviderSpec as ProviderSpecType,
+  ProviderStatus as ProviderStatusType,
+} from "@/types/generated/provider";
+export type Provider = ProviderType;
+export type ProviderSpec = ProviderSpecType;
+export type ProviderStatus = ProviderStatusType;
+export type ProviderPhase = "Ready" | "Error";
 
 // Log entry for agent logs
 export interface LogEntry {

@@ -103,6 +103,41 @@ func BuildEnvVarsFromProviders(providers []*corev1alpha1.Provider) []corev1.EnvV
 	return envVars
 }
 
+// BuildPlatformEnvVars builds environment variables for hyperscaler platform configuration.
+// For each provider with platform config, injects the appropriate cloud SDK env vars
+// so the default credential chain can discover the correct region/project.
+func BuildPlatformEnvVars(providers []*corev1alpha1.Provider) []corev1.EnvVar {
+	var envVars []corev1.EnvVar
+	seen := make(map[string]bool)
+
+	addEnv := func(name, value string) {
+		if value == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		envVars = append(envVars, corev1.EnvVar{Name: name, Value: value})
+	}
+
+	for _, provider := range providers {
+		if provider.Spec.Platform == nil {
+			continue
+		}
+		platform := provider.Spec.Platform
+		switch platform.Type {
+		case corev1alpha1.PlatformTypeAWS:
+			addEnv("AWS_REGION", platform.Region)
+			addEnv("AWS_DEFAULT_REGION", platform.Region)
+		case corev1alpha1.PlatformTypeGCP:
+			addEnv("GOOGLE_CLOUD_PROJECT", platform.Project)
+			addEnv("CLOUD_ML_REGION", platform.Region)
+		case corev1alpha1.PlatformTypeAzure:
+			addEnv("AZURE_REGION", platform.Region)
+		}
+	}
+
+	return envVars
+}
+
 // FlattenProviderGroups returns a deduplicated flat list of providers from grouped providers.
 // Used when you have providers organized by group but need a flat list for env var building.
 func FlattenProviderGroups(providersByGroup map[string][]*corev1alpha1.Provider) []*corev1alpha1.Provider {

@@ -2117,4 +2117,214 @@ var _ = Describe("ArenaJob Controller", func() {
 			Expect(toolOverrides).To(BeNil())
 		})
 	})
+
+	Context("convertProviderToOverride with platform and auth config", func() {
+		It("should pass through platform configuration", func() {
+			provider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-provider",
+					Namespace: "default",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  corev1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+				},
+			}
+
+			override := convertProviderToOverride(provider)
+
+			Expect(override.ID).To(Equal("bedrock-provider"))
+			Expect(override.Type).To(Equal("bedrock"))
+			Expect(override.Platform).NotTo(BeNil())
+			Expect(override.Platform.Type).To(Equal("aws"))
+			Expect(override.Platform.Region).To(Equal("us-east-1"))
+		})
+
+		It("should pass through auth configuration", func() {
+			provider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bedrock-wi-provider",
+					Namespace: "default",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  corev1alpha1.ProviderTypeBedrock,
+					Model: "anthropic.claude-3-sonnet-20240229-v1:0",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:   corev1alpha1.PlatformTypeAWS,
+						Region: "us-east-1",
+					},
+					Auth: &corev1alpha1.AuthConfig{
+						Type:    corev1alpha1.AuthMethodWorkloadIdentity,
+						RoleArn: "arn:aws:iam::123456789012:role/my-role",
+					},
+				},
+			}
+
+			override := convertProviderToOverride(provider)
+
+			Expect(override.AuthMethod).To(Equal("workloadIdentity"))
+			Expect(override.RoleARN).To(Equal("arn:aws:iam::123456789012:role/my-role"))
+			Expect(override.Platform).NotTo(BeNil())
+		})
+
+		It("should pass through GCP auth with serviceAccountEmail", func() {
+			provider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vertex-wi-provider",
+					Namespace: "default",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  corev1alpha1.ProviderTypeVertex,
+					Model: "gemini-1.5-pro",
+					Platform: &corev1alpha1.PlatformConfig{
+						Type:    corev1alpha1.PlatformTypeGCP,
+						Region:  "us-central1",
+						Project: "my-project",
+					},
+					Auth: &corev1alpha1.AuthConfig{
+						Type:                corev1alpha1.AuthMethodWorkloadIdentity,
+						ServiceAccountEmail: "my-sa@my-project.iam.gserviceaccount.com",
+					},
+				},
+			}
+
+			override := convertProviderToOverride(provider)
+
+			Expect(override.AuthMethod).To(Equal("workloadIdentity"))
+			Expect(override.ServiceAccountEmail).To(Equal("my-sa@my-project.iam.gserviceaccount.com"))
+			Expect(override.Platform).NotTo(BeNil())
+			Expect(override.Platform.Project).To(Equal("my-project"))
+		})
+
+		It("should not set auth fields when auth is nil", func() {
+			provider := &corev1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "claude-noauth",
+					Namespace: "default",
+				},
+				Spec: corev1alpha1.ProviderSpec{
+					Type:  corev1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+				},
+			}
+
+			override := convertProviderToOverride(provider)
+
+			Expect(override.AuthMethod).To(BeEmpty())
+			Expect(override.RoleARN).To(BeEmpty())
+			Expect(override.ServiceAccountEmail).To(BeEmpty())
+			Expect(override.Platform).To(BeNil())
+		})
+	})
+
+	Context("getWorkerServiceAccountName", func() {
+		It("should return empty when WorkerServiceAccountName is not configured", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:                   k8sClient,
+				Scheme:                   k8sClient.Scheme(),
+				WorkerServiceAccountName: "",
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{
+					Spec: corev1alpha1.ProviderSpec{
+						Type: corev1alpha1.ProviderTypeBedrock,
+						Auth: &corev1alpha1.AuthConfig{
+							Type: corev1alpha1.AuthMethodWorkloadIdentity,
+						},
+					},
+				},
+			}
+
+			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(BeEmpty())
+		})
+
+		It("should return SA name when a provider uses workload identity", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:                   k8sClient,
+				Scheme:                   k8sClient.Scheme(),
+				WorkerServiceAccountName: "my-arena-worker",
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{
+					Spec: corev1alpha1.ProviderSpec{
+						Type: corev1alpha1.ProviderTypeBedrock,
+						Auth: &corev1alpha1.AuthConfig{
+							Type: corev1alpha1.AuthMethodWorkloadIdentity,
+						},
+					},
+				},
+			}
+
+			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(Equal("my-arena-worker"))
+		})
+
+		It("should return empty when no provider uses workload identity", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:                   k8sClient,
+				Scheme:                   k8sClient.Scheme(),
+				WorkerServiceAccountName: "my-arena-worker",
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{
+					Spec: corev1alpha1.ProviderSpec{
+						Type: corev1alpha1.ProviderTypeClaude,
+						// No auth config
+					},
+				},
+				{
+					Spec: corev1alpha1.ProviderSpec{
+						Type: corev1alpha1.ProviderTypeBedrock,
+						Auth: &corev1alpha1.AuthConfig{
+							Type: corev1alpha1.AuthMethodAccessKey,
+						},
+					},
+				},
+			}
+
+			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(BeEmpty())
+		})
+
+		It("should return SA name when at least one provider uses workload identity among multiple", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:                   k8sClient,
+				Scheme:                   k8sClient.Scheme(),
+				WorkerServiceAccountName: "my-arena-worker",
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{
+					Spec: corev1alpha1.ProviderSpec{
+						Type: corev1alpha1.ProviderTypeClaude,
+					},
+				},
+				{
+					Spec: corev1alpha1.ProviderSpec{
+						Type: corev1alpha1.ProviderTypeBedrock,
+						Auth: &corev1alpha1.AuthConfig{
+							Type: corev1alpha1.AuthMethodWorkloadIdentity,
+						},
+					},
+				},
+			}
+
+			Expect(reconciler.getWorkerServiceAccountName(providerCRDs)).To(Equal("my-arena-worker"))
+		})
+
+		It("should return empty when providers list is empty", func() {
+			reconciler := &ArenaJobReconciler{
+				Client:                   k8sClient,
+				Scheme:                   k8sClient.Scheme(),
+				WorkerServiceAccountName: "my-arena-worker",
+			}
+
+			Expect(reconciler.getWorkerServiceAccountName([]*corev1alpha1.Provider{})).To(BeEmpty())
+		})
+	})
 })

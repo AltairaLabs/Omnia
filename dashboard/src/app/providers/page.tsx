@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import { LayoutGrid, List } from "lucide-react";
+import { LayoutGrid, List, Plus } from "lucide-react";
 import Link from "next/link";
 import { Header } from "@/components/layout";
 import { NamespaceFilter } from "@/components/filters";
@@ -21,11 +21,13 @@ import { Badge } from "@/components/ui/badge";
 import { CostSparkline } from "@/components/cost";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
+import { ProviderDialog } from "@/components/providers/provider-dialog";
 import { SharedBadge } from "@/components/shared";
 import { formatCost } from "@/lib/pricing";
 import { formatTokens } from "@/lib/utils";
 import { useProviders, useSharedProviders } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { Provider } from "@/types";
 
 /** Extended provider type with shared flag */
@@ -204,8 +206,12 @@ export default function ProvidersPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
-  const { data: workspaceProviders, isLoading: isLoadingWorkspace } = useProviders();
+  const { currentWorkspace } = useWorkspace();
+  const canEdit = currentWorkspace?.permissions?.write ?? false;
+
+  const { data: workspaceProviders, isLoading: isLoadingWorkspace, refetch } = useProviders();
   const { data: sharedProviders, isLoading: isLoadingShared } = useSharedProviders();
 
   const isLoading = isLoadingWorkspace || isLoadingShared;
@@ -315,6 +321,12 @@ export default function ProvidersPage() {
                 <List className="h-4 w-4" />
               </Button>
             </div>
+            {canEdit && (
+              <Button onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Provider
+              </Button>
+            )}
           </div>
         </div>
 
@@ -335,11 +347,25 @@ export default function ProvidersPage() {
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-muted-foreground">No providers found</p>
             <p className="text-sm text-muted-foreground mt-2">
-              Create a Provider CRD in your cluster to configure LLM access
+              {canEdit
+                ? "Create a provider to configure LLM access for your workspace."
+                : "Create a Provider CRD in your cluster to configure LLM access."}
             </p>
+            {canEdit && (
+              <Button className="mt-4" onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Provider
+              </Button>
+            )}
           </div>
         )}
       </div>
+
+      <ProviderDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        onSuccess={() => refetch()}
+      />
     </div>
   );
 }

@@ -54,6 +54,57 @@ spec:
           spec:
             description: spec defines the desired state of Provider
             properties:
+              auth:
+                description: |-
+                  auth defines authentication configuration for hyperscaler providers.
+                  Required for provider types that use platform authentication (bedrock, vertex, azure-ai).
+                properties:
+                  credentialsSecretRef:
+                    description: |-
+                      credentialsSecretRef references a secret containing platform credentials.
+                      Required for accessKey, serviceAccount, and servicePrincipal auth types.
+                      Not used with workloadIdentity.
+                    properties:
+                      key:
+                        description: |-
+                          key is the key within the Secret to use.
+                          If not specified, the provider-appropriate key is used:
+                          - ANTHROPIC_API_KEY for Claude
+                          - OPENAI_API_KEY for OpenAI
+                          - GEMINI_API_KEY for Gemini
+                        type: string
+                      name:
+                        description: name is the name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  roleArn:
+                    description: |-
+                      roleArn is the AWS IAM role ARN for IRSA (optional override).
+                      Only applicable when platform.type is aws.
+                    type: string
+                  serviceAccountEmail:
+                    description: |-
+                      serviceAccountEmail is the GCP service account email for workload identity.
+                      Only applicable when platform.type is gcp.
+                    type: string
+                  type:
+                    description: type is the authentication method.
+                    enum:
+                    - workloadIdentity
+                    - accessKey
+                    - serviceAccount
+                    - servicePrincipal
+                    type: string
+                required:
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: credentialsSecretRef is not used with workloadIdentity
+                    auth
+                  rule: self.type != 'workloadIdentity' || !has(self.credentialsSecretRef)
               baseURL:
                 description: |-
                   baseURL overrides the provider's default API endpoint.
@@ -257,6 +308,13 @@ spec:
             - message: platform is required for hyperscaler provider types (bedrock,
                 vertex, azure-ai)
               rule: '!(self.type in [''bedrock'', ''vertex'', ''azure-ai'']) || has(self.platform)'
+            - message: auth is only valid for hyperscaler provider types (bedrock,
+                vertex, azure-ai)
+              rule: '!has(self.auth) || (self.type in [''bedrock'', ''vertex'', ''azure-ai''])'
+            - message: credentialsSecretRef is required for non-workloadIdentity auth
+                types
+              rule: '!(has(self.auth) && self.auth.type != ''workloadIdentity'') ||
+                has(self.auth.credentialsSecretRef)'
           status:
             description: status defines the observed state of Provider
             properties:
