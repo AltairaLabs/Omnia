@@ -23,7 +23,6 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Collapsible,
   CollapsibleContent,
@@ -67,8 +66,6 @@ interface FormState {
   inputCostPer1K: string;
   outputCostPer1K: string;
   cachedCostPer1K: string;
-  // Misc
-  validateCredentials: boolean;
 }
 
 // --- Constants ---
@@ -164,7 +161,6 @@ function getInitialFormState(provider?: Provider | null): FormState {
       inputCostPer1K: spec.pricing?.inputCostPer1K || "",
       outputCostPer1K: spec.pricing?.outputCostPer1K || "",
       cachedCostPer1K: spec.pricing?.cachedCostPer1K || "",
-      validateCredentials: spec.validateCredentials ?? false,
     };
   }
 
@@ -194,7 +190,6 @@ function getInitialFormState(provider?: Provider | null): FormState {
     inputCostPer1K: "",
     outputCostPer1K: "",
     cachedCostPer1K: "",
-    validateCredentials: false,
   };
 }
 
@@ -318,8 +313,6 @@ function buildSpec(form: FormState): ProviderSpec {
   if (form.capabilities.length > 0) {
     spec.capabilities = form.capabilities as ProviderSpec["capabilities"];
   }
-  if (form.validateCredentials) spec.validateCredentials = true;
-
   if (!isHyperscaler(form.providerType) && !isLocal(form.providerType)) {
     spec.credential = buildCredential(form);
   }
@@ -679,6 +672,8 @@ function CapabilitiesFields({
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }>) {
+  const [open, setOpen] = useState(form.capabilities.length > 0);
+
   const toggleCapability = (cap: string) => {
     const current = form.capabilities;
     if (current.includes(cap)) {
@@ -689,23 +684,30 @@ function CapabilitiesFields({
   };
 
   return (
-    <div className="space-y-2">
-      <Label>Capabilities</Label>
-      <div className="flex flex-wrap gap-3">
-        {ALL_CAPABILITIES.map((cap) => (
-          <div key={cap} className="flex items-center space-x-2">
-            <Checkbox
-              id={`cap-${cap}`}
-              checked={form.capabilities.includes(cap)}
-              onCheckedChange={() => toggleCapability(cap)}
-            />
-            <Label htmlFor={`cap-${cap}`} className="text-sm font-normal capitalize">
-              {cap}
-            </Label>
-          </div>
-        ))}
-      </div>
-    </div>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" className="w-full justify-between px-0 font-semibold">
+          Capabilities
+          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-2">
+        <div className="grid grid-cols-2 gap-2">
+          {ALL_CAPABILITIES.map((cap) => (
+            <div key={cap} className="flex items-center space-x-2">
+              <Checkbox
+                id={`cap-${cap}`}
+                checked={form.capabilities.includes(cap)}
+                onCheckedChange={() => toggleCapability(cap)}
+              />
+              <Label htmlFor={`cap-${cap}`} className="text-sm font-normal capitalize">
+                {cap}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -823,7 +825,7 @@ function ProviderDialogForm({
   const showPlatformAuth = isHyperscaler(formState.providerType);
 
   return (
-    <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col">
+    <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col overflow-hidden">
       <DialogHeader>
         <DialogTitle>{isEditing ? "Edit Provider" : "Create Provider"}</DialogTitle>
         <DialogDescription>
@@ -833,7 +835,7 @@ function ProviderDialogForm({
         </DialogDescription>
       </DialogHeader>
 
-      <ScrollArea className="flex-1 -mx-6 px-6">
+      <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6">
         <div className="space-y-6 py-4">
           {error && (
             <Alert variant="destructive">
@@ -920,25 +922,13 @@ function ProviderDialogForm({
           {/* Capabilities */}
           <CapabilitiesFields form={formState} updateForm={updateForm} />
 
-          {/* Validate Credentials */}
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="validate-credentials"
-              checked={formState.validateCredentials}
-              onCheckedChange={(checked) => updateForm("validateCredentials", checked === true)}
-            />
-            <Label htmlFor="validate-credentials" className="font-normal">
-              Validate credentials on reconciliation
-            </Label>
-          </div>
-
           {/* Defaults (collapsible) */}
           <DefaultsFields form={formState} updateForm={updateForm} />
 
           {/* Pricing (collapsible) */}
           <PricingFields form={formState} updateForm={updateForm} />
         </div>
-      </ScrollArea>
+      </div>
 
       <DialogFooter>
         <Button variant="outline" onClick={() => onOpenChange(false)}>

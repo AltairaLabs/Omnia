@@ -292,12 +292,6 @@ spec:
                 - vertex
                 - azure-ai
                 type: string
-              validateCredentials:
-                default: false
-                description: |-
-                  validateCredentials enables credential validation on reconciliation.
-                  When enabled, the controller attempts to verify credentials with the provider.
-                type: boolean
             required:
             - type
             type: object
@@ -379,11 +373,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              lastValidatedAt:
-                description: lastValidatedAt is the timestamp of the last successful
-                  credential validation.
-                format: date-time
-                type: string
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller.

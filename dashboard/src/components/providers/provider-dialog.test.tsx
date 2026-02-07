@@ -545,6 +545,9 @@ describe("ProviderDialog", () => {
       await user.type(screen.getByLabelText("Name"), "cap-provider");
       await user.type(screen.getByLabelText("Secret Name"), "my-secret");
 
+      // Expand the capabilities collapsible
+      fireEvent.click(screen.getByRole("button", { name: /capabilities/i }));
+
       // Toggle text capability on
       fireEvent.click(screen.getByLabelText("text"));
       // Toggle streaming on
@@ -660,35 +663,6 @@ describe("ProviderDialog", () => {
               outputCostPer1K: "0.015",
               cachedCostPer1K: "0.0003",
             },
-          })
-        );
-      });
-    });
-  });
-
-  describe("validate credentials checkbox", () => {
-    it("includes validateCredentials when checked", async () => {
-      vi.useRealTimers();
-      const user = userEvent.setup();
-
-      render(
-        <TestWrapper>
-          <ProviderDialog open={true} onOpenChange={vi.fn()} />
-        </TestWrapper>
-      );
-
-      await user.type(screen.getByLabelText("Name"), "validate-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "my-secret");
-
-      fireEvent.click(screen.getByLabelText("Validate credentials on reconciliation"));
-
-      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
-
-      await waitFor(() => {
-        expect(mockCreateProvider).toHaveBeenCalledWith(
-          "validate-provider",
-          expect.objectContaining({
-            validateCredentials: true,
           })
         );
       });

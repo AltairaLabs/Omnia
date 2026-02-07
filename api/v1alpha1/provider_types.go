@@ -203,12 +203,6 @@ type ProviderSpec struct {
 	// +optional
 	Pricing *ProviderPricing `json:"pricing,omitempty"`
 
-	// validateCredentials enables credential validation on reconciliation.
-	// When enabled, the controller attempts to verify credentials with the provider.
-	// +kubebuilder:default=false
-	// +optional
-	ValidateCredentials bool `json:"validateCredentials,omitempty"`
-
 	// capabilities lists what this provider supports.
 	// Used for capability-based filtering when binding arena providers.
 	// +optional
@@ -241,10 +235,6 @@ type ProviderStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// lastValidatedAt is the timestamp of the last successful credential validation.
-	// +optional
-	LastValidatedAt *metav1.Time `json:"lastValidatedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
