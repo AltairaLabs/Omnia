@@ -25,6 +25,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
+	"github.com/altairalabs/omnia/ee/pkg/arena/binding"
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
@@ -329,6 +330,15 @@ func executeWorkItem(
 		// Fall back to legacy tool overrides from env var (for backwards compatibility)
 		if err := applyToolOverrides(arenaCfg, cfg.ToolOverrides, cfg.Verbose); err != nil {
 			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
+		}
+	}
+
+	// Apply provider bindings (annotation-based credential resolution)
+	// This runs after explicit overrides so they take precedence
+	if overrideCfg != nil && len(overrideCfg.Bindings) > 0 {
+		if err := applyProviderBindings(arenaCfg, overrideCfg.Bindings, configPath, cfg.Verbose); err != nil {
+			// Non-fatal: log warning and continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to apply provider bindings: %v\n", err)
 		}
 	}
 
@@ -763,6 +773,29 @@ func applyProviderOverrides(
 	if verbose && appliedCount > 0 {
 		fmt.Printf("  Applied %d provider override(s)\n", appliedCount)
 	}
+}
+
+// applyProviderBindings resolves provider binding annotations against the registry
+// and injects credentials into providers that don't already have them.
+func applyProviderBindings(
+	cfg *config.Config,
+	registry map[string]overrides.ProviderOverride,
+	configPath string,
+	verbose bool,
+) error {
+	bindings, err := binding.ParseProviderAnnotations(cfg, configPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse provider annotations: %w", err)
+	}
+
+	boundCount := binding.ApplyBindings(cfg, bindings, registry, verbose)
+	matchedCount := binding.ApplyNameMatching(cfg, registry, verbose)
+
+	if verbose && (boundCount > 0 || matchedCount > 0) {
+		fmt.Printf("  Provider bindings: %d annotation-based, %d name-matched\n", boundCount, matchedCount)
+	}
+
+	return nil
 }
 
 // applyOverridesFromConfig applies all overrides from the loaded override config.
