@@ -67,6 +67,18 @@ vi.mock("@/hooks", () => ({
   })),
 }));
 
+vi.mock("@/hooks/use-provider-binding-status", () => ({
+  useProviderBindingStatus: vi.fn(() => new Map()),
+}));
+
+vi.mock("@/hooks/use-providers", () => ({
+  useProviders: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+  })),
+}));
+
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({
     toast: vi.fn(),

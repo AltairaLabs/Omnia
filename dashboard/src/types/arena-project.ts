@@ -35,6 +35,12 @@ export interface ArenaProjectWithTree extends ArenaProject {
 // File Tree Types
 // =============================================================================
 
+/** Provider binding annotation data extracted from YAML files */
+export interface ProviderBinding {
+  providerName?: string;
+  providerNamespace?: string;
+}
+
 /** A node in the file tree (file or directory) */
 export interface FileTreeNode {
   /** Node name (file or directory name) */
@@ -51,6 +57,8 @@ export interface FileTreeNode {
   modifiedAt?: string;
   /** File type based on extension or YAML kind */
   type?: FileType;
+  /** Provider binding annotations (for provider files only) */
+  providerBinding?: ProviderBinding;
 }
 
 /** File type classification for icons and behavior */
