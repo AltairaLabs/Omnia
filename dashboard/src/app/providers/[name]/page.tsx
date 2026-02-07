@@ -1,9 +1,9 @@
 "use client";
 
-import { use, useCallback, useMemo } from "react";
+import { use, useState, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Activity, Settings, Zap, DollarSign, FileText, AlertCircle, Loader2 } from "lucide-react";
+import { ArrowLeft, Activity, Settings, Zap, DollarSign, FileText, AlertCircle, Loader2, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Header } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { ProviderStatusBadge } from "@/components/providers/provider-status-badge";
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
+import { ProviderDialog } from "@/components/providers/provider-dialog";
 import { useProvider, useUpdateProviderSecretRef, useSecrets } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 interface ProviderDetailPageProps {
   params: Promise<{ name: string }>;
@@ -52,7 +54,11 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
   const namespace = searchParams.get("namespace") || "default";
   const currentTab = searchParams.get("tab") || "overview";
 
-  const { data: provider, isLoading } = useProvider(name, namespace);
+  const { currentWorkspace } = useWorkspace();
+  const canEdit = currentWorkspace?.permissions?.write ?? false;
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+
+  const { data: provider, isLoading, refetch } = useProvider(name, namespace);
   const { data: metrics, isLoading: metricsLoading } = useProviderMetrics(name, provider?.spec?.type);
   const { data: secrets, isLoading: secretsLoading } = useSecrets({ namespace });
   const updateSecretRef = useUpdateProviderSecretRef();
@@ -145,7 +151,15 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
               Back to Providers
             </Button>
           </Link>
-          <ProviderStatusBadge phase={status?.phase} />
+          <div className="flex items-center gap-2">
+            {canEdit && (
+              <Button variant="outline" size="sm" onClick={() => setEditDialogOpen(true)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            )}
+            <ProviderStatusBadge phase={status?.phase} />
+          </div>
         </div>
 
         {/* Tabs */}
@@ -514,6 +528,13 @@ export default function ProviderDetailPage({ params }: Readonly<ProviderDetailPa
           </TabsContent>
         </Tabs>
       </div>
+
+      <ProviderDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        provider={provider}
+        onSuccess={() => refetch()}
+      />
     </div>
   );
 }

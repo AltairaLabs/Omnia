@@ -181,6 +181,7 @@ export async function getWorkspaceResource<T>(
  * CRD plural names for Omnia resources.
  */
 export const CRD_AGENTS = "agentruntimes";
+export const CRD_PROVIDERS = "providers";
 export const CRD_PROMPTPACKS = "promptpacks";
 export const CRD_ARENA_SOURCES = "arenasources";
 export const CRD_ARENA_CONFIGS = "arenaconfigs";

@@ -78,6 +78,7 @@ export type { ReadOnlyConfig } from "./use-read-only";
 export type { GrafanaConfig, GrafanaPanelOptions } from "./use-grafana";
 export type { SystemMetrics, SystemMetric, MetricDataPoint } from "./use-system-metrics";
 export type { AgentCostData } from "./use-agent-cost";
+export { useProviderMutations } from "./use-provider-mutations";
 export { useProviderPreview } from "./use-provider-preview";
 export { useToolRegistryPreview } from "./use-tool-registry-preview";
 export type { ProviderPreviewResult } from "./use-provider-preview";
