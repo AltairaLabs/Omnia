@@ -26,9 +26,9 @@ import (
 
 func TestNewCompactionMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newCompactionMetricsWithRegistry(reg)
+	m := NewCompactionMetricsWithRegistry(reg)
 	if m == nil {
-		t.Fatal("newCompactionMetricsWithRegistry returned nil")
+		t.Fatal("NewCompactionMetricsWithRegistry returned nil")
 	}
 	if m.RunDurationSeconds == nil {
 		t.Error("RunDurationSeconds is nil")
@@ -71,7 +71,7 @@ func TestNewCompactionMetrics_Promauto(t *testing.T) {
 
 func TestCompactionMetrics_RecordDuration(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newCompactionMetricsWithRegistry(reg)
+	m := NewCompactionMetricsWithRegistry(reg)
 
 	m.RecordDuration(5 * time.Second)
 
@@ -97,7 +97,7 @@ func TestCompactionMetrics_RecordDuration(t *testing.T) {
 
 func TestCompactionMetrics_RecordSessionsCompacted(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newCompactionMetricsWithRegistry(reg)
+	m := NewCompactionMetricsWithRegistry(reg)
 
 	m.RecordSessionsCompacted(42)
 
@@ -112,7 +112,7 @@ func TestCompactionMetrics_RecordSessionsCompacted(t *testing.T) {
 
 func TestCompactionMetrics_RecordBatchProcessed(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newCompactionMetricsWithRegistry(reg)
+	m := NewCompactionMetricsWithRegistry(reg)
 
 	m.RecordBatchProcessed()
 	m.RecordBatchProcessed()
@@ -128,7 +128,7 @@ func TestCompactionMetrics_RecordBatchProcessed(t *testing.T) {
 
 func TestCompactionMetrics_RecordError(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newCompactionMetricsWithRegistry(reg)
+	m := NewCompactionMetricsWithRegistry(reg)
 
 	m.RecordError("write_parquet")
 	m.RecordError("write_parquet")
@@ -155,7 +155,7 @@ func TestCompactionMetrics_RecordError(t *testing.T) {
 
 func TestCompactionMetrics_RecordLastRun(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newCompactionMetricsWithRegistry(reg)
+	m := NewCompactionMetricsWithRegistry(reg)
 
 	before := float64(time.Now().Unix())
 	m.RecordLastRun()

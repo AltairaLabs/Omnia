@@ -89,8 +89,10 @@ func (m *CompactionMetrics) RecordLastRun() {
 	m.LastRunTimestamp.SetToCurrentTime()
 }
 
-// newCompactionMetricsWithRegistry creates compaction metrics with a custom registry for testing.
-func newCompactionMetricsWithRegistry(reg *prometheus.Registry) *CompactionMetrics {
+// NewCompactionMetricsWithRegistry creates compaction metrics with a custom
+// registry. Use this instead of NewCompactionMetrics when you need an isolated
+// registry (e.g. for testing or per-run CronJob binaries).
+func NewCompactionMetricsWithRegistry(reg *prometheus.Registry) *CompactionMetrics {
 	runDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "omnia_compaction_run_duration_seconds",
 		Help:    "Duration of a compaction run in seconds",

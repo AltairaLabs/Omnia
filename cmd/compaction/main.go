@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
@@ -95,7 +96,10 @@ func main() {
 
 func run() error {
 	f := parseFlags()
+	return runWithFlags(f)
+}
 
+func runWithFlags(f *flags) error {
 	// --- Logger ---
 	zapCfg := zap.NewProductionConfig()
 	zapCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
@@ -113,9 +117,10 @@ func run() error {
 	defer cancel()
 
 	// --- Metrics server (goroutine) ---
-	compactionMetrics := metrics.NewCompactionMetrics()
+	reg := prometheus.NewRegistry()
+	compactionMetrics := metrics.NewCompactionMetricsWithRegistry(reg)
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	srv := &http.Server{Addr: f.metricsAddr, Handler: mux}
 	go func() {
 		log.Infow("starting metrics server", "addr", f.metricsAddr)
@@ -180,10 +185,32 @@ func run() error {
 	return nil
 }
 
+// validateProviderFlags checks that all required provider flags are set
+// before attempting to create any network connections.
+func validateProviderFlags(f *flags) error {
+	if f.postgresConn == "" {
+		return fmt.Errorf("--postgres-conn or POSTGRES_CONN is required")
+	}
+	if f.coldBucket == "" {
+		return fmt.Errorf("--cold-bucket or COLD_BUCKET is required")
+	}
+	switch cold.BackendType(f.coldBackend) {
+	case cold.BackendS3, cold.BackendGCS, cold.BackendAzure:
+		// valid
+	default:
+		return fmt.Errorf("unsupported cold backend: %s", f.coldBackend)
+	}
+	return nil
+}
+
 // initProviders creates the storage providers and returns a cleanup function.
 func initProviders(
 	ctx context.Context, f *flags,
 ) (*postgres.Provider, *cold.Provider, *redis.Provider, func(), error) {
+	if err := validateProviderFlags(f); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
 	var cleanups []func()
 	cleanup := func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {
@@ -192,10 +219,6 @@ func initProviders(
 	}
 
 	// Postgres (required)
-	if f.postgresConn == "" {
-		return nil, nil, nil, nil,
-			fmt.Errorf("--postgres-conn or POSTGRES_CONN is required")
-	}
 	pgCfg := postgres.DefaultConfig()
 	pgCfg.ConnString = f.postgresConn
 	warmProvider, err := postgres.New(pgCfg)
@@ -206,11 +229,6 @@ func initProviders(
 	cleanups = append(cleanups, func() { _ = warmProvider.Close() })
 
 	// Cold archive (required)
-	if f.coldBucket == "" {
-		cleanup()
-		return nil, nil, nil, nil,
-			fmt.Errorf("--cold-bucket or COLD_BUCKET is required")
-	}
 	coldCfg := cold.DefaultConfig()
 	coldCfg.Backend = cold.BackendType(f.coldBackend)
 	coldCfg.Bucket = f.coldBucket
@@ -224,10 +242,6 @@ func initProviders(
 		coldCfg.GCS = &cold.GCSConfig{}
 	case cold.BackendAzure:
 		coldCfg.Azure = &cold.AzureConfig{}
-	default:
-		cleanup()
-		return nil, nil, nil, nil,
-			fmt.Errorf("unsupported cold backend: %s", f.coldBackend)
 	}
 	coldProvider, err := cold.New(ctx, coldCfg)
 	if err != nil {

@@ -108,7 +108,7 @@ func (e *Engine) compactWarmToCold(ctx context.Context, result *Result) error {
 	e.log.Infow("starting warm-to-cold compaction", "minCutoff", minCutoff, "batchSize", e.cfg.BatchSize)
 
 	for {
-		if err := ctx.Err(); err != nil {
+		if ctx.Err() != nil {
 			return nil
 		}
 

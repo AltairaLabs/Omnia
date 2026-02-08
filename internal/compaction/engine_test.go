@@ -29,6 +29,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -612,4 +613,139 @@ func TestFilterByWorkspaceCutoff(t *testing.T) {
 	if eligible[1].ID != "s3" {
 		t.Errorf("expected s3, got %s", eligible[1].ID)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional coverage tests
+// ---------------------------------------------------------------------------
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.BatchSize != 1000 {
+		t.Errorf("expected BatchSize 1000, got %d", cfg.BatchSize)
+	}
+	if cfg.MaxRetries != 3 {
+		t.Errorf("expected MaxRetries 3, got %d", cfg.MaxRetries)
+	}
+	if cfg.Compression != "snappy" {
+		t.Errorf("expected Compression snappy, got %s", cfg.Compression)
+	}
+	if cfg.DryRun {
+		t.Error("expected DryRun false")
+	}
+}
+
+func TestRun_WithMetrics(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{
+			testSession("s1", "", old),
+		},
+	}
+	cold := &mockColdArchive{}
+	hot := &mockHotCache{}
+
+	m := newTestMetrics()
+	e := NewEngine(warm, cold, hot, testRetentionConfig(), testConfig(), m, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SessionsCompacted != 1 {
+		t.Errorf("expected 1 session, got %d", result.SessionsCompacted)
+	}
+}
+
+func TestRun_HotCacheInvalidationError(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+
+	warm := &mockWarmStore{
+		sessions: []*session.Session{testSession("s1", "", old)},
+	}
+	cold := &mockColdArchive{}
+	hot := &mockHotCache{invalidateErr: errors.New("cache error")}
+
+	e := NewEngine(warm, cold, hot, testRetentionConfig(), testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run should succeed despite hot cache error: %v", err)
+	}
+	if result.SessionsCompacted != 1 {
+		t.Errorf("expected 1 session compacted, got %d", result.SessionsCompacted)
+	}
+}
+
+func TestRun_ColdPurgeSkipped_NoCutoff(t *testing.T) {
+	warm := &mockWarmStore{}
+	cold := &mockColdArchive{}
+
+	// Retention config with no cold retention days configured.
+	retention := &RetentionConfig{
+		Default: TierConfig{
+			WarmStore:   &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
+			ColdArchive: &omniav1alpha1.ColdArchiveConfig{Enabled: true},
+		},
+	}
+
+	e := NewEngine(warm, cold, nil, retention, testConfig(), nil, testLogger())
+	result, err := e.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.ColdPurged {
+		t.Error("expected ColdPurged == false when no cutoff configured")
+	}
+}
+
+func TestRun_WarmStoreQueryError(t *testing.T) {
+	warm := &mockWarmStoreWithQueryErr{
+		queryErr: errors.New("query failed"),
+	}
+	cold := &mockColdArchive{}
+
+	e := NewEngine(warm, cold, nil, testRetentionConfig(), testConfig(), nil, testLogger())
+	_, err := e.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error from warm store query failure")
+	}
+}
+
+func TestLoadRetentionConfig_FileNotFound(t *testing.T) {
+	_, err := LoadRetentionConfig("/nonexistent/path/retention.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestLoadRetentionConfig_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(path, []byte("{{invalid yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadRetentionConfig(path)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+// mockWarmStoreWithQueryErr always returns an error from GetSessionsOlderThan.
+type mockWarmStoreWithQueryErr struct {
+	mockWarmStore
+	queryErr error
+}
+
+func (m *mockWarmStoreWithQueryErr) GetSessionsOlderThan(
+	_ context.Context, _ time.Time, _ int,
+) ([]*session.Session, error) {
+	return nil, m.queryErr
+}
+
+// newTestMetrics creates compaction metrics for testing (unexported helper
+// delegates to the metrics package test helper).
+func newTestMetrics() *metrics.CompactionMetrics {
+	return metrics.NewCompactionMetrics()
 }
