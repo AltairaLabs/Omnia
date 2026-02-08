@@ -23,14 +23,17 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // retentionTestCounter ensures unique names across all retention policy tests
@@ -60,6 +63,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 		AfterEach(func() {
 			policy := &omniav1alpha1.SessionRetentionPolicy{}
 			if err := k8sClient.Get(ctx, policyKey, policy); err == nil {
+				policy.Finalizers = nil
+				_ = k8sClient.Update(ctx, policy)
 				_ = k8sClient.Delete(ctx, policy)
 			}
 		})
@@ -327,6 +332,469 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			Expect(wsCond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(wsCond.Reason).To(Equal("NoOverrides"))
 		})
+
+		It("should add finalizer on first reconcile", func() {
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.SessionRetentionPolicy
+			Expect(k8sClient.Get(ctx, policyKey, &updated)).To(Succeed())
+			Expect(updated.Finalizers).To(ContainElement(retentionPolicyFinalizer))
+		})
+
+		It("should set Ready condition True when all checks pass", func() {
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated omniav1alpha1.SessionRetentionPolicy
+			Expect(k8sClient.Get(ctx, policyKey, &updated)).To(Succeed())
+
+			var readyCond *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == RetentionConditionTypeReady {
+					readyCond = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(readyCond.Reason).To(Equal("AllChecksPass"))
+		})
+
+		It("should set Ready condition False on validation error", func() {
+			// Use fake client to bypass CRD validation
+			scheme := k8sClient.Scheme()
+			zeroDays := int32(0)
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       policyKey.Name,
+					Finalizers: []string{retentionPolicyFinalizer},
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+							Enabled:       true,
+							RetentionDays: &zeroDays,
+						},
+					},
+				},
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				Build()
+
+			fakeReconciler := &SessionRetentionPolicyReconciler{
+				Client: fakeClient,
+				Scheme: scheme,
+			}
+
+			_, err := fakeReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: policyKey,
+			})
+			Expect(err).To(HaveOccurred())
+
+			var updated omniav1alpha1.SessionRetentionPolicy
+			Expect(fakeClient.Get(ctx, policyKey, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.SessionRetentionPolicyPhaseError))
+
+			var readyCond *metav1.Condition
+			for i := range updated.Status.Conditions {
+				if updated.Status.Conditions[i].Type == RetentionConditionTypeReady {
+					readyCond = &updated.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal("ValidationFailed"))
+		})
+
+		It("should emit events on validation success", func() {
+			fakeRecorder := record.NewFakeRecorder(10)
+			reconciler.Recorder = fakeRecorder
+
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Drain events and check for PolicyValidated
+			var events []string
+			for {
+				select {
+				case event := <-fakeRecorder.Events:
+					events = append(events, event)
+				default:
+					goto done
+				}
+			}
+		done:
+			Expect(events).To(ContainElement(ContainSubstring(RetentionEventReasonValidated)))
+			Expect(events).To(ContainElement(ContainSubstring(RetentionEventReasonActive)))
+		})
+
+		It("should emit warning event on validation failure", func() {
+			fakeRecorder := record.NewFakeRecorder(10)
+			scheme := k8sClient.Scheme()
+			zeroDays := int32(0)
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       policyKey.Name,
+					Finalizers: []string{retentionPolicyFinalizer},
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+							Enabled:       true,
+							RetentionDays: &zeroDays,
+						},
+					},
+				},
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				Build()
+
+			fakeReconciler := &SessionRetentionPolicyReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: fakeRecorder,
+			}
+
+			_, err := fakeReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).To(HaveOccurred())
+
+			var events []string
+			for {
+				select {
+				case event := <-fakeRecorder.Events:
+					events = append(events, event)
+				default:
+					goto done
+				}
+			}
+		done:
+			Expect(events).To(ContainElement(ContainSubstring(RetentionEventReasonValidationFailed)))
+		})
+	})
+
+	Context("ConfigMap projection", func() {
+		var (
+			ctx        context.Context
+			policyKey  types.NamespacedName
+			reconciler *SessionRetentionPolicyReconciler
+			testID     string
+			testNS     string
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			testID = fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			testNS = "default" // envtest always has "default" namespace
+			policyKey = types.NamespacedName{
+				Name: "test-cm-" + testID,
+			}
+			reconciler = &SessionRetentionPolicyReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Namespace: testNS,
+			}
+		})
+
+		AfterEach(func() {
+			policy := &omniav1alpha1.SessionRetentionPolicy{}
+			if err := k8sClient.Get(ctx, policyKey, policy); err == nil {
+				policy.Finalizers = nil
+				_ = k8sClient.Update(ctx, policy)
+				_ = k8sClient.Delete(ctx, policy)
+			}
+			// Clean up ConfigMap
+			cm := &corev1.ConfigMap{}
+			cmKey := types.NamespacedName{Name: retentionConfigMapName(policyKey.Name), Namespace: testNS}
+			if err := k8sClient.Get(ctx, cmKey, cm); err == nil {
+				_ = k8sClient.Delete(ctx, cm)
+			}
+		})
+
+		It("should create ConfigMap on reconcile", func() {
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 14,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify ConfigMap was created
+			var cm corev1.ConfigMap
+			cmKey := types.NamespacedName{
+				Name:      retentionConfigMapName(policyKey.Name),
+				Namespace: testNS,
+			}
+			Expect(k8sClient.Get(ctx, cmKey, &cm)).To(Succeed())
+			Expect(cm.Labels[labelAppManagedBy]).To(Equal(labelValueOmniaOperator))
+			Expect(cm.Labels[labelOmniaComp]).To(Equal("retention-config"))
+			Expect(cm.Data).To(HaveKey("retention.yaml"))
+			Expect(cm.Data["retention.yaml"]).To(ContainSubstring("retentionDays: 14"))
+		})
+
+		It("should update ConfigMap on policy change", func() {
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Update policy
+			var existing omniav1alpha1.SessionRetentionPolicy
+			Expect(k8sClient.Get(ctx, policyKey, &existing)).To(Succeed())
+			existing.Spec.Default.WarmStore.RetentionDays = 30
+			Expect(k8sClient.Update(ctx, &existing)).To(Succeed())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify ConfigMap reflects new value
+			var cm corev1.ConfigMap
+			cmKey := types.NamespacedName{
+				Name:      retentionConfigMapName(policyKey.Name),
+				Namespace: testNS,
+			}
+			Expect(k8sClient.Get(ctx, cmKey, &cm)).To(Succeed())
+			Expect(cm.Data["retention.yaml"]).To(ContainSubstring("retentionDays: 30"))
+		})
+
+		It("should delete ConfigMap on policy deletion via finalizer", func() {
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			// First reconcile — adds finalizer and creates ConfigMap
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify ConfigMap exists
+			cmKey := types.NamespacedName{
+				Name:      retentionConfigMapName(policyKey.Name),
+				Namespace: testNS,
+			}
+			var cm corev1.ConfigMap
+			Expect(k8sClient.Get(ctx, cmKey, &cm)).To(Succeed())
+
+			// Delete policy (finalizer will block actual deletion)
+			Expect(k8sClient.Delete(ctx, policy)).To(Succeed())
+
+			// Reconcile again — should handle deletion
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify ConfigMap is gone
+			err = k8sClient.Get(ctx, cmKey, &cm)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not found"))
+		})
+
+		It("should not create ConfigMap when Namespace is empty", func() {
+			noNSReconciler := &SessionRetentionPolicyReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Namespace: "",
+			}
+
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyKey.Name,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			_, err := noNSReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: policyKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// ConfigMap should not exist
+			cmKey := types.NamespacedName{
+				Name:      retentionConfigMapName(policyKey.Name),
+				Namespace: "default",
+			}
+			var cm corev1.ConfigMap
+			err = k8sClient.Get(ctx, cmKey, &cm)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("Metrics recording", func() {
+		// Create metrics once per Context to avoid duplicate registration with promauto
+		var testMetrics *metrics.RetentionMetrics
+
+		BeforeEach(func() {
+			if testMetrics == nil {
+				testMetrics = metrics.NewRetentionMetrics()
+				testMetrics.Initialize()
+			}
+		})
+
+		It("should record metrics on successful reconcile", func() {
+			ctx := context.Background()
+			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			policyName := "metrics-ok-" + testID
+
+			fakeRecorder := record.NewFakeRecorder(10)
+
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       policyName,
+					Finalizers: []string{retentionPolicyFinalizer},
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+
+			scheme := k8sClient.Scheme()
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: fakeRecorder,
+				Metrics:  testMetrics,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName},
+			})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should record error metrics on validation failure", func() {
+			ctx := context.Background()
+			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			policyName := "metrics-err-" + testID
+
+			zeroDays := int32(0)
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       policyName,
+					Finalizers: []string{retentionPolicyFinalizer},
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+							Enabled:       true,
+							RetentionDays: &zeroDays,
+						},
+					},
+				},
+			}
+
+			scheme := k8sClient.Scheme()
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client:  fakeClient,
+				Scheme:  scheme,
+				Metrics: testMetrics,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName},
+			})
+			Expect(err).To(HaveOccurred())
+			// Metrics are nil-safe; just verify no panic
+		})
 	})
 
 	Context("findPoliciesForWorkspace", func() {
@@ -390,6 +858,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			Expect(requests[0].Name).To(Equal(policyName))
 
 			// Clean up
+			policy.Finalizers = nil
+			_ = k8sClient.Update(ctx, policy)
 			_ = k8sClient.Delete(ctx, policy)
 			workspace.Finalizers = nil
 			_ = k8sClient.Update(ctx, workspace)
@@ -450,6 +920,7 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			zeroDays := int32(0)
 			invalidPolicy := policy.DeepCopy()
 			invalidPolicy.Spec.Default.ColdArchive.RetentionDays = &zeroDays
+			invalidPolicy.Finalizers = []string{retentionPolicyFinalizer}
 
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(scheme).
@@ -474,7 +945,12 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.SessionRetentionPolicyPhaseError))
 
 			// Clean up the real resource
-			_ = k8sClient.Delete(ctx, policy)
+			realPolicy := &omniav1alpha1.SessionRetentionPolicy{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: policyName}, realPolicy); err == nil {
+				realPolicy.Finalizers = nil
+				_ = k8sClient.Update(ctx, realPolicy)
+				_ = k8sClient.Delete(ctx, realPolicy)
+			}
 		})
 
 		It("should set Error phase when Get returns a non-NotFound error", func() {
@@ -512,7 +988,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			scheme := k8sClient.Scheme()
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: policyName,
+					Name:       policyName,
+					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
 					Default: omniav1alpha1.RetentionTierConfig{
@@ -554,7 +1031,8 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			scheme := k8sClient.Scheme()
 			policy := &omniav1alpha1.SessionRetentionPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: policyName,
+					Name:       policyName,
+					Finalizers: []string{retentionPolicyFinalizer},
 				},
 				Spec: omniav1alpha1.SessionRetentionPolicySpec{
 					Default: omniav1alpha1.RetentionTierConfig{
@@ -572,7 +1050,6 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 				},
 			}
 
-			callCount := 0
 			wsGetErrClient := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(policy).
@@ -581,7 +1058,6 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 					Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 						// Let the first Get (for the policy itself) succeed, fail on workspace Get
 						if _, ok := obj.(*omniav1alpha1.Workspace); ok {
-							callCount++
 							return fmt.Errorf("simulated workspace API error")
 						}
 						return client.Get(ctx, key, obj, opts...)

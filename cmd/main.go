@@ -37,6 +37,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
+	"github.com/altairalabs/omnia/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -214,10 +215,15 @@ func main() {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)
 	}
+	retentionMetrics := metrics.NewRetentionMetrics()
+	retentionMetrics.Initialize()
+
 	if err := (&controller.SessionRetentionPolicyReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("sessionretentionpolicy-controller"),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Recorder:  mgr.GetEventRecorderFor("sessionretentionpolicy-controller"),
+		Namespace: os.Getenv("POD_NAMESPACE"),
+		Metrics:   retentionMetrics,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "SessionRetentionPolicy")
 		os.Exit(1)
