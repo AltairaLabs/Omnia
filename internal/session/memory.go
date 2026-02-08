@@ -313,32 +313,46 @@ func (m *MemoryStore) Count() int {
 
 // copySession creates a deep copy of a session.
 func (m *MemoryStore) copySession(s *Session) *Session {
-	copy := &Session{
-		ID:        s.ID,
-		AgentName: s.AgentName,
-		Namespace: s.Namespace,
-		CreatedAt: s.CreatedAt,
-		UpdatedAt: s.UpdatedAt,
-		ExpiresAt: s.ExpiresAt,
-		Messages:  make([]Message, len(s.Messages)),
-		State:     make(map[string]string),
+	cp := &Session{
+		ID:                 s.ID,
+		AgentName:          s.AgentName,
+		Namespace:          s.Namespace,
+		CreatedAt:          s.CreatedAt,
+		UpdatedAt:          s.UpdatedAt,
+		ExpiresAt:          s.ExpiresAt,
+		Messages:           make([]Message, len(s.Messages)),
+		State:              make(map[string]string),
+		WorkspaceName:      s.WorkspaceName,
+		Status:             s.Status,
+		EndedAt:            s.EndedAt,
+		MessageCount:       s.MessageCount,
+		ToolCallCount:      s.ToolCallCount,
+		TotalInputTokens:   s.TotalInputTokens,
+		TotalOutputTokens:  s.TotalOutputTokens,
+		EstimatedCostUSD:   s.EstimatedCostUSD,
+		LastMessagePreview: s.LastMessagePreview,
+	}
+
+	if len(s.Tags) > 0 {
+		cp.Tags = make([]string, len(s.Tags))
+		copy(cp.Tags, s.Tags)
 	}
 
 	for i, msg := range s.Messages {
-		copy.Messages[i] = msg
+		cp.Messages[i] = msg
 		if msg.Metadata != nil {
-			copy.Messages[i].Metadata = make(map[string]string)
+			cp.Messages[i].Metadata = make(map[string]string)
 			for k, v := range msg.Metadata {
-				copy.Messages[i].Metadata[k] = v
+				cp.Messages[i].Metadata[k] = v
 			}
 		}
 	}
 
 	for k, v := range s.State {
-		copy.State[k] = v
+		cp.State[k] = v
 	}
 
-	return copy
+	return cp
 }
 
 // Ensure MemoryStore implements Store interface.

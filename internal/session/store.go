@@ -45,6 +45,20 @@ const (
 	RoleSystem MessageRole = "system"
 )
 
+// SessionStatus represents the lifecycle state of a session.
+type SessionStatus string
+
+const (
+	// SessionStatusActive indicates the session is currently in use.
+	SessionStatusActive SessionStatus = "active"
+	// SessionStatusCompleted indicates the session ended normally.
+	SessionStatusCompleted SessionStatus = "completed"
+	// SessionStatusError indicates the session ended due to an error.
+	SessionStatusError SessionStatus = "error"
+	// SessionStatusExpired indicates the session was expired by TTL.
+	SessionStatusExpired SessionStatus = "expired"
+)
+
 // Message represents a single message in a conversation.
 type Message struct {
 	// ID is the unique identifier for this message.
@@ -57,6 +71,14 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"`
 	// Metadata contains optional additional data.
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// InputTokens is the number of input tokens consumed by this message.
+	InputTokens int32 `json:"inputTokens,omitempty"`
+	// OutputTokens is the number of output tokens produced by this message.
+	OutputTokens int32 `json:"outputTokens,omitempty"`
+	// ToolCallID links this message to a specific tool call.
+	ToolCallID string `json:"toolCallId,omitempty"`
+	// SequenceNum is the ordering position within the session.
+	SequenceNum int32 `json:"sequenceNum,omitempty"`
 }
 
 // Session represents an agent conversation session.
@@ -77,6 +99,26 @@ type Session struct {
 	Messages []Message `json:"messages"`
 	// State contains arbitrary session state.
 	State map[string]string `json:"state,omitempty"`
+	// WorkspaceName is the workspace this session belongs to.
+	WorkspaceName string `json:"workspaceName,omitempty"`
+	// Status is the lifecycle state of the session.
+	Status SessionStatus `json:"status,omitempty"`
+	// EndedAt is when the session ended (zero means still active).
+	EndedAt time.Time `json:"endedAt,omitempty"`
+	// MessageCount is the total number of messages in the session.
+	MessageCount int32 `json:"messageCount,omitempty"`
+	// ToolCallCount is the total number of tool calls in the session.
+	ToolCallCount int32 `json:"toolCallCount,omitempty"`
+	// TotalInputTokens is the cumulative input token count.
+	TotalInputTokens int64 `json:"totalInputTokens,omitempty"`
+	// TotalOutputTokens is the cumulative output token count.
+	TotalOutputTokens int64 `json:"totalOutputTokens,omitempty"`
+	// EstimatedCostUSD is the estimated cost of the session in USD.
+	EstimatedCostUSD float64 `json:"estimatedCostUSD,omitempty"`
+	// Tags contains arbitrary labels for categorization and filtering.
+	Tags []string `json:"tags,omitempty"`
+	// LastMessagePreview is a truncated preview of the last message.
+	LastMessagePreview string `json:"lastMessagePreview,omitempty"`
 }
 
 // IsExpired returns true if the session has expired.
