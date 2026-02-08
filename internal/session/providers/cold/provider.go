@@ -329,32 +329,43 @@ func (p *Provider) scanFiles(ctx context.Context, fileSet map[string]struct{}, f
 			break
 		}
 
-		data, err := p.store.Get(ctx, key)
-		if err != nil {
-			return nil, fmt.Errorf("get parquet file: %w", err)
-		}
-
-		rows, err := readParquetBytes(data)
+		matched, err := p.scanOneFile(ctx, key, filters, maxResults-len(results))
 		if err != nil {
 			return nil, err
 		}
-
-		for _, r := range rows {
-			if len(results) >= maxResults {
-				break
-			}
-			if !matchesFilters(r, filters) {
-				continue
-			}
-			s, err := rowToSession(r)
-			if err != nil {
-				return nil, err
-			}
-			results = append(results, s)
-		}
+		results = append(results, matched...)
 	}
 
 	return results, nil
+}
+
+// scanOneFile reads a single parquet file and returns up to limit matching sessions.
+func (p *Provider) scanOneFile(ctx context.Context, key string, filters queryFilters, limit int) ([]*session.Session, error) {
+	data, err := p.store.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("get parquet file: %w", err)
+	}
+
+	rows, err := readParquetBytes(data)
+	if err != nil {
+		return nil, err
+	}
+
+	matched := make([]*session.Session, 0, min(len(rows), limit))
+	for _, r := range rows {
+		if len(matched) >= limit {
+			break
+		}
+		if !matchesFilters(r, filters) {
+			continue
+		}
+		s, err := rowToSession(r)
+		if err != nil {
+			return nil, err
+		}
+		matched = append(matched, s)
+	}
+	return matched, nil
 }
 
 // DeleteOlderThan removes all archived data older than the cutoff date.
