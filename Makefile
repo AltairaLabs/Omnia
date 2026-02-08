@@ -2,6 +2,8 @@
 IMG ?= controller:latest
 # Runtime image for PromptKit runtime container
 RUNTIME_IMG ?= omnia-runtime:latest
+# Compaction CronJob image
+COMPACTION_IMG ?= omnia-compaction:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -356,6 +358,10 @@ build: manifests generate fmt vet ## Build manager binary.
 build-runtime: fmt vet ## Build runtime binary.
 	go build -o bin/runtime ./cmd/runtime
 
+.PHONY: build-compaction
+build-compaction: fmt vet ## Build compaction CronJob binary.
+	go build -o bin/compaction ./cmd/compaction
+
 ##@ Enterprise Edition
 
 .PHONY: build-arena-controller
@@ -382,8 +388,12 @@ docker-build-arena-controller: ## Build docker image for Arena controller (Enter
 docker-build-arena-worker: ## Build docker image for Arena worker (Enterprise).
 	$(CONTAINER_TOOL) build -t arena-worker:latest -f ee/Dockerfile.arena-worker .
 
+.PHONY: docker-build-compaction
+docker-build-compaction: ## Build docker image for compaction CronJob.
+	$(CONTAINER_TOOL) build -t ${COMPACTION_IMG} -f Dockerfile.compaction .
+
 .PHONY: build-all
-build-all: build build-runtime build-arena-controller build-arena-worker ## Build all binaries (core + enterprise).
+build-all: build build-runtime build-compaction build-arena-controller build-arena-worker ## Build all binaries (core + enterprise).
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

@@ -116,3 +116,11 @@ Dashboard service account name
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Compaction image
+*/}}
+{{- define "omnia.compaction.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.sessionRetention.compaction.image.tag }}
+{{- printf "%s:%s" .Values.sessionRetention.compaction.image.repository $tag }}
+{{- end }}

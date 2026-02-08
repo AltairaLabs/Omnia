@@ -1,0 +1,101 @@
+{{- if and .Values.sessionRetention.compaction.enabled .Values.sessionRetention.defaultPolicy.coldArchive.enabled -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "omnia.fullname" . }}-compaction
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compaction
+spec:
+  schedule: {{ .Values.sessionRetention.compaction.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.sessionRetention.compaction.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.sessionRetention.compaction.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "omnia.labels" . | nindent 8 }}
+        app.kubernetes.io/component: compaction
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      backoffLimit: {{ .Values.sessionRetention.compaction.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.sessionRetention.compaction.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "omnia.labels" . | nindent 12 }}
+            app.kubernetes.io/component: compaction
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9090"
+            prometheus.io/path: "/metrics"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "omnia.fullname" . }}-compaction
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+          containers:
+            - name: compaction
+              image: {{ include "omnia.compaction.image" . }}
+              imagePullPolicy: {{ .Values.sessionRetention.compaction.image.pullPolicy }}
+              args:
+                - --retention-config=/etc/omnia/retention/retention.yaml
+                - --batch-size={{ .Values.sessionRetention.compaction.batchSize }}
+                - --max-retries={{ .Values.sessionRetention.compaction.maxRetries }}
+                - --compression={{ .Values.sessionRetention.compaction.compression }}
+                {{- if .Values.sessionRetention.compaction.dryRun }}
+                - --dry-run
+                {{- end }}
+                - --metrics-addr=:9090
+              env:
+                - name: POSTGRES_CONN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.sessionRetention.compaction.postgres.secretName }}
+                      key: {{ .Values.sessionRetention.compaction.postgres.secretKey }}
+                - name: COLD_BACKEND
+                  value: {{ .Values.sessionRetention.compaction.coldArchive.backend | quote }}
+                - name: COLD_BUCKET
+                  value: {{ .Values.sessionRetention.compaction.coldArchive.bucket | quote }}
+                {{- if .Values.sessionRetention.compaction.coldArchive.region }}
+                - name: COLD_REGION
+                  value: {{ .Values.sessionRetention.compaction.coldArchive.region | quote }}
+                {{- end }}
+                {{- if .Values.sessionRetention.compaction.coldArchive.endpoint }}
+                - name: COLD_ENDPOINT
+                  value: {{ .Values.sessionRetention.compaction.coldArchive.endpoint | quote }}
+                {{- end }}
+                {{- if .Values.sessionRetention.compaction.redis.addrs }}
+                - name: REDIS_ADDRS
+                  value: {{ .Values.sessionRetention.compaction.redis.addrs | quote }}
+                {{- end }}
+                {{- with .Values.sessionRetention.compaction.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              ports:
+                - name: metrics
+                  containerPort: 9090
+                  protocol: TCP
+              resources:
+                {{- toYaml .Values.sessionRetention.compaction.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: retention-config
+                  mountPath: /etc/omnia/retention
+                  readOnly: true
+          volumes:
+            - name: retention-config
+              configMap:
+                name: retention-policy-{{ .Values.sessionRetention.compaction.policyName }}
+{{- end }}
