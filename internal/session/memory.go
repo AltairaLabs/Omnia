@@ -288,6 +288,43 @@ func (m *MemoryStore) Close() error {
 	return nil
 }
 
+// UpdateSessionStats atomically increments session-level counters.
+func (m *MemoryStore) UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, exists := m.sessions[sessionID]
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	if session.IsExpired() {
+		return ErrSessionExpired
+	}
+
+	session.TotalInputTokens += int64(update.AddInputTokens)
+	session.TotalOutputTokens += int64(update.AddOutputTokens)
+	session.EstimatedCostUSD += update.AddCostUSD
+	session.ToolCallCount += update.AddToolCalls
+	session.MessageCount += update.AddMessages
+
+	if update.SetStatus != "" {
+		session.Status = update.SetStatus
+	}
+
+	session.UpdatedAt = time.Now()
+
+	return nil
+}
+
 // CleanupExpired removes all expired sessions.
 // This method can be called periodically to free memory.
 func (m *MemoryStore) CleanupExpired() int {

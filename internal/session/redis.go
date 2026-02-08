@@ -437,6 +437,58 @@ func (r *RedisStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.
 	return nil
 }
 
+// UpdateSessionStats atomically increments session-level counters.
+func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error {
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
+	data, err := r.client.Get(ctx, r.sessionKey(sessionID)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return ErrSessionNotFound
+		}
+		return fmt.Errorf(errGetSession, err)
+	}
+
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return fmt.Errorf(errUnmarshalSession, err)
+	}
+
+	if session.IsExpired() {
+		return ErrSessionExpired
+	}
+
+	session.TotalInputTokens += int64(update.AddInputTokens)
+	session.TotalOutputTokens += int64(update.AddOutputTokens)
+	session.EstimatedCostUSD += update.AddCostUSD
+	session.ToolCallCount += update.AddToolCalls
+	session.MessageCount += update.AddMessages
+
+	if update.SetStatus != "" {
+		session.Status = update.SetStatus
+	}
+
+	session.UpdatedAt = time.Now()
+
+	updatedData, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf(errMarshalSession, err)
+	}
+
+	// Preserve TTL if set
+	ttl, err := r.client.TTL(ctx, r.sessionKey(sessionID)).Result()
+	if err != nil {
+		return fmt.Errorf("failed to get TTL: %w", err)
+	}
+
+	if ttl > 0 {
+		return r.client.Set(ctx, r.sessionKey(sessionID), updatedData, ttl).Err()
+	}
+	return r.client.Set(ctx, r.sessionKey(sessionID), updatedData, 0).Err()
+}
+
 // Close releases resources held by the store.
 func (r *RedisStore) Close() error {
 	return r.client.Close()

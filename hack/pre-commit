@@ -483,6 +483,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip Redis session store (requires real Redis, tested in integration)
+        if [[ "$file" == "internal/session/redis.go" ]]; then
+            continue
+        fi
+
         # Skip Postgres session store (requires real Postgres via testcontainers, tested in integration)
         if [[ "$file" == "internal/session/postgres/migrator.go" ]] || [[ "$file" == internal/session/providers/postgres/*.go ]]; then
             continue
