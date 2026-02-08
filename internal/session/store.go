@@ -141,6 +141,17 @@ type CreateSessionOptions struct {
 	InitialState map[string]string
 }
 
+// SessionStatsUpdate contains incremental updates to session-level counters.
+// All Add* fields are added to the current values; SetStatus is applied only if non-empty.
+type SessionStatsUpdate struct {
+	AddInputTokens  int32
+	AddOutputTokens int32
+	AddCostUSD      float64
+	AddToolCalls    int32
+	AddMessages     int32
+	SetStatus       SessionStatus // empty means no change
+}
+
 // Store defines the interface for session storage.
 type Store interface {
 	// CreateSession creates a new session and returns its ID.
@@ -175,6 +186,11 @@ type Store interface {
 	// RefreshTTL extends the session's expiration time.
 	// Returns ErrSessionNotFound if the session does not exist.
 	RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error
+
+	// UpdateSessionStats atomically increments session-level counters.
+	// Returns ErrSessionNotFound if the session does not exist.
+	// Returns ErrSessionExpired if the session has expired.
+	UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error
 
 	// Close releases any resources held by the store.
 	Close() error

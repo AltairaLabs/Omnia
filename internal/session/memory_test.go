@@ -851,6 +851,161 @@ func TestMemoryStoreRefreshTTLExpiredSession(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreUpdateSessionStats(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, err := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		AddInputTokens:  100,
+		AddOutputTokens: 50,
+		AddCostUSD:      0.005,
+		AddToolCalls:    2,
+		AddMessages:     3,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats failed: %v", err)
+	}
+
+	updated, err := store.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	if updated.TotalInputTokens != 100 {
+		t.Errorf("TotalInputTokens = %d, want 100", updated.TotalInputTokens)
+	}
+	if updated.TotalOutputTokens != 50 {
+		t.Errorf("TotalOutputTokens = %d, want 50", updated.TotalOutputTokens)
+	}
+	if updated.EstimatedCostUSD != 0.005 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.005", updated.EstimatedCostUSD)
+	}
+	if updated.ToolCallCount != 2 {
+		t.Errorf("ToolCallCount = %d, want 2", updated.ToolCallCount)
+	}
+	if updated.MessageCount != 3 {
+		t.Errorf("MessageCount = %d, want 3", updated.MessageCount)
+	}
+
+	// Second update should accumulate
+	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		AddInputTokens:  200,
+		AddOutputTokens: 100,
+		AddCostUSD:      0.01,
+		AddToolCalls:    1,
+		AddMessages:     2,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats (2nd) failed: %v", err)
+	}
+
+	updated, _ = store.GetSession(ctx, sess.ID)
+	if updated.TotalInputTokens != 300 {
+		t.Errorf("TotalInputTokens = %d, want 300", updated.TotalInputTokens)
+	}
+	if updated.TotalOutputTokens != 150 {
+		t.Errorf("TotalOutputTokens = %d, want 150", updated.TotalOutputTokens)
+	}
+	if updated.ToolCallCount != 3 {
+		t.Errorf("ToolCallCount = %d, want 3", updated.ToolCallCount)
+	}
+	if updated.MessageCount != 5 {
+		t.Errorf("MessageCount = %d, want 5", updated.MessageCount)
+	}
+}
+
+func TestMemoryStoreUpdateSessionStats_SetStatus(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	err := store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		SetStatus: SessionStatusError,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats failed: %v", err)
+	}
+
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.Status != SessionStatusError {
+		t.Errorf("Status = %q, want %q", updated.Status, SessionStatusError)
+	}
+
+	// Empty SetStatus should not change the status
+	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		AddMessages: 1,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats failed: %v", err)
+	}
+
+	updated, _ = store.GetSession(ctx, sess.ID)
+	if updated.Status != SessionStatusError {
+		t.Errorf("Status should remain %q, got %q", SessionStatusError, updated.Status)
+	}
+}
+
+func TestMemoryStoreUpdateSessionStats_NotFound(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.UpdateSessionStats(ctx, "non-existent", SessionStatsUpdate{
+		AddMessages: 1,
+	})
+	if err != ErrSessionNotFound {
+		t.Errorf("error = %v, want %v", err, ErrSessionNotFound)
+	}
+}
+
+func TestMemoryStoreUpdateSessionStats_InvalidID(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	err := store.UpdateSessionStats(ctx, "", SessionStatsUpdate{
+		AddMessages: 1,
+	})
+	if err != ErrInvalidSessionID {
+		t.Errorf("error = %v, want %v", err, ErrInvalidSessionID)
+	}
+}
+
+func TestMemoryStoreUpdateSessionStats_Expired(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+		TTL:       1 * time.Millisecond,
+	})
+
+	time.Sleep(10 * time.Millisecond)
+
+	err := store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		AddMessages: 1,
+	})
+	if err != ErrSessionExpired {
+		t.Errorf("error = %v, want %v", err, ErrSessionExpired)
+	}
+}
+
 func TestMemoryStoreCopySessionWithMessages(t *testing.T) {
 	store := NewMemoryStore()
 	defer func() { _ = store.Close() }()

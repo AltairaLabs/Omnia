@@ -104,6 +104,16 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		return writer.WriteChunk(msg.Chunk.Content)
 
 	case *runtimev1.ServerMessage_Done:
+		// Report usage if available
+		if msg.Done.Usage != nil {
+			if reporter, ok := writer.(facade.UsageReporter); ok {
+				reporter.ReportUsage(&facade.UsageInfo{
+					InputTokens:  msg.Done.Usage.InputTokens,
+					OutputTokens: msg.Done.Usage.OutputTokens,
+					CostUSD:      float64(msg.Done.Usage.CostUsd),
+				})
+			}
+		}
 		// If response has multimodal parts, forward them; otherwise use text
 		if len(msg.Done.Parts) > 0 {
 			return writer.WriteDoneWithParts(fromGRPCContentParts(msg.Done.Parts))

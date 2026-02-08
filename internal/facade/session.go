@@ -75,15 +75,18 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		log.Error(err, "failed to store user message")
 	}
 
+	// Wrap writer with recording decorator to persist assistant responses
+	recWriter := newRecordingWriter(writer, s.sessionStore, sessionID, log)
+
 	// Handle message
 	if s.handler != nil {
-		if err := s.handler.HandleMessage(ctx, sessionID, msg, writer); err != nil {
+		if err := s.handler.HandleMessage(ctx, sessionID, msg, recWriter); err != nil {
 			s.sendError(c, sessionID, ErrorCodeInternalError, err.Error())
 			return err
 		}
 	} else {
 		// Default echo behavior if no handler
-		if err := writer.WriteDone("Handler not configured"); err != nil {
+		if err := recWriter.WriteDone("Handler not configured"); err != nil {
 			return err
 		}
 	}
