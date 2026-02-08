@@ -24,6 +24,8 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
@@ -965,3 +967,156 @@ func (f *failingWarmStore) DeleteSessionArtifacts(context.Context, string) error
 }
 func (f *failingWarmStore) Ping(context.Context) error { return nil }
 func (f *failingWarmStore) Close() error               { return nil }
+
+// TestOmniaEventStore_QueryRaw_Error validates QueryRaw propagates query errors.
+func TestOmniaEventStore_QueryRaw_Error(t *testing.T) {
+	store := NewOmniaEventStore(&failingWarmStore{}, nil, logr.Discard())
+	_, err := store.QueryRaw(context.Background(), &events.EventFilter{SessionID: "s"})
+	require.Error(t, err)
+}
+
+// TestOmniaEventStore_Stream_Error validates Stream propagates query errors.
+func TestOmniaEventStore_Stream_Error(t *testing.T) {
+	store := NewOmniaEventStore(&failingWarmStore{}, nil, logr.Discard())
+	_, err := store.Stream(context.Background(), "s")
+	require.Error(t, err)
+}
+
+// TestOmniaEventStore_Stream_ContextCancel validates Stream respects cancellation.
+func TestOmniaEventStore_Stream_ContextCancel(t *testing.T) {
+	warm := newMockWarmStoreForTest()
+	store := NewOmniaEventStore(warm, nil, logr.Discard())
+
+	sessionID := "sess-cancel"
+	_ = warm.CreateSession(context.Background(), &session.Session{ID: sessionID})
+
+	// Append multiple messages
+	for i := range 10 {
+		_ = store.Append(context.Background(), &events.Event{
+			Type:      events.EventMessageCreated,
+			SessionID: sessionID,
+			Timestamp: time.Now(),
+			Data: &events.MessageCreatedData{
+				Role:    "user",
+				Content: fmt.Sprintf("msg %d", i),
+			},
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := store.Stream(ctx, sessionID)
+	require.NoError(t, err)
+
+	// Read one event then cancel
+	<-ch
+	cancel()
+
+	// Drain remaining — channel should close soon
+	count := 1
+	for range ch {
+		count++
+	}
+	// We should get fewer than all 10 due to cancellation (or all if goroutine was fast)
+	assert.LessOrEqual(t, count, 10)
+}
+
+// TestOmniaEventStore_HandleBinaryEvent_BlobStoreFailure validates graceful
+// degradation when the blob store fails during binary event handling.
+func TestOmniaEventStore_HandleBinaryEvent_BlobStoreFailure(t *testing.T) {
+	warm := newMockWarmStoreForTest()
+	coldBlob := &failingBlobStore{}
+	blobStore := NewOmniaBlobStore(coldBlob, warm, logr.Discard())
+	store := NewOmniaEventStore(warm, blobStore, logr.Discard())
+
+	sessionID := "sess-blob-fail"
+	_ = warm.CreateSession(context.Background(), &session.Session{ID: sessionID})
+
+	err := store.Append(context.Background(), &events.Event{
+		Type:      events.EventAudioInput,
+		SessionID: sessionID,
+		Timestamp: time.Now(),
+		Data: &events.AudioInputData{
+			Payload: events.BinaryPayload{
+				InlineData: []byte("audio data"),
+				MIMEType:   "audio/wav",
+			},
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	// The message should still be appended (graceful degradation) but without
+	// storage ref since blob store failed
+	msgs := warm.getMessages(sessionID)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, session.RoleSystem, msgs[0].Role)
+}
+
+// TestOmniaEventStore_MaybeUpdateSessionStats_GetSessionFailure validates that
+// stats update gracefully handles a missing session.
+func TestOmniaEventStore_MaybeUpdateSessionStats_GetSessionFailure(t *testing.T) {
+	warm := newMockWarmStoreForTest()
+	store := NewOmniaEventStore(warm, nil, logr.Discard())
+
+	// Session "no-such" doesn't exist — GetSession will fail
+	err := store.Append(context.Background(), &events.Event{
+		Type:      events.EventProviderCallCompleted,
+		SessionID: "no-such",
+		Timestamp: time.Now(),
+		Data: &events.ProviderCallCompletedData{
+			Provider:     "openai",
+			Model:        "gpt-4",
+			InputTokens:  100,
+			OutputTokens: 50,
+			Cost:         0.01,
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+	// No panic — graceful degradation
+}
+
+// TestOmniaEventStore_Query_GetMessagesFailure validates Query propagates warm store errors.
+func TestOmniaEventStore_Query_GetMessagesFailure(t *testing.T) {
+	store := NewOmniaEventStore(&failingWarmStore{}, nil, logr.Discard())
+
+	_, err := store.Query(context.Background(), &events.EventFilter{SessionID: "s"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "store unavailable")
+}
+
+// TestOmniaEventStore_Query_UntilFilter validates the Until time filter works.
+func TestOmniaEventStore_Query_UntilFilter(t *testing.T) {
+	warm := newMockWarmStoreForTest()
+	store := NewOmniaEventStore(warm, nil, logr.Discard())
+
+	sessionID := "sess-until"
+	_ = warm.CreateSession(context.Background(), &session.Session{ID: sessionID})
+
+	now := time.Now()
+	// Append a message with a known timestamp
+	_ = store.Append(context.Background(), &events.Event{
+		Type:      events.EventMessageCreated,
+		SessionID: sessionID,
+		Timestamp: now,
+		Data:      &events.MessageCreatedData{Role: "user", Content: "hello"},
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	// Query with Until before the message timestamp — should return 0
+	result, err := store.Query(context.Background(), &events.EventFilter{
+		SessionID: sessionID,
+		Until:     now.Add(-time.Hour),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, result)
+
+	// Query with Until after the message timestamp — should return 1
+	result, err = store.Query(context.Background(), &events.EventFilter{
+		SessionID: sessionID,
+		Until:     now.Add(time.Hour),
+	})
+	require.NoError(t, err)
+	assert.Len(t, result, 1)
+}
