@@ -25,6 +25,9 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -416,6 +419,214 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			workspace.Finalizers = nil
 			_ = k8sClient.Update(ctx, workspace)
 			_ = k8sClient.Delete(ctx, workspace)
+		})
+	})
+
+	Context("Reconcile error paths", func() {
+		It("should set Error phase when validatePolicy fails via reconcile", func() {
+			ctx := context.Background()
+			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			policyName := "val-err-" + testID
+
+			// Create a valid policy first
+			coldDays := int32(365)
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyName,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						ColdArchive: &omniav1alpha1.ColdArchiveConfig{
+							Enabled:       true,
+							RetentionDays: &coldDays,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+
+			// Use a fake client with the object but patch retentionDays to nil to trigger validation error
+			scheme := k8sClient.Scheme()
+			zeroDays := int32(0)
+			invalidPolicy := policy.DeepCopy()
+			invalidPolicy.Spec.Default.ColdArchive.RetentionDays = &zeroDays
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(invalidPolicy).
+				WithStatusSubresource(invalidPolicy).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: fakeClient,
+				Scheme: scheme,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("retentionDays is required"))
+
+			// Verify status was updated to Error
+			var updated omniav1alpha1.SessionRetentionPolicy
+			Expect(fakeClient.Get(ctx, types.NamespacedName{Name: policyName}, &updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.SessionRetentionPolicyPhaseError))
+
+			// Clean up the real resource
+			_ = k8sClient.Delete(ctx, policy)
+		})
+
+		It("should set Error phase when Get returns a non-NotFound error", func() {
+			ctx := context.Background()
+			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			policyName := "get-err-" + testID
+
+			scheme := k8sClient.Scheme()
+			errClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						return fmt.Errorf("simulated API server error")
+					},
+				}).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: errClient,
+				Scheme: scheme,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated API server error"))
+		})
+
+		It("should handle status update failure after successful reconcile", func() {
+			ctx := context.Background()
+			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			policyName := "status-err-" + testID
+
+			scheme := k8sClient.Scheme()
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyName,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+				},
+			}
+
+			statusUpdateClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+						return fmt.Errorf("simulated status update error")
+					},
+				}).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: statusUpdateClient,
+				Scheme: scheme,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated status update error"))
+		})
+
+		It("should handle workspace Get returning non-NotFound error in resolveWorkspaces", func() {
+			ctx := context.Background()
+			testID := fmt.Sprintf("%d", atomic.AddUint64(&retentionTestCounter, 1))
+			policyName := "ws-get-err-" + testID
+
+			scheme := k8sClient.Scheme()
+			policy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: policyName,
+				},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{
+							RetentionDays: 7,
+						},
+					},
+					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
+						"some-workspace": {
+							WarmStore: &omniav1alpha1.WarmStoreConfig{
+								RetentionDays: 30,
+							},
+						},
+					},
+				},
+			}
+
+			callCount := 0
+			wsGetErrClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(policy).
+				WithStatusSubresource(policy).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						// Let the first Get (for the policy itself) succeed, fail on workspace Get
+						if _, ok := obj.(*omniav1alpha1.Workspace); ok {
+							callCount++
+							return fmt.Errorf("simulated workspace API error")
+						}
+						return client.Get(ctx, key, obj, opts...)
+					},
+				}).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: wsGetErrClient,
+				Scheme: scheme,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get workspace"))
+		})
+
+		It("should handle List error in findPoliciesForWorkspace", func() {
+			ctx := context.Background()
+
+			scheme := k8sClient.Scheme()
+			listErrClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						return fmt.Errorf("simulated list error")
+					},
+				}).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: listErrClient,
+				Scheme: scheme,
+			}
+
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-ws",
+				},
+			}
+
+			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
+			Expect(requests).To(BeNil())
 		})
 	})
 
