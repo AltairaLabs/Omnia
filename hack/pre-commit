@@ -488,6 +488,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip cold archive cloud blob store implementations (require external infrastructure: S3/MinIO, GCS, Azure)
+        if [[ "$file" == internal/session/providers/cold/blobstore_s3.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_gcs.go ]] || [[ "$file" == internal/session/providers/cold/blobstore_azure.go ]]; then
+            continue
+        fi
+
         # Calculate ACTUAL statement coverage from raw coverage.out
         # Format: file:startLine.startCol,endLine.endCol numStatements count
         # count > 0 means covered, count = 0 means not covered
