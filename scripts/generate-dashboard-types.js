@@ -23,6 +23,7 @@ const CRDS = [
   { file: 'omnia.altairalabs.ai_promptpacks.yaml', name: 'PromptPack' },
   { file: 'omnia.altairalabs.ai_toolregistries.yaml', name: 'ToolRegistry' },
   { file: 'omnia.altairalabs.ai_providers.yaml', name: 'Provider' },
+  { file: 'omnia.altairalabs.ai_sessionretentionpolicies.yaml', name: 'SessionRetentionPolicy' },
 ];
 
 // Convert OpenAPI type to TypeScript type

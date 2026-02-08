@@ -92,6 +92,7 @@ rules:
       - agentruntimes
       - promptpacks
       - providers
+      - sessionretentionpolicies
       - toolregistries
     verbs:
       - create
@@ -107,6 +108,7 @@ rules:
       - agentruntimes/finalizers
       - promptpacks/finalizers
       - providers/finalizers
+      - sessionretentionpolicies/finalizers
       - toolregistries/finalizers
     verbs:
       - update
@@ -116,6 +118,7 @@ rules:
       - agentruntimes/status
       - promptpacks/status
       - providers/status
+      - sessionretentionpolicies/status
       - toolregistries/status
     verbs:
       - get

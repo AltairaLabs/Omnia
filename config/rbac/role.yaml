@@ -97,6 +97,7 @@ rules:
   - arenasources
   - promptpacks
   - providers
+  - sessionretentionpolicies
   - toolregistries
   - workspaces
   verbs:
@@ -113,6 +114,7 @@ rules:
   - agentruntimes/finalizers
   - promptpacks/finalizers
   - providers/finalizers
+  - sessionretentionpolicies/finalizers
   - toolregistries/finalizers
   - workspaces/finalizers
   verbs:
@@ -123,6 +125,7 @@ rules:
   - agentruntimes/status
   - promptpacks/status
   - providers/status
+  - sessionretentionpolicies/status
   - toolregistries/status
   - workspaces/status
   verbs:
