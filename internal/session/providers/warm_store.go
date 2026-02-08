@@ -75,6 +75,18 @@ type WarmStoreProvider interface {
 	// DeleteSessionsBatch removes multiple sessions in a single operation.
 	DeleteSessionsBatch(ctx context.Context, sessionIDs []string) error
 
+	// SaveArtifact persists a binary artifact reference.
+	SaveArtifact(ctx context.Context, artifact *session.Artifact) error
+
+	// GetArtifacts retrieves all artifacts for a message.
+	GetArtifacts(ctx context.Context, messageID string) ([]*session.Artifact, error)
+
+	// GetSessionArtifacts retrieves all artifacts for a session.
+	GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error)
+
+	// DeleteSessionArtifacts removes all artifacts for a session.
+	DeleteSessionArtifacts(ctx context.Context, sessionID string) error
+
 	// Ping checks connectivity to the underlying store.
 	Ping(ctx context.Context) error
 

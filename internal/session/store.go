@@ -31,6 +31,8 @@ var (
 	ErrSessionExpired = errors.New("session expired")
 	// ErrInvalidSessionID is returned when a session ID is invalid.
 	ErrInvalidSessionID = errors.New("invalid session ID")
+	// ErrArtifactNotFound is returned when a requested artifact does not exist.
+	ErrArtifactNotFound = errors.New("artifact not found")
 )
 
 // MessageRole represents the role of a message sender.
@@ -79,6 +81,33 @@ type Message struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 	// SequenceNum is the ordering position within the session.
 	SequenceNum int32 `json:"sequenceNum,omitempty"`
+}
+
+// Artifact represents a binary attachment (image, audio, video, etc.) associated
+// with a message. It maps to the message_artifacts table.
+type Artifact struct {
+	// ID is the unique identifier for this artifact.
+	ID string `json:"id"`
+	// MessageID links this artifact to its parent message.
+	MessageID string `json:"messageId"`
+	// SessionID links this artifact to its parent session.
+	SessionID string `json:"sessionId"`
+	// Type is the artifact category: image, audio, video, document, file.
+	Type string `json:"type"`
+	// MIMEType is the MIME type of the binary data.
+	MIMEType string `json:"mimeType"`
+	// StorageURI is the URI to the binary data in cold storage.
+	StorageURI string `json:"storageUri"`
+	// SizeBytes is the size of the binary data in bytes.
+	SizeBytes int64 `json:"sizeBytes,omitempty"`
+	// Filename is the original filename, if known.
+	Filename string `json:"filename,omitempty"`
+	// Checksum is a SHA-256 integrity checksum.
+	Checksum string `json:"checksum,omitempty"`
+	// Metadata contains optional additional data.
+	Metadata map[string]string `json:"metadata,omitempty"`
+	// CreatedAt is when the artifact was created.
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // Session represents an agent conversation session.

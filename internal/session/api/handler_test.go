@@ -154,9 +154,17 @@ func (m *mockWarmStore) ListPartitions(_ context.Context) ([]providers.Partition
 func (m *mockWarmStore) GetSessionsOlderThan(_ context.Context, _ time.Time, _ int) ([]*session.Session, error) {
 	return nil, nil
 }
-func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, _ []string) error { return nil }
-func (m *mockWarmStore) Ping(_ context.Context) error                            { return nil }
-func (m *mockWarmStore) Close() error                                            { return nil }
+func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, _ []string) error   { return nil }
+func (m *mockWarmStore) SaveArtifact(_ context.Context, _ *session.Artifact) error { return nil }
+func (m *mockWarmStore) GetArtifacts(_ context.Context, _ string) ([]*session.Artifact, error) {
+	return []*session.Artifact{}, nil
+}
+func (m *mockWarmStore) GetSessionArtifacts(_ context.Context, _ string) ([]*session.Artifact, error) {
+	return []*session.Artifact{}, nil
+}
+func (m *mockWarmStore) DeleteSessionArtifacts(_ context.Context, _ string) error { return nil }
+func (m *mockWarmStore) Ping(_ context.Context) error                             { return nil }
+func (m *mockWarmStore) Close() error                                             { return nil }
 
 type mockColdArchive struct {
 	sessions map[string]*session.Session

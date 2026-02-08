@@ -97,8 +97,16 @@ func (m *mockWarmStore) DropPartition(context.Context, time.Time) error   { retu
 func (m *mockWarmStore) ListPartitions(context.Context) ([]providers.PartitionInfo, error) {
 	return nil, nil
 }
-func (m *mockWarmStore) Ping(context.Context) error { return nil }
-func (m *mockWarmStore) Close() error               { return nil }
+func (m *mockWarmStore) SaveArtifact(context.Context, *session.Artifact) error { return nil }
+func (m *mockWarmStore) GetArtifacts(context.Context, string) ([]*session.Artifact, error) {
+	return []*session.Artifact{}, nil
+}
+func (m *mockWarmStore) GetSessionArtifacts(context.Context, string) ([]*session.Artifact, error) {
+	return []*session.Artifact{}, nil
+}
+func (m *mockWarmStore) DeleteSessionArtifacts(context.Context, string) error { return nil }
+func (m *mockWarmStore) Ping(context.Context) error                           { return nil }
+func (m *mockWarmStore) Close() error                                         { return nil }
 
 type mockColdArchive struct {
 	written       [][]*session.Session

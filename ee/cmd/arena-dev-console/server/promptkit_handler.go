@@ -14,13 +14,22 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	"github.com/google/uuid"
+
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/session/providers/cold"
+	"github.com/altairalabs/omnia/internal/session/recorder"
 	"github.com/altairalabs/omnia/pkg/logctx"
+
+	sessionproviders "github.com/altairalabs/omnia/internal/session/providers"
+
 	"github.com/go-logr/logr"
 )
 
@@ -42,6 +51,9 @@ type PromptKitHandler struct {
 	k8sLoader *K8sProviderLoader
 	// Cache of provider registries per namespace
 	nsRegistries map[string]*providers.Registry
+
+	// Session storage providers for event recording (optional).
+	sessionProviders *sessionproviders.Registry
 }
 
 // SessionState holds conversation state for a session.
@@ -133,6 +145,43 @@ func (h *PromptKitHandler) selectProvider(
 	return provider, providerID, nil
 }
 
+// SetSessionProviders configures session storage for event recording.
+// When set, HandleMessage will emit PromptKit events to the tiered storage.
+func (h *PromptKitHandler) SetSessionProviders(reg *sessionproviders.Registry) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sessionProviders = reg
+}
+
+// createRecorder creates a SessionRecorder if session providers are configured.
+// Returns nil if no providers are available.
+func (h *PromptKitHandler) createRecorder(sessionID string) *recorder.SessionRecorder {
+	h.mu.RLock()
+	reg := h.sessionProviders
+	h.mu.RUnlock()
+
+	if reg == nil {
+		return nil
+	}
+
+	warmStore, err := reg.WarmStore()
+	if err != nil {
+		h.log.V(1).Info("session recording disabled: warm store not configured")
+		return nil
+	}
+
+	var coldBlob cold.BlobStore
+	coldArchive, err := reg.ColdArchive()
+	if err == nil {
+		// Try to get a BlobStore from the cold archive provider
+		if bs, ok := coldArchive.(interface{ BlobStore() cold.BlobStore }); ok {
+			coldBlob = bs.BlobStore()
+		}
+	}
+
+	return recorder.NewSessionRecorder(sessionID, warmStore, coldBlob, h.log)
+}
+
 // HandleMessage processes a client message and streams responses via the ResponseWriter.
 func (h *PromptKitHandler) HandleMessage(
 	ctx context.Context,
@@ -178,6 +227,18 @@ func (h *PromptKitHandler) HandleMessage(
 		return writer.WriteError("PROVIDER_ERROR", err.Error())
 	}
 
+	// Set up session recording (EventBus + Emitter)
+	rec := h.createRecorder(sessionID)
+	var emitter *events.Emitter
+	if rec != nil {
+		bus := events.NewEventBus().WithStore(rec.EventStore())
+		runID := uuid.New().String()
+		emitter = events.NewEmitter(bus, runID, sessionID, sessionID)
+
+		// Emit user message event
+		emitter.MessageCreated("user", msg.Content, len(messages)-1, nil, nil)
+	}
+
 	// Build prediction request with provider defaults
 	req := providers.PredictionRequest{
 		Messages:    messages,
@@ -191,11 +252,36 @@ func (h *PromptKitHandler) HandleMessage(
 		}
 	}
 
+	// Emit provider call started
+	if emitter != nil {
+		emitter.ProviderCallStarted(providerID, "", len(messages), 0)
+	}
+	predictionStart := time.Now()
+
 	// Execute with streaming
-	response, err := h.executeStreaming(ctx, provider, req, writer)
+	response, costInfo, err := h.executeStreamingWithCost(ctx, provider, req, writer)
 	if err != nil {
+		if emitter != nil {
+			emitter.PipelineFailed(err, time.Since(predictionStart))
+		}
 		h.log.Error(err, "prediction failed", "sessionID", sessionID)
 		return writer.WriteError("EXECUTION_ERROR", err.Error())
+	}
+
+	// Emit provider call completed + assistant message
+	if emitter != nil {
+		completedData := &events.ProviderCallCompletedData{
+			Provider:     providerID,
+			Duration:     time.Since(predictionStart),
+			FinishReason: "stop",
+		}
+		if costInfo != nil {
+			completedData.InputTokens = costInfo.InputTokens
+			completedData.OutputTokens = costInfo.OutputTokens
+			completedData.Cost = costInfo.TotalCost
+		}
+		emitter.ProviderCallCompleted(completedData)
+		emitter.MessageCreated("assistant", response, len(messages), nil, nil)
 	}
 
 	session.mu.Lock()
@@ -245,19 +331,33 @@ func (h *PromptKitHandler) executeStreaming(
 	req providers.PredictionRequest,
 	writer facade.ResponseWriter,
 ) (string, error) {
+	response, _, err := h.executeStreamingWithCost(ctx, provider, req, writer)
+	return response, err
+}
+
+// executeStreamingWithCost runs a streaming prediction, forwards chunks to the
+// writer, and returns cost info from the final chunk (if available).
+func (h *PromptKitHandler) executeStreamingWithCost(
+	ctx context.Context,
+	provider providers.Provider,
+	req providers.PredictionRequest,
+	writer facade.ResponseWriter,
+) (string, *types.CostInfo, error) {
 	if !provider.SupportsStreaming() {
-		return h.executeNonStreaming(ctx, provider, req, writer)
+		resp, err := h.executeNonStreaming(ctx, provider, req, writer)
+		return resp, nil, err
 	}
 
 	stream, err := provider.PredictStream(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("failed to start stream: %w", err)
+		return "", nil, fmt.Errorf("failed to start stream: %w", err)
 	}
 
 	var fullContent string
+	var costInfo *types.CostInfo
 	for chunk := range stream {
 		if chunk.Error != nil {
-			return "", chunk.Error
+			return "", nil, chunk.Error
 		}
 		if chunk.Delta != "" {
 			if err := writer.WriteChunk(chunk.Delta); err != nil {
@@ -268,15 +368,18 @@ func (h *PromptKitHandler) executeStreaming(
 			h.writeToolCalls(chunk.ToolCalls, writer)
 		}
 		fullContent = chunk.Content
+		if chunk.CostInfo != nil {
+			costInfo = chunk.CostInfo
+		}
 		if chunk.FinishReason != nil {
 			break
 		}
 	}
 
 	if err := writer.WriteDone(fullContent); err != nil {
-		return "", fmt.Errorf("failed to write done: %w", err)
+		return "", nil, fmt.Errorf("failed to write done: %w", err)
 	}
-	return fullContent, nil
+	return fullContent, costInfo, nil
 }
 
 // addImagePart adds an image part to the message from the given media.
