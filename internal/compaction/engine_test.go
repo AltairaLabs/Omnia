@@ -732,6 +732,30 @@ func TestLoadRetentionConfig_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestWithRetry_ContextCancelledDuringWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	e := &Engine{
+		cfg: Config{MaxRetries: 3, RetryDelay: 10 * time.Second},
+		log: testLogger(),
+	}
+
+	count := 0
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	err := e.withRetry(ctx, "test", func() error {
+		count++
+		return errors.New("transient")
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
 // mockWarmStoreWithQueryErr always returns an error from GetSessionsOlderThan.
 type mockWarmStoreWithQueryErr struct {
 	mockWarmStore

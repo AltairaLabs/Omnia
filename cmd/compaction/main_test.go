@@ -402,3 +402,47 @@ default:
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// run() tests (exercises parseFlags + runWithFlags together)
+// ---------------------------------------------------------------------------
+
+func TestRun_InvalidRetentionConfig(t *testing.T) {
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+	os.Args = []string{
+		"compaction",
+		"--retention-config=/nonexistent/path/retention.yaml",
+		"--metrics-addr=:0",
+	}
+
+	err := run()
+	if err == nil {
+		t.Fatal("expected error for missing retention config")
+	}
+	if !strings.Contains(err.Error(), "retention config") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// initProviders deeper coverage
+// ---------------------------------------------------------------------------
+
+func TestInitProviders_PostgresConnectionFails(t *testing.T) {
+	// Use a connection string that pgx can parse but immediately fails to
+	// connect to (localhost on an unlikely port with a short timeout).
+	f := &flags{
+		postgresConn: "postgres://user:pass@localhost:1/db?connect_timeout=1",
+		coldBucket:   "bucket",
+		coldBackend:  "s3",
+	}
+	_, _, _, _, err := initProviders(context.Background(), f)
+	if err == nil {
+		t.Fatal("expected error for unreachable postgres")
+	}
+	if !strings.Contains(err.Error(), "creating postgres provider") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
