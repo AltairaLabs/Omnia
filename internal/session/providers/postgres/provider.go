@@ -584,6 +584,110 @@ func (p *Provider) applySessionFilters(qb *queryBuilder, opts providers.SessionL
 	}
 }
 
+// --- Artifact management ----------------------------------------------------
+
+func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact) error {
+	query := `INSERT INTO message_artifacts (id, message_id, session_id, artifact_type, mime_type,
+		storage_uri, size_bytes, filename, checksum_sha256, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+
+	_, err := p.pool.Exec(ctx, query,
+		artifact.ID, artifact.MessageID, artifact.SessionID,
+		artifact.Type, artifact.MIMEType, artifact.StorageURI,
+		nullInt64(artifact.SizeBytes), nullString(artifact.Filename),
+		nullString(artifact.Checksum), marshalJSONB(artifact.Metadata),
+		artifact.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: save artifact: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*session.Artifact, error) {
+	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
+		size_bytes, filename, checksum_sha256, metadata, created_at
+		FROM message_artifacts WHERE message_id=$1 ORDER BY created_at ASC`
+
+	rows, err := p.pool.Query(ctx, query, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get artifacts: %w", err)
+	}
+	return collectArtifacts(rows)
+}
+
+func (p *Provider) GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error) {
+	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
+		size_bytes, filename, checksum_sha256, metadata, created_at
+		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC`
+
+	rows, err := p.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get session artifacts: %w", err)
+	}
+	return collectArtifacts(rows)
+}
+
+func (p *Provider) DeleteSessionArtifacts(ctx context.Context, sessionID string) error {
+	_, err := p.pool.Exec(ctx, "DELETE FROM message_artifacts WHERE session_id=$1", sessionID)
+	if err != nil {
+		return fmt.Errorf("postgres: delete session artifacts: %w", err)
+	}
+	return nil
+}
+
+func nullInt64(v int64) *int64 {
+	if v == 0 {
+		return nil
+	}
+	return &v
+}
+
+func scanArtifact(row pgx.Row) (*session.Artifact, error) {
+	var a session.Artifact
+	var sizeBytes *int64
+	var filename, checksum *string
+	var metadataJSON []byte
+
+	err := row.Scan(
+		&a.ID, &a.MessageID, &a.SessionID, &a.Type, &a.MIMEType, &a.StorageURI,
+		&sizeBytes, &filename, &checksum, &metadataJSON, &a.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, session.ErrArtifactNotFound
+		}
+		return nil, fmt.Errorf("postgres: scan artifact: %w", err)
+	}
+
+	if sizeBytes != nil {
+		a.SizeBytes = *sizeBytes
+	}
+	a.Filename = stringOrEmpty(filename)
+	a.Checksum = stringOrEmpty(checksum)
+	a.Metadata = unmarshalJSONB(metadataJSON)
+	return &a, nil
+}
+
+func collectArtifacts(rows pgx.Rows) ([]*session.Artifact, error) {
+	defer rows.Close()
+	var artifacts []*session.Artifact
+	for rows.Next() {
+		a, err := scanArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: iterate artifacts: %w", err)
+	}
+	if artifacts == nil {
+		artifacts = []*session.Artifact{}
+	}
+	return artifacts, nil
+}
+
 // --- Partition management ---------------------------------------------------
 
 var partitionTables = []string{"sessions", "messages", "tool_calls", "message_artifacts"}
