@@ -572,6 +572,68 @@ sessionRetention:
       # -- Enable cold archival (e.g., S3, GCS)
       enabled: false
 
+  # Session compaction CronJob configuration
+  # Moves sessions from Postgres warm store to S3/Parquet cold archive
+  compaction:
+    # -- Enable the compaction CronJob
+    enabled: false
+    # -- Cron schedule for compaction runs
+    schedule: "0 2 * * *"
+    # -- Name of the SessionRetentionPolicy whose ConfigMap to mount
+    policyName: "default"
+    # -- Number of sessions per compaction batch
+    batchSize: 1000
+    # -- Maximum retry attempts per operation
+    maxRetries: 3
+    # -- Parquet compression codec (snappy, gzip, zstd)
+    compression: "snappy"
+    # -- Log actions without making changes
+    dryRun: false
+    # -- Number of retries before marking job as failed
+    backoffLimit: 2
+    # -- Maximum time in seconds for the job to run
+    activeDeadlineSeconds: 7200
+    # -- Number of successful jobs to keep
+    successfulJobsHistoryLimit: 3
+    # -- Number of failed jobs to keep
+    failedJobsHistoryLimit: 3
+    image:
+      # -- Compaction image repository
+      repository: ghcr.io/altairalabs/omnia-compaction
+      # -- Compaction image tag (defaults to Chart.AppVersion)
+      tag: ""
+      # -- Image pull policy
+      pullPolicy: IfNotPresent
+    postgres:
+      # -- Name of the Secret containing the Postgres connection string
+      secretName: omnia-postgres
+      # -- Key in the Secret for the connection string
+      secretKey: connection-string
+    coldArchive:
+      # -- Cold archive backend: s3, gcs, azure
+      backend: "s3"
+      # -- Bucket/container name for cold storage
+      bucket: ""
+      # -- Cloud region (S3)
+      region: ""
+      # -- Custom endpoint for S3-compatible storage
+      endpoint: ""
+    redis:
+      # -- Comma-separated Redis addresses for hot cache invalidation (optional)
+      addrs: ""
+    serviceAccount:
+      # -- Annotations for the compaction ServiceAccount (e.g., IRSA, Workload Identity)
+      annotations: {}
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    # -- Additional environment variables for the compaction container
+    extraEnv: []
+
 # ============================================================================
 # Workspace Multi-Tenancy Configuration
 # Multi-tenant workspace isolation with namespace, RBAC, and quotas

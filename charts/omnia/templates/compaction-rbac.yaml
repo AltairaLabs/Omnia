@@ -1,0 +1,43 @@
+{{- if and .Values.sessionRetention.compaction.enabled .Values.sessionRetention.defaultPolicy.coldArchive.enabled -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "omnia.fullname" . }}-compaction
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compaction
+  {{- with .Values.sessionRetention.compaction.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "omnia.fullname" . }}-compaction
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compaction
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - retention-policy-{{ .Values.sessionRetention.compaction.policyName }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "omnia.fullname" . }}-compaction
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compaction
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "omnia.fullname" . }}-compaction
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "omnia.fullname" . }}-compaction
+    namespace: {{ .Release.Namespace }}
+{{- end }}

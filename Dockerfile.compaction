@@ -1,0 +1,28 @@
+# Build the compaction binary
+FROM golang:1.25 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+# NOTE: Skipping go mod download due to local replace directives for PromptKit
+# which aren't available in the Docker build context. Dependencies will be
+# downloaded during the build step instead.
+# TODO: Re-enable once PromptKit is published to a module proxy
+# RUN go mod download
+
+# Copy the Go source (relies on .dockerignore to filter)
+COPY . .
+
+# Build
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -ldflags="-w -s" -o compaction ./cmd/compaction
+
+# Use distroless as minimal base image to package the compaction binary
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/compaction .
+USER 65532:65532
+
+ENTRYPOINT ["/compaction"]
