@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
@@ -2079,6 +2080,124 @@ func TestGetOrLoadK8sRegistryCached(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, cachedRegistry, registry)
 	assert.Equal(t, cfg, gotCfg)
+}
+
+// TestSetSessionProviders tests setting session providers on the handler.
+func TestSetSessionProviders(t *testing.T) {
+	handler := &PromptKitHandler{
+		log:          logr.Discard(),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+	}
+
+	assert.Nil(t, handler.sessionProviders)
+
+	// Setting nil should be fine
+	handler.SetSessionProviders(nil)
+	assert.Nil(t, handler.sessionProviders)
+}
+
+// TestCreateRecorderNilProviders tests createRecorder when no session providers configured.
+func TestCreateRecorderNilProviders(t *testing.T) {
+	handler := &PromptKitHandler{
+		log:          logr.Discard(),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+	}
+
+	rec := handler.createRecorder("sess-1")
+	assert.Nil(t, rec, "should return nil when no session providers configured")
+}
+
+// TestCreateEmitterNilRecorder tests createEmitter when no recorder is available.
+func TestCreateEmitterNilRecorder(t *testing.T) {
+	handler := &PromptKitHandler{
+		log:          logr.Discard(),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+	}
+
+	emitter := handler.createEmitter("sess-1", "hello", 0)
+	assert.Nil(t, emitter, "should return nil when no recorder available")
+}
+
+// TestBuildPredictionRequest tests building a prediction request with defaults.
+func TestBuildPredictionRequest(t *testing.T) {
+	handler := &PromptKitHandler{log: logr.Discard()}
+	msgs := []types.Message{types.NewUserMessage("test")}
+
+	cfg := &config.Config{
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {
+				ID:    "mock",
+				Type:  "mock",
+				Model: "mock-model",
+				Defaults: config.ProviderDefaults{
+					Temperature: 0.3,
+					MaxTokens:   2048,
+				},
+			},
+		},
+	}
+
+	req := handler.buildPredictionRequest(msgs, "mock", cfg)
+	assert.InDelta(t, 0.3, req.Temperature, 1e-6)
+	assert.Equal(t, 2048, req.MaxTokens)
+	assert.Len(t, req.Messages, 1)
+}
+
+// TestBuildPredictionRequestDefaults tests building request when provider has no custom defaults.
+func TestBuildPredictionRequestDefaults(t *testing.T) {
+	handler := &PromptKitHandler{log: logr.Discard()}
+	msgs := []types.Message{types.NewUserMessage("test")}
+
+	cfg := &config.Config{
+		LoadedProviders: map[string]*config.Provider{},
+	}
+
+	req := handler.buildPredictionRequest(msgs, "nonexistent", cfg)
+	assert.InDelta(t, 0.7, req.Temperature, 1e-6)
+	assert.Equal(t, 4096, req.MaxTokens)
+}
+
+// TestEmitCompletionEventsNilEmitter tests that emitCompletionEvents is a no-op with nil emitter.
+func TestEmitCompletionEventsNilEmitter(t *testing.T) {
+	handler := &PromptKitHandler{log: logr.Discard()}
+	// Should not panic
+	handler.emitCompletionEvents(nil, "mock", "response", nil, time.Now(), 1)
+}
+
+// TestExecuteStreamingWithCostInfo tests that cost info is returned from streaming.
+func TestExecuteStreamingWithCostInfo(t *testing.T) {
+	finishReason := "stop"
+	handler := &PromptKitHandler{log: logr.Discard()}
+
+	costInfo := &types.CostInfo{
+		InputTokens:  100,
+		OutputTokens: 50,
+		TotalCost:    0.005,
+	}
+
+	provider := &mockStreamingProvider{
+		supportsStr: true,
+		chunks: []providers.StreamChunk{
+			{Delta: "Hello", Content: "Hello"},
+			{Content: "Hello", CostInfo: costInfo, FinishReason: &finishReason},
+		},
+	}
+
+	writer := &MockResponseWriter{}
+	req := providers.PredictionRequest{
+		Messages: []types.Message{types.NewUserMessage("Hi")},
+	}
+
+	response, gotCost, err := handler.executeStreamingWithCost(context.Background(), provider, req, writer)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello", response)
+	require.NotNil(t, gotCost)
+	assert.Equal(t, 100, gotCost.InputTokens)
+	assert.Equal(t, 50, gotCost.OutputTokens)
+	assert.InDelta(t, 0.005, gotCost.TotalCost, 1e-9)
 }
 
 // TestGetOrLoadK8sRegistryNoProviders tests fallback when no K8s providers found.

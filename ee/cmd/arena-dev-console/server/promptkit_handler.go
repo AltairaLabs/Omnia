@@ -228,29 +228,10 @@ func (h *PromptKitHandler) HandleMessage(
 	}
 
 	// Set up session recording (EventBus + Emitter)
-	rec := h.createRecorder(sessionID)
-	var emitter *events.Emitter
-	if rec != nil {
-		bus := events.NewEventBus().WithStore(rec.EventStore())
-		runID := uuid.New().String()
-		emitter = events.NewEmitter(bus, runID, sessionID, sessionID)
-
-		// Emit user message event
-		emitter.MessageCreated("user", msg.Content, len(messages)-1, nil, nil)
-	}
+	emitter := h.createEmitter(sessionID, msg.Content, len(messages)-1)
 
 	// Build prediction request with provider defaults
-	req := providers.PredictionRequest{
-		Messages:    messages,
-		Temperature: 0.7,
-		MaxTokens:   4096,
-	}
-	if p, ok := cfg.LoadedProviders[providerID]; ok {
-		req.Temperature = p.Defaults.Temperature
-		if p.Defaults.MaxTokens > 0 {
-			req.MaxTokens = p.Defaults.MaxTokens
-		}
-	}
+	req := h.buildPredictionRequest(messages, providerID, cfg)
 
 	// Emit provider call started
 	if emitter != nil {
@@ -268,26 +249,72 @@ func (h *PromptKitHandler) HandleMessage(
 		return writer.WriteError("EXECUTION_ERROR", err.Error())
 	}
 
-	// Emit provider call completed + assistant message
-	if emitter != nil {
-		completedData := &events.ProviderCallCompletedData{
-			Provider:     providerID,
-			Duration:     time.Since(predictionStart),
-			FinishReason: "stop",
-		}
-		if costInfo != nil {
-			completedData.InputTokens = costInfo.InputTokens
-			completedData.OutputTokens = costInfo.OutputTokens
-			completedData.Cost = costInfo.TotalCost
-		}
-		emitter.ProviderCallCompleted(completedData)
-		emitter.MessageCreated("assistant", response, len(messages), nil, nil)
-	}
+	// Emit completion events
+	h.emitCompletionEvents(emitter, providerID, response, costInfo, predictionStart, len(messages))
 
 	session.mu.Lock()
 	session.Messages = append(session.Messages, types.NewAssistantMessage(response))
 	session.mu.Unlock()
 	return nil
+}
+
+// createEmitter sets up session recording and returns an Emitter, or nil if
+// recording is not configured.
+func (h *PromptKitHandler) createEmitter(sessionID, userContent string, messageIndex int) *events.Emitter {
+	rec := h.createRecorder(sessionID)
+	if rec == nil {
+		return nil
+	}
+	bus := events.NewEventBus().WithStore(rec.EventStore())
+	runID := uuid.New().String()
+	emitter := events.NewEmitter(bus, runID, sessionID, sessionID)
+	emitter.MessageCreated("user", userContent, messageIndex, nil, nil)
+	return emitter
+}
+
+// buildPredictionRequest creates a PredictionRequest with provider defaults applied.
+func (h *PromptKitHandler) buildPredictionRequest(
+	messages []types.Message,
+	providerID string,
+	cfg *config.Config,
+) providers.PredictionRequest {
+	req := providers.PredictionRequest{
+		Messages:    messages,
+		Temperature: 0.7,
+		MaxTokens:   4096,
+	}
+	if p, ok := cfg.LoadedProviders[providerID]; ok {
+		req.Temperature = p.Defaults.Temperature
+		if p.Defaults.MaxTokens > 0 {
+			req.MaxTokens = p.Defaults.MaxTokens
+		}
+	}
+	return req
+}
+
+// emitCompletionEvents emits provider call completed and assistant message events.
+func (h *PromptKitHandler) emitCompletionEvents(
+	emitter *events.Emitter,
+	providerID, response string,
+	costInfo *types.CostInfo,
+	predictionStart time.Time,
+	messageCount int,
+) {
+	if emitter == nil {
+		return
+	}
+	completedData := &events.ProviderCallCompletedData{
+		Provider:     providerID,
+		Duration:     time.Since(predictionStart),
+		FinishReason: "stop",
+	}
+	if costInfo != nil {
+		completedData.InputTokens = costInfo.InputTokens
+		completedData.OutputTokens = costInfo.OutputTokens
+		completedData.Cost = costInfo.TotalCost
+	}
+	emitter.ProviderCallCompleted(completedData)
+	emitter.MessageCreated("assistant", response, messageCount, nil, nil)
 }
 
 // executeNonStreaming executes a non-streaming prediction.
@@ -353,6 +380,23 @@ func (h *PromptKitHandler) executeStreamingWithCost(
 		return "", nil, fmt.Errorf("failed to start stream: %w", err)
 	}
 
+	fullContent, costInfo, err := h.consumeStream(stream, writer)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if err := writer.WriteDone(fullContent); err != nil {
+		return "", nil, fmt.Errorf("failed to write done: %w", err)
+	}
+	return fullContent, costInfo, nil
+}
+
+// consumeStream reads all chunks from the stream, writing deltas and tool calls
+// to the writer. Returns the final content, cost info, and any error.
+func (h *PromptKitHandler) consumeStream(
+	stream <-chan providers.StreamChunk,
+	writer facade.ResponseWriter,
+) (string, *types.CostInfo, error) {
 	var fullContent string
 	var costInfo *types.CostInfo
 	for chunk := range stream {
@@ -374,10 +418,6 @@ func (h *PromptKitHandler) executeStreamingWithCost(
 		if chunk.FinishReason != nil {
 			break
 		}
-	}
-
-	if err := writer.WriteDone(fullContent); err != nil {
-		return "", nil, fmt.Errorf("failed to write done: %w", err)
 	}
 	return fullContent, costInfo, nil
 }

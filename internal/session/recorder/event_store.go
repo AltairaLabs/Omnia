@@ -69,21 +69,24 @@ func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error
 
 	seq := s.sequence.Add(1)
 
+	// Detach from caller's cancellation so the goroutine can finish after the
+	// request returns, while preserving any values attached to the context.
+	detached := context.WithoutCancel(ctx)
+
 	go func() {
-		bgCtx := context.Background()
-		msg := s.eventToMessage(bgCtx, event, seq)
+		msg := s.eventToMessage(detached, event, seq)
 		if msg == nil {
 			return
 		}
 
-		if err := s.warmStore.AppendMessage(bgCtx, event.SessionID, msg); err != nil {
+		if err := s.warmStore.AppendMessage(detached, event.SessionID, msg); err != nil {
 			s.log.Error(err, "failed to append message",
 				"sessionID", event.SessionID,
 				"eventType", string(event.Type))
 		}
 
 		// Update session stats for provider completion events
-		s.maybeUpdateSessionStats(bgCtx, event)
+		s.maybeUpdateSessionStats(detached, event)
 	}()
 
 	return nil
