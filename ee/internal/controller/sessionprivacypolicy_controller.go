@@ -445,6 +445,17 @@ func mergePII(base, override *omniav1alpha1.PIIConfig) *omniav1alpha1.PIIConfig 
 		Encrypt: boolFromEither(base, override, func(c *omniav1alpha1.PIIConfig) bool { return c.Encrypt }),
 	}
 	result.Patterns = mergePatterns(base, override)
+
+	// Strategy: child overrides parent; default to "replace"
+	switch {
+	case override != nil && override.Strategy != "":
+		result.Strategy = override.Strategy
+	case base != nil && base.Strategy != "":
+		result.Strategy = base.Strategy
+	default:
+		result.Strategy = omniav1alpha1.RedactionStrategyReplace
+	}
+
 	return result
 }
 

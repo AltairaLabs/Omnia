@@ -646,12 +646,13 @@ sessionPrivacy:
     pii:
       # -- Enable automatic PII redaction
       redact: true
-      # -- PII patterns to detect (built-in: ssn, credit_card, phone_number, email)
+      # -- PII patterns to detect (built-in: ssn, credit_card, phone_number, email, ip_address)
       patterns:
         - ssn
         - credit_card
         - phone_number
         - email
+        - ip_address
     userOptOut:
       # -- Allow users to opt out of session recording
       enabled: true
