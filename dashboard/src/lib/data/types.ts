@@ -11,6 +11,14 @@ import type {
   ConnectionStatus,
   ContentPart,
 } from "@/types/websocket";
+import type {
+  Session as SessionType,
+  SessionListOptions,
+  SessionSearchOptions,
+  SessionMessageOptions,
+  SessionListResponse,
+  SessionMessagesResponse,
+} from "@/types/session";
 
 import type { AgentRuntime as AgentRuntimeType } from "@/types/agent-runtime";
 import type { PromptPack as PromptPackType } from "@/types/prompt-pack";
@@ -68,6 +76,17 @@ export type {
 } from "@/types/arena";
 
 export type { ArenaJobListOptions, ArenaJobMetrics } from "./arena-service";
+
+export type {
+  Session as SessionData,
+  SessionSummary,
+  Message as SessionMessage,
+  SessionListOptions,
+  SessionSearchOptions,
+  SessionMessageOptions,
+  SessionListResponse,
+  SessionMessagesResponse,
+} from "@/types/session";
 
 // Provider types (re-exported from generated types)
 import type {
@@ -366,6 +385,12 @@ export interface DataService {
 
   // Arena Stats (workspace-scoped)
   getArenaStats(workspace: string): Promise<ArenaStats>;
+
+  // Sessions (workspace-scoped)
+  getSessions(workspace: string, options?: SessionListOptions): Promise<SessionListResponse>;
+  getSessionById(workspace: string, sessionId: string): Promise<SessionType | undefined>;
+  searchSessions(workspace: string, options: SessionSearchOptions): Promise<SessionListResponse>;
+  getSessionMessages(workspace: string, sessionId: string, options?: SessionMessageOptions): Promise<SessionMessagesResponse>;
 
   // Agent WebSocket connections (uses namespace from workspace)
   createAgentConnection(namespace: string, name: string): AgentConnection;

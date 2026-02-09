@@ -23,7 +23,13 @@ import type {
   K8sEvent,
   AgentConnection,
   ArenaJobListOptions,
+  SessionListOptions,
+  SessionSearchOptions,
+  SessionMessageOptions,
+  SessionListResponse,
+  SessionMessagesResponse,
 } from "./types";
+import type { Session } from "@/types/session";
 import type {
   ArenaSource,
   ArenaSourceSpec,
@@ -41,6 +47,7 @@ import type {
 import { WorkspaceApiService } from "./workspace-api-service";
 import { PrometheusService } from "./prometheus-service";
 import { ArenaService, type ArenaJobMetrics } from "./arena-service";
+import { SessionApiService } from "./session-api-service";
 import { getWsProxyUrl } from "@/lib/config";
 
 /**
@@ -224,11 +231,13 @@ export class LiveDataService implements DataService {
   private readonly workspaceService: WorkspaceApiService;
   private readonly prometheusService: PrometheusService;
   private readonly arenaService: ArenaService;
+  private readonly sessionService: SessionApiService;
 
   constructor() {
     this.workspaceService = new WorkspaceApiService();
     this.prometheusService = new PrometheusService();
     this.arenaService = new ArenaService();
+    this.sessionService = new SessionApiService();
   }
 
   // ============================================================
@@ -385,6 +394,26 @@ export class LiveDataService implements DataService {
 
   async getArenaStats(workspace: string): Promise<ArenaStats> {
     return this.arenaService.getArenaStats(workspace);
+  }
+
+  // ============================================================
+  // Sessions - delegated to SessionApiService
+  // ============================================================
+
+  async getSessions(workspace: string, options?: SessionListOptions): Promise<SessionListResponse> {
+    return this.sessionService.getSessions(workspace, options);
+  }
+
+  async getSessionById(workspace: string, sessionId: string): Promise<Session | undefined> {
+    return this.sessionService.getSessionById(workspace, sessionId);
+  }
+
+  async searchSessions(workspace: string, options: SessionSearchOptions): Promise<SessionListResponse> {
+    return this.sessionService.searchSessions(workspace, options);
+  }
+
+  async getSessionMessages(workspace: string, sessionId: string, options?: SessionMessageOptions): Promise<SessionMessagesResponse> {
+    return this.sessionService.getSessionMessages(workspace, sessionId, options);
   }
 
   // ============================================================

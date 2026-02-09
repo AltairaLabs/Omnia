@@ -26,4 +26,5 @@ export { MockDataService, MockAgentConnection } from "./mock-service";
 export { WorkspaceApiService } from "./workspace-api-service";
 export { PrometheusService } from "./prometheus-service";
 export { LiveDataService, LiveAgentConnection } from "./live-service";
+export { SessionApiService } from "./session-api-service";
 export { DataServiceProvider, useDataService, createDataService } from "./provider";

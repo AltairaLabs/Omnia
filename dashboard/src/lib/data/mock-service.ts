@@ -21,6 +21,11 @@ import type {
   AgentConnection,
   CostAllocationItem,
   ArenaJobListOptions,
+  SessionListOptions,
+  SessionSearchOptions,
+  SessionMessageOptions,
+  SessionListResponse,
+  SessionMessagesResponse,
 } from "./types";
 import type {
   ArenaSource,
@@ -30,6 +35,7 @@ import type {
   ArenaJobResults,
   ArenaStats,
 } from "@/types/arena";
+import type { Session } from "@/types/session";
 import type { ArenaJobMetrics } from "./arena-service";
 
 import type {
@@ -48,6 +54,8 @@ import {
   getMockCostSummary,
   getMockCostByProvider,
   getMockCostByModel,
+  getMockSessionSummaries,
+  getMockSession,
 } from "../mock-data";
 import { LiveAgentConnection } from "./live-service";
 
@@ -999,6 +1007,88 @@ export class MockDataService implements DataService {
           : 0,
       },
     };
+  }
+
+  // ============================================================
+  // Sessions mock methods
+  // ============================================================
+
+  async getSessions(_workspace: string, options?: SessionListOptions): Promise<SessionListResponse> {
+    await delay();
+    let summaries = getMockSessionSummaries();
+
+    // Client-side filtering
+    if (options?.agent) {
+      summaries = summaries.filter((s) => s.agentName === options.agent);
+    }
+    if (options?.status) {
+      summaries = summaries.filter((s) => s.status === options.status);
+    }
+    if (options?.from) {
+      const from = new Date(options.from).getTime();
+      summaries = summaries.filter((s) => new Date(s.startedAt).getTime() >= from);
+    }
+    if (options?.to) {
+      const to = new Date(options.to).getTime();
+      summaries = summaries.filter((s) => new Date(s.startedAt).getTime() <= to);
+    }
+
+    const total = summaries.length;
+    const offset = options?.offset || 0;
+    const limit = options?.limit || 20;
+    const paged = summaries.slice(offset, offset + limit);
+
+    return { sessions: paged, total, hasMore: offset + limit < total };
+  }
+
+  async getSessionById(_workspace: string, sessionId: string): Promise<Session | undefined> {
+    await delay();
+    return getMockSession(sessionId);
+  }
+
+  async searchSessions(_workspace: string, options: SessionSearchOptions): Promise<SessionListResponse> {
+    await delay();
+    const q = options.q.toLowerCase();
+    let summaries = getMockSessionSummaries().filter((s) =>
+      s.id.toLowerCase().includes(q) ||
+      s.agentName.toLowerCase().includes(q) ||
+      s.lastMessage?.toLowerCase().includes(q)
+    );
+
+    if (options.agent) {
+      summaries = summaries.filter((s) => s.agentName === options.agent);
+    }
+    if (options.status) {
+      summaries = summaries.filter((s) => s.status === options.status);
+    }
+
+    const total = summaries.length;
+    const offset = options.offset || 0;
+    const limit = options.limit || 20;
+    const paged = summaries.slice(offset, offset + limit);
+
+    return { sessions: paged, total, hasMore: offset + limit < total };
+  }
+
+  async getSessionMessages(_workspace: string, sessionId: string, options?: SessionMessageOptions): Promise<SessionMessagesResponse> {
+    await delay();
+    const session = getMockSession(sessionId);
+    if (!session) {
+      return { messages: [], hasMore: false };
+    }
+
+    let messages = session.messages;
+    const limit = options?.limit || 50;
+
+    if (options?.after !== undefined) {
+      messages = messages.filter((_, i) => i > options.after!);
+    }
+    if (options?.before !== undefined) {
+      messages = messages.filter((_, i) => i < options.before!);
+    }
+
+    const paged = messages.slice(0, limit);
+    return { messages: paged, hasMore: messages.length > limit };
   }
 
   createAgentConnection(namespace: string, name: string): AgentConnection {
