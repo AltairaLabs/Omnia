@@ -123,6 +123,11 @@ const mockDataService: DataService = {
   getArenaJobLogs: vi.fn().mockResolvedValue([]),
   // Arena Stats
   getArenaStats: vi.fn().mockResolvedValue({ sources: {}, configs: {}, jobs: {} }),
+  // Sessions
+  getSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0, hasMore: false }),
+  getSessionById: vi.fn().mockResolvedValue(undefined),
+  searchSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0, hasMore: false }),
+  getSessionMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   // Agent connections
   createAgentConnection: vi.fn().mockReturnValue({
     connect: vi.fn(),

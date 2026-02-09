@@ -58,3 +58,38 @@ export interface SessionSummary {
   totalTokens: number;
   lastMessage?: string;
 }
+
+// Options for listing sessions
+export interface SessionListOptions {
+  agent?: string;
+  status?: Session["status"];
+  from?: string; // ISO date string
+  to?: string; // ISO date string
+  limit?: number;
+  offset?: number;
+}
+
+// Options for searching sessions (extends list options with query)
+export interface SessionSearchOptions extends SessionListOptions {
+  q: string;
+}
+
+// Options for fetching session messages
+export interface SessionMessageOptions {
+  limit?: number;
+  before?: number; // sequence number
+  after?: number; // sequence number
+}
+
+// Response shape for session list/search endpoints
+export interface SessionListResponse {
+  sessions: SessionSummary[];
+  total: number;
+  hasMore: boolean;
+}
+
+// Response shape for session messages endpoint
+export interface SessionMessagesResponse {
+  messages: Message[];
+  hasMore: boolean;
+}

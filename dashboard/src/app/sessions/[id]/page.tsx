@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   ArrowLeft,
   Bot,
@@ -25,8 +27,9 @@ import {
   ChevronRight,
   Copy,
   MessageSquare,
+  AlertCircle,
 } from "lucide-react";
-import { getMockSession } from "@/lib/mock-data";
+import { useSessionDetail } from "@/hooks";
 import type { Message, ToolCall, Session } from "@/types";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -196,6 +199,36 @@ function MessageBubble({ message, showTimestamp }: Readonly<{ message: Message; 
   );
 }
 
+function DetailSkeleton() {
+  return (
+    <div className="flex flex-col h-full">
+      <Header
+        title={
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" asChild>
+              <Link href="/sessions">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Skeleton className="h-6 w-48" />
+          </div>
+        }
+      />
+      <div className="flex-1 p-6 space-y-4">
+        <Skeleton className="h-10 w-64" />
+        <Card className="h-[calc(100vh-300px)]">
+          <div className="p-6 space-y-6">
+            <Skeleton className="h-16 w-3/4" />
+            <Skeleton className="h-16 w-1/2 ml-auto" />
+            <Skeleton className="h-16 w-3/4" />
+            <Skeleton className="h-16 w-1/2 ml-auto" />
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export default function SessionDetailPage({
   params,
 }: Readonly<{
@@ -203,7 +236,32 @@ export default function SessionDetailPage({
 }>) {
   const { id } = use(params);
   const router = useRouter();
-  const session = getMockSession(id);
+  const { data: session, isLoading, error } = useSessionDetail(id);
+
+  if (isLoading) {
+    return <DetailSkeleton />;
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col h-full">
+        <Header title="Session Error" />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <Alert variant="destructive" className="max-w-md">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Failed to load session</AlertTitle>
+            <AlertDescription>
+              {error instanceof Error ? error.message : "An unexpected error occurred"}
+            </AlertDescription>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => router.push("/sessions")}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Sessions
+            </Button>
+          </Alert>
+        </div>
+      </div>
+    );
+  }
 
   if (!session) {
     return (
