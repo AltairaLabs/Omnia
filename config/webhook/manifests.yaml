@@ -64,3 +64,24 @@ webhooks:
     resources:
     - arenatemplatesources
   sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-omnia-altairalabs-ai-v1alpha1-sessionprivacypolicy
+  failurePolicy: Fail
+  name: vsessionprivacypolicy.kb.io
+  rules:
+  - apiGroups:
+    - omnia.altairalabs.ai
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - sessionprivacypolicies
+  sideEffects: None
