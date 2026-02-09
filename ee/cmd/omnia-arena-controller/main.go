@@ -37,6 +37,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
+	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
 
 	"github.com/altairalabs/omnia/ee/cmd/omnia-arena-controller/api"
@@ -272,7 +273,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup license validation webhooks
+	// SessionPrivacyPolicy controller
+	privacyPolicyMetrics := metrics.NewPrivacyPolicyMetrics()
+	privacyPolicyMetrics.Initialize()
+	if err := (&controller.SessionPrivacyPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		//nolint:staticcheck // consistent with other controllers in this file
+		Recorder: mgr.GetEventRecorderFor("sessionprivacypolicy-controller"),
+		Metrics:  privacyPolicyMetrics,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "SessionPrivacyPolicy")
+		os.Exit(1)
+	}
+
+	// Setup webhooks
+	if err := arenawebhook.SetupSessionPrivacyPolicyWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "SessionPrivacyPolicy")
+		os.Exit(1)
+	}
+
 	if enableLicenseWebhooks {
 		if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaSource")
