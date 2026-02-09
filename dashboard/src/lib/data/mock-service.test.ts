@@ -318,6 +318,196 @@ describe("MockDataService", () => {
     });
   });
 
+  // ============================================================
+  // Sessions
+  // ============================================================
+
+  describe("getSessions", () => {
+    it("should return sessions with pagination", async () => {
+      const promise = service.getSessions("default");
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result.sessions).toBeDefined();
+      expect(typeof result.total).toBe("number");
+      expect(typeof result.hasMore).toBe("boolean");
+    });
+
+    it("should filter sessions by status", async () => {
+      const promise = service.getSessions("default", { status: "completed" });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      result.sessions.forEach((s) => {
+        expect(s.status).toBe("completed");
+      });
+    });
+
+    it("should respect limit and offset", async () => {
+      const promise = service.getSessions("default", { limit: 2, offset: 0 });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result.sessions.length).toBeLessThanOrEqual(2);
+    });
+
+    it("should filter by date range (from)", async () => {
+      const promise = service.getSessions("default", {
+        from: new Date(Date.now() - 1000).toISOString(),
+      });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result).toBeDefined();
+    });
+
+    it("should filter by date range (to)", async () => {
+      const promise = service.getSessions("default", {
+        to: new Date().toISOString(),
+      });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result).toBeDefined();
+    });
+
+    it("should filter sessions by agent name", async () => {
+      const promise = service.getSessions("default", { agent: "nonexistent-agent" });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result.sessions).toHaveLength(0);
+    });
+  });
+
+  describe("getSessionById", () => {
+    it("should return a session by ID", async () => {
+      const listPromise = service.getSessions("default");
+      vi.advanceTimersByTime(200);
+      const list = await listPromise;
+
+      if (list.sessions.length > 0) {
+        const detailPromise = service.getSessionById("default", list.sessions[0].id);
+        vi.advanceTimersByTime(200);
+        const session = await detailPromise;
+
+        expect(session).toBeDefined();
+        expect(session?.id).toBe(list.sessions[0].id);
+      }
+    });
+
+    it("should return undefined for unknown ID", async () => {
+      const promise = service.getSessionById("default", "nonexistent-id");
+      vi.advanceTimersByTime(200);
+      const session = await promise;
+
+      expect(session).toBeUndefined();
+    });
+  });
+
+  describe("searchSessions", () => {
+    it("should search sessions by query string", async () => {
+      const promise = service.searchSessions("default", { q: "a" });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result.sessions).toBeDefined();
+      expect(typeof result.total).toBe("number");
+    });
+
+    it("should filter search results by agent", async () => {
+      const promise = service.searchSessions("default", {
+        q: "a",
+        agent: "nonexistent-agent",
+      });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result.sessions).toHaveLength(0);
+    });
+
+    it("should filter search results by status", async () => {
+      const promise = service.searchSessions("default", {
+        q: "a",
+        status: "error",
+      });
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      result.sessions.forEach((s) => {
+        expect(s.status).toBe("error");
+      });
+    });
+  });
+
+  describe("getSessionMessages", () => {
+    it("should return messages for a valid session", async () => {
+      const listPromise = service.getSessions("default");
+      vi.advanceTimersByTime(200);
+      const list = await listPromise;
+
+      if (list.sessions.length > 0) {
+        const msgPromise = service.getSessionMessages("default", list.sessions[0].id);
+        vi.advanceTimersByTime(200);
+        const result = await msgPromise;
+
+        expect(result.messages).toBeDefined();
+        expect(typeof result.hasMore).toBe("boolean");
+      }
+    });
+
+    it("should return empty for unknown session", async () => {
+      const promise = service.getSessionMessages("default", "nonexistent-id");
+      vi.advanceTimersByTime(200);
+      const result = await promise;
+
+      expect(result.messages).toHaveLength(0);
+      expect(result.hasMore).toBe(false);
+    });
+
+    it("should respect limit option", async () => {
+      const listPromise = service.getSessions("default");
+      vi.advanceTimersByTime(200);
+      const list = await listPromise;
+
+      if (list.sessions.length > 0) {
+        const msgPromise = service.getSessionMessages("default", list.sessions[0].id, { limit: 1 });
+        vi.advanceTimersByTime(200);
+        const result = await msgPromise;
+
+        expect(result.messages.length).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it("should support after cursor", async () => {
+      const listPromise = service.getSessions("default");
+      vi.advanceTimersByTime(200);
+      const list = await listPromise;
+
+      if (list.sessions.length > 0) {
+        const msgPromise = service.getSessionMessages("default", list.sessions[0].id, { after: 0 });
+        vi.advanceTimersByTime(200);
+        const result = await msgPromise;
+
+        expect(result).toBeDefined();
+      }
+    });
+
+    it("should support before cursor", async () => {
+      const listPromise = service.getSessions("default");
+      vi.advanceTimersByTime(200);
+      const list = await listPromise;
+
+      if (list.sessions.length > 0) {
+        const msgPromise = service.getSessionMessages("default", list.sessions[0].id, { before: 100 });
+        vi.advanceTimersByTime(200);
+        const result = await msgPromise;
+
+        expect(result).toBeDefined();
+      }
+    });
+  });
+
   describe("createAgentConnection", () => {
     it("should return a MockAgentConnection", () => {
       const connection = service.createAgentConnection("default", "test-agent");

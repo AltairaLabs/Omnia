@@ -297,7 +297,7 @@ export default function SessionsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading && (
                 <>
                   <TableRowSkeleton />
                   <TableRowSkeleton />
@@ -305,42 +305,42 @@ export default function SessionsPage() {
                   <TableRowSkeleton />
                   <TableRowSkeleton />
                 </>
-              ) : sessions.length === 0 ? (
+              )}
+              {!isLoading && sessions.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     No sessions found
                   </TableCell>
                 </TableRow>
-              ) : (
-                sessions.map((session) => (
-                  <TableRow key={session.id}>
-                    <TableCell className="font-mono text-sm">{session.id}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-4 w-4 text-muted-foreground" />
-                        <span>{session.agentName}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{getStatusBadge(session.status)}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDistanceToNow(new Date(session.startedAt), { addSuffix: true })}
-                    </TableCell>
-                    <TableCell className="text-right">{session.messageCount}</TableCell>
-                    <TableCell className="text-right">{session.toolCallCount}</TableCell>
-                    <TableCell className="text-right">{session.totalTokens.toLocaleString()}</TableCell>
-                    <TableCell className="max-w-[200px] truncate text-muted-foreground text-sm">
-                      {session.lastMessage}
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/sessions/${session.id}`}>
-                          <ExternalLink className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
               )}
+              {!isLoading && sessions.map((session) => (
+                <TableRow key={session.id}>
+                  <TableCell className="font-mono text-sm">{session.id}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Bot className="h-4 w-4 text-muted-foreground" />
+                      <span>{session.agentName}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{getStatusBadge(session.status)}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDistanceToNow(new Date(session.startedAt), { addSuffix: true })}
+                  </TableCell>
+                  <TableCell className="text-right">{session.messageCount}</TableCell>
+                  <TableCell className="text-right">{session.toolCallCount}</TableCell>
+                  <TableCell className="text-right">{session.totalTokens.toLocaleString()}</TableCell>
+                  <TableCell className="max-w-[200px] truncate text-muted-foreground text-sm">
+                    {session.lastMessage}
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={`/sessions/${session.id}`}>
+                        <ExternalLink className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </Card>

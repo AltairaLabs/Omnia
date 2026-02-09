@@ -32,7 +32,7 @@ export function useSessions(options: SessionListOptions = {}) {
     refetchInterval: (query) => {
       // Auto-refresh when there might be active sessions
       const data = query.state.data;
-      if (data && data.sessions.some((s) => s.status === "active")) {
+      if (data?.sessions.some((s) => s.status === "active")) {
         return 10000;
       }
       return false;
@@ -62,7 +62,7 @@ export function useSessionDetail(sessionId: string) {
     staleTime: 5000,
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (data && data.status === "active") {
+      if (data?.status === "active") {
         return 5000;
       }
       return false;
