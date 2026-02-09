@@ -635,6 +635,30 @@ sessionRetention:
     extraEnv: []
 
 # ============================================================================
+# Session Privacy Configuration
+# Privacy policies for session data: PII handling, encryption, opt-out
+# ============================================================================
+
+sessionPrivacy:
+  defaultPolicy:
+    # -- Create the default global SessionPrivacyPolicy (requires enterprise.enabled)
+    create: true
+    pii:
+      # -- Enable automatic PII redaction
+      redact: true
+      # -- PII patterns to detect (built-in: ssn, credit_card, phone_number, email)
+      patterns:
+        - ssn
+        - credit_card
+        - phone_number
+        - email
+    userOptOut:
+      # -- Allow users to opt out of session recording
+      enabled: true
+      # -- Honor user data deletion requests
+      honorDeleteRequests: true
+
+# ============================================================================
 # Workspace Multi-Tenancy Configuration
 # Multi-tenant workspace isolation with namespace, RBAC, and quotas
 # ============================================================================

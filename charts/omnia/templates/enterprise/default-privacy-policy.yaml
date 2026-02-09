@@ -1,0 +1,26 @@
+{{- if and .Values.enterprise.enabled .Values.sessionPrivacy.defaultPolicy.create -}}
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SessionPrivacyPolicy
+metadata:
+  name: default
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  level: global
+  recording:
+    enabled: true
+    facadeData: true
+    richData: false
+    pii:
+      redact: {{ .Values.sessionPrivacy.defaultPolicy.pii.redact }}
+      encrypt: false
+      patterns: {{ .Values.sessionPrivacy.defaultPolicy.pii.patterns | toJson }}
+  userOptOut:
+    enabled: {{ .Values.sessionPrivacy.defaultPolicy.userOptOut.enabled }}
+    honorDeleteRequests: {{ .Values.sessionPrivacy.defaultPolicy.userOptOut.honorDeleteRequests }}
+    deleteWithinDays: 30
+  encryption:
+    enabled: false
+  auditLog:
+    enabled: false
+{{- end }}
