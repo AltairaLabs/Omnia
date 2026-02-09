@@ -153,7 +153,7 @@ spec:
                       patterns:
                         description: |-
                           patterns specifies which PII patterns to detect.
-                          Built-in patterns: ssn, credit_card, phone_number, email.
+                          Built-in patterns: ssn, credit_card, phone_number, email, ip_address.
                           Custom regex patterns can be specified with the "custom:" prefix (e.g., "custom:^[A-Z]{2}\\d{6}$").
                         items:
                           type: string
@@ -162,6 +162,14 @@ spec:
                         description: redact enables automatic PII redaction in session
                           data.
                         type: boolean
+                      strategy:
+                        description: 'strategy specifies how PII is redacted. Options:
+                          replace (default), hash, mask.'
+                        enum:
+                        - replace
+                        - hash
+                        - mask
+                        type: string
                     type: object
                   richData:
                     description: richData enables recording of full session content

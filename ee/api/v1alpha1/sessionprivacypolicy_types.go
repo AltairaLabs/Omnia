@@ -40,6 +40,19 @@ const (
 	SessionPrivacyPolicyPhaseError SessionPrivacyPolicyPhase = "Error"
 )
 
+// RedactionStrategy represents the method used to redact PII data.
+// +kubebuilder:validation:Enum=replace;hash;mask
+type RedactionStrategy string
+
+const (
+	// RedactionStrategyReplace swaps PII with a token like [REDACTED_SSN].
+	RedactionStrategyReplace RedactionStrategy = "replace"
+	// RedactionStrategyHash replaces PII with a deterministic SHA-256 truncated hash.
+	RedactionStrategyHash RedactionStrategy = "hash"
+	// RedactionStrategyMask preserves the last 4 characters, masking the rest with *.
+	RedactionStrategyMask RedactionStrategy = "mask"
+)
+
 // KMSProvider represents a supported key management service provider.
 // +kubebuilder:validation:Enum="aws-kms";"azure-keyvault";"gcp-kms";"vault"
 type KMSProvider string
@@ -66,10 +79,14 @@ type PIIConfig struct {
 	Encrypt bool `json:"encrypt,omitempty"`
 
 	// patterns specifies which PII patterns to detect.
-	// Built-in patterns: ssn, credit_card, phone_number, email.
+	// Built-in patterns: ssn, credit_card, phone_number, email, ip_address.
 	// Custom regex patterns can be specified with the "custom:" prefix (e.g., "custom:^[A-Z]{2}\\d{6}$").
 	// +optional
 	Patterns []string `json:"patterns,omitempty"`
+
+	// strategy specifies how PII is redacted. Options: replace (default), hash, mask.
+	// +optional
+	Strategy RedactionStrategy `json:"strategy,omitempty"`
 }
 
 // RecordingConfig configures what session data is recorded.
