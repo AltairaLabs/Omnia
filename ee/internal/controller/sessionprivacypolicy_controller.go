@@ -552,9 +552,16 @@ func mergeEncryption(base, override *omniav1alpha1.EncryptionConfig) *omniav1alp
 	if override != nil && override.KMSProvider != "" {
 		result.KMSProvider = override.KMSProvider
 		result.SecretRef = override.SecretRef
+		result.KeyID = override.KeyID
 	} else if base != nil {
 		result.KMSProvider = base.KMSProvider
 		result.SecretRef = base.SecretRef
+		result.KeyID = base.KeyID
+	}
+
+	// Allow KeyID to be overridden independently (same provider, different key per workspace/agent)
+	if override != nil && override.KeyID != "" && override.KMSProvider == "" {
+		result.KeyID = override.KeyID
 	}
 
 	return result

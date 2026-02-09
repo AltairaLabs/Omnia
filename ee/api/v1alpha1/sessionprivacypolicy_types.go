@@ -149,6 +149,7 @@ type UserOptOutConfig struct {
 
 // EncryptionConfig configures encryption for session data at rest.
 // +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.kmsProvider)",message="kmsProvider is required when encryption is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.keyID)",message="keyID is required when encryption is enabled"
 type EncryptionConfig struct {
 	// enabled specifies whether encryption is active.
 	// +optional
@@ -158,6 +159,11 @@ type EncryptionConfig struct {
 	// Required when enabled is true.
 	// +optional
 	KMSProvider KMSProvider `json:"kmsProvider,omitempty"`
+
+	// keyID is the identifier of the encryption key within the KMS provider.
+	// Required when enabled is true.
+	// +optional
+	KeyID string `json:"keyID,omitempty"`
 
 	// secretRef references a Secret containing encryption credentials.
 	// +optional
