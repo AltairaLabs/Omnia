@@ -195,6 +195,11 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			return ctrl.Result{}, nil // Don't requeue - license must change
 		}
+
+		if r.LicenseValidator.IsDevMode() && r.Recorder != nil {
+			r.Recorder.Event(arenaJob, corev1.EventTypeWarning, "DevModeLicense",
+				"Using development license - not licensed for production use")
+		}
 	}
 
 	// Validate the referenced ArenaSource

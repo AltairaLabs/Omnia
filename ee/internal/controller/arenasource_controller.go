@@ -168,6 +168,11 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			return ctrl.Result{}, nil // Don't requeue - license must change
 		}
+
+		if r.LicenseValidator.IsDevMode() && r.Recorder != nil {
+			r.Recorder.Event(source, corev1.EventTypeWarning, "DevModeLicense",
+				"Using development license - not licensed for production use")
+		}
 	}
 
 	// Parse interval duration

@@ -9,6 +9,8 @@ data:
   # Operator API URL (server-side for proxy)
   {{- if .Values.dashboard.operatorApiUrl }}
   OPERATOR_API_URL: {{ .Values.dashboard.operatorApiUrl | quote }}
+  {{- else if .Values.enterprise.enabled }}
+  OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-arena-controller:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}"
   {{- end }}
 
   # Mode settings (demo mode defaults to false, not exposed in config)

@@ -30,6 +30,7 @@ vi.mock("@/components/layout", () => ({
   ReadOnlyBanner: () => null,
   DemoModeBanner: () => null,
   LicenseExpiryBanner: () => null,
+  DevModeLicenseBanner: () => null,
   WorkspaceContent: ({ children }: { children: React.ReactNode }) => children,
 }));
 

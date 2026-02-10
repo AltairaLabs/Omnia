@@ -345,7 +345,7 @@ fi
 #
 print_header "Running go vet"
 
-if go vet ./... 2>&1; then
+if GOWORK=off go vet ./... 2>&1; then
     print_success "go vet passed"
 else
     print_error "go vet found issues"
@@ -365,7 +365,7 @@ if ! command -v golangci-lint &> /dev/null; then
     print_info "Skipping lint check..."
 else
     # Use --new-from-rev=HEAD to only check changes
-    if golangci-lint run --new-from-rev=HEAD --timeout=3m ./... 2>&1; then
+    if GOWORK=off golangci-lint run --new-from-rev=HEAD --timeout=3m ./... 2>&1; then
         print_success "Linting passed"
     else
         print_error "Linting failed"
@@ -378,7 +378,7 @@ fi
 #
 print_header "Building"
 
-if go build ./... 2>&1; then
+if GOWORK=off go build ./... 2>&1; then
     print_success "Build successful"
 else
     print_error "Build failed"
@@ -391,7 +391,7 @@ fi
 print_header "Running Tests with Coverage"
 
 # Run tests with coverage
-TEST_OUTPUT=$(go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
+TEST_OUTPUT=$(GOWORK=off go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
 TEST_EXIT_CODE=$?
 
 if [ $TEST_EXIT_CODE -ne 0 ]; then
