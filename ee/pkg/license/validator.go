@@ -217,6 +217,11 @@ func (v *Validator) GetLicenseOrDefault(ctx context.Context) *License {
 	return license
 }
 
+// IsDevMode returns whether the validator is running in development mode.
+func (v *Validator) IsDevMode() bool {
+	return v.devMode
+}
+
 // InvalidateCache clears the license cache.
 func (v *Validator) InvalidateCache() {
 	v.mu.Lock()

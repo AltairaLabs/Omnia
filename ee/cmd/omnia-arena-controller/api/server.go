@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
+	"github.com/altairalabs/omnia/ee/pkg/license"
 )
 
 // HTTP header and content type constants.
@@ -26,22 +28,25 @@ const (
 
 // Server provides HTTP API endpoints for arena operations.
 type Server struct {
-	addr   string
-	log    logr.Logger
-	server *http.Server
+	addr             string
+	log              logr.Logger
+	server           *http.Server
+	licenseValidator *license.Validator
 }
 
 // NewServer creates a new API server.
-func NewServer(addr string, log logr.Logger) *Server {
+func NewServer(addr string, log logr.Logger, licenseValidator *license.Validator) *Server {
 	return &Server{
-		addr: addr,
-		log:  log.WithName("api-server"),
+		addr:             addr,
+		log:              log.WithName("api-server"),
+		licenseValidator: licenseValidator,
 	}
 }
 
 // Start starts the HTTP server.
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/license", s.handleGetLicense)
 	mux.HandleFunc("/api/render-template", s.handleRenderTemplate)
 	mux.HandleFunc("/api/preview-template", s.handlePreviewTemplate)
 	mux.HandleFunc("/healthz", s.handleHealthz)
@@ -201,6 +206,52 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		s.log.Error(err, "failed to encode response")
+	}
+}
+
+// licenseResponse is the JSON shape the dashboard expects.
+// The Go License struct uses JWT-style tags (lid, iat, exp) but the dashboard
+// expects (id, issuedAt, expiresAt), so we map explicitly.
+type licenseResponse struct {
+	ID        string           `json:"id"`
+	Tier      license.Tier     `json:"tier"`
+	Customer  string           `json:"customer"`
+	Features  license.Features `json:"features"`
+	Limits    license.Limits   `json:"limits"`
+	IssuedAt  string           `json:"issuedAt"`
+	ExpiresAt string           `json:"expiresAt"`
+}
+
+func toLicenseResponse(l *license.License) licenseResponse {
+	return licenseResponse{
+		ID:        l.ID,
+		Tier:      l.Tier,
+		Customer:  l.Customer,
+		Features:  l.Features,
+		Limits:    l.Limits,
+		IssuedAt:  l.IssuedAt.Format(time.RFC3339),
+		ExpiresAt: l.ExpiresAt.Format(time.RFC3339),
+	}
+}
+
+// handleGetLicense handles GET /api/v1/license.
+// Returns the current license information for the dashboard.
+func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var lic *license.License
+	if s.licenseValidator != nil {
+		lic = s.licenseValidator.GetLicenseOrDefault(r.Context())
+	} else {
+		lic = license.OpenCoreLicense()
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(toLicenseResponse(lic)); err != nil {
+		s.log.Error(err, "failed to encode license response")
 	}
 }
 

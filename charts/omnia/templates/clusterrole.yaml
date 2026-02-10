@@ -231,6 +231,7 @@ rules:
       - arenajobs
       - arenasources
       - arenatemplatesources
+      - sessionprivacypolicies
     verbs:
       - create
       - delete
@@ -246,6 +247,7 @@ rules:
       - arenajobs/finalizers
       - arenasources/finalizers
       - arenatemplatesources/finalizers
+      - sessionprivacypolicies/finalizers
     verbs:
       - update
   - apiGroups:
@@ -255,6 +257,7 @@ rules:
       - arenajobs/status
       - arenasources/status
       - arenatemplatesources/status
+      - sessionprivacypolicies/status
     verbs:
       - get
       - patch

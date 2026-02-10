@@ -20,7 +20,7 @@ import (
 )
 
 func TestNewServer(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 	if s == nil {
 		t.Fatal("NewServer() returned nil")
 	}
@@ -30,7 +30,7 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestHandleHealthz(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestHandleHealthz(t *testing.T) {
 }
 
 func TestHandleRenderTemplate_MethodNotAllowed(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	methods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	for _, method := range methods {
@@ -64,7 +64,7 @@ func TestHandleRenderTemplate_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleRenderTemplate_InvalidJSON(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/render-template", bytes.NewBufferString("invalid json"))
 	w := httptest.NewRecorder()
@@ -77,7 +77,7 @@ func TestHandleRenderTemplate_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleRenderTemplate_MissingTemplatePath(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := RenderTemplateRequest{
 		OutputPath:  "/output",
@@ -99,7 +99,7 @@ func TestHandleRenderTemplate_MissingTemplatePath(t *testing.T) {
 }
 
 func TestHandleRenderTemplate_MissingOutputPath(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := RenderTemplateRequest{
 		TemplatePath: "/template",
@@ -121,7 +121,7 @@ func TestHandleRenderTemplate_MissingOutputPath(t *testing.T) {
 }
 
 func TestHandleRenderTemplate_MissingProjectName(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := RenderTemplateRequest{
 		TemplatePath: "/template",
@@ -143,7 +143,7 @@ func TestHandleRenderTemplate_MissingProjectName(t *testing.T) {
 }
 
 func TestHandlePreviewTemplate_MethodNotAllowed(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	methods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	for _, method := range methods {
@@ -161,7 +161,7 @@ func TestHandlePreviewTemplate_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandlePreviewTemplate_InvalidJSON(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/preview-template", bytes.NewBufferString("invalid json"))
 	w := httptest.NewRecorder()
@@ -174,7 +174,7 @@ func TestHandlePreviewTemplate_InvalidJSON(t *testing.T) {
 }
 
 func TestHandlePreviewTemplate_MissingTemplatePath(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := PreviewTemplateRequest{
 		ProjectName: "test",
@@ -195,7 +195,7 @@ func TestHandlePreviewTemplate_MissingTemplatePath(t *testing.T) {
 }
 
 func TestHandlePreviewTemplate_MissingProjectName(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := PreviewTemplateRequest{
 		TemplatePath: "/template",
@@ -216,7 +216,7 @@ func TestHandlePreviewTemplate_MissingProjectName(t *testing.T) {
 }
 
 func TestServerShutdown_NilServer(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	// Server is nil before Start is called
 	err := s.Shutdown(context.Background())
@@ -228,7 +228,7 @@ func TestServerShutdown_NilServer(t *testing.T) {
 func TestServerStart_InvalidAddress(t *testing.T) {
 	// Test that Start returns an error when the address is invalid
 	// This covers the Start() function without needing goroutines
-	s := NewServer("invalid:::address", logr.Discard())
+	s := NewServer("invalid:::address", logr.Discard(), nil)
 
 	err := s.Start(context.Background())
 	if err == nil {
@@ -237,7 +237,7 @@ func TestServerStart_InvalidAddress(t *testing.T) {
 }
 
 func TestHandleRenderTemplate_InvalidTemplatePath(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := RenderTemplateRequest{
 		TemplatePath: "/nonexistent/path",
@@ -269,8 +269,45 @@ func TestHandleRenderTemplate_InvalidTemplatePath(t *testing.T) {
 	}
 }
 
+func TestHandleGetLicense_NilValidator(t *testing.T) {
+	s := NewServer(":8080", logr.Discard(), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/license", nil)
+	w := httptest.NewRecorder()
+
+	s.handleGetLicense(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp licenseResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp.ID != "open-core" {
+		t.Errorf("id = %q, want %q", resp.ID, "open-core")
+	}
+	if resp.Tier != "open-core" {
+		t.Errorf("tier = %q, want %q", resp.Tier, "open-core")
+	}
+}
+
+func TestHandleGetLicense_MethodNotAllowed(t *testing.T) {
+	s := NewServer(":8080", logr.Discard(), nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/license", nil)
+	w := httptest.NewRecorder()
+
+	s.handleGetLicense(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
 func TestHandlePreviewTemplate_InvalidTemplatePath(t *testing.T) {
-	s := NewServer(":8080", logr.Discard())
+	s := NewServer(":8080", logr.Discard(), nil)
 
 	body := PreviewTemplateRequest{
 		TemplatePath: "/nonexistent/path",

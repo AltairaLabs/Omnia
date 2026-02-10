@@ -183,7 +183,10 @@ func main() {
 	var licenseValidator *license.Validator
 	validatorOpts := []license.ValidatorOption{}
 	if devMode {
-		setupLog.Info("WARNING: Running in dev mode with full-featured license. DO NOT USE IN PRODUCTION.")
+		setupLog.Info("========================================================================")
+		setupLog.Info("WARNING: Running with development license - NOT LICENSED FOR PRODUCTION USE.")
+		setupLog.Info("Please obtain a valid enterprise license at https://altairalabs.ai/licensing")
+		setupLog.Info("========================================================================")
 		validatorOpts = append(validatorOpts, license.WithDevMode())
 	}
 	licenseValidator, err = license.NewValidator(mgr.GetClient(), validatorOpts...)
@@ -326,12 +329,30 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 
 	// Start API server for template rendering
-	apiServer := api.NewServer(apiAddr, ctrl.Log)
+	apiServer := api.NewServer(apiAddr, ctrl.Log, licenseValidator)
 	go func() {
 		if err := apiServer.Start(ctx); err != nil && err != http.ErrServerClosed {
 			setupLog.Error(err, "API server error")
 		}
 	}()
+
+	// Start periodic dev mode warning
+	if devMode {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					setupLog.Info( //nolint:lll
+						"WARNING: Running with development license - NOT LICENSED FOR PRODUCTION USE. " +
+							"Please obtain a valid enterprise license at https://altairalabs.ai/licensing")
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	setupLog.Info("starting arena controller manager")
 	if err := mgr.Start(ctx); err != nil {
