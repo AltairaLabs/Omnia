@@ -657,6 +657,54 @@ func TestMergeEncryption_BaseKMSNoOverride(t *testing.T) {
 	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, result.KMSProvider)
 }
 
+func TestMergeEncryption_KeyIDOverride(t *testing.T) {
+	base := &omniav1alpha1.EncryptionConfig{
+		Enabled:     true,
+		KMSProvider: omniav1alpha1.KMSProviderAzureKeyVault,
+		KeyID:       "base-key-1",
+	}
+	override := &omniav1alpha1.EncryptionConfig{
+		KeyID: "child-key-2",
+	}
+	result := mergeEncryption(base, override)
+	require.NotNil(t, result)
+	assert.True(t, result.Enabled)
+	assert.Equal(t, omniav1alpha1.KMSProviderAzureKeyVault, result.KMSProvider)
+	assert.Equal(t, "child-key-2", result.KeyID)
+}
+
+func TestMergeEncryption_KeyIDFromBase(t *testing.T) {
+	base := &omniav1alpha1.EncryptionConfig{
+		Enabled:     true,
+		KMSProvider: omniav1alpha1.KMSProviderAWSKMS,
+		KeyID:       "parent-key",
+	}
+	override := &omniav1alpha1.EncryptionConfig{
+		Enabled: true,
+	}
+	result := mergeEncryption(base, override)
+	require.NotNil(t, result)
+	assert.Equal(t, omniav1alpha1.KMSProviderAWSKMS, result.KMSProvider)
+	assert.Equal(t, "parent-key", result.KeyID)
+}
+
+func TestMergeEncryption_ProviderOverrideIncludesKeyID(t *testing.T) {
+	base := &omniav1alpha1.EncryptionConfig{
+		Enabled:     true,
+		KMSProvider: omniav1alpha1.KMSProviderAWSKMS,
+		KeyID:       "aws-key",
+	}
+	override := &omniav1alpha1.EncryptionConfig{
+		KMSProvider: omniav1alpha1.KMSProviderAzureKeyVault,
+		KeyID:       "azure-key",
+	}
+	result := mergeEncryption(base, override)
+	require.NotNil(t, result)
+	assert.True(t, result.Enabled)
+	assert.Equal(t, omniav1alpha1.KMSProviderAzureKeyVault, result.KMSProvider)
+	assert.Equal(t, "azure-key", result.KeyID)
+}
+
 func TestMergeRetention_NilBase(t *testing.T) {
 	override := &omniav1alpha1.PrivacyRetentionConfig{
 		Facade: &omniav1alpha1.PrivacyRetentionTierConfig{

@@ -100,6 +100,11 @@ spec:
                   enabled:
                     description: enabled specifies whether encryption is active.
                     type: boolean
+                  keyID:
+                    description: |-
+                      keyID is the identifier of the encryption key within the KMS provider.
+                      Required when enabled is true.
+                    type: string
                   kmsProvider:
                     description: |-
                       kmsProvider specifies the key management service to use.
@@ -125,6 +130,8 @@ spec:
                 x-kubernetes-validations:
                 - message: kmsProvider is required when encryption is enabled
                   rule: '!self.enabled || has(self.kmsProvider)'
+                - message: keyID is required when encryption is enabled
+                  rule: '!self.enabled || has(self.keyID)'
               level:
                 description: level defines the scope at which this policy applies.
                 enum:
