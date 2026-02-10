@@ -77,6 +77,7 @@ func main() {
 	var redisPassword string
 	var redisDB int
 	var workerServiceAccountName string
+	var enableWebhooks bool
 	var enableLicenseWebhooks bool
 	var devMode bool
 	var tlsOpts []func(*tls.Config)
@@ -105,6 +106,8 @@ func main() {
 		"Redis database number for Arena work queue.")
 	flag.StringVar(&workerServiceAccountName, "worker-service-account-name", "",
 		"ServiceAccount name for worker pods (for workload identity).")
+	flag.BoolVar(&enableWebhooks, "enable-webhooks", false,
+		"Enable webhook server for admission webhooks (requires TLS certificates).")
 	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
 		"Enable license validation webhooks for Arena resources.")
 	flag.BoolVar(&devMode, "dev-mode", false,
@@ -138,13 +141,16 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	webhookServerOptions := webhook.Options{TLSOpts: tlsOpts}
-	if len(webhookCertPath) > 0 {
-		webhookServerOptions.CertDir = webhookCertPath
-		webhookServerOptions.CertName = webhookCertName
-		webhookServerOptions.KeyName = webhookCertKey
+	var webhookServer webhook.Server
+	if enableWebhooks {
+		webhookServerOptions := webhook.Options{TLSOpts: tlsOpts}
+		if len(webhookCertPath) > 0 {
+			webhookServerOptions.CertDir = webhookCertPath
+			webhookServerOptions.CertName = webhookCertName
+			webhookServerOptions.KeyName = webhookCertKey
+		}
+		webhookServer = webhook.NewServer(webhookServerOptions)
 	}
-	webhookServer := webhook.NewServer(webhookServerOptions)
 
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
@@ -287,22 +293,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup webhooks
-	if err := arenawebhook.SetupSessionPrivacyPolicyWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "SessionPrivacyPolicy")
-		os.Exit(1)
-	}
+	// Setup webhooks (only when webhook server is enabled)
+	if enableWebhooks {
+		if err := arenawebhook.SetupSessionPrivacyPolicyWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "SessionPrivacyPolicy")
+			os.Exit(1)
+		}
 
-	if enableLicenseWebhooks {
-		if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaSource")
-			os.Exit(1)
+		if enableLicenseWebhooks {
+			if err := arenawebhook.SetupArenaSourceWebhookWithManager(mgr, licenseValidator); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "ArenaSource")
+				os.Exit(1)
+			}
+			if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
+				setupLog.Error(err, "unable to create webhook", "webhook", "ArenaJob")
+				os.Exit(1)
+			}
+			setupLog.Info("license validation webhooks enabled")
 		}
-		if err := arenawebhook.SetupArenaJobWebhookWithManager(mgr, licenseValidator); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ArenaJob")
-			os.Exit(1)
-		}
-		setupLog.Info("license validation webhooks enabled")
+		setupLog.Info("webhook server enabled")
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
