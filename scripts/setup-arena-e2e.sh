@@ -33,6 +33,21 @@ log_info() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
 log_error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
 
+retry() {
+    local retries=${1}; shift
+    local delay=${1}; shift
+    local attempt=0
+    until "$@"; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -ge "$retries" ]; then
+            log_error "Command failed after $retries attempts: $*"
+            return 1
+        fi
+        log_warn "Attempt $attempt/$retries failed. Retrying in ${delay}s..."
+        sleep "$delay"
+    done
+}
+
 # Clean up function
 cleanup() {
     log_info "Cleaning up Arena E2E environment..."
@@ -59,7 +74,7 @@ if kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER}$"; then
     kubectl config use-context "kind-${KIND_CLUSTER}"
 else
     log_info "Creating kind cluster '${KIND_CLUSTER}'..."
-    kind create cluster --name "$KIND_CLUSTER"
+    kind create cluster --name "$KIND_CLUSTER" --wait 60s
 fi
 
 # Build images (unless skipped)
@@ -89,11 +104,11 @@ log_info "Images loaded"
 
 # Deploy with Helm (matching Tilt enterprise setup - NO --wait flag)
 log_info "Building Helm dependencies..."
-helm dependency build charts/omnia
+retry 3 10 helm dependency build charts/omnia
 
 log_info "Deploying via Helm..."
 
-helm upgrade --install omnia charts/omnia \
+retry 2 15 helm upgrade --install omnia charts/omnia \
     --namespace "$NAMESPACE" \
     --create-namespace \
     --set image.repository=omnia-operator-dev \
