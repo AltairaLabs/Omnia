@@ -19,8 +19,10 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -85,6 +87,23 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/messages", h.handleGetMessages)
 }
 
+// extractRequestContext extracts client IP and User-Agent from the request.
+func extractRequestContext(r *http.Request) RequestContext {
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip != "" {
+		// X-Forwarded-For may contain multiple IPs; take the first (client).
+		if idx := strings.IndexByte(ip, ','); idx != -1 {
+			ip = strings.TrimSpace(ip[:idx])
+		}
+	} else {
+		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
+	return RequestContext{
+		IPAddress: ip,
+		UserAgent: r.Header.Get("User-Agent"),
+	}
+}
+
 // handleListSessions returns a paginated list of sessions filtered by workspace.
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	opts, err := parseListParams(r)
@@ -98,7 +117,8 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := h.service.ListSessions(r.Context(), opts)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	page, err := h.service.ListSessions(ctx, opts)
 	if err != nil {
 		h.log.Error(err, "ListSessions failed")
 		writeError(w, err)
@@ -131,7 +151,8 @@ func (h *Handler) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := h.service.SearchSessions(r.Context(), q, opts)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	page, err := h.service.SearchSessions(ctx, q, opts)
 	if err != nil {
 		h.log.Error(err, "SearchSessions failed")
 		writeError(w, err)
@@ -153,7 +174,8 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.service.GetSession(r.Context(), sessionID)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	sess, err := h.service.GetSession(ctx, sessionID)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.log.Error(err, "GetSession failed", "sessionID", sessionID)
@@ -186,7 +208,8 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		AfterSeq:  after,
 	}
 
-	msgs, err := h.service.GetMessages(r.Context(), sessionID, opts)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	msgs, err := h.service.GetMessages(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.log.Error(err, "GetMessages failed", "sessionID", sessionID)

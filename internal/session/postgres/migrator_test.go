@@ -138,7 +138,7 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 10, "should have at least 10 migration files (5 up + 5 down)")
+	assert.GreaterOrEqual(t, len(entries), 12, "should have at least 12 migration files (6 up + 6 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -146,6 +146,8 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 		"000001_create_sessions.down.sql",
 		"000005_create_partition_management.up.sql",
 		"000005_create_partition_management.down.sql",
+		"000006_create_audit_log.up.sql",
+		"000006_create_audit_log.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
@@ -182,7 +184,7 @@ func TestMigrator_UpDown(t *testing.T) {
 	// Verify version
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(5), v)
+	assert.Equal(t, uint(6), v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
@@ -210,7 +212,7 @@ func TestMigrator_TablesExist(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all expected tables exist as partitioned tables
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (
@@ -440,7 +442,7 @@ func TestMigrator_CleanTeardown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all tables are gone
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (

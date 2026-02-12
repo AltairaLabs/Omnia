@@ -46,13 +46,18 @@ type ServiceConfig struct {
 	// CacheTTL is the TTL for hot cache entries populated from lower tiers.
 	// Defaults to DefaultCacheTTL (15 minutes) if zero.
 	CacheTTL time.Duration
+
+	// AuditLogger is an optional audit logger for session operations.
+	// When non-nil, session access events are logged asynchronously.
+	AuditLogger AuditLogger
 }
 
 // SessionService provides tiered session retrieval with hot→warm→cold fallback.
 type SessionService struct {
-	registry *providers.Registry
-	cacheTTL time.Duration
-	log      logr.Logger
+	registry    *providers.Registry
+	cacheTTL    time.Duration
+	auditLogger AuditLogger
+	log         logr.Logger
 }
 
 // NewSessionService creates a new SessionService with the given registry and config.
@@ -62,9 +67,10 @@ func NewSessionService(registry *providers.Registry, cfg ServiceConfig, log logr
 		ttl = DefaultCacheTTL
 	}
 	return &SessionService{
-		registry: registry,
-		cacheTTL: ttl,
-		log:      log.WithName("session-service"),
+		registry:    registry,
+		cacheTTL:    ttl,
+		auditLogger: cfg.AuditLogger,
+		log:         log.WithName("session-service"),
 	}
 }
 
@@ -77,6 +83,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try hot cache first.
 	sess, err := s.getFromHot(ctx, sessionID)
 	if err == nil {
+		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
 
@@ -84,6 +91,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	sess, err = s.getFromWarm(ctx, sessionID)
 	if err == nil {
 		s.populateHotCache(ctx, sess)
+		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
 
@@ -91,6 +99,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	sess, err = s.getFromCold(ctx, sessionID)
 	if err == nil {
 		s.populateHotCache(ctx, sess)
+		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
 
@@ -110,6 +119,7 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 		if hot, err := s.registry.HotCache(); err == nil {
 			msgs, err := hot.GetRecentMessages(ctx, sessionID, opts.Limit)
 			if err == nil {
+				s.auditMessagesAccess(ctx, sessionID, len(msgs))
 				return msgs, nil
 			}
 			if !errors.Is(err, session.ErrSessionNotFound) {
@@ -122,6 +132,7 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 	if warm, err := s.registry.WarmStore(); err == nil {
 		msgs, err := warm.GetMessages(ctx, sessionID, opts)
 		if err == nil {
+			s.auditMessagesAccess(ctx, sessionID, len(msgs))
 			return msgs, nil
 		}
 		if !errors.Is(err, session.ErrSessionNotFound) {
@@ -133,7 +144,9 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 	if cold, err := s.registry.ColdArchive(); err == nil {
 		sess, err := cold.GetSession(ctx, sessionID)
 		if err == nil {
-			return filterMessages(sess.Messages, opts), nil
+			msgs := filterMessages(sess.Messages, opts)
+			s.auditMessagesAccess(ctx, sessionID, len(msgs))
+			return msgs, nil
 		}
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			s.log.Error(err, "cold archive GetSession failed", "sessionID", sessionID)
@@ -149,7 +162,12 @@ func (s *SessionService) ListSessions(ctx context.Context, opts providers.Sessio
 	if err != nil {
 		return nil, ErrWarmStoreRequired
 	}
-	return warm.ListSessions(ctx, opts)
+	page, err := warm.ListSessions(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	s.auditSearch(ctx, "", opts.WorkspaceName, len(page.Sessions))
+	return page, nil
 }
 
 // SearchSessions performs full-text search across sessions. Requires a warm store.
@@ -158,7 +176,12 @@ func (s *SessionService) SearchSessions(ctx context.Context, query string, opts 
 	if err != nil {
 		return nil, ErrWarmStoreRequired
 	}
-	return warm.SearchSessions(ctx, query, opts)
+	page, err := warm.SearchSessions(ctx, query, opts)
+	if err != nil {
+		return nil, err
+	}
+	s.auditSearch(ctx, query, opts.WorkspaceName, len(page.Sessions))
+	return page, nil
 }
 
 // getFromHot attempts to retrieve a session from the hot cache.
@@ -216,6 +239,56 @@ func isHotEligible(opts providers.MessageQueryOpts) bool {
 		return false
 	}
 	return true
+}
+
+// --- audit helpers ----------------------------------------------------------
+
+// auditSessionAccess logs a session_accessed event if an audit logger is configured.
+func (s *SessionService) auditSessionAccess(ctx context.Context, sess *session.Session) {
+	if s.auditLogger == nil {
+		return
+	}
+	rc, _ := requestContextFromCtx(ctx)
+	s.auditLogger.LogEvent(ctx, &AuditEntry{
+		EventType: "session_accessed",
+		SessionID: sess.ID,
+		Workspace: sess.WorkspaceName,
+		AgentName: sess.AgentName,
+		Namespace: sess.Namespace,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+	})
+}
+
+// auditMessagesAccess logs a session_accessed event for message retrieval.
+func (s *SessionService) auditMessagesAccess(ctx context.Context, sessionID string, count int) {
+	if s.auditLogger == nil {
+		return
+	}
+	rc, _ := requestContextFromCtx(ctx)
+	s.auditLogger.LogEvent(ctx, &AuditEntry{
+		EventType:   "session_accessed",
+		SessionID:   sessionID,
+		ResultCount: count,
+		IPAddress:   rc.IPAddress,
+		UserAgent:   rc.UserAgent,
+	})
+}
+
+// auditSearch logs a session_searched event.
+func (s *SessionService) auditSearch(ctx context.Context, query, workspace string, count int) {
+	if s.auditLogger == nil {
+		return
+	}
+	rc, _ := requestContextFromCtx(ctx)
+	s.auditLogger.LogEvent(ctx, &AuditEntry{
+		EventType:   "session_searched",
+		Workspace:   workspace,
+		Query:       query,
+		ResultCount: count,
+		IPAddress:   rc.IPAddress,
+		UserAgent:   rc.UserAgent,
+	})
 }
 
 // filterMessages applies MessageQueryOpts to a slice of messages in memory.

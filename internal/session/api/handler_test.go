@@ -1167,3 +1167,210 @@ func TestWriteError_InvalidTime(t *testing.T) {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
+
+// --- Audit context tests ---
+
+func TestExtractRequestContext_XForwardedFor(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("X-Forwarded-For", "203.0.113.50, 70.41.3.18, 150.172.238.178")
+	req.Header.Set("User-Agent", "TestBrowser/1.0")
+
+	rc := extractRequestContext(req)
+	if rc.IPAddress != "203.0.113.50" {
+		t.Fatalf("expected IP 203.0.113.50, got %s", rc.IPAddress)
+	}
+	if rc.UserAgent != "TestBrowser/1.0" {
+		t.Fatalf("expected User-Agent TestBrowser/1.0, got %s", rc.UserAgent)
+	}
+}
+
+func TestExtractRequestContext_SingleXFF(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("X-Forwarded-For", "10.0.0.1")
+
+	rc := extractRequestContext(req)
+	if rc.IPAddress != "10.0.0.1" {
+		t.Fatalf("expected IP 10.0.0.1, got %s", rc.IPAddress)
+	}
+}
+
+func TestExtractRequestContext_RemoteAddr(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+
+	rc := extractRequestContext(req)
+	if rc.IPAddress != "192.168.1.1" {
+		t.Fatalf("expected IP 192.168.1.1, got %s", rc.IPAddress)
+	}
+}
+
+func TestWithRequestContext_RoundTrip(t *testing.T) {
+	rc := RequestContext{
+		IPAddress: "10.0.0.1",
+		UserAgent: "TestAgent",
+	}
+	ctx := withRequestContext(context.Background(), rc)
+
+	got, ok := requestContextFromCtx(ctx)
+	if !ok {
+		t.Fatal("expected RequestContext in context")
+	}
+	if got.IPAddress != "10.0.0.1" {
+		t.Fatalf("expected IP 10.0.0.1, got %s", got.IPAddress)
+	}
+	if got.UserAgent != "TestAgent" {
+		t.Fatalf("expected UserAgent TestAgent, got %s", got.UserAgent)
+	}
+}
+
+func TestRequestContextFromCtx_NotPresent(t *testing.T) {
+	_, ok := requestContextFromCtx(context.Background())
+	if ok {
+		t.Fatal("expected no RequestContext in empty context")
+	}
+}
+
+// --- Audit logger integration tests ---
+
+type mockAuditLogger struct {
+	entries []*AuditEntry
+}
+
+func (m *mockAuditLogger) LogEvent(_ context.Context, entry *AuditEntry) {
+	m.entries = append(m.entries, entry)
+}
+
+func (m *mockAuditLogger) Close() error {
+	return nil
+}
+
+func TestGetSession_AuditEvent(t *testing.T) {
+	hot := newMockHotCache()
+	hot.sessions["s1"] = testSession("s1")
+
+	reg := providers.NewRegistry()
+	reg.SetHotCache(hot)
+
+	audit := &mockAuditLogger{}
+	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
+
+	ctx := withRequestContext(context.Background(), RequestContext{
+		IPAddress: "10.0.0.1",
+		UserAgent: "TestAgent",
+	})
+
+	_, err := svc.GetSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(audit.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audit.entries))
+	}
+	entry := audit.entries[0]
+	if entry.EventType != "session_accessed" {
+		t.Fatalf("expected event_type session_accessed, got %s", entry.EventType)
+	}
+	if entry.SessionID != "s1" {
+		t.Fatalf("expected session ID s1, got %s", entry.SessionID)
+	}
+	if entry.IPAddress != "10.0.0.1" {
+		t.Fatalf("expected IP 10.0.0.1, got %s", entry.IPAddress)
+	}
+}
+
+func TestGetMessages_AuditEvent(t *testing.T) {
+	hot := newMockHotCache()
+	hot.sessions["s1"] = testSession("s1")
+
+	reg := providers.NewRegistry()
+	reg.SetHotCache(hot)
+
+	audit := &mockAuditLogger{}
+	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
+
+	_, err := svc.GetMessages(context.Background(), "s1", providers.MessageQueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(audit.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audit.entries))
+	}
+	if audit.entries[0].EventType != "session_accessed" {
+		t.Fatalf("expected event_type session_accessed, got %s", audit.entries[0].EventType)
+	}
+}
+
+func TestListSessions_AuditEvent(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.listResult = &providers.SessionPage{
+		Sessions:   []*session.Session{testSession("s1")},
+		TotalCount: 1,
+	}
+
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	audit := &mockAuditLogger{}
+	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
+
+	_, err := svc.ListSessions(context.Background(), providers.SessionListOpts{WorkspaceName: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(audit.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audit.entries))
+	}
+	if audit.entries[0].EventType != "session_searched" {
+		t.Fatalf("expected event_type session_searched, got %s", audit.entries[0].EventType)
+	}
+	if audit.entries[0].Workspace != "test" {
+		t.Fatalf("expected workspace test, got %s", audit.entries[0].Workspace)
+	}
+}
+
+func TestSearchSessions_AuditEvent(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.searchResult = &providers.SessionPage{
+		Sessions:   []*session.Session{testSession("s1")},
+		TotalCount: 1,
+	}
+
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	audit := &mockAuditLogger{}
+	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
+
+	_, err := svc.SearchSessions(context.Background(), "hello", providers.SessionListOpts{WorkspaceName: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(audit.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audit.entries))
+	}
+	if audit.entries[0].EventType != "session_searched" {
+		t.Fatalf("expected event_type session_searched, got %s", audit.entries[0].EventType)
+	}
+	if audit.entries[0].Query != "hello" {
+		t.Fatalf("expected query hello, got %s", audit.entries[0].Query)
+	}
+}
+
+func TestGetSession_NoAuditLogger(t *testing.T) {
+	hot := newMockHotCache()
+	hot.sessions["s1"] = testSession("s1")
+
+	reg := providers.NewRegistry()
+	reg.SetHotCache(hot)
+
+	// No audit logger configured — should not panic.
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	_, err := svc.GetSession(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
