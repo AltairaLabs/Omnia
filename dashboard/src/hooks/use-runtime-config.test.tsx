@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import {
   useRuntimeConfig,
+  useDevMode,
   useDemoMode,
   useReadOnlyMode,
   useGrafanaUrl,
@@ -88,6 +89,43 @@ describe("useRuntimeConfig", () => {
     // Should fall back to default config
     expect(result.current.config).toBeDefined();
     consoleSpy.mockRestore();
+  });
+});
+
+describe("useDevMode", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("should return isDevMode and loading state", () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ devMode: true, demoMode: false, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "", lokiEnabled: false, tempoEnabled: false }),
+    });
+
+    const { result } = renderHook(() => useDevMode());
+
+    expect(result.current).toHaveProperty("isDevMode");
+    expect(result.current).toHaveProperty("loading");
+    expect(typeof result.current.isDevMode).toBe("boolean");
+    expect(typeof result.current.loading).toBe("boolean");
+  });
+
+  it("should reflect dev mode from config", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ devMode: true, demoMode: false, readOnlyMode: false, readOnlyMessage: "", wsProxyUrl: "", grafanaUrl: "", lokiEnabled: false, tempoEnabled: false }),
+    });
+
+    const { result } = renderHook(() => useDevMode());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(typeof result.current.isDevMode).toBe("boolean");
   });
 });
 
