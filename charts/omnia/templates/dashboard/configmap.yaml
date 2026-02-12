@@ -13,6 +13,11 @@ data:
   OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-arena-controller:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}"
   {{- end }}
 
+  # Session API URL (server-side for session history proxy)
+  {{- if .Values.sessionApi.enabled }}
+  SESSION_API_URL: "http://{{ include "omnia.sessionApi.fullname" . }}:{{ .Values.sessionApi.service.port }}"
+  {{- end }}
+
   # Mode settings (demo mode defaults to false, not exposed in config)
   {{- if .Values.devMode }}
   NEXT_PUBLIC_DEV_MODE: "true"

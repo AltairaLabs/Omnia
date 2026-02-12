@@ -17,23 +17,21 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-
-	"github.com/altairalabs/omnia/ee/pkg/audit"
 )
 
-// auditQuerier abstracts the query method of audit.Logger for testability.
-type auditQuerier interface {
-	Query(ctx context.Context, opts audit.QueryOpts) (*audit.QueryResult, error)
+// httpQuerier abstracts the query method of Logger for testability.
+type httpQuerier interface {
+	Query(ctx context.Context, opts QueryOpts) (*QueryResult, error)
 }
 
 // Handler provides HTTP endpoints for querying audit logs.
 type Handler struct {
-	logger auditQuerier
+	logger httpQuerier
 	log    logr.Logger
 }
 
 // NewHandler creates a new audit query handler.
-func NewHandler(logger *audit.Logger, log logr.Logger) *Handler {
+func NewHandler(logger *Logger, log logr.Logger) *Handler {
 	return &Handler{
 		logger: logger,
 		log:    log.WithName("audit-handler"),
@@ -49,12 +47,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
-	opts := audit.QueryOpts{
+	opts := QueryOpts{
 		SessionID: q.Get("sessionId"),
 		UserID:    q.Get("userId"),
 		Workspace: q.Get("workspace"),
-		Limit:     parseIntParam(r, "limit", 50),
-		Offset:    parseIntParam(r, "offset", 0),
+		Limit:     httpParseIntParam(r, "limit", 50),
+		Offset:    httpParseIntParam(r, "offset", 0),
 	}
 
 	if eventTypes := q.Get("eventTypes"); eventTypes != "" {
@@ -64,7 +62,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if from := q.Get("from"); from != "" {
 		t, err := time.Parse(time.RFC3339, from)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid 'from' time format, expected RFC3339")
+			httpWriteError(w, http.StatusBadRequest, "invalid 'from' time format, expected RFC3339")
 			return
 		}
 		opts.From = t
@@ -73,7 +71,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if to := q.Get("to"); to != "" {
 		t, err := time.Parse(time.RFC3339, to)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid 'to' time format, expected RFC3339")
+			httpWriteError(w, http.StatusBadRequest, "invalid 'to' time format, expected RFC3339")
 			return
 		}
 		opts.To = t
@@ -82,7 +80,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	result, err := h.logger.Query(r.Context(), opts)
 	if err != nil {
 		h.log.Error(err, "audit query failed")
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		httpWriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -90,8 +88,8 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-// parseIntParam returns an integer query parameter or the default value.
-func parseIntParam(r *http.Request, name string, defaultVal int) int {
+// httpParseIntParam returns an integer query parameter or the default value.
+func httpParseIntParam(r *http.Request, name string, defaultVal int) int {
 	s := r.URL.Query().Get(name)
 	if s == "" {
 		return defaultVal
@@ -103,14 +101,14 @@ func parseIntParam(r *http.Request, name string, defaultVal int) int {
 	return v
 }
 
-// errorResponse is the JSON response for errors.
-type errorResponse struct {
+// httpErrorResponse is the JSON response for errors.
+type httpErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// writeError writes a JSON error response.
-func writeError(w http.ResponseWriter, status int, msg string) {
+// httpWriteError writes a JSON error response.
+func httpWriteError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorResponse{Error: msg})
+	_ = json.NewEncoder(w).Encode(httpErrorResponse{Error: msg})
 }

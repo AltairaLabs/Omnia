@@ -19,23 +19,21 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/altairalabs/omnia/ee/pkg/audit"
 )
 
-// mockQuerier implements auditQuerier for testing.
+// mockQuerier implements httpQuerier for testing.
 type mockQuerier struct {
-	result *audit.QueryResult
+	result *QueryResult
 	err    error
-	opts   audit.QueryOpts // captured from last call
+	opts   QueryOpts // captured from last call
 }
 
-func (m *mockQuerier) Query(_ context.Context, opts audit.QueryOpts) (*audit.QueryResult, error) {
+func (m *mockQuerier) Query(_ context.Context, opts QueryOpts) (*QueryResult, error) {
 	m.opts = opts
 	return m.result, m.err
 }
 
-func TestParseIntParam(t *testing.T) {
+func TestHttpParseIntParam(t *testing.T) {
 	tests := []struct {
 		name       string
 		url        string
@@ -53,28 +51,28 @@ func TestParseIntParam(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
-			got := parseIntParam(req, tt.param, tt.defaultVal)
+			got := httpParseIntParam(req, tt.param, tt.defaultVal)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestWriteError(t *testing.T) {
+func TestHttpWriteError(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeError(rec, http.StatusBadRequest, "bad request")
+	httpWriteError(rec, http.StatusBadRequest, "bad request")
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 
-	var resp errorResponse
+	var resp httpErrorResponse
 	err := json.NewDecoder(rec.Body).Decode(&resp)
 	assert.NoError(t, err)
 	assert.Equal(t, "bad request", resp.Error)
 }
 
-func TestWriteError_InternalServerError(t *testing.T) {
+func TestHttpWriteError_InternalServerError(t *testing.T) {
 	rec := httptest.NewRecorder()
-	writeError(rec, http.StatusInternalServerError, "internal server error")
+	httpWriteError(rec, http.StatusInternalServerError, "internal server error")
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -88,7 +86,7 @@ func TestHandleQuery_InvalidFromTime(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var resp errorResponse
+	var resp httpErrorResponse
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 	assert.Contains(t, resp.Error, "from")
 }
@@ -102,7 +100,7 @@ func TestHandleQuery_InvalidToTime(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	var resp errorResponse
+	var resp httpErrorResponse
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 	assert.Contains(t, resp.Error, "to")
 }
@@ -121,8 +119,8 @@ func TestRegisterRoutes(t *testing.T) {
 
 func TestHandleQuery_Success(t *testing.T) {
 	mq := &mockQuerier{
-		result: &audit.QueryResult{
-			Entries: []*audit.Entry{{ID: 1, EventType: "session_accessed"}},
+		result: &QueryResult{
+			Entries: []*Entry{{ID: 1, EventType: "session_accessed"}},
 			Total:   1,
 			HasMore: false,
 		},
@@ -136,7 +134,7 @@ func TestHandleQuery_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 
-	var result audit.QueryResult
+	var result QueryResult
 	err := json.NewDecoder(rec.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), result.Total)
@@ -150,7 +148,7 @@ func TestHandleQuery_Success(t *testing.T) {
 
 func TestHandleQuery_EventTypes(t *testing.T) {
 	mq := &mockQuerier{
-		result: &audit.QueryResult{Entries: []*audit.Entry{}, Total: 0},
+		result: &QueryResult{Entries: []*Entry{}, Total: 0},
 	}
 	h := &Handler{logger: mq, log: logr.Discard()}
 
@@ -164,7 +162,7 @@ func TestHandleQuery_EventTypes(t *testing.T) {
 
 func TestHandleQuery_FromTo(t *testing.T) {
 	mq := &mockQuerier{
-		result: &audit.QueryResult{Entries: []*audit.Entry{}, Total: 0},
+		result: &QueryResult{Entries: []*Entry{}, Total: 0},
 	}
 	h := &Handler{logger: mq, log: logr.Discard()}
 
@@ -187,7 +185,7 @@ func TestHandleQuery_QueryError(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	var resp errorResponse
+	var resp httpErrorResponse
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 	assert.Equal(t, "internal server error", resp.Error)
 }

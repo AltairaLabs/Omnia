@@ -1,0 +1,128 @@
+{{- if .Values.sessionApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnia.sessionApi.fullname" . }}
+  labels:
+    {{- include "omnia.sessionApi.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.sessionApi.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omnia.sessionApi.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "omnia.sessionApi.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        {{- with .Values.sessionApi.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "omnia.sessionApi.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      terminationGracePeriodSeconds: 35
+      containers:
+        - name: session-api
+          image: {{ include "omnia.sessionApi.image" . }}
+          imagePullPolicy: {{ .Values.sessionApi.image.pullPolicy }}
+          env:
+            - name: POSTGRES_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sessionApi.postgres.secretName }}
+                  key: {{ .Values.sessionApi.postgres.secretKey }}
+            {{- if .Values.sessionApi.redis.addrs }}
+            - name: REDIS_ADDRS
+              value: {{ .Values.sessionApi.redis.addrs | quote }}
+            {{- end }}
+            {{- if .Values.sessionApi.coldArchive.backend }}
+            - name: COLD_BACKEND
+              value: {{ .Values.sessionApi.coldArchive.backend | quote }}
+            - name: COLD_BUCKET
+              value: {{ .Values.sessionApi.coldArchive.bucket | quote }}
+            {{- if .Values.sessionApi.coldArchive.region }}
+            - name: COLD_REGION
+              value: {{ .Values.sessionApi.coldArchive.region | quote }}
+            {{- end }}
+            {{- if .Values.sessionApi.coldArchive.endpoint }}
+            - name: COLD_ENDPOINT
+              value: {{ .Values.sessionApi.coldArchive.endpoint | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.enterprise.enabled }}
+            - name: ENTERPRISE_ENABLED
+              value: "true"
+            {{- end }}
+            {{- with .Values.sessionApi.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: api
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.sessionApi.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      {{- with .Values.sessionApi.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.sessionApi.affinity }}
+      affinity:
+        {{- toYaml .Values.sessionApi.affinity | nindent 8 }}
+      {{- else if gt (int .Values.sessionApi.replicaCount) 1 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "omnia.sessionApi.selectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with .Values.sessionApi.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.sessionApi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

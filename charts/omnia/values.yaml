@@ -635,6 +635,75 @@ sessionRetention:
     extraEnv: []
 
 # ============================================================================
+# Session API Server
+# Long-running HTTP server for session history queries (dashboard backend)
+# ============================================================================
+
+sessionApi:
+  # -- Enable the session API server deployment
+  enabled: true
+  # -- Number of replicas (2+ recommended for fault tolerance)
+  replicaCount: 2
+  image:
+    # -- Session API image repository
+    repository: ghcr.io/altairalabs/omnia-session-api
+    # -- Session API image tag (defaults to Chart.AppVersion)
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  service:
+    # -- Service type
+    type: ClusterIP
+    # -- Service port
+    port: 8080
+  postgres:
+    # -- Name of the Secret containing the Postgres connection string
+    secretName: omnia-postgres
+    # -- Key in the Secret for the connection string
+    secretKey: connection-string
+    # -- Deploy a dev-only single-node Postgres (NOT for production)
+    dev:
+      enabled: false
+  redis:
+    # -- Comma-separated Redis addresses for hot cache (optional)
+    addrs: ""
+  coldArchive:
+    # -- Cold archive backend: s3, gcs, azure (leave empty to disable)
+    backend: ""
+    # -- Bucket/container name for cold storage
+    bucket: ""
+    # -- Cloud region (S3)
+    region: ""
+    # -- Custom endpoint for S3-compatible storage
+    endpoint: ""
+  serviceAccount:
+    # -- Annotations for the session-api ServiceAccount (e.g., IRSA, Workload Identity)
+    annotations: {}
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  # -- PodDisruptionBudget for high availability
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  # -- Additional pod annotations
+  podAnnotations: {}
+  # -- Node selector for pod scheduling
+  nodeSelector: {}
+  # -- Tolerations for pod scheduling
+  tolerations: []
+  # -- Affinity rules for pod scheduling
+  affinity: {}
+  # -- Topology spread constraints for distributing pods across failure domains
+  topologySpreadConstraints: []
+  # -- Additional environment variables for the session-api container
+  extraEnv: []
+
+# ============================================================================
 # Session Privacy Configuration
 # Privacy policies for session data: PII handling, encryption, opt-out
 # ============================================================================

@@ -202,6 +202,25 @@ docker_build(
 )
 
 # ============================================================================
+# Session API Server - Session history backend for the dashboard
+# ============================================================================
+
+docker_build(
+    'omnia-session-api-dev',
+    context='.',
+    dockerfile='./Dockerfile.session-api',
+    only=[
+        './cmd/session-api',
+        './internal/session',
+        './ee/pkg',
+        './ee/internal',
+        './pkg',
+        './go.mod',
+        './go.sum',
+    ],
+)
+
+# ============================================================================
 # Agent Images - Facade and Runtime containers for AgentRuntime pods
 # ============================================================================
 
@@ -388,6 +407,13 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
+    # Use dev images for session-api and enable dev Postgres
+    'sessionApi.image.repository=omnia-session-api-dev',
+    'sessionApi.image.tag=latest',
+    'sessionApi.image.pullPolicy=Never',
+    'sessionApi.replicaCount=1',  # Single replica for dev
+    'sessionApi.podDisruptionBudget.enabled=false',  # No PDB for dev
+    'sessionApi.postgres.dev.enabled=true',  # Deploy dev Postgres
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -618,7 +644,22 @@ k8s_resource(
         '3000:3000',  # Dashboard UI
         '3002:3002',  # WebSocket proxy for agent connections
     ],
-    resource_deps=dashboard_deps,
+    resource_deps=dashboard_deps + ['omnia-session-api'],
+)
+
+# Session API server and its dev Postgres
+k8s_resource(
+    'omnia-postgres',
+    labels=['session-api'],
+    objects=[
+        'omnia-postgres:secret',
+    ],
+)
+
+k8s_resource(
+    'omnia-session-api',
+    labels=['session-api'],
+    resource_deps=['omnia-postgres'],
 )
 
 if ENABLE_OBSERVABILITY:
