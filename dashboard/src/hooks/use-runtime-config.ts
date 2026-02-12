@@ -6,6 +6,7 @@ import { getRuntimeConfig, type RuntimeConfig } from "@/lib/config";
 // Use NEXT_PUBLIC_* as build-time defaults to avoid flash of wrong state
 // The API route will provide the runtime values if different
 const defaultConfig: RuntimeConfig = {
+  devMode: process.env.NEXT_PUBLIC_DEV_MODE === "true",
   demoMode: process.env.NEXT_PUBLIC_DEMO_MODE === "true",
   readOnlyMode: process.env.NEXT_PUBLIC_READ_ONLY_MODE === "true",
   readOnlyMessage: process.env.NEXT_PUBLIC_READ_ONLY_MESSAGE || "This dashboard is in read-only mode",
@@ -55,6 +56,14 @@ export function useRuntimeConfig() {
   }, []);
 
   return { config, loading };
+}
+
+/**
+ * Check if dev mode is enabled (development license, not for production).
+ */
+export function useDevMode() {
+  const { config, loading } = useRuntimeConfig();
+  return { isDevMode: config.devMode, loading };
 }
 
 /**

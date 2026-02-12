@@ -1,16 +1,16 @@
 "use client";
 
 import { ShieldAlert } from "lucide-react";
-import { useLicense } from "@/hooks/use-license";
+import { useDevMode } from "@/hooks/use-runtime-config";
 
 /**
  * Banner displayed when the instance is running with a development license.
- * Detects dev mode by checking license.id === "dev-mode".
+ * Detects dev mode via NEXT_PUBLIC_DEV_MODE runtime config (set by Helm when devMode=true).
  */
 export function DevModeLicenseBanner() {
-  const { license, isLoading } = useLicense();
+  const { isDevMode, loading } = useDevMode();
 
-  if (isLoading || license.id !== "dev-mode") {
+  if (loading || !isDevMode) {
     return null;
   }
 

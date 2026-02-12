@@ -14,6 +14,9 @@ data:
   {{- end }}
 
   # Mode settings (demo mode defaults to false, not exposed in config)
+  {{- if .Values.devMode }}
+  NEXT_PUBLIC_DEV_MODE: "true"
+  {{- end }}
   NEXT_PUBLIC_READ_ONLY_MODE: {{ .Values.dashboard.readOnlyMode | quote }}
   {{- if .Values.dashboard.readOnlyMessage }}
   NEXT_PUBLIC_READ_ONLY_MESSAGE: {{ .Values.dashboard.readOnlyMessage | quote }}

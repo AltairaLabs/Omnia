@@ -7,6 +7,7 @@
  */
 
 export interface RuntimeConfig {
+  devMode: boolean;
   demoMode: boolean;
   readOnlyMode: boolean;
   readOnlyMessage: string;
@@ -24,6 +25,7 @@ let cachedConfig: RuntimeConfig | null = null;
 let configPromise: Promise<RuntimeConfig> | null = null;
 
 const defaultConfig: RuntimeConfig = {
+  devMode: false,
   demoMode: false,
   readOnlyMode: false,
   readOnlyMessage: "This dashboard is in read-only mode",

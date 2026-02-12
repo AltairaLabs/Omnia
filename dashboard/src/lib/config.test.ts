@@ -45,6 +45,7 @@ describe("config", () => {
       const config = await getConfig();
 
       expect(config).toEqual({
+        devMode: false,
         demoMode: false,
         readOnlyMode: false,
         readOnlyMessage: "This dashboard is in read-only mode",
@@ -68,6 +69,7 @@ describe("config", () => {
       const config = await getConfig();
 
       expect(config).toEqual({
+        devMode: false,
         demoMode: false,
         readOnlyMode: false,
         readOnlyMessage: "This dashboard is in read-only mode",
