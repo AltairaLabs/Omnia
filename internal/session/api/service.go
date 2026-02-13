@@ -36,6 +36,7 @@ var (
 	ErrMissingWorkspace  = errors.New("workspace parameter is required")
 	ErrMissingQuery      = errors.New("search query parameter is required")
 	ErrMissingSessionID  = errors.New("session ID is required")
+	ErrMissingBody       = errors.New("request body is required")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.
@@ -182,6 +183,77 @@ func (s *SessionService) SearchSessions(ctx context.Context, query string, opts 
 	}
 	s.auditSearch(ctx, query, opts.WorkspaceName, len(page.Sessions))
 	return page, nil
+}
+
+// CreateSession persists a new session via the warm store.
+func (s *SessionService) CreateSession(ctx context.Context, sess *session.Session) error {
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	return warm.CreateSession(ctx, sess)
+}
+
+// AppendMessage adds a message to a session via the warm store.
+func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	return warm.AppendMessage(ctx, sessionID, msg)
+}
+
+// UpdateSessionStats applies incremental counter updates to a session.
+func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+
+	// Fetch the existing session to apply the incremental updates.
+	sess, err := warm.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	sess.TotalInputTokens += int64(update.AddInputTokens)
+	sess.TotalOutputTokens += int64(update.AddOutputTokens)
+	sess.EstimatedCostUSD += update.AddCostUSD
+	sess.ToolCallCount += update.AddToolCalls
+	sess.MessageCount += update.AddMessages
+	if update.SetStatus != "" {
+		sess.Status = update.SetStatus
+	}
+	sess.UpdatedAt = time.Now()
+
+	return warm.UpdateSession(ctx, sess)
+}
+
+// RefreshTTL extends the expiry of a session.
+func (s *SessionService) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+
+	sess, err := warm.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	sess.ExpiresAt = time.Now().Add(ttl)
+	sess.UpdatedAt = time.Now()
+
+	return warm.UpdateSession(ctx, sess)
 }
 
 // getFromHot attempts to retrieve a session from the hot cache.

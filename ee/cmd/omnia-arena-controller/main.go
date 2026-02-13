@@ -80,6 +80,7 @@ func main() {
 	var enableWebhooks bool
 	var enableLicenseWebhooks bool
 	var devMode bool
+	var sessionAPIURL string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to.")
@@ -106,6 +107,8 @@ func main() {
 		"Redis database number for Arena work queue.")
 	flag.StringVar(&workerServiceAccountName, "worker-service-account-name", "",
 		"ServiceAccount name for worker pods (for workload identity).")
+	flag.StringVar(&sessionAPIURL, "session-api-url", "",
+		"URL of session-api service for session recording in dev console pods.")
 	flag.BoolVar(&enableWebhooks, "enable-webhooks", false,
 		"Enable webhook server for admission webhooks (requires TLS certificates).")
 	flag.BoolVar(&enableLicenseWebhooks, "enable-license-webhooks", false,
@@ -277,6 +280,7 @@ func main() {
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		DevConsoleImage: arenaDevConsoleImage,
+		SessionAPIURL:   sessionAPIURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaDevSession")
 		os.Exit(1)

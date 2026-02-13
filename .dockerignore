@@ -13,6 +13,9 @@
 # Re-include embedded schema files for go:embed
 !internal/schema/*.json
 
+# Re-include SQL migration files for go:embed (session-api)
+!internal/session/postgres/migrations/*.sql
+
 # Re-include embedded license public key for go:embed
 !pkg/
 !pkg/license/

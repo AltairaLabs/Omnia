@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
@@ -21,8 +20,6 @@ import (
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/session"
-	sessionproviders "github.com/altairalabs/omnia/internal/session/providers"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2084,170 +2081,6 @@ func TestGetOrLoadK8sRegistryCached(t *testing.T) {
 	assert.Equal(t, cfg, gotCfg)
 }
 
-// TestSetSessionProviders tests setting session providers on the handler.
-func TestSetSessionProviders(t *testing.T) {
-	handler := &PromptKitHandler{
-		log:          logr.Discard(),
-		sessions:     make(map[string]*SessionState),
-		nsRegistries: make(map[string]*providers.Registry),
-	}
-
-	assert.Nil(t, handler.sessionProviders)
-
-	// Setting nil should be fine
-	handler.SetSessionProviders(nil)
-	assert.Nil(t, handler.sessionProviders)
-
-	// Setting a real registry should work
-	reg := sessionproviders.NewRegistry()
-	handler.SetSessionProviders(reg)
-	assert.NotNil(t, handler.sessionProviders)
-}
-
-// TestCreateRecorderNilProviders tests createRecorder when no session providers configured.
-func TestCreateRecorderNilProviders(t *testing.T) {
-	handler := &PromptKitHandler{
-		log:          logr.Discard(),
-		sessions:     make(map[string]*SessionState),
-		nsRegistries: make(map[string]*providers.Registry),
-	}
-
-	rec := handler.createRecorder("sess-1")
-	assert.Nil(t, rec, "should return nil when no session providers configured")
-}
-
-// TestCreateRecorderWithWarmStore tests createRecorder when a warm store is configured.
-func TestCreateRecorderWithWarmStore(t *testing.T) {
-	reg := sessionproviders.NewRegistry()
-	reg.SetWarmStore(&mockWarmStoreForHandler{})
-
-	handler := &PromptKitHandler{
-		log:              logr.Discard(),
-		sessions:         make(map[string]*SessionState),
-		nsRegistries:     make(map[string]*providers.Registry),
-		sessionProviders: reg,
-	}
-
-	rec := handler.createRecorder("sess-1")
-	require.NotNil(t, rec, "should return recorder when warm store is configured")
-	assert.NotNil(t, rec.EventStore())
-}
-
-// TestCreateRecorderNoWarmStore tests createRecorder when registry has no warm store.
-func TestCreateRecorderNoWarmStore(t *testing.T) {
-	reg := sessionproviders.NewRegistry()
-	// No warm store set
-
-	handler := &PromptKitHandler{
-		log:              logr.Discard(),
-		sessions:         make(map[string]*SessionState),
-		nsRegistries:     make(map[string]*providers.Registry),
-		sessionProviders: reg,
-	}
-
-	rec := handler.createRecorder("sess-1")
-	assert.Nil(t, rec, "should return nil when warm store is not configured")
-}
-
-// TestCreateEmitterNilRecorder tests createEmitter when no recorder is available.
-func TestCreateEmitterNilRecorder(t *testing.T) {
-	handler := &PromptKitHandler{
-		log:          logr.Discard(),
-		sessions:     make(map[string]*SessionState),
-		nsRegistries: make(map[string]*providers.Registry),
-	}
-
-	emitter := handler.createEmitter("sess-1", "hello", 0)
-	assert.Nil(t, emitter, "should return nil when no recorder available")
-}
-
-// TestCreateEmitterWithRecorder tests createEmitter with a working warm store.
-func TestCreateEmitterWithRecorder(t *testing.T) {
-	reg := sessionproviders.NewRegistry()
-	reg.SetWarmStore(&mockWarmStoreForHandler{})
-
-	handler := &PromptKitHandler{
-		log:              logr.Discard(),
-		sessions:         make(map[string]*SessionState),
-		nsRegistries:     make(map[string]*providers.Registry),
-		sessionProviders: reg,
-	}
-
-	emitter := handler.createEmitter("sess-1", "hello", 0)
-	assert.NotNil(t, emitter, "should return emitter when recorder is available")
-}
-
-// TestEmitCompletionEventsWithEmitter tests emitCompletionEvents with a real emitter.
-func TestEmitCompletionEventsWithEmitter(t *testing.T) {
-	reg := sessionproviders.NewRegistry()
-	reg.SetWarmStore(&mockWarmStoreForHandler{})
-
-	handler := &PromptKitHandler{
-		log:              logr.Discard(),
-		sessions:         make(map[string]*SessionState),
-		nsRegistries:     make(map[string]*providers.Registry),
-		sessionProviders: reg,
-	}
-
-	emitter := handler.createEmitter("sess-1", "hello", 0)
-	require.NotNil(t, emitter)
-
-	// Should not panic — exercises non-nil emitter path
-	handler.emitCompletionEvents(emitter, "mock", "response", nil, time.Now(), 1)
-
-	// With cost info
-	costInfo := &types.CostInfo{InputTokens: 10, OutputTokens: 5, TotalCost: 0.001}
-	handler.emitCompletionEvents(emitter, "mock", "response", costInfo, time.Now(), 1)
-}
-
-// TestHandleMessageWithSessionProviders tests HandleMessage with session recording enabled.
-func TestHandleMessageWithSessionProviders(t *testing.T) {
-	tmpDir := t.TempDir()
-	outputDir := filepath.Join(tmpDir, "output")
-
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output:    config.OutputConfig{Dir: outputDir},
-			OutDir:    outputDir,
-			ConfigDir: tmpDir,
-		},
-		LoadedProviders: map[string]*config.Provider{
-			"mock": {ID: "mock", Type: "mock", Model: "mock-model"},
-		},
-	}
-
-	reg := sessionproviders.NewRegistry()
-	reg.SetWarmStore(&mockWarmStoreForHandler{})
-
-	handler := &PromptKitHandler{
-		config:           cfg,
-		log:              logr.Discard(),
-		sessions:         make(map[string]*SessionState),
-		nsRegistries:     make(map[string]*providers.Registry),
-		sessionProviders: reg,
-	}
-
-	err := handler.buildComponents()
-	require.NoError(t, err)
-	defer func() {
-		if handler.providerRegistry != nil {
-			_ = handler.providerRegistry.Close()
-		}
-	}()
-
-	writer := &MockResponseWriter{}
-	msg := &facade.ClientMessage{Content: "test with recording"}
-
-	// Execute — should succeed and emit recording events
-	_ = handler.HandleMessage(context.Background(), "test-session", msg, writer)
-
-	// Verify the message was added to session history
-	sess := handler.getOrCreateSession("test-session")
-	sess.mu.Lock()
-	assert.NotEmpty(t, sess.Messages)
-	sess.mu.Unlock()
-}
-
 // TestBuildPredictionRequest tests building a prediction request with defaults.
 func TestBuildPredictionRequest(t *testing.T) {
 	handler := &PromptKitHandler{log: logr.Discard()}
@@ -2285,13 +2118,6 @@ func TestBuildPredictionRequestDefaults(t *testing.T) {
 	req := handler.buildPredictionRequest(msgs, "nonexistent", cfg)
 	assert.InDelta(t, 0.7, req.Temperature, 1e-6)
 	assert.Equal(t, 4096, req.MaxTokens)
-}
-
-// TestEmitCompletionEventsNilEmitter tests that emitCompletionEvents is a no-op with nil emitter.
-func TestEmitCompletionEventsNilEmitter(t *testing.T) {
-	handler := &PromptKitHandler{log: logr.Discard()}
-	// Should not panic
-	handler.emitCompletionEvents(nil, "mock", "response", nil, time.Now(), 1)
 }
 
 // TestExecuteStreamingWithCostInfo tests that cost info is returned from streaming.
@@ -2376,61 +2202,43 @@ func TestGetOrLoadK8sRegistryNoProviders(t *testing.T) {
 	assert.Equal(t, cfg, gotCfg)
 }
 
-// mockWarmStoreForHandler is a minimal WarmStoreProvider for handler tests.
-type mockWarmStoreForHandler struct{}
+// TestHandleMessageWithMockProvider verifies that HandleMessage
+// works correctly with the built-in mock provider.
+func TestHandleMessageWithMockProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "output")
 
-func (m *mockWarmStoreForHandler) CreateSession(_ context.Context, _ *session.Session) error {
-	return nil
+	cfg := &config.Config{
+		Defaults: config.Defaults{
+			Output:    config.OutputConfig{Dir: outputDir},
+			OutDir:    outputDir,
+			ConfigDir: tmpDir,
+		},
+		LoadedProviders: map[string]*config.Provider{
+			"mock": {ID: "mock", Type: "mock", Model: "mock-model"},
+		},
+	}
+
+	handler := &PromptKitHandler{
+		config:       cfg,
+		log:          logr.Discard(),
+		sessions:     make(map[string]*SessionState),
+		nsRegistries: make(map[string]*providers.Registry),
+	}
+
+	err := handler.buildComponents()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = handler.Close() })
+
+	writer := &MockResponseWriter{}
+	msg := &facade.ClientMessage{Content: "test message"}
+
+	err = handler.HandleMessage(context.Background(), "sess-test", msg, writer)
+	require.NoError(t, err)
+
+	// Verify the session has the user message in its in-memory history.
+	sess := handler.getOrCreateSession("sess-test")
+	sess.mu.Lock()
+	assert.GreaterOrEqual(t, len(sess.Messages), 1)
+	sess.mu.Unlock()
 }
-func (m *mockWarmStoreForHandler) GetSession(_ context.Context, _ string) (*session.Session, error) {
-	return nil, session.ErrSessionNotFound
-}
-func (m *mockWarmStoreForHandler) UpdateSession(_ context.Context, _ *session.Session) error {
-	return nil
-}
-func (m *mockWarmStoreForHandler) DeleteSession(_ context.Context, _ string) error { return nil }
-func (m *mockWarmStoreForHandler) AppendMessage(_ context.Context, _ string, _ *session.Message) error {
-	return nil
-}
-func (m *mockWarmStoreForHandler) GetMessages(
-	_ context.Context, _ string, _ sessionproviders.MessageQueryOpts,
-) ([]*session.Message, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) ListSessions(
-	_ context.Context, _ sessionproviders.SessionListOpts,
-) (*sessionproviders.SessionPage, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) SearchSessions(
-	_ context.Context, _ string, _ sessionproviders.SessionListOpts,
-) (*sessionproviders.SessionPage, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) CreatePartition(_ context.Context, _ time.Time) error { return nil }
-func (m *mockWarmStoreForHandler) DropPartition(_ context.Context, _ time.Time) error   { return nil }
-func (m *mockWarmStoreForHandler) ListPartitions(_ context.Context) ([]sessionproviders.PartitionInfo, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) GetSessionsOlderThan(
-	_ context.Context, _ time.Time, _ int,
-) ([]*session.Session, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) DeleteSessionsBatch(_ context.Context, _ []string) error {
-	return nil
-}
-func (m *mockWarmStoreForHandler) SaveArtifact(_ context.Context, _ *session.Artifact) error {
-	return nil
-}
-func (m *mockWarmStoreForHandler) GetArtifacts(_ context.Context, _ string) ([]*session.Artifact, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) GetSessionArtifacts(_ context.Context, _ string) ([]*session.Artifact, error) {
-	return nil, nil
-}
-func (m *mockWarmStoreForHandler) DeleteSessionArtifacts(_ context.Context, _ string) error {
-	return nil
-}
-func (m *mockWarmStoreForHandler) Ping(_ context.Context) error { return nil }
-func (m *mockWarmStoreForHandler) Close() error                 { return nil }

@@ -49,9 +49,23 @@ func NewMigrator(connString string, logger logr.Logger) (*Migrator, error) {
 	return &Migrator{m: m, logger: logger}, nil
 }
 
-// Up applies all pending migrations.
+// Up applies all pending migrations. If the database is in a dirty state
+// (from a previously failed migration), it forces the version back to the
+// last cleanly applied migration and retries.
 func (mg *Migrator) Up() error {
 	mg.logger.Info("applying migrations")
+
+	// Check for dirty state before attempting migration.
+	if v, dirty, err := mg.m.Version(); err == nil && dirty {
+		// The failed migration was v, so the last clean version is v-1.
+		cleanVersion := int(v) - 1
+		mg.logger.Info("database is dirty, forcing version to last clean migration",
+			"dirtyVersion", v, "forceVersion", cleanVersion)
+		if err := mg.m.Force(cleanVersion); err != nil {
+			return fmt.Errorf("forcing clean version %d: %w", cleanVersion, err)
+		}
+	}
+
 	if err := mg.m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("applying migrations: %w", err)
 	}
