@@ -38,7 +38,7 @@ import (
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
-	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/internal/tracing"
 )
 
 // Server implements the RuntimeService gRPC server.

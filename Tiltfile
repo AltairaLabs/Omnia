@@ -234,6 +234,7 @@ docker_build(
         './internal/agent',
         './internal/facade',
         './internal/session',
+        './internal/tracing',
         './pkg',
         './go.mod',
         './go.sum',
@@ -245,6 +246,7 @@ docker_build(
 runtime_only = [
     './cmd/runtime',
     './internal/runtime',
+    './internal/tracing',
     './pkg',
     './api/proto',
     './go.mod',
@@ -895,6 +897,7 @@ restart_agents_deps = [
     './internal/agent',
     './internal/facade',
     './internal/session',
+    './internal/tracing',
     './cmd/runtime',
     './internal/runtime',
 ]
@@ -916,22 +919,43 @@ local_resource(
 )
 
 # ============================================================================
-# Local Resources (optional helpers)
+# E2E Tests (run against the Tilt dev cluster)
 # ============================================================================
+# These resources run the e2e test suite against the existing Tilt dev cluster.
+# E2E_PREDEPLOYED=true tells the tests to skip operator/infra setup and teardown
+# (already handled by Tilt/Helm). E2E_SKIP_SETUP=true skips image building.
+# Image refs and session-api URL are set to match the Tilt Helm deployment.
+#
+# Usage: Click the trigger button in the Tilt UI, or run `tilt trigger e2e-tests`.
 
-# Run tests on file changes (optional - uncomment to enable)
-# local_resource(
-#     'go-test',
-#     cmd='make test',
-#     deps=['./internal', './pkg', './api'],
-#     labels=['test'],
-#     auto_init=False,
-# )
+_e2e_env = {
+    'E2E_SKIP_SETUP': 'true',
+    'E2E_PREDEPLOYED': 'true',
+    'E2E_SKIP_CLEANUP': 'true',
+    'SESSION_API_URL': 'http://omnia-session-api.omnia-system.svc.cluster.local:8080',
+    'E2E_FACADE_IMAGE': 'omnia-facade-dev:latest',
+    'E2E_RUNTIME_IMAGE': 'omnia-runtime-dev:latest',
+}
 
-# local_resource(
-#     'dashboard-lint',
-#     cmd='cd dashboard && npm run lint',
-#     deps=['./dashboard/src'],
-#     labels=['test'],
-#     auto_init=False,
-# )
+_e2e_env['KUBECONFIG'] = os.getenv('KUBECONFIG', os.path.join(os.getenv('HOME', ''), '.kube/config'))
+_e2e_cmd = 'kubectl config use-context %s && ' % k8s_context() + ' '.join(['%s=%s' % (k, v) for k, v in _e2e_env.items()])
+
+# Full e2e suite — runs all tests against the Tilt dev cluster.
+local_resource(
+    'e2e-tests',
+    cmd=_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -timeout 20m',
+    labels=['test'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['omnia-controller-manager', 'omnia-session-api'],
+)
+
+# CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).
+local_resource(
+    'e2e-tests-crds',
+    cmd=_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -ginkgo.label-filter=crds -timeout 20m',
+    labels=['test'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['omnia-controller-manager', 'omnia-session-api'],
+)

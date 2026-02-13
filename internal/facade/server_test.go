@@ -31,6 +31,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/tracing"
 )
 
 // Test constants.
@@ -498,6 +499,68 @@ func TestServerWithMetrics(t *testing.T) {
 	// Verify the metrics were set and server is valid
 	if server == nil {
 		t.Fatal("NewServer returned nil")
+	}
+}
+
+func TestServerWithTracingProvider(t *testing.T) {
+	// Create a no-op tracing provider (disabled, but exercises code paths)
+	provider, err := tracing.NewProvider(context.Background(), tracing.Config{Enabled: false})
+	if err != nil {
+		t.Fatalf("Failed to create tracing provider: %v", err)
+	}
+
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteDone("traced: " + msg.Content)
+		},
+	}
+
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+	log := logr.Discard()
+	server := NewServer(cfg, store, handler, log, WithTracingProvider(provider))
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	// Connect and send a message to exercise tracing spans
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=traced-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	// Send a message (triggers facade.session span, facade.message span, session_id attribute)
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+	if connectedMsg.Type != MessageTypeConnected {
+		t.Errorf("Expected connected, got %v", connectedMsg.Type)
+	}
+	if connectedMsg.SessionID == "" {
+		t.Error("Session ID should not be empty")
+	}
+
+	// Read done message
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+	if doneMsg.Type != MessageTypeDone {
+		t.Errorf("Expected done, got %v", doneMsg.Type)
+	}
+	if doneMsg.Content != "traced: hello" {
+		t.Errorf("Content = %q, want %q", doneMsg.Content, "traced: hello")
 	}
 }
 

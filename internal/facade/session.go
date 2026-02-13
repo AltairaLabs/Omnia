@@ -21,6 +21,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
@@ -29,6 +32,15 @@ import (
 
 // processMessage handles processing of an incoming client message.
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
+	// Start message span if tracing is enabled
+	if s.tracingProvider != nil {
+		var msgSpan trace.Span
+		ctx, msgSpan = s.tracingProvider.Tracer().Start(ctx, "facade.message",
+			trace.WithSpanKind(trace.SpanKindInternal),
+		)
+		defer msgSpan.End()
+	}
+
 	// Get or create session
 	sessionID, err := s.ensureSession(ctx, c, msg.SessionID, log)
 	if err != nil {
@@ -40,6 +52,16 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	ctx = logctx.WithSessionID(ctx, sessionID)
 	ctx = logctx.WithNamespace(ctx, c.namespace)
 	log = logctx.LoggerWithContext(s.log, ctx)
+
+	// Set session ID on tracing spans
+	if s.tracingProvider != nil {
+		span := trace.SpanFromContext(ctx)
+		span.SetAttributes(attribute.String("omnia.session_id", sessionID))
+		// Also set on the session span if not already set
+		if c.sessionSpan != nil {
+			c.sessionSpan.SetAttributes(attribute.String("omnia.session_id", sessionID))
+		}
+	}
 
 	// Update connection's session ID
 	c.mu.Lock()
@@ -67,6 +89,7 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 
 	// Store user message (only for regular messages)
 	if err := s.sessionStore.AppendMessage(ctx, sessionID, session.Message{
+		ID:        uuid.New().String(),
 		Role:      session.RoleUser,
 		Content:   msg.Content,
 		Metadata:  msg.Metadata,
@@ -112,9 +135,10 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 
 	// Create new session
 	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
-		AgentName: c.agentName,
-		Namespace: c.namespace,
-		TTL:       s.config.SessionTTL,
+		AgentName:     c.agentName,
+		Namespace:     c.namespace,
+		WorkspaceName: c.namespace,
+		TTL:           s.config.SessionTTL,
 	})
 	if err != nil {
 		return "", err
