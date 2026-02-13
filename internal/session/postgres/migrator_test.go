@@ -138,7 +138,7 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 14, "should have at least 14 migration files (7 up + 7 down)")
+	assert.GreaterOrEqual(t, len(entries), 16, "should have at least 16 migration files (8 up + 8 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -150,6 +150,8 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 		"000006_create_audit_log.down.sql",
 		"000007_add_audit_log_partitions.up.sql",
 		"000007_add_audit_log_partitions.down.sql",
+		"000008_tool_call_id_to_text.up.sql",
+		"000008_tool_call_id_to_text.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {

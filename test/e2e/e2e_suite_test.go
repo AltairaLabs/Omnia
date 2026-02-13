@@ -58,6 +58,9 @@ var (
 
 	// arenaControllerImage is the name of the arena controller image (Enterprise)
 	arenaControllerImage = "example.com/arena-controller:v0.0.1"
+
+	// sessionApiImage is the name of the session-api image
+	sessionApiImage = "example.com/omnia-session-api:v0.0.1"
 )
 
 // buildResult holds the result of an image build operation
@@ -87,7 +90,7 @@ var _ = BeforeSuite(func() {
 	// Build all images in parallel for faster setup
 	By("building all container images in parallel")
 	var wg sync.WaitGroup
-	results := make(chan buildResult, 5)
+	results := make(chan buildResult, 6)
 
 	// Build manager image
 	wg.Add(1)
@@ -134,6 +137,15 @@ var _ = BeforeSuite(func() {
 		results <- buildResult{name: "arena-controller", err: err}
 	}()
 
+	// Build session-api image
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("docker", "build", "-t", sessionApiImage, "-f", "Dockerfile.session-api", ".")
+		_, err := utils.Run(cmd)
+		results <- buildResult{name: "session-api", err: err}
+	}()
+
 	// Wait for all builds to complete
 	go func() {
 		wg.Wait()
@@ -150,7 +162,7 @@ var _ = BeforeSuite(func() {
 	// Load images into Kind in parallel
 	By("loading all container images into Kind in parallel")
 	var loadWg sync.WaitGroup
-	loadResults := make(chan buildResult, 5)
+	loadResults := make(chan buildResult, 6)
 
 	images := []struct {
 		name  string
@@ -161,6 +173,7 @@ var _ = BeforeSuite(func() {
 		{"runtime", runtimeImage},
 		{"arena-worker", arenaWorkerImage},
 		{"arena-controller", arenaControllerImage},
+		{"session-api", sessionApiImage},
 	}
 
 	for _, img := range images {

@@ -217,9 +217,21 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch messages separately — GetSession only returns session metadata.
+	msgPtrs, err := h.service.GetMessages(ctx, sessionID, providers.MessageQueryOpts{
+		Limit: defaultMessageLimit,
+	})
+	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
+		h.log.Error(err, "GetMessages failed", "sessionID", sessionID)
+	}
+	msgs := make([]session.Message, 0, len(msgPtrs))
+	for _, m := range msgPtrs {
+		msgs = append(msgs, *m)
+	}
+
 	writeJSON(w, SessionResponse{
 		Session:  sess,
-		Messages: sess.Messages,
+		Messages: msgs,
 	})
 }
 

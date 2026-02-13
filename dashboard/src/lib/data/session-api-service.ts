@@ -14,6 +14,7 @@ import type {
   Session,
   SessionSummary,
   Message,
+  ToolCall,
   SessionListOptions,
   SessionSearchOptions,
   SessionMessageOptions,
@@ -98,12 +99,116 @@ function transformApiMessage(api: ApiMessage): Message {
 }
 
 /**
+ * Pair tool_call and tool_result API messages into ToolCall objects attached
+ * to the assistant "done" messages, then transform the result to Message[].
+ *
+ * The recording writer stores three separate messages per tool-use cycle:
+ *   1. role=assistant, metadata.type=tool_call, toolCallId=X  (content = JSON {name, arguments})
+ *   2. role=system,    metadata.type=tool_result, toolCallId=X (content = result data)
+ *   3. role=assistant  (no metadata.type — the final "done" response)
+ *
+ * This function operates on raw ApiMessage objects (which have metadata) to
+ * build the pairing, then transforms to Message[] for the UI.
+ */
+function transformAndPairMessages(apiMessages: ApiMessage[]): Message[] {
+  // Index tool_result messages by toolCallId
+  const resultsByToolCallId = new Map<string, { content: string; isError: boolean }>();
+  const toolCallIds = new Set<string>(); // API message IDs to remove
+  const toolResultIds = new Set<string>(); // API message IDs to remove
+
+  for (const api of apiMessages) {
+    if (api.metadata?.type === "tool_result" && api.toolCallId) {
+      resultsByToolCallId.set(api.toolCallId, {
+        content: api.content,
+        isError: api.metadata?.is_error === "true",
+      });
+      toolResultIds.add(api.id);
+    }
+  }
+
+  // Build ToolCall objects from tool_call messages in sequence order
+  const pendingToolCalls: ToolCall[] = [];
+  for (const api of apiMessages) {
+    if (api.metadata?.type === "tool_call" && api.toolCallId) {
+      toolCallIds.add(api.id);
+
+      let name = "unknown";
+      let args: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(api.content);
+        name = parsed.name || name;
+        args = parsed.arguments || args;
+      } catch {
+        // Content is not valid JSON
+      }
+
+      const result = resultsByToolCallId.get(api.toolCallId);
+      let parsedResult: unknown;
+      if (result) {
+        try {
+          parsedResult = JSON.parse(result.content);
+        } catch {
+          parsedResult = result.content;
+        }
+      }
+
+      let status: "pending" | "success" | "error" = "pending";
+      if (result) {
+        status = result.isError ? "error" : "success";
+      }
+
+      pendingToolCalls.push({
+        id: api.toolCallId,
+        name,
+        arguments: args,
+        result: result ? parsedResult : undefined,
+        status,
+      });
+    }
+  }
+
+  // Transform non-tool messages and attach collected ToolCalls to
+  // the next assistant "done" message
+  const output: Message[] = [];
+  let toolCallsToAttach = [...pendingToolCalls];
+
+  for (const api of apiMessages) {
+    if (toolCallIds.has(api.id) || toolResultIds.has(api.id)) {
+      continue; // Skip raw tool messages — they're merged into ToolCall objects
+    }
+
+    const msg = transformApiMessage(api);
+
+    if (msg.role === "assistant" && toolCallsToAttach.length > 0) {
+      msg.toolCalls = toolCallsToAttach;
+      toolCallsToAttach = [];
+    }
+
+    output.push(msg);
+  }
+
+  // If there are leftover tool calls with no subsequent assistant message,
+  // attach them to the last assistant message
+  if (toolCallsToAttach.length > 0) {
+    const lastAssistant = [...output].reverse().find((m) => m.role === "assistant");
+    if (lastAssistant) {
+      lastAssistant.toolCalls = [...(lastAssistant.toolCalls || []), ...toolCallsToAttach];
+    } else if (output.length > 0) {
+      const last = output[output.length - 1];
+      last.toolCalls = [...(last.toolCalls || []), ...toolCallsToAttach];
+    }
+  }
+
+  return output;
+}
+
+/**
  * Transform an API session to a full Session object.
  */
 function transformApiSession(api: ApiSession): Session {
   const inputTokens = api.totalInputTokens || 0;
   const outputTokens = api.totalOutputTokens || 0;
-  const messages = (api.messages || []).map(transformApiMessage);
+  const messages = transformAndPairMessages(api.messages || []);
 
   return {
     id: api.id,
@@ -245,7 +350,7 @@ export class SessionApiService {
 
     const data = await response.json();
     return {
-      messages: (data.messages || []).map(transformApiMessage),
+      messages: transformAndPairMessages(data.messages || []),
       hasMore: data.hasMore || false,
     };
   }

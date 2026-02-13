@@ -40,9 +40,6 @@ const namespace = "omnia-system"
 // agentsNamespace is where test agents are deployed
 const agentsNamespace = "test-agents"
 
-// cacheNamespace is where Redis is deployed
-const cacheNamespace = "cache"
-
 // serviceAccountName created for the project
 const serviceAccountName = "omnia-controller-manager"
 
@@ -52,11 +49,23 @@ const metricsServiceName = "omnia-controller-manager-metrics-service"
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "omnia-metrics-binding"
 
-// agentImage is the agent container image used by AgentRuntime
-const (
-	facadeImageRef  = "example.com/omnia-facade:v0.0.1"
-	runtimeImageRef = "example.com/omnia-runtime:v0.0.1"
+// predeployed indicates the test is running against a pre-deployed cluster (e.g., Tilt dev).
+// When true, infrastructure setup/teardown (operator, CRDs, Postgres, session-api) is skipped.
+var predeployed = os.Getenv("E2E_PREDEPLOYED") == "true"
+
+// Configurable via env vars for pre-deployed clusters where the operator uses different image names.
+var (
+	sessionApiURL   = envOrDefault("SESSION_API_URL", "http://e2e-session-api.omnia-system.svc.cluster.local:8080")
+	facadeImageRef  = envOrDefault("E2E_FACADE_IMAGE", "example.com/omnia-facade:v0.0.1")
+	runtimeImageRef = envOrDefault("E2E_RUNTIME_IMAGE", "example.com/omnia-runtime:v0.0.1")
 )
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -64,7 +73,13 @@ var _ = Describe("Manager", Ordered, func() {
 	// Before running the tests, set up the environment by creating the namespace,
 	// enforce the restricted security policy to the namespace, installing CRDs,
 	// and deploying the controller.
+	// In predeployed mode (e.g., Tilt dev), this is skipped — the operator is already running.
 	BeforeAll(func() {
+		if predeployed {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Skipping Manager setup (E2E_PREDEPLOYED=true)\n")
+			return
+		}
+
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", namespace)
 		_, err := utils.Run(cmd)
@@ -99,10 +114,10 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(strategyPatchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager strategy")
 
-		By("patching the controller-manager to use the test facade and framework images")
+		By("patching the controller-manager to use the test facade and framework images and session-api URL")
 		patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 			"-n", namespace, "--type=strategic",
-			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s"]}]}}}}`, facadeImageRef, runtimeImageRef))
+			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-url=%s"]}]}}}}`, facadeImageRef, runtimeImageRef, sessionApiURL))
 		_, err = utils.Run(patchCmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller-manager")
 
@@ -114,11 +129,16 @@ var _ = Describe("Manager", Ordered, func() {
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
-	// and deleting the namespace.
+	// and deleting the namespace. In predeployed mode, only clean up test artifacts.
 	AfterAll(func() {
 		By("cleaning up the curl pod for metrics")
-		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
+		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
+
+		if predeployed {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Skipping Manager teardown (E2E_PREDEPLOYED=true)\n")
+			return
+		}
 
 		By("undeploying the controller-manager")
 		cmd = exec.Command("make", "undeploy")
@@ -196,9 +216,17 @@ var _ = Describe("Manager", Ordered, func() {
 				podOutput, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve controller-manager pod information")
 				podNames := utils.GetNonEmptyLines(podOutput)
-				g.Expect(podNames).To(HaveLen(1), "expected 1 controller pod running")
-				controllerPodName = podNames[0]
-				g.Expect(controllerPodName).To(ContainSubstring("controller-manager"))
+				// Filter to pods whose name contains "controller-manager" — in Helm-deployed
+				// clusters, the control-plane=controller-manager label is on all chart pods,
+				// so we need to narrow down to the actual controller-manager pod.
+				var filtered []string
+				for _, name := range podNames {
+					if strings.Contains(name, "controller-manager") {
+						filtered = append(filtered, name)
+					}
+				}
+				g.Expect(filtered).To(HaveLen(1), "expected 1 controller-manager pod running")
+				controllerPodName = filtered[0]
 
 				// Validate the pod's status
 				cmd = exec.Command("kubectl", "get",
@@ -251,6 +279,10 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyMetricsServerStarted, 3*time.Minute, time.Second).Should(Succeed())
 
 			// +kubebuilder:scaffold:e2e-metrics-webhooks-readiness
+
+			By("cleaning up any existing curl-metrics pod")
+			cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
 
 			By("creating the curl-metrics pod to access the metrics endpoint")
 			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
@@ -309,36 +341,133 @@ var _ = Describe("Manager", Ordered, func() {
 
 	Context("Omnia CRDs", Ordered, func() {
 		BeforeAll(func() {
-			By("creating the cache namespace for Redis")
-			cmd := exec.Command("kubectl", "create", "ns", cacheNamespace)
-			_, _ = utils.Run(cmd) // Ignore error if already exists
-
 			By("creating the agents namespace")
-			cmd = exec.Command("kubectl", "create", "ns", agentsNamespace)
+			cmd := exec.Command("kubectl", "create", "ns", agentsNamespace)
 			_, _ = utils.Run(cmd) // Ignore error if already exists
 
-			By("deploying Redis for session storage")
-			redisManifest := `
+			if predeployed {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Skipping infra setup (E2E_PREDEPLOYED=true) — Postgres and session-api already deployed\n")
+				return
+			}
+
+			By("deploying Postgres for session storage")
+			postgresManifest := `
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omnia-postgres
+  namespace: omnia-system
+type: Opaque
+stringData:
+  connection-string: "postgres://omnia:omnia@e2e-postgres.omnia-system.svc.cluster.local:5432/omnia?sslmode=disable"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: redis
-  namespace: cache
+  name: e2e-postgres
+  namespace: omnia-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: redis
+      app: e2e-postgres
   template:
     metadata:
       labels:
-        app: redis
+        app: e2e-postgres
     spec:
       containers:
-      - name: redis
-        image: redis:7-alpine
+      - name: postgres
+        image: postgres:17-alpine
         ports:
-        - containerPort: 6379
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: omnia
+        - name: POSTGRES_PASSWORD
+          value: omnia
+        - name: POSTGRES_DB
+          value: omnia
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "omnia"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-postgres
+  namespace: omnia-system
+spec:
+  selector:
+    app: e2e-postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(postgresManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to deploy Postgres")
+
+			By("waiting for Postgres to be ready")
+			verifyPostgresReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", namespace,
+					"-l", "app=e2e-postgres", "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"))
+			}
+			Eventually(verifyPostgresReady, 2*time.Minute, time.Second).Should(Succeed())
+
+			By("deploying session-api")
+			sessionApiManifest := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-session-api
+  namespace: omnia-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: e2e-session-api
+  template:
+    metadata:
+      labels:
+        app: e2e-session-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+      - name: session-api
+        image: %s
+        ports:
+        - name: api
+          containerPort: 8080
+        - name: health
+          containerPort: 8081
+        env:
+        - name: POSTGRES_CONN
+          valueFrom:
+            secretKeyRef:
+              name: omnia-postgres
+              key: connection-string
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 5
         resources:
           requests:
             cpu: 50m
@@ -346,33 +475,38 @@ spec:
           limits:
             cpu: 200m
             memory: 128Mi
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: redis
-  namespace: cache
+  name: e2e-session-api
+  namespace: omnia-system
 spec:
   selector:
-    app: redis
+    app: e2e-session-api
   ports:
-  - port: 6379
-    targetPort: 6379
-`
+  - port: 8080
+    targetPort: 8080
+`, sessionApiImage)
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(redisManifest)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to deploy Redis")
+			cmd.Stdin = strings.NewReader(sessionApiManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to deploy session-api")
 
-			By("waiting for Redis to be ready")
-			verifyRedisReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pods", "-n", cacheNamespace,
-					"-l", "app=redis", "-o", "jsonpath={.items[0].status.phase}")
+			By("waiting for session-api to be ready")
+			verifySessionApiReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", namespace,
+					"-l", "app=e2e-session-api", "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Running"))
+				g.Expect(output).To(Equal("True"))
 			}
-			Eventually(verifyRedisReady, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifySessionApiReady, 2*time.Minute, time.Second).Should(Succeed())
 		})
 
 		AfterAll(func() {
@@ -380,8 +514,21 @@ spec:
 			cmd := exec.Command("kubectl", "delete", "ns", agentsNamespace, "--ignore-not-found", "--timeout=60s")
 			_, _ = utils.Run(cmd)
 
-			By("cleaning up cache namespace")
-			cmd = exec.Command("kubectl", "delete", "ns", cacheNamespace, "--ignore-not-found", "--timeout=60s")
+			if predeployed {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Skipping infra teardown (E2E_PREDEPLOYED=true)\n")
+				return
+			}
+
+			By("cleaning up session-api and postgres")
+			cmd = exec.Command("kubectl", "delete", "deployment", "e2e-session-api", "-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "service", "e2e-session-api", "-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "deployment", "e2e-postgres", "-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "service", "e2e-postgres", "-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "secret", "omnia-postgres", "-n", namespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
@@ -531,19 +678,6 @@ spec:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create provider secret")
 
-			// Create Redis credentials secret
-			cmd = exec.Command("kubectl", "create", "secret", "generic", "redis-credentials",
-				"-n", agentsNamespace,
-				"--from-literal=url=redis://redis.cache.svc.cluster.local:6379",
-				"--dry-run=client", "-o", "yaml")
-			redisSecretYaml, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(redisSecretYaml)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create Redis credentials secret")
-
 			By("creating the AgentRuntime with mock provider annotation")
 			// Note: The agent image is configured on the operator via --facade-image/--framework-image flags,
 			// not in the CRD spec. The operator was patched in BeforeAll to use the test images.
@@ -565,9 +699,7 @@ spec:
     type: websocket
     port: 8080
   session:
-    type: redis
-    storeRef:
-      name: redis-credentials
+    type: memory
     ttl: "1h"
   runtime:
     replicas: 1
@@ -800,6 +932,15 @@ data:
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("true"), "Mock provider should be enabled for E2E testing")
+
+			By("verifying the facade container has SESSION_API_URL injected")
+			cmd = exec.Command("kubectl", "get", "pods",
+				"-n", agentsNamespace,
+				"-l", "app.kubernetes.io/instance=test-agent",
+				"-o", "jsonpath={.items[0].spec.containers[?(@.name=='facade')].env[?(@.name=='SESSION_API_URL')].value}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal(sessionApiURL), "Facade should have SESSION_API_URL set by the operator")
 		})
 
 		It("should handle WebSocket connections to the facade", func() {
@@ -987,10 +1128,10 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 
-		It("should persist session state in Redis", func() {
+		It("should persist session state via session-api", func() {
 			By("creating a session persistence test pod")
-			// Test that sessions are persisted by connecting twice with the same session ID
-			sessionTestManifest := `
+			// Test the production path: facade → httpclient.Store → session-api → Postgres
+			sessionTestManifest := fmt.Sprintf(`
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1004,36 +1145,36 @@ spec:
     command: ["sh", "-c"]
     args:
     - |
-      pip install websockets redis --quiet
+      pip install websockets requests --quiet
       python3 << 'PYTHON_SCRIPT'
       import asyncio
       import json
+      import time
+      import requests
       import websockets
-      import redis
       import sys
+
+      SESSION_API_URL = "%s"
 
       async def test_session_persistence():
           uri = "ws://test-agent.test-agents.svc.cluster.local:8080/ws?agent=test-agent"
-          redis_client = redis.from_url("redis://redis.cache.svc.cluster.local:6379")
 
           try:
-              # First connection - establish session
+              # Connect via WebSocket and send a message
               async with websockets.connect(uri, ping_interval=None) as ws:
-                  # Send first message (no session_id to trigger connected message)
                   await ws.send(json.dumps({
                       "type": "message",
                       "content": "Remember this: the secret code is ALPHA123"
                   }))
-                  print("Sent first message")
+                  print("Sent message")
 
-                  # Wait for connected + response
                   session_id = ""
                   for _ in range(10):
                       try:
                           response = await asyncio.wait_for(ws.recv(), timeout=30)
                           msg = json.loads(response)
                           msg_type = msg.get("type")
-                          print(f"First response: {msg_type}")
+                          print(f"Received: {msg_type}")
 
                           if msg_type == "connected":
                               session_id = msg.get("session_id", "")
@@ -1047,24 +1188,42 @@ spec:
                       print("ERROR: Did not receive session_id")
                       sys.exit(1)
 
-              # Check Redis for session data
-              print("Checking Redis for session data...")
-              keys = redis_client.keys(f"*{session_id}*")
-              print(f"Found {len(keys)} Redis keys for session")
+              # Wait for async write flush to session-api
+              print("Waiting for async write flush...")
+              time.sleep(3)
 
-              if len(keys) > 0:
-                  print("SUCCESS: Session data found in Redis")
-                  print("TEST PASSED: Session persistence verified")
-              else:
-                  # Session might be stored with different key pattern
-                  all_keys = redis_client.keys("*")
-                  print(f"Total Redis keys: {len(all_keys)}")
-                  if len(all_keys) > 0:
-                      print("SUCCESS: Redis has session data")
-                      print("TEST PASSED: Session persistence verified")
-                  else:
-                      print("WARNING: No Redis keys found, but connection worked")
-                      print("TEST PASSED: Session flow completed (Redis may use different storage)")
+              # Verify session exists via session-api
+              print(f"Querying session-api for session {session_id}...")
+              resp = requests.get(f"{SESSION_API_URL}/api/v1/sessions/{session_id}", timeout=10)
+              print(f"GET /sessions/{session_id}: status={resp.status_code}")
+              if resp.status_code != 200:
+                  print(f"ERROR: Expected 200, got {resp.status_code}: {resp.text}")
+                  sys.exit(1)
+
+              session_data = resp.json()
+              agent_name = session_data.get("agentName", session_data.get("agent_name", ""))
+              print(f"Session agent: {agent_name}")
+              if agent_name != "test-agent":
+                  print(f"ERROR: Expected agentName='test-agent', got '{agent_name}'")
+                  sys.exit(1)
+
+              # Verify messages exist
+              print(f"Querying messages for session {session_id}...")
+              resp = requests.get(f"{SESSION_API_URL}/api/v1/sessions/{session_id}/messages", timeout=10)
+              print(f"GET /sessions/{session_id}/messages: status={resp.status_code}")
+              if resp.status_code != 200:
+                  print(f"ERROR: Expected 200, got {resp.status_code}: {resp.text}")
+                  sys.exit(1)
+
+              messages_data = resp.json()
+              messages = messages_data.get("messages", [])
+              print(f"Found {len(messages)} messages")
+              if len(messages) == 0:
+                  print("ERROR: Expected at least 1 message")
+                  sys.exit(1)
+
+              print("SUCCESS: Session data persisted via session-api")
+              print("TEST PASSED: Session persistence verified")
 
           except Exception as e:
               print(f"ERROR: {e}")
@@ -1074,7 +1233,7 @@ spec:
 
       asyncio.run(test_session_persistence())
       PYTHON_SCRIPT
-`
+`, sessionApiURL)
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(sessionTestManifest)
 			_, err := utils.Run(cmd)
@@ -1088,7 +1247,24 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifySessionTest, 3*time.Minute, 5*time.Second).Should(Succeed())
+			ok := Eventually(verifySessionTest, 3*time.Minute, 5*time.Second).Should(Succeed())
+			if !ok {
+				// Dump debug info on failure
+				_, _ = fmt.Fprintf(GinkgoWriter, "\n=== DEBUG: Session test failed ===\n")
+				logsCmd := exec.Command("kubectl", "logs", "session-test", "-n", agentsNamespace)
+				if logs, err := utils.Run(logsCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Session test logs:\n%s\n", logs)
+				}
+				facadeCmd := exec.Command("kubectl", "logs", "-n", agentsNamespace, "-l", "app.kubernetes.io/instance=test-agent", "-c", "facade", "--tail=100")
+				if facadeLogs, err := utils.Run(facadeCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Facade logs:\n%s\n", facadeLogs)
+				}
+				sessionApiLogsCmd := exec.Command("kubectl", "logs", "-n", namespace, "-l", "app=e2e-session-api", "--tail=100")
+				if sessionApiLogs, err := utils.Run(sessionApiLogsCmd); err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Session-api logs:\n%s\n", sessionApiLogs)
+				}
+				Fail("Session test failed - see debug output above")
+			}
 
 			By("checking the session test logs")
 			cmd = exec.Command("kubectl", "logs", "session-test", "-n", agentsNamespace)

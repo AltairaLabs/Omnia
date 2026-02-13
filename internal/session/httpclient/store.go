@@ -78,9 +78,10 @@ type refreshTTLRequest struct {
 func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
 	id := uuid.New().String()
 	reqBody := createSessionRequest{
-		ID:        id,
-		AgentName: opts.AgentName,
-		Namespace: opts.Namespace,
+		ID:            id,
+		AgentName:     opts.AgentName,
+		Namespace:     opts.Namespace,
+		WorkspaceName: opts.WorkspaceName,
 	}
 	if opts.TTL > 0 {
 		reqBody.TTLSeconds = int(opts.TTL.Seconds())

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -110,6 +111,7 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 		}
 
 		msg := session.Message{
+			ID:         uuid.New().String(),
 			Role:       session.RoleAssistant,
 			Content:    string(content),
 			ToolCallID: toolCall.ID,
@@ -159,6 +161,7 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 		}
 
 		msg := session.Message{
+			ID:         uuid.New().String(),
 			Role:       session.RoleSystem,
 			Content:    content,
 			ToolCallID: result.ID,
@@ -185,6 +188,7 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 
 	go func() {
 		msg := session.Message{
+			ID:        uuid.New().String(),
 			Role:      session.RoleSystem,
 			Content:   fmt.Sprintf("%s: %s", code, message),
 			Timestamp: time.Now(),
@@ -251,6 +255,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 		}
 
 		msg := session.Message{
+			ID:           uuid.New().String(),
 			Role:         session.RoleAssistant,
 			Content:      content,
 			Timestamp:    time.Now(),
