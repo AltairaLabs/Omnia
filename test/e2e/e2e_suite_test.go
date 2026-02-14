@@ -115,10 +115,10 @@ var _ = BeforeSuite(func() {
 		wg.Add(1)
 		go func(name, pkg string) {
 			defer wg.Done()
-			// Each binary gets its own staging dir so Docker can COPY "entrypoint"
+			// Each binary gets its own staging dir with its real name for COPY
 			outDir := filepath.Join(distDir, name)
 			_ = os.MkdirAll(outDir, 0o755)
-			outPath := filepath.Join(outDir, "entrypoint")
+			outPath := filepath.Join(outDir, name)
 			cmd := exec.Command("go", "build", "-ldflags=-w -s", "-o", outPath, pkg)
 			cmd.Dir = projectDir
 			cmd.Env = append(os.Environ(),
@@ -150,13 +150,18 @@ var _ = BeforeSuite(func() {
 		go func(name, image string) {
 			defer pkgWg.Done()
 			contextDir := filepath.Join(distDir, name)
-			cmd := exec.Command("docker", "build",
-				"-t", image,
-				"-f", "test/e2e/Dockerfile.e2e",
-				contextDir,
-			)
-			_, err := utils.Run(cmd)
-			pkgResults <- buildResult{name: name, err: err}
+			// Write a per-binary Dockerfile so the COPY and ENTRYPOINT use the real name.
+			// K8s manifests override the container command (e.g. /manager), so the binary
+			// must live at the path the manifests expect.
+			df := fmt.Sprintf("FROM gcr.io/distroless/static:nonroot\nCOPY %s /%s\nUSER 65532:65532\nENTRYPOINT [\"/%s\"]\n", name, name, name)
+			dfErr := os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(df), 0o644)
+			if dfErr != nil {
+				pkgResults <- buildResult{name: name, err: dfErr}
+				return
+			}
+			cmd := exec.Command("docker", "build", "-t", image, contextDir)
+			_, buildErr := utils.Run(cmd)
+			pkgResults <- buildResult{name: name, err: buildErr}
 		}(b.name, b.image)
 	}
 	go func() {
