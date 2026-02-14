@@ -57,7 +57,9 @@ func (m *MockDeletionStore) GetRequest(_ context.Context, id string) (*DeletionR
 	if !ok {
 		return nil, ErrRequestNotFound
 	}
-	return req, nil
+	// Return a copy to avoid data races with concurrent mutations.
+	cp := *req
+	return &cp, nil
 }
 
 func (m *MockDeletionStore) UpdateRequest(_ context.Context, req *DeletionRequest) error {
