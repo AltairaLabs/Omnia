@@ -1,0 +1,423 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: sessionstreamingconfigs.omnia.altairalabs.ai
+spec:
+  group: omnia.altairalabs.ai
+  names:
+    kind: SessionStreamingConfig
+    listKind: SessionStreamingConfigList
+    plural: sessionstreamingconfigs
+    singular: sessionstreamingconfig
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.provider
+      name: Provider
+      type: string
+    - jsonPath: .spec.enabled
+      name: Enabled
+      type: boolean
+    - jsonPath: .status.connected
+      name: Connected
+      type: boolean
+    - jsonPath: .status.eventsPublished
+      name: Events
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SessionStreamingConfig is the Schema for the sessionstreamingconfigs API.
+          It defines configuration for real-time event streaming of session data to external systems.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of SessionStreamingConfig
+            properties:
+              enabled:
+                default: false
+                description: enabled specifies whether event streaming is active.
+                type: boolean
+              filter:
+                description: filter defines filtering rules for which events to stream.
+                properties:
+                  agents:
+                    description: agents is the list of agent names to stream events
+                      for. If empty, all agents are included.
+                    items:
+                      type: string
+                    type: array
+                  eventTypes:
+                    description: eventTypes is the list of event types to stream.
+                      If empty, all event types are streamed.
+                    items:
+                      type: string
+                    type: array
+                  workspaces:
+                    description: workspaces is the list of workspace names to stream
+                      events for. If empty, all workspaces are included.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              kafka:
+                description: kafka defines Kafka-specific configuration. Required
+                  when provider is "kafka".
+                properties:
+                  acks:
+                    default: all
+                    description: acks is the acknowledgment level for published messages.
+                    enum:
+                    - none
+                    - leader
+                    - all
+                    type: string
+                  auth:
+                    description: auth defines authentication configuration for Kafka.
+                    properties:
+                      mechanism:
+                        description: mechanism is the SASL mechanism to use.
+                        minLength: 1
+                        type: string
+                      secretRef:
+                        description: secretRef references a Secret containing Kafka
+                          credentials.
+                        properties:
+                          name:
+                            description: name is the name of the object.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - mechanism
+                    - secretRef
+                    type: object
+                  brokers:
+                    description: brokers is the list of Kafka broker addresses.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                  compression:
+                    default: snappy
+                    description: compression is the compression algorithm for published
+                      messages.
+                    enum:
+                    - none
+                    - gzip
+                    - snappy
+                    - lz4
+                    - zstd
+                    type: string
+                  partitionKey:
+                    default: session_id
+                    description: partitionKey is the field used for partition assignment.
+                    type: string
+                  retries:
+                    default: 3
+                    description: retries is the number of retries for failed publish
+                      attempts.
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  topic:
+                    description: topic is the Kafka topic to publish events to.
+                    minLength: 1
+                    type: string
+                required:
+                - brokers
+                - topic
+                type: object
+              kinesis:
+                description: kinesis defines AWS Kinesis-specific configuration. Required
+                  when provider is "kinesis".
+                properties:
+                  partitionKey:
+                    default: session_id
+                    description: partitionKey is the field used for partition assignment.
+                    type: string
+                  region:
+                    description: region is the AWS region where the Kinesis stream
+                      resides.
+                    minLength: 1
+                    type: string
+                  secretRef:
+                    description: secretRef references a Secret containing AWS credentials.
+                    properties:
+                      name:
+                        description: name is the name of the object.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  streamName:
+                    description: streamName is the Kinesis stream name.
+                    minLength: 1
+                    type: string
+                required:
+                - region
+                - streamName
+                type: object
+              nats:
+                description: nats defines NATS-specific configuration. Required when
+                  provider is "nats".
+                properties:
+                  auth:
+                    description: auth defines authentication configuration for NATS.
+                    properties:
+                      secretRef:
+                        description: secretRef references a Secret containing NATS
+                          credentials.
+                        properties:
+                          name:
+                            description: name is the name of the object.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - secretRef
+                    type: object
+                  stream:
+                    description: stream is the NATS JetStream stream name.
+                    minLength: 1
+                    type: string
+                  subject:
+                    description: subject is the NATS subject to publish events to.
+                    minLength: 1
+                    type: string
+                  url:
+                    description: url is the NATS server URL.
+                    minLength: 1
+                    type: string
+                required:
+                - stream
+                - subject
+                - url
+                type: object
+              provider:
+                description: provider is the streaming provider to use.
+                enum:
+                - kafka
+                - kinesis
+                - pulsar
+                - nats
+                type: string
+              pulsar:
+                description: pulsar defines Apache Pulsar-specific configuration.
+                  Required when provider is "pulsar".
+                properties:
+                  auth:
+                    description: auth defines authentication configuration for Pulsar.
+                    properties:
+                      secretRef:
+                        description: secretRef references a Secret containing Pulsar
+                          credentials.
+                        properties:
+                          name:
+                            description: name is the name of the object.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      type:
+                        description: type is the Pulsar authentication type.
+                        enum:
+                        - token
+                        - oauth2
+                        type: string
+                    required:
+                    - secretRef
+                    - type
+                    type: object
+                  serviceUrl:
+                    description: serviceUrl is the Pulsar service URL.
+                    minLength: 1
+                    type: string
+                  topic:
+                    description: topic is the Pulsar topic to publish events to.
+                    minLength: 1
+                    type: string
+                required:
+                - serviceUrl
+                - topic
+                type: object
+              transform:
+                description: transform defines how events are transformed before publishing.
+                properties:
+                  excludePII:
+                    default: false
+                    description: excludePII specifies whether to strip personally
+                      identifiable information from events.
+                    type: boolean
+                  format:
+                    default: json
+                    description: format is the output format for streamed events.
+                    enum:
+                    - json
+                    - avro
+                    - protobuf
+                    type: string
+                  includeFields:
+                    description: includeFields specifies which fields to include in
+                      the output. If empty, all fields are included.
+                    items:
+                      type: string
+                    type: array
+                type: object
+            required:
+            - provider
+            type: object
+            x-kubernetes-validations:
+            - message: provider-specific configuration must be set when streaming
+                is enabled
+              rule: '!self.enabled || (self.provider == ''kafka'' && has(self.kafka))
+                || (self.provider == ''kinesis'' && has(self.kinesis)) || (self.provider
+                == ''pulsar'' && has(self.pulsar)) || (self.provider == ''nats'' &&
+                has(self.nats))'
+          status:
+            description: status defines the observed state of SessionStreamingConfig
+            properties:
+              conditions:
+                description: conditions represent the current state of the SessionStreamingConfig
+                  resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              connected:
+                description: connected indicates whether the streaming provider is
+                  currently connected.
+                type: boolean
+              errors:
+                description: errors is a list of recent streaming errors.
+                items:
+                  description: StreamingErrorDetail captures a single streaming error.
+                  properties:
+                    message:
+                      description: message is the error message.
+                      type: string
+                    timestamp:
+                      description: timestamp is when the error occurred.
+                      format: date-time
+                      type: string
+                  required:
+                  - message
+                  - timestamp
+                  type: object
+                type: array
+              eventsPublished:
+                description: eventsPublished is the total number of events published
+                  since the config was created.
+                format: int64
+                type: integer
+              lastEventAt:
+                description: lastEventAt is the timestamp of the last successfully
+                  published event.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              phase:
+                description: phase represents the current lifecycle phase of the config.
+                enum:
+                - Active
+                - Error
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
