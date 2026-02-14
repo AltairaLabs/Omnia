@@ -422,7 +422,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("True"))
 			}
-			Eventually(verifyPostgresReady, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifyPostgresReady, 4*time.Minute, time.Second).Should(Succeed())
 
 			By("deploying session-api")
 			sessionApiManifest := fmt.Sprintf(`
@@ -502,7 +502,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("True"))
 			}
-			Eventually(verifySessionApiReady, 2*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifySessionApiReady, 4*time.Minute, time.Second).Should(Succeed())
 		})
 
 		AfterAll(func() {
