@@ -34,6 +34,7 @@ import (
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/internal/session/api"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
 	"github.com/altairalabs/omnia/internal/session/providers"
@@ -187,6 +188,12 @@ func run() error {
 	if f.enterprise && auditLogger != nil {
 		ah := audit.NewHandler(auditLogger, log)
 		ah.RegisterRoutes(apiMux)
+	}
+
+	if f.enterprise {
+		privacyStore := privacy.NewPreferencesStore(pool)
+		optOutHandler := privacy.NewOptOutHandler(privacyStore, log)
+		optOutHandler.RegisterRoutes(apiMux)
 	}
 
 	apiMux.Handle("GET /metrics", promhttp.Handler())

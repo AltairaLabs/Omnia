@@ -138,7 +138,7 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 16, "should have at least 16 migration files (8 up + 8 down)")
+	assert.GreaterOrEqual(t, len(entries), 18, "should have at least 18 migration files (9 up + 9 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -152,6 +152,8 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 		"000007_add_audit_log_partitions.down.sql",
 		"000008_tool_call_id_to_text.up.sql",
 		"000008_tool_call_id_to_text.down.sql",
+		"000009_create_privacy_preferences.up.sql",
+		"000009_create_privacy_preferences.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
@@ -188,7 +190,7 @@ func TestMigrator_UpDown(t *testing.T) {
 	// Verify version
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(8), v)
+	assert.Equal(t, uint(9), v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
