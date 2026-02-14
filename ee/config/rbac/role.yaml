@@ -101,6 +101,7 @@ rules:
   - arenasources/status
   - arenatemplatesources/status
   - sessionprivacypolicies/status
+  - sessionstreamingconfigs/status
   verbs:
   - get
   - patch
@@ -118,6 +119,7 @@ rules:
   - omnia.altairalabs.ai
   resources:
   - sessionprivacypolicies
+  - sessionstreamingconfigs
   verbs:
   - get
   - list
