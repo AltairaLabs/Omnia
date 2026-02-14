@@ -389,13 +389,6 @@ spec:
             command: ["pg_isready", "-U", "omnia"]
           initialDelaySeconds: 5
           periodSeconds: 5
-        resources:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
 ---
 apiVersion: v1
 kind: Service
@@ -464,13 +457,6 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 5
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 128Mi
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
