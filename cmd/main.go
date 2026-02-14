@@ -69,6 +69,7 @@ func main() {
 	var frameworkImagePullPolicy string
 	var tracingEnabled bool
 	var tracingEndpoint string
+	var sessionAPIURL string
 	var workspaceStorageClass string
 	var tlsOpts []func(*tls.Config)
 
@@ -86,6 +87,8 @@ func main() {
 		"Enable distributed tracing for agent runtime containers")
 	flag.StringVar(&tracingEndpoint, "tracing-endpoint", "",
 		"OTLP endpoint for traces (e.g., tempo.omnia-system.svc.cluster.local:4317)")
+	flag.StringVar(&sessionAPIURL, "session-api-url", "",
+		"Internal URL of the session-api service for session recording")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -177,6 +180,7 @@ func main() {
 		FrameworkImagePullPolicy: corev1.PullPolicy(frameworkImagePullPolicy),
 		TracingEnabled:           tracingEnabled,
 		TracingEndpoint:          tracingEndpoint,
+		SessionAPIURL:            sessionAPIURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

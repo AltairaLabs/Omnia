@@ -690,7 +690,7 @@ func collectArtifacts(rows pgx.Rows) ([]*session.Artifact, error) {
 
 // --- Partition management ---------------------------------------------------
 
-var partitionTables = []string{"sessions", "messages", "tool_calls", "message_artifacts"}
+var partitionTables = []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"}
 
 func (p *Provider) CreatePartition(ctx context.Context, date time.Time) error {
 	// Align to ISO week boundary (Monday).
@@ -741,8 +741,8 @@ func (p *Provider) DropPartition(ctx context.Context, date time.Time) error {
 		return providers.ErrPartitionNotFound
 	}
 
-	// Drop all 4 table partitions in reverse dependency order.
-	for _, table := range []string{"message_artifacts", "tool_calls", "messages", "sessions"} {
+	// Drop all table partitions in reverse dependency order.
+	for _, table := range []string{"audit_log", "message_artifacts", "tool_calls", "messages", "sessions"} {
 		name := pgx.Identifier{table + "_" + suffix}.Sanitize()
 		_, err := tx.Exec(ctx, "DROP TABLE IF EXISTS "+name)
 		if err != nil {

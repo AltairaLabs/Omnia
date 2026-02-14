@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -69,6 +70,7 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 			grpc.MaxCallRecvMsgSize(maxMsgSize),
 			grpc.MaxCallSendMsgSize(maxMsgSize),
 		),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client for %s: %w", cfg.Address, err)

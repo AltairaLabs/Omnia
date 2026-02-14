@@ -27,7 +27,7 @@ import (
 
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
-	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
@@ -39,7 +39,8 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	// Enrich context with session ID and start tracing span
 	ctx = logctx.WithSessionID(ctx, sessionID)
 	log := logctx.LoggerWithContext(s.log, ctx)
-	ctx = s.startTracingSpan(ctx, sessionID)
+	ctx, span := s.startTracingSpan(ctx, sessionID)
+	defer span.End()
 
 	// Extract mock scenario and prepare message content
 	scenario := s.extractScenario(metadata, content, log)
@@ -67,14 +68,13 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	return s.sendDoneMessage(ctx, stream, log, finalResponse, accumulatedContent, content)
 }
 
-// startTracingSpan starts a conversation span if tracing is enabled, returning the enriched context.
-func (s *Server) startTracingSpan(ctx context.Context, sessionID string) context.Context {
+// startTracingSpan starts a conversation span if tracing is enabled, returning the enriched context and span.
+func (s *Server) startTracingSpan(ctx context.Context, sessionID string) (context.Context, trace.Span) {
 	if s.tracingProvider != nil {
-		var span trace.Span
-		ctx, span = s.tracingProvider.StartConversationSpan(ctx, sessionID)
-		defer span.End()
+		return s.tracingProvider.StartConversationSpan(ctx, sessionID)
 	}
-	return ctx
+	// Return a no-op span from the context (may have been set by otelgrpc server handler)
+	return ctx, trace.SpanFromContext(ctx)
 }
 
 // extractScenario extracts the mock scenario from metadata/content if mock provider is enabled.

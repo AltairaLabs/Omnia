@@ -1,0 +1,114 @@
+/*
+Copyright 2026 Altaira Labs.
+
+SPDX-License-Identifier: FSL-1.1-Apache-2.0
+This file is part of Omnia Enterprise and is subject to the
+Functional Source License. See ee/LICENSE for details.
+*/
+
+package audit
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-logr/logr"
+)
+
+// httpQuerier abstracts the query method of Logger for testability.
+type httpQuerier interface {
+	Query(ctx context.Context, opts QueryOpts) (*QueryResult, error)
+}
+
+// Handler provides HTTP endpoints for querying audit logs.
+type Handler struct {
+	logger httpQuerier
+	log    logr.Logger
+}
+
+// NewHandler creates a new audit query handler.
+func NewHandler(logger *Logger, log logr.Logger) *Handler {
+	return &Handler{
+		logger: logger,
+		log:    log.WithName("audit-handler"),
+	}
+}
+
+// RegisterRoutes registers the audit API routes on the given mux.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/audit/sessions", h.handleQuery)
+}
+
+// handleQuery returns paginated audit log entries matching the query filters.
+func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	opts := QueryOpts{
+		SessionID: q.Get("sessionId"),
+		UserID:    q.Get("userId"),
+		Workspace: q.Get("workspace"),
+		Limit:     httpParseIntParam(r, "limit", 50),
+		Offset:    httpParseIntParam(r, "offset", 0),
+	}
+
+	if eventTypes := q.Get("eventTypes"); eventTypes != "" {
+		opts.EventTypes = strings.Split(eventTypes, ",")
+	}
+
+	if from := q.Get("from"); from != "" {
+		t, err := time.Parse(time.RFC3339, from)
+		if err != nil {
+			httpWriteError(w, http.StatusBadRequest, "invalid 'from' time format, expected RFC3339")
+			return
+		}
+		opts.From = t
+	}
+
+	if to := q.Get("to"); to != "" {
+		t, err := time.Parse(time.RFC3339, to)
+		if err != nil {
+			httpWriteError(w, http.StatusBadRequest, "invalid 'to' time format, expected RFC3339")
+			return
+		}
+		opts.To = t
+	}
+
+	result, err := h.logger.Query(r.Context(), opts)
+	if err != nil {
+		h.log.Error(err, "audit query failed")
+		httpWriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// httpParseIntParam returns an integer query parameter or the default value.
+func httpParseIntParam(r *http.Request, name string, defaultVal int) int {
+	s := r.URL.Query().Get(name)
+	if s == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil || v < 0 {
+		return defaultVal
+	}
+	return v
+}
+
+// httpErrorResponse is the JSON response for errors.
+type httpErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// httpWriteError writes a JSON error response.
+func httpWriteError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(httpErrorResponse{Error: msg})
+}

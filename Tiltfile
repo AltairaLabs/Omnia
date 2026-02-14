@@ -202,6 +202,25 @@ docker_build(
 )
 
 # ============================================================================
+# Session API Server - Session history backend for the dashboard
+# ============================================================================
+
+docker_build(
+    'omnia-session-api-dev',
+    context='.',
+    dockerfile='./Dockerfile.session-api',
+    only=[
+        './cmd/session-api',
+        './internal/session',
+        './ee/pkg',
+        './ee/internal',
+        './pkg',
+        './go.mod',
+        './go.sum',
+    ],
+)
+
+# ============================================================================
 # Agent Images - Facade and Runtime containers for AgentRuntime pods
 # ============================================================================
 
@@ -215,6 +234,7 @@ docker_build(
         './internal/agent',
         './internal/facade',
         './internal/session',
+        './internal/tracing',
         './pkg',
         './go.mod',
         './go.sum',
@@ -226,6 +246,7 @@ docker_build(
 runtime_only = [
     './cmd/runtime',
     './internal/runtime',
+    './internal/tracing',
     './pkg',
     './api/proto',
     './go.mod',
@@ -388,6 +409,13 @@ helm_set = [
     'framework.image.pullPolicy=Never',
     # Enable dashboard
     'dashboard.enabled=true',
+    # Use dev images for session-api and enable dev Postgres
+    'sessionApi.image.repository=omnia-session-api-dev',
+    'sessionApi.image.tag=latest',
+    'sessionApi.image.pullPolicy=Never',
+    'sessionApi.replicaCount=1',  # Single replica for dev
+    'sessionApi.podDisruptionBudget.enabled=false',  # No PDB for dev
+    'sessionApi.postgres.dev.enabled=true',  # Deploy dev Postgres
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -618,7 +646,22 @@ k8s_resource(
         '3000:3000',  # Dashboard UI
         '3002:3002',  # WebSocket proxy for agent connections
     ],
-    resource_deps=dashboard_deps,
+    resource_deps=dashboard_deps + ['omnia-session-api'],
+)
+
+# Session API server and its dev Postgres
+k8s_resource(
+    'omnia-postgres',
+    labels=['session-api'],
+    objects=[
+        'omnia-postgres:secret',
+    ],
+)
+
+k8s_resource(
+    'omnia-session-api',
+    labels=['session-api'],
+    resource_deps=['omnia-postgres'],
 )
 
 if ENABLE_OBSERVABILITY:
@@ -854,6 +897,7 @@ restart_agents_deps = [
     './internal/agent',
     './internal/facade',
     './internal/session',
+    './internal/tracing',
     './cmd/runtime',
     './internal/runtime',
 ]
@@ -875,22 +919,46 @@ local_resource(
 )
 
 # ============================================================================
-# Local Resources (optional helpers)
+# E2E Tests (run against the Tilt dev cluster)
 # ============================================================================
+# These resources run the e2e test suite against the existing Tilt dev cluster.
+# E2E_PREDEPLOYED=true tells the tests to skip operator/infra setup and teardown
+# (already handled by Tilt/Helm). E2E_SKIP_SETUP=true skips image building.
+# Image refs and session-api URL are set to match the Tilt Helm deployment.
+#
+# Usage: Click the trigger button in the Tilt UI, or run `tilt trigger e2e-tests`.
 
-# Run tests on file changes (optional - uncomment to enable)
-# local_resource(
-#     'go-test',
-#     cmd='make test',
-#     deps=['./internal', './pkg', './api'],
-#     labels=['test'],
-#     auto_init=False,
-# )
+_e2e_env = {
+    'E2E_SKIP_SETUP': 'true',
+    'E2E_PREDEPLOYED': 'true',
+    'E2E_SKIP_CLEANUP': 'true',
+    'ENABLE_ARENA_E2E': 'true',
+    'SESSION_API_URL': 'http://omnia-session-api.omnia-system.svc.cluster.local:8080',
+    'E2E_FACADE_IMAGE': 'omnia-facade-dev:latest',
+    'E2E_RUNTIME_IMAGE': 'omnia-runtime-dev:latest',
+    'E2E_SERVICE_ACCOUNT': 'omnia',
+    'E2E_METRICS_SERVICE': 'omnia-controller-manager-metrics-service',
+}
 
-# local_resource(
-#     'dashboard-lint',
-#     cmd='cd dashboard && npm run lint',
-#     deps=['./dashboard/src'],
-#     labels=['test'],
-#     auto_init=False,
-# )
+_e2e_env['KUBECONFIG'] = os.getenv('KUBECONFIG', os.path.join(os.getenv('HOME', ''), '.kube/config'))
+_e2e_cmd = 'kubectl config use-context %s && ' % k8s_context() + ' '.join(['%s=%s' % (k, v) for k, v in _e2e_env.items()])
+
+# Full e2e suite — runs all tests against the Tilt dev cluster.
+local_resource(
+    'e2e-tests',
+    cmd=_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -timeout 20m',
+    labels=['test'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['omnia-controller-manager', 'omnia-session-api', 'omnia-arena-controller'],
+)
+
+# CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).
+local_resource(
+    'e2e-tests-crds',
+    cmd=_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -ginkgo.label-filter=crds -timeout 20m',
+    labels=['test'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['omnia-controller-manager', 'omnia-session-api'],
+)

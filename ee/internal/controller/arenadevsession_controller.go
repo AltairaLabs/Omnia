@@ -57,6 +57,10 @@ type ArenaDevSessionReconciler struct {
 
 	// DevConsoleImage is the default image for dev console pods.
 	DevConsoleImage string
+
+	// SessionAPIURL is the URL of the session-api service for session recording.
+	// When set, SESSION_API_URL is injected into dev console pods.
+	SessionAPIURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenadevsessions,verbs=get;list;watch;create;update;patch;delete
@@ -528,6 +532,15 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 			},
 		},
 	}
+
+	// Inject SESSION_API_URL for session recording if configured
+	if r.SessionAPIURL != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "SESSION_API_URL",
+			Value: r.SessionAPIURL,
+		})
+	}
+
 	envVars = append(envVars, providerEnvVars...)
 
 	replicas := int32(1)

@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/internal/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 

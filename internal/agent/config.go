@@ -63,6 +63,12 @@ const (
 	EnvMediaAzureContainer = "OMNIA_MEDIA_AZURE_CONTAINER"
 	EnvMediaAzurePrefix    = "OMNIA_MEDIA_AZURE_PREFIX"
 	EnvMediaAzureKey       = "OMNIA_MEDIA_AZURE_KEY" // Optional, for cross-cloud or explicit credentials
+
+	// Tracing configuration.
+	EnvTracingEnabled    = "OMNIA_TRACING_ENABLED"
+	EnvTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
+	EnvTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
+	EnvTracingInsecure   = "OMNIA_TRACING_INSECURE"
 )
 
 // Default values.
@@ -176,6 +182,12 @@ type Config struct {
 	MediaAzurePrefix    string
 	MediaAzureKey       string // Optional, for cross-cloud or explicit credentials
 
+	// Tracing configuration.
+	TracingEnabled    bool
+	TracingEndpoint   string
+	TracingSampleRate float64
+	TracingInsecure   bool
+
 	// Health check port.
 	HealthPort int
 }
@@ -284,6 +296,17 @@ func LoadFromEnv() (*Config, error) {
 	cfg.MediaAzurePrefix = os.Getenv(EnvMediaAzurePrefix)
 	cfg.MediaAzureKey = os.Getenv(EnvMediaAzureKey)
 
+	// Parse tracing configuration
+	cfg.TracingEnabled = os.Getenv(EnvTracingEnabled) == "true"
+	cfg.TracingEndpoint = os.Getenv(EnvTracingEndpoint)
+	cfg.TracingInsecure = os.Getenv(EnvTracingInsecure) == "true"
+
+	tracingSampleRate, err := getEnvAsFloat64(EnvTracingSampleRate, 1.0)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvTracingSampleRate, err)
+	}
+	cfg.TracingSampleRate = tracingSampleRate
+
 	return cfg, nil
 }
 
@@ -387,4 +410,12 @@ func getEnvAsDuration(key string, defaultValue time.Duration) (time.Duration, er
 		return defaultValue, nil
 	}
 	return time.ParseDuration(valueStr)
+}
+
+func getEnvAsFloat64(key string, defaultValue float64) (float64, error) {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue, nil
+	}
+	return strconv.ParseFloat(valueStr, 64)
 }

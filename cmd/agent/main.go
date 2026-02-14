@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -33,6 +34,8 @@ import (
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
+	"github.com/altairalabs/omnia/internal/tracing"
 )
 
 const (
@@ -71,7 +74,42 @@ func main() {
 		"facade", cfg.FacadeType,
 		"port", cfg.FacadePort,
 		"handler", cfg.HandlerMode,
+		"tracingEnabled", cfg.TracingEnabled,
 	)
+
+	// Initialize tracing if enabled
+	var tracingProvider *tracing.Provider
+	if cfg.TracingEnabled {
+		tracingCfg := tracing.Config{
+			Enabled:        true,
+			Endpoint:       cfg.TracingEndpoint,
+			ServiceName:    fmt.Sprintf("omnia-facade-%s", cfg.AgentName),
+			ServiceVersion: "1.0.0",
+			Environment:    cfg.Namespace,
+			SampleRate:     cfg.TracingSampleRate,
+			Insecure:       cfg.TracingInsecure,
+		}
+
+		initCtx, initCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		var tracingErr error
+		tracingProvider, tracingErr = tracing.NewProvider(initCtx, tracingCfg)
+		initCancel()
+		if tracingErr != nil {
+			log.Error(tracingErr, "failed to initialize tracing")
+			// Continue without tracing - it's optional
+		} else {
+			defer func() {
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer shutdownCancel()
+				if err := tracingProvider.Shutdown(shutdownCtx); err != nil {
+					log.Error(err, "failed to shutdown tracing provider")
+				}
+			}()
+			log.Info("tracing initialized",
+				"endpoint", cfg.TracingEndpoint,
+				"sampleRate", cfg.TracingSampleRate)
+		}
+	}
 
 	// Initialize session store
 	store, err := initSessionStore(cfg, log)
@@ -93,7 +131,11 @@ func main() {
 	// Create WebSocket server with metrics
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
-	wsServer := facade.NewServer(wsConfig, store, handler, log, facade.WithMetrics(metrics))
+	serverOpts := []facade.ServerOption{facade.WithMetrics(metrics)}
+	if tracingProvider != nil {
+		serverOpts = append(serverOpts, facade.WithTracingProvider(tracingProvider))
+	}
+	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
 	// Create HTTP mux for routing
 	mux := http.NewServeMux()
@@ -183,7 +225,13 @@ func main() {
 	log.Info("shutdown complete")
 }
 
-func initSessionStore(cfg *agent.Config, log interface{ Info(string, ...any) }) (session.Store, error) {
+func initSessionStore(cfg *agent.Config, log logr.Logger) (session.Store, error) {
+	// Cluster-level session-api takes precedence over per-agent session type
+	if url := os.Getenv("SESSION_API_URL"); url != "" {
+		log.Info("using session-api HTTP store", "url", url)
+		return httpclient.NewStore(url, log), nil
+	}
+
 	switch cfg.SessionType {
 	case agent.SessionTypeMemory:
 		log.Info("using in-memory session store")
@@ -218,8 +266,9 @@ func readyzHandler(store session.Store, handler facade.MessageHandler) http.Hand
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Check session store connectivity
-		_, err := store.GetSession(ctx, "health-check-probe")
+		// Check session store connectivity using a nil UUID that won't match any
+		// real session but is a valid UUID (avoids PostgreSQL type errors).
+		_, err := store.GetSession(ctx, "00000000-0000-0000-0000-000000000000")
 		if err != nil && err != session.ErrSessionNotFound {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)

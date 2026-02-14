@@ -19,6 +19,7 @@ package facade
 import (
 	"context"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -26,8 +27,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
@@ -104,13 +109,14 @@ type ResponseWriter interface {
 
 // Server is a WebSocket server for agent communication.
 type Server struct {
-	config       ServerConfig
-	upgrader     websocket.Upgrader
-	sessionStore session.Store
-	handler      MessageHandler
-	metrics      ServerMetrics
-	mediaStorage media.Storage
-	log          logr.Logger
+	config          ServerConfig
+	upgrader        websocket.Upgrader
+	sessionStore    session.Store
+	handler         MessageHandler
+	metrics         ServerMetrics
+	mediaStorage    media.Storage
+	tracingProvider *tracing.Provider
+	log             logr.Logger
 
 	mu          sync.RWMutex
 	connections map[*websocket.Conn]*Connection
@@ -132,6 +138,14 @@ func WithMetrics(m ServerMetrics) ServerOption {
 func WithMediaStorage(ms media.Storage) ServerOption {
 	return func(s *Server) {
 		s.mediaStorage = ms
+	}
+}
+
+// WithTracingProvider sets the tracing provider for the server.
+// When set, the server creates spans for sessions and messages.
+func WithTracingProvider(p *tracing.Provider) ServerOption {
+	return func(s *Server) {
+		s.tracingProvider = p
 	}
 }
 
@@ -171,9 +185,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RUnlock()
 
-	// Extract agent info from query params or headers
+	// Extract agent info from query params, falling back to pod env vars
 	agentName := r.URL.Query().Get("agent")
+	if agentName == "" {
+		agentName = os.Getenv("OMNIA_AGENT_NAME")
+	}
 	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		namespace = os.Getenv("OMNIA_NAMESPACE")
+	}
 	if namespace == "" {
 		namespace = "default"
 	}
@@ -211,6 +231,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connCtx := logctx.WithAgent(context.Background(), agentName)
 	connCtx = logctx.WithNamespace(connCtx, namespace)
 	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
+
+	// Start session span if tracing is enabled
+	var sessionSpan trace.Span
+	if s.tracingProvider != nil {
+		connCtx, sessionSpan = s.tracingProvider.Tracer().Start(connCtx, "facade.session",
+			trace.WithSpanKind(trace.SpanKindServer),
+			trace.WithAttributes(
+				attribute.String("omnia.agent_name", agentName),
+				attribute.String("omnia.namespace", namespace),
+			),
+		)
+		c.sessionSpan = sessionSpan
+	}
 
 	log := logctx.LoggerWithContext(s.log, connCtx)
 	log.Info("new connection")

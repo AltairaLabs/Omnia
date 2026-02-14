@@ -36,6 +36,7 @@ import (
 	"github.com/altairalabs/omnia/ee/cmd/arena-dev-console/server"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
@@ -55,6 +56,7 @@ var (
 	sessionTTL    = flag.Duration("session-ttl", 30*time.Minute, "Session timeout duration")
 	workspacePath = flag.String("workspace-path", "/workspace-content", "Base path for workspace content")
 	configFile    = flag.String("config-file", "", "Optional: Path to arena config file for initialization")
+	sessionAPIURL = flag.String("session-api-url", "", "URL of session-api service for session recording")
 )
 
 func main() {
@@ -83,8 +85,20 @@ func main() {
 		"workspacePath", *workspacePath,
 	)
 
-	// Initialize session store (in-memory for dev console)
-	store := session.NewMemoryStore()
+	// Initialize session store — use HTTP client to session-api when available,
+	// fall back to in-memory store for local development.
+	var store session.Store
+	apiURL := *sessionAPIURL
+	if apiURL == "" {
+		apiURL = os.Getenv("SESSION_API_URL")
+	}
+	if apiURL != "" {
+		store = httpclient.NewStore(apiURL, log)
+		log.Info("session recording enabled via session-api", "url", apiURL)
+	} else {
+		store = session.NewMemoryStore()
+		log.Info("session recording disabled: no session-api URL configured")
+	}
 
 	// Create the PromptKit handler
 	handler, cleanup, err := createHandler(log, *configFile)

@@ -96,7 +96,7 @@ function parseQueryParams(url) {
  * The facade requires an `agent` query parameter.
  */
 function getAgentWsUrl(namespace, name, facadePort = DEFAULT_FACADE_PORT) {
-  return `ws://${name}.${namespace}.${SERVICE_DOMAIN}:${facadePort}/ws?agent=${encodeURIComponent(name)}`;
+  return `ws://${name}.${namespace}.${SERVICE_DOMAIN}:${facadePort}/ws?agent=${encodeURIComponent(name)}&namespace=${encodeURIComponent(namespace)}`;
 }
 
 /**

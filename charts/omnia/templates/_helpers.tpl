@@ -124,3 +124,39 @@ Compaction image
 {{- $tag := default .Chart.AppVersion .Values.sessionRetention.compaction.image.tag }}
 {{- printf "%s:%s" .Values.sessionRetention.compaction.image.repository $tag }}
 {{- end }}
+
+{{/*
+Session API fullname
+*/}}
+{{- define "omnia.sessionApi.fullname" -}}
+{{- printf "%s-session-api" (include "omnia.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Session API labels
+*/}}
+{{- define "omnia.sessionApi.labels" -}}
+helm.sh/chart: {{ include "omnia.chart" . }}
+{{ include "omnia.sessionApi.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Session API selector labels
+*/}}
+{{- define "omnia.sessionApi.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "omnia.name" . }}-session-api
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: session-api
+{{- end }}
+
+{{/*
+Session API image
+*/}}
+{{- define "omnia.sessionApi.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.sessionApi.image.tag }}
+{{- printf "%s:%s" .Values.sessionApi.image.repository $tag }}
+{{- end }}

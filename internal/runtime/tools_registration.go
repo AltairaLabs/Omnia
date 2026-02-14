@@ -23,7 +23,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 

@@ -51,6 +51,8 @@ type AgentRuntimeReconciler struct {
 	// Tracing configuration for runtime containers
 	TracingEnabled  bool
 	TracingEndpoint string
+	// SessionAPIURL is the internal URL of the session-api service for session recording
+	SessionAPIURL string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete

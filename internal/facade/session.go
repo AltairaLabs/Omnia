@@ -21,6 +21,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
@@ -29,6 +32,8 @@ import (
 
 // processMessage handles processing of an incoming client message.
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
+	ctx = s.startMessageSpan(ctx)
+
 	// Get or create session
 	sessionID, err := s.ensureSession(ctx, c, msg.SessionID, log)
 	if err != nil {
@@ -40,6 +45,8 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	ctx = logctx.WithSessionID(ctx, sessionID)
 	ctx = logctx.WithNamespace(ctx, c.namespace)
 	log = logctx.LoggerWithContext(s.log, ctx)
+
+	s.setSessionTraceAttributes(ctx, c, sessionID)
 
 	// Update connection's session ID
 	c.mu.Lock()
@@ -65,8 +72,39 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 		return s.handleUploadRequest(ctx, sessionID, msg, writer, log)
 	}
 
-	// Store user message (only for regular messages)
+	return s.processRegularMessage(ctx, c, sessionID, msg, writer, log)
+}
+
+// startMessageSpan starts a tracing span for the message if tracing is enabled.
+func (s *Server) startMessageSpan(ctx context.Context) context.Context {
+	if s.tracingProvider == nil {
+		return ctx
+	}
+	var msgSpan trace.Span
+	ctx, msgSpan = s.tracingProvider.Tracer().Start(ctx, "facade.message",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer msgSpan.End()
+	return ctx
+}
+
+// setSessionTraceAttributes sets the session ID on tracing spans.
+func (s *Server) setSessionTraceAttributes(ctx context.Context, c *Connection, sessionID string) {
+	if s.tracingProvider == nil {
+		return
+	}
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.String("omnia.session_id", sessionID))
+	if c.sessionSpan != nil {
+		c.sessionSpan.SetAttributes(attribute.String("omnia.session_id", sessionID))
+	}
+}
+
+// processRegularMessage stores the user message and dispatches to the handler.
+func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessionID string, msg *ClientMessage, writer *connResponseWriter, log logr.Logger) error {
+	// Store user message
 	if err := s.sessionStore.AppendMessage(ctx, sessionID, session.Message{
+		ID:        uuid.New().String(),
 		Role:      session.RoleUser,
 		Content:   msg.Content,
 		Metadata:  msg.Metadata,
@@ -112,9 +150,10 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 
 	// Create new session
 	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
-		AgentName: c.agentName,
-		Namespace: c.namespace,
-		TTL:       s.config.SessionTTL,
+		AgentName:     c.agentName,
+		Namespace:     c.namespace,
+		WorkspaceName: c.namespace,
+		TTL:           s.config.SessionTTL,
 	})
 	if err != nil {
 		return "", err

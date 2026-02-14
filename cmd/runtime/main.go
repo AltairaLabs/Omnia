@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -38,7 +39,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
-	"github.com/altairalabs/omnia/internal/runtime/tracing"
+	"github.com/altairalabs/omnia/internal/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -207,6 +208,7 @@ func main() {
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 	)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 

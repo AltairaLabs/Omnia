@@ -164,6 +164,8 @@ type CreateSessionOptions struct {
 	AgentName string
 	// Namespace is the Kubernetes namespace.
 	Namespace string
+	// WorkspaceName is the workspace this session belongs to (used for filtering in the dashboard).
+	WorkspaceName string
 	// TTL is the time-to-live for the session (zero means no expiry).
 	TTL time.Duration
 	// InitialState is optional initial state.

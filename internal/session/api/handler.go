@@ -19,8 +19,10 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -77,12 +79,62 @@ func NewHandler(service *SessionService, log logr.Logger) *Handler {
 	}
 }
 
+// Request types for write endpoints.
+
+// CreateSessionRequest is the JSON body for POST /api/v1/sessions.
+type CreateSessionRequest struct {
+	ID            string `json:"id"`
+	AgentName     string `json:"agentName"`
+	Namespace     string `json:"namespace"`
+	WorkspaceName string `json:"workspaceName,omitempty"`
+	TTLSeconds    int    `json:"ttlSeconds,omitempty"`
+}
+
+// AppendMessageRequest is the JSON body for POST /api/v1/sessions/{sessionID}/messages.
+type AppendMessageRequest struct {
+	session.Message
+}
+
+// UpdateStatsRequest is the JSON body for PATCH /api/v1/sessions/{sessionID}/stats.
+type UpdateStatsRequest struct {
+	session.SessionStatsUpdate
+}
+
+// RefreshTTLRequest is the JSON body for POST /api/v1/sessions/{sessionID}/ttl.
+type RefreshTTLRequest struct {
+	TTLSeconds int `json:"ttlSeconds"`
+}
+
 // RegisterRoutes registers the session API routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	// Read endpoints
 	mux.HandleFunc("GET /api/v1/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/v1/sessions/search", h.handleSearchSessions)
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}", h.handleGetSession)
 	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/messages", h.handleGetMessages)
+
+	// Write endpoints
+	mux.HandleFunc("POST /api/v1/sessions", h.handleCreateSession)
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/messages", h.handleAppendMessage)
+	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats)
+	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
+}
+
+// extractRequestContext extracts client IP and User-Agent from the request.
+func extractRequestContext(r *http.Request) RequestContext {
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip != "" {
+		// X-Forwarded-For may contain multiple IPs; take the first (client).
+		if idx := strings.IndexByte(ip, ','); idx != -1 {
+			ip = strings.TrimSpace(ip[:idx])
+		}
+	} else {
+		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
+	return RequestContext{
+		IPAddress: ip,
+		UserAgent: r.Header.Get("User-Agent"),
+	}
 }
 
 // handleListSessions returns a paginated list of sessions filtered by workspace.
@@ -98,7 +150,8 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := h.service.ListSessions(r.Context(), opts)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	page, err := h.service.ListSessions(ctx, opts)
 	if err != nil {
 		h.log.Error(err, "ListSessions failed")
 		writeError(w, err)
@@ -131,7 +184,8 @@ func (h *Handler) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := h.service.SearchSessions(r.Context(), q, opts)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	page, err := h.service.SearchSessions(ctx, q, opts)
 	if err != nil {
 		h.log.Error(err, "SearchSessions failed")
 		writeError(w, err)
@@ -153,7 +207,8 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.service.GetSession(r.Context(), sessionID)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	sess, err := h.service.GetSession(ctx, sessionID)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.log.Error(err, "GetSession failed", "sessionID", sessionID)
@@ -162,9 +217,21 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch messages separately — GetSession only returns session metadata.
+	msgPtrs, err := h.service.GetMessages(ctx, sessionID, providers.MessageQueryOpts{
+		Limit: defaultMessageLimit,
+	})
+	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
+		h.log.Error(err, "GetMessages failed", "sessionID", sessionID)
+	}
+	msgs := make([]session.Message, 0, len(msgPtrs))
+	for _, m := range msgPtrs {
+		msgs = append(msgs, *m)
+	}
+
 	writeJSON(w, SessionResponse{
 		Session:  sess,
-		Messages: sess.Messages,
+		Messages: msgs,
 	})
 }
 
@@ -186,7 +253,8 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		AfterSeq:  after,
 	}
 
-	msgs, err := h.service.GetMessages(r.Context(), sessionID, opts)
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	msgs, err := h.service.GetMessages(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			h.log.Error(err, "GetMessages failed", "sessionID", sessionID)
@@ -204,6 +272,115 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		Messages: msgs,
 		HasMore:  hasMore,
 	})
+}
+
+// handleCreateSession creates a new session.
+func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	var req CreateSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	now := time.Now()
+	sess := &session.Session{
+		ID:            req.ID,
+		AgentName:     req.AgentName,
+		Namespace:     req.Namespace,
+		WorkspaceName: req.WorkspaceName,
+		Status:        session.SessionStatusActive,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if req.TTLSeconds > 0 {
+		sess.ExpiresAt = now.Add(time.Duration(req.TTLSeconds) * time.Second)
+	}
+
+	if err := h.service.CreateSession(r.Context(), sess); err != nil {
+		h.log.Error(err, "CreateSession failed")
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(SessionResponse{Session: sess})
+}
+
+// handleAppendMessage appends a message to a session.
+func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionID")
+	if sessionID == "" {
+		writeError(w, ErrMissingSessionID)
+		return
+	}
+
+	var msg session.Message
+	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	if err := h.service.AppendMessage(r.Context(), sessionID, &msg); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.log.Error(err, "AppendMessage failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+// handleUpdateStats applies incremental counter updates to a session.
+func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionID")
+	if sessionID == "" {
+		writeError(w, ErrMissingSessionID)
+		return
+	}
+
+	var update session.SessionStatsUpdate
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	if err := h.service.UpdateSessionStats(r.Context(), sessionID, update); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.log.Error(err, "UpdateSessionStats failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleRefreshTTL extends the expiry of a session.
+func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionID")
+	if sessionID == "" {
+		writeError(w, ErrMissingSessionID)
+		return
+	}
+
+	var req RefreshTTLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, ErrMissingBody)
+		return
+	}
+
+	ttl := time.Duration(req.TTLSeconds) * time.Second
+	if err := h.service.RefreshTTL(r.Context(), sessionID, ttl); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.log.Error(err, "RefreshTTL failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // parseListParams extracts common list/search query parameters from the request.
@@ -291,6 +468,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingSessionID):
 		status = http.StatusBadRequest
 		msg = ErrMissingSessionID.Error()
+	case errors.Is(err, ErrMissingBody):
+		status = http.StatusBadRequest
+		msg = ErrMissingBody.Error()
 	default:
 		var timeErr *time.ParseError
 		if errors.As(err, &timeErr) {

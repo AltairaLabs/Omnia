@@ -138,7 +138,7 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 10, "should have at least 10 migration files (5 up + 5 down)")
+	assert.GreaterOrEqual(t, len(entries), 16, "should have at least 16 migration files (8 up + 8 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -146,6 +146,12 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 		"000001_create_sessions.down.sql",
 		"000005_create_partition_management.up.sql",
 		"000005_create_partition_management.down.sql",
+		"000006_create_audit_log.up.sql",
+		"000006_create_audit_log.down.sql",
+		"000007_add_audit_log_partitions.up.sql",
+		"000007_add_audit_log_partitions.down.sql",
+		"000008_tool_call_id_to_text.up.sql",
+		"000008_tool_call_id_to_text.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
@@ -182,7 +188,7 @@ func TestMigrator_UpDown(t *testing.T) {
 	// Verify version
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(5), v)
+	assert.Equal(t, uint(8), v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
@@ -210,7 +216,7 @@ func TestMigrator_TablesExist(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all expected tables exist as partitioned tables
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (
@@ -241,7 +247,7 @@ func TestMigrator_PartitionsCreated(t *testing.T) {
 	require.NoError(t, err)
 
 	// Each table should have partitions (4 weeks back + 2 weeks ahead ≈ 5-7 partitions)
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
 		var count int
 		err := db.QueryRow(`
 			SELECT COUNT(*) FROM pg_class c
@@ -378,6 +384,19 @@ func TestMigrator_DataOperations(t *testing.T) {
 		VALUES (gen_random_uuid(), $1, 'invalid_role', 'test', $2, 2)`,
 		sessionID, now)
 	assert.Error(t, err, "inserting message with invalid role should fail")
+
+	// Verify audit_log inserts work (this was the production failure:
+	// "no partition of relation audit_log found for row")
+	_, err = db.Exec(`
+		INSERT INTO audit_log (
+			timestamp, event_type, session_id, user_id,
+			workspace, agent_name, namespace, query,
+			result_count, ip_address, user_agent, reason, metadata
+		) VALUES ($1, 'session_accessed', $2, 'test-user',
+			'default', 'test-agent', 'default', NULL,
+			NULL, '127.0.0.1', 'test-ua', NULL, '{}')`,
+		now, sessionID)
+	require.NoError(t, err, "inserting into audit_log should succeed (partition must exist for current date)")
 }
 
 func TestMigrator_PartitionManagement(t *testing.T) {
@@ -440,7 +459,7 @@ func TestMigrator_CleanTeardown(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all tables are gone
-	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts"} {
+	for _, table := range []string{"sessions", "messages", "tool_calls", "message_artifacts", "audit_log"} {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (

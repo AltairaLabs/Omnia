@@ -14,6 +14,7 @@ import type {
   Session,
   SessionSummary,
   Message,
+  ToolCall,
   SessionListOptions,
   SessionSearchOptions,
   SessionMessageOptions,
@@ -98,12 +99,136 @@ function transformApiMessage(api: ApiMessage): Message {
 }
 
 /**
+ * Index tool_result messages by their toolCallId for fast lookup.
+ */
+function indexToolResults(apiMessages: ApiMessage[]): {
+  resultsByToolCallId: Map<string, { content: string; isError: boolean }>;
+  toolResultIds: Set<string>;
+} {
+  const resultsByToolCallId = new Map<string, { content: string; isError: boolean }>();
+  const toolResultIds = new Set<string>();
+
+  for (const api of apiMessages) {
+    if (api.metadata?.type === "tool_result" && api.toolCallId) {
+      resultsByToolCallId.set(api.toolCallId, {
+        content: api.content,
+        isError: api.metadata?.is_error === "true",
+      });
+      toolResultIds.add(api.id);
+    }
+  }
+
+  return { resultsByToolCallId, toolResultIds };
+}
+
+/**
+ * Parse a tool_call API message into a ToolCall object, pairing it with
+ * its result if available.
+ */
+function buildToolCall(
+  api: ApiMessage,
+  resultsByToolCallId: Map<string, { content: string; isError: boolean }>,
+): ToolCall {
+  let name = "unknown";
+  let args: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(api.content);
+    name = parsed.name || name;
+    args = parsed.arguments || args;
+  } catch {
+    // Content is not valid JSON
+  }
+
+  const result = resultsByToolCallId.get(api.toolCallId!);
+  let parsedResult: unknown;
+  if (result) {
+    try {
+      parsedResult = JSON.parse(result.content);
+    } catch {
+      parsedResult = result.content;
+    }
+  }
+
+  let status: "pending" | "success" | "error" = "pending";
+  if (result) {
+    status = result.isError ? "error" : "success";
+  }
+
+  return {
+    id: api.toolCallId!,
+    name,
+    arguments: args,
+    result: result ? parsedResult : undefined,
+    status,
+  };
+}
+
+/**
+ * Attach leftover tool calls to the last assistant message, or the last
+ * message if no assistant message exists.
+ */
+function attachLeftoverToolCalls(output: Message[], toolCalls: ToolCall[]): void {
+  if (toolCalls.length === 0) return;
+
+  const lastAssistant = output.findLast((m) => m.role === "assistant");
+  const target = lastAssistant ?? output.at(-1);
+  if (target) {
+    target.toolCalls = [...(target.toolCalls || []), ...toolCalls];
+  }
+}
+
+/**
+ * Pair tool_call and tool_result API messages into ToolCall objects attached
+ * to the assistant "done" messages, then transform the result to Message[].
+ *
+ * The recording writer stores three separate messages per tool-use cycle:
+ *   1. role=assistant, metadata.type=tool_call, toolCallId=X  (content = JSON {name, arguments})
+ *   2. role=system,    metadata.type=tool_result, toolCallId=X (content = result data)
+ *   3. role=assistant  (no metadata.type — the final "done" response)
+ *
+ * This function operates on raw ApiMessage objects (which have metadata) to
+ * build the pairing, then transforms to Message[] for the UI.
+ */
+function transformAndPairMessages(apiMessages: ApiMessage[]): Message[] {
+  const { resultsByToolCallId, toolResultIds } = indexToolResults(apiMessages);
+
+  // Build ToolCall objects from tool_call messages and collect their IDs
+  const toolCallIds = new Set<string>();
+  const pendingToolCalls: ToolCall[] = [];
+  for (const api of apiMessages) {
+    if (api.metadata?.type === "tool_call" && api.toolCallId) {
+      toolCallIds.add(api.id);
+      pendingToolCalls.push(buildToolCall(api, resultsByToolCallId));
+    }
+  }
+
+  // Transform non-tool messages and attach collected ToolCalls to
+  // the next assistant "done" message
+  const output: Message[] = [];
+  let toolCallsToAttach = [...pendingToolCalls];
+
+  for (const api of apiMessages) {
+    if (toolCallIds.has(api.id) || toolResultIds.has(api.id)) continue;
+
+    const msg = transformApiMessage(api);
+    if (msg.role === "assistant" && toolCallsToAttach.length > 0) {
+      msg.toolCalls = toolCallsToAttach;
+      toolCallsToAttach = [];
+    }
+    output.push(msg);
+  }
+
+  attachLeftoverToolCalls(output, toolCallsToAttach);
+  return output;
+}
+
+/**
  * Transform an API session to a full Session object.
  */
 function transformApiSession(api: ApiSession): Session {
   const inputTokens = api.totalInputTokens || 0;
   const outputTokens = api.totalOutputTokens || 0;
-  const messages = (api.messages || []).map(transformApiMessage);
+  const messages = transformAndPairMessages(api.messages || []);
 
   return {
     id: api.id,
@@ -245,7 +370,7 @@ export class SessionApiService {
 
     const data = await response.json();
     return {
-      messages: (data.messages || []).map(transformApiMessage),
+      messages: transformAndPairMessages(data.messages || []),
       hasMore: data.hasMore || false,
     };
   }

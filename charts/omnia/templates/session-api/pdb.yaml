@@ -1,0 +1,13 @@
+{{- if and .Values.sessionApi.enabled .Values.sessionApi.podDisruptionBudget.enabled (gt (int .Values.sessionApi.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "omnia.sessionApi.fullname" . }}
+  labels:
+    {{- include "omnia.sessionApi.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.sessionApi.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "omnia.sessionApi.selectorLabels" . | nindent 6 }}
+{{- end }}

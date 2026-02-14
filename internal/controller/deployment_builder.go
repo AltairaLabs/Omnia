@@ -434,6 +434,32 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	// Add session config (facade needs this for session management)
 	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_STORE_URL")...)
 
+	// Inject session-api URL so the facade uses httpclient.Store for session recording
+	if r.SessionAPIURL != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "SESSION_API_URL",
+			Value: r.SessionAPIURL,
+		})
+	}
+
+	// Add tracing configuration if enabled
+	if r.TracingEnabled && r.TracingEndpoint != "" {
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_ENABLED",
+				Value: "true",
+			},
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_ENDPOINT",
+				Value: r.TracingEndpoint,
+			},
+			corev1.EnvVar{
+				Name:  "OMNIA_TRACING_INSECURE",
+				Value: "true",
+			},
+		)
+	}
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Facade.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
