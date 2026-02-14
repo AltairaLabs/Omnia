@@ -729,6 +729,21 @@ sessionPrivacy:
       honorDeleteRequests: true
 
 # ============================================================================
+# Compliance Presets
+# Pre-configured SessionPrivacyPolicy resources for regulatory compliance.
+# Requires enterprise.enabled=true. Multiple presets can be enabled together.
+# ============================================================================
+
+compliance:
+  presets:
+    # -- Deploy a GDPR-compliant SessionPrivacyPolicy (EU data protection)
+    gdpr: false
+    # -- Deploy a HIPAA-compliant SessionPrivacyPolicy (US healthcare)
+    hipaa: false
+    # -- Deploy a CCPA-compliant SessionPrivacyPolicy (California consumer privacy)
+    ccpa: false
+
+# ============================================================================
 # Workspace Multi-Tenancy Configuration
 # Multi-tenant workspace isolation with namespace, RBAC, and quotas
 # ============================================================================
