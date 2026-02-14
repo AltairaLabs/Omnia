@@ -103,8 +103,62 @@ wait
 log_info "Images loaded"
 
 # Deploy with Helm (matching Tilt enterprise setup - NO --wait flag)
-log_info "Building Helm dependencies..."
-retry 3 10 helm dependency build charts/omnia
+# Download each Helm dependency individually with retries. This prevents a
+# transient CDN failure for one disabled subchart (e.g. 502 from Grafana's
+# GitHub-hosted repo) from blocking the entire E2E setup.
+log_info "Building Helm dependencies individually..."
+mkdir -p charts/omnia/charts
+
+# Download each dependency individually with retries. If a disabled dependency
+# fails (e.g. 502 from Grafana's GitHub CDN), create a stub chart so Helm's
+# dependency check passes — we don't need its contents since it won't be rendered.
+#
+# Format: name|repo|version|required (1=required, 0=disabled in E2E)
+DEPS="
+prometheus|https://prometheus-community.github.io/helm-charts|27.0.0|0
+grafana|https://grafana.github.io/helm-charts|10.0.0|0
+loki|https://grafana.github.io/helm-charts|6.0.0|0
+alloy|https://grafana.github.io/helm-charts|0.10.1|0
+tempo|https://grafana.github.io/helm-charts|1.0.3|0
+keda|https://kedacore.github.io/charts|2.16.1|0
+redis|https://charts.bitnami.com/bitnami|24.0.9|1
+csi-driver-nfs|https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts|v4.9.0|0
+"
+
+create_stub_chart() {
+    local name=$1 version=$2
+    local stub_dir
+    stub_dir=$(mktemp -d)
+    mkdir -p "$stub_dir/$name"
+    cat > "$stub_dir/$name/Chart.yaml" <<STUBEOF
+apiVersion: v2
+name: $name
+version: $version
+description: stub chart for E2E
+STUBEOF
+    tar -czf "charts/omnia/charts/${name}-${version}.tgz" -C "$stub_dir" "$name"
+    rm -rf "$stub_dir"
+}
+
+while IFS='|' read -r name repo version required; do
+    # Skip blank lines
+    [ -z "$name" ] && continue
+
+    if [ -f "charts/omnia/charts/${name}-${version}.tgz" ]; then
+        log_info "  $name-$version already exists, skipping"
+        continue
+    fi
+
+    if retry 3 10 helm pull "$name" --repo "$repo" --version "$version" --destination charts/omnia/charts; then
+        log_info "  Downloaded $name-$version"
+    elif [ "$required" = "0" ]; then
+        log_warn "  Failed to download $name-$version (disabled dep), creating stub"
+        create_stub_chart "$name" "$version"
+    else
+        log_error "  Failed to download required dependency: $name-$version"
+        exit 1
+    fi
+done <<< "$DEPS"
 
 log_info "Deploying via Helm..."
 
