@@ -790,6 +790,76 @@ func TestQuery_NilMetrics(t *testing.T) {
 	assert.NotNil(t, result)
 }
 
+// --- retention tests ---
+
+func TestNewLogger_RetentionDaysZero(t *testing.T) {
+	log := zap.New(zap.UseDevMode(true))
+	l := NewLogger(nil, log, nil, LoggerConfig{RetentionDays: 0})
+	require.NotNil(t, l)
+	assert.Equal(t, 0, l.cfg.RetentionDays)
+	require.NoError(t, l.Close())
+}
+
+func TestNewLogger_RetentionDaysSet(t *testing.T) {
+	log := zap.New(zap.UseDevMode(true))
+	l := NewLogger(nil, log, nil, LoggerConfig{RetentionDays: 90})
+	require.NotNil(t, l)
+	assert.Equal(t, 90, l.cfg.RetentionDays)
+	require.NoError(t, l.Close())
+}
+
+func TestDeleteExpiredEntries_NilPool(t *testing.T) {
+	l := newTestLogger(1, nil)
+	l.cfg.RetentionDays = 30
+	// Should not panic with nil pool.
+	l.deleteExpiredEntries()
+}
+
+func TestDeleteExpiredEntries_ZeroRetention(t *testing.T) {
+	l := newTestLogger(1, nil)
+	l.cfg.RetentionDays = 0
+	// Should return early with zero retention.
+	l.deleteExpiredEntries()
+}
+
+func TestDeleteExpiredEntries_WithMockPool(t *testing.T) {
+	log := zap.New(zap.UseDevMode(true))
+	var capturedSQL string
+	pool := &mockDBPool{
+		execFunc: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+			capturedSQL = sql
+			return pgconn.NewCommandTag("DELETE 5"), nil
+		},
+	}
+	l := &Logger{
+		pool:   pool,
+		buffer: make(chan *Entry, 10),
+		stopCh: make(chan struct{}),
+		log:    log,
+		cfg:    LoggerConfig{RetentionDays: 30, BatchSize: 10},
+	}
+	l.deleteExpiredEntries()
+	assert.Contains(t, capturedSQL, "DELETE FROM audit_log")
+}
+
+func TestDeleteExpiredEntries_ExecError(t *testing.T) {
+	log := zap.New(zap.UseDevMode(true))
+	pool := &mockDBPool{
+		execFunc: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, fmt.Errorf("exec failed")
+		},
+	}
+	l := &Logger{
+		pool:   pool,
+		buffer: make(chan *Entry, 10),
+		stopCh: make(chan struct{}),
+		log:    log,
+		cfg:    LoggerConfig{RetentionDays: 30, BatchSize: 10},
+	}
+	// Should not panic on error.
+	l.deleteExpiredEntries()
+}
+
 func TestQuery_LimitClamp(t *testing.T) {
 	log := zap.New(zap.UseDevMode(true))
 

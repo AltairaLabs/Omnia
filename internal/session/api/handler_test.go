@@ -131,7 +131,13 @@ func (m *mockWarmStore) UpdateSession(_ context.Context, s *session.Session) err
 	m.sessions[s.ID] = s
 	return nil
 }
-func (m *mockWarmStore) DeleteSession(_ context.Context, _ string) error { return nil }
+func (m *mockWarmStore) DeleteSession(_ context.Context, id string) error {
+	if _, ok := m.sessions[id]; !ok {
+		return session.ErrSessionNotFound
+	}
+	delete(m.sessions, id)
+	return nil
+}
 
 func (m *mockWarmStore) AppendMessage(_ context.Context, sessionID string, msg *session.Message) error {
 	if _, ok := m.sessions[sessionID]; !ok {
@@ -1591,6 +1597,127 @@ func TestWriteError_MissingBody(t *testing.T) {
 	writeError(rec, ErrMissingBody)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleDeleteSession_OK(t *testing.T) {
+	h, _, warm := setupHandler(t)
+	warm.sessions["s1"] = testSession("s1")
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	if _, ok := warm.sessions["s1"]; ok {
+		t.Fatal("expected session to be deleted from warm store")
+	}
+}
+
+func TestHandleDeleteSession_NotFound(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/nonexistent", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandleDeleteSession_NoWarmStore(t *testing.T) {
+	reg := providers.NewRegistry()
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestHandleDeleteSession_AuditEvent(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = testSession("s1")
+
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	audit := &mockAuditLogger{}
+	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req.Header.Set("User-Agent", "TestBrowser/1.0")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	if len(audit.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audit.entries))
+	}
+	if audit.entries[0].EventType != "session_deleted" {
+		t.Fatalf("expected session_deleted, got %s", audit.entries[0].EventType)
+	}
+	if audit.entries[0].UserAgent != "TestBrowser/1.0" {
+		t.Fatalf("expected UserAgent TestBrowser/1.0, got %s", audit.entries[0].UserAgent)
+	}
+}
+
+func TestHandleCreateSession_AuditEvent(t *testing.T) {
+	warm := newMockWarmStore()
+
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	audit := &mockAuditLogger{}
+	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"new-sess","agentName":"a","namespace":"ns","workspaceName":"ws"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "TestBrowser/2.0")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	if len(audit.entries) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audit.entries))
+	}
+	if audit.entries[0].EventType != "session_created" {
+		t.Fatalf("expected session_created, got %s", audit.entries[0].EventType)
+	}
+	if audit.entries[0].SessionID != "new-sess" {
+		t.Fatalf("expected session ID new-sess, got %s", audit.entries[0].SessionID)
+	}
+	if audit.entries[0].UserAgent != "TestBrowser/2.0" {
+		t.Fatalf("expected UserAgent TestBrowser/2.0, got %s", audit.entries[0].UserAgent)
 	}
 }
 
