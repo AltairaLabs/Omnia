@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -87,76 +88,85 @@ var _ = BeforeSuite(func() {
 		return
 	}
 
-	// Build all images in parallel for faster setup
-	By("building all container images in parallel")
+	// Build all binaries natively (shared module/build cache) then package into minimal images.
+	// This is significantly faster than running 6 independent Docker builds.
+	binaries := []struct {
+		name  string
+		pkg   string
+		image string
+	}{
+		{"manager", "./cmd/main.go", projectImage},
+		{"agent", "./cmd/agent", facadeImage},
+		{"runtime", "./cmd/runtime", runtimeImage},
+		{"session-api", "./cmd/session-api", sessionApiImage},
+		{"arena-worker", "./ee/cmd/arena-worker", arenaWorkerImage},
+		{"arena-controller", "./ee/cmd/omnia-arena-controller", arenaControllerImage},
+	}
+
+	distDir := "dist/e2e"
+	Expect(os.MkdirAll(distDir, 0o755)).To(Succeed())
+
+	By("building all binaries natively")
 	var wg sync.WaitGroup
-	results := make(chan buildResult, 6)
-
-	// Build manager image
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-		_, err := utils.Run(cmd)
-		results <- buildResult{name: "manager(Operator)", err: err}
-	}()
-
-	// Build facade image
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("docker", "build", "-t", facadeImage, "-f", "Dockerfile.agent", ".")
-		_, err := utils.Run(cmd)
-		results <- buildResult{name: "facade", err: err}
-	}()
-
-	// Build runtime image
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("docker", "build", "-t", runtimeImage, "-f", "Dockerfile.runtime", ".")
-		_, err := utils.Run(cmd)
-		results <- buildResult{name: "runtime", err: err}
-	}()
-
-	// Build arena-worker image (Enterprise)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("docker", "build", "-t", arenaWorkerImage, "-f", "ee/Dockerfile.arena-worker", ".")
-		_, err := utils.Run(cmd)
-		results <- buildResult{name: "arena-worker", err: err}
-	}()
-
-	// Build arena-controller image (Enterprise)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("docker", "build", "-t", arenaControllerImage, "-f", "ee/Dockerfile.arena-controller", ".")
-		_, err := utils.Run(cmd)
-		results <- buildResult{name: "arena-controller", err: err}
-	}()
-
-	// Build session-api image
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("docker", "build", "-t", sessionApiImage, "-f", "Dockerfile.session-api", ".")
-		_, err := utils.Run(cmd)
-		results <- buildResult{name: "session-api", err: err}
-	}()
-
-	// Wait for all builds to complete
+	results := make(chan buildResult, len(binaries))
+	projectDir, err := utils.GetProjectDir()
+	Expect(err).NotTo(HaveOccurred())
+	for _, b := range binaries {
+		wg.Add(1)
+		go func(name, pkg string) {
+			defer wg.Done()
+			// Each binary gets its own staging dir so Docker can COPY "entrypoint"
+			outDir := filepath.Join(distDir, name)
+			_ = os.MkdirAll(outDir, 0o755)
+			outPath := filepath.Join(outDir, "entrypoint")
+			cmd := exec.Command("go", "build", "-ldflags=-w -s", "-o", outPath, pkg)
+			cmd.Dir = projectDir
+			cmd.Env = append(os.Environ(),
+				"GO111MODULE=on", "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64",
+			)
+			_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", cmd.String())
+			out, buildErr := cmd.CombinedOutput()
+			if buildErr != nil {
+				buildErr = fmt.Errorf("%s failed: %s: %w", name, string(out), buildErr)
+			}
+			results <- buildResult{name: name, err: buildErr}
+		}(b.name, b.pkg)
+	}
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
-
-	// Collect results and check for errors
 	for result := range results {
 		ExpectWithOffset(1, result.err).NotTo(HaveOccurred(),
-			fmt.Sprintf("Failed to build the %s image", result.name))
-		_, _ = fmt.Fprintf(GinkgoWriter, "Built %s image successfully\n", result.name)
+			fmt.Sprintf("Failed to build binary for %s", result.name))
+		_, _ = fmt.Fprintf(GinkgoWriter, "Built %s binary successfully\n", result.name)
+	}
+
+	By("packaging binaries into container images")
+	var pkgWg sync.WaitGroup
+	pkgResults := make(chan buildResult, len(binaries))
+	for _, b := range binaries {
+		pkgWg.Add(1)
+		go func(name, image string) {
+			defer pkgWg.Done()
+			contextDir := filepath.Join(distDir, name)
+			cmd := exec.Command("docker", "build",
+				"-t", image,
+				"-f", "test/e2e/Dockerfile.e2e",
+				contextDir,
+			)
+			_, err := utils.Run(cmd)
+			pkgResults <- buildResult{name: name, err: err}
+		}(b.name, b.image)
+	}
+	go func() {
+		pkgWg.Wait()
+		close(pkgResults)
+	}()
+	for result := range pkgResults {
+		ExpectWithOffset(1, result.err).NotTo(HaveOccurred(),
+			fmt.Sprintf("Failed to package the %s image", result.name))
+		_, _ = fmt.Fprintf(GinkgoWriter, "Packaged %s image successfully\n", result.name)
 	}
 
 	// Load images into Kind in parallel
