@@ -43,6 +43,10 @@ func (m *prefsMockPool) QueryRow(ctx context.Context, sql string, args ...any) p
 	return m.queryRowFn(ctx, sql, args...)
 }
 
+func (m *prefsMockPool) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	return nil, nil
+}
+
 func TestGetPreferences_Found(t *testing.T) {
 	now := time.Now().UTC()
 	pool := &prefsMockPool{

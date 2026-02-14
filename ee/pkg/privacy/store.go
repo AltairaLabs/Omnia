@@ -28,6 +28,7 @@ const (
 type dbPool interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // ErrPreferencesNotFound is returned when no privacy preferences exist for a user.

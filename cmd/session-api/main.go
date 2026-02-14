@@ -188,6 +188,14 @@ func run() error {
 	if f.enterprise && auditLogger != nil {
 		ah := audit.NewHandler(auditLogger, log)
 		ah.RegisterRoutes(apiMux)
+
+		// GDPR/CCPA deletion workflow.
+		warm, _ := registry.WarmStore()
+		deletionStore := privacy.NewPostgresDeletionStore(pool)
+		deleter := privacy.NewWarmStoreSessionDeleter(warm)
+		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
+		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
+		deletionHandler.RegisterRoutes(apiMux)
 	}
 
 	if f.enterprise {
