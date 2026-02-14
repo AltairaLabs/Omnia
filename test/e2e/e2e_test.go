@@ -40,12 +40,6 @@ const namespace = "omnia-system"
 // agentsNamespace is where test agents are deployed
 const agentsNamespace = "test-agents"
 
-// serviceAccountName created for the project
-const serviceAccountName = "omnia-controller-manager"
-
-// metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "omnia-controller-manager-metrics-service"
-
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "omnia-metrics-binding"
 
@@ -55,9 +49,11 @@ var predeployed = os.Getenv("E2E_PREDEPLOYED") == "true"
 
 // Configurable via env vars for pre-deployed clusters where the operator uses different image names.
 var (
-	sessionApiURL   = envOrDefault("SESSION_API_URL", "http://e2e-session-api.omnia-system.svc.cluster.local:8080")
-	facadeImageRef  = envOrDefault("E2E_FACADE_IMAGE", "example.com/omnia-facade:v0.0.1")
-	runtimeImageRef = envOrDefault("E2E_RUNTIME_IMAGE", "example.com/omnia-runtime:v0.0.1")
+	sessionApiURL      = envOrDefault("SESSION_API_URL", "http://e2e-session-api.omnia-system.svc.cluster.local:8080")
+	facadeImageRef     = envOrDefault("E2E_FACADE_IMAGE", "example.com/omnia-facade:v0.0.1")
+	runtimeImageRef    = envOrDefault("E2E_RUNTIME_IMAGE", "example.com/omnia-runtime:v0.0.1")
+	serviceAccountName = envOrDefault("E2E_SERVICE_ACCOUNT", "omnia-controller-manager")
+	metricsServiceName = envOrDefault("E2E_METRICS_SERVICE", "omnia-controller-manager-metrics-service")
 )
 
 func envOrDefault(key, fallback string) string {
@@ -241,10 +237,6 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
-			if predeployed {
-				Skip("Metrics service not available in Helm/Tilt deployments (E2E_PREDEPLOYED=true)")
-			}
-
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
 				"--clusterrole=omnia-metrics-reader",

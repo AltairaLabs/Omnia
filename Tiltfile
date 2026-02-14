@@ -932,9 +932,12 @@ _e2e_env = {
     'E2E_SKIP_SETUP': 'true',
     'E2E_PREDEPLOYED': 'true',
     'E2E_SKIP_CLEANUP': 'true',
+    'ENABLE_ARENA_E2E': 'true',
     'SESSION_API_URL': 'http://omnia-session-api.omnia-system.svc.cluster.local:8080',
     'E2E_FACADE_IMAGE': 'omnia-facade-dev:latest',
     'E2E_RUNTIME_IMAGE': 'omnia-runtime-dev:latest',
+    'E2E_SERVICE_ACCOUNT': 'omnia',
+    'E2E_METRICS_SERVICE': 'omnia-controller-manager-metrics-service',
 }
 
 _e2e_env['KUBECONFIG'] = os.getenv('KUBECONFIG', os.path.join(os.getenv('HOME', ''), '.kube/config'))
@@ -947,7 +950,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'omnia-session-api'],
+    resource_deps=['omnia-controller-manager', 'omnia-session-api', 'omnia-arena-controller'],
 )
 
 # CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).

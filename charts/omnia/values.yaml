@@ -257,7 +257,7 @@ probes:
 # Metrics configuration
 metrics:
   # -- Enable metrics endpoint
-  enabled: false
+  enabled: true
   # -- Port for metrics
   port: 8443
   # -- Enable secure metrics (HTTPS)
