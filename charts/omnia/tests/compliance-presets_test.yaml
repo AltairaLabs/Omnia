@@ -1,0 +1,161 @@
+suite: compliance presets
+templates:
+  - templates/enterprise/compliance-gdpr.yaml
+  - templates/enterprise/compliance-hipaa.yaml
+  - templates/enterprise/compliance-ccpa.yaml
+tests:
+  - it: should not render any preset when enterprise is disabled
+    set:
+      enterprise.enabled: false
+      compliance.presets.gdpr: true
+      compliance.presets.hipaa: true
+      compliance.presets.ccpa: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not render any preset when all presets are false
+    set:
+      enterprise.enabled: true
+      compliance.presets.gdpr: false
+      compliance.presets.hipaa: false
+      compliance.presets.ccpa: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render only GDPR when gdpr preset is enabled
+    set:
+      enterprise.enabled: true
+      compliance.presets.gdpr: true
+      compliance.presets.hipaa: false
+      compliance.presets.ccpa: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: gdpr-compliant
+        documentIndex: 0
+      - equal:
+          path: metadata.labels["omnia.altairalabs.ai/compliance-preset"]
+          value: gdpr
+        documentIndex: 0
+      - equal:
+          path: spec.level
+          value: workspace
+        documentIndex: 0
+      - equal:
+          path: spec.recording.pii.redact
+          value: true
+        documentIndex: 0
+      - equal:
+          path: spec.recording.pii.encrypt
+          value: true
+        documentIndex: 0
+      - equal:
+          path: spec.recording.pii.strategy
+          value: replace
+        documentIndex: 0
+      - equal:
+          path: spec.retention.facade.warmDays
+          value: 30
+        documentIndex: 0
+      - equal:
+          path: spec.retention.facade.coldDays
+          value: 90
+        documentIndex: 0
+      - equal:
+          path: spec.userOptOut.enabled
+          value: true
+        documentIndex: 0
+      - equal:
+          path: spec.userOptOut.deleteWithinDays
+          value: 30
+        documentIndex: 0
+      - equal:
+          path: spec.auditLog.enabled
+          value: true
+        documentIndex: 0
+      - equal:
+          path: spec.auditLog.retentionDays
+          value: 365
+        documentIndex: 0
+
+  - it: should render only HIPAA when hipaa preset is enabled
+    set:
+      enterprise.enabled: true
+      compliance.presets.gdpr: false
+      compliance.presets.hipaa: true
+      compliance.presets.ccpa: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: hipaa-compliant
+        documentIndex: 0
+      - equal:
+          path: metadata.labels["omnia.altairalabs.ai/compliance-preset"]
+          value: hipaa
+        documentIndex: 0
+      - equal:
+          path: spec.retention.facade.coldDays
+          value: 2555
+        documentIndex: 0
+      - equal:
+          path: spec.encryption.enabled
+          value: true
+        documentIndex: 0
+      - equal:
+          path: spec.auditLog.retentionDays
+          value: 2555
+        documentIndex: 0
+
+  - it: should render only CCPA when ccpa preset is enabled
+    set:
+      enterprise.enabled: true
+      compliance.presets.gdpr: false
+      compliance.presets.hipaa: false
+      compliance.presets.ccpa: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: ccpa-compliant
+        documentIndex: 0
+      - equal:
+          path: metadata.labels["omnia.altairalabs.ai/compliance-preset"]
+          value: ccpa
+        documentIndex: 0
+      - equal:
+          path: spec.recording.richData
+          value: false
+        documentIndex: 0
+      - equal:
+          path: spec.recording.pii.encrypt
+          value: false
+        documentIndex: 0
+      - equal:
+          path: spec.recording.pii.strategy
+          value: mask
+        documentIndex: 0
+      - equal:
+          path: spec.retention.facade.coldDays
+          value: 30
+        documentIndex: 0
+      - equal:
+          path: spec.userOptOut.deleteWithinDays
+          value: 45
+        documentIndex: 0
+
+  - it: should render all presets when all are enabled
+    set:
+      enterprise.enabled: true
+      compliance.presets.gdpr: true
+      compliance.presets.hipaa: true
+      compliance.presets.ccpa: true
+    asserts:
+      - hasDocuments:
+          count: 3

@@ -1,0 +1,43 @@
+{{- if and .Values.enterprise.enabled (index .Values.compliance.presets "hipaa") }}
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SessionPrivacyPolicy
+metadata:
+  name: hipaa-compliant
+  labels:
+    omnia.altairalabs.ai/compliance-preset: hipaa
+    {{- include "omnia.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  level: workspace
+  recording:
+    enabled: true
+    facadeData: true
+    richData: true
+    pii:
+      redact: true
+      encrypt: true
+      patterns:
+        - ssn
+        - credit_card
+        - phone_number
+        - email
+        - ip_address
+        - "custom:^[A-Z]{2,4}-?\\d{6,10}$"
+      strategy: replace
+  retention:
+    facade:
+      warmDays: 30
+      coldDays: 2555
+  encryption:
+    enabled: true
+  userOptOut:
+    enabled: true
+    honorDeleteRequests: true
+    deleteWithinDays: 30
+  auditLog:
+    enabled: true
+    retentionDays: 2555
+{{- end }}
