@@ -9,6 +9,7 @@ Functional Source License. See ee/LICENSE for details.
 package privacy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -52,16 +53,17 @@ func (h *DeletionHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process the deletion asynchronously in a goroutine.
-	go func() {
-		if processErr := h.service.ProcessRequest(r.Context(), req.ID); processErr != nil {
-			h.log.Error(processErr, "deletion processing failed", "requestID", req.ID)
-		}
-	}()
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(req)
+
+	// Process the deletion asynchronously. Use a detached context since the
+	// request context is cancelled when the handler returns.
+	go func() {
+		if processErr := h.service.ProcessRequest(context.Background(), req.ID); processErr != nil {
+			h.log.Error(processErr, "deletion processing failed", "requestID", req.ID)
+		}
+	}()
 }
 
 // handleGet processes a GET request to retrieve a deletion request status.

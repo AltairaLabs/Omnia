@@ -479,8 +479,12 @@ func newTestHandler() (*DeletionHandler, *MockDeletionStore, *MockSessionDeleter
 }
 
 func TestHandleCreate_Success(t *testing.T) {
-	handler, _, deleter := newTestHandler()
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
 	deleter.Sessions["user-1|"] = []string{"sess-1"}
+	audit := &MockAuditLogger{}
+	svc := NewDeletionService(store, deleter, audit, logr.Discard())
+	handler := NewDeletionHandler(svc, logr.Discard())
 
 	body := `{"userId":"user-1","reason":"gdpr_erasure","scope":"all"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/deletion-request", bytes.NewBufferString(body))
@@ -497,8 +501,13 @@ func TestHandleCreate_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.ID)
 	assert.Equal(t, "user-1", resp.UserID)
-	// Status may be "pending" or "completed" depending on goroutine timing.
-	assert.Contains(t, []string{"pending", "completed"}, resp.Status)
+	assert.Equal(t, "pending", resp.Status)
+
+	// Wait for the background goroutine to complete to avoid data races.
+	assert.Eventually(t, func() bool {
+		updated, getErr := store.GetRequest(context.Background(), resp.ID)
+		return getErr == nil && updated.Status != "pending" && updated.Status != "in_progress"
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestHandleCreate_InvalidBody(t *testing.T) {
