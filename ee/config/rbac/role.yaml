@@ -100,6 +100,7 @@ rules:
   - arenajobs/status
   - arenasources/status
   - arenatemplatesources/status
+  - sessionanalyticssyncs/status
   - sessionprivacypolicies/status
   verbs:
   - get
@@ -117,6 +118,7 @@ rules:
 - apiGroups:
   - omnia.altairalabs.ai
   resources:
+  - sessionanalyticssyncs
   - sessionprivacypolicies
   verbs:
   - get
