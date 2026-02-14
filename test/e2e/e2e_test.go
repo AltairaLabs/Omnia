@@ -241,6 +241,10 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
+			if predeployed {
+				Skip("Metrics service not available in Helm/Tilt deployments (E2E_PREDEPLOYED=true)")
+			}
+
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
 				"--clusterrole=omnia-metrics-reader",
@@ -1201,7 +1205,9 @@ spec:
                   sys.exit(1)
 
               session_data = resp.json()
-              agent_name = session_data.get("agentName", session_data.get("agent_name", ""))
+              # The session-api wraps the session in a {"session": {...}, "messages": [...]} envelope
+              session_obj = session_data.get("session", session_data)
+              agent_name = session_obj.get("agentName", session_obj.get("agent_name", ""))
               print(f"Session agent: {agent_name}")
               if agent_name != "test-agent":
                   print(f"ERROR: Expected agentName='test-agent', got '{agent_name}'")

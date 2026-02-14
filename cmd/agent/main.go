@@ -266,8 +266,9 @@ func readyzHandler(store session.Store, handler facade.MessageHandler) http.Hand
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Check session store connectivity
-		_, err := store.GetSession(ctx, "health-check-probe")
+		// Check session store connectivity using a nil UUID that won't match any
+		// real session but is a valid UUID (avoids PostgreSQL type errors).
+		_, err := store.GetSession(ctx, "00000000-0000-0000-0000-000000000000")
 		if err != nil && err != session.ErrSessionNotFound {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
