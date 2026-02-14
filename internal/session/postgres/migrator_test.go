@@ -188,7 +188,7 @@ func TestMigrator_UpDown(t *testing.T) {
 	// Verify version
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(7), v)
+	assert.Equal(t, uint(8), v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
