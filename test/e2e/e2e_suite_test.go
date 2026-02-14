@@ -103,14 +103,14 @@ var _ = BeforeSuite(func() {
 		{"arena-controller", "./ee/cmd/omnia-arena-controller", arenaControllerImage},
 	}
 
-	distDir := "dist/e2e"
+	projectDir, err := utils.GetProjectDir()
+	Expect(err).NotTo(HaveOccurred())
+	distDir := filepath.Join(projectDir, "dist", "e2e")
 	Expect(os.MkdirAll(distDir, 0o755)).To(Succeed())
 
 	By("building all binaries natively")
 	var wg sync.WaitGroup
 	results := make(chan buildResult, len(binaries))
-	projectDir, err := utils.GetProjectDir()
-	Expect(err).NotTo(HaveOccurred())
 	for _, b := range binaries {
 		wg.Add(1)
 		go func(name, pkg string) {
@@ -160,7 +160,11 @@ var _ = BeforeSuite(func() {
 				return
 			}
 			cmd := exec.Command("docker", "build", "-t", image, contextDir)
-			_, buildErr := utils.Run(cmd)
+			_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", cmd.String())
+			out, buildErr := cmd.CombinedOutput()
+			if buildErr != nil {
+				buildErr = fmt.Errorf("%s docker build failed: %s: %w", name, string(out), buildErr)
+			}
 			pkgResults <- buildResult{name: name, err: buildErr}
 		}(b.name, b.image)
 	}
