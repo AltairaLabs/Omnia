@@ -35,6 +35,11 @@ const (
 	DefaultBatchSize = 50
 	// DefaultFlushInterval is the maximum time between batch writes.
 	DefaultFlushInterval = 500 * time.Millisecond
+	// DefaultRetentionDays is the default number of days to retain audit log entries.
+	// A value of 0 means entries are retained indefinitely.
+	DefaultRetentionDays = 0
+	// retentionCheckInterval is how often the retention cleanup runs.
+	retentionCheckInterval = 24 * time.Hour
 )
 
 // LoggerConfig configures the audit Logger.
@@ -43,6 +48,9 @@ type LoggerConfig struct {
 	Workers       int
 	BatchSize     int
 	FlushInterval time.Duration
+	// RetentionDays is the number of days to retain audit log entries.
+	// A value of 0 (default) means entries are retained indefinitely.
+	RetentionDays int
 }
 
 // dbPool abstracts the database operations needed by the audit logger.
@@ -100,6 +108,11 @@ func NewLogger(pool *pgxpool.Pool, log logr.Logger, m *metrics.AuditMetrics, cfg
 		_ = i
 		l.wg.Add(1)
 		go l.worker()
+	}
+
+	if cfg.RetentionDays > 0 {
+		l.wg.Add(1)
+		go l.retentionWorker()
 	}
 
 	return l
@@ -443,6 +456,40 @@ func (qb *queryBuilder) where() string {
 		return ""
 	}
 	return " AND " + strings.Join(qb.clauses, " AND ")
+}
+
+// retentionWorker periodically deletes audit entries older than the configured retention period.
+func (l *Logger) retentionWorker() {
+	defer l.wg.Done()
+	l.deleteExpiredEntries()
+	ticker := time.NewTicker(retentionCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			l.deleteExpiredEntries()
+		case <-l.stopCh:
+			return
+		}
+	}
+}
+
+// deleteExpiredEntries removes audit log entries older than the retention period.
+func (l *Logger) deleteExpiredEntries() {
+	if l.pool == nil || l.cfg.RetentionDays <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cutoff := time.Now().UTC().AddDate(0, 0, -l.cfg.RetentionDays)
+	result, err := l.pool.Exec(ctx,
+		"DELETE FROM audit_log WHERE timestamp < $1", cutoff)
+	if err != nil {
+		l.log.Error(err, "failed to delete expired audit entries")
+		return
+	}
+	l.log.V(1).Info("audit retention cleanup completed",
+		"cutoff", cutoff, "deleted", result.RowsAffected())
 }
 
 func (qb *queryBuilder) appendPagination(query string, limit, offset int) string {

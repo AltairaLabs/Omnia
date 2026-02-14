@@ -320,6 +320,126 @@ func TestCreateSession_Success(t *testing.T) {
 	assert.Len(t, warm.createdSessions, 1)
 }
 
+// --- CreateSession audit ---
+
+func TestCreateSession_AuditEvent(t *testing.T) {
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+
+	al := &mockAuditLogger{}
+	svc := newServiceWithRegistry(registry, al)
+
+	ctx := withRequestContext(context.Background(), RequestContext{
+		IPAddress: "1.2.3.4",
+		UserAgent: "test-ua",
+	})
+	sess := &session.Session{ID: "s1", AgentName: "agent", Namespace: "ns", WorkspaceName: "ws"}
+	err := svc.CreateSession(ctx, sess)
+	require.NoError(t, err)
+	require.Len(t, al.entries, 1)
+	assert.Equal(t, "session_created", al.entries[0].EventType)
+	assert.Equal(t, "s1", al.entries[0].SessionID)
+	assert.Equal(t, "ws", al.entries[0].Workspace)
+	assert.Equal(t, "1.2.3.4", al.entries[0].IPAddress)
+}
+
+func TestCreateSession_NoAuditOnError(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), &mockAuditLogger{})
+	err := svc.CreateSession(context.Background(), &session.Session{ID: "s1"})
+	assert.ErrorIs(t, err, ErrWarmStoreRequired)
+}
+
+// --- DeleteSession ---
+
+func TestDeleteSession_EmptySessionID(t *testing.T) {
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(newMockWarmStore())
+	svc := newServiceWithRegistry(registry, nil)
+	err := svc.DeleteSession(context.Background(), "")
+	assert.ErrorIs(t, err, ErrMissingSessionID)
+}
+
+func TestDeleteSession_NoWarmStore(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
+	err := svc.DeleteSession(context.Background(), "s1")
+	assert.ErrorIs(t, err, ErrWarmStoreRequired)
+}
+
+func TestDeleteSession_Success(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1", AgentName: "a", WorkspaceName: "ws"}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+
+	al := &mockAuditLogger{}
+	svc := newServiceWithRegistry(registry, al)
+
+	err := svc.DeleteSession(context.Background(), "s1")
+	require.NoError(t, err)
+	assert.NotContains(t, warm.sessions, "s1")
+	require.Len(t, al.entries, 1)
+	assert.Equal(t, "session_deleted", al.entries[0].EventType)
+	assert.Equal(t, "ws", al.entries[0].Workspace)
+}
+
+func TestDeleteSession_NotFound(t *testing.T) {
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.DeleteSession(context.Background(), "nonexistent")
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}
+
+func TestDeleteSession_NilAuditLogger(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1"}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.DeleteSession(context.Background(), "s1")
+	require.NoError(t, err)
+}
+
+func TestAuditSessionCreated_NilLogger(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
+	svc.auditSessionCreated(context.Background(), &session.Session{ID: "s1"})
+}
+
+func TestAuditSessionDeleted_NilLogger(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
+	svc.auditSessionDeleted(context.Background(), "s1", nil, nil)
+}
+
+func TestAuditSessionDeleted_WithLogger_NoSession(t *testing.T) {
+	al := &mockAuditLogger{}
+	svc := newServiceWithRegistry(providers.NewRegistry(), al)
+	svc.auditSessionDeleted(context.Background(), "s1", nil, session.ErrSessionNotFound)
+	require.Len(t, al.entries, 1)
+	assert.Equal(t, "session_deleted", al.entries[0].EventType)
+	assert.Equal(t, "s1", al.entries[0].SessionID)
+	assert.Equal(t, "", al.entries[0].Workspace)
+}
+
+func TestAuditSessionCreated_WithLogger(t *testing.T) {
+	al := &mockAuditLogger{}
+	svc := newServiceWithRegistry(providers.NewRegistry(), al)
+	ctx := withRequestContext(context.Background(), RequestContext{
+		IPAddress: "5.6.7.8",
+		UserAgent: "ua",
+	})
+	svc.auditSessionCreated(ctx, &session.Session{
+		ID: "s1", WorkspaceName: "ws", AgentName: "ag", Namespace: "ns",
+	})
+	require.Len(t, al.entries, 1)
+	assert.Equal(t, "session_created", al.entries[0].EventType)
+	assert.Equal(t, "5.6.7.8", al.entries[0].IPAddress)
+	assert.Equal(t, "ws", al.entries[0].Workspace)
+}
+
 // --- populateHotCache edge cases ---
 
 func TestPopulateHotCache_SetError_DoesNotPanic(t *testing.T) {
