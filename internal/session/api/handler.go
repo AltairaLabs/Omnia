@@ -118,6 +118,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/messages", h.handleAppendMessage)
 	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
+	mux.HandleFunc("DELETE /api/v1/sessions/{sessionID}", h.handleDeleteSession)
 }
 
 // extractRequestContext extracts client IP and User-Agent from the request.
@@ -296,7 +297,8 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		sess.ExpiresAt = now.Add(time.Duration(req.TTLSeconds) * time.Second)
 	}
 
-	if err := h.service.CreateSession(r.Context(), sess); err != nil {
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	if err := h.service.CreateSession(ctx, sess); err != nil {
 		h.log.Error(err, "CreateSession failed")
 		writeError(w, err)
 		return
@@ -381,6 +383,26 @@ func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeleteSession deletes a session by ID.
+func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionID")
+	if sessionID == "" {
+		writeError(w, ErrMissingSessionID)
+		return
+	}
+
+	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	if err := h.service.DeleteSession(ctx, sessionID); err != nil {
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			h.log.Error(err, "DeleteSession failed", "sessionID", sessionID)
+		}
+		writeError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // parseListParams extracts common list/search query parameters from the request.

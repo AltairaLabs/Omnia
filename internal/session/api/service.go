@@ -191,7 +191,29 @@ func (s *SessionService) CreateSession(ctx context.Context, sess *session.Sessio
 	if err != nil {
 		return ErrWarmStoreRequired
 	}
-	return warm.CreateSession(ctx, sess)
+	if err := warm.CreateSession(ctx, sess); err != nil {
+		return err
+	}
+	s.auditSessionCreated(ctx, sess)
+	return nil
+}
+
+// DeleteSession removes a session from the warm store.
+func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return ErrMissingSessionID
+	}
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return ErrWarmStoreRequired
+	}
+	// Fetch session metadata before deletion for the audit entry.
+	sess, getErr := warm.GetSession(ctx, sessionID)
+	if err := warm.DeleteSession(ctx, sessionID); err != nil {
+		return err
+	}
+	s.auditSessionDeleted(ctx, sessionID, sess, getErr)
+	return nil
 }
 
 // AppendMessage adds a message to a session via the warm store.
@@ -345,6 +367,43 @@ func (s *SessionService) auditMessagesAccess(ctx context.Context, sessionID stri
 		IPAddress:   rc.IPAddress,
 		UserAgent:   rc.UserAgent,
 	})
+}
+
+// auditSessionCreated logs a session_created event if an audit logger is configured.
+func (s *SessionService) auditSessionCreated(ctx context.Context, sess *session.Session) {
+	if s.auditLogger == nil {
+		return
+	}
+	rc, _ := requestContextFromCtx(ctx)
+	s.auditLogger.LogEvent(ctx, &AuditEntry{
+		EventType: "session_created",
+		SessionID: sess.ID,
+		Workspace: sess.WorkspaceName,
+		AgentName: sess.AgentName,
+		Namespace: sess.Namespace,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+	})
+}
+
+// auditSessionDeleted logs a session_deleted event if an audit logger is configured.
+func (s *SessionService) auditSessionDeleted(ctx context.Context, sessionID string, sess *session.Session, getErr error) {
+	if s.auditLogger == nil {
+		return
+	}
+	rc, _ := requestContextFromCtx(ctx)
+	entry := &AuditEntry{
+		EventType: "session_deleted",
+		SessionID: sessionID,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+	}
+	if getErr == nil && sess != nil {
+		entry.Workspace = sess.WorkspaceName
+		entry.AgentName = sess.AgentName
+		entry.Namespace = sess.Namespace
+	}
+	s.auditLogger.LogEvent(ctx, entry)
 }
 
 // auditSearch logs a session_searched event.
