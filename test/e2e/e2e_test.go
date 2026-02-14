@@ -372,6 +372,12 @@ spec:
       labels:
         app: e2e-postgres
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: postgres
         image: postgres:17-alpine
@@ -384,11 +390,17 @@ spec:
           value: omnia
         - name: POSTGRES_DB
           value: omnia
+        - name: PGDATA
+          value: /tmp/pgdata
         readinessProbe:
           exec:
             command: ["pg_isready", "-U", "omnia"]
           initialDelaySeconds: 5
           periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
 ---
 apiVersion: v1
 kind: Service
@@ -437,6 +449,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: session-api
         image: %s
