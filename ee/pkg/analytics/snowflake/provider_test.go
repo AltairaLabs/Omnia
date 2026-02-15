@@ -84,8 +84,9 @@ func (m *MockDB) Close() error {
 
 // MockSourceReader implements analytics.SourceReader for testing.
 type MockSourceReader struct {
-	ReadSessionsFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.SessionRow, error)
-	ReadMessagesFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.MessageRow, error)
+	ReadSessionsFunc    func(ctx context.Context, after time.Time, limit int) ([]analytics.SessionRow, error)
+	ReadMessagesFunc    func(ctx context.Context, after time.Time, limit int) ([]analytics.MessageRow, error)
+	ReadEvalResultsFunc func(ctx context.Context, after time.Time, limit int) ([]analytics.EvalResultRow, error)
 }
 
 func (m *MockSourceReader) ReadSessions(
@@ -102,6 +103,15 @@ func (m *MockSourceReader) ReadMessages(
 ) ([]analytics.MessageRow, error) {
 	if m.ReadMessagesFunc != nil {
 		return m.ReadMessagesFunc(ctx, after, limit)
+	}
+	return nil, nil
+}
+
+func (m *MockSourceReader) ReadEvalResults(
+	ctx context.Context, after time.Time, limit int,
+) ([]analytics.EvalResultRow, error) {
+	if m.ReadEvalResultsFunc != nil {
+		return m.ReadEvalResultsFunc(ctx, after, limit)
 	}
 	return nil, nil
 }
@@ -348,6 +358,115 @@ func TestProvider_Sync_Messages(t *testing.T) {
 	}
 }
 
+func TestProvider_Sync_EvalResults(t *testing.T) {
+	now := time.Now().UTC()
+	score := 0.95
+	dur := 150
+	evalResults := []analytics.EvalResultRow{
+		{
+			ID:             "e1",
+			SessionID:      "s1",
+			MessageID:      "m1",
+			AgentName:      "agent-a",
+			Namespace:      "default",
+			PromptPackName: "pp1",
+			EvalID:         "eval-a",
+			EvalType:       "llm-judge",
+			Trigger:        "on-message",
+			Passed:         true,
+			Score:          &score,
+			Details:        `{"reason":"good"}`,
+			DurationMs:     &dur,
+			Source:         "runtime",
+			CreatedAt:      now,
+		},
+	}
+
+	source := &MockSourceReader{
+		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
+			return evalResults, nil
+		},
+	}
+
+	mock := &MockDB{
+		QueryRowFunc: func(_ context.Context, _ string, _ ...any) Row {
+			return &MockRow{ScanFunc: func(_ ...any) error { return sql.ErrNoRows }}
+		},
+	}
+
+	p := newProviderWithDB(validConfig(), source, mock)
+	p.inited = true
+
+	result, err := p.Sync(context.Background(), analytics.SyncOpts{
+		Tables: []string{TableEvalResults},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalRows != 1 {
+		t.Errorf("expected 1 row synced, got %d", result.TotalRows)
+	}
+	if len(result.Tables) != 1 {
+		t.Errorf("expected 1 table result, got %d", len(result.Tables))
+	}
+	if result.Tables[0].Table != TableEvalResults {
+		t.Errorf("expected table %q, got %q", TableEvalResults, result.Tables[0].Table)
+	}
+}
+
+func TestProvider_Sync_EvalResults_Empty(t *testing.T) {
+	source := &MockSourceReader{
+		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
+			return nil, nil
+		},
+	}
+	mock := &MockDB{
+		QueryRowFunc: func(_ context.Context, _ string, _ ...any) Row {
+			return &MockRow{ScanFunc: func(_ ...any) error { return sql.ErrNoRows }}
+		},
+	}
+
+	p := newProviderWithDB(validConfig(), source, mock)
+	p.inited = true
+
+	result, err := p.Sync(context.Background(), analytics.SyncOpts{
+		Tables: []string{TableEvalResults},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalRows != 0 {
+		t.Errorf("expected 0 rows, got %d", result.TotalRows)
+	}
+}
+
+func TestProvider_Sync_EvalResults_SourceError(t *testing.T) {
+	source := &MockSourceReader{
+		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
+			return nil, errors.New("eval source read failed")
+		},
+	}
+	assertSyncTableError(t, source, TableEvalResults)
+}
+
+func TestProvider_Sync_EvalResults_UpsertError(t *testing.T) {
+	source := &MockSourceReader{
+		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
+			return []analytics.EvalResultRow{{ID: "e1", CreatedAt: time.Now()}}, nil
+		},
+	}
+	assertSyncUpsertError(t, source, TableEvalResults)
+}
+
+func TestMarshalEvalDetails(t *testing.T) {
+	if got := marshalEvalDetails(""); got != "{}" {
+		t.Errorf("empty details: got %q, want {}", got)
+	}
+	if got := marshalEvalDetails(`{"a":1}`); got != `{"a":1}` {
+		t.Errorf("non-empty details: got %q, want {\"a\":1}", got)
+	}
+}
+
 func TestProvider_Sync_DryRun(t *testing.T) {
 	execCalled := false
 	source := &MockSourceReader{
@@ -417,6 +536,9 @@ func TestProvider_Sync_AllTables(t *testing.T) {
 		ReadMessagesFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.MessageRow, error) {
 			return nil, nil
 		},
+		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.EvalResultRow, error) {
+			return nil, nil
+		},
 	}
 	mock := &MockDB{
 		QueryRowFunc: func(_ context.Context, _ string, _ ...any) Row {
@@ -431,29 +553,24 @@ func TestProvider_Sync_AllTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Tables) != 2 {
-		t.Errorf("expected 2 table results (all tables), got %d", len(result.Tables))
+	if len(result.Tables) != 3 {
+		t.Errorf("expected 3 table results (all tables), got %d", len(result.Tables))
 	}
 }
 
-func TestProvider_Sync_SourceReadError(t *testing.T) {
-	readErr := errors.New("source read failed")
-	source := &MockSourceReader{
-		ReadSessionsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.SessionRow, error) {
-			return nil, readErr
-		},
-	}
+// assertSyncTableError verifies that a source-read error is surfaced as a per-table error.
+func assertSyncTableError(t *testing.T, source *MockSourceReader, table string) {
+	t.Helper()
 	mock := &MockDB{
 		QueryRowFunc: func(_ context.Context, _ string, _ ...any) Row {
 			return &MockRow{ScanFunc: func(_ ...any) error { return sql.ErrNoRows }}
 		},
 	}
-
 	p := newProviderWithDB(validConfig(), source, mock)
 	p.inited = true
 
 	result, err := p.Sync(context.Background(), analytics.SyncOpts{
-		Tables: []string{TableSessions},
+		Tables: []string{table},
 	})
 	if err != nil {
 		t.Fatalf("unexpected top-level error: %v", err)
@@ -463,17 +580,13 @@ func TestProvider_Sync_SourceReadError(t *testing.T) {
 	}
 }
 
-func TestProvider_Sync_UpsertError(t *testing.T) {
-	upsertErr := errors.New("upsert failed")
-	source := &MockSourceReader{
-		ReadSessionsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.SessionRow, error) {
-			return []analytics.SessionRow{{SessionID: "s1", UpdatedAt: time.Now()}}, nil
-		},
-	}
+// assertSyncUpsertError verifies that an upsert error is surfaced as a per-table error.
+func assertSyncUpsertError(t *testing.T, source *MockSourceReader, table string) {
+	t.Helper()
 	mock := &MockDB{
 		ExecFunc: func(_ context.Context, query string, _ ...any) (sql.Result, error) {
 			if len(query) > 5 && query[:5] == "MERGE" {
-				return nil, upsertErr
+				return nil, errors.New("upsert failed")
 			}
 			return MockResult{rowsAffected: 1}, nil
 		},
@@ -481,12 +594,11 @@ func TestProvider_Sync_UpsertError(t *testing.T) {
 			return &MockRow{ScanFunc: func(_ ...any) error { return sql.ErrNoRows }}
 		},
 	}
-
 	p := newProviderWithDB(validConfig(), source, mock)
 	p.inited = true
 
 	result, err := p.Sync(context.Background(), analytics.SyncOpts{
-		Tables: []string{TableSessions},
+		Tables: []string{table},
 	})
 	if err != nil {
 		t.Fatalf("unexpected top-level error: %v", err)
@@ -494,6 +606,24 @@ func TestProvider_Sync_UpsertError(t *testing.T) {
 	if result.Tables[0].Error == nil {
 		t.Error("expected per-table error from upsert failure")
 	}
+}
+
+func TestProvider_Sync_SourceReadError(t *testing.T) {
+	source := &MockSourceReader{
+		ReadSessionsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.SessionRow, error) {
+			return nil, errors.New("source read failed")
+		},
+	}
+	assertSyncTableError(t, source, TableSessions)
+}
+
+func TestProvider_Sync_UpsertError(t *testing.T) {
+	source := &MockSourceReader{
+		ReadSessionsFunc: func(_ context.Context, _ time.Time, _ int) ([]analytics.SessionRow, error) {
+			return []analytics.SessionRow{{SessionID: "s1", UpdatedAt: time.Now()}}, nil
+		},
+	}
+	assertSyncUpsertError(t, source, TableSessions)
 }
 
 func TestProvider_Close(t *testing.T) {
@@ -559,8 +689,9 @@ func TestFilterTables(t *testing.T) {
 		available []string
 		expected  int
 	}{
-		{"empty returns all", nil, AllTables, 2},
+		{"empty returns all", nil, AllTables, 3},
 		{"filter sessions", []string{TableSessions}, AllTables, 1},
+		{"filter eval_results", []string{TableEvalResults}, AllTables, 1},
 		{"filter unknown", []string{"unknown"}, AllTables, 0},
 		{"case insensitive", []string{"OMNIA_SESSIONS"}, AllTables, 1},
 	}
@@ -608,6 +739,12 @@ func TestProvider_Sync_DefaultBatchSize(t *testing.T) {
 			return nil, nil
 		},
 		ReadMessagesFunc: func(_ context.Context, _ time.Time, limit int) ([]analytics.MessageRow, error) {
+			if limit != 100 {
+				t.Errorf("expected batch size 100, got %d", limit)
+			}
+			return nil, nil
+		},
+		ReadEvalResultsFunc: func(_ context.Context, _ time.Time, limit int) ([]analytics.EvalResultRow, error) {
 			if limit != 100 {
 				t.Errorf("expected batch size 100, got %d", limit)
 			}

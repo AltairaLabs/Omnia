@@ -37,6 +37,7 @@ var (
 	ErrMissingQuery      = errors.New("search query parameter is required")
 	ErrMissingSessionID  = errors.New("session ID is required")
 	ErrMissingBody       = errors.New("request body is required")
+	ErrMissingNamespace  = errors.New("namespace parameter is required")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.

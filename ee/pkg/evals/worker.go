@@ -34,6 +34,7 @@ const (
 	eventTypeSessionDone  = "session.completed"
 	streamPayloadField    = "payload"
 	periodicCheckInterval = 30 * time.Second
+	evalTypeLLMJudge      = "llm_judge"
 )
 
 // EvalRunner executes a rule-based eval against session messages.
@@ -52,6 +53,12 @@ type WorkerConfig struct {
 	// InactivityTimeout overrides the default completion inactivity timeout.
 	// If zero, DefaultInactivityTimeout is used.
 	InactivityTimeout time.Duration
+	// Sampler controls hash-based deterministic eval sampling.
+	// If nil, a default Sampler (100% default, 10% LLM judge) is used.
+	Sampler *Sampler
+	// RateLimiter controls eval execution throughput.
+	// If nil, a default RateLimiter (50 evals/sec, 5 concurrent judges) is used.
+	RateLimiter *RateLimiter
 }
 
 // EvalWorker consumes session events from Redis Streams and runs evals.
@@ -64,6 +71,8 @@ type EvalWorker struct {
 	logger            *slog.Logger
 	evalRunner        EvalRunner
 	completionTracker *CompletionTracker
+	sampler           *Sampler
+	rateLimiter       *RateLimiter
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace.
@@ -78,6 +87,16 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		timeout = DefaultInactivityTimeout
 	}
 
+	sampler := config.Sampler
+	if sampler == nil {
+		sampler = NewSampler(nil)
+	}
+
+	rateLimiter := config.RateLimiter
+	if rateLimiter == nil {
+		rateLimiter = NewRateLimiter(nil)
+	}
+
 	w := &EvalWorker{
 		redisClient:   config.RedisClient,
 		sessionAPI:    config.SessionAPI,
@@ -86,6 +105,8 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		consumerName:  hostname(),
 		logger:        config.Logger,
 		evalRunner:    runner,
+		sampler:       sampler,
+		rateLimiter:   rateLimiter,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -227,13 +248,15 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 		return fmt.Errorf("get session messages: %w", err)
 	}
 
+	turnIndex := countAssistantMessages(messages)
+
 	evalDefs := filterPerTurnRuleEvals(nil)
 	if len(evalDefs) == 0 {
 		w.logger.Debug("no per_turn rule evals to run", "sessionID", event.SessionID)
 		return nil
 	}
 
-	results := w.runEvals(evalDefs, messages, event, sess.AgentName)
+	results := w.runEvalsWithSampling(ctx, evalDefs, messages, event, sess.AgentName, turnIndex)
 	return w.writeResults(ctx, results, event.SessionID)
 }
 
@@ -251,6 +274,8 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		return fmt.Errorf("get session messages: %w", err)
 	}
 
+	turnIndex := countAssistantMessages(messages)
+
 	evalDefs := filterOnCompleteRuleEvals(nil)
 	if len(evalDefs) == 0 {
 		w.logger.Debug("no on_session_complete rule evals to run", "sessionID", sessionID)
@@ -261,7 +286,7 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		SessionID: sessionID,
 		Namespace: sess.Namespace,
 	}
-	results := w.runEvals(evalDefs, messages, event, sess.AgentName)
+	results := w.runEvalsWithSampling(ctx, evalDefs, messages, event, sess.AgentName, turnIndex)
 	return w.writeResults(ctx, results, sessionID)
 }
 
@@ -309,6 +334,104 @@ func (w *EvalWorker) runEvals(
 	}
 
 	return results
+}
+
+// runEvalsWithSampling runs evals with sampling and rate limiting applied.
+// Each eval is checked against the sampler before execution, and the rate
+// limiter is consulted to avoid exceeding throughput limits.
+func (w *EvalWorker) runEvalsWithSampling(
+	ctx context.Context,
+	evalDefs []api.EvalDefinition,
+	messages []session.Message,
+	event api.SessionEvent,
+	agentName string,
+	turnIndex int,
+) []*api.EvalResult {
+	results := make([]*api.EvalResult, 0, len(evalDefs))
+
+	for _, def := range evalDefs {
+		isJudge := def.Type == evalTypeLLMJudge
+		if !w.getSampler().ShouldSample(event.SessionID, turnIndex, isJudge) {
+			continue
+		}
+
+		if err := w.acquireRateLimit(ctx, isJudge); err != nil {
+			w.logger.Warn("rate limit acquisition failed",
+				"evalID", def.ID,
+				"sessionID", event.SessionID,
+				"error", err,
+			)
+			break
+		}
+
+		if isJudge {
+			defer w.getRateLimiter().ReleaseJudge()
+		}
+
+		result := w.executeSingleEval(def, messages, event, agentName)
+		if result != nil {
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
+// executeSingleEval runs one eval and returns the result, or nil on error.
+func (w *EvalWorker) executeSingleEval(
+	def api.EvalDefinition,
+	messages []session.Message,
+	event api.SessionEvent,
+	agentName string,
+) *api.EvalResult {
+	item, err := w.evalRunner(def, messages)
+	if err != nil {
+		w.logger.Warn("eval failed",
+			"evalID", def.ID,
+			"sessionID", event.SessionID,
+			"error", err,
+		)
+		return nil
+	}
+
+	item.Source = evalSource
+	return toEvalResult(item, event, agentName)
+}
+
+// acquireRateLimit acquires the appropriate rate limit token.
+func (w *EvalWorker) acquireRateLimit(ctx context.Context, isJudge bool) error {
+	rl := w.getRateLimiter()
+	if isJudge {
+		return rl.AcquireJudge(ctx)
+	}
+	return rl.Acquire(ctx)
+}
+
+// getSampler returns the sampler, initializing a default one if needed.
+func (w *EvalWorker) getSampler() *Sampler {
+	if w.sampler == nil {
+		w.sampler = NewSampler(nil)
+	}
+	return w.sampler
+}
+
+// getRateLimiter returns the rate limiter, initializing a default one if needed.
+func (w *EvalWorker) getRateLimiter() *RateLimiter {
+	if w.rateLimiter == nil {
+		w.rateLimiter = NewRateLimiter(nil)
+	}
+	return w.rateLimiter
+}
+
+// countAssistantMessages counts the number of assistant messages to derive turn index.
+func countAssistantMessages(messages []session.Message) int {
+	count := 0
+	for _, m := range messages {
+		if m.Role == session.RoleAssistant {
+			count++
+		}
+	}
+	return count
 }
 
 // toEvalResult converts an EvaluateResultItem to an EvalResult for persistence.

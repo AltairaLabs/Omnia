@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
@@ -1050,4 +1051,266 @@ func TestGetTracker_LazyInit(t *testing.T) {
 	assert.NotNil(t, tracker)
 	// Second call returns the same tracker.
 	assert.Same(t, tracker, w.getTracker())
+}
+
+func TestGetSampler_LazyInit(t *testing.T) {
+	w := &EvalWorker{logger: testLogger()}
+	assert.Nil(t, w.sampler)
+
+	s := w.getSampler()
+	assert.NotNil(t, s)
+	assert.Equal(t, int32(DefaultSamplingRate), s.DefaultRate())
+	// Second call returns the same instance.
+	assert.Same(t, s, w.getSampler())
+}
+
+func TestGetRateLimiter_LazyInit(t *testing.T) {
+	w := &EvalWorker{logger: testLogger()}
+	assert.Nil(t, w.rateLimiter)
+
+	rl := w.getRateLimiter()
+	assert.NotNil(t, rl)
+	assert.Equal(t, int32(DefaultMaxEvalsPerSecond), rl.MaxEvalsPerSecond())
+	// Second call returns the same instance.
+	assert.Same(t, rl, w.getRateLimiter())
+}
+
+func TestAcquireRateLimit_NonJudge(t *testing.T) {
+	w := &EvalWorker{
+		logger:      testLogger(),
+		rateLimiter: NewRateLimiter(nil),
+	}
+	err := w.acquireRateLimit(context.Background(), false)
+	require.NoError(t, err)
+}
+
+func TestAcquireRateLimit_Judge(t *testing.T) {
+	w := &EvalWorker{
+		logger:      testLogger(),
+		rateLimiter: NewRateLimiter(nil),
+	}
+	err := w.acquireRateLimit(context.Background(), true)
+	require.NoError(t, err)
+	w.rateLimiter.ReleaseJudge()
+}
+
+func TestExecuteSingleEval_Success(t *testing.T) {
+	score := 0.9
+	runner := func(def api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		return api.EvaluateResultItem{
+			EvalID:     def.ID,
+			EvalType:   def.Type,
+			Trigger:    def.Trigger,
+			Passed:     true,
+			Score:      &score,
+			DurationMs: 3,
+		}, nil
+	}
+
+	w := &EvalWorker{logger: testLogger(), evalRunner: runner}
+
+	def := api.EvalDefinition{ID: "e1", Type: "contains", Trigger: "per_turn"}
+	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
+	msgs := []session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "hi"}}
+
+	result := w.executeSingleEval(def, msgs, event, "agent")
+	require.NotNil(t, result)
+	assert.Equal(t, "e1", result.EvalID)
+	assert.True(t, result.Passed)
+	assert.Equal(t, evalSource, result.Source)
+}
+
+func TestExecuteSingleEval_Error(t *testing.T) {
+	runner := func(_ api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		return api.EvaluateResultItem{}, fmt.Errorf("eval engine failure")
+	}
+
+	w := &EvalWorker{logger: testLogger(), evalRunner: runner}
+
+	def := api.EvalDefinition{ID: "e1", Type: "rule", Trigger: "per_turn"}
+	event := api.SessionEvent{SessionID: "s1"}
+
+	result := w.executeSingleEval(def, nil, event, "agent")
+	assert.Nil(t, result)
+}
+
+func TestRunEvalsWithSampling_AllSampled(t *testing.T) {
+	runner := func(def api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		return api.EvaluateResultItem{
+			EvalID:     def.ID,
+			EvalType:   def.Type,
+			Trigger:    def.Trigger,
+			Passed:     true,
+			DurationMs: 1,
+		}, nil
+	}
+
+	w := &EvalWorker{
+		logger:      testLogger(),
+		evalRunner:  runner,
+		sampler:     NewSampler(nil), // 100% default rate
+		rateLimiter: NewRateLimiter(nil),
+	}
+
+	defs := []api.EvalDefinition{
+		{ID: "e1", Type: "contains", Trigger: "per_turn"},
+		{ID: "e2", Type: "max_length", Trigger: "per_turn"},
+	}
+	msgs := []session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "hi"}}
+	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
+
+	results := w.runEvalsWithSampling(context.Background(), defs, msgs, event, "agent", 1)
+	assert.Len(t, results, 2)
+}
+
+func TestRunEvalsWithSampling_NoneSampled(t *testing.T) {
+	runner := func(_ api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		t.Fatal("runner should not be called when sampling rate is 0")
+		return api.EvaluateResultItem{}, nil
+	}
+
+	dr := int32(0)
+	w := &EvalWorker{
+		logger:      testLogger(),
+		evalRunner:  runner,
+		sampler:     NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr}),
+		rateLimiter: NewRateLimiter(nil),
+	}
+
+	defs := []api.EvalDefinition{
+		{ID: "e1", Type: "rule", Trigger: "per_turn"},
+	}
+	event := api.SessionEvent{SessionID: "s1"}
+
+	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0)
+	assert.Empty(t, results)
+}
+
+func TestRunEvalsWithSampling_RateLimitCancelled(t *testing.T) {
+	callCount := 0
+	runner := func(def api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		callCount++
+		return api.EvaluateResultItem{
+			EvalID: def.ID, EvalType: def.Type, Passed: true,
+		}, nil
+	}
+
+	// Rate limit of 1 per second with already-cancelled context.
+	maxEvals := int32(1)
+	w := &EvalWorker{
+		logger:      testLogger(),
+		evalRunner:  runner,
+		sampler:     NewSampler(nil),
+		rateLimiter: NewRateLimiter(&v1alpha1.EvalRateLimit{MaxEvalsPerSecond: &maxEvals}),
+	}
+
+	// Consume the burst token.
+	ctx := context.Background()
+	err := w.rateLimiter.Acquire(ctx)
+	require.NoError(t, err)
+
+	// Now use a cancelled context so the next Acquire fails.
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	defs := []api.EvalDefinition{
+		{ID: "e1", Type: "rule", Trigger: "per_turn"},
+		{ID: "e2", Type: "rule", Trigger: "per_turn"},
+	}
+	event := api.SessionEvent{SessionID: "s1"}
+
+	results := w.runEvalsWithSampling(cancelledCtx, defs, nil, event, "agent", 0)
+	assert.Empty(t, results)
+	assert.Equal(t, 0, callCount, "no evals should run when rate limit fails")
+}
+
+func TestRunEvalsWithSampling_LLMJudgeSampling(t *testing.T) {
+	callCount := 0
+	runner := func(def api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		callCount++
+		return api.EvaluateResultItem{
+			EvalID: def.ID, EvalType: def.Type, Passed: true, DurationMs: 1,
+		}, nil
+	}
+
+	// Default rate 100%, LLM judge rate 0% — judge evals should be skipped.
+	jr := int32(0)
+	w := &EvalWorker{
+		logger:      testLogger(),
+		evalRunner:  runner,
+		sampler:     NewSampler(&v1alpha1.EvalSampling{LLMJudgeRate: &jr}),
+		rateLimiter: NewRateLimiter(nil),
+	}
+
+	defs := []api.EvalDefinition{
+		{ID: "e1", Type: "rule", Trigger: "per_turn"},
+		{ID: "e2", Type: "llm_judge", Trigger: "per_turn"},
+	}
+	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
+
+	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "e1", results[0].EvalID)
+	assert.Equal(t, 1, callCount)
+}
+
+func TestCountAssistantMessages(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []session.Message
+		expected int
+	}{
+		{
+			name:     "empty",
+			messages: nil,
+			expected: 0,
+		},
+		{
+			name: "mixed roles",
+			messages: []session.Message{
+				{Role: session.RoleUser},
+				{Role: session.RoleAssistant},
+				{Role: session.RoleUser},
+				{Role: session.RoleAssistant},
+				{Role: session.RoleAssistant},
+			},
+			expected: 3,
+		},
+		{
+			name: "no assistant",
+			messages: []session.Message{
+				{Role: session.RoleUser},
+				{Role: session.RoleUser},
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, countAssistantMessages(tc.messages))
+		})
+	}
+}
+
+func TestNewEvalWorker_WithSamplerAndRateLimiter(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	dr := int32(50)
+	sampler := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
+	rateLimiter := NewRateLimiter(nil)
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: client,
+		SessionAPI:  &mockSessionAPI{},
+		Namespace:   "ns",
+		Logger:      testLogger(),
+		Sampler:     sampler,
+		RateLimiter: rateLimiter,
+	})
+
+	assert.Same(t, sampler, w.sampler)
+	assert.Same(t, rateLimiter, w.rateLimiter)
 }

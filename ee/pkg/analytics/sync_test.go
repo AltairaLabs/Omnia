@@ -93,6 +93,49 @@ func TestMessageRow_Fields(t *testing.T) {
 	}
 }
 
+func TestEvalResultRow_Fields(t *testing.T) {
+	now := time.Now()
+	score := 0.95
+	dur := 150
+	tokens := 200
+	cost := 0.002
+	row := EvalResultRow{
+		ID:                "e1",
+		SessionID:         "sess-1",
+		MessageID:         "msg-1",
+		AgentName:         "agent-a",
+		Namespace:         "default",
+		PromptPackName:    "pp-1",
+		PromptPackVersion: "v1",
+		EvalID:            "eval-a",
+		EvalType:          "llm-judge",
+		Trigger:           "on-message",
+		Passed:            true,
+		Score:             &score,
+		Details:           `{"reason":"good"}`,
+		DurationMs:        &dur,
+		JudgeTokens:       &tokens,
+		JudgeCostUSD:      &cost,
+		Source:            "runtime",
+		CreatedAt:         now,
+	}
+	if row.ID != "e1" {
+		t.Errorf("expected ID 'e1', got %s", row.ID)
+	}
+	if row.SessionID != "sess-1" {
+		t.Errorf("expected SessionID 'sess-1', got %s", row.SessionID)
+	}
+	if !row.Passed {
+		t.Error("expected Passed true")
+	}
+	if row.Score == nil || *row.Score != 0.95 {
+		t.Errorf("expected Score 0.95, got %v", row.Score)
+	}
+	if row.EvalType != "llm-judge" {
+		t.Errorf("expected EvalType 'llm-judge', got %s", row.EvalType)
+	}
+}
+
 func TestTableSyncResult_WithError(t *testing.T) {
 	result := TableSyncResult{
 		Table:      "sessions",

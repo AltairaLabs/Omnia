@@ -15,10 +15,10 @@ import (
 	"testing"
 )
 
-func TestSchemaDDL_ReturnsThreeStatements(t *testing.T) {
+func TestSchemaDDL_ReturnsFourStatements(t *testing.T) {
 	ddl := SchemaDDL()
-	if len(ddl) != 3 {
-		t.Fatalf("expected 3 DDL statements, got %d", len(ddl))
+	if len(ddl) != 4 {
+		t.Fatalf("expected 4 DDL statements, got %d", len(ddl))
 	}
 }
 
@@ -61,9 +61,26 @@ func TestSchemaDDL_MessagesTable(t *testing.T) {
 	}
 }
 
+func TestSchemaDDL_EvalResultsTable(t *testing.T) {
+	ddl := SchemaDDL()
+	evalStmt := ddl[2]
+	expectedCols := []string{
+		"id", "session_id", "message_id", "agent_name",
+		"namespace", "promptpack_name", "promptpack_version",
+		"eval_id", "eval_type", "trigger", "passed",
+		"score", "details", "duration_ms", "judge_tokens",
+		"judge_cost_usd", "source", "created_at",
+	}
+	for _, col := range expectedCols {
+		if !strings.Contains(evalStmt, col) {
+			t.Errorf("eval_results DDL missing column %q", col)
+		}
+	}
+}
+
 func TestSchemaDDL_WatermarksTable(t *testing.T) {
 	ddl := SchemaDDL()
-	wmStmt := ddl[2]
+	wmStmt := ddl[3]
 	expectedCols := []string{
 		"table_name", "last_sync_at", "last_sync_rows", "updated_at",
 	}
@@ -75,14 +92,17 @@ func TestSchemaDDL_WatermarksTable(t *testing.T) {
 }
 
 func TestAllTables(t *testing.T) {
-	if len(AllTables) != 2 {
-		t.Fatalf("expected 2 tables in AllTables, got %d", len(AllTables))
+	if len(AllTables) != 3 {
+		t.Fatalf("expected 3 tables in AllTables, got %d", len(AllTables))
 	}
 	if AllTables[0] != TableSessions {
 		t.Errorf("expected AllTables[0] = %q, got %q", TableSessions, AllTables[0])
 	}
 	if AllTables[1] != TableMessages {
 		t.Errorf("expected AllTables[1] = %q, got %q", TableMessages, AllTables[1])
+	}
+	if AllTables[2] != TableEvalResults {
+		t.Errorf("expected AllTables[2] = %q, got %q", TableEvalResults, AllTables[2])
 	}
 }
 
@@ -92,6 +112,9 @@ func TestTableConstants(t *testing.T) {
 	}
 	if TableMessages != "omnia_messages" {
 		t.Errorf("unexpected TableMessages: %q", TableMessages)
+	}
+	if TableEvalResults != "omnia_eval_results" {
+		t.Errorf("unexpected TableEvalResults: %q", TableEvalResults)
 	}
 	if TableWatermarks != "_omnia_sync_watermarks" {
 		t.Errorf("unexpected TableWatermarks: %q", TableWatermarks)

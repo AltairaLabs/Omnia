@@ -70,6 +70,9 @@ type EvalListenerConfig struct {
 	Enabled      bool
 	SamplingRate int32 // 0-100, default 100
 	LLMJudgeRate int32 // 0-100, default 10
+	// Sampler provides deterministic hash-based sampling. If nil, the legacy
+	// SamplingRate field is used via the inline shouldSample method.
+	Sampler *evals.Sampler
 }
 
 // EvalLoader defines the interface for loading eval definitions.
@@ -195,8 +198,16 @@ func (l *EvalListener) parseMessageData(event EventBusEvent) recordingMessageDat
 }
 
 // shouldSample determines if this event should be sampled for eval execution.
-// Uses FNV hash of sessionID + trigger for deterministic, uniform sampling.
+// Delegates to the Sampler if configured, otherwise uses legacy FNV hash logic.
 func (l *EvalListener) shouldSample(sessionID, trigger string) bool {
+	if l.config.Sampler != nil {
+		return l.config.Sampler.ShouldSample(sessionID, 0, false)
+	}
+	return l.legacyShouldSample(sessionID, trigger)
+}
+
+// legacyShouldSample is the original FNV hash-based sampling for backward compat.
+func (l *EvalListener) legacyShouldSample(sessionID, trigger string) bool {
 	rate := l.config.SamplingRate
 	if rate <= 0 {
 		return false

@@ -12,13 +12,14 @@ package snowflake
 
 // Table name constants.
 const (
-	TableSessions   = "omnia_sessions"
-	TableMessages   = "omnia_messages"
-	TableWatermarks = "_omnia_sync_watermarks"
+	TableSessions    = "omnia_sessions"
+	TableMessages    = "omnia_messages"
+	TableEvalResults = "omnia_eval_results"
+	TableWatermarks  = "_omnia_sync_watermarks"
 )
 
 // AllTables lists all destination tables managed by this provider.
-var AllTables = []string{TableSessions, TableMessages}
+var AllTables = []string{TableSessions, TableMessages, TableEvalResults}
 
 // DDL statements for creating the Snowflake analytics tables.
 const createSessionsTable = `CREATE TABLE IF NOT EXISTS omnia_sessions (
@@ -48,6 +49,27 @@ const createMessagesTable = `CREATE TABLE IF NOT EXISTS omnia_messages (
     created_at TIMESTAMP_TZ
 )`
 
+const createEvalResultsTable = `CREATE TABLE IF NOT EXISTS omnia_eval_results (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36),
+    message_id VARCHAR(36),
+    agent_name VARCHAR(255),
+    namespace VARCHAR(255),
+    promptpack_name VARCHAR(255),
+    promptpack_version VARCHAR(100),
+    eval_id VARCHAR(255),
+    eval_type VARCHAR(100),
+    trigger VARCHAR(100),
+    passed BOOLEAN,
+    score FLOAT,
+    details VARIANT,
+    duration_ms INT,
+    judge_tokens INT,
+    judge_cost_usd FLOAT,
+    source VARCHAR(100),
+    created_at TIMESTAMP_TZ
+)`
+
 const createWatermarksTable = `CREATE TABLE IF NOT EXISTS _omnia_sync_watermarks (
     table_name VARCHAR NOT NULL PRIMARY KEY,
     last_sync_at TIMESTAMP_TZ NOT NULL,
@@ -60,6 +82,7 @@ func SchemaDDL() []string {
 	return []string{
 		createSessionsTable,
 		createMessagesTable,
+		createEvalResultsTable,
 		createWatermarksTable,
 	}
 }
