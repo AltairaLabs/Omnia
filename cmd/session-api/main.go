@@ -27,9 +27,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
@@ -42,6 +44,11 @@ import (
 	pgprovider "github.com/altairalabs/omnia/internal/session/providers/postgres"
 	"github.com/altairalabs/omnia/internal/session/providers/redis"
 )
+
+// redisClientProvider is implemented by providers that expose the underlying Redis client.
+type redisClientProvider interface {
+	RedisClient() goredis.UniversalClient
+}
 
 // flags groups all CLI flags for the session-api binary.
 type flags struct {
@@ -138,26 +145,16 @@ func run() error {
 	defer cancel()
 
 	// --- Postgres pool (shared) ---
-	poolCfg, err := pgxpool.ParseConfig(f.postgresConn)
+	pool, err := initPool(ctx, f.postgresConn)
 	if err != nil {
-		return fmt.Errorf("parsing postgres connection string: %w", err)
-	}
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-	if err != nil {
-		return fmt.Errorf("creating postgres pool: %w", err)
+		return err
 	}
 	defer pool.Close()
 
 	// --- Migrations ---
-	migrator, err := sessionpg.NewMigrator(f.postgresConn, log)
-	if err != nil {
-		return fmt.Errorf("creating migrator: %w", err)
+	if err := runMigrations(f.postgresConn, log); err != nil {
+		return err
 	}
-	if err := migrator.Up(); err != nil {
-		_ = migrator.Close()
-		return fmt.Errorf("running migrations: %w", err)
-	}
-	_ = migrator.Close()
 
 	// --- Providers ---
 	registry, providerCleanup, err := initProviders(ctx, f, pool)
@@ -166,79 +163,20 @@ func run() error {
 	}
 	defer providerCleanup()
 
-	// --- Session service ---
-	svcCfg := api.ServiceConfig{}
+	// --- Build API mux ---
+	apiMux, auditCleanup := buildAPIMux(pool, registry, f, log)
+	defer auditCleanup()
 
-	// Enterprise: audit logger.
-	var auditLogger *audit.Logger
-	if f.enterprise {
-		auditMetrics := metrics.NewAuditMetrics()
-		auditLogger = audit.NewLogger(pool, log, auditMetrics, audit.LoggerConfig{})
-		defer func() { _ = auditLogger.Close() }()
-		svcCfg.AuditLogger = auditLogger
-	}
+	// --- Servers ---
+	healthSrv := newHealthServer(f.healthAddr, pool)
+	apiSrv := &http.Server{Addr: f.apiAddr, Handler: apiMux}
 
-	sessionService := api.NewSessionService(registry, svcCfg, log)
-	handler := api.NewHandler(sessionService, log)
-
-	// --- Eval results ---
-	evalStore := pgprovider.NewEvalStore(pool)
-	evalService := api.NewEvalService(evalStore, log)
-	evalService.SetMessageFetcher(sessionService)
-	evalHandler := api.NewEvalHandler(evalService, log)
-
-	// --- API mux ---
-	apiMux := http.NewServeMux()
-	handler.RegisterRoutes(apiMux)
-	evalHandler.RegisterRoutes(apiMux)
-
-	if f.enterprise && auditLogger != nil {
-		ah := audit.NewHandler(auditLogger, log)
-		ah.RegisterRoutes(apiMux)
-
-		// GDPR/CCPA deletion workflow.
-		warm, _ := registry.WarmStore()
-		deletionStore := privacy.NewPostgresDeletionStore(pool)
-		deleter := privacy.NewWarmStoreSessionDeleter(warm)
-		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
-		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
-		deletionHandler.RegisterRoutes(apiMux)
-	}
-
-	if f.enterprise {
-		privacyStore := privacy.NewPreferencesStore(pool)
-		optOutHandler := privacy.NewOptOutHandler(privacyStore, log)
-		optOutHandler.RegisterRoutes(apiMux)
-	}
-
-	apiMux.Handle("GET /metrics", promhttp.Handler())
-
-	// --- Health server ---
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	healthMux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := pool.Ping(r.Context()); err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("postgres unavailable"))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	healthSrv := &http.Server{Addr: f.healthAddr, Handler: healthMux}
 	go func() {
 		log.Info("starting health server", "addr", f.healthAddr)
 		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error(err, "health server error")
 		}
 	}()
-
-	// --- API server ---
-	apiSrv := &http.Server{Addr: f.apiAddr, Handler: apiMux}
 	go func() {
 		log.Info("starting session API server", "addr", f.apiAddr)
 		if err := apiSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -259,7 +197,6 @@ func run() error {
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutCancel()
 
-	// Graceful shutdown: API first, then health.
 	if err := apiSrv.Shutdown(shutCtx); err != nil {
 		log.Error(err, "API server shutdown error")
 	}
@@ -268,6 +205,110 @@ func run() error {
 	}
 
 	return nil
+}
+
+// initPool creates and returns a pgxpool connection pool.
+func initPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
+	poolCfg, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		return nil, fmt.Errorf("parsing postgres connection string: %w", err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating postgres pool: %w", err)
+	}
+	return pool, nil
+}
+
+// runMigrations applies database schema migrations.
+func runMigrations(connStr string, log logr.Logger) error {
+	migrator, err := sessionpg.NewMigrator(connStr, log)
+	if err != nil {
+		return fmt.Errorf("creating migrator: %w", err)
+	}
+	if err := migrator.Up(); err != nil {
+		_ = migrator.Close()
+		return fmt.Errorf("running migrations: %w", err)
+	}
+	_ = migrator.Close()
+	return nil
+}
+
+// buildAPIMux assembles the HTTP mux with all API routes. Returns the mux and
+// a cleanup function for the audit logger (no-op when enterprise is disabled).
+func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (*http.ServeMux, func()) {
+	svcCfg := api.ServiceConfig{}
+	cleanup := func() {}
+
+	// Enterprise: audit logger.
+	var auditLogger *audit.Logger
+	if f.enterprise {
+		auditMetrics := metrics.NewAuditMetrics()
+		auditLogger = audit.NewLogger(pool, log, auditMetrics, audit.LoggerConfig{})
+		svcCfg.AuditLogger = auditLogger
+		cleanup = func() { _ = auditLogger.Close() }
+	}
+
+	// Event publisher (reuses the same Redis used for hot cache, if configured).
+	svcCfg.EventPublisher = initEventPublisher(registry, log)
+
+	sessionService := api.NewSessionService(registry, svcCfg, log)
+	handler := api.NewHandler(sessionService, log)
+
+	// Eval results.
+	evalStore := pgprovider.NewEvalStore(pool)
+	evalService := api.NewEvalService(evalStore, log)
+	evalService.SetMessageFetcher(sessionService)
+	evalHandler := api.NewEvalHandler(evalService, log)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	evalHandler.RegisterRoutes(mux)
+	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
+	mux.Handle("GET /metrics", promhttp.Handler())
+
+	return mux, cleanup
+}
+
+// registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when
+// enterprise mode is enabled.
+func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *providers.Registry, auditLogger *audit.Logger, f *flags, log logr.Logger) {
+	if f.enterprise && auditLogger != nil {
+		ah := audit.NewHandler(auditLogger, log)
+		ah.RegisterRoutes(mux)
+
+		warm, _ := registry.WarmStore()
+		deletionStore := privacy.NewPostgresDeletionStore(pool)
+		deleter := privacy.NewWarmStoreSessionDeleter(warm)
+		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
+		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
+		deletionHandler.RegisterRoutes(mux)
+	}
+
+	if f.enterprise {
+		privacyStore := privacy.NewPreferencesStore(pool)
+		optOutHandler := privacy.NewOptOutHandler(privacyStore, log)
+		optOutHandler.RegisterRoutes(mux)
+	}
+}
+
+// newHealthServer creates an HTTP server for health and readiness probes.
+func newHealthServer(addr string, pool *pgxpool.Pool) *http.Server {
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	healthMux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := pool.Ping(r.Context()); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("postgres unavailable"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	return &http.Server{Addr: addr, Handler: healthMux}
 }
 
 // initProviders creates the tiered storage registry (warm/hot/cold) and returns
@@ -323,4 +364,19 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*provider
 		}
 	}
 	return registry, cleanup, nil
+}
+
+// initEventPublisher creates an EventPublisher backed by the Redis client from
+// the hot cache provider, if available. Returns nil when Redis is not configured.
+func initEventPublisher(registry *providers.Registry, log logr.Logger) api.EventPublisher {
+	hot, err := registry.HotCache()
+	if err != nil {
+		return nil
+	}
+	rp, ok := hot.(redisClientProvider)
+	if !ok {
+		return nil
+	}
+	log.Info("event publisher enabled (Redis Streams)")
+	return api.NewRedisEventPublisher(rp.RedisClient(), log)
 }

@@ -19,6 +19,7 @@ import {
   Cpu,
   Target,
   Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 
 interface NavItem {
@@ -37,6 +38,7 @@ const navigation: NavItem[] = [
   { name: "Tools", href: "/tools", icon: Wrench },
   { name: "Providers", href: "/providers", icon: Cpu },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
+  { name: "Quality", href: "/quality", icon: ShieldCheck },
   { name: "Costs", href: "/costs", icon: DollarSign },
   { name: "Arena", href: "/arena", icon: Target, enterprise: true },
 ];
