@@ -625,6 +625,84 @@ type RuntimeConfig struct {
 	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
+// EvalConfig configures realtime eval execution for this agent.
+type EvalConfig struct {
+	// enabled activates eval execution for this agent's sessions.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// judges maps judge names (referenced in PromptPack eval definitions)
+	// to Provider CRDs that supply the LLM for judging.
+	// +optional
+	Judges []JudgeMapping `json:"judges,omitempty"`
+
+	// sampling configures eval sampling rates to control cost.
+	// +optional
+	Sampling *EvalSampling `json:"sampling,omitempty"`
+
+	// rateLimit configures eval execution rate limits.
+	// +optional
+	RateLimit *EvalRateLimit `json:"rateLimit,omitempty"`
+
+	// sessionCompletion configures how session completion is detected
+	// for on_session_complete evals.
+	// +optional
+	SessionCompletion *SessionCompletionConfig `json:"sessionCompletion,omitempty"`
+}
+
+// JudgeMapping maps a judge name to a Provider CRD.
+type JudgeMapping struct {
+	// name is the judge name as referenced in PromptPack eval params
+	// (e.g., "fast-judge", "strong-judge").
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// providerRef references the Provider CRD to use for this judge.
+	// +kubebuilder:validation:Required
+	ProviderRef ProviderRef `json:"providerRef"`
+}
+
+// EvalSampling configures sampling rates for evals.
+type EvalSampling struct {
+	// defaultRate is the default sampling percentage (0-100) for all evals.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:default=100
+	// +optional
+	DefaultRate *int32 `json:"defaultRate,omitempty"`
+
+	// llmJudgeRate is the sampling percentage (0-100) for LLM judge evals.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:default=10
+	// +optional
+	LLMJudgeRate *int32 `json:"llmJudgeRate,omitempty"`
+}
+
+// EvalRateLimit configures rate limits for eval execution.
+type EvalRateLimit struct {
+	// maxEvalsPerSecond is the maximum number of evals to execute per second.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=50
+	// +optional
+	MaxEvalsPerSecond *int32 `json:"maxEvalsPerSecond,omitempty"`
+
+	// maxConcurrentJudgeCalls is the maximum concurrent LLM judge API calls.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=5
+	// +optional
+	MaxConcurrentJudgeCalls *int32 `json:"maxConcurrentJudgeCalls,omitempty"`
+}
+
+// SessionCompletionConfig configures session completion detection for evals.
+type SessionCompletionConfig struct {
+	// inactivityTimeout is the duration after the last message before a session
+	// is considered complete. Uses Go duration format (e.g., "5m", "1h").
+	// +kubebuilder:default="5m"
+	// +optional
+	InactivityTimeout *string `json:"inactivityTimeout,omitempty"`
+}
+
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
 type AgentRuntimeSpec struct {
 	// framework specifies which agent framework to use.
@@ -668,6 +746,10 @@ type AgentRuntimeSpec struct {
 	// is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
 	// +optional
 	Provider *ProviderConfig `json:"provider,omitempty"`
+
+	// evals configures realtime eval execution for this agent's sessions.
+	// +optional
+	Evals *EvalConfig `json:"evals,omitempty"`
 
 	// console configures the dashboard console UI settings.
 	// Use this to customize allowed file attachment types and size limits.

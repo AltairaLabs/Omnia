@@ -10,6 +10,7 @@ import SessionDetailPage from "./page";
 // Mock hooks
 vi.mock("@/hooks", () => ({
   useSessionDetail: vi.fn(),
+  useSessionEvalResults: vi.fn(),
 }));
 
 // Mock next/link
@@ -106,14 +107,26 @@ async function renderPage(id = "sess-123") {
 }
 
 describe("SessionDetailPage", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // Default mock for useSessionEvalResults to avoid errors in tests that don't set it
+    const { useSessionEvalResults } = await import("@/hooks");
+    vi.mocked(useSessionEvalResults).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
   });
 
   it("renders loading skeleton when loading", async () => {
-    const { useSessionDetail } = await import("@/hooks");
+    const { useSessionDetail, useSessionEvalResults } = await import("@/hooks");
     vi.mocked(useSessionDetail).mockReturnValue({
       data: undefined,
+      isLoading: true,
+      error: null,
+    } as any);
+    vi.mocked(useSessionEvalResults).mockReturnValue({
+      data: [],
       isLoading: true,
       error: null,
     } as any);
@@ -235,5 +248,59 @@ describe("SessionDetailPage", () => {
     await renderPage();
 
     expect(screen.getByText(/sess-123/)).toBeInTheDocument();
+  });
+
+  it("renders eval results badge next to evaluated messages", async () => {
+    const { useSessionDetail, useSessionEvalResults } = await import("@/hooks");
+    vi.mocked(useSessionDetail).mockReturnValue({
+      data: mockSession,
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionEvalResults).mockReturnValue({
+      data: [
+        {
+          id: "e1",
+          sessionId: "sess-123",
+          messageId: "m2",
+          agentName: "support-agent",
+          namespace: "default",
+          promptpackName: "pp-1",
+          evalId: "tone-check",
+          evalType: "llm_judge",
+          trigger: "on_response",
+          passed: true,
+          score: 0.95,
+          source: "in_proc",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      isLoading: false,
+      error: null,
+    } as any);
+
+    await renderPage();
+
+    expect(screen.getByText("1 eval passed")).toBeInTheDocument();
+  });
+
+  it("renders without eval results when data is undefined", async () => {
+    const { useSessionDetail, useSessionEvalResults } = await import("@/hooks");
+    vi.mocked(useSessionDetail).mockReturnValue({
+      data: mockSession,
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useSessionEvalResults).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    } as any);
+
+    await renderPage();
+
+    // Should still render normally without eval badges
+    expect(screen.getByText("Hello, I need help")).toBeInTheDocument();
+    expect(screen.queryByTestId("eval-results-badge")).not.toBeInTheDocument();
   });
 });

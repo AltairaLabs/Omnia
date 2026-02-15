@@ -21,6 +21,7 @@ import type {
   SessionListResponse,
   SessionMessagesResponse,
 } from "@/types/session";
+import type { EvalResult } from "@/types/eval";
 
 const SESSION_API_BASE = "/api/workspaces";
 
@@ -373,5 +374,23 @@ export class SessionApiService {
       messages: transformAndPairMessages(data.messages || []),
       hasMore: data.hasMore || false,
     };
+  }
+
+  async getSessionEvalResults(
+    workspace: string,
+    sessionId: string
+  ): Promise<EvalResult[]> {
+    const response = await fetch(
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}/eval-results`
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return [];
+      }
+      throw new Error(`Failed to fetch eval results: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.evalResults || [];
   }
 }

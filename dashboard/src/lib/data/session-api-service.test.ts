@@ -389,4 +389,52 @@ describe("SessionApiService", () => {
       expect(result.messages[0].tokens).toBeUndefined();
     });
   });
+
+  describe("getSessionEvalResults", () => {
+    it("fetches eval results for a session", async () => {
+      const evalResults = [
+        { id: "e1", sessionId: "s1", evalId: "tone", evalType: "llm_judge", passed: true, score: 0.9, source: "in_proc", createdAt: "2026-01-15T10:00:00Z" },
+      ];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ evalResults }),
+      });
+
+      const result = await service.getSessionEvalResults("ws", "s1");
+
+      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/sessions/s1/eval-results");
+      expect(result).toHaveLength(1);
+      expect(result[0].evalId).toBe("tone");
+    });
+
+    it("returns empty array on 404", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
+
+      const result = await service.getSessionEvalResults("ws", "s1");
+      expect(result).toEqual([]);
+    });
+
+    it("returns empty array on 403", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 403, statusText: "Forbidden" });
+
+      const result = await service.getSessionEvalResults("ws", "s1");
+      expect(result).toEqual([]);
+    });
+
+    it("throws on server error", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
+
+      await expect(service.getSessionEvalResults("ws", "s1")).rejects.toThrow("Failed to fetch eval results");
+    });
+
+    it("handles response with no evalResults field", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
+
+      const result = await service.getSessionEvalResults("ws", "s1");
+      expect(result).toEqual([]);
+    });
+  });
 });

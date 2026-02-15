@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useDataService } from "@/lib/data";
+import { SessionApiService } from "@/lib/data/session-api-service";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type {
   SessionListOptions,
@@ -112,5 +113,27 @@ export function useSessionMessages(sessionId: string, options: SessionMessageOpt
     },
     enabled: !!currentWorkspace && !!sessionId,
     staleTime: 5000,
+  });
+}
+
+/**
+ * Fetch eval results for a session.
+ * Uses SessionApiService directly since eval results are not part of the
+ * DataService interface (they are session-api specific).
+ */
+export function useSessionEvalResults(sessionId: string) {
+  const { currentWorkspace } = useWorkspace();
+
+  return useQuery({
+    queryKey: ["session-eval-results", currentWorkspace?.name, sessionId],
+    queryFn: async () => {
+      if (!currentWorkspace) {
+        return [];
+      }
+      const service = new SessionApiService();
+      return service.getSessionEvalResults(currentWorkspace.name, sessionId);
+    },
+    enabled: !!currentWorkspace && !!sessionId,
+    staleTime: 10000,
   });
 }
