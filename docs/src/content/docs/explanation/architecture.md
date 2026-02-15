@@ -131,6 +131,7 @@ The primary resource for deploying agents. It references:
 - PromptPack (what prompts to use)
 - ToolRegistry (what tools are available)
 - Session configuration
+- Evals configuration (judges, sampling, rate limits)
 - Runtime resources and scaling
 
 #### PromptPack
@@ -249,6 +250,34 @@ env:
   - name: OMNIA_TRACING_SAMPLE_RATE
     value: "1.0"
 ```
+
+## Realtime Evals
+
+Omnia includes a realtime evaluation system that continuously assesses the quality of live agent conversations. Eval definitions are authored in the PromptPack (alongside validators/guardrails) and executed automatically as sessions progress.
+
+The system uses a **dual-pattern architecture** based on the agent's framework type:
+
+```mermaid
+flowchart LR
+    subgraph patternA["Pattern A — All Agents"]
+        F[Facade] --> SA[session-api]
+        SA -.->|event| RS[Redis Streams]
+        RS --> EW[eval worker]
+    end
+
+    subgraph patternC["Pattern C — PromptKit Agents"]
+        EB[EventBus] --> EBL[EventBusEvalListener]
+        EBL --> Runner[in-process evals]
+    end
+```
+
+- **Pattern A (Platform Events)** works with every framework type. The facade records sessions through session-api, which publishes lightweight events to Redis Streams. A per-namespace eval worker subscribes, loads the PromptPack's eval definitions, and runs assertions against the session data.
+
+- **Pattern C (EventBus-Driven)** is an additional path for PromptKit agents. PromptKit's `RecordingStage` and `EventBus` provide richer event data (provider call metadata, validation events, pipeline timings). An in-process `EventBusEvalListener` triggers evals with lower latency and fuller context.
+
+Eval configuration — judges, sampling rates, rate limits — is defined per-agent on the [AgentRuntime CRD](/reference/agentruntime/#evals). Results are stored in the `eval_results` table and surfaced in the dashboard's quality view.
+
+For the complete explanation, see [Realtime Evals](/explanation/realtime-evals/).
 
 ## Design Decisions
 

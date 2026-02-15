@@ -463,6 +463,97 @@ triggers:
       desiredReplicas: "5"
 ```
 
+### `evals`
+
+Configures realtime eval execution for this agent. When enabled, session events trigger evaluation of live conversations against eval definitions in the referenced PromptPack. See [Realtime Evals](/explanation/realtime-evals/) for the full architecture and [Configure Realtime Evals](/how-to/configure-realtime-evals/) for a step-by-step guide.
+
+| Field | Type | Default | Required |
+|-------|------|---------|----------|
+| `evals.enabled` | boolean | false | No |
+
+```yaml
+spec:
+  evals:
+    enabled: true
+```
+
+#### `evals.judges`
+
+Maps judge names (referenced in PromptPack eval definitions) to Provider CRDs that supply the LLM for judging.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `evals.judges[].name` | string | Yes |
+| `evals.judges[].providerRef.name` | string | Yes |
+| `evals.judges[].providerRef.namespace` | string | No |
+
+```yaml
+spec:
+  evals:
+    enabled: true
+    judges:
+      - name: fast-judge
+        providerRef:
+          name: claude-haiku
+      - name: strong-judge
+        providerRef:
+          name: claude-sonnet
+          namespace: shared-providers
+```
+
+The `name` field must match the judge name used in PromptPack eval params (e.g., `"judge": "fast-judge"` in an `llm_judge_turn` eval).
+
+#### `evals.sampling`
+
+Controls what percentage of sessions and turns are evaluated to manage cost.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `evals.sampling.defaultRate` | integer (0-100) | 100 | Sampling percentage for all evals |
+| `evals.sampling.llmJudgeRate` | integer (0-100) | 10 | Sampling percentage for LLM judge evals |
+
+```yaml
+spec:
+  evals:
+    sampling:
+      defaultRate: 100   # Run all rule-based evals
+      llmJudgeRate: 10   # Sample 10% for LLM judge evals (cost control)
+```
+
+Sampling uses deterministic hashing on `sessionID:turnIndex`, so the same session/turn always produces the same sampling decision. Non-LLM evals (e.g., `content_includes`) are free to run and typically use the `defaultRate`. LLM judge evals incur API costs, so `llmJudgeRate` is set lower by default.
+
+#### `evals.rateLimit`
+
+Limits eval execution throughput to prevent runaway costs.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `evals.rateLimit.maxEvalsPerSecond` | integer | 50 | Maximum evals executed per second |
+| `evals.rateLimit.maxConcurrentJudgeCalls` | integer | 5 | Maximum concurrent LLM judge API calls |
+
+```yaml
+spec:
+  evals:
+    rateLimit:
+      maxEvalsPerSecond: 50
+      maxConcurrentJudgeCalls: 5
+```
+
+#### `evals.sessionCompletion`
+
+Configures how session completion is detected for `on_session_complete` evals.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `evals.sessionCompletion.inactivityTimeout` | duration string | "5m" | Duration after last message before a session is considered complete |
+
+```yaml
+spec:
+  evals:
+    sessionCompletion:
+      inactivityTimeout: 10m
+```
+
 ## Status Fields
 
 ### `phase`
@@ -521,6 +612,24 @@ spec:
     ttl: 24h
     storeRef:
       name: redis-credentials
+
+  evals:
+    enabled: true
+    judges:
+      - name: fast-judge
+        providerRef:
+          name: claude-haiku
+      - name: strong-judge
+        providerRef:
+          name: claude-sonnet
+    sampling:
+      defaultRate: 100
+      llmJudgeRate: 10
+    rateLimit:
+      maxEvalsPerSecond: 50
+      maxConcurrentJudgeCalls: 5
+    sessionCompletion:
+      inactivityTimeout: 5m
 
   runtime:
     replicas: 3  # Ignored when autoscaling enabled
