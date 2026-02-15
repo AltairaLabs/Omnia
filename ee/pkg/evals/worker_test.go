@@ -785,3 +785,269 @@ func TestProcessEvent_WriteError(t *testing.T) {
 	err := w.processEvent(context.Background(), event)
 	require.NoError(t, err)
 }
+
+func TestProcessEvent_SessionCompleted_TriggersCompletion(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:        "s1",
+			AgentName: "test-agent",
+			Namespace: "ns",
+		},
+		messages: []session.Message{
+			{ID: "m1", Role: session.RoleAssistant, Content: "hello"},
+		},
+	}
+
+	w := &EvalWorker{
+		sessionAPI: mock,
+		namespace:  "ns",
+		logger:     testLogger(),
+		evalRunner: api.RunRuleEval,
+	}
+
+	// The tracker is lazily initialized and the onComplete callback is nil
+	// for directly constructed workers. We verify the event is handled
+	// without error and the tracker is initialized.
+	event := api.SessionEvent{
+		EventType: eventTypeSessionDone,
+		SessionID: "s1",
+		Namespace: "ns",
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+	assert.NotNil(t, w.completionTracker)
+}
+
+func TestProcessEvent_AssistantMessage_RecordsActivity(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:        "s1",
+			AgentName: "test-agent",
+			Namespace: "ns",
+		},
+		messages: []session.Message{
+			{ID: "m1", Role: session.RoleAssistant, Content: "hello"},
+		},
+	}
+
+	w := &EvalWorker{
+		sessionAPI: mock,
+		namespace:  "ns",
+		logger:     testLogger(),
+		evalRunner: api.RunRuleEval,
+	}
+
+	event := api.SessionEvent{
+		EventType:   eventTypeMessage,
+		SessionID:   "s1",
+		MessageRole: "assistant",
+		Namespace:   "ns",
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	// Verify the tracker was initialized and the session is tracked.
+	assert.Equal(t, 1, w.getTracker().TrackedCount())
+}
+
+func TestIsSessionCompletedEvent(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    api.SessionEvent
+		expected bool
+	}{
+		{
+			name:     "session completed event",
+			event:    api.SessionEvent{EventType: eventTypeSessionDone},
+			expected: true,
+		},
+		{
+			name:     "assistant message event",
+			event:    api.SessionEvent{EventType: eventTypeMessage, MessageRole: "assistant"},
+			expected: false,
+		},
+		{
+			name:     "empty event",
+			event:    api.SessionEvent{},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, isSessionCompletedEvent(tc.event))
+		})
+	}
+}
+
+func TestFilterOnCompleteRuleEvals(t *testing.T) {
+	defs := []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: "per_turn"},
+		{ID: "e2", Type: "rule", Trigger: "on_session_complete", Params: map[string]any{"value": "x"}},
+		{ID: "e3", Type: "llm_judge", Trigger: "on_session_complete"},
+		{ID: "e4", Type: "rule", Trigger: "on_session_complete", Params: map[string]any{"maxLength": 100}},
+	}
+
+	result := filterOnCompleteRuleEvals(defs)
+
+	require.Len(t, result, 2)
+	assert.Equal(t, "e2", result[0].ID)
+	assert.Equal(t, "e4", result[1].ID)
+	assert.Equal(t, map[string]any{"value": "x"}, result[0].Params)
+}
+
+func TestFilterOnCompleteRuleEvals_Nil(t *testing.T) {
+	result := filterOnCompleteRuleEvals(nil)
+	assert.Empty(t, result)
+}
+
+func TestNewEvalWorker_CompletionTracker(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: client,
+		SessionAPI:  &mockSessionAPI{},
+		Namespace:   "ns",
+		Logger:      testLogger(),
+	})
+
+	assert.NotNil(t, w.completionTracker)
+}
+
+func TestNewEvalWorker_CustomInactivityTimeout(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient:       client,
+		SessionAPI:        &mockSessionAPI{},
+		Namespace:         "ns",
+		Logger:            testLogger(),
+		InactivityTimeout: 10 * time.Minute,
+	})
+
+	assert.NotNil(t, w.completionTracker)
+}
+
+func TestOnSessionComplete_NoEvals(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:        "s1",
+			AgentName: "test-agent",
+			Namespace: "ns",
+		},
+		messages: []session.Message{
+			{ID: "m1", Role: session.RoleAssistant, Content: "hello"},
+		},
+	}
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  mock,
+		Namespace:   "ns",
+		Logger:      testLogger(),
+	})
+
+	// filterOnCompleteRuleEvals(nil) returns empty, so no evals run.
+	err := w.onSessionComplete(context.Background(), "s1")
+	require.NoError(t, err)
+	assert.Empty(t, mock.written)
+}
+
+func TestOnSessionComplete_GetSessionError(t *testing.T) {
+	mock := &mockSessionAPI{
+		getSessionErr: fmt.Errorf("session not found"),
+	}
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  mock,
+		Namespace:   "ns",
+		Logger:      testLogger(),
+	})
+
+	err := w.onSessionComplete(context.Background(), "s1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get session")
+}
+
+func TestOnSessionComplete_GetMessagesError(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:        "s1",
+			AgentName: "test-agent",
+			Namespace: "ns",
+		},
+		getMessagesErr: fmt.Errorf("timeout"),
+	}
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  mock,
+		Namespace:   "ns",
+		Logger:      testLogger(),
+	})
+
+	err := w.onSessionComplete(context.Background(), "s1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get session messages")
+}
+
+func TestWriteResults_Empty(t *testing.T) {
+	mock := &mockSessionAPI{}
+	w := &EvalWorker{
+		sessionAPI: mock,
+		logger:     testLogger(),
+	}
+
+	err := w.writeResults(context.Background(), nil, "s1")
+	require.NoError(t, err)
+	assert.Empty(t, mock.written)
+}
+
+func TestWriteResults_Success(t *testing.T) {
+	mock := &mockSessionAPI{}
+	w := &EvalWorker{
+		sessionAPI: mock,
+		logger:     testLogger(),
+	}
+
+	results := []*api.EvalResult{
+		{SessionID: "s1", EvalID: "e1", Passed: true},
+	}
+	err := w.writeResults(context.Background(), results, "s1")
+	require.NoError(t, err)
+	assert.Len(t, mock.written, 1)
+}
+
+func TestWriteResults_Error(t *testing.T) {
+	mock := &mockSessionAPI{writeErr: fmt.Errorf("write failed")}
+	w := &EvalWorker{
+		sessionAPI: mock,
+		logger:     testLogger(),
+	}
+
+	results := []*api.EvalResult{
+		{SessionID: "s1", EvalID: "e1", Passed: true},
+	}
+	err := w.writeResults(context.Background(), results, "s1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write eval results")
+}
+
+func TestGetTracker_LazyInit(t *testing.T) {
+	w := &EvalWorker{
+		logger: testLogger(),
+	}
+
+	assert.Nil(t, w.completionTracker)
+	tracker := w.getTracker()
+	assert.NotNil(t, tracker)
+	// Second call returns the same tracker.
+	assert.Same(t, tracker, w.getTracker())
+}

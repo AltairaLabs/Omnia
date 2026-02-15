@@ -25,12 +25,15 @@ import (
 
 // Constants for Redis consumer group and stream configuration.
 const (
-	consumerGroupPrefix = "omnia-eval-workers-"
-	blockTimeout        = 5 * time.Second
-	evalSource          = "worker"
-	triggerPerTurn      = "per_turn"
-	eventTypeMessage    = "message.assistant"
-	streamPayloadField  = "payload"
+	consumerGroupPrefix   = "omnia-eval-workers-"
+	blockTimeout          = 5 * time.Second
+	evalSource            = "worker"
+	triggerPerTurn        = "per_turn"
+	triggerOnComplete     = "on_session_complete"
+	eventTypeMessage      = "message.assistant"
+	eventTypeSessionDone  = "session.completed"
+	streamPayloadField    = "payload"
+	periodicCheckInterval = 30 * time.Second
 )
 
 // EvalRunner executes a rule-based eval against session messages.
@@ -46,17 +49,21 @@ type WorkerConfig struct {
 	// EvalRunner overrides the default eval runner (api.RunRuleEval).
 	// If nil, api.RunRuleEval is used.
 	EvalRunner EvalRunner
+	// InactivityTimeout overrides the default completion inactivity timeout.
+	// If zero, DefaultInactivityTimeout is used.
+	InactivityTimeout time.Duration
 }
 
 // EvalWorker consumes session events from Redis Streams and runs evals.
 type EvalWorker struct {
-	redisClient   goredis.UniversalClient
-	sessionAPI    SessionAPIClient
-	namespace     string
-	consumerGroup string
-	consumerName  string
-	logger        *slog.Logger
-	evalRunner    EvalRunner
+	redisClient       goredis.UniversalClient
+	sessionAPI        SessionAPIClient
+	namespace         string
+	consumerGroup     string
+	consumerName      string
+	logger            *slog.Logger
+	evalRunner        EvalRunner
+	completionTracker *CompletionTracker
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace.
@@ -66,7 +73,12 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		runner = api.RunRuleEval
 	}
 
-	return &EvalWorker{
+	timeout := config.InactivityTimeout
+	if timeout == 0 {
+		timeout = DefaultInactivityTimeout
+	}
+
+	w := &EvalWorker{
 		redisClient:   config.RedisClient,
 		sessionAPI:    config.SessionAPI,
 		namespace:     config.Namespace,
@@ -75,6 +87,10 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		logger:        config.Logger,
 		evalRunner:    runner,
 	}
+
+	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
+
+	return w
 }
 
 // Start begins consuming events from the Redis Stream. It blocks until
@@ -91,6 +107,8 @@ func (w *EvalWorker) Start(ctx context.Context) error {
 		"consumerGroup", w.consumerGroup,
 		"consumer", w.consumerName,
 	)
+
+	go w.completionTracker.StartPeriodicCheck(ctx, periodicCheckInterval)
 
 	return w.consumeLoop(ctx, streamKey)
 }
@@ -169,16 +187,36 @@ func (w *EvalWorker) handleMessage(ctx context.Context, streamKey string, msg go
 	w.ackMessage(ctx, streamKey, msg.ID)
 }
 
+// getTracker returns the completion tracker, initializing a no-op one if needed.
+// This ensures backward compatibility with tests that construct EvalWorker directly.
+func (w *EvalWorker) getTracker() *CompletionTracker {
+	if w.completionTracker == nil {
+		w.completionTracker = NewCompletionTracker(DefaultInactivityTimeout, nil, w.logger)
+	}
+	return w.completionTracker
+}
+
 // processEvent handles a single session event.
 func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) error {
-	if !isAssistantMessageEvent(event) {
-		w.logger.Debug("skipping non-assistant event",
-			"eventType", event.EventType,
-			"messageRole", event.MessageRole,
-		)
+	if isSessionCompletedEvent(event) {
+		w.getTracker().MarkCompleted(ctx, event.SessionID)
 		return nil
 	}
 
+	if isAssistantMessageEvent(event) {
+		w.getTracker().RecordActivity(event.SessionID)
+		return w.processAssistantMessage(ctx, event)
+	}
+
+	w.logger.Debug("skipping unhandled event",
+		"eventType", event.EventType,
+		"messageRole", event.MessageRole,
+	)
+	return nil
+}
+
+// processAssistantMessage handles assistant message events by running per-turn evals.
+func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.SessionEvent) error {
 	sess, err := w.sessionAPI.GetSession(ctx, event.SessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
@@ -189,10 +227,6 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 		return fmt.Errorf("get session messages: %w", err)
 	}
 
-	// Build per_turn rule eval definitions from messages.
-	// In this initial implementation without K8s API access, we don't have
-	// PromptPack definitions. This will be wired in #473 (operator wiring).
-	// For now, the worker correctly processes events but has no evals to run.
 	evalDefs := filterPerTurnRuleEvals(nil)
 	if len(evalDefs) == 0 {
 		w.logger.Debug("no per_turn rule evals to run", "sessionID", event.SessionID)
@@ -200,6 +234,39 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 	}
 
 	results := w.runEvals(evalDefs, messages, event, sess.AgentName)
+	return w.writeResults(ctx, results, event.SessionID)
+}
+
+// onSessionComplete is the CompletionTracker callback. It runs on_session_complete evals.
+func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) error {
+	defer w.completionTracker.Cleanup(sessionID)
+
+	sess, err := w.sessionAPI.GetSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("get session: %w", err)
+	}
+
+	messages, err := w.sessionAPI.GetSessionMessages(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("get session messages: %w", err)
+	}
+
+	evalDefs := filterOnCompleteRuleEvals(nil)
+	if len(evalDefs) == 0 {
+		w.logger.Debug("no on_session_complete rule evals to run", "sessionID", sessionID)
+		return nil
+	}
+
+	event := api.SessionEvent{
+		SessionID: sessionID,
+		Namespace: sess.Namespace,
+	}
+	results := w.runEvals(evalDefs, messages, event, sess.AgentName)
+	return w.writeResults(ctx, results, sessionID)
+}
+
+// writeResults writes eval results if there are any.
+func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult, sessionID string) error {
 	if len(results) == 0 {
 		return nil
 	}
@@ -209,7 +276,7 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 	}
 
 	w.logger.Info("eval results written",
-		"sessionID", event.SessionID,
+		"sessionID", sessionID,
 		"count", len(results),
 	)
 
@@ -287,6 +354,27 @@ func filterPerTurnRuleEvals(defs []EvalDef) []api.EvalDefinition {
 // isAssistantMessageEvent returns true if the event is for an assistant message.
 func isAssistantMessageEvent(event api.SessionEvent) bool {
 	return event.EventType == eventTypeMessage && event.MessageRole == "assistant"
+}
+
+// isSessionCompletedEvent returns true if the event signals session completion.
+func isSessionCompletedEvent(event api.SessionEvent) bool {
+	return event.EventType == eventTypeSessionDone
+}
+
+// filterOnCompleteRuleEvals filters eval definitions to only on_session_complete rule evals.
+func filterOnCompleteRuleEvals(defs []EvalDef) []api.EvalDefinition {
+	var result []api.EvalDefinition
+	for _, d := range defs {
+		if d.Trigger == triggerOnComplete && d.Type == "rule" {
+			result = append(result, api.EvalDefinition{
+				ID:      d.ID,
+				Type:    d.Type,
+				Trigger: d.Trigger,
+				Params:  d.Params,
+			})
+		}
+	}
+	return result
 }
 
 // parseEvent extracts a SessionEvent from a Redis stream message.

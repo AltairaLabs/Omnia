@@ -75,6 +75,35 @@ const (
 	toolsConfigVolumeName = "tools-config"
 )
 
+// Eval-related constants.
+const (
+	// EvalWorkerDeploymentName is the name of the per-namespace eval worker Deployment.
+	EvalWorkerDeploymentName = "arena-eval-worker"
+	// DefaultEvalWorkerImage is the default image for the arena-eval-worker container.
+	DefaultEvalWorkerImage = "ghcr.io/altairalabs/arena-eval-worker:latest"
+	// EvalWorkerContainerName is the container name inside the eval worker Deployment.
+	EvalWorkerContainerName = "eval-worker"
+	// EvalWorkerHealthPort is the health check port for the eval worker.
+	EvalWorkerHealthPort = 8082
+)
+
+// Eval environment variable name constants.
+const (
+	envEvalsEnabled       = "OMNIA_EVALS_ENABLED"
+	envEvalsJudges        = "OMNIA_EVALS_JUDGES"
+	envEvalsSamplingDef   = "OMNIA_EVALS_SAMPLING_DEFAULT"
+	envEvalsSamplingJudge = "OMNIA_EVALS_SAMPLING_LLM_JUDGE"
+	envRedisAddr          = "REDIS_ADDR"
+	envSessionAPIURL      = "SESSION_API_URL"
+	envNamespace          = "NAMESPACE"
+)
+
+// Eval label constants.
+const (
+	labelEvalWorkerComp  = "eval-worker"
+	labelValueEvalWorker = "arena-eval-worker"
+)
+
 // Condition types for AgentRuntime
 const (
 	ConditionTypeReady             = "Ready"

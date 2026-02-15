@@ -87,11 +87,12 @@ type SessionMessageFetcher interface {
 // EvalListener listens to EventBridge events and runs evals in-process.
 // This is the Pattern C eval path for PromptKit agents.
 type EvalListener struct {
-	evalLoader     EvalLoader
-	messageFetcher SessionMessageFetcher
-	resultWriter   EvalResultWriter
-	config         EvalListenerConfig
-	logger         *slog.Logger
+	evalLoader        EvalLoader
+	messageFetcher    SessionMessageFetcher
+	resultWriter      EvalResultWriter
+	config            EvalListenerConfig
+	logger            *slog.Logger
+	completionTracker *evals.CompletionTracker
 }
 
 // recordingMessageData is the subset of recording.message event data we parse.
@@ -108,13 +109,34 @@ func NewEvalListener(
 	resultWriter EvalResultWriter,
 	logger *slog.Logger,
 ) *EvalListener {
-	return &EvalListener{
+	l := &EvalListener{
 		evalLoader:     loader,
 		messageFetcher: messageFetcher,
 		resultWriter:   resultWriter,
 		config:         config,
 		logger:         logger.With("component", "eval-listener"),
 	}
+
+	l.completionTracker = evals.NewCompletionTracker(
+		evals.DefaultInactivityTimeout,
+		l.onCompletionDetected,
+		l.logger,
+	)
+
+	return l
+}
+
+// StartCompletionTracker starts the periodic inactivity check. It blocks
+// until the context is cancelled. Call this in a goroutine.
+func (l *EvalListener) StartCompletionTracker(ctx context.Context) {
+	l.completionTracker.StartPeriodicCheck(ctx, 30*time.Second)
+}
+
+// onCompletionDetected is the CompletionTracker callback for inactivity-based
+// session completion detection. It delegates to OnSessionComplete.
+func (l *EvalListener) onCompletionDetected(ctx context.Context, sessionID string) error {
+	defer l.completionTracker.Cleanup(sessionID)
+	return l.OnSessionComplete(ctx, sessionID)
 }
 
 // OnEvent is called by the EventBridge when an event occurs.
@@ -127,6 +149,8 @@ func (l *EvalListener) OnEvent(ctx context.Context, event EventBusEvent) error {
 	if !l.isAssistantMessage(event) {
 		return nil
 	}
+
+	l.completionTracker.RecordActivity(event.SessionID)
 
 	if !l.shouldSample(event.SessionID, evalTriggerPerTurn) {
 		return nil

@@ -71,6 +71,8 @@ func main() {
 	var tracingEndpoint string
 	var sessionAPIURL string
 	var workspaceStorageClass string
+	var redisAddr string
+	var evalWorkerImage string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -91,6 +93,10 @@ func main() {
 		"Internal URL of the session-api service for session recording")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
+	flag.StringVar(&redisAddr, "redis-addr", "",
+		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
+	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
+		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -181,6 +187,8 @@ func main() {
 		TracingEnabled:           tracingEnabled,
 		TracingEndpoint:          tracingEndpoint,
 		SessionAPIURL:            sessionAPIURL,
+		RedisAddr:                redisAddr,
+		EvalWorkerImage:          evalWorkerImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
