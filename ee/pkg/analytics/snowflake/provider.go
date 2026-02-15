@@ -96,6 +96,31 @@ const (
 		input_tokens, output_tokens, sequence_num, created_at)
 		VALUES (s.message_id, s.session_id, s.role, s.content,
 		s.input_tokens, s.output_tokens, s.sequence_num, s.created_at)`
+
+	evalResultMergeQuery = `MERGE INTO omnia_eval_results t USING (SELECT
+		? AS id, ? AS session_id, ? AS message_id, ? AS agent_name,
+		? AS namespace, ? AS promptpack_name, ? AS promptpack_version,
+		? AS eval_id, ? AS eval_type, ? AS trigger, ? AS passed,
+		? AS score, PARSE_JSON(?) AS details, ? AS duration_ms,
+		? AS judge_tokens, ? AS judge_cost_usd, ? AS source, ? AS created_at
+	) s ON t.id = s.id
+	WHEN MATCHED THEN UPDATE SET
+		session_id = s.session_id, message_id = s.message_id,
+		agent_name = s.agent_name, namespace = s.namespace,
+		promptpack_name = s.promptpack_name, promptpack_version = s.promptpack_version,
+		eval_id = s.eval_id, eval_type = s.eval_type, trigger = s.trigger,
+		passed = s.passed, score = s.score, details = s.details,
+		duration_ms = s.duration_ms, judge_tokens = s.judge_tokens,
+		judge_cost_usd = s.judge_cost_usd, source = s.source
+	WHEN NOT MATCHED THEN INSERT (id, session_id, message_id, agent_name,
+		namespace, promptpack_name, promptpack_version, eval_id, eval_type,
+		trigger, passed, score, details, duration_ms, judge_tokens,
+		judge_cost_usd, source, created_at)
+		VALUES (s.id, s.session_id, s.message_id, s.agent_name,
+		s.namespace, s.promptpack_name, s.promptpack_version,
+		s.eval_id, s.eval_type, s.trigger, s.passed, s.score,
+		s.details, s.duration_ms, s.judge_tokens,
+		s.judge_cost_usd, s.source, s.created_at)`
 )
 
 // Provider implements analytics.SyncProvider for Snowflake.
@@ -273,6 +298,8 @@ func (p *Provider) syncTableData(
 		return p.syncSessions(ctx, after, batchSize, dryRun)
 	case TableMessages:
 		return p.syncMessages(ctx, after, batchSize, dryRun)
+	case TableEvalResults:
+		return p.syncEvalResults(ctx, after, batchSize, dryRun)
 	default:
 		return 0, after, fmt.Errorf("unknown table: %s", table)
 	}
@@ -361,6 +388,55 @@ func marshalSessionJSON(row *analytics.SessionRow) (string, string) {
 		}
 	}
 	return tagsJSON, metaJSON
+}
+
+// syncEvalResults syncs eval result rows from source to Snowflake.
+func (p *Provider) syncEvalResults(
+	ctx context.Context, after time.Time, limit int, dryRun bool,
+) (int64, time.Time, error) {
+	rows, err := p.source.ReadEvalResults(ctx, after, limit)
+	if err != nil {
+		return 0, after, fmt.Errorf("read eval results: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, after, nil
+	}
+
+	maxTime := after
+	if !dryRun {
+		for i := range rows {
+			if err := p.upsertEvalResult(ctx, &rows[i]); err != nil {
+				return int64(i), maxTime, fmt.Errorf("upsert eval result %s: %w", rows[i].ID, err)
+			}
+			maxTime = latestTime(maxTime, rows[i].CreatedAt)
+		}
+	} else {
+		for i := range rows {
+			maxTime = latestTime(maxTime, rows[i].CreatedAt)
+		}
+	}
+	return int64(len(rows)), maxTime, nil
+}
+
+// upsertEvalResult merges a single eval result row into Snowflake.
+func (p *Provider) upsertEvalResult(ctx context.Context, row *analytics.EvalResultRow) error {
+	detailsJSON := marshalEvalDetails(row.Details)
+	_, err := p.db.ExecContext(ctx, evalResultMergeQuery,
+		row.ID, row.SessionID, row.MessageID, row.AgentName,
+		row.Namespace, row.PromptPackName, row.PromptPackVersion,
+		row.EvalID, row.EvalType, row.Trigger, row.Passed,
+		row.Score, detailsJSON, row.DurationMs,
+		row.JudgeTokens, row.JudgeCostUSD, row.Source, row.CreatedAt,
+	)
+	return err
+}
+
+// marshalEvalDetails returns the details JSON string, defaulting to "{}".
+func marshalEvalDetails(details string) string {
+	if details == "" {
+		return "{}"
+	}
+	return details
 }
 
 // upsertMessage merges a single message row into Snowflake.

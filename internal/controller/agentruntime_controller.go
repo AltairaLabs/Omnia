@@ -53,6 +53,10 @@ type AgentRuntimeReconciler struct {
 	TracingEndpoint string
 	// SessionAPIURL is the internal URL of the session-api service for session recording
 	SessionAPIURL string
+	// RedisAddr is the Redis address for eval worker deployments
+	RedisAddr string
+	// EvalWorkerImage overrides the default eval worker container image
+	EvalWorkerImage string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -244,6 +248,12 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := r.reconcileAutoscaling(ctx, agentRuntime); err != nil {
 		log.Error(err, "Failed to reconcile autoscaling")
 		// Don't fail the reconciliation for autoscaling errors, just log
+	}
+
+	// Reconcile eval worker deployment for non-PromptKit agents with evals enabled
+	if err := r.reconcileEvalWorker(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile eval worker")
+		// Don't fail the reconciliation for eval worker errors, just log
 	}
 
 	// Update status from deployment

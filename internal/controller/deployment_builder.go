@@ -460,6 +460,11 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		)
 	}
 
+	// Add eval env vars for PromptKit agents with evals enabled
+	if hasEvalsEnabled(&agentRuntime.Spec) && isPromptKit(&agentRuntime.Spec) {
+		envVars = append(envVars, buildEvalEnvVars(agentRuntime.Spec.Evals)...)
+	}
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Facade.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)

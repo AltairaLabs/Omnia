@@ -493,6 +493,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingBody):
 		status = http.StatusBadRequest
 		msg = ErrMissingBody.Error()
+	case errors.Is(err, ErrMissingNamespace):
+		status = http.StatusBadRequest
+		msg = ErrMissingNamespace.Error()
 	default:
 		var timeErr *time.ParseError
 		if errors.As(err, &timeErr) {

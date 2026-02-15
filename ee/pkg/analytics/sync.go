@@ -93,6 +93,8 @@ type SourceReader interface {
 	ReadSessions(ctx context.Context, after time.Time, limit int) ([]SessionRow, error)
 	// ReadMessages returns messages created after the given watermark, up to limit rows.
 	ReadMessages(ctx context.Context, after time.Time, limit int) ([]MessageRow, error)
+	// ReadEvalResults returns eval results created after the given watermark, up to limit rows.
+	ReadEvalResults(ctx context.Context, after time.Time, limit int) ([]EvalResultRow, error)
 }
 
 // SessionRow is a flattened session record for analytics sync.
@@ -122,4 +124,26 @@ type MessageRow struct {
 	OutputTokens int32
 	SequenceNum  int32
 	CreatedAt    time.Time
+}
+
+// EvalResultRow is a flattened eval result record for analytics sync.
+type EvalResultRow struct {
+	ID                string
+	SessionID         string
+	MessageID         string
+	AgentName         string
+	Namespace         string
+	PromptPackName    string
+	PromptPackVersion string
+	EvalID            string
+	EvalType          string
+	Trigger           string
+	Passed            bool
+	Score             *float64
+	Details           string
+	DurationMs        *int
+	JudgeTokens       *int
+	JudgeCostUSD      *float64
+	Source            string
+	CreatedAt         time.Time
 }

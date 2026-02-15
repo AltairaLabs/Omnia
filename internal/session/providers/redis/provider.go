@@ -273,6 +273,12 @@ func (p *Provider) Invalidate(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// RedisClient returns the underlying Redis client. This allows other components
+// (e.g. event publishers) to share the same connection without owning it.
+func (p *Provider) RedisClient() goredis.UniversalClient {
+	return p.client
+}
+
 func (p *Provider) Ping(ctx context.Context) error {
 	return p.client.Ping(ctx).Err()
 }

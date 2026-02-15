@@ -37,6 +37,7 @@ var (
 	ErrMissingQuery      = errors.New("search query parameter is required")
 	ErrMissingSessionID  = errors.New("session ID is required")
 	ErrMissingBody       = errors.New("request body is required")
+	ErrMissingNamespace  = errors.New("namespace parameter is required")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.
@@ -51,14 +52,20 @@ type ServiceConfig struct {
 	// AuditLogger is an optional audit logger for session operations.
 	// When non-nil, session access events are logged asynchronously.
 	AuditLogger AuditLogger
+
+	// EventPublisher is an optional publisher for session events (e.g. Redis Streams).
+	// When non-nil, events are published asynchronously after message appends and
+	// session completions. Publishing failures are logged but never block the caller.
+	EventPublisher EventPublisher
 }
 
 // SessionService provides tiered session retrieval with hot→warm→cold fallback.
 type SessionService struct {
-	registry    *providers.Registry
-	cacheTTL    time.Duration
-	auditLogger AuditLogger
-	log         logr.Logger
+	registry       *providers.Registry
+	cacheTTL       time.Duration
+	auditLogger    AuditLogger
+	eventPublisher EventPublisher
+	log            logr.Logger
 }
 
 // NewSessionService creates a new SessionService with the given registry and config.
@@ -68,10 +75,11 @@ func NewSessionService(registry *providers.Registry, cfg ServiceConfig, log logr
 		ttl = DefaultCacheTTL
 	}
 	return &SessionService{
-		registry:    registry,
-		cacheTTL:    ttl,
-		auditLogger: cfg.AuditLogger,
-		log:         log.WithName("session-service"),
+		registry:       registry,
+		cacheTTL:       ttl,
+		auditLogger:    cfg.AuditLogger,
+		eventPublisher: cfg.EventPublisher,
+		log:            log.WithName("session-service"),
 	}
 }
 
@@ -217,6 +225,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) er
 }
 
 // AppendMessage adds a message to a session via the warm store.
+// For assistant messages, a message.assistant event is published asynchronously.
 func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
@@ -225,7 +234,13 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 	if err != nil {
 		return ErrWarmStoreRequired
 	}
-	return warm.AppendMessage(ctx, sessionID, msg)
+	if err := warm.AppendMessage(ctx, sessionID, msg); err != nil {
+		return err
+	}
+	if msg.Role == session.RoleAssistant {
+		s.publishMessageEvent(ctx, sessionID, msg)
+	}
+	return nil
 }
 
 // UpdateSessionStats applies incremental counter updates to a session.
@@ -244,6 +259,7 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 		return err
 	}
 
+	previousStatus := sess.Status
 	sess.TotalInputTokens += int64(update.AddInputTokens)
 	sess.TotalOutputTokens += int64(update.AddOutputTokens)
 	sess.EstimatedCostUSD += update.AddCostUSD
@@ -254,7 +270,13 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 	}
 	sess.UpdatedAt = time.Now()
 
-	return warm.UpdateSession(ctx, sess)
+	if err := warm.UpdateSession(ctx, sess); err != nil {
+		return err
+	}
+	if sess.Status == session.SessionStatusCompleted && previousStatus != session.SessionStatusCompleted {
+		s.publishSessionCompleted(ctx, sess)
+	}
+	return nil
 }
 
 // RefreshTTL extends the expiry of a session.
@@ -420,6 +442,70 @@ func (s *SessionService) auditSearch(ctx context.Context, query, workspace strin
 		IPAddress:   rc.IPAddress,
 		UserAgent:   rc.UserAgent,
 	})
+}
+
+// --- event publishing helpers -----------------------------------------------
+
+// publishMessageEvent fires a message.assistant event asynchronously.
+func (s *SessionService) publishMessageEvent(ctx context.Context, sessionID string, msg *session.Message) {
+	if s.eventPublisher == nil {
+		return
+	}
+	sess := s.lookupSessionMetadata(ctx, sessionID)
+	event := SessionEvent{
+		EventType:   "message.assistant",
+		SessionID:   sessionID,
+		AgentName:   sess.AgentName,
+		Namespace:   sess.Namespace,
+		MessageID:   msg.ID,
+		MessageRole: string(msg.Role),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	s.publishAsync(event)
+}
+
+// publishSessionCompleted fires a session.completed event asynchronously.
+func (s *SessionService) publishSessionCompleted(_ context.Context, sess *session.Session) {
+	if s.eventPublisher == nil {
+		return
+	}
+	event := SessionEvent{
+		EventType: "session.completed",
+		SessionID: sess.ID,
+		AgentName: sess.AgentName,
+		Namespace: sess.Namespace,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	s.publishAsync(event)
+}
+
+// publishAsync publishes an event in a background goroutine so the caller is never blocked.
+func (s *SessionService) publishAsync(event SessionEvent) {
+	go func() {
+		// Use a detached context so the publish is not cancelled by the HTTP request.
+		ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+		defer cancel()
+		if err := s.eventPublisher.PublishMessageEvent(ctx, event); err != nil {
+			s.log.Error(err, "failed to publish session event",
+				"eventType", event.EventType,
+				"sessionID", event.SessionID,
+			)
+		}
+	}()
+}
+
+// lookupSessionMetadata fetches session metadata for event enrichment.
+// Returns a zero-value Session on failure so publishing still works with empty fields.
+func (s *SessionService) lookupSessionMetadata(ctx context.Context, sessionID string) *session.Session {
+	warm, err := s.registry.WarmStore()
+	if err != nil {
+		return &session.Session{}
+	}
+	sess, err := warm.GetSession(ctx, sessionID)
+	if err != nil {
+		return &session.Session{}
+	}
+	return sess
 }
 
 // filterMessages applies MessageQueryOpts to a slice of messages in memory.

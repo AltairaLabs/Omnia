@@ -21,6 +21,7 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY internal/ internal/
 COPY pkg/ pkg/
+COPY ee/ ee/
 
 # Build the agent binary
 # TARGETARCH is set automatically by buildx, or passed via --build-arg

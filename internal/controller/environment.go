@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -234,4 +235,70 @@ func buildSecretEnvVarsWithKey(secretRef *corev1.LocalObjectReference, providerT
 	}
 
 	return []corev1.EnvVar{buildSecretKeyEnvVar(secretRef, envVarName, key)}
+}
+
+// buildEvalEnvVars creates eval-related environment variables for the facade container.
+// Only called when evals are enabled and the framework is PromptKit.
+func buildEvalEnvVars(evalConfig *omniav1alpha1.EvalConfig) []corev1.EnvVar {
+	if evalConfig == nil || !evalConfig.Enabled {
+		return nil
+	}
+
+	envVars := []corev1.EnvVar{
+		{Name: envEvalsEnabled, Value: "true"},
+	}
+
+	envVars = append(envVars, buildEvalJudgesEnvVar(evalConfig.Judges)...)
+	envVars = append(envVars, buildEvalSamplingEnvVars(evalConfig.Sampling)...)
+
+	return envVars
+}
+
+// buildEvalJudgesEnvVar creates the OMNIA_EVALS_JUDGES env var from judge mappings.
+func buildEvalJudgesEnvVar(judges []omniav1alpha1.JudgeMapping) []corev1.EnvVar {
+	if len(judges) == 0 {
+		return nil
+	}
+
+	judgesJSON, err := json.Marshal(judges)
+	if err != nil {
+		return nil
+	}
+
+	return []corev1.EnvVar{
+		{Name: envEvalsJudges, Value: string(judgesJSON)},
+	}
+}
+
+// buildEvalSamplingEnvVars creates sampling rate env vars with defaults.
+func buildEvalSamplingEnvVars(sampling *omniav1alpha1.EvalSampling) []corev1.EnvVar {
+	defaultRate := int32(100)
+	llmJudgeRate := int32(10)
+
+	if sampling != nil {
+		if sampling.DefaultRate != nil {
+			defaultRate = *sampling.DefaultRate
+		}
+		if sampling.LLMJudgeRate != nil {
+			llmJudgeRate = *sampling.LLMJudgeRate
+		}
+	}
+
+	return []corev1.EnvVar{
+		{Name: envEvalsSamplingDef, Value: fmt.Sprintf("%d", defaultRate)},
+		{Name: envEvalsSamplingJudge, Value: fmt.Sprintf("%d", llmJudgeRate)},
+	}
+}
+
+// isPromptKit returns true if the AgentRuntime uses the PromptKit framework.
+func isPromptKit(spec *omniav1alpha1.AgentRuntimeSpec) bool {
+	if spec.Framework == nil {
+		return true // default is PromptKit
+	}
+	return spec.Framework.Type == omniav1alpha1.FrameworkTypePromptKit
+}
+
+// hasEvalsEnabled returns true if the AgentRuntime has evals enabled.
+func hasEvalsEnabled(spec *omniav1alpha1.AgentRuntimeSpec) bool {
+	return spec.Evals != nil && spec.Evals.Enabled
 }
