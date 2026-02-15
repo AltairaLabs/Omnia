@@ -125,9 +125,11 @@ export function EvalResultsBadge({ results }: Readonly<{ results: EvalResult[] }
   const failedCount = results.length - passedCount;
   const allPassed = failedCount === 0;
 
+  const evalPlural = results.length === 1 ? "" : "s";
+  const passedPlural = passedCount === 1 ? "" : "s";
   const summaryText = allPassed
-    ? `${passedCount} eval${passedCount === 1 ? "" : "s"} passed`
-    : `${failedCount} of ${results.length} eval${results.length === 1 ? "" : "s"} failed`;
+    ? `${passedCount} eval${passedPlural} passed`
+    : `${failedCount} of ${results.length} eval${evalPlural} failed`;
 
   return (
     <div className="mt-1">
