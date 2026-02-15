@@ -181,9 +181,16 @@ func run() error {
 	sessionService := api.NewSessionService(registry, svcCfg, log)
 	handler := api.NewHandler(sessionService, log)
 
+	// --- Eval results ---
+	evalStore := pgprovider.NewEvalStore(pool)
+	evalService := api.NewEvalService(evalStore, log)
+	evalService.SetMessageFetcher(sessionService)
+	evalHandler := api.NewEvalHandler(evalService, log)
+
 	// --- API mux ---
 	apiMux := http.NewServeMux()
 	handler.RegisterRoutes(apiMux)
+	evalHandler.RegisterRoutes(apiMux)
 
 	if f.enterprise && auditLogger != nil {
 		ah := audit.NewHandler(auditLogger, log)

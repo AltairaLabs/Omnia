@@ -9,6 +9,10 @@ const mockGetSessionById = vi.fn();
 const mockSearchSessions = vi.fn();
 const mockGetSessionMessages = vi.fn();
 
+const { mockGetSessionEvalResults } = vi.hoisted(() => {
+  return { mockGetSessionEvalResults: vi.fn() };
+});
+
 vi.mock("@/lib/data", () => ({
   useDataService: () => ({
     name: "MockDataService",
@@ -25,8 +29,14 @@ vi.mock("@/contexts/workspace-context", () => ({
   }),
 }));
 
+vi.mock("@/lib/data/session-api-service", () => ({
+  SessionApiService: class MockSessionApiService {
+    getSessionEvalResults = mockGetSessionEvalResults;
+  },
+}));
+
 // Import after mocks
-import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages } from "./use-sessions";
+import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionEvalResults } from "./use-sessions";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -149,5 +159,32 @@ describe("useSessionMessages", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(mockGetSessionMessages).toHaveBeenCalledWith("test-workspace", "s1", opts);
+  });
+});
+
+describe("useSessionEvalResults", () => {
+  beforeEach(() => {
+    mockGetSessionEvalResults.mockReset();
+    mockGetSessionEvalResults.mockResolvedValue([
+      { id: "e1", sessionId: "s1", evalId: "tone", evalType: "llm_judge", passed: true, source: "in_proc", createdAt: new Date().toISOString() },
+    ]);
+  });
+
+  it("fetches eval results for a session", async () => {
+    const { result } = renderHook(() => useSessionEvalResults("s1"), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+
+    expect(result.current.isSuccess).toBe(true);
+    expect(mockGetSessionEvalResults).toHaveBeenCalledWith("test-workspace", "s1");
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data![0].evalId).toBe("tone");
+  });
+
+  it("is disabled when sessionId is empty", () => {
+    const { result } = renderHook(() => useSessionEvalResults(""), { wrapper: createWrapper() });
+    expect(result.current.fetchStatus).toBe("idle");
   });
 });

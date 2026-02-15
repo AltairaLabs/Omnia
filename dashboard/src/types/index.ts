@@ -8,4 +8,5 @@ export * from "./prompt-pack";
 export * from "./tool-registry";
 export * from "./websocket";
 export * from "./session";
+export * from "./eval";
 export * from "./generated/provider";

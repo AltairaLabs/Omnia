@@ -225,6 +225,99 @@ spec:
                         type: object
                     type: object
                 type: object
+              evals:
+                description: evals configures realtime eval execution for this agent's
+                  sessions.
+                properties:
+                  enabled:
+                    description: enabled activates eval execution for this agent's
+                      sessions.
+                    type: boolean
+                  judges:
+                    description: |-
+                      judges maps judge names (referenced in PromptPack eval definitions)
+                      to Provider CRDs that supply the LLM for judging.
+                    items:
+                      description: JudgeMapping maps a judge name to a Provider CRD.
+                      properties:
+                        name:
+                          description: |-
+                            name is the judge name as referenced in PromptPack eval params
+                            (e.g., "fast-judge", "strong-judge").
+                          type: string
+                        providerRef:
+                          description: providerRef references the Provider CRD to
+                            use for this judge.
+                          properties:
+                            name:
+                              description: name is the name of the Provider resource.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                namespace is the namespace of the Provider resource.
+                                If not specified, the same namespace as the AgentRuntime is used.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                      required:
+                      - name
+                      - providerRef
+                      type: object
+                    type: array
+                  rateLimit:
+                    description: rateLimit configures eval execution rate limits.
+                    properties:
+                      maxConcurrentJudgeCalls:
+                        default: 5
+                        description: maxConcurrentJudgeCalls is the maximum concurrent
+                          LLM judge API calls.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      maxEvalsPerSecond:
+                        default: 50
+                        description: maxEvalsPerSecond is the maximum number of evals
+                          to execute per second.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                  sampling:
+                    description: sampling configures eval sampling rates to control
+                      cost.
+                    properties:
+                      defaultRate:
+                        default: 100
+                        description: defaultRate is the default sampling percentage
+                          (0-100) for all evals.
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      llmJudgeRate:
+                        default: 10
+                        description: llmJudgeRate is the sampling percentage (0-100)
+                          for LLM judge evals.
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                    type: object
+                  sessionCompletion:
+                    description: |-
+                      sessionCompletion configures how session completion is detected
+                      for on_session_complete evals.
+                    properties:
+                      inactivityTimeout:
+                        default: 5m
+                        description: |-
+                          inactivityTimeout is the duration after the last message before a session
+                          is considered complete. Uses Go duration format (e.g., "5m", "1h").
+                        type: string
+                    type: object
+                type: object
               extraPodAnnotations:
                 additionalProperties:
                   type: string

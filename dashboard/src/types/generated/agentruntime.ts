@@ -77,6 +77,47 @@ export interface AgentRuntimeSpec {
       };
     };
   };
+  /** evals configures realtime eval execution for this agent's sessions. */
+  evals?: {
+    /** enabled activates eval execution for this agent's sessions. */
+    enabled?: boolean;
+    /** judges maps judge names (referenced in PromptPack eval definitions)
+     * to Provider CRDs that supply the LLM for judging. */
+    judges?: {
+      /** name is the judge name as referenced in PromptPack eval params
+       * (e.g., "fast-judge", "strong-judge"). */
+      name: string;
+      /** providerRef references the Provider CRD to use for this judge. */
+      providerRef: {
+        /** name is the name of the Provider resource. */
+        name: string;
+        /** namespace is the namespace of the Provider resource.
+         * If not specified, the same namespace as the AgentRuntime is used. */
+        namespace?: string;
+      };
+    }[];
+    /** rateLimit configures eval execution rate limits. */
+    rateLimit?: {
+      /** maxConcurrentJudgeCalls is the maximum concurrent LLM judge API calls. */
+      maxConcurrentJudgeCalls?: number;
+      /** maxEvalsPerSecond is the maximum number of evals to execute per second. */
+      maxEvalsPerSecond?: number;
+    };
+    /** sampling configures eval sampling rates to control cost. */
+    sampling?: {
+      /** defaultRate is the default sampling percentage (0-100) for all evals. */
+      defaultRate?: number;
+      /** llmJudgeRate is the sampling percentage (0-100) for LLM judge evals. */
+      llmJudgeRate?: number;
+    };
+    /** sessionCompletion configures how session completion is detected
+     * for on_session_complete evals. */
+    sessionCompletion?: {
+      /** inactivityTimeout is the duration after the last message before a session
+       * is considered complete. Uses Go duration format (e.g., "5m", "1h"). */
+      inactivityTimeout?: string;
+    };
+  };
   /** extraPodAnnotations defines additional annotations to add to the agent pods.
    * Use this for integrations like service meshes, logging agents, or monitoring tools. */
   extraPodAnnotations?: Record<string, string>;

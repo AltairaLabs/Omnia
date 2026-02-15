@@ -83,5 +83,5 @@ export { useProviderPreview } from "./use-provider-preview";
 export { useToolRegistryPreview } from "./use-tool-registry-preview";
 export type { ProviderPreviewResult } from "./use-provider-preview";
 export type { ToolRegistryPreviewResult } from "./use-tool-registry-preview";
-export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages } from "./use-sessions";
+export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionEvalResults } from "./use-sessions";
 export { useDebounce } from "./use-debounce";

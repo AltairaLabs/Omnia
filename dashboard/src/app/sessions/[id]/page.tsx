@@ -29,8 +29,9 @@ import {
   MessageSquare,
   AlertCircle,
 } from "lucide-react";
-import { useSessionDetail } from "@/hooks";
-import type { Message, ToolCall, Session } from "@/types";
+import { useSessionDetail, useSessionEvalResults } from "@/hooks";
+import type { Message, ToolCall, Session, EvalResult } from "@/types";
+import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -146,7 +147,7 @@ function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
   return "bg-muted";
 }
 
-function MessageBubble({ message, showTimestamp }: Readonly<{ message: Message; showTimestamp?: boolean }>) {
+function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[] }>) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isTool = message.role === "tool";
@@ -182,6 +183,11 @@ function MessageBubble({ message, showTimestamp }: Readonly<{ message: Message; 
           <ToolCallCard key={tc.id} toolCall={tc} />
         ))}
 
+        {/* Eval results */}
+        {evalResults && evalResults.length > 0 && (
+          <EvalResultsBadge results={evalResults} />
+        )}
+
         {/* Timestamp and tokens */}
         <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
           {showTimestamp && (
@@ -197,6 +203,48 @@ function MessageBubble({ message, showTimestamp }: Readonly<{ message: Message; 
       </div>
     </div>
   );
+}
+
+/**
+ * Renders the conversation message list with eval results grouped by message.
+ */
+function ConversationMessages({
+  messages,
+  evalResults,
+}: Readonly<{ messages: Message[]; evalResults: EvalResult[] }>) {
+  const evalsByMessage = groupEvalResultsByMessageId(evalResults);
+
+  return (
+    <div className="space-y-6">
+      {messages
+        .filter((m) => m.role !== "tool")
+        .map((message) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            showTimestamp
+            evalResults={evalsByMessage.get(message.id)}
+          />
+        ))}
+    </div>
+  );
+}
+
+/**
+ * Group eval results by messageId for efficient lookup.
+ */
+function groupEvalResultsByMessageId(results: EvalResult[]): Map<string, EvalResult[]> {
+  const grouped = new Map<string, EvalResult[]>();
+  for (const result of results) {
+    if (!result.messageId) continue;
+    const existing = grouped.get(result.messageId);
+    if (existing) {
+      existing.push(result);
+    } else {
+      grouped.set(result.messageId, [result]);
+    }
+  }
+  return grouped;
 }
 
 function DetailSkeleton() {
@@ -237,6 +285,7 @@ export default function SessionDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const { data: session, isLoading, error } = useSessionDetail(id);
+  const { data: evalResults } = useSessionEvalResults(id);
 
   if (isLoading) {
     return <DetailSkeleton />;
@@ -404,17 +453,10 @@ export default function SessionDetailPage({
           <TabsContent value="conversation" className="flex-1 mt-4">
             <Card className="h-[calc(100vh-300px)]">
               <ScrollArea className="h-full p-6">
-                <div className="space-y-6">
-                  {session.messages
-                    .filter((m) => m.role !== "tool")
-                    .map((message) => (
-                      <MessageBubble
-                        key={message.id}
-                        message={message}
-                        showTimestamp
-                      />
-                    ))}
-                </div>
+                <ConversationMessages
+                  messages={session.messages}
+                  evalResults={evalResults || []}
+                />
               </ScrollArea>
             </Card>
           </TabsContent>
