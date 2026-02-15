@@ -236,6 +236,7 @@ docker_build(
         './internal/session',
         './internal/tracing',
         './pkg',
+        './ee',
         './go.mod',
         './go.sum',
     ],
@@ -898,6 +899,7 @@ restart_agents_deps = [
     './internal/facade',
     './internal/session',
     './internal/tracing',
+    './ee',
     './cmd/runtime',
     './internal/runtime',
 ]
