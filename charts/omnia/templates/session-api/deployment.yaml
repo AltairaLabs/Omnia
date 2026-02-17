@@ -66,6 +66,14 @@ spec:
             - name: ENTERPRISE_ENABLED
               value: "true"
             {{- end }}
+            {{- if .Values.sessionApi.otlp.enabled }}
+            - name: OTLP_ENABLED
+              value: "true"
+            - name: OTLP_GRPC_ADDR
+              value: ":{{ .Values.sessionApi.otlp.grpcPort }}"
+            - name: OTLP_HTTP_ADDR
+              value: ":{{ .Values.sessionApi.otlp.httpPort }}"
+            {{- end }}
             {{- with .Values.sessionApi.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -79,6 +87,14 @@ spec:
             - name: metrics
               containerPort: 9090
               protocol: TCP
+            {{- if .Values.sessionApi.otlp.enabled }}
+            - name: otlp-grpc
+              containerPort: {{ .Values.sessionApi.otlp.grpcPort }}
+              protocol: TCP
+            - name: otlp-http
+              containerPort: {{ .Values.sessionApi.otlp.httpPort }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
