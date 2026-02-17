@@ -20,7 +20,7 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 	case ProviderGCPKMS:
 		return newGCPKMSProvider(cfg)
 	case ProviderVault:
-		return nil, fmt.Errorf("%w: vault (see https://github.com/AltairaLabs/Omnia/issues/439)", ErrProviderNotImplemented)
+		return newVaultProvider(cfg)
 	default:
 		return nil, fmt.Errorf("unknown encryption provider type: %q", cfg.ProviderType)
 	}

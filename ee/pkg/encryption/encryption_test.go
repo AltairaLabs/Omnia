@@ -137,9 +137,19 @@ func TestNewProvider_GCPKMS(t *testing.T) {
 }
 
 func TestNewProvider_Vault(t *testing.T) {
-	_, err := NewProvider(ProviderConfig{ProviderType: ProviderVault})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrProviderNotImplemented))
+	p, err := NewProvider(ProviderConfig{
+		ProviderType: ProviderVault,
+		KeyID:        "my-transit-key",
+		VaultURL:     "https://vault.example.com:8200",
+		Credentials:  map[string]string{"token": "s.test-token"},
+	})
+	// Must NOT return ErrProviderNotImplemented.
+	if err != nil {
+		assert.False(t, errors.Is(err, ErrProviderNotImplemented))
+	} else {
+		assert.NotNil(t, p)
+		_ = p.Close()
+	}
 }
 
 func TestNewProvider_Unknown(t *testing.T) {
@@ -658,6 +668,176 @@ func TestGCPKMSProvider_GetKeyMetadataError(t *testing.T) {
 func TestGCPKMSProvider_Close(t *testing.T) {
 	mock := newMockGCPKMSClient()
 	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	err := provider.Close()
+	require.NoError(t, err)
+}
+
+// --- Vault Transit Provider Tests ---
+
+func TestVaultProvider_EncryptDecryptRoundTrip(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "my-transit-key")
+	assertEncryptDecryptRoundTrip(t, provider, "my-transit-key", "AES-256-GCM+VAULT-TRANSIT")
+}
+
+func TestVaultProvider_EncryptEmptyPlaintext(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "my-transit-key")
+
+	ctx := context.Background()
+	out, err := provider.Encrypt(ctx, []byte{})
+	require.NoError(t, err)
+
+	decrypted, err := provider.Decrypt(ctx, out.Ciphertext)
+	require.NoError(t, err)
+	assert.Empty(t, decrypted)
+}
+
+func TestVaultProvider_InvalidConfig_NoVaultURL(t *testing.T) {
+	_, err := newVaultProvider(ProviderConfig{
+		ProviderType: ProviderVault,
+		KeyID:        "test-key",
+		Credentials:  map[string]string{"token": "s.test"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "vault URL is required")
+}
+
+func TestVaultProvider_InvalidConfig_NoKeyID(t *testing.T) {
+	_, err := newVaultProvider(ProviderConfig{
+		ProviderType: ProviderVault,
+		VaultURL:     "https://vault.example.com:8200",
+		Credentials:  map[string]string{"token": "s.test"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "key ID is required")
+}
+
+func TestVaultProvider_InvalidConfig_NoToken(t *testing.T) {
+	_, err := newVaultProvider(ProviderConfig{
+		ProviderType: ProviderVault,
+		KeyID:        "test-key",
+		VaultURL:     "https://vault.example.com:8200",
+		Credentials:  map[string]string{},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token credential is required")
+}
+
+func TestVaultProvider_GenerateDataKeyError(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	mock.GenerateDataKeyFn = func(_ context.Context, _ string) (*vaultDataKeyResponse, error) {
+		return nil, fmt.Errorf("Vault unavailable")
+	}
+	provider := newVaultProviderWithClient(mock, "test-key")
+
+	_, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionFailed))
+	assert.Contains(t, err.Error(), "Vault GenerateDataKey failed")
+}
+
+func TestVaultProvider_DecryptError(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.NoError(t, err)
+
+	mock.DecryptDEKFn = func(_ context.Context, _ string, _ string) ([]byte, error) {
+		return nil, fmt.Errorf("Vault unavailable")
+	}
+
+	_, err = provider.Decrypt(context.Background(), out.Ciphertext)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "Vault Decrypt failed")
+}
+
+func TestVaultProvider_DecryptInvalidEnvelope(t *testing.T) {
+	provider := newVaultProviderWithClient(newMockVaultTransitClient(), "test-key")
+
+	_, err := provider.Decrypt(context.Background(), []byte("not json"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "invalid envelope")
+}
+
+func TestVaultProvider_DecryptWrongVersion(t *testing.T) {
+	provider := newVaultProviderWithClient(newMockVaultTransitClient(), "test-key")
+
+	_, err := provider.Decrypt(context.Background(), []byte(`{"v":99,"wdek":"","nonce":"","ct":""}`))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "unsupported envelope version")
+}
+
+func TestVaultProvider_DecryptTamperedCiphertext(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("secret"))
+	require.NoError(t, err)
+
+	env, err := envelopeFromBytes(out.Ciphertext)
+	require.NoError(t, err)
+	env.Ciphertext[0] ^= 0xFF
+
+	tampered, err := json.Marshal(env)
+	require.NoError(t, err)
+
+	_, err = provider.Decrypt(context.Background(), tampered)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+}
+
+func TestVaultProvider_DecryptInvalidDEKSize(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.NoError(t, err)
+
+	// Override DecryptDEK to return invalid key size.
+	mock.DecryptDEKFn = func(_ context.Context, _ string, _ string) ([]byte, error) {
+		return []byte("bad"), nil
+	}
+
+	_, err = provider.Decrypt(context.Background(), out.Ciphertext)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "AES cipher creation failed")
+}
+
+func TestVaultProvider_GetKeyMetadata(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "my-transit-key")
+
+	meta, err := provider.GetKeyMetadata(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "my-transit-key", meta.KeyID)
+	assert.Equal(t, "1", meta.KeyVersion)
+	assert.Equal(t, "aes256-gcm96", meta.Algorithm)
+	assert.True(t, meta.Enabled)
+	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), meta.CreatedAt)
+}
+
+func TestVaultProvider_GetKeyMetadataError(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	mock.ReadKeyFn = func(_ context.Context, _ string) (*vaultKeyInfo, error) {
+		return nil, fmt.Errorf("key not found")
+	}
+	provider := newVaultProviderWithClient(mock, "test-key")
+
+	_, err := provider.GetKeyMetadata(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrKeyNotFound))
+}
+
+func TestVaultProvider_Close(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "test-key")
 
 	err := provider.Close()
 	require.NoError(t, err)
