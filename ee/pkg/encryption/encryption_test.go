@@ -18,6 +18,8 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,9 +104,19 @@ func TestNewProvider_AzureKeyVault(t *testing.T) {
 }
 
 func TestNewProvider_AWSKMS(t *testing.T) {
-	_, err := NewProvider(ProviderConfig{ProviderType: ProviderAWSKMS})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrProviderNotImplemented))
+	p, err := NewProvider(ProviderConfig{
+		ProviderType: ProviderAWSKMS,
+		KeyID:        "arn:aws:kms:us-east-1:123456789012:key/test-key",
+		Credentials:  map[string]string{"region": "us-east-1"},
+	})
+	// May succeed or fail depending on environment credentials;
+	// either way, must NOT return ErrProviderNotImplemented.
+	if err != nil {
+		assert.False(t, errors.Is(err, ErrProviderNotImplemented))
+	} else {
+		assert.NotNil(t, p)
+		_ = p.Close()
+	}
 }
 
 func TestNewProvider_GCPKMS(t *testing.T) {
@@ -281,6 +293,208 @@ func TestAzureProvider_GetKeyMetadataError(t *testing.T) {
 		return azkeys.GetKeyResponse{}, fmt.Errorf("key not found")
 	}
 	provider := newAzureKeyVaultProviderWithClient(mock, "test-key", "")
+
+	_, err := provider.GetKeyMetadata(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrKeyNotFound))
+}
+
+// --- AWS KMS Provider Tests ---
+
+func TestAWSKMSProvider_EncryptDecryptRoundTrip(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "arn:aws:kms:us-east-1:123456789012:key/test-key")
+
+	ctx := context.Background()
+	plaintext := []byte("Hello, World! This is sensitive data.")
+
+	out, err := provider.Encrypt(ctx, plaintext)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	assert.Equal(t, "arn:aws:kms:us-east-1:123456789012:key/test-key", out.KeyID)
+	assert.Equal(t, "AES-256-GCM+AES-256-KMS", out.Algorithm)
+	assert.NotEmpty(t, out.Ciphertext)
+
+	// Verify envelope structure.
+	env, err := envelopeFromBytes(out.Ciphertext)
+	require.NoError(t, err)
+	assert.Equal(t, 1, env.Version)
+	assert.NotEmpty(t, env.WrappedDEK)
+	assert.NotEmpty(t, env.Nonce)
+	assert.NotEmpty(t, env.Ciphertext)
+
+	// Decrypt and verify.
+	decrypted, err := provider.Decrypt(ctx, out.Ciphertext)
+	require.NoError(t, err)
+	assert.Equal(t, plaintext, decrypted)
+}
+
+func TestAWSKMSProvider_EncryptEmptyPlaintext(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	ctx := context.Background()
+	out, err := provider.Encrypt(ctx, []byte{})
+	require.NoError(t, err)
+
+	decrypted, err := provider.Decrypt(ctx, out.Ciphertext)
+	require.NoError(t, err)
+	assert.Empty(t, decrypted)
+}
+
+func TestAWSKMSProvider_InvalidConfig_NoKeyID(t *testing.T) {
+	_, err := newAWSKMSProvider(ProviderConfig{
+		ProviderType: ProviderAWSKMS,
+		Credentials:  map[string]string{"region": "us-east-1"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "key ID is required")
+}
+
+func TestAWSKMSProvider_InvalidConfig_NoRegion(t *testing.T) {
+	_, err := newAWSKMSProvider(ProviderConfig{
+		ProviderType: ProviderAWSKMS,
+		KeyID:        "test-key",
+		Credentials:  map[string]string{},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "region is required")
+}
+
+func TestAWSKMSProvider_GenerateDataKeyError(t *testing.T) {
+	mock := newMockKMSClient()
+	mock.GenerateDataKeyFn = func(
+		_ context.Context, _ *kms.GenerateDataKeyInput, _ ...func(*kms.Options),
+	) (*kms.GenerateDataKeyOutput, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionFailed))
+	assert.Contains(t, err.Error(), "KMS GenerateDataKey failed")
+}
+
+func TestAWSKMSProvider_EncryptInvalidDEKSize(t *testing.T) {
+	mock := newMockKMSClient()
+	mock.GenerateDataKeyFn = func(
+		_ context.Context, params *kms.GenerateDataKeyInput, _ ...func(*kms.Options),
+	) (*kms.GenerateDataKeyOutput, error) {
+		// Return a DEK with invalid size (not 16, 24, or 32 bytes).
+		return &kms.GenerateDataKeyOutput{
+			Plaintext:      []byte("bad"),
+			CiphertextBlob: []byte("wrapped"),
+			KeyId:          params.KeyId,
+		}, nil
+	}
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionFailed))
+	assert.Contains(t, err.Error(), "AES cipher creation failed")
+}
+
+func TestAWSKMSProvider_DecryptInvalidDEKSize(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	// Encrypt normally first.
+	out, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.NoError(t, err)
+
+	// Override Decrypt to return invalid key size.
+	mock.DecryptFn = func(
+		_ context.Context, _ *kms.DecryptInput, _ ...func(*kms.Options),
+	) (*kms.DecryptOutput, error) {
+		return &kms.DecryptOutput{
+			Plaintext: []byte("bad"),
+		}, nil
+	}
+
+	_, err = provider.Decrypt(context.Background(), out.Ciphertext)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "AES cipher creation failed")
+}
+
+func TestAWSKMSProvider_DecryptError(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.NoError(t, err)
+
+	mock.DecryptFn = func(
+		_ context.Context, _ *kms.DecryptInput, _ ...func(*kms.Options),
+	) (*kms.DecryptOutput, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+
+	_, err = provider.Decrypt(context.Background(), out.Ciphertext)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "KMS Decrypt failed")
+}
+
+func TestAWSKMSProvider_DecryptInvalidEnvelope(t *testing.T) {
+	provider := newAWSKMSProviderWithClient(newMockKMSClient(), "test-key")
+
+	_, err := provider.Decrypt(context.Background(), []byte("not json"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "invalid envelope")
+}
+
+func TestAWSKMSProvider_DecryptWrongVersion(t *testing.T) {
+	provider := newAWSKMSProviderWithClient(newMockKMSClient(), "test-key")
+
+	_, err := provider.Decrypt(context.Background(), []byte(`{"v":99,"wdek":"","nonce":"","ct":""}`))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "unsupported envelope version")
+}
+
+func TestAWSKMSProvider_DecryptTamperedCiphertext(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("secret"))
+	require.NoError(t, err)
+
+	env, err := envelopeFromBytes(out.Ciphertext)
+	require.NoError(t, err)
+	env.Ciphertext[0] ^= 0xFF
+
+	tampered, err := json.Marshal(env)
+	require.NoError(t, err)
+
+	_, err = provider.Decrypt(context.Background(), tampered)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+}
+
+func TestAWSKMSProvider_GetKeyMetadata(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "arn:aws:kms:us-east-1:123456789012:key/test-key")
+
+	meta, err := provider.GetKeyMetadata(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "arn:aws:kms:us-east-1:123456789012:key/test-key", meta.KeyID)
+	assert.Equal(t, string(types.KeySpecSymmetricDefault), meta.Algorithm)
+	assert.True(t, meta.Enabled)
+	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), meta.CreatedAt)
+}
+
+func TestAWSKMSProvider_GetKeyMetadataError(t *testing.T) {
+	mock := newMockKMSClient()
+	mock.DescribeKeyFn = func(
+		_ context.Context, _ *kms.DescribeKeyInput, _ ...func(*kms.Options),
+	) (*kms.DescribeKeyOutput, error) {
+		return nil, fmt.Errorf("key not found")
+	}
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
 
 	_, err := provider.GetKeyMetadata(context.Background())
 	require.Error(t, err)
