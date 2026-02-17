@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -33,16 +34,20 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/internal/session/api"
+	"github.com/altairalabs/omnia/internal/session/otlp"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
 	"github.com/altairalabs/omnia/internal/session/providers"
 	"github.com/altairalabs/omnia/internal/session/providers/cold"
 	pgprovider "github.com/altairalabs/omnia/internal/session/providers/postgres"
 	"github.com/altairalabs/omnia/internal/session/providers/redis"
+
+	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 )
 
 // redisClientProvider is implemented by providers that expose the underlying Redis client.
@@ -62,6 +67,9 @@ type flags struct {
 	coldRegion   string
 	coldEndpoint string
 	enterprise   bool
+	otlpEnabled  bool
+	otlpGRPCAddr string
+	otlpHTTPAddr string
 }
 
 func parseFlags() *flags {
@@ -76,41 +84,49 @@ func parseFlags() *flags {
 	flag.StringVar(&f.coldRegion, "cold-region", "", "Cold archive region (S3)")
 	flag.StringVar(&f.coldEndpoint, "cold-endpoint", "", "Cold archive endpoint (S3)")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (audit)")
+	flag.BoolVar(&f.otlpEnabled, "otlp-enabled", false, "Enable OTLP ingestion endpoint")
+	flag.StringVar(&f.otlpGRPCAddr, "otlp-grpc-addr", ":4317", "OTLP gRPC listen address")
+	flag.StringVar(&f.otlpHTTPAddr, "otlp-http-addr", ":4318", "OTLP HTTP listen address")
 	flag.Parse()
 
-	// Env var fallbacks.
-	if f.postgresConn == "" {
-		f.postgresConn = os.Getenv("POSTGRES_CONN")
-	}
-	if f.redisAddrs == "" {
-		f.redisAddrs = os.Getenv("REDIS_ADDRS")
-	}
-	if f.coldBackend == "" {
-		f.coldBackend = os.Getenv("COLD_BACKEND")
-	}
-	if f.coldBucket == "" {
-		f.coldBucket = os.Getenv("COLD_BUCKET")
-	}
-	if f.coldRegion == "" {
-		f.coldRegion = os.Getenv("COLD_REGION")
-	}
-	if f.coldEndpoint == "" {
-		f.coldEndpoint = os.Getenv("COLD_ENDPOINT")
-	}
-	if !f.enterprise && os.Getenv("ENTERPRISE_ENABLED") == "true" {
-		f.enterprise = true
-	}
-	if f.apiAddr == ":8080" && os.Getenv("API_ADDR") != "" {
-		f.apiAddr = os.Getenv("API_ADDR")
-	}
-	if f.healthAddr == ":8081" && os.Getenv("HEALTH_ADDR") != "" {
-		f.healthAddr = os.Getenv("HEALTH_ADDR")
-	}
-	if f.metricsAddr == ":9090" && os.Getenv("METRICS_ADDR") != "" {
-		f.metricsAddr = os.Getenv("METRICS_ADDR")
-	}
-
+	f.applyEnvFallbacks()
 	return f
+}
+
+// applyEnvFallbacks applies environment variable overrides to flag defaults.
+func (f *flags) applyEnvFallbacks() {
+	envFallback(&f.postgresConn, "", "POSTGRES_CONN")
+	envFallback(&f.redisAddrs, "", "REDIS_ADDRS")
+	envFallback(&f.coldBackend, "", "COLD_BACKEND")
+	envFallback(&f.coldBucket, "", "COLD_BUCKET")
+	envFallback(&f.coldRegion, "", "COLD_REGION")
+	envFallback(&f.coldEndpoint, "", "COLD_ENDPOINT")
+	envFallback(&f.apiAddr, ":8080", "API_ADDR")
+	envFallback(&f.healthAddr, ":8081", "HEALTH_ADDR")
+	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
+	envFallback(&f.otlpGRPCAddr, ":4317", "OTLP_GRPC_ADDR")
+	envFallback(&f.otlpHTTPAddr, ":4318", "OTLP_HTTP_ADDR")
+
+	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
+	envBoolFallback(&f.otlpEnabled, "OTLP_ENABLED")
+}
+
+// envFallback sets *dst from the environment variable envKey when *dst still
+// equals the default value and the environment variable is non-empty.
+func envFallback(dst *string, defaultVal, envKey string) {
+	if *dst == defaultVal {
+		if v := os.Getenv(envKey); v != "" {
+			*dst = v
+		}
+	}
+}
+
+// envBoolFallback enables a boolean flag from an environment variable when the
+// flag is still false and the env var is "true".
+func envBoolFallback(dst *bool, envKey string) {
+	if !*dst && os.Getenv(envKey) == "true" {
+		*dst = true
+	}
 }
 
 func main() {
@@ -184,10 +200,18 @@ func run() error {
 		}
 	}()
 
+	// --- OTLP servers (optional) ---
+	var grpcSrv *grpc.Server
+	var otlpHTTPSrv *http.Server
+	if f.otlpEnabled {
+		grpcSrv, otlpHTTPSrv = startOTLPServers(f, registry, log)
+	}
+
 	log.Info("session-api ready",
 		"api", f.apiAddr,
 		"health", f.healthAddr,
 		"enterprise", f.enterprise,
+		"otlp", f.otlpEnabled,
 	)
 
 	// --- Wait for shutdown ---
@@ -197,6 +221,14 @@ func run() error {
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutCancel()
 
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
+	}
+	if otlpHTTPSrv != nil {
+		if err := otlpHTTPSrv.Shutdown(shutCtx); err != nil {
+			log.Error(err, "OTLP HTTP server shutdown error")
+		}
+	}
 	if err := apiSrv.Shutdown(shutCtx); err != nil {
 		log.Error(err, "API server shutdown error")
 	}
@@ -379,4 +411,43 @@ func initEventPublisher(registry *providers.Registry, log logr.Logger) api.Event
 	}
 	log.Info("event publisher enabled (Redis Streams)")
 	return api.NewRedisEventPublisher(rp.RedisClient(), log)
+}
+
+// startOTLPServers creates and starts the OTLP gRPC and HTTP servers.
+// Returns the servers for graceful shutdown.
+func startOTLPServers(f *flags, registry *providers.Registry, log logr.Logger) (*grpc.Server, *http.Server) {
+	sessionService := api.NewSessionService(registry, api.ServiceConfig{}, log)
+	transformer := otlp.NewTransformer(sessionService, log)
+
+	// gRPC server.
+	grpcSrv := grpc.NewServer()
+	receiver := otlp.NewReceiver(transformer, log)
+	coltracepb.RegisterTraceServiceServer(grpcSrv, receiver)
+
+	go func() {
+		lis, err := net.Listen("tcp", f.otlpGRPCAddr)
+		if err != nil {
+			log.Error(err, "failed to listen for OTLP gRPC", "addr", f.otlpGRPCAddr)
+			return
+		}
+		log.Info("starting OTLP gRPC server", "addr", f.otlpGRPCAddr)
+		if err := grpcSrv.Serve(lis); err != nil {
+			log.Error(err, "OTLP gRPC server error")
+		}
+	}()
+
+	// HTTP server.
+	handler := otlp.NewHandler(transformer, log)
+	otlpMux := http.NewServeMux()
+	handler.RegisterRoutes(otlpMux)
+
+	httpSrv := &http.Server{Addr: f.otlpHTTPAddr, Handler: otlpMux}
+	go func() {
+		log.Info("starting OTLP HTTP server", "addr", f.otlpHTTPAddr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error(err, "OTLP HTTP server error")
+		}
+	}()
+
+	return grpcSrv, httpSrv
 }

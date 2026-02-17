@@ -12,6 +12,16 @@ spec:
       targetPort: api
       protocol: TCP
       name: api
+    {{- if .Values.sessionApi.otlp.enabled }}
+    - port: {{ .Values.sessionApi.otlp.grpcPort }}
+      targetPort: otlp-grpc
+      protocol: TCP
+      name: otlp-grpc
+    - port: {{ .Values.sessionApi.otlp.httpPort }}
+      targetPort: otlp-http
+      protocol: TCP
+      name: otlp-http
+    {{- end }}
   selector:
     {{- include "omnia.sessionApi.selectorLabels" . | nindent 4 }}
 {{- end }}

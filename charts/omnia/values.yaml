@@ -700,6 +700,14 @@ sessionApi:
   affinity: {}
   # -- Topology spread constraints for distributing pods across failure domains
   topologySpreadConstraints: []
+  # OTLP ingestion endpoint for external agent frameworks
+  otlp:
+    # -- Enable OTLP trace ingestion (gRPC + HTTP)
+    enabled: false
+    # -- gRPC listen port (standard OTLP port)
+    grpcPort: 4317
+    # -- HTTP listen port (standard OTLP port)
+    httpPort: 4318
   # -- Additional environment variables for the session-api container
   extraEnv: []
 
