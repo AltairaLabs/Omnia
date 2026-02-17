@@ -16,7 +16,7 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 	case ProviderAzureKeyVault:
 		return newAzureKeyVaultProvider(cfg)
 	case ProviderAWSKMS:
-		return nil, fmt.Errorf("%w: aws-kms (see https://github.com/AltairaLabs/Omnia/issues/437)", ErrProviderNotImplemented)
+		return newAWSKMSProvider(cfg)
 	case ProviderGCPKMS:
 		return nil, fmt.Errorf("%w: gcp-kms (see https://github.com/AltairaLabs/Omnia/issues/438)", ErrProviderNotImplemented)
 	case ProviderVault:

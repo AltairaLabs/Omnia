@@ -10,8 +10,6 @@ package encryption
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -116,21 +114,10 @@ func (p *azureKeyVaultProvider) Encrypt(ctx context.Context, plaintext []byte) (
 	}
 
 	// Encrypt locally with AES-256-GCM.
-	block, err := aes.NewCipher(dek)
+	nonce, ciphertext, err := aesGCMEncrypt(dek, plaintext)
 	if err != nil {
-		return nil, fmt.Errorf("%w: AES cipher creation failed: %v", ErrEncryptionFailed, err)
+		return nil, err
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("%w: GCM creation failed: %v", ErrEncryptionFailed, err)
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, fmt.Errorf("%w: failed to generate nonce: %v", ErrEncryptionFailed, err)
-	}
-
-	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
 
 	// Determine key version from response.
 	keyVersion := p.keyVersion
@@ -141,16 +128,9 @@ func (p *azureKeyVaultProvider) Encrypt(ctx context.Context, plaintext []byte) (
 	}
 
 	// Package into envelope.
-	env := envelope{
-		Version:    envelopeVersion,
-		WrappedDEK: wrapResp.Result,
-		Nonce:      nonce,
-		Ciphertext: ciphertext,
-		KeyVersion: keyVersion,
-	}
-	envBytes, err := json.Marshal(env)
+	envBytes, err := sealEnvelope(wrapResp.Result, nonce, ciphertext, keyVersion)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to marshal envelope: %v", ErrEncryptionFailed, err)
+		return nil, err
 	}
 
 	return &EncryptOutput{
@@ -162,13 +142,9 @@ func (p *azureKeyVaultProvider) Encrypt(ctx context.Context, plaintext []byte) (
 }
 
 func (p *azureKeyVaultProvider) Decrypt(ctx context.Context, ciphertext []byte) ([]byte, error) {
-	var env envelope
-	if err := json.Unmarshal(ciphertext, &env); err != nil {
-		return nil, fmt.Errorf("%w: invalid envelope: %v", ErrDecryptionFailed, err)
-	}
-
-	if env.Version != envelopeVersion {
-		return nil, fmt.Errorf("%w: unsupported envelope version: %d", ErrDecryptionFailed, env.Version)
+	env, err := parseAndValidateEnvelope(ciphertext)
+	if err != nil {
+		return nil, err
 	}
 
 	// Unwrap the DEK using Azure Key Vault.
@@ -181,22 +157,7 @@ func (p *azureKeyVaultProvider) Decrypt(ctx context.Context, ciphertext []byte) 
 		return nil, fmt.Errorf("%w: KMS unwrap key failed: %v", ErrDecryptionFailed, err)
 	}
 
-	// Decrypt locally with AES-256-GCM.
-	block, err := aes.NewCipher(unwrapResp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("%w: AES cipher creation failed: %v", ErrDecryptionFailed, err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("%w: GCM creation failed: %v", ErrDecryptionFailed, err)
-	}
-
-	plaintext, err := gcm.Open(nil, env.Nonce, env.Ciphertext, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%w: AES-GCM decryption failed: %v", ErrDecryptionFailed, err)
-	}
-
-	return plaintext, nil
+	return aesGCMDecrypt(unwrapResp.Result, env.Nonce, env.Ciphertext)
 }
 
 func (p *azureKeyVaultProvider) GetKeyMetadata(ctx context.Context) (*KeyMetadata, error) {
