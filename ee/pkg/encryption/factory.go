@@ -18,7 +18,7 @@ func NewProvider(cfg ProviderConfig) (Provider, error) {
 	case ProviderAWSKMS:
 		return newAWSKMSProvider(cfg)
 	case ProviderGCPKMS:
-		return nil, fmt.Errorf("%w: gcp-kms (see https://github.com/AltairaLabs/Omnia/issues/438)", ErrProviderNotImplemented)
+		return newGCPKMSProvider(cfg)
 	case ProviderVault:
 		return nil, fmt.Errorf("%w: vault (see https://github.com/AltairaLabs/Omnia/issues/439)", ErrProviderNotImplemented)
 	default:

@@ -22,6 +22,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"cloud.google.com/go/kms/apiv1/kmspb"
 )
 
 // newMockWrapUnwrap creates a mock client that wraps/unwraps DEKs by XORing with a fixed key.
@@ -120,9 +122,18 @@ func TestNewProvider_AWSKMS(t *testing.T) {
 }
 
 func TestNewProvider_GCPKMS(t *testing.T) {
-	_, err := NewProvider(ProviderConfig{ProviderType: ProviderGCPKMS})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrProviderNotImplemented))
+	p, err := NewProvider(ProviderConfig{
+		ProviderType: ProviderGCPKMS,
+		KeyID:        "projects/test/locations/global/keyRings/test/cryptoKeys/test",
+	})
+	// May succeed or fail depending on environment credentials;
+	// either way, must NOT return ErrProviderNotImplemented.
+	if err != nil {
+		assert.False(t, errors.Is(err, ErrProviderNotImplemented))
+	} else {
+		assert.NotNil(t, p)
+		_ = p.Close()
+	}
 }
 
 func TestNewProvider_Vault(t *testing.T) {
@@ -137,11 +148,9 @@ func TestNewProvider_Unknown(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown encryption provider type")
 }
 
-// --- Azure Provider Tests ---
-
-func TestAzureProvider_EncryptDecryptRoundTrip(t *testing.T) {
-	mock := newMockWrapUnwrap()
-	provider := newAzureKeyVaultProviderWithClient(mock, "test-key", "")
+// assertEncryptDecryptRoundTrip is a shared helper for provider round-trip tests.
+func assertEncryptDecryptRoundTrip(t *testing.T, provider Provider, expectedKeyID, expectedAlgo string) {
+	t.Helper()
 
 	ctx := context.Background()
 	plaintext := []byte("Hello, World! This is sensitive data.")
@@ -149,8 +158,8 @@ func TestAzureProvider_EncryptDecryptRoundTrip(t *testing.T) {
 	out, err := provider.Encrypt(ctx, plaintext)
 	require.NoError(t, err)
 	require.NotNil(t, out)
-	assert.Equal(t, "test-key", out.KeyID)
-	assert.Equal(t, "AES-256-GCM+RSA-OAEP-256", out.Algorithm)
+	assert.Equal(t, expectedKeyID, out.KeyID)
+	assert.Equal(t, expectedAlgo, out.Algorithm)
 	assert.NotEmpty(t, out.Ciphertext)
 
 	// Verify envelope structure.
@@ -165,6 +174,14 @@ func TestAzureProvider_EncryptDecryptRoundTrip(t *testing.T) {
 	decrypted, err := provider.Decrypt(ctx, out.Ciphertext)
 	require.NoError(t, err)
 	assert.Equal(t, plaintext, decrypted)
+}
+
+// --- Azure Provider Tests ---
+
+func TestAzureProvider_EncryptDecryptRoundTrip(t *testing.T) {
+	mock := newMockWrapUnwrap()
+	provider := newAzureKeyVaultProviderWithClient(mock, "test-key", "")
+	assertEncryptDecryptRoundTrip(t, provider, "test-key", "AES-256-GCM+RSA-OAEP-256")
 }
 
 func TestAzureProvider_EncryptEmptyPlaintext(t *testing.T) {
@@ -303,30 +320,9 @@ func TestAzureProvider_GetKeyMetadataError(t *testing.T) {
 
 func TestAWSKMSProvider_EncryptDecryptRoundTrip(t *testing.T) {
 	mock := newMockKMSClient()
-	provider := newAWSKMSProviderWithClient(mock, "arn:aws:kms:us-east-1:123456789012:key/test-key")
-
-	ctx := context.Background()
-	plaintext := []byte("Hello, World! This is sensitive data.")
-
-	out, err := provider.Encrypt(ctx, plaintext)
-	require.NoError(t, err)
-	require.NotNil(t, out)
-	assert.Equal(t, "arn:aws:kms:us-east-1:123456789012:key/test-key", out.KeyID)
-	assert.Equal(t, "AES-256-GCM+AES-256-KMS", out.Algorithm)
-	assert.NotEmpty(t, out.Ciphertext)
-
-	// Verify envelope structure.
-	env, err := envelopeFromBytes(out.Ciphertext)
-	require.NoError(t, err)
-	assert.Equal(t, 1, env.Version)
-	assert.NotEmpty(t, env.WrappedDEK)
-	assert.NotEmpty(t, env.Nonce)
-	assert.NotEmpty(t, env.Ciphertext)
-
-	// Decrypt and verify.
-	decrypted, err := provider.Decrypt(ctx, out.Ciphertext)
-	require.NoError(t, err)
-	assert.Equal(t, plaintext, decrypted)
+	keyID := "arn:aws:kms:us-east-1:123456789012:key/test-key"
+	provider := newAWSKMSProviderWithClient(mock, keyID)
+	assertEncryptDecryptRoundTrip(t, provider, keyID, "AES-256-GCM+AES-256-KMS")
 }
 
 func TestAWSKMSProvider_EncryptEmptyPlaintext(t *testing.T) {
@@ -499,6 +495,172 @@ func TestAWSKMSProvider_GetKeyMetadataError(t *testing.T) {
 	_, err := provider.GetKeyMetadata(context.Background())
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrKeyNotFound))
+}
+
+// --- GCP KMS Provider Tests ---
+
+func TestGCPKMSProvider_EncryptDecryptRoundTrip(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	keyID := "projects/test/locations/global/keyRings/test/cryptoKeys/test"
+	provider := newGCPKMSProviderWithClient(mock, keyID)
+	assertEncryptDecryptRoundTrip(t, provider, keyID, "AES-256-GCM+GCP-KMS")
+}
+
+func TestGCPKMSProvider_EncryptEmptyPlaintext(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	provider := newGCPKMSProviderWithClient(mock, "projects/test/locations/global/keyRings/test/cryptoKeys/test")
+
+	ctx := context.Background()
+	out, err := provider.Encrypt(ctx, []byte{})
+	require.NoError(t, err)
+
+	decrypted, err := provider.Decrypt(ctx, out.Ciphertext)
+	require.NoError(t, err)
+	assert.Empty(t, decrypted)
+}
+
+func TestGCPKMSProvider_InvalidConfig_NoKeyID(t *testing.T) {
+	_, err := newGCPKMSProvider(ProviderConfig{
+		ProviderType: ProviderGCPKMS,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "key ID is required")
+}
+
+func TestGCPKMSProvider_EncryptKMSError(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	mock.EncryptFn = func(_ context.Context, _ *kmspb.EncryptRequest) (*kmspb.EncryptResponse, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrEncryptionFailed))
+	assert.Contains(t, err.Error(), "KMS Encrypt (wrap DEK) failed")
+}
+
+func TestGCPKMSProvider_DecryptKMSError(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.NoError(t, err)
+
+	mock.DecryptFn = func(_ context.Context, _ *kmspb.DecryptRequest) (*kmspb.DecryptResponse, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+
+	_, err = provider.Decrypt(context.Background(), out.Ciphertext)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "KMS Decrypt failed")
+}
+
+func TestGCPKMSProvider_DecryptInvalidEnvelope(t *testing.T) {
+	provider := newGCPKMSProviderWithClient(newMockGCPKMSClient(), "test-key")
+
+	_, err := provider.Decrypt(context.Background(), []byte("not json"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "invalid envelope")
+}
+
+func TestGCPKMSProvider_DecryptWrongVersion(t *testing.T) {
+	provider := newGCPKMSProviderWithClient(newMockGCPKMSClient(), "test-key")
+
+	_, err := provider.Decrypt(context.Background(), []byte(`{"v":99,"wdek":"","nonce":"","ct":""}`))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "unsupported envelope version")
+}
+
+func TestGCPKMSProvider_DecryptTamperedCiphertext(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("secret"))
+	require.NoError(t, err)
+
+	env, err := envelopeFromBytes(out.Ciphertext)
+	require.NoError(t, err)
+	env.Ciphertext[0] ^= 0xFF
+
+	tampered, err := json.Marshal(env)
+	require.NoError(t, err)
+
+	_, err = provider.Decrypt(context.Background(), tampered)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+}
+
+func TestGCPKMSProvider_DecryptInvalidDEKSize(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	out, err := provider.Encrypt(context.Background(), []byte("test"))
+	require.NoError(t, err)
+
+	// Override Decrypt to return invalid key size.
+	mock.DecryptFn = func(_ context.Context, _ *kmspb.DecryptRequest) (*kmspb.DecryptResponse, error) {
+		return &kmspb.DecryptResponse{
+			Plaintext: []byte("bad"),
+		}, nil
+	}
+
+	_, err = provider.Decrypt(context.Background(), out.Ciphertext)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDecryptionFailed))
+	assert.Contains(t, err.Error(), "AES cipher creation failed")
+}
+
+func TestGCPKMSProvider_GetKeyMetadata(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	provider := newGCPKMSProviderWithClient(mock, "projects/test/locations/global/keyRings/test/cryptoKeys/test")
+
+	meta, err := provider.GetKeyMetadata(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "projects/test/locations/global/keyRings/test/cryptoKeys/test", meta.KeyID)
+	assert.Equal(t, "GOOGLE_SYMMETRIC_ENCRYPTION", meta.Algorithm)
+	assert.True(t, meta.Enabled)
+	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), meta.CreatedAt)
+}
+
+func TestGCPKMSProvider_GetKeyMetadataDisabledKey(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	mock.GetCryptoKeyFn = func(_ context.Context, req *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+		return &kmspb.CryptoKey{
+			Name: req.Name,
+			Primary: &kmspb.CryptoKeyVersion{
+				State: kmspb.CryptoKeyVersion_DESTROYED,
+			},
+		}, nil
+	}
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	meta, err := provider.GetKeyMetadata(context.Background())
+	require.NoError(t, err)
+	assert.False(t, meta.Enabled)
+}
+
+func TestGCPKMSProvider_GetKeyMetadataError(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	mock.GetCryptoKeyFn = func(_ context.Context, _ *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+		return nil, fmt.Errorf("key not found")
+	}
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.GetKeyMetadata(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrKeyNotFound))
+}
+
+func TestGCPKMSProvider_Close(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	err := provider.Close()
+	require.NoError(t, err)
 }
 
 // --- Encryptor Tests ---
