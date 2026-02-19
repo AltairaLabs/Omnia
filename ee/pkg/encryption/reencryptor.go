@@ -97,7 +97,7 @@ func (r *MessageReEncryptor) ReEncryptBatch(
 	lastID := cfg.AfterMessageID
 	for _, encMsg := range messages {
 		lastID = encMsg.Message.ID
-		if processErr := r.reEncryptMessage(ctx, encMsg); processErr != nil {
+		if r.reEncryptMessage(ctx, encMsg) != nil {
 			result.Errors++
 			continue
 		}

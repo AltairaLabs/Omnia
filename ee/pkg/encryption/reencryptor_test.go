@@ -246,6 +246,177 @@ func TestReEncryptBatch_HasMore(t *testing.T) {
 	assert.Equal(t, batchSize, result.MessagesProcessed)
 }
 
+func TestReEncryptBatch_MissingEncryptionMeta(t *testing.T) {
+	provider := newAzureKeyVaultProviderWithClient(newMockWrapUnwrap(), "test-key", "")
+
+	badMsg := &session.Message{
+		ID:       "msg-no-meta",
+		Content:  "some content",
+		Metadata: map[string]string{"other": "value"},
+	}
+
+	store := &mockReEncryptionStore{
+		GetEncryptedMessageBatchFn: func(
+			_ context.Context, _, _ string, _ int, _ string,
+		) ([]*EncryptedMessage, error) {
+			return []*EncryptedMessage{
+				{SessionID: "sess-1", Message: badMsg},
+			}, nil
+		},
+		UpdateMessageContentFn: func(_ context.Context, _ string, _ *session.Message) error {
+			t.Fatal("should not be called")
+			return nil
+		},
+	}
+
+	reEncryptor := NewMessageReEncryptor(provider, store)
+	_, _, result, err := reEncryptor.ReEncryptBatch(context.Background(), ReEncryptionConfig{
+		KeyID:     "test-key",
+		BatchSize: 10,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.MessagesProcessed)
+	assert.Equal(t, 1, result.Errors)
+}
+
+func TestReEncryptBatch_InvalidEncryptionMetaJSON(t *testing.T) {
+	provider := newAzureKeyVaultProviderWithClient(newMockWrapUnwrap(), "test-key", "")
+
+	badMsg := &session.Message{
+		ID:      "msg-bad-json",
+		Content: "some content",
+		Metadata: map[string]string{
+			encryptionMetadataKey: "not-valid-json",
+		},
+	}
+
+	store := &mockReEncryptionStore{
+		GetEncryptedMessageBatchFn: func(
+			_ context.Context, _, _ string, _ int, _ string,
+		) ([]*EncryptedMessage, error) {
+			return []*EncryptedMessage{
+				{SessionID: "sess-1", Message: badMsg},
+			}, nil
+		},
+		UpdateMessageContentFn: func(_ context.Context, _ string, _ *session.Message) error {
+			t.Fatal("should not be called")
+			return nil
+		},
+	}
+
+	reEncryptor := NewMessageReEncryptor(provider, store)
+	_, _, result, err := reEncryptor.ReEncryptBatch(context.Background(), ReEncryptionConfig{
+		KeyID:     "test-key",
+		BatchSize: 10,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.MessagesProcessed)
+	assert.Equal(t, 1, result.Errors)
+}
+
+func TestReEncryptBatch_InvalidBase64Content(t *testing.T) {
+	provider := newAzureKeyVaultProviderWithClient(newMockWrapUnwrap(), "test-key", "")
+
+	meta := encryptionMetadata{
+		KeyID:     "test-key",
+		Algorithm: "AES-256-GCM+RSA-OAEP-256",
+		Fields:    []string{"content"},
+	}
+	metaBytes, _ := json.Marshal(meta)
+
+	badMsg := &session.Message{
+		ID:      "msg-bad-b64",
+		Content: "not-valid-base64!!!",
+		Metadata: map[string]string{
+			encryptionMetadataKey: string(metaBytes),
+		},
+	}
+
+	store := &mockReEncryptionStore{
+		GetEncryptedMessageBatchFn: func(
+			_ context.Context, _, _ string, _ int, _ string,
+		) ([]*EncryptedMessage, error) {
+			return []*EncryptedMessage{
+				{SessionID: "sess-1", Message: badMsg},
+			}, nil
+		},
+		UpdateMessageContentFn: func(_ context.Context, _ string, _ *session.Message) error {
+			t.Fatal("should not be called")
+			return nil
+		},
+	}
+
+	reEncryptor := NewMessageReEncryptor(provider, store)
+	_, _, result, err := reEncryptor.ReEncryptBatch(context.Background(), ReEncryptionConfig{
+		KeyID:     "test-key",
+		BatchSize: 10,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.MessagesProcessed)
+	assert.Equal(t, 1, result.Errors)
+}
+
+func TestReEncryptBatch_WithMetadataFields(t *testing.T) {
+	mock := newMockWrapUnwrap()
+	provider := newAzureKeyVaultProviderWithClient(mock, "test-key", "")
+
+	encryptor := NewEncryptor(provider)
+	ctx := context.Background()
+
+	original := &session.Message{
+		ID:      "msg-meta",
+		Role:    session.RoleUser,
+		Content: "sensitive data",
+		Metadata: map[string]string{
+			"pii-field": "SSN-123-45-6789",
+			"safe":      "not-encrypted",
+		},
+	}
+
+	encrypted, _, err := encryptor.EncryptMessage(ctx, original)
+	require.NoError(t, err)
+
+	var updatedMsg *session.Message
+	store := &mockReEncryptionStore{
+		GetEncryptedMessageBatchFn: func(
+			_ context.Context, _, _ string, _ int, _ string,
+		) ([]*EncryptedMessage, error) {
+			return []*EncryptedMessage{
+				{SessionID: "sess-1", Message: encrypted},
+			}, nil
+		},
+		UpdateMessageContentFn: func(_ context.Context, _ string, msg *session.Message) error {
+			updatedMsg = msg
+			return nil
+		},
+	}
+
+	reEncryptor := NewMessageReEncryptor(provider, store)
+	_, _, result, err := reEncryptor.ReEncryptBatch(ctx, ReEncryptionConfig{
+		KeyID:     "test-key",
+		BatchSize: 10,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.MessagesProcessed)
+	require.NotNil(t, updatedMsg)
+
+	decrypted, err := encryptor.DecryptMessage(ctx, updatedMsg)
+	require.NoError(t, err)
+	assert.Equal(t, "sensitive data", decrypted.Content)
+	assert.Equal(t, "SSN-123-45-6789", decrypted.Metadata["pii-field"])
+	assert.Equal(t, "not-encrypted", decrypted.Metadata["safe"])
+}
+
+func TestReEncryptBatch_NilMetadata(t *testing.T) {
+	// Covers the nil path in copyMetadata.
+	result := copyMetadata(nil)
+	assert.Nil(t, result)
+}
+
 func TestReEncryptBatch_FetchError(t *testing.T) {
 	provider := newAzureKeyVaultProviderWithClient(newMockWrapUnwrap(), "test-key", "")
 

@@ -81,13 +81,13 @@ func (p *Provider) UpdateMessageContent(ctx context.Context, _ string, msg *sess
 	return nil
 }
 
-// scanRow is a minimal interface for scanning a row from pgx.
-type scanRow interface {
+// scanner is a minimal interface for scanning a row from pgx.
+type scanner interface {
 	Scan(dest ...any) error
 }
 
 // scanEncryptedMessage scans a row into a session.Message and extracts the session_id.
-func scanEncryptedMessage(row scanRow) (*session.Message, string, error) {
+func scanEncryptedMessage(row scanner) (*session.Message, string, error) {
 	var msg session.Message
 	var sessionID string
 	var toolCallID *string

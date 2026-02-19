@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockScanRow implements the scanRow interface for testing scanEncryptedMessage.
+// mockScanRow implements the scanner interface for testing scanEncryptedMessage.
 type mockScanRow struct {
 	values []any
 	err    error
