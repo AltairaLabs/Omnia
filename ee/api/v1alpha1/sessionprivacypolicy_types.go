@@ -168,6 +168,31 @@ type EncryptionConfig struct {
 	// secretRef references a Secret containing encryption credentials.
 	// +optional
 	SecretRef *corev1alpha1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// keyRotation configures automatic key rotation.
+	// +optional
+	KeyRotation *KeyRotationConfig `json:"keyRotation,omitempty"`
+}
+
+// KeyRotationConfig configures automatic key rotation.
+type KeyRotationConfig struct {
+	// enabled specifies whether automatic key rotation is active.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// schedule is a cron expression for automatic rotation (e.g. "0 0 1 * *" for monthly).
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// reEncryptExisting specifies whether existing data should be re-encrypted after rotation.
+	// +optional
+	ReEncryptExisting bool `json:"reEncryptExisting,omitempty"`
+
+	// batchSize is the number of messages to re-encrypt per batch. Default 100, max 1000.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1000
+	// +optional
+	BatchSize *int32 `json:"batchSize,omitempty"`
 }
 
 // AuditLogConfig configures audit logging for privacy-related operations.
@@ -223,6 +248,40 @@ type SessionPrivacyPolicySpec struct {
 	AuditLog *AuditLogConfig `json:"auditLog,omitempty"`
 }
 
+// KeyRotationStatus reports the current state of key rotation.
+type KeyRotationStatus struct {
+	// lastRotatedAt is the timestamp of the last successful key rotation.
+	// +optional
+	LastRotatedAt *metav1.Time `json:"lastRotatedAt,omitempty"`
+
+	// currentKeyVersion is the version of the key currently in use for encryption.
+	// +optional
+	CurrentKeyVersion string `json:"currentKeyVersion,omitempty"`
+
+	// reEncryptionProgress tracks the progress of re-encrypting existing data.
+	// +optional
+	ReEncryptionProgress *ReEncryptionProgress `json:"reEncryptionProgress,omitempty"`
+}
+
+// ReEncryptionProgress tracks the progress of a re-encryption operation.
+type ReEncryptionProgress struct {
+	// status is the current state of re-encryption: Pending, InProgress, Completed, or Failed.
+	// +optional
+	Status string `json:"status,omitempty"`
+
+	// messagesProcessed is the total number of messages re-encrypted so far.
+	// +optional
+	MessagesProcessed int64 `json:"messagesProcessed,omitempty"`
+
+	// startedAt is when the re-encryption operation began.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// completedAt is when the re-encryption operation finished.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+}
+
 // SessionPrivacyPolicyStatus defines the observed state of SessionPrivacyPolicy.
 type SessionPrivacyPolicyStatus struct {
 	// phase represents the current lifecycle phase of the policy.
@@ -238,6 +297,10 @@ type SessionPrivacyPolicyStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// keyRotation reports the current state of key rotation.
+	// +optional
+	KeyRotation *KeyRotationStatus `json:"keyRotation,omitempty"`
 }
 
 // +kubebuilder:object:root=true

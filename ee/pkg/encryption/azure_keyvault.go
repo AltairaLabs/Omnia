@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -34,6 +35,10 @@ type azkeysClient interface {
 		ctx context.Context, keyName string, keyVersion string,
 		options *azkeys.GetKeyOptions,
 	) (azkeys.GetKeyResponse, error)
+	RotateKey(
+		ctx context.Context, keyName string,
+		options *azkeys.RotateKeyOptions,
+	) (azkeys.RotateKeyResponse, error)
 }
 
 const (
@@ -193,6 +198,30 @@ func (p *azureKeyVaultProvider) GetKeyMetadata(ctx context.Context) (*KeyMetadat
 	}
 
 	return meta, nil
+}
+
+func (p *azureKeyVaultProvider) RotateKey(ctx context.Context) (*KeyRotationResult, error) {
+	// Get current key version before rotation.
+	prevMeta, err := p.GetKeyMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get current key version: %v", ErrRotationFailed, err)
+	}
+
+	resp, err := p.client.RotateKey(ctx, p.keyName, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: Azure RotateKey failed: %v", ErrRotationFailed, err)
+	}
+
+	newVersion := ""
+	if resp.Key != nil && resp.Key.KID != nil {
+		newVersion = resp.Key.KID.Version()
+	}
+
+	return &KeyRotationResult{
+		PreviousKeyVersion: prevMeta.KeyVersion,
+		NewKeyVersion:      newVersion,
+		RotatedAt:          time.Now(),
+	}, nil
 }
 
 func (p *azureKeyVaultProvider) Close() error {

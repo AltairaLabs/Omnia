@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"time"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
@@ -24,6 +25,10 @@ type gcpKMSClient interface {
 	Encrypt(ctx context.Context, req *kmspb.EncryptRequest) (*kmspb.EncryptResponse, error)
 	Decrypt(ctx context.Context, req *kmspb.DecryptRequest) (*kmspb.DecryptResponse, error)
 	GetCryptoKey(ctx context.Context, req *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error)
+	CreateCryptoKeyVersion(ctx context.Context, req *kmspb.CreateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error)
+	UpdateCryptoKeyPrimaryVersion(
+		ctx context.Context, req *kmspb.UpdateCryptoKeyPrimaryVersionRequest,
+	) (*kmspb.CryptoKey, error)
 	Close() error
 }
 
@@ -48,6 +53,18 @@ func (w *gcpKMSClientWrapper) GetCryptoKey(
 	ctx context.Context, req *kmspb.GetCryptoKeyRequest,
 ) (*kmspb.CryptoKey, error) {
 	return w.client.GetCryptoKey(ctx, req)
+}
+
+func (w *gcpKMSClientWrapper) CreateCryptoKeyVersion(
+	ctx context.Context, req *kmspb.CreateCryptoKeyVersionRequest,
+) (*kmspb.CryptoKeyVersion, error) {
+	return w.client.CreateCryptoKeyVersion(ctx, req)
+}
+
+func (w *gcpKMSClientWrapper) UpdateCryptoKeyPrimaryVersion(
+	ctx context.Context, req *kmspb.UpdateCryptoKeyPrimaryVersionRequest,
+) (*kmspb.CryptoKey, error) {
+	return w.client.UpdateCryptoKeyPrimaryVersion(ctx, req)
 }
 
 func (w *gcpKMSClientWrapper) Close() error {
@@ -166,6 +183,37 @@ func (p *gcpKMSProvider) GetKeyMetadata(ctx context.Context) (*KeyMetadata, erro
 	}
 
 	return meta, nil
+}
+
+func (p *gcpKMSProvider) RotateKey(ctx context.Context) (*KeyRotationResult, error) {
+	// Get current key version before rotation.
+	prevMeta, err := p.GetKeyMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get current key version: %v", ErrRotationFailed, err)
+	}
+
+	// Create a new key version.
+	newVer, err := p.client.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{
+		Parent: p.keyID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: GCP CreateCryptoKeyVersion failed: %v", ErrRotationFailed, err)
+	}
+
+	// Promote the new version to primary.
+	_, err = p.client.UpdateCryptoKeyPrimaryVersion(ctx, &kmspb.UpdateCryptoKeyPrimaryVersionRequest{
+		Name:               p.keyID,
+		CryptoKeyVersionId: newVer.Name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: GCP UpdateCryptoKeyPrimaryVersion failed: %v", ErrRotationFailed, err)
+	}
+
+	return &KeyRotationResult{
+		PreviousKeyVersion: prevMeta.KeyVersion,
+		NewKeyVersion:      newVer.Name,
+		RotatedAt:          time.Now(),
+	}, nil
 }
 
 func (p *gcpKMSProvider) Close() error {

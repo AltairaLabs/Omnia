@@ -31,6 +31,10 @@ type mockKMSClient struct {
 	DescribeKeyFn func(
 		ctx context.Context, params *kms.DescribeKeyInput, optFns ...func(*kms.Options),
 	) (*kms.DescribeKeyOutput, error)
+
+	RotateKeyOnDemandFn func(
+		ctx context.Context, params *kms.RotateKeyOnDemandInput, optFns ...func(*kms.Options),
+	) (*kms.RotateKeyOnDemandOutput, error)
 }
 
 func (m *mockKMSClient) GenerateDataKey(
@@ -49,6 +53,12 @@ func (m *mockKMSClient) DescribeKey(
 	ctx context.Context, params *kms.DescribeKeyInput, optFns ...func(*kms.Options),
 ) (*kms.DescribeKeyOutput, error) {
 	return m.DescribeKeyFn(ctx, params, optFns...)
+}
+
+func (m *mockKMSClient) RotateKeyOnDemand(
+	ctx context.Context, params *kms.RotateKeyOnDemandInput, optFns ...func(*kms.Options),
+) (*kms.RotateKeyOnDemandOutput, error) {
+	return m.RotateKeyOnDemandFn(ctx, params, optFns...)
 }
 
 // newMockKMSClient creates a mock AWS KMS client that generates real DEKs
@@ -104,6 +114,13 @@ func newMockKMSClient() *mockKMSClient {
 					KeySpec:      types.KeySpecSymmetricDefault,
 					CreationDate: &created,
 				},
+			}, nil
+		},
+		RotateKeyOnDemandFn: func(
+			_ context.Context, params *kms.RotateKeyOnDemandInput, _ ...func(*kms.Options),
+		) (*kms.RotateKeyOnDemandOutput, error) {
+			return &kms.RotateKeyOnDemandOutput{
+				KeyId: params.KeyId,
 			}, nil
 		},
 	}

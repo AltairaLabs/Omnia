@@ -22,6 +22,7 @@ type mockVaultTransitClient struct {
 	GenerateDataKeyFn func(ctx context.Context, keyName string) (*vaultDataKeyResponse, error)
 	DecryptDEKFn      func(ctx context.Context, keyName string, ciphertext string) ([]byte, error)
 	ReadKeyFn         func(ctx context.Context, keyName string) (*vaultKeyInfo, error)
+	RotateKeyFn       func(ctx context.Context, keyName string) (*vaultKeyInfo, error)
 }
 
 func (m *mockVaultTransitClient) GenerateDataKey(ctx context.Context, keyName string) (*vaultDataKeyResponse, error) {
@@ -34,6 +35,10 @@ func (m *mockVaultTransitClient) DecryptDEK(ctx context.Context, keyName string,
 
 func (m *mockVaultTransitClient) ReadKey(ctx context.Context, keyName string) (*vaultKeyInfo, error) {
 	return m.ReadKeyFn(ctx, keyName)
+}
+
+func (m *mockVaultTransitClient) RotateKey(ctx context.Context, keyName string) (*vaultKeyInfo, error) {
+	return m.RotateKeyFn(ctx, keyName)
 }
 
 // newMockVaultTransitClient creates a mock Vault Transit client that generates real DEKs
@@ -86,6 +91,16 @@ func newMockVaultTransitClient() *mockVaultTransitClient {
 				Name:            keyName,
 				Type:            "aes256-gcm96",
 				LatestVersion:   1,
+				MinDecryptVer:   1,
+				DeletionAllowed: false,
+				CreatedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			}, nil
+		},
+		RotateKeyFn: func(_ context.Context, keyName string) (*vaultKeyInfo, error) {
+			return &vaultKeyInfo{
+				Name:            keyName,
+				Type:            "aes256-gcm96",
+				LatestVersion:   2,
 				MinDecryptVer:   1,
 				DeletionAllowed: false,
 				CreatedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),

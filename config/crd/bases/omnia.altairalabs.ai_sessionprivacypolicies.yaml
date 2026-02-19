@@ -104,6 +104,29 @@ spec:
                       keyID is the identifier of the encryption key within the KMS provider.
                       Required when enabled is true.
                     type: string
+                  keyRotation:
+                    description: keyRotation configures automatic key rotation.
+                    properties:
+                      batchSize:
+                        description: batchSize is the number of messages to re-encrypt
+                          per batch. Default 100, max 1000.
+                        format: int32
+                        maximum: 1000
+                        minimum: 1
+                        type: integer
+                      enabled:
+                        description: enabled specifies whether automatic key rotation
+                          is active.
+                        type: boolean
+                      reEncryptExisting:
+                        description: reEncryptExisting specifies whether existing
+                          data should be re-encrypted after rotation.
+                        type: boolean
+                      schedule:
+                        description: schedule is a cron expression for automatic rotation
+                          (e.g. "0 0 1 * *" for monthly).
+                        type: string
+                    type: object
                   kmsProvider:
                     description: |-
                       kmsProvider specifies the key management service to use.
@@ -328,6 +351,43 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              keyRotation:
+                description: keyRotation reports the current state of key rotation.
+                properties:
+                  currentKeyVersion:
+                    description: currentKeyVersion is the version of the key currently
+                      in use for encryption.
+                    type: string
+                  lastRotatedAt:
+                    description: lastRotatedAt is the timestamp of the last successful
+                      key rotation.
+                    format: date-time
+                    type: string
+                  reEncryptionProgress:
+                    description: reEncryptionProgress tracks the progress of re-encrypting
+                      existing data.
+                    properties:
+                      completedAt:
+                        description: completedAt is when the re-encryption operation
+                          finished.
+                        format: date-time
+                        type: string
+                      messagesProcessed:
+                        description: messagesProcessed is the total number of messages
+                          re-encrypted so far.
+                        format: int64
+                        type: integer
+                      startedAt:
+                        description: startedAt is when the re-encryption operation
+                          began.
+                        format: date-time
+                        type: string
+                      status:
+                        description: 'status is the current state of re-encryption:
+                          Pending, InProgress, Completed, or Failed.'
+                        type: string
+                    type: object
+                type: object
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller.

@@ -24,6 +24,8 @@ var (
 	ErrEncryptionFailed = errors.New("encryption failed")
 	// ErrDecryptionFailed indicates decryption failed.
 	ErrDecryptionFailed = errors.New("decryption failed")
+	// ErrRotationFailed indicates key rotation failed.
+	ErrRotationFailed = errors.New("key rotation failed")
 )
 
 // EncryptOutput holds the result of an encryption operation.
@@ -54,6 +56,16 @@ type KeyMetadata struct {
 	Enabled bool
 }
 
+// KeyRotationResult holds the result of a key rotation operation.
+type KeyRotationResult struct {
+	// PreviousKeyVersion is the version of the key before rotation.
+	PreviousKeyVersion string
+	// NewKeyVersion is the version of the key after rotation.
+	NewKeyVersion string
+	// RotatedAt is when the rotation occurred.
+	RotatedAt time.Time
+}
+
 // Provider defines the interface for KMS encryption providers.
 type Provider interface {
 	// Encrypt encrypts plaintext using the configured KMS key.
@@ -62,6 +74,8 @@ type Provider interface {
 	Decrypt(ctx context.Context, ciphertext []byte) ([]byte, error)
 	// GetKeyMetadata returns metadata about the configured encryption key.
 	GetKeyMetadata(ctx context.Context) (*KeyMetadata, error)
+	// RotateKey triggers key rotation in the KMS provider, returning the new key version.
+	RotateKey(ctx context.Context) (*KeyRotationResult, error)
 	// Close releases any resources held by the provider.
 	Close() error
 }

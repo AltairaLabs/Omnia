@@ -11,6 +11,7 @@ package encryption
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -30,6 +31,9 @@ type kmsClient interface {
 	DescribeKey(
 		ctx context.Context, params *kms.DescribeKeyInput, optFns ...func(*kms.Options),
 	) (*kms.DescribeKeyOutput, error)
+	RotateKeyOnDemand(
+		ctx context.Context, params *kms.RotateKeyOnDemandInput, optFns ...func(*kms.Options),
+	) (*kms.RotateKeyOnDemandOutput, error)
 }
 
 type awsKMSProvider struct {
@@ -143,6 +147,33 @@ func (p *awsKMSProvider) GetKeyMetadata(ctx context.Context) (*KeyMetadata, erro
 	}
 
 	return meta, nil
+}
+
+func (p *awsKMSProvider) RotateKey(ctx context.Context) (*KeyRotationResult, error) {
+	// Get current key version before rotation.
+	prevMeta, err := p.GetKeyMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get current key version: %v", ErrRotationFailed, err)
+	}
+
+	_, err = p.client.RotateKeyOnDemand(ctx, &kms.RotateKeyOnDemandInput{
+		KeyId: aws.String(p.keyID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: AWS RotateKeyOnDemand failed: %v", ErrRotationFailed, err)
+	}
+
+	// Get the new key version after rotation.
+	newMeta, err := p.GetKeyMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get new key version: %v", ErrRotationFailed, err)
+	}
+
+	return &KeyRotationResult{
+		PreviousKeyVersion: prevMeta.KeyVersion,
+		NewKeyVersion:      newMeta.KeyVersion,
+		RotatedAt:          time.Now(),
+	}, nil
 }
 
 func (p *awsKMSProvider) Close() error {

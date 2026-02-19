@@ -36,6 +36,7 @@ import (
 	arenawebhook "github.com/altairalabs/omnia/ee/internal/webhook"
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/ee/pkg/encryption"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/workspace"
@@ -297,6 +298,20 @@ func main() {
 		Metrics:  privacyPolicyMetrics,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "SessionPrivacyPolicy")
+		os.Exit(1)
+	}
+
+	// KeyRotation controller
+	if err := (&controller.KeyRotationReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		//nolint:staticcheck // consistent with other controllers in this file
+		Recorder: mgr.GetEventRecorderFor("keyrotation-controller"),
+		ProviderFactory: func(cfg encryption.ProviderConfig) (encryption.Provider, error) {
+			return encryption.NewProvider(cfg)
+		},
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "KeyRotation")
 		os.Exit(1)
 	}
 
