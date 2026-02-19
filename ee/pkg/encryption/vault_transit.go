@@ -32,6 +32,7 @@ type vaultTransitClient interface {
 	GenerateDataKey(ctx context.Context, keyName string) (*vaultDataKeyResponse, error)
 	DecryptDEK(ctx context.Context, keyName string, ciphertext string) ([]byte, error)
 	ReadKey(ctx context.Context, keyName string) (*vaultKeyInfo, error)
+	RotateKey(ctx context.Context, keyName string) (*vaultKeyInfo, error)
 }
 
 // vaultDataKeyResponse holds the response from the Vault datakey endpoint.
@@ -186,6 +187,17 @@ func (c *vaultHTTPClient) ReadKey(ctx context.Context, keyName string) (*vaultKe
 	return info, nil
 }
 
+func (c *vaultHTTPClient) RotateKey(ctx context.Context, keyName string) (*vaultKeyInfo, error) {
+	url := fmt.Sprintf("%s/v1/%s/keys/%s/rotate", c.addr, c.mountPath, keyName)
+
+	_, err := c.doRequest(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("vault rotate key request failed: %w", err)
+	}
+
+	return c.ReadKey(ctx, keyName)
+}
+
 func (c *vaultHTTPClient) doRequest(ctx context.Context, method, url string, body []byte) ([]byte, error) {
 	var bodyReader io.Reader
 	if body != nil {
@@ -312,6 +324,25 @@ func (p *vaultProvider) GetKeyMetadata(ctx context.Context) (*KeyMetadata, error
 		Algorithm:  info.Type,
 		CreatedAt:  info.CreatedAt,
 		Enabled:    true,
+	}, nil
+}
+
+func (p *vaultProvider) RotateKey(ctx context.Context) (*KeyRotationResult, error) {
+	// Get current key version before rotation.
+	prevMeta, err := p.GetKeyMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get current key version: %v", ErrRotationFailed, err)
+	}
+
+	info, err := p.client.RotateKey(ctx, p.keyID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: Vault RotateKey failed: %v", ErrRotationFailed, err)
+	}
+
+	return &KeyRotationResult{
+		PreviousKeyVersion: prevMeta.KeyVersion,
+		NewKeyVersion:      strconv.Itoa(info.LatestVersion),
+		RotatedAt:          time.Now(),
 	}, nil
 }
 

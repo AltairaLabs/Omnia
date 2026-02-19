@@ -564,6 +564,48 @@ func mergeEncryption(base, override *omniav1alpha1.EncryptionConfig) *omniav1alp
 		result.KeyID = override.KeyID
 	}
 
+	result.KeyRotation = mergeKeyRotation(
+		getOptionalField(base, func(c *omniav1alpha1.EncryptionConfig) *omniav1alpha1.KeyRotationConfig { return c.KeyRotation }),
+		getOptionalField(override, func(c *omniav1alpha1.EncryptionConfig) *omniav1alpha1.KeyRotationConfig { return c.KeyRotation }),
+	)
+
+	return result
+}
+
+// getOptionalField safely extracts a field from a possibly-nil struct.
+func getOptionalField[T any, F any](obj *T, getter func(*T) *F) *F {
+	if obj == nil {
+		return nil
+	}
+	return getter(obj)
+}
+
+// mergeKeyRotation merges key rotation configs; child overrides parent for non-bool fields.
+func mergeKeyRotation(base, override *omniav1alpha1.KeyRotationConfig) *omniav1alpha1.KeyRotationConfig {
+	if base == nil && override == nil {
+		return nil
+	}
+
+	result := &omniav1alpha1.KeyRotationConfig{
+		Enabled: boolFromEither(base, override, func(c *omniav1alpha1.KeyRotationConfig) bool { return c.Enabled }),
+		ReEncryptExisting: boolFromEither(base, override,
+			func(c *omniav1alpha1.KeyRotationConfig) bool { return c.ReEncryptExisting }),
+	}
+
+	// Schedule: child overrides parent.
+	switch {
+	case override != nil && override.Schedule != "":
+		result.Schedule = override.Schedule
+	case base != nil:
+		result.Schedule = base.Schedule
+	}
+
+	// BatchSize: use the smaller value.
+	result.BatchSize = minInt32Ptr(
+		getOptionalInt32(base, func(c *omniav1alpha1.KeyRotationConfig) *int32 { return c.BatchSize }),
+		getOptionalInt32(override, func(c *omniav1alpha1.KeyRotationConfig) *int32 { return c.BatchSize }),
+	)
+
 	return result
 }
 

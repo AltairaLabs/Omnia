@@ -30,6 +30,11 @@ type mockAzkeysClient struct {
 		ctx context.Context, keyName, keyVersion string,
 		opts *azkeys.GetKeyOptions,
 	) (azkeys.GetKeyResponse, error)
+
+	RotateKeyFn func(
+		ctx context.Context, keyName string,
+		opts *azkeys.RotateKeyOptions,
+	) (azkeys.RotateKeyResponse, error)
 }
 
 func (m *mockAzkeysClient) WrapKey(
@@ -51,4 +56,11 @@ func (m *mockAzkeysClient) GetKey(
 	opts *azkeys.GetKeyOptions,
 ) (azkeys.GetKeyResponse, error) {
 	return m.GetKeyFn(ctx, keyName, keyVersion, opts)
+}
+
+func (m *mockAzkeysClient) RotateKey(
+	ctx context.Context, keyName string,
+	opts *azkeys.RotateKeyOptions,
+) (azkeys.RotateKeyResponse, error) {
+	return m.RotateKeyFn(ctx, keyName, opts)
 }

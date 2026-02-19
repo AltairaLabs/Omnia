@@ -159,6 +159,53 @@ func TestVaultHTTPClient_ReadKey_HTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 404")
 }
 
+func TestVaultHTTPClient_RotateKey(t *testing.T) {
+	callCount := 0
+	srv, client := newTestVaultServer(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// First call: POST rotate
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/v1/transit/keys/my-key/rotate", r.URL.Path)
+			assert.Equal(t, "s.test-token", r.Header.Get("X-Vault-Token"))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// Second call: GET read key
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/v1/transit/keys/my-key", r.URL.Path)
+
+		resp := map[string]any{
+			"data": map[string]any{
+				"name":           "my-key",
+				"type":           "aes256-gcm96",
+				"latest_version": 2,
+				"keys":           map[string]any{},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	})
+	defer srv.Close()
+
+	info, err := client.RotateKey(context.Background(), "my-key")
+	require.NoError(t, err)
+	assert.Equal(t, 2, info.LatestVersion)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestVaultHTTPClient_RotateKey_HTTPError(t *testing.T) {
+	srv, client := newTestVaultServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"errors":["permission denied"]}`)) //nolint:errcheck
+	})
+	defer srv.Close()
+
+	_, err := client.RotateKey(context.Background(), "my-key")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 403")
+}
+
 func TestVaultHTTPClient_CustomMountPath(t *testing.T) {
 	srv, client := newTestVaultServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/custom-transit/keys/my-key", r.URL.Path)

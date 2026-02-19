@@ -84,6 +84,27 @@ func newMockWrapUnwrap() *mockAzkeysClient {
 				},
 			}, nil
 		},
+		RotateKeyFn: func(
+			ctx context.Context, keyName string,
+			_ *azkeys.RotateKeyOptions,
+		) (azkeys.RotateKeyResponse, error) {
+			kid := azkeys.ID("https://myvault.vault.azure.net/keys/test-key/def456")
+			kty := azkeys.KeyTypeRSA
+			enabled := true
+			created := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+			return azkeys.RotateKeyResponse{
+				KeyBundle: azkeys.KeyBundle{
+					Key: &azkeys.JSONWebKey{
+						KID: &kid,
+						Kty: &kty,
+					},
+					Attributes: &azkeys.KeyAttributes{
+						Enabled: &enabled,
+						Created: &created,
+					},
+				},
+			}, nil
+		},
 	}
 }
 
@@ -326,6 +347,33 @@ func TestAzureProvider_GetKeyMetadataError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrKeyNotFound))
 }
 
+func TestAzureProvider_RotateKey(t *testing.T) {
+	mock := newMockWrapUnwrap()
+	provider := newAzureKeyVaultProviderWithClient(mock, "test-key", "")
+
+	result, err := provider.RotateKey(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", result.PreviousKeyVersion)
+	assert.Equal(t, "def456", result.NewKeyVersion)
+	assert.False(t, result.RotatedAt.IsZero())
+}
+
+func TestAzureProvider_RotateKeyError(t *testing.T) {
+	mock := newMockWrapUnwrap()
+	mock.RotateKeyFn = func(
+		_ context.Context, _ string,
+		_ *azkeys.RotateKeyOptions,
+	) (azkeys.RotateKeyResponse, error) {
+		return azkeys.RotateKeyResponse{}, fmt.Errorf("KMS unavailable")
+	}
+	provider := newAzureKeyVaultProviderWithClient(mock, "test-key", "")
+
+	_, err := provider.RotateKey(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRotationFailed))
+	assert.Contains(t, err.Error(), "Azure RotateKey failed")
+}
+
 // --- AWS KMS Provider Tests ---
 
 func TestAWSKMSProvider_EncryptDecryptRoundTrip(t *testing.T) {
@@ -507,6 +555,31 @@ func TestAWSKMSProvider_GetKeyMetadataError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrKeyNotFound))
 }
 
+func TestAWSKMSProvider_RotateKey(t *testing.T) {
+	mock := newMockKMSClient()
+	provider := newAWSKMSProviderWithClient(mock, "arn:aws:kms:us-east-1:123456789012:key/test-key")
+
+	result, err := provider.RotateKey(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.False(t, result.RotatedAt.IsZero())
+}
+
+func TestAWSKMSProvider_RotateKeyError(t *testing.T) {
+	mock := newMockKMSClient()
+	mock.RotateKeyOnDemandFn = func(
+		_ context.Context, _ *kms.RotateKeyOnDemandInput, _ ...func(*kms.Options),
+	) (*kms.RotateKeyOnDemandOutput, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+	provider := newAWSKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.RotateKey(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRotationFailed))
+	assert.Contains(t, err.Error(), "AWS RotateKeyOnDemand failed")
+}
+
 // --- GCP KMS Provider Tests ---
 
 func TestGCPKMSProvider_EncryptDecryptRoundTrip(t *testing.T) {
@@ -671,6 +744,48 @@ func TestGCPKMSProvider_Close(t *testing.T) {
 
 	err := provider.Close()
 	require.NoError(t, err)
+}
+
+func TestGCPKMSProvider_RotateKey(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	keyID := "projects/test/locations/global/keyRings/test/cryptoKeys/test"
+	provider := newGCPKMSProviderWithClient(mock, keyID)
+
+	result, err := provider.RotateKey(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Contains(t, result.NewKeyVersion, "cryptoKeyVersions/2")
+	assert.False(t, result.RotatedAt.IsZero())
+}
+
+func TestGCPKMSProvider_RotateKeyCreateError(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	mock.CreateCryptoKeyVersionFn = func(
+		_ context.Context, _ *kmspb.CreateCryptoKeyVersionRequest,
+	) (*kmspb.CryptoKeyVersion, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.RotateKey(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRotationFailed))
+	assert.Contains(t, err.Error(), "GCP CreateCryptoKeyVersion failed")
+}
+
+func TestGCPKMSProvider_RotateKeyPromoteError(t *testing.T) {
+	mock := newMockGCPKMSClient()
+	mock.UpdateCryptoKeyPrimaryVersionFn = func(
+		_ context.Context, _ *kmspb.UpdateCryptoKeyPrimaryVersionRequest,
+	) (*kmspb.CryptoKey, error) {
+		return nil, fmt.Errorf("KMS unavailable")
+	}
+	provider := newGCPKMSProviderWithClient(mock, "test-key")
+
+	_, err := provider.RotateKey(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRotationFailed))
+	assert.Contains(t, err.Error(), "GCP UpdateCryptoKeyPrimaryVersion failed")
 }
 
 // --- Vault Transit Provider Tests ---
@@ -841,6 +956,30 @@ func TestVaultProvider_Close(t *testing.T) {
 
 	err := provider.Close()
 	require.NoError(t, err)
+}
+
+func TestVaultProvider_RotateKey(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	provider := newVaultProviderWithClient(mock, "my-transit-key")
+
+	result, err := provider.RotateKey(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "1", result.PreviousKeyVersion)
+	assert.Equal(t, "2", result.NewKeyVersion)
+	assert.False(t, result.RotatedAt.IsZero())
+}
+
+func TestVaultProvider_RotateKeyError(t *testing.T) {
+	mock := newMockVaultTransitClient()
+	mock.RotateKeyFn = func(_ context.Context, _ string) (*vaultKeyInfo, error) {
+		return nil, fmt.Errorf("Vault unavailable")
+	}
+	provider := newVaultProviderWithClient(mock, "test-key")
+
+	_, err := provider.RotateKey(context.Background())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRotationFailed))
+	assert.Contains(t, err.Error(), "Vault RotateKey failed")
 }
 
 // --- Encryptor Tests ---

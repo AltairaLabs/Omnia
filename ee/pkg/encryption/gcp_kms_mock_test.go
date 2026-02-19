@@ -19,21 +19,51 @@ import (
 
 // mockGCPKMSClient is a test double for the gcpKMSClient interface.
 type mockGCPKMSClient struct {
-	EncryptFn      func(ctx context.Context, req *kmspb.EncryptRequest) (*kmspb.EncryptResponse, error)
-	DecryptFn      func(ctx context.Context, req *kmspb.DecryptRequest) (*kmspb.DecryptResponse, error)
-	GetCryptoKeyFn func(ctx context.Context, req *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error)
+	EncryptFn func(
+		ctx context.Context, req *kmspb.EncryptRequest,
+	) (*kmspb.EncryptResponse, error)
+	DecryptFn func(
+		ctx context.Context, req *kmspb.DecryptRequest,
+	) (*kmspb.DecryptResponse, error)
+	GetCryptoKeyFn func(
+		ctx context.Context, req *kmspb.GetCryptoKeyRequest,
+	) (*kmspb.CryptoKey, error)
+	CreateCryptoKeyVersionFn func(
+		ctx context.Context, req *kmspb.CreateCryptoKeyVersionRequest,
+	) (*kmspb.CryptoKeyVersion, error)
+	UpdateCryptoKeyPrimaryVersionFn func(
+		ctx context.Context, req *kmspb.UpdateCryptoKeyPrimaryVersionRequest,
+	) (*kmspb.CryptoKey, error)
 }
 
-func (m *mockGCPKMSClient) Encrypt(ctx context.Context, req *kmspb.EncryptRequest) (*kmspb.EncryptResponse, error) {
+func (m *mockGCPKMSClient) Encrypt(
+	ctx context.Context, req *kmspb.EncryptRequest,
+) (*kmspb.EncryptResponse, error) {
 	return m.EncryptFn(ctx, req)
 }
 
-func (m *mockGCPKMSClient) Decrypt(ctx context.Context, req *kmspb.DecryptRequest) (*kmspb.DecryptResponse, error) {
+func (m *mockGCPKMSClient) Decrypt(
+	ctx context.Context, req *kmspb.DecryptRequest,
+) (*kmspb.DecryptResponse, error) {
 	return m.DecryptFn(ctx, req)
 }
 
-func (m *mockGCPKMSClient) GetCryptoKey(ctx context.Context, req *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+func (m *mockGCPKMSClient) GetCryptoKey(
+	ctx context.Context, req *kmspb.GetCryptoKeyRequest,
+) (*kmspb.CryptoKey, error) {
 	return m.GetCryptoKeyFn(ctx, req)
+}
+
+func (m *mockGCPKMSClient) CreateCryptoKeyVersion(
+	ctx context.Context, req *kmspb.CreateCryptoKeyVersionRequest,
+) (*kmspb.CryptoKeyVersion, error) {
+	return m.CreateCryptoKeyVersionFn(ctx, req)
+}
+
+func (m *mockGCPKMSClient) UpdateCryptoKeyPrimaryVersion(
+	ctx context.Context, req *kmspb.UpdateCryptoKeyPrimaryVersionRequest,
+) (*kmspb.CryptoKey, error) {
+	return m.UpdateCryptoKeyPrimaryVersionFn(ctx, req)
 }
 
 func (m *mockGCPKMSClient) Close() error {
@@ -76,6 +106,29 @@ func newMockGCPKMSClient() *mockGCPKMSClient {
 					CreateTime: timestamppb.New(created),
 				},
 				DestroyScheduledDuration: durationpb.New(24 * time.Hour),
+			}, nil
+		},
+		CreateCryptoKeyVersionFn: func(
+			_ context.Context, req *kmspb.CreateCryptoKeyVersionRequest,
+		) (*kmspb.CryptoKeyVersion, error) {
+			return &kmspb.CryptoKeyVersion{
+				Name:      req.Parent + "/cryptoKeyVersions/2",
+				Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
+				State:     kmspb.CryptoKeyVersion_ENABLED,
+			}, nil
+		},
+		UpdateCryptoKeyPrimaryVersionFn: func(
+			_ context.Context, req *kmspb.UpdateCryptoKeyPrimaryVersionRequest,
+		) (*kmspb.CryptoKey, error) {
+			created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			return &kmspb.CryptoKey{
+				Name:       req.Name,
+				CreateTime: timestamppb.New(created),
+				Primary: &kmspb.CryptoKeyVersion{
+					Name:      req.CryptoKeyVersionId,
+					Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
+					State:     kmspb.CryptoKeyVersion_ENABLED,
+				},
 			}, nil
 		},
 	}
