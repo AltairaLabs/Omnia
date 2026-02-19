@@ -5,10 +5,10 @@ go 1.25.1
 require (
 	cloud.google.com/go/kms v1.25.0
 	cloud.google.com/go/storage v1.59.2
-	github.com/AltairaLabs/PromptKit/pkg v1.1.10
-	github.com/AltairaLabs/PromptKit/runtime v1.1.10
+	github.com/AltairaLabs/PromptKit/pkg v1.2.0
+	github.com/AltairaLabs/PromptKit/runtime v1.2.0
 	github.com/AltairaLabs/PromptKit/sdk v1.1.9
-	github.com/AltairaLabs/PromptKit/tools/arena v1.1.10
+	github.com/AltairaLabs/PromptKit/tools/arena v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
@@ -254,7 +254,7 @@ require (
 	golang.org/x/image v0.35.0 // indirect
 	golang.org/x/mod v0.32.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
+	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260109210033-bd525da824e2 // indirect

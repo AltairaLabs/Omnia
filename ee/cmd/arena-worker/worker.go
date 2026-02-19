@@ -343,10 +343,13 @@ func executeWorkItem(
 	}
 
 	// Build registries and executors from the config
-	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, err :=
+	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, a2aCleanup, err :=
 		engine.BuildEngineComponents(arenaCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine components: %w", err)
+	}
+	if a2aCleanup != nil {
+		defer a2aCleanup()
 	}
 
 	// Create engine with all components

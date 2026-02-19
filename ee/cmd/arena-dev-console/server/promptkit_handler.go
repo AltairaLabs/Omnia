@@ -509,12 +509,15 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 		"outputDir", cfg.Defaults.Output.Dir,
 		"outDir", cfg.Defaults.OutDir,
 		"configDir", cfg.Defaults.ConfigDir)
-	registry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, a2aCleanup, err := engine.BuildEngineComponents(cfg)
 	if err != nil {
 		h.log.Error(err, "getOrLoadK8sRegistry: BuildEngineComponents failed",
 			"outputDir", cfg.Defaults.Output.Dir,
 			"outDir", cfg.Defaults.OutDir)
 		return nil, nil, fmt.Errorf("failed to build provider registry: %w", err)
+	}
+	if a2aCleanup != nil {
+		defer a2aCleanup()
 	}
 
 	// Cache the registry
@@ -589,12 +592,15 @@ func (h *PromptKitHandler) buildComponents() error {
 	h.log.Info("buildComponents: calling BuildEngineComponents",
 		"outputDir", cfg.Defaults.Output.Dir,
 		"outDir", cfg.Defaults.OutDir)
-	providerRegistry, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	providerRegistry, _, _, _, _, a2aCleanup, err := engine.BuildEngineComponents(cfg)
 	if err != nil {
 		h.log.Error(err, "buildComponents: BuildEngineComponents failed",
 			"outputDir", cfg.Defaults.Output.Dir,
 			"outDir", cfg.Defaults.OutDir)
 		return fmt.Errorf("failed to build engine components: %w", err)
+	}
+	if a2aCleanup != nil {
+		defer a2aCleanup()
 	}
 
 	h.providerRegistry = providerRegistry
