@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"time"
 
@@ -54,28 +55,37 @@ func NewHTTPSessionAPIClient(baseURL string) *HTTPSessionAPIClient {
 	}
 }
 
-// GetSession retrieves session metadata by ID from the session-api.
-func (c *HTTPSessionAPIClient) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
-	url := fmt.Sprintf("%s/api/v1/sessions/%s", c.baseURL, sessionID)
-
+// doGet performs a GET request to the given URL and decodes the JSON response into dest.
+func (c *HTTPSessionAPIClient) doGet(ctx context.Context, url string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
+		return fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
+		return fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
 	}
 
+	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+		return fmt.Errorf("decode response from %s: %w", url, err)
+	}
+
+	return nil
+}
+
+// GetSession retrieves session metadata by ID from the session-api.
+func (c *HTTPSessionAPIClient) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
+	url := fmt.Sprintf("%s/api/v1/sessions/%s", c.baseURL, sessionID)
+
 	var result sessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode session response: %w", err)
+	if err := c.doGet(ctx, url, &result); err != nil {
+		return nil, err
 	}
 
 	return result.Session, nil
@@ -85,24 +95,9 @@ func (c *HTTPSessionAPIClient) GetSession(ctx context.Context, sessionID string)
 func (c *HTTPSessionAPIClient) GetSessionMessages(ctx context.Context, sessionID string) ([]session.Message, error) {
 	url := fmt.Sprintf("%s/api/v1/sessions/%s/messages", c.baseURL, sessionID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
-	}
-
 	var result messagesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode messages response: %w", err)
+	if err := c.doGet(ctx, url, &result); err != nil {
+		return nil, err
 	}
 
 	// Convert pointer slice to value slice.
@@ -146,14 +141,31 @@ func (c *HTTPSessionAPIClient) WriteEvalResults(ctx context.Context, results []*
 
 // ListEvalResults retrieves eval results matching the given filters from the session-api.
 func (c *HTTPSessionAPIClient) ListEvalResults(ctx context.Context, opts api.EvalResultListOpts) ([]*api.EvalResult, error) {
-	url := fmt.Sprintf("%s/api/v1/eval-results", c.baseURL)
+	url := fmt.Sprintf("%s/api/v1/eval-results?%s", c.baseURL, encodeEvalListQuery(opts))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+	var result api.EvalResultListResponse
+	if err := c.doGet(ctx, url, &result); err != nil {
+		return nil, err
 	}
 
-	q := req.URL.Query()
+	return result.Results, nil
+}
+
+// GetSessionEvalResults retrieves eval results for a specific session from the session-api.
+func (c *HTTPSessionAPIClient) GetSessionEvalResults(ctx context.Context, sessionID string) ([]*api.EvalResult, error) {
+	url := fmt.Sprintf("%s/api/v1/sessions/%s/eval-results", c.baseURL, sessionID)
+
+	var result api.EvalResultSessionResponse
+	if err := c.doGet(ctx, url, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Results, nil
+}
+
+// encodeEvalListQuery builds query parameters for the eval results list endpoint.
+func encodeEvalListQuery(opts api.EvalResultListOpts) string {
+	q := make(neturl.Values)
 	if opts.Passed != nil {
 		q.Set("passed", strconv.FormatBool(*opts.Passed))
 	}
@@ -172,51 +184,7 @@ func (c *HTTPSessionAPIClient) ListEvalResults(ctx context.Context, opts api.Eva
 	if opts.EvalID != "" {
 		q.Set("eval_id", opts.EvalID)
 	}
-	req.URL.RawQuery = q.Encode()
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", req.URL.String(), err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s returned status %d", req.URL.String(), resp.StatusCode)
-	}
-
-	var result api.EvalResultListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode eval results response: %w", err)
-	}
-
-	return result.Results, nil
-}
-
-// GetSessionEvalResults retrieves eval results for a specific session from the session-api.
-func (c *HTTPSessionAPIClient) GetSessionEvalResults(ctx context.Context, sessionID string) ([]*api.EvalResult, error) {
-	url := fmt.Sprintf("%s/api/v1/sessions/%s/eval-results", c.baseURL, sessionID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
-	}
-
-	var result api.EvalResultSessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode session eval results response: %w", err)
-	}
-
-	return result.Results, nil
+	return q.Encode()
 }
 
 // sessionResponse mirrors the session-api GET /sessions/{id} JSON response.
