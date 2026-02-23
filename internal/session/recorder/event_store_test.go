@@ -917,6 +917,163 @@ func TestOmniaEventStore_Append_MessageCreated_SystemRole(t *testing.T) {
 	}
 }
 
+func TestOmniaEventStore_WorkflowTransitioned(t *testing.T) {
+	warmStore := newMockWarmStoreForTest()
+	es := NewOmniaEventStore(warmStore, nil, logr.Discard())
+
+	err := es.Append(context.Background(), &events.Event{
+		Type:      events.EventWorkflowTransitioned,
+		Timestamp: time.Now(),
+		SessionID: "sess-1",
+		Data: &events.WorkflowTransitionedData{
+			FromState:  "greeting",
+			ToState:    "collecting_info",
+			Event:      "user_responded",
+			PromptTask: "collect_details",
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	msgs := warmStore.getMessages("sess-1")
+	require.Len(t, msgs, 1)
+	assert.Equal(t, session.RoleSystem, msgs[0].Role)
+	assert.Equal(t, "greeting", msgs[0].Metadata["from_state"])
+	assert.Equal(t, "collecting_info", msgs[0].Metadata["to_state"])
+	assert.Equal(t, "user_responded", msgs[0].Metadata["event"])
+	assert.Equal(t, "collect_details", msgs[0].Metadata["prompt_task"])
+}
+
+func TestOmniaEventStore_WorkflowTransitioned_ValueType(t *testing.T) {
+	warmStore := newMockWarmStoreForTest()
+	es := NewOmniaEventStore(warmStore, nil, logr.Discard())
+
+	err := es.Append(context.Background(), &events.Event{
+		Type:      events.EventWorkflowTransitioned,
+		Timestamp: time.Now(),
+		SessionID: "sess-1",
+		Data: events.WorkflowTransitionedData{
+			FromState:  "init",
+			ToState:    "ready",
+			Event:      "setup_complete",
+			PromptTask: "main_task",
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	msgs := warmStore.getMessages("sess-1")
+	require.Len(t, msgs, 1)
+	assert.Equal(t, session.RoleSystem, msgs[0].Role)
+	assert.Equal(t, "init", msgs[0].Metadata["from_state"])
+	assert.Equal(t, "ready", msgs[0].Metadata["to_state"])
+}
+
+func TestOmniaEventStore_WorkflowCompleted(t *testing.T) {
+	warmStore := newMockWarmStoreForTest()
+	es := NewOmniaEventStore(warmStore, nil, logr.Discard())
+
+	err := es.Append(context.Background(), &events.Event{
+		Type:      events.EventWorkflowCompleted,
+		Timestamp: time.Now(),
+		SessionID: "sess-1",
+		Data: &events.WorkflowCompletedData{
+			FinalState:      "completed",
+			TransitionCount: 5,
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	msgs := warmStore.getMessages("sess-1")
+	require.Len(t, msgs, 1)
+	assert.Equal(t, session.RoleSystem, msgs[0].Role)
+	assert.Equal(t, "completed", msgs[0].Metadata["final_state"])
+	assert.Equal(t, "5", msgs[0].Metadata["transition_count"])
+}
+
+func TestOmniaEventStore_WorkflowCompleted_ValueType(t *testing.T) {
+	warmStore := newMockWarmStoreForTest()
+	es := NewOmniaEventStore(warmStore, nil, logr.Discard())
+
+	err := es.Append(context.Background(), &events.Event{
+		Type:      events.EventWorkflowCompleted,
+		Timestamp: time.Now(),
+		SessionID: "sess-1",
+		Data: events.WorkflowCompletedData{
+			FinalState:      "done",
+			TransitionCount: 3,
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	msgs := warmStore.getMessages("sess-1")
+	require.Len(t, msgs, 1)
+	assert.Equal(t, session.RoleSystem, msgs[0].Role)
+	assert.Equal(t, "done", msgs[0].Metadata["final_state"])
+	assert.Equal(t, "3", msgs[0].Metadata["transition_count"])
+}
+
+func TestOmniaEventStore_WorkflowReconstruction(t *testing.T) {
+	warmStore := newMockWarmStoreForTest()
+	es := NewOmniaEventStore(warmStore, nil, logr.Discard())
+
+	now := time.Now()
+
+	// Append workflow transitioned event
+	err := es.Append(context.Background(), &events.Event{
+		Type:      events.EventWorkflowTransitioned,
+		Timestamp: now,
+		SessionID: "sess-1",
+		Data: &events.WorkflowTransitionedData{
+			FromState:  "idle",
+			ToState:    "active",
+			Event:      "start",
+			PromptTask: "do_work",
+		},
+	})
+	require.NoError(t, err)
+
+	// Append workflow completed event
+	err = es.Append(context.Background(), &events.Event{
+		Type:      events.EventWorkflowCompleted,
+		Timestamp: now.Add(time.Second),
+		SessionID: "sess-1",
+		Data: &events.WorkflowCompletedData{
+			FinalState:      "finished",
+			TransitionCount: 7,
+		},
+	})
+	require.NoError(t, err)
+	time.Sleep(200 * time.Millisecond)
+
+	// Query and verify reconstruction
+	result, err := es.Query(context.Background(), &events.EventFilter{SessionID: "sess-1"})
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	// Find each event type and verify data round-tripped
+	for _, evt := range result {
+		switch evt.Type {
+		case events.EventWorkflowTransitioned:
+			d, ok := evt.Data.(*events.WorkflowTransitionedData)
+			require.True(t, ok, "expected WorkflowTransitionedData")
+			assert.Equal(t, "idle", d.FromState)
+			assert.Equal(t, "active", d.ToState)
+			assert.Equal(t, "start", d.Event)
+			assert.Equal(t, "do_work", d.PromptTask)
+		case events.EventWorkflowCompleted:
+			d, ok := evt.Data.(*events.WorkflowCompletedData)
+			require.True(t, ok, "expected WorkflowCompletedData")
+			assert.Equal(t, "finished", d.FinalState)
+			assert.Equal(t, 7, d.TransitionCount)
+		default:
+			t.Errorf("unexpected event type: %s", evt.Type)
+		}
+	}
+}
+
 // failingWarmStore is a WarmStoreProvider that fails on all writes.
 type failingWarmStore struct{}
 

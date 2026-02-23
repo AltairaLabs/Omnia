@@ -32,8 +32,6 @@ github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8af
 github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
 github.com/AltairaLabs/PromptKit/pkg v1.2.0 h1:wncApX4+IIMU0HuOAzzg7csaa00epJuNQPyLWfaZfmo=
 github.com/AltairaLabs/PromptKit/pkg v1.2.0/go.mod h1:c6uXDz8fqsklCeF82nFk92POj7Bfirckm5nhQziIjxs=
-github.com/AltairaLabs/PromptKit/runtime v1.2.0 h1:aXDXkoEnI7fU35PnWWJp/TO/EsHUF207FyelKPj1naQ=
-github.com/AltairaLabs/PromptKit/runtime v1.2.0/go.mod h1:fty8hap3BZ2bKJnNR9A8NdjecXFrNJoLK9vcOwej7r8=
 github.com/AltairaLabs/PromptKit/sdk v1.1.9 h1:rb7imxePOeBbf6x55NmRE7ex6LcL0OENy/2IHeIlFTw=
 github.com/AltairaLabs/PromptKit/sdk v1.1.9/go.mod h1:nlM9KgmDSBi5Ecd9Wtw0yC1uJOWVyZS1crCszBmrgdQ=
 github.com/AltairaLabs/PromptKit/tools/arena v1.2.0 h1:eEOJAmEFObgbO0aJLnDfnAc2YXL6AXpfjJLpO/nppGc=

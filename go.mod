@@ -2,6 +2,10 @@ module github.com/altairalabs/omnia
 
 go 1.25.1
 
+// Temporary: use local PromptKit runtime for WorkflowTransitionedData/WorkflowCompletedData types
+// (not yet published). Remove when PromptKit publishes the new version.
+replace github.com/AltairaLabs/PromptKit/runtime => ./promptkit-local/runtime
+
 require (
 	cloud.google.com/go/kms v1.25.0
 	cloud.google.com/go/storage v1.59.2
@@ -37,6 +41,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.17.3
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/snowflakedb/gosnowflake v1.19.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
@@ -221,7 +226,6 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect

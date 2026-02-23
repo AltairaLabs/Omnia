@@ -142,6 +142,14 @@ func (s *OmniaEventStore) populateMessageFromEvent(ctx context.Context, msg *ses
 		s.handleProviderCallCompleted(msg, data)
 	case events.ProviderCallCompletedData:
 		s.handleProviderCallCompleted(msg, &data)
+	case *events.WorkflowTransitionedData:
+		s.handleWorkflowTransitioned(msg, data)
+	case events.WorkflowTransitionedData:
+		s.handleWorkflowTransitioned(msg, &data)
+	case *events.WorkflowCompletedData:
+		s.handleWorkflowCompleted(msg, data)
+	case events.WorkflowCompletedData:
+		s.handleWorkflowCompleted(msg, &data)
 	default:
 		msg.Role = session.RoleSystem
 		if event.Data != nil {
@@ -239,6 +247,22 @@ func (s *OmniaEventStore) handleProviderCallCompleted(msg *session.Message, data
 	msg.Metadata["finish_reason"] = data.FinishReason
 	msg.Metadata["input_tokens"] = strconv.Itoa(data.InputTokens)
 	msg.Metadata["output_tokens"] = strconv.Itoa(data.OutputTokens)
+}
+
+// handleWorkflowTransitioned converts a workflow transition event to a message.
+func (s *OmniaEventStore) handleWorkflowTransitioned(msg *session.Message, data *events.WorkflowTransitionedData) {
+	msg.Role = session.RoleSystem
+	msg.Metadata["from_state"] = data.FromState
+	msg.Metadata["to_state"] = data.ToState
+	msg.Metadata["event"] = data.Event
+	msg.Metadata["prompt_task"] = data.PromptTask
+}
+
+// handleWorkflowCompleted converts a workflow completion event to a message.
+func (s *OmniaEventStore) handleWorkflowCompleted(msg *session.Message, data *events.WorkflowCompletedData) {
+	msg.Role = session.RoleSystem
+	msg.Metadata["final_state"] = data.FinalState
+	msg.Metadata["transition_count"] = strconv.Itoa(data.TransitionCount)
 }
 
 // handleBinaryEvent stores binary payload via the blob store and records the
@@ -462,6 +486,21 @@ func (s *OmniaEventStore) messageToEvent(msg *session.Message, sessionID string)
 			OutputTokens: outputTokens,
 			Cost:         cost,
 			FinishReason: msg.Metadata["finish_reason"],
+		}
+
+	case events.EventWorkflowTransitioned:
+		event.Data = &events.WorkflowTransitionedData{
+			FromState:  msg.Metadata["from_state"],
+			ToState:    msg.Metadata["to_state"],
+			Event:      msg.Metadata["event"],
+			PromptTask: msg.Metadata["prompt_task"],
+		}
+
+	case events.EventWorkflowCompleted:
+		tc, _ := strconv.Atoi(msg.Metadata["transition_count"])
+		event.Data = &events.WorkflowCompletedData{
+			FinalState:      msg.Metadata["final_state"],
+			TransitionCount: tc,
 		}
 	}
 
