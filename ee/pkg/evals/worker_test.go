@@ -41,9 +41,14 @@ type mockSessionAPI struct {
 	// written collects results passed to WriteEvalResults.
 	written []*api.EvalResult
 
-	getSessionErr  error
-	getMessagesErr error
-	writeErr       error
+	evalResults        []*api.EvalResult
+	sessionEvalResults []*api.EvalResult
+
+	getSessionErr            error
+	getMessagesErr           error
+	writeErr                 error
+	listEvalResultsErr       error
+	getSessionEvalResultsErr error
 }
 
 func (m *mockSessionAPI) GetSession(_ context.Context, _ string) (*session.Session, error) {
@@ -66,6 +71,20 @@ func (m *mockSessionAPI) WriteEvalResults(_ context.Context, results []*api.Eval
 	}
 	m.written = append(m.written, results...)
 	return nil
+}
+
+func (m *mockSessionAPI) ListEvalResults(_ context.Context, _ api.EvalResultListOpts) ([]*api.EvalResult, error) {
+	if m.listEvalResultsErr != nil {
+		return nil, m.listEvalResultsErr
+	}
+	return m.evalResults, nil
+}
+
+func (m *mockSessionAPI) GetSessionEvalResults(_ context.Context, _ string) ([]*api.EvalResult, error) {
+	if m.getSessionEvalResultsErr != nil {
+		return nil, m.getSessionEvalResultsErr
+	}
+	return m.sessionEvalResults, nil
 }
 
 func TestProcessEvent_AssistantMessage_RunsEvals(t *testing.T) {

@@ -198,6 +198,134 @@ func TestHTTPSessionAPIClient_WriteEvalResults_BadRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "400")
 }
 
+func TestHTTPSessionAPIClient_ListEvalResults_Success(t *testing.T) {
+	results := []*api.EvalResult{
+		{ID: "er1", SessionID: "s1", EvalType: "contains", Passed: false},
+		{ID: "er2", SessionID: "s2", EvalType: "contains", Passed: false},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/eval-results", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "false", r.URL.Query().Get("passed"))
+		assert.Equal(t, "10", r.URL.Query().Get("limit"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.EvalResultListResponse{
+			Results: results,
+			Total:   2,
+			HasMore: false,
+		})
+	}))
+	defer server.Close()
+
+	client := NewHTTPSessionAPIClient(server.URL)
+	passed := false
+	got, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{
+		Passed: &passed,
+		Limit:  10,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "er1", got[0].ID)
+	assert.Equal(t, "er2", got[1].ID)
+}
+
+func TestHTTPSessionAPIClient_ListEvalResults_WithAllParams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		assert.Equal(t, "true", q.Get("passed"))
+		assert.Equal(t, "5", q.Get("limit"))
+		assert.Equal(t, "10", q.Get("offset"))
+		assert.Equal(t, "my-agent", q.Get("agent_name"))
+		assert.Equal(t, "default", q.Get("namespace"))
+		assert.Equal(t, "eval-1", q.Get("eval_id"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.EvalResultListResponse{Results: []*api.EvalResult{}})
+	}))
+	defer server.Close()
+
+	client := NewHTTPSessionAPIClient(server.URL)
+	passed := true
+	_, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{
+		Passed:    &passed,
+		Limit:     5,
+		Offset:    10,
+		AgentName: "my-agent",
+		Namespace: "default",
+		EvalID:    "eval-1",
+	})
+
+	require.NoError(t, err)
+}
+
+func TestHTTPSessionAPIClient_ListEvalResults_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewHTTPSessionAPIClient(server.URL)
+	_, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
+}
+
+func TestHTTPSessionAPIClient_ListEvalResults_ConnectionError(t *testing.T) {
+	client := NewHTTPSessionAPIClient("http://localhost:1")
+	_, err := client.ListEvalResults(context.Background(), api.EvalResultListOpts{})
+
+	require.Error(t, err)
+}
+
+func TestHTTPSessionAPIClient_GetSessionEvalResults_Success(t *testing.T) {
+	results := []*api.EvalResult{
+		{ID: "er1", SessionID: "s1", EvalType: "contains", Passed: true},
+		{ID: "er2", SessionID: "s1", EvalType: "tone", Passed: false, MessageID: "m2"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/sessions/s1/eval-results", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.EvalResultSessionResponse{Results: results})
+	}))
+	defer server.Close()
+
+	client := NewHTTPSessionAPIClient(server.URL)
+	got, err := client.GetSessionEvalResults(context.Background(), "s1")
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "er1", got[0].ID)
+	assert.True(t, got[0].Passed)
+	assert.Equal(t, "m2", got[1].MessageID)
+}
+
+func TestHTTPSessionAPIClient_GetSessionEvalResults_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewHTTPSessionAPIClient(server.URL)
+	_, err := client.GetSessionEvalResults(context.Background(), "s1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
+}
+
+func TestHTTPSessionAPIClient_GetSessionEvalResults_ConnectionError(t *testing.T) {
+	client := NewHTTPSessionAPIClient("http://localhost:1")
+	_, err := client.GetSessionEvalResults(context.Background(), "s1")
+
+	require.Error(t, err)
+}
+
 func TestNewHTTPSessionAPIClient(t *testing.T) {
 	client := NewHTTPSessionAPIClient("http://example.com")
 
