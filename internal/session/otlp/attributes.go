@@ -66,6 +66,25 @@ const (
 	AttrServiceNamespace = "service.namespace"
 )
 
+// PromptKit tool span attribute keys.
+const (
+	AttrToolName       = "tool.name"
+	AttrToolCallID     = "tool.call_id"
+	AttrToolArgs       = "tool.args"
+	AttrToolStatus     = "tool.status"
+	AttrToolDurationMs = "tool.duration_ms"
+)
+
+// PromptKit workflow span attribute keys.
+const (
+	AttrWorkflowFromState       = "workflow.from_state"
+	AttrWorkflowToState         = "workflow.to_state"
+	AttrWorkflowEvent           = "workflow.event"
+	AttrWorkflowPromptTask      = "workflow.prompt_task"
+	AttrWorkflowFinalState      = "workflow.final_state"
+	AttrWorkflowTransitionCount = "workflow.transition_count"
+)
+
 // getStringAttr retrieves a string attribute value from a KeyValue slice.
 func getStringAttr(attrs []*commonpb.KeyValue, key string) string {
 	for _, kv := range attrs {

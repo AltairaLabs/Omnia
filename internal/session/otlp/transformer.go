@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -131,6 +133,7 @@ func (t *Transformer) processScopeSpans(ctx context.Context, sc spanContext, ss 
 // appends output messages and token usage.
 func (t *Transformer) processSpan(ctx context.Context, sc spanContext, span *tracepb.Span) error {
 	attrs := span.GetAttributes()
+	spanName := span.GetName()
 
 	sessionID := extractSessionID(attrs, sc.resourceAttrs, span.GetTraceId())
 	if sessionID == "" {
@@ -142,6 +145,18 @@ func (t *Transformer) processSpan(ctx context.Context, sc spanContext, span *tra
 	}
 
 	timestamp := spanTimestamp(span)
+
+	// Route enriched spans by name prefix.
+	switch {
+	case strings.HasPrefix(spanName, "tool."):
+		return t.processToolSpan(ctx, sessionID, attrs, timestamp)
+	case spanName == "workflow.transition":
+		return t.processWorkflowTransition(ctx, sessionID, attrs, timestamp)
+	case spanName == "workflow.completed":
+		return t.processWorkflowCompleted(ctx, sessionID, attrs, timestamp)
+	}
+
+	// Default: GenAI conversation messages + token usage.
 	model := extractModel(attrs)
 	msgs := t.resolveMessages(attrs, span.GetEvents(), timestamp, model)
 
@@ -314,6 +329,59 @@ func (t *Transformer) updateTokenUsage(ctx context.Context, sessionID string, at
 	}
 
 	return t.writer.UpdateSessionStats(ctx, sessionID, update)
+}
+
+// processToolSpan converts a tool.* span into a session message matching
+// the metadata format used by event_store.go handleToolCallCompleted.
+func (t *Transformer) processToolSpan(ctx context.Context, sessionID string, attrs []*commonpb.KeyValue, ts time.Time) error {
+	msg := &session.Message{
+		ID:         uuid.New().String(),
+		Role:       session.RoleSystem,
+		Timestamp:  ts,
+		ToolCallID: getStringAttr(attrs, AttrToolCallID),
+		Metadata: map[string]string{
+			"type":        "tool.call.completed",
+			"tool_name":   getStringAttr(attrs, AttrToolName),
+			"tool_args":   getStringAttr(attrs, AttrToolArgs),
+			"status":      getStringAttr(attrs, AttrToolStatus),
+			"duration_ms": strconv.FormatInt(getIntAttr(attrs, AttrToolDurationMs), 10),
+		},
+	}
+	return t.writer.AppendMessage(ctx, sessionID, msg)
+}
+
+// processWorkflowTransition converts a workflow.transition span into a session
+// message matching the metadata format used by event_store.go handleWorkflowTransitioned.
+func (t *Transformer) processWorkflowTransition(ctx context.Context, sessionID string, attrs []*commonpb.KeyValue, ts time.Time) error {
+	msg := &session.Message{
+		ID:        uuid.New().String(),
+		Role:      session.RoleSystem,
+		Timestamp: ts,
+		Metadata: map[string]string{
+			"type":        "workflow.transitioned",
+			"from_state":  getStringAttr(attrs, AttrWorkflowFromState),
+			"to_state":    getStringAttr(attrs, AttrWorkflowToState),
+			"event":       getStringAttr(attrs, AttrWorkflowEvent),
+			"prompt_task": getStringAttr(attrs, AttrWorkflowPromptTask),
+		},
+	}
+	return t.writer.AppendMessage(ctx, sessionID, msg)
+}
+
+// processWorkflowCompleted converts a workflow.completed span into a session
+// message matching the metadata format used by event_store.go handleWorkflowCompleted.
+func (t *Transformer) processWorkflowCompleted(ctx context.Context, sessionID string, attrs []*commonpb.KeyValue, ts time.Time) error {
+	msg := &session.Message{
+		ID:        uuid.New().String(),
+		Role:      session.RoleSystem,
+		Timestamp: ts,
+		Metadata: map[string]string{
+			"type":             "workflow.completed",
+			"final_state":      getStringAttr(attrs, AttrWorkflowFinalState),
+			"transition_count": strconv.FormatInt(getIntAttr(attrs, AttrWorkflowTransitionCount), 10),
+		},
+	}
+	return t.writer.AppendMessage(ctx, sessionID, msg)
 }
 
 // parseMessageValue extracts role and content from a kvlist AnyValue.
