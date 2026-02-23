@@ -100,7 +100,7 @@ func TestProcessEvent_AssistantMessage_RunsEvals(t *testing.T) {
 	}
 
 	// Directly test processEvent with an assistant event — but the current
-	// implementation will call filterPerTurnRuleEvals(nil) which returns empty.
+	// implementation will call filterPerTurnDeterministicEvals(nil) which returns empty.
 	// So no evals run and no results are written. This tests the skip path.
 	event := api.SessionEvent{
 		EventType:   eventTypeMessage,
@@ -352,24 +352,30 @@ func TestIsAssistantMessageEvent(t *testing.T) {
 	}
 }
 
-func TestFilterPerTurnRuleEvals(t *testing.T) {
+func TestFilterPerTurnDeterministicEvals(t *testing.T) {
 	defs := []EvalDef{
 		{ID: "e1", Type: "rule", Trigger: "per_turn", Params: map[string]any{"value": "x"}},
 		{ID: "e2", Type: "llm_judge", Trigger: "per_turn"},
 		{ID: "e3", Type: "rule", Trigger: "on_session_complete"},
 		{ID: "e4", Type: "rule", Trigger: "per_turn", Params: map[string]any{"maxLength": 100}},
+		{
+			ID: "e5", Type: EvalTypeArenaAssertion, Trigger: "per_turn",
+			Params: map[string]any{"assertion_type": "tools_called"},
+		},
 	}
 
-	result := filterPerTurnRuleEvals(defs)
+	result := filterPerTurnDeterministicEvals(defs)
 
-	require.Len(t, result, 2)
+	require.Len(t, result, 3)
 	assert.Equal(t, "e1", result[0].ID)
 	assert.Equal(t, "e4", result[1].ID)
+	assert.Equal(t, "e5", result[2].ID)
+	assert.Equal(t, EvalTypeArenaAssertion, result[2].Type)
 	assert.Equal(t, map[string]any{"value": "x"}, result[0].Params)
 }
 
-func TestFilterPerTurnRuleEvals_Nil(t *testing.T) {
-	result := filterPerTurnRuleEvals(nil)
+func TestFilterPerTurnDeterministicEvals_Nil(t *testing.T) {
+	result := filterPerTurnDeterministicEvals(nil)
 	assert.Empty(t, result)
 }
 
@@ -726,7 +732,7 @@ func TestProcessEvent_WriteEvalResults(t *testing.T) {
 		}, nil
 	}
 
-	// Create a worker with a patched filterPerTurnRuleEvals that returns defs.
+	// Create a worker with a patched filterPerTurnDeterministicEvals that returns defs.
 	w := &EvalWorker{
 		sessionAPI: mock,
 		namespace:  "ns",
@@ -774,7 +780,7 @@ func TestProcessEvent_WriteError(t *testing.T) {
 		evalRunner: api.RunRuleEval,
 	}
 
-	// Since filterPerTurnRuleEvals(nil) returns empty, processEvent returns nil.
+	// Since filterPerTurnDeterministicEvals(nil) returns empty, processEvent returns nil.
 	// This tests the "no evals" path, which is still a valid test.
 	event := api.SessionEvent{
 		EventType:   eventTypeMessage,
@@ -883,24 +889,30 @@ func TestIsSessionCompletedEvent(t *testing.T) {
 	}
 }
 
-func TestFilterOnCompleteRuleEvals(t *testing.T) {
+func TestFilterOnCompleteDeterministicEvals(t *testing.T) {
 	defs := []EvalDef{
 		{ID: "e1", Type: "rule", Trigger: "per_turn"},
 		{ID: "e2", Type: "rule", Trigger: "on_session_complete", Params: map[string]any{"value": "x"}},
 		{ID: "e3", Type: "llm_judge", Trigger: "on_session_complete"},
 		{ID: "e4", Type: "rule", Trigger: "on_session_complete", Params: map[string]any{"maxLength": 100}},
+		{
+			ID: "e5", Type: EvalTypeArenaAssertion, Trigger: "on_session_complete",
+			Params: map[string]any{"assertion_type": "tools_called"},
+		},
 	}
 
-	result := filterOnCompleteRuleEvals(defs)
+	result := filterOnCompleteDeterministicEvals(defs)
 
-	require.Len(t, result, 2)
+	require.Len(t, result, 3)
 	assert.Equal(t, "e2", result[0].ID)
 	assert.Equal(t, "e4", result[1].ID)
+	assert.Equal(t, "e5", result[2].ID)
+	assert.Equal(t, EvalTypeArenaAssertion, result[2].Type)
 	assert.Equal(t, map[string]any{"value": "x"}, result[0].Params)
 }
 
-func TestFilterOnCompleteRuleEvals_Nil(t *testing.T) {
-	result := filterOnCompleteRuleEvals(nil)
+func TestFilterOnCompleteDeterministicEvals_Nil(t *testing.T) {
+	result := filterOnCompleteDeterministicEvals(nil)
 	assert.Empty(t, result)
 }
 
@@ -954,7 +966,7 @@ func TestOnSessionComplete_NoEvals(t *testing.T) {
 		Logger:      testLogger(),
 	})
 
-	// filterOnCompleteRuleEvals(nil) returns empty, so no evals run.
+	// filterOnCompleteDeterministicEvals(nil) returns empty, so no evals run.
 	err := w.onSessionComplete(context.Background(), "s1")
 	require.NoError(t, err)
 	assert.Empty(t, mock.written)

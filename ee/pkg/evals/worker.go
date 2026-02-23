@@ -79,7 +79,7 @@ type EvalWorker struct {
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
 	runner := config.EvalRunner
 	if runner == nil {
-		runner = api.RunRuleEval
+		runner = NewEvalDispatcher()
 	}
 
 	timeout := config.InactivityTimeout
@@ -250,9 +250,9 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 
 	turnIndex := countAssistantMessages(messages)
 
-	evalDefs := filterPerTurnRuleEvals(nil)
+	evalDefs := filterPerTurnDeterministicEvals(nil)
 	if len(evalDefs) == 0 {
-		w.logger.Debug("no per_turn rule evals to run", "sessionID", event.SessionID)
+		w.logger.Debug("no per_turn deterministic evals to run", "sessionID", event.SessionID)
 		return nil
 	}
 
@@ -276,9 +276,9 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 
 	turnIndex := countAssistantMessages(messages)
 
-	evalDefs := filterOnCompleteRuleEvals(nil)
+	evalDefs := filterOnCompleteDeterministicEvals(nil)
 	if len(evalDefs) == 0 {
-		w.logger.Debug("no on_session_complete rule evals to run", "sessionID", sessionID)
+		w.logger.Debug("no on_session_complete deterministic evals to run", "sessionID", sessionID)
 		return nil
 	}
 
@@ -458,11 +458,12 @@ func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName
 	return result
 }
 
-// filterPerTurnRuleEvals filters eval definitions to only per_turn rule evals.
-func filterPerTurnRuleEvals(defs []EvalDef) []api.EvalDefinition {
+// filterPerTurnDeterministicEvals filters eval definitions to per_turn deterministic evals.
+// This includes rule-based evals and arena assertions, but excludes LLM judge evals.
+func filterPerTurnDeterministicEvals(defs []EvalDef) []api.EvalDefinition {
 	var result []api.EvalDefinition
 	for _, d := range defs {
-		if d.Trigger == triggerPerTurn && d.Type == "rule" {
+		if d.Trigger == triggerPerTurn && isDeterministicEval(d.Type) {
 			result = append(result, api.EvalDefinition{
 				ID:      d.ID,
 				Type:    d.Type,
@@ -484,11 +485,12 @@ func isSessionCompletedEvent(event api.SessionEvent) bool {
 	return event.EventType == eventTypeSessionDone
 }
 
-// filterOnCompleteRuleEvals filters eval definitions to only on_session_complete rule evals.
-func filterOnCompleteRuleEvals(defs []EvalDef) []api.EvalDefinition {
+// filterOnCompleteDeterministicEvals filters eval definitions to on_session_complete deterministic evals.
+// This includes rule-based evals and arena assertions, but excludes LLM judge evals.
+func filterOnCompleteDeterministicEvals(defs []EvalDef) []api.EvalDefinition {
 	var result []api.EvalDefinition
 	for _, d := range defs {
-		if d.Trigger == triggerOnComplete && d.Type == "rule" {
+		if d.Trigger == triggerOnComplete && isDeterministicEval(d.Type) {
 			result = append(result, api.EvalDefinition{
 				ID:      d.ID,
 				Type:    d.Type,

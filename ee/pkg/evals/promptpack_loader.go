@@ -46,11 +46,22 @@ type PromptPackEvals struct {
 	Evals       []EvalDef `json:"evals"`
 }
 
+// PackAssertion represents a PromptKit arena assertion in a PromptPack.
+type PackAssertion struct {
+	// Type is the arena assertion type (e.g. "tools_called", "content_includes_any").
+	Type string `json:"type" yaml:"type"`
+	// Params holds assertion-specific configuration.
+	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	// Message is an optional human-readable description of the assertion.
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
 // packJSON is the subset of pack.json we parse for eval definitions.
 type packJSON struct {
-	ID      string    `json:"id"`
-	Version string    `json:"version"`
-	Evals   []EvalDef `json:"evals"`
+	ID             string          `json:"id"`
+	Version        string          `json:"version"`
+	Evals          []EvalDef       `json:"evals"`
+	PackAssertions []PackAssertion `json:"pack_assertions"`
 }
 
 // PromptPackLoader loads and caches eval definitions from PromptPack ConfigMaps.
@@ -132,11 +143,42 @@ func parsePackEvals(cm *corev1.ConfigMap, packName, packVersion string) (*Prompt
 		version = packVersion
 	}
 
+	allEvals := pack.Evals
+	allEvals = append(allEvals, convertPackAssertions(pack.PackAssertions)...)
+
 	return &PromptPackEvals{
 		PackName:    name,
 		PackVersion: version,
-		Evals:       pack.Evals,
+		Evals:       allEvals,
 	}, nil
+}
+
+// convertPackAssertions converts PackAssertions into EvalDef entries with
+// type "arena_assertion" and trigger "on_session_complete".
+func convertPackAssertions(assertions []PackAssertion) []EvalDef {
+	defs := make([]EvalDef, 0, len(assertions))
+	for i, a := range assertions {
+		params := map[string]any{
+			"assertion_type": a.Type,
+		}
+		if len(a.Params) > 0 {
+			params["assertion_params"] = a.Params
+		}
+
+		description := a.Message
+		if description == "" {
+			description = fmt.Sprintf("arena assertion: %s", a.Type)
+		}
+
+		defs = append(defs, EvalDef{
+			ID:          fmt.Sprintf("pack-assertion-%d", i),
+			Type:        EvalTypeArenaAssertion,
+			Trigger:     "on_session_complete",
+			Description: description,
+			Params:      params,
+		})
+	}
+	return defs
 }
 
 // ResolveEvals returns the evals applicable for the given trigger type.
