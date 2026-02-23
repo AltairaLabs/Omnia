@@ -53,7 +53,7 @@ func TestBuildEngineComponentsOutputDirectory(t *testing.T) {
 	}
 
 	// Build engine components
-	registry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	require.NoError(t, err, "BuildEngineComponents should succeed with valid output directory")
 	require.NotNil(t, registry, "Registry should not be nil")
 
@@ -100,7 +100,7 @@ func TestBuildEngineComponentsWithWorkdirChange(t *testing.T) {
 	}
 
 	// Build engine components - should create "out" in tmpDir
-	registry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	require.NoError(t, err, "BuildEngineComponents should succeed when working directory is writable")
 	require.NotNil(t, registry, "Registry should not be nil")
 
@@ -159,7 +159,7 @@ func TestBuildEngineComponentsFailsWithReadOnlyDir(t *testing.T) {
 	}
 
 	// Build engine components - should fail
-	registry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	assert.Error(t, err, "BuildEngineComponents should fail when working directory is read-only")
 	assert.Contains(t, err.Error(), "permission denied", "Error should mention permission denied")
 
@@ -1161,7 +1161,7 @@ func TestCloseWithNsRegistries(t *testing.T) {
 	}
 
 	// Build a registry to add to nsRegistries
-	registry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	require.NoError(t, err)
 
 	handler := &PromptKitHandler{
@@ -1416,7 +1416,7 @@ func TestInvalidateProviderCacheWithK8sLoader(t *testing.T) {
 	}
 
 	// Build a registry to put in nsRegistries
-	registry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	require.NoError(t, err)
 
 	// Create a mock k8sLoader (minimal struct that just returns a namespace)
@@ -1465,7 +1465,7 @@ func TestGetRegistryAndConfigWithK8sLoader(t *testing.T) {
 	}
 
 	// Build a registry to put in nsRegistries
-	registry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	require.NoError(t, err)
 
 	// Create a mock k8sLoader
@@ -1698,7 +1698,7 @@ func TestPromptKitHandlerCloseWithNamespaceRegistries(t *testing.T) {
 	}
 
 	// Build the second registry separately
-	nsRegistry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg2)
+	nsRegistry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg2)
 	require.NoError(t, err)
 	require.NotNil(t, nsRegistry)
 
@@ -2056,7 +2056,7 @@ func TestGetOrLoadK8sRegistryCached(t *testing.T) {
 	}
 
 	// Pre-build a registry
-	cachedRegistry, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+	cachedRegistry, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
 	require.NoError(t, err)
 	defer func() {
 		_ = cachedRegistry.Close()

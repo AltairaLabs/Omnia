@@ -509,7 +509,7 @@ func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers
 		"outputDir", cfg.Defaults.Output.Dir,
 		"outDir", cfg.Defaults.OutDir,
 		"configDir", cfg.Defaults.ConfigDir)
-	registry, _, _, _, _, a2aCleanup, err := engine.BuildEngineComponents(cfg)
+	registry, _, _, _, _, a2aCleanup, _, err := engine.BuildEngineComponents(cfg)
 	if err != nil {
 		h.log.Error(err, "getOrLoadK8sRegistry: BuildEngineComponents failed",
 			"outputDir", cfg.Defaults.Output.Dir,
@@ -592,7 +592,7 @@ func (h *PromptKitHandler) buildComponents() error {
 	h.log.Info("buildComponents: calling BuildEngineComponents",
 		"outputDir", cfg.Defaults.Output.Dir,
 		"outDir", cfg.Defaults.OutDir)
-	providerRegistry, _, _, _, _, a2aCleanup, err := engine.BuildEngineComponents(cfg)
+	providerRegistry, _, _, _, _, a2aCleanup, _, err := engine.BuildEngineComponents(cfg)
 	if err != nil {
 		h.log.Error(err, "buildComponents: BuildEngineComponents failed",
 			"outputDir", cfg.Defaults.Output.Dir,
