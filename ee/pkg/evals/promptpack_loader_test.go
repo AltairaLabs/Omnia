@@ -432,3 +432,109 @@ func TestEvalDefFields(t *testing.T) {
 		t.Errorf("got Params[rubric] %v, want %q", e.Params["rubric"], "professional tone")
 	}
 }
+
+// packJSONWithAssertions is a pack.json with pack_assertions for testing.
+const packJSONWithAssertions = `{
+  "id": "assertion-pack",
+  "version": "1.0.0",
+  "evals": [
+    {
+      "id": "rule-eval",
+      "type": "rule",
+      "trigger": "per_turn",
+      "description": "A rule eval"
+    }
+  ],
+  "pack_assertions": [
+    {
+      "type": "tools_called",
+      "params": {"tool_names": ["get_weather"]},
+      "message": "Must call get_weather"
+    },
+    {
+      "type": "content_includes_any",
+      "params": {"patterns": ["hello", "hi"]}
+    }
+  ]
+}`
+
+func TestLoadEvals_WithPackAssertions(t *testing.T) {
+	cm := newConfigMap("default", "assertion-pack", packJSONWithAssertions)
+	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(cm).Build()
+	loader := NewPromptPackLoader(c)
+
+	result, err := loader.LoadEvals(context.Background(), "default", "assertion-pack", "1.0.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 1 explicit eval + 2 converted pack_assertions = 3 total
+	if len(result.Evals) != 3 {
+		t.Fatalf("got %d evals, want 3", len(result.Evals))
+	}
+
+	// First eval is the explicit one.
+	if result.Evals[0].ID != "rule-eval" {
+		t.Errorf("first eval ID = %q, want %q", result.Evals[0].ID, "rule-eval")
+	}
+
+	// Second eval is converted from first pack_assertion.
+	a1 := result.Evals[1]
+	if a1.ID != "pack-assertion-0" {
+		t.Errorf("assertion 0 ID = %q, want %q", a1.ID, "pack-assertion-0")
+	}
+	if a1.Type != EvalTypeArenaAssertion {
+		t.Errorf("assertion 0 Type = %q, want %q", a1.Type, EvalTypeArenaAssertion)
+	}
+	if a1.Trigger != "on_session_complete" {
+		t.Errorf("assertion 0 Trigger = %q, want %q", a1.Trigger, "on_session_complete")
+	}
+	if a1.Description != "Must call get_weather" {
+		t.Errorf("assertion 0 Description = %q, want %q", a1.Description, "Must call get_weather")
+	}
+	if a1.Params["assertion_type"] != "tools_called" {
+		t.Errorf("assertion 0 assertion_type = %v, want %q", a1.Params["assertion_type"], "tools_called")
+	}
+	if _, ok := a1.Params["assertion_params"]; !ok {
+		t.Error("assertion 0 should have assertion_params")
+	}
+
+	// Third eval is converted from second pack_assertion (no message).
+	a2 := result.Evals[2]
+	if a2.ID != "pack-assertion-1" {
+		t.Errorf("assertion 1 ID = %q, want %q", a2.ID, "pack-assertion-1")
+	}
+	if a2.Description != "arena assertion: content_includes_any" {
+		t.Errorf("assertion 1 Description = %q, want %q", a2.Description, "arena assertion: content_includes_any")
+	}
+}
+
+func TestConvertPackAssertions_Empty(t *testing.T) {
+	result := convertPackAssertions(nil)
+	if len(result) != 0 {
+		t.Errorf("expected 0 results for nil input, got %d", len(result))
+	}
+
+	result = convertPackAssertions([]PackAssertion{})
+	if len(result) != 0 {
+		t.Errorf("expected 0 results for empty input, got %d", len(result))
+	}
+}
+
+func TestConvertPackAssertions_NoParams(t *testing.T) {
+	assertions := []PackAssertion{
+		{Type: "tools_called"},
+	}
+
+	result := convertPackAssertions(assertions)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+
+	if _, ok := result[0].Params["assertion_params"]; ok {
+		t.Error("assertion_params should not be set when params are empty")
+	}
+	if result[0].Params["assertion_type"] != "tools_called" {
+		t.Errorf("assertion_type = %v, want %q", result[0].Params["assertion_type"], "tools_called")
+	}
+}

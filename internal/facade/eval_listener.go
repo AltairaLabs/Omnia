@@ -96,6 +96,7 @@ type EvalListener struct {
 	config            EvalListenerConfig
 	logger            *slog.Logger
 	completionTracker *evals.CompletionTracker
+	runEval           evals.EvalRunner
 }
 
 // recordingMessageData is the subset of recording.message event data we parse.
@@ -118,6 +119,7 @@ func NewEvalListener(
 		resultWriter:   resultWriter,
 		config:         config,
 		logger:         logger.With("component", "eval-listener"),
+		runEval:        evals.NewEvalDispatcher(),
 	}
 
 	l.completionTracker = evals.NewCompletionTracker(
@@ -303,7 +305,8 @@ func (l *EvalListener) executeRuleEvals(
 	return results
 }
 
-// runSingleEval executes a single rule-based eval and returns the result.
+// runSingleEval executes a single eval and returns the result.
+// It delegates to the pluggable runEval runner which dispatches based on eval type.
 func (l *EvalListener) runSingleEval(
 	def evals.EvalDef,
 	messages []session.Message,
@@ -312,7 +315,7 @@ func (l *EvalListener) runSingleEval(
 	apiDef := toAPIEvalDefinition(def)
 
 	start := time.Now()
-	item, err := sessionapi.RunRuleEval(apiDef, messages)
+	item, err := l.runEval(apiDef, messages)
 	if err != nil {
 		return EvalResultInput{}, err
 	}

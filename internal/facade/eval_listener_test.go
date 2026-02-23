@@ -862,3 +862,125 @@ func TestEventBridge_HandleEvent_EvalListenerErrorDoesNotFailPipeline(t *testing
 		t.Errorf("expected 1 session message even when eval fails, got %d", len(msgs))
 	}
 }
+
+func TestEvalListener_OnEvent_ArenaAssertionFlowsThrough(t *testing.T) {
+	packEvals := &evals.PromptPackEvals{
+		PackName:    "test-pack",
+		PackVersion: "v1.0.0",
+		Evals: []evals.EvalDef{
+			{
+				ID:      "eval-arena",
+				Type:    evals.EvalTypeArenaAssertion,
+				Trigger: "per_turn",
+				Params: map[string]any{
+					"assertion_type": "content_includes_any",
+					"assertion_params": map[string]any{
+						"patterns": []any{"hello"},
+					},
+				},
+			},
+			{
+				ID:      "eval-rule",
+				Type:    "max_length",
+				Trigger: "per_turn",
+				Params:  map[string]any{"maxLength": float64(5000)},
+			},
+		},
+	}
+	loader := &mockEvalLoader{evals: packEvals}
+	fetcher := &mockMessageFetcher{messages: sampleMessages()}
+	writer := &mockResultWriter{}
+	config := defaultConfig()
+
+	listener := NewEvalListener(config, loader, fetcher, writer, newTestLogger())
+
+	err := listener.OnEvent(context.Background(), assistantEvent())
+	if err != nil {
+		t.Fatalf("OnEvent returned error: %v", err)
+	}
+
+	results := writer.getResults()
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (arena + rule), got %d", len(results))
+	}
+
+	// Verify arena assertion result
+	arenaResult := results[0]
+	if arenaResult.EvalID != "eval-arena" {
+		t.Errorf("evalID = %q, want %q", arenaResult.EvalID, "eval-arena")
+	}
+	if arenaResult.EvalType != evals.EvalTypeArenaAssertion {
+		t.Errorf("evalType = %q, want %q", arenaResult.EvalType, evals.EvalTypeArenaAssertion)
+	}
+	if !arenaResult.Passed {
+		t.Error("expected arena assertion to pass (content contains 'hello')")
+	}
+
+	// Verify rule result
+	ruleResult := results[1]
+	if ruleResult.EvalID != "eval-rule" {
+		t.Errorf("evalID = %q, want %q", ruleResult.EvalID, "eval-rule")
+	}
+}
+
+func TestEvalListener_OnSessionComplete_ArenaAssertionRuns(t *testing.T) {
+	packEvals := &evals.PromptPackEvals{
+		PackName:    "test-pack",
+		PackVersion: "v1.0.0",
+		Evals: []evals.EvalDef{
+			{
+				ID:      "eval-arena-complete",
+				Type:    evals.EvalTypeArenaAssertion,
+				Trigger: "on_session_complete",
+				Params: map[string]any{
+					"assertion_type": "content_includes_any",
+					"assertion_params": map[string]any{
+						"patterns": []any{"hello"},
+					},
+				},
+			},
+		},
+	}
+	loader := &mockEvalLoader{evals: packEvals}
+	fetcher := &mockMessageFetcher{messages: sampleMessages()}
+	writer := &mockResultWriter{}
+	config := defaultConfig()
+
+	listener := NewEvalListener(config, loader, fetcher, writer, newTestLogger())
+
+	err := listener.OnSessionComplete(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("OnSessionComplete returned error: %v", err)
+	}
+
+	results := writer.getResults()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].EvalType != evals.EvalTypeArenaAssertion {
+		t.Errorf("evalType = %q, want %q", results[0].EvalType, evals.EvalTypeArenaAssertion)
+	}
+	if results[0].Trigger != evalTriggerOnSessionComplete {
+		t.Errorf("trigger = %q, want %q", results[0].Trigger, evalTriggerOnSessionComplete)
+	}
+}
+
+func TestEvalListener_FilterRuleEvals_PassesArenaAssertionThrough(t *testing.T) {
+	defs := []evals.EvalDef{
+		{ID: "arena-1", Type: evals.EvalTypeArenaAssertion},
+		{ID: "rule-1", Type: "contains"},
+		{ID: "judge-1", Type: "llm_judge"},
+	}
+
+	filtered := filterRuleEvals(defs)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 evals (arena + rule), got %d", len(filtered))
+	}
+
+	expectedIDs := []string{"arena-1", "rule-1"}
+	for i, f := range filtered {
+		if f.ID != expectedIDs[i] {
+			t.Errorf("filtered[%d].ID = %q, want %q", i, f.ID, expectedIDs[i])
+		}
+	}
+}
