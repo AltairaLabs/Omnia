@@ -535,3 +535,201 @@ func TestBuildSessionState(t *testing.T) {
 func TestBuildSessionState_Empty(t *testing.T) {
 	assert.Nil(t, buildSessionState(nil))
 }
+
+// --- tool & workflow span tests ---
+
+func makeNamedSpan(name, conversationID string, startNano uint64, attrs []*commonpb.KeyValue) *tracepb.Span {
+	if conversationID != "" {
+		attrs = append([]*commonpb.KeyValue{
+			{Key: AttrGenAIConversationID, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: conversationID}}},
+		}, attrs...)
+	}
+	return &tracepb.Span{
+		Name:              name,
+		TraceId:           []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+		SpanId:            []byte{0x01},
+		StartTimeUnixNano: startNano,
+		Attributes:        attrs,
+	}
+}
+
+func toolAttrs(name, callID, args, status string, durationMs int64) []*commonpb.KeyValue {
+	return []*commonpb.KeyValue{
+		{Key: AttrToolName, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: name}}},
+		{Key: AttrToolCallID, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: callID}}},
+		{Key: AttrToolArgs, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: args}}},
+		{Key: AttrToolStatus, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: status}}},
+		{Key: AttrToolDurationMs, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: durationMs}}},
+	}
+}
+
+func workflowTransitionAttrs(from, to, event, promptTask string) []*commonpb.KeyValue {
+	return []*commonpb.KeyValue{
+		{Key: AttrWorkflowFromState, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: from}}},
+		{Key: AttrWorkflowToState, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: to}}},
+		{Key: AttrWorkflowEvent, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: event}}},
+		{Key: AttrWorkflowPromptTask, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: promptTask}}},
+	}
+}
+
+func workflowCompletedAttrs(finalState string, transitionCount int64) []*commonpb.KeyValue {
+	return []*commonpb.KeyValue{
+		{Key: AttrWorkflowFinalState, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: finalState}}},
+		{Key: AttrWorkflowTransitionCount, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: transitionCount}}},
+	}
+}
+
+func TestProcessExport_ToolSpan(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	attrs := toolAttrs("search", "call-1", `{"query":"test"}`, "success", 150)
+	span := makeNamedSpan("tool.search", "conv-tool", uint64(time.Now().UnixNano()), attrs)
+	rs := makeResourceSpans("default", "agent", span)
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+
+	msgs := writer.messages["conv-tool"]
+	require.Len(t, msgs, 1)
+	msg := msgs[0]
+	assert.Equal(t, session.RoleSystem, msg.Role)
+	assert.Equal(t, "call-1", msg.ToolCallID)
+	assert.Equal(t, "tool.call.completed", msg.Metadata["type"])
+	assert.Equal(t, "search", msg.Metadata["tool_name"])
+	assert.Equal(t, `{"query":"test"}`, msg.Metadata["tool_args"])
+	assert.Equal(t, "success", msg.Metadata["status"])
+	assert.Equal(t, "150", msg.Metadata["duration_ms"])
+	assert.NotEmpty(t, msg.ID)
+}
+
+func TestProcessExport_ToolSpan_NoTokenUpdate(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	attrs := toolAttrs("calculator", "call-2", "{}", "error", 50)
+	span := makeNamedSpan("tool.calculator", "conv-tool-no-tokens", uint64(time.Now().UnixNano()), attrs)
+	rs := makeResourceSpans("default", "agent", span)
+
+	_, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Empty(t, writer.stats, "tool spans should not trigger UpdateSessionStats")
+
+	msgs := writer.messages["conv-tool-no-tokens"]
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "error", msgs[0].Metadata["status"])
+}
+
+func TestProcessExport_WorkflowTransitionSpan(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	attrs := workflowTransitionAttrs("intake", "processing", "InfoComplete", "process")
+	span := makeNamedSpan("workflow.transition", "conv-wf-trans", uint64(time.Now().UnixNano()), attrs)
+	rs := makeResourceSpans("default", "agent", span)
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+
+	msgs := writer.messages["conv-wf-trans"]
+	require.Len(t, msgs, 1)
+	msg := msgs[0]
+	assert.Equal(t, session.RoleSystem, msg.Role)
+	assert.Equal(t, "workflow.transitioned", msg.Metadata["type"])
+	assert.Equal(t, "intake", msg.Metadata["from_state"])
+	assert.Equal(t, "processing", msg.Metadata["to_state"])
+	assert.Equal(t, "InfoComplete", msg.Metadata["event"])
+	assert.Equal(t, "process", msg.Metadata["prompt_task"])
+}
+
+func TestProcessExport_WorkflowCompletedSpan(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	attrs := workflowCompletedAttrs("done", 5)
+	span := makeNamedSpan("workflow.completed", "conv-wf-done", uint64(time.Now().UnixNano()), attrs)
+	rs := makeResourceSpans("default", "agent", span)
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+
+	msgs := writer.messages["conv-wf-done"]
+	require.Len(t, msgs, 1)
+	msg := msgs[0]
+	assert.Equal(t, session.RoleSystem, msg.Role)
+	assert.Equal(t, "workflow.completed", msg.Metadata["type"])
+	assert.Equal(t, "done", msg.Metadata["final_state"])
+	assert.Equal(t, "5", msg.Metadata["transition_count"])
+}
+
+func TestProcessExport_MixedSpans(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	// GenAI span.
+	genaiSpan := makeSpan("conv-mixed", uint64(base.UnixNano()),
+		combineAttrs(
+			outputMsgAttrs(makeMessageValue("assistant", "Hello")),
+			tokenAttrs(10, 5),
+		))
+
+	// Tool span.
+	toolSpan := makeNamedSpan("tool.search", "conv-mixed",
+		uint64(base.Add(1*time.Second).UnixNano()),
+		toolAttrs("search", "c1", "{}", "success", 100))
+
+	// Workflow transition span.
+	wfSpan := makeNamedSpan("workflow.transition", "conv-mixed",
+		uint64(base.Add(2*time.Second).UnixNano()),
+		workflowTransitionAttrs("s1", "s2", "Next", "task2"))
+
+	// Workflow completed span.
+	wfDoneSpan := makeNamedSpan("workflow.completed", "conv-mixed",
+		uint64(base.Add(3*time.Second).UnixNano()),
+		workflowCompletedAttrs("done", 3))
+
+	rs := makeResourceSpans("ns", "agent", genaiSpan, toolSpan, wfSpan, wfDoneSpan)
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Equal(t, 4, processed)
+
+	msgs := writer.messages["conv-mixed"]
+	require.Len(t, msgs, 4)
+	// GenAI message.
+	assert.Equal(t, session.RoleAssistant, msgs[0].Role)
+	assert.Equal(t, "Hello", msgs[0].Content)
+	// Tool message.
+	assert.Equal(t, "tool.call.completed", msgs[1].Metadata["type"])
+	assert.Equal(t, "search", msgs[1].Metadata["tool_name"])
+	// Workflow transition.
+	assert.Equal(t, "workflow.transitioned", msgs[2].Metadata["type"])
+	// Workflow completed.
+	assert.Equal(t, "workflow.completed", msgs[3].Metadata["type"])
+
+	// Token stats should only come from the GenAI span.
+	stats := writer.stats["conv-mixed"]
+	assert.Equal(t, int32(10), stats.AddInputTokens)
+	assert.Equal(t, int32(5), stats.AddOutputTokens)
+}
+
+func TestProcessExport_ToolSpan_AppendError(t *testing.T) {
+	writer := newMockWriter()
+	writer.appendErr = errors.New("append failed")
+
+	transformer := NewTransformer(writer, logr.Discard())
+
+	attrs := toolAttrs("search", "call-1", "{}", "success", 100)
+	span := makeNamedSpan("tool.search", "conv-tool-err", uint64(time.Now().UnixNano()), attrs)
+	rs := makeResourceSpans("default", "agent", span)
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "append failed")
+	assert.Equal(t, 0, processed)
+}
