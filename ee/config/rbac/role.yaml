@@ -72,6 +72,16 @@ rules:
 - apiGroups:
   - omnia.altairalabs.ai
   resources:
+  - agentruntimes
+  - providers
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - omnia.altairalabs.ai
+  resources:
   - arenadevsessions
   - arenajobs
   - arenasources
@@ -107,15 +117,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - omnia.altairalabs.ai
-  resources:
-  - providers
-  - workspaces
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - omnia.altairalabs.ai
   resources:

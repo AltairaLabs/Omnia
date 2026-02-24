@@ -391,8 +391,14 @@ fi
 print_header "Running Tests with Coverage"
 
 # Run tests with coverage
+# Temporarily disable set -e because go test may return non-zero when some
+# packages fail to compile (e.g. toolchain version mismatch on cmd/ packages)
+# while all actual tests pass. The exit code handling below already accounts
+# for this by checking for "FAIL" in the output.
+set +e
 TEST_OUTPUT=$(GOWORK=off go test -short -timeout 120s -coverprofile=coverage.out ./... 2>&1)
 TEST_EXIT_CODE=$?
+set -e
 
 if [ $TEST_EXIT_CODE -ne 0 ]; then
     if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
