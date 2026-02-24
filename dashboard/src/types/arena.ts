@@ -301,6 +301,22 @@ export interface ScheduleConfig {
   concurrencyPolicy?: "Allow" | "Forbid" | "Replace";
 }
 
+// =============================================================================
+// Execution Config - Direct vs Fleet mode
+// =============================================================================
+
+export type ExecutionMode = "direct" | "fleet";
+
+export interface FleetTarget {
+  agentRuntimeRef: { name: string };
+  namespace?: string;
+}
+
+export interface ExecutionConfig {
+  mode?: ExecutionMode;
+  target?: FleetTarget;
+}
+
 /** ArenaJob specification */
 export interface ArenaJobSpec {
   /** Reference to ArenaSource containing test scenarios and configuration */
@@ -335,6 +351,8 @@ export interface ArenaJobSpec {
   suspend?: boolean;
   /** Enable verbose/debug logging for promptarena */
   verbose?: boolean;
+  /** Execution mode configuration (direct or fleet) */
+  execution?: ExecutionConfig;
 }
 
 /** Worker status within a job */

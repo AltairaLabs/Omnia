@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/contexts/workspace-context";
-import type { ArenaSource, ArenaJob, ArenaJobType, ScenarioFilter } from "@/types/arena";
+import type { ArenaSource, ArenaJob, ArenaJobType, ScenarioFilter, ExecutionConfig } from "@/types/arena";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
@@ -21,6 +21,7 @@ export interface QuickRunRequest {
   name?: string;
   scenarios?: ScenarioFilter;
   verbose?: boolean;
+  execution?: ExecutionConfig;
 }
 
 export interface QuickRunResponse {

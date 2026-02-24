@@ -27,7 +27,7 @@ import {
 } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import type { ArenaSource, ArenaJob, ArenaJobType, ScenarioFilter } from "@/types/arena";
+import type { ArenaSource, ArenaJob, ArenaJobType, ScenarioFilter, ExecutionConfig } from "@/types/arena";
 
 const RESOURCE_TYPE = "ArenaProjectRun";
 const PROJECT_LABEL = "arena.omnia.altairalabs.ai/project-id";
@@ -42,6 +42,7 @@ interface QuickRunRequest {
   name?: string;
   scenarios?: ScenarioFilter;
   verbose?: boolean;
+  execution?: ExecutionConfig;
 }
 
 interface QuickRunResponse {
@@ -151,6 +152,11 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
       // Add scenarios filter if provided
       if (body.scenarios) {
         jobSpec.scenarios = body.scenarios;
+      }
+
+      // Add execution config if fleet mode
+      if (body.execution?.mode === "fleet") {
+        jobSpec.execution = body.execution;
       }
 
       // Add type-specific defaults
