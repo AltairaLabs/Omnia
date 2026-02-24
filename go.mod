@@ -24,7 +24,7 @@ require (
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
-	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/go-containerregistry v0.21.0
 	github.com/google/uuid v1.6.0
