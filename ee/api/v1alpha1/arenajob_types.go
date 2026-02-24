@@ -29,6 +29,46 @@ const (
 	ArenaJobTypeDataGen ArenaJobType = "datagen"
 )
 
+// ExecutionMode defines how the arena worker executes scenarios.
+// +kubebuilder:validation:Enum=direct;fleet
+type ExecutionMode string
+
+const (
+	// ExecutionModeDirect calls LLM providers directly (existing behavior).
+	ExecutionModeDirect ExecutionMode = "direct"
+	// ExecutionModeFleet connects to a deployed agent via WebSocket.
+	ExecutionModeFleet ExecutionMode = "fleet"
+)
+
+// FleetTarget identifies the deployed agent to test against.
+type FleetTarget struct {
+	// agentRuntimeRef references the AgentRuntime CRD to connect to.
+	// The controller resolves this to a WebSocket endpoint.
+	// +kubebuilder:validation:Required
+	AgentRuntimeRef corev1alpha1.LocalObjectReference `json:"agentRuntimeRef"`
+
+	// namespace is the namespace of the AgentRuntime.
+	// If not specified, defaults to the ArenaJob's namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// ExecutionConfig configures how scenarios are executed.
+// +kubebuilder:validation:XValidation:rule="self.mode != 'fleet' || has(self.target)",message="target is required when execution mode is fleet"
+type ExecutionConfig struct {
+	// mode selects the execution strategy.
+	// "direct" calls LLM providers directly (existing behavior).
+	// "fleet" connects to a deployed agent via WebSocket.
+	// +kubebuilder:default="direct"
+	// +optional
+	Mode ExecutionMode `json:"mode,omitempty"`
+
+	// target specifies the agent to test against.
+	// Required when mode is "fleet".
+	// +optional
+	Target *FleetTarget `json:"target,omitempty"`
+}
+
 // ScenarioFilter defines include/exclude patterns for scenario selection.
 type ScenarioFilter struct {
 	// include specifies glob patterns for scenarios to include.
@@ -259,6 +299,11 @@ type ArenaJobSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// execution configures the execution mode and target.
+	// If not specified, defaults to direct provider execution.
+	// +optional
+	Execution *ExecutionConfig `json:"execution,omitempty"`
 
 	// verbose enables verbose/debug logging for promptarena execution.
 	// When enabled, workers will pass --verbose to promptarena for detailed output.

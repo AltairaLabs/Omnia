@@ -26,6 +26,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
 	"github.com/altairalabs/omnia/ee/pkg/arena/binding"
+	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
@@ -61,6 +62,10 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+
+	// Execution mode
+	ExecutionMode string // "direct" or "fleet"
+	FleetWSURL    string // WebSocket URL for fleet mode
 
 	// Worker configuration
 	WorkDir       string
@@ -118,11 +123,17 @@ func loadConfig() (*Config, error) {
 		Verbose:        os.Getenv("ARENA_VERBOSE") == "true",
 	}
 
+	cfg.ExecutionMode = getEnvOrDefault("ARENA_EXECUTION_MODE", "direct")
+	cfg.FleetWSURL = os.Getenv("ARENA_FLEET_WS_URL")
+
 	if cfg.JobName == "" {
 		return nil, errors.New("ARENA_JOB_NAME is required")
 	}
 	if cfg.ContentPath == "" {
 		return nil, errors.New("ARENA_CONTENT_PATH is required")
+	}
+	if cfg.ExecutionMode == "fleet" && cfg.FleetWSURL == "" {
+		return nil, errors.New("ARENA_FLEET_WS_URL is required when ARENA_EXECUTION_MODE is fleet")
 	}
 
 	// Parse tool overrides if provided (legacy env var, prefer OverridesPath)
@@ -283,6 +294,10 @@ func executeWorkItem(
 	item *queue.WorkItem,
 	bundlePath string,
 ) (*ExecutionResult, error) {
+	if cfg.ExecutionMode == "fleet" {
+		return executeFleetWorkItem(ctx, cfg, item, bundlePath)
+	}
+
 	start := time.Now()
 
 	result := &ExecutionResult{
@@ -451,6 +466,139 @@ func findArenaConfigFile(bundlePath, configFile string) string {
 	}
 
 	return ""
+}
+
+// executeFleetWorkItem runs a scenario against a deployed agent via WebSocket.
+func executeFleetWorkItem(
+	ctx context.Context,
+	cfg *Config,
+	item *queue.WorkItem,
+	bundlePath string,
+) (*ExecutionResult, error) {
+	start := time.Now()
+
+	// Find and parse the scenario file
+	scenarioPath := findScenarioFile(bundlePath, cfg.ConfigFile, item.ScenarioID)
+	if scenarioPath == "" {
+		return nil, fmt.Errorf("scenario file not found for ID %q in %s", item.ScenarioID, bundlePath)
+	}
+
+	turns, err := fleet.ParseScenarioFile(scenarioPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse scenario file: %w", err)
+	}
+
+	if cfg.Verbose {
+		fmt.Printf("  Fleet mode: running %d turn(s) against %s\n", len(turns), cfg.FleetWSURL)
+	}
+
+	// Create fleet client and run conversation
+	client := fleet.NewClient(cfg.FleetWSURL)
+	convResult, err := client.RunConversation(ctx, turns)
+	if err != nil {
+		return nil, fmt.Errorf("fleet conversation failed: %w", err)
+	}
+
+	// Build execution result from conversation transcript
+	result := &ExecutionResult{
+		Status:     statusPass,
+		DurationMs: float64(time.Since(start).Milliseconds()),
+		Metrics: map[string]float64{
+			"totalDurationMs": float64(convResult.Duration.Milliseconds()),
+			"turnCount":       float64(len(turns)),
+			"messageCount":    float64(len(convResult.Messages)),
+		},
+	}
+
+	if convResult.Error != "" {
+		result.Status = statusFail
+		result.Error = convResult.Error
+	}
+
+	if cfg.Verbose {
+		fmt.Printf("  Fleet result: %s (session=%s, messages=%d, duration=%v)\n",
+			result.Status, convResult.SessionID, len(convResult.Messages), convResult.Duration)
+	}
+
+	return result, nil
+}
+
+// findScenarioFile locates the scenario file for a given scenario ID within the bundle.
+// It reads the arena config to find scenario file entries, then checks each for a matching ID.
+func findScenarioFile(bundlePath, configFile, scenarioID string) string {
+	if scenarioID == "" || scenarioID == "default" {
+		return ""
+	}
+
+	configPath := findArenaConfigFile(bundlePath, configFile)
+	if configPath == "" {
+		return ""
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	var cfg struct {
+		Spec struct {
+			Scenarios []struct {
+				File string `yaml:"file"`
+			} `yaml:"scenarios"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+
+	configDir := filepath.Dir(configPath)
+	for _, entry := range cfg.Spec.Scenarios {
+		if entry.File == "" {
+			continue
+		}
+		scenarioPath := filepath.Join(configDir, entry.File)
+		if matchesScenarioID(scenarioPath, entry.File, scenarioID) {
+			return scenarioPath
+		}
+	}
+
+	return ""
+}
+
+// matchesScenarioID checks if a scenario file matches the given scenario ID.
+// Uses the same fallback chain as the partitioner: spec.id > metadata.name > filename derivation.
+func matchesScenarioID(absPath, relativePath, targetID string) bool {
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return false
+	}
+
+	var sf struct {
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+		Spec struct {
+			ID string `yaml:"id"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(data, &sf); err != nil {
+		return false
+	}
+
+	// Check spec.id first
+	if sf.Spec.ID != "" {
+		return sf.Spec.ID == targetID
+	}
+	// Check metadata.name
+	if sf.Metadata.Name != "" {
+		return sf.Metadata.Name == targetID
+	}
+	// Fall back to filename derivation
+	base := filepath.Base(relativePath)
+	for ext := filepath.Ext(base); ext != ""; ext = filepath.Ext(base) {
+		base = strings.TrimSuffix(base, ext)
+	}
+	return base == targetID
 }
 
 // runAggregator collects and aggregates run results.

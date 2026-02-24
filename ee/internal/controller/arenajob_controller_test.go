@@ -31,6 +31,7 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/aggregator"
+	"github.com/altairalabs/omnia/ee/pkg/arena/partitioner"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/ee/pkg/license"
 )
@@ -2638,6 +2639,195 @@ spec:
 			}
 
 			Expect(reconciler.getWorkerServiceAccountName([]*corev1alpha1.Provider{})).To(BeEmpty())
+		})
+	})
+
+	Context("When testing fleet mode helpers", func() {
+		It("should detect fleet mode correctly", func() {
+			// Not fleet mode when execution is nil
+			arenaJob := &omniav1alpha1.ArenaJob{}
+			Expect(isFleetMode(arenaJob)).To(BeFalse())
+
+			// Not fleet mode when mode is direct
+			arenaJob.Spec.Execution = &omniav1alpha1.ExecutionConfig{
+				Mode: omniav1alpha1.ExecutionModeDirect,
+			}
+			Expect(isFleetMode(arenaJob)).To(BeFalse())
+
+			// Fleet mode when mode is fleet
+			arenaJob.Spec.Execution = &omniav1alpha1.ExecutionConfig{
+				Mode: omniav1alpha1.ExecutionModeFleet,
+			}
+			Expect(isFleetMode(arenaJob)).To(BeTrue())
+		})
+
+		It("should build fleet work items per scenario", func() {
+			scenarios := []partitioner.Scenario{
+				{ID: "billing", Name: "Billing Test", Path: "billing.scenario.yaml"},
+				{ID: "auth", Name: "Auth Test", Path: "auth.scenario.yaml"},
+			}
+
+			items := buildFleetWorkItems("fleet-job", "bundle-url", scenarios)
+			Expect(items).To(HaveLen(2))
+			Expect(items[0].ScenarioID).To(Equal("billing"))
+			Expect(items[0].ProviderID).To(BeEmpty())
+			Expect(items[0].JobID).To(Equal("fleet-job"))
+			Expect(items[1].ScenarioID).To(Equal("auth"))
+			Expect(items[1].ProviderID).To(BeEmpty())
+		})
+
+		It("should build single default fleet work item when no scenarios", func() {
+			items := buildFleetWorkItems("fleet-job", "bundle-url", nil)
+			Expect(items).To(HaveLen(1))
+			Expect(items[0].ScenarioID).To(Equal("default"))
+			Expect(items[0].ProviderID).To(BeEmpty())
+		})
+
+		It("should enqueue fleet work items without provider dimension", func() {
+			// Set up filesystem content with proper workspace/namespace structure
+			baseDir := GinkgoT().TempDir()
+			contentDir := filepath.Join(baseDir, "default", arenaJobNamespace, "content")
+			Expect(os.MkdirAll(contentDir, 0o755)).To(Succeed())
+
+			Expect(os.WriteFile(filepath.Join(contentDir, "billing.scenario.yaml"), []byte(`
+metadata:
+  name: Billing Test
+spec:
+  id: billing
+`), 0o644)).To(Succeed())
+
+			Expect(os.WriteFile(filepath.Join(contentDir, "config.arena.yaml"), []byte(`
+spec:
+  scenarios:
+    - file: billing.scenario.yaml
+`), 0o644)).To(Succeed())
+
+			memQueue := queue.NewMemoryQueueWithDefaults()
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fleet-enqueue-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: arenaSourceName},
+					Execution: &omniav1alpha1.ExecutionConfig{
+						Mode: omniav1alpha1.ExecutionModeFleet,
+					},
+				},
+			}
+
+			arenaSource := &omniav1alpha1.ArenaSource{
+				Status: omniav1alpha1.ArenaSourceStatus{
+					Artifact: &omniav1alpha1.Artifact{
+						Revision:    "v1.0.0",
+						Checksum:    "sha256:abc123",
+						ContentPath: "content",
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				Queue:                memQueue,
+				WorkspaceContentPath: baseDir,
+			}
+
+			// Even with providers, fleet mode should create scenario-only items
+			providerCRDs := []*corev1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "provider-1"}},
+			}
+
+			count, err := reconciler.enqueueWorkItems(ctx, arenaJob, arenaSource, providerCRDs)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(1))
+
+			item, err := memQueue.Pop(ctx, "fleet-enqueue-job")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(item.ScenarioID).To(Equal("billing"))
+			Expect(item.ProviderID).To(BeEmpty())
+		})
+
+		It("should resolve fleet target from AgentRuntime", func() {
+			By("creating an AgentRuntime with service endpoint")
+			agentRuntime := &corev1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent-runtime",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: corev1alpha1.AgentRuntimeSpec{
+					Facade: corev1alpha1.FacadeConfig{
+						Type: corev1alpha1.FacadeTypeWebSocket,
+					},
+					PromptPackRef: corev1alpha1.PromptPackRef{
+						Name: "test-prompt-pack",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			// Update status with service endpoint
+			agentRuntime.Status.ServiceEndpoint = "test-agent-runtime.default.svc.cluster.local:8080"
+			Expect(k8sClient.Status().Update(ctx, agentRuntime)).To(Succeed())
+
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fleet-resolve-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: arenaSourceName},
+					Execution: &omniav1alpha1.ExecutionConfig{
+						Mode: omniav1alpha1.ExecutionModeFleet,
+						Target: &omniav1alpha1.FleetTarget{
+							AgentRuntimeRef: corev1alpha1.LocalObjectReference{
+								Name: "test-agent-runtime",
+							},
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			wsURL, err := reconciler.resolveFleetTarget(ctx, arenaJob)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wsURL).To(Equal("ws://test-agent-runtime.default.svc.cluster.local:8080/ws"))
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, agentRuntime)).To(Succeed())
+		})
+
+		It("should fail to resolve fleet target when AgentRuntime not found", func() {
+			arenaJob := &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fleet-notfound-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{Name: arenaSourceName},
+					Execution: &omniav1alpha1.ExecutionConfig{
+						Mode: omniav1alpha1.ExecutionModeFleet,
+						Target: &omniav1alpha1.FleetTarget{
+							AgentRuntimeRef: corev1alpha1.LocalObjectReference{
+								Name: "nonexistent-agent",
+							},
+						},
+					},
+				},
+			}
+
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.resolveFleetTarget(ctx, arenaJob)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 	})
 })

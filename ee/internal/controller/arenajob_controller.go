@@ -129,6 +129,7 @@ func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, names
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/finalizers,verbs=update
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenasources,verbs=get;list;watch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=providers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
@@ -333,6 +334,43 @@ func (r *ArenaJobReconciler) getWorkerServiceAccountName(providerCRDs []*corev1a
 		}
 	}
 	return ""
+}
+
+// isFleetMode returns true if the ArenaJob is configured for fleet execution mode.
+func isFleetMode(arenaJob *omniav1alpha1.ArenaJob) bool {
+	return arenaJob.Spec.Execution != nil && arenaJob.Spec.Execution.Mode == omniav1alpha1.ExecutionModeFleet
+}
+
+// resolveFleetTarget resolves the fleet target AgentRuntime to a WebSocket URL.
+// It reads the AgentRuntime's status.serviceEndpoint and constructs a ws:// URL.
+func (r *ArenaJobReconciler) resolveFleetTarget(ctx context.Context, arenaJob *omniav1alpha1.ArenaJob) (string, error) {
+	if arenaJob.Spec.Execution == nil || arenaJob.Spec.Execution.Target == nil {
+		return "", fmt.Errorf("fleet target not specified")
+	}
+
+	target := arenaJob.Spec.Execution.Target
+	targetNamespace := target.Namespace
+	if targetNamespace == "" {
+		targetNamespace = arenaJob.Namespace
+	}
+
+	agentRuntime := &corev1alpha1.AgentRuntime{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      target.AgentRuntimeRef.Name,
+		Namespace: targetNamespace,
+	}, agentRuntime); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("agentRuntime %s/%s not found", targetNamespace, target.AgentRuntimeRef.Name)
+		}
+		return "", fmt.Errorf("failed to get agentRuntime %s/%s: %w", targetNamespace, target.AgentRuntimeRef.Name, err)
+	}
+
+	if agentRuntime.Status.ServiceEndpoint == "" {
+		return "", fmt.Errorf("agentRuntime %s/%s has no service endpoint (not ready)", targetNamespace, target.AgentRuntimeRef.Name)
+	}
+
+	wsURL := fmt.Sprintf("ws://%s/ws", agentRuntime.Status.ServiceEndpoint)
+	return wsURL, nil
 }
 
 // resolveProviderOverrides resolves provider CRDs based on ArenaJob's providerOverrides.
@@ -863,6 +901,19 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	platformEnvVars := providers.BuildPlatformEnvVars(providerCRDs)
 	env = append(env, platformEnvVars...)
 
+	// Add fleet execution mode env vars if configured
+	if isFleetMode(arenaJob) {
+		wsURL, err := r.resolveFleetTarget(ctx, arenaJob)
+		if err != nil {
+			return fmt.Errorf("failed to resolve fleet target: %w", err)
+		}
+		env = append(env,
+			corev1.EnvVar{Name: "ARENA_EXECUTION_MODE", Value: "fleet"},
+			corev1.EnvVar{Name: "ARENA_FLEET_WS_URL", Value: wsURL},
+		)
+		log.Info("fleet mode enabled", "wsURL", wsURL)
+	}
+
 	// Add overrides path env var if ConfigMap was created
 	if hasOverrides {
 		env = append(env, corev1.EnvVar{
@@ -1196,6 +1247,40 @@ func buildFallbackWorkItems(jobName, bundleURL string, providerIDs []string) []q
 	return items
 }
 
+// buildFleetWorkItems creates one work item per scenario (no provider dimension).
+// Used in fleet mode where the agent handles its own provider configuration.
+func buildFleetWorkItems(jobName, bundleURL string, scenarios []partitioner.Scenario) []queue.WorkItem {
+	now := time.Now()
+	if len(scenarios) == 0 {
+		// Single default item when scenarios can't be enumerated
+		return []queue.WorkItem{{
+			ID:          fmt.Sprintf("%s-fleet-0", jobName),
+			JobID:       jobName,
+			ScenarioID:  "default",
+			BundleURL:   bundleURL,
+			Status:      queue.ItemStatusPending,
+			Attempt:     1,
+			MaxAttempts: 3,
+			CreatedAt:   now,
+		}}
+	}
+
+	items := make([]queue.WorkItem, 0, len(scenarios))
+	for i, s := range scenarios {
+		items = append(items, queue.WorkItem{
+			ID:          fmt.Sprintf("%s-%s-%d", jobName, s.ID, i),
+			JobID:       jobName,
+			ScenarioID:  s.ID,
+			BundleURL:   bundleURL,
+			Status:      queue.ItemStatusPending,
+			Attempt:     1,
+			MaxAttempts: 3,
+			CreatedAt:   now,
+		})
+	}
+	return items
+}
+
 // enqueueWorkItems creates and enqueues work items for the Arena job.
 // When scenarios can be enumerated from the filesystem, work items are created
 // for each scenario × provider combination for maximum parallelism.
@@ -1237,23 +1322,29 @@ func (r *ArenaJobReconciler) enqueueWorkItems(ctx context.Context, arenaJob *omn
 		}
 	}
 
-	// Build provider list
-	var providerIDs []string
-	if len(providerCRDs) > 0 {
-		providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
-		log.V(1).Info("using providers for work items", "count", len(providerIDs))
-	}
-
-	// Try scenario × provider matrix, fall back to per-provider items
+	// Build work items based on execution mode
 	var items []queue.WorkItem
-	if len(scenarios) > 0 && len(providerIDs) > 0 {
-		items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, providerCRDs)
-	}
-	if len(items) == 0 {
-		items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
+
+	if isFleetMode(arenaJob) {
+		// Fleet mode: one work item per scenario (no provider dimension)
+		items = buildFleetWorkItems(arenaJob.Name, bundleURL, scenarios)
+	} else {
+		// Direct mode: scenario × provider matrix
+		var providerIDs []string
+		if len(providerCRDs) > 0 {
+			providerIDs = r.getProviderIDsFromCRDs(providerCRDs)
+			log.V(1).Info("using providers for work items", "count", len(providerIDs))
+		}
+
+		if len(scenarios) > 0 && len(providerIDs) > 0 {
+			items = r.buildMatrixWorkItems(ctx, arenaJob.Name, bundleURL, scenarios, providerCRDs)
+		}
+		if len(items) == 0 {
+			items = buildFallbackWorkItems(arenaJob.Name, bundleURL, providerIDs)
+		}
 	}
 
-	log.Info("enqueueing work items", "count", len(items), "providers", providerIDs)
+	log.Info("enqueueing work items", "count", len(items))
 	if err := q.Push(ctx, arenaJob.Name, items); err != nil {
 		return 0, fmt.Errorf("failed to push work items to queue: %w", err)
 	}

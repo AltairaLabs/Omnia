@@ -95,6 +95,50 @@ spec:
                       type: string
                     type: array
                 type: object
+              execution:
+                description: |-
+                  execution configures the execution mode and target.
+                  If not specified, defaults to direct provider execution.
+                properties:
+                  mode:
+                    default: direct
+                    description: |-
+                      mode selects the execution strategy.
+                      "direct" calls LLM providers directly (existing behavior).
+                      "fleet" connects to a deployed agent via WebSocket.
+                    enum:
+                    - direct
+                    - fleet
+                    type: string
+                  target:
+                    description: |-
+                      target specifies the agent to test against.
+                      Required when mode is "fleet".
+                    properties:
+                      agentRuntimeRef:
+                        description: |-
+                          agentRuntimeRef references the AgentRuntime CRD to connect to.
+                          The controller resolves this to a WebSocket endpoint.
+                        properties:
+                          name:
+                            description: name is the name of the object.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      namespace:
+                        description: |-
+                          namespace is the namespace of the AgentRuntime.
+                          If not specified, defaults to the ArenaJob's namespace.
+                        type: string
+                    required:
+                    - agentRuntimeRef
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: target is required when execution mode is fleet
+                  rule: self.mode != 'fleet' || has(self.target)
               loadTest:
                 description: |-
                   loadTest configures load testing settings.
