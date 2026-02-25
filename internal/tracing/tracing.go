@@ -155,6 +155,15 @@ func (p *Provider) Tracer() trace.Tracer {
 	return p.tracer
 }
 
+// TracerProvider returns the underlying TracerProvider for SDK integration.
+// Returns the configured provider if tracing is enabled, or the global provider otherwise.
+func (p *Provider) TracerProvider() trace.TracerProvider {
+	if p.tp != nil {
+		return p.tp
+	}
+	return otel.GetTracerProvider()
+}
+
 // Shutdown shuts down the tracer provider.
 func (p *Provider) Shutdown(ctx context.Context) error {
 	if p.tp != nil {

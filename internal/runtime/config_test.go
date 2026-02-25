@@ -323,6 +323,27 @@ func TestLoadConfig_TracingSampleRateNegative(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be between 0.0 and 1.0")
 }
 
+func TestLoadConfig_EvalEnabled(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+	t.Setenv(envEvalEnabled, "true")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.EvalEnabled)
+}
+
+func TestLoadConfig_EvalDisabledByDefault(t *testing.T) {
+	t.Setenv(envAgentName, "test-agent")
+	t.Setenv(envNamespace, "test-ns")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.EvalEnabled)
+}
+
 func TestLoadConfig_MediaBasePath(t *testing.T) {
 	t.Setenv(envAgentName, "test-agent")
 	t.Setenv(envNamespace, "test-ns")

@@ -115,6 +115,14 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	}
 	// If provider is nil, PromptKit will auto-detect from environment
 
+	// Wire eval middleware when collector is configured
+	opts = append(opts, s.buildEvalOptions()...)
+
+	// Wire tracing provider into SDK for span propagation
+	if s.tracingProvider != nil {
+		opts = append(opts, sdk.WithTracerProvider(s.tracingProvider.TracerProvider()))
+	}
+
 	return opts, nil
 }
 

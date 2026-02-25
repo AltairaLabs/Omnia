@@ -586,6 +586,12 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		)
 	}
 
+	// Enable real-time evals — promptPack is always non-nil when this function is called
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_EVAL_ENABLED",
+		Value: "true",
+	})
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)

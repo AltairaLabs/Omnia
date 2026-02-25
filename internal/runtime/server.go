@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	// Register all providers via blank imports
 	// TODO: PromptKit should provide a "providers/all" package for convenience
@@ -66,6 +67,10 @@ type Server struct {
 
 	// Tracing
 	tracingProvider *tracing.Provider
+
+	// Evals
+	evalCollector *evals.MetricCollector
+	evalDefs      []evals.EvalDef
 
 	// Metrics
 	metrics        *Metrics
@@ -181,6 +186,20 @@ func WithProviderInfo(providerType, model string) ServerOption {
 func WithBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.baseURL = baseURL
+	}
+}
+
+// WithEvalCollector sets the eval metric collector for the server.
+func WithEvalCollector(c *evals.MetricCollector) ServerOption {
+	return func(s *Server) {
+		s.evalCollector = c
+	}
+}
+
+// WithEvalDefs sets the eval definitions loaded from the prompt pack.
+func WithEvalDefs(defs []evals.EvalDef) ServerOption {
+	return func(s *Server) {
+		s.evalDefs = defs
 	}
 }
 

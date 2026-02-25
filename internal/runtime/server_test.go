@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/altairalabs/omnia/internal/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
@@ -111,6 +112,33 @@ func TestServerOptions(t *testing.T) {
 		)
 		assert.NotNil(t, server.runtimeMetrics)
 		assert.Equal(t, runtimeMetrics, server.runtimeMetrics)
+	})
+
+	t.Run("WithEvalCollector", func(t *testing.T) {
+		collector := evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+		server := NewServer(
+			WithEvalCollector(collector),
+		)
+		assert.NotNil(t, server.evalCollector)
+		assert.Equal(t, collector, server.evalCollector)
+	})
+
+	t.Run("WithEvalCollector_Nil", func(t *testing.T) {
+		server := NewServer(
+			WithEvalCollector(nil),
+		)
+		assert.Nil(t, server.evalCollector)
+	})
+
+	t.Run("WithEvalDefs", func(t *testing.T) {
+		defs := []evals.EvalDef{
+			{ID: "test-eval", Type: "contains"},
+		}
+		server := NewServer(
+			WithEvalDefs(defs),
+		)
+		assert.Len(t, server.evalDefs, 1)
+		assert.Equal(t, "test-eval", server.evalDefs[0].ID)
 	})
 
 	t.Run("WithProviderInfo", func(t *testing.T) {
