@@ -473,6 +473,142 @@ func TestNewProvider_Enabled_RatioSample(t *testing.T) {
 	}
 }
 
+func TestProvider_TracerProvider_Disabled(t *testing.T) {
+	provider, err := NewProvider(context.Background(), Config{Enabled: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tp := provider.TracerProvider()
+	if tp == nil {
+		t.Fatal("expected non-nil TracerProvider")
+	}
+	// Should return the global provider when tracing is disabled (tp is nil)
+}
+
+func TestProvider_TracerProvider_NilTP(t *testing.T) {
+	// Manually construct a provider with nil tp to test the fallback
+	p := &Provider{tracer: nil}
+	tp := p.TracerProvider()
+	if tp == nil {
+		t.Fatal("expected non-nil TracerProvider from global fallback")
+	}
+}
+
+func TestProvider_TracerProvider_WithTP(t *testing.T) {
+	// Construct a provider with a real (no-op) TracerProvider to cover the tp != nil branch
+	sdkTP := sdktrace.NewTracerProvider()
+	defer func() { _ = sdkTP.Shutdown(context.Background()) }()
+
+	p := &Provider{tp: sdkTP, tracer: sdkTP.Tracer(TracerName)}
+	tp := p.TracerProvider()
+	if tp == nil {
+		t.Fatal("expected non-nil TracerProvider")
+	}
+	if tp != sdkTP {
+		t.Fatal("expected TracerProvider to return the configured provider")
+	}
+}
+
+func TestProvider_Shutdown_WithTP(t *testing.T) {
+	// Test Shutdown with a real TracerProvider to cover the tp != nil branch
+	sdkTP := sdktrace.NewTracerProvider()
+	p := &Provider{tp: sdkTP, tracer: sdkTP.Tracer(TracerName)}
+
+	err := p.Shutdown(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewProvider_Enabled(t *testing.T) {
+	// Create with a non-routable endpoint — provider creation succeeds even
+	// though the exporter can't connect (batching is async).
+	cfg := Config{
+		Enabled:        true,
+		Endpoint:       "127.0.0.1:0",
+		ServiceName:    "test-service",
+		ServiceVersion: "1.0.0",
+		Environment:    "test",
+		SampleRate:     1.0,
+		Insecure:       true,
+	}
+
+	provider, err := NewProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+	if provider.tp == nil {
+		t.Fatal("expected non-nil TracerProvider when enabled")
+	}
+	if provider.Tracer() == nil {
+		t.Fatal("expected non-nil tracer")
+	}
+}
+
+func TestNewProvider_Enabled_Defaults(t *testing.T) {
+	// Test that empty ServiceName gets defaulted
+	cfg := Config{
+		Enabled:    true,
+		Endpoint:   "127.0.0.1:0",
+		SampleRate: 0, // Should default to 1.0
+		Insecure:   true,
+	}
+
+	provider, err := NewProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+
+	if provider.tp == nil {
+		t.Fatal("expected non-nil TracerProvider")
+	}
+}
+
+func TestNewProvider_Enabled_NeverSample(t *testing.T) {
+	cfg := Config{
+		Enabled:    true,
+		Endpoint:   "127.0.0.1:0",
+		SampleRate: 0.0,
+		Insecure:   true,
+	}
+
+	provider, err := NewProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+
+	if provider.tp == nil {
+		t.Fatal("expected non-nil TracerProvider")
+	}
+}
+
+func TestNewProvider_Enabled_RatioSample(t *testing.T) {
+	cfg := Config{
+		Enabled:    true,
+		Endpoint:   "127.0.0.1:0",
+		SampleRate: 0.5,
+		Insecure:   true,
+	}
+
+	provider, err := NewProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+
+	if provider.tp == nil {
+		t.Fatal("expected non-nil TracerProvider")
+	}
+}
+
 func TestConfig_SampleRates(t *testing.T) {
 	tests := []struct {
 		name       string
