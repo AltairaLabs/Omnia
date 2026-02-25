@@ -55,8 +55,9 @@ export function RunDropdown({
     async (type: ArenaJobType) => {
       if (!projectId) return;
 
-      // Auto-deploy if not deployed
-      if (!deployed || !deploymentStatus?.deployed) {
+      // Auto-deploy if not deployed (use && so that if either endpoint
+      // confirms deployment we skip the unnecessary re-deploy)
+      if (!deployed && !deploymentStatus?.deployed) {
         try {
           toast({
             title: "Deploying",

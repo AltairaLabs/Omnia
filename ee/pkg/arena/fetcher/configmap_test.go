@@ -454,21 +454,24 @@ func TestConfigMapFetcher_Fetch_WithZeroTimestamp(t *testing.T) {
 	assert.NotEmpty(t, artifact.Path)
 }
 
-func TestConfigMapFetcher_Fetch_WithNestedPaths(t *testing.T) {
+func TestConfigMapFetcher_Fetch_DecodesDoubleUnderscoreToNestedDirs(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 
-	// ConfigMap keys can have path separators
+	// The dashboard deploy route encodes "/" as "__" because K8s ConfigMap keys
+	// only allow [-._a-zA-Z0-9]+. The fetcher must decode them back.
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              "nested-config",
+			Name:              "arena-project-test",
 			Namespace:         "default",
 			ResourceVersion:   "12345",
 			CreationTimestamp: metav1.Now(),
 		},
 		Data: map[string]string{
-			"subdir/config.yaml":  "nested: value",
-			"subdir/deep/file.md": "# Deep file",
+			"config.arena.yaml":                     "apiVersion: promptkit.altairalabs.ai/v1alpha1\nkind: ArenaConfig\n",
+			"scenarios__greeting.scenario.yaml":     "scenario: greeting",
+			"scenarios__deep__nested.scenario.yaml": "scenario: nested",
+			"prompts__main.yaml":                    "prompt: main",
 		},
 	}
 
@@ -478,7 +481,7 @@ func TestConfigMapFetcher_Fetch_WithNestedPaths(t *testing.T) {
 		Build()
 
 	fetcher := NewConfigMapFetcher(ConfigMapFetcherConfig{
-		Name:      "nested-config",
+		Name:      "arena-project-test",
 		Namespace: "default",
 	}, fakeClient)
 
@@ -487,14 +490,169 @@ func TestConfigMapFetcher_Fetch_WithNestedPaths(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = os.RemoveAll(artifact.Path) }()
 
-	// Verify nested structure
-	content1, err := os.ReadFile(filepath.Join(artifact.Path, "subdir", "config.yaml"))
+	// config.arena.yaml should remain at root (no __ to decode)
+	content, err := os.ReadFile(filepath.Join(artifact.Path, "config.arena.yaml"))
 	require.NoError(t, err)
-	assert.Equal(t, "nested: value", string(content1))
+	assert.Contains(t, string(content), "ArenaConfig")
 
-	content2, err := os.ReadFile(filepath.Join(artifact.Path, "subdir", "deep", "file.md"))
+	// scenarios__greeting.scenario.yaml should become scenarios/greeting.scenario.yaml
+	content, err = os.ReadFile(filepath.Join(artifact.Path, "scenarios", "greeting.scenario.yaml"))
 	require.NoError(t, err)
-	assert.Equal(t, "# Deep file", string(content2))
+	assert.Equal(t, "scenario: greeting", string(content))
+
+	// scenarios__deep__nested.scenario.yaml should become scenarios/deep/nested.scenario.yaml
+	content, err = os.ReadFile(filepath.Join(artifact.Path, "scenarios", "deep", "nested.scenario.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "scenario: nested", string(content))
+
+	// prompts__main.yaml should become prompts/main.yaml
+	content, err = os.ReadFile(filepath.Join(artifact.Path, "prompts", "main.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "prompt: main", string(content))
+
+	// The flat __-encoded filenames should NOT exist
+	_, err = os.Stat(filepath.Join(artifact.Path, "scenarios__greeting.scenario.yaml"))
+	assert.True(t, os.IsNotExist(err), "flat __-encoded file should not exist")
+}
+
+func TestConfigMapFetcher_Fetch_FleetProjectLayout(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	// Simulate the exact ConfigMap layout from the arena-fleet-sample.yaml
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "arena-project-fleet-echo-test",
+			Namespace:         "dev-agents",
+			ResourceVersion:   "99999",
+			CreationTimestamp: metav1.Now(),
+		},
+		Data: map[string]string{
+			"config.arena.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: ArenaConfig
+metadata:
+  name: fleet-echo-test
+spec:
+  providers: []
+  scenarios:
+    - file: scenarios/echo-greeting.scenario.yaml
+    - file: scenarios/echo-math.scenario.yaml
+  defaults:
+    temperature: 0
+    max_tokens: 256
+`,
+			"scenarios__echo-greeting.scenario.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Scenario
+metadata:
+  name: echo-greeting
+spec:
+  id: echo-greeting
+  task_type: assistant
+  turns:
+    - role: user
+      content: "Hello!"
+`,
+			"scenarios__echo-math.scenario.yaml": `apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Scenario
+metadata:
+  name: echo-math
+spec:
+  id: echo-math
+  task_type: assistant
+  turns:
+    - role: user
+      content: "What is 2+2?"
+`,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cm).
+		Build()
+
+	fetcher := NewConfigMapFetcher(ConfigMapFetcherConfig{
+		Name:      "arena-project-fleet-echo-test",
+		Namespace: "dev-agents",
+	}, fakeClient)
+
+	ctx := context.Background()
+	artifact, err := fetcher.Fetch(ctx, "")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(artifact.Path) }()
+
+	// Verify the directory structure matches what the arena worker expects
+	// The worker reads config.arena.yaml which references scenarios/echo-greeting.scenario.yaml
+
+	// 1. config.arena.yaml at root
+	configContent, err := os.ReadFile(filepath.Join(artifact.Path, "config.arena.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(configContent), "scenarios/echo-greeting.scenario.yaml",
+		"arena config should reference scenario files with / paths")
+
+	// 2. Scenario files in scenarios/ subdirectory (decoded from scenarios__ keys)
+	greetingContent, err := os.ReadFile(filepath.Join(artifact.Path, "scenarios", "echo-greeting.scenario.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(greetingContent), "echo-greeting")
+
+	mathContent, err := os.ReadFile(filepath.Join(artifact.Path, "scenarios", "echo-math.scenario.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(mathContent), "echo-math")
+
+	// 3. Verify the scenarios directory was actually created
+	entries, err := os.ReadDir(filepath.Join(artifact.Path, "scenarios"))
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "scenarios/ should contain exactly 2 files")
+}
+
+func TestDecodeConfigMapKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		expected string
+	}{
+		{
+			name:     "no encoding",
+			key:      "config.arena.yaml",
+			expected: "config.arena.yaml",
+		},
+		{
+			name:     "single level",
+			key:      "scenarios__greeting.yaml",
+			expected: "scenarios/greeting.yaml",
+		},
+		{
+			name:     "multiple levels",
+			key:      "a__b__c__file.yaml",
+			expected: "a/b/c/file.yaml",
+		},
+		{
+			name:     "empty string",
+			key:      "",
+			expected: "",
+		},
+		{
+			name:     "trailing double underscore",
+			key:      "dir__",
+			expected: "dir/",
+		},
+		{
+			name:     "single underscore preserved",
+			key:      "my_file.yaml",
+			expected: "my_file.yaml",
+		},
+		{
+			name:     "mixed single and double underscores",
+			key:      "my_dir__my_file.yaml",
+			expected: "my_dir/my_file.yaml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, decodeConfigMapKey(tt.key))
+		})
+	}
 }
 
 // Helper function to verify directory contents

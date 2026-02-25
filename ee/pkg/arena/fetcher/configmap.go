@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -138,7 +139,11 @@ func (f *ConfigMapFetcher) writeToDirectory(cm *corev1.ConfigMap) (string, error
 	// Write each file
 	for _, key := range keys {
 		content := getConfigMapContent(cm, key)
-		filePath := filepath.Join(tmpDir, key)
+		// Decode __ back to / for nested directory structure.
+		// The dashboard deploy route encodes file paths with __ because
+		// Kubernetes ConfigMap keys cannot contain forward slashes.
+		decodedKey := decodeConfigMapKey(key)
+		filePath := filepath.Join(tmpDir, decodedKey)
 
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
@@ -164,6 +169,13 @@ func (f *ConfigMapFetcher) writeToDirectory(cm *corev1.ConfigMap) (string, error
 	}
 
 	return tmpDir, nil
+}
+
+// decodeConfigMapKey reverses the dashboard deploy route's encoding of file paths.
+// Kubernetes ConfigMap keys cannot contain /, so the deploy route encodes
+// path separators as __. This function decodes them back to /.
+func decodeConfigMapKey(key string) string {
+	return strings.ReplaceAll(key, "__", "/")
 }
 
 // getSortedConfigMapKeys returns sorted keys from both Data and BinaryData, with Data taking precedence.

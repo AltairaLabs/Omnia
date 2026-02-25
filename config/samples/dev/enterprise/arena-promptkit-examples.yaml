@@ -1,0 +1,17 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaSource
+metadata:
+  name: promptkit-examples
+  namespace: dev-agents
+  labels:
+    arena.omnia.altairalabs.ai/project-id: promptkit-examples
+    app.kubernetes.io/managed-by: omnia-arena
+spec:
+  type: git
+  git:
+    url: https://github.com/AltairaLabs/PromptKit.git
+    ref:
+      branch: main
+    path: examples
+  interval: 5m
+  timeout: 120s

@@ -8,8 +8,9 @@ Functional Source License. See ee/LICENSE for details.
 
 */
 
-// Package fleet provides a WebSocket client that drives multi-turn conversations
-// against a deployed agent for black-box evaluation in Arena fleet mode.
+// Package fleet provides a WebSocket-based PromptKit provider that drives
+// multi-turn conversations against a deployed agent for black-box evaluation
+// in Arena fleet mode.
 package fleet
 
 import (
@@ -22,14 +23,6 @@ import (
 
 	"github.com/altairalabs/omnia/internal/facade"
 )
-
-// ConversationResult contains the full transcript and metrics from a fleet conversation.
-type ConversationResult struct {
-	SessionID string
-	Messages  []Message
-	Duration  time.Duration
-	Error     string
-}
 
 // Message represents a single message in the conversation transcript.
 type Message struct {
@@ -65,74 +58,13 @@ func (d *gorillaDialer) DialContext(ctx context.Context, urlStr string) (Conn, e
 	return conn, nil
 }
 
-// Client drives multi-turn WebSocket conversations against a deployed agent.
-type Client struct {
-	wsURL  string
-	dialer Dialer
-}
-
-// NewClient creates a new fleet client targeting the given WebSocket URL.
-func NewClient(wsURL string) *Client {
-	return &Client{
-		wsURL: wsURL,
-		dialer: &gorillaDialer{
-			dialer: &websocket.Dialer{
-				HandshakeTimeout: 10 * time.Second,
-			},
+// newDefaultDialer creates a gorilla WebSocket dialer with sensible defaults.
+func newDefaultDialer() Dialer {
+	return &gorillaDialer{
+		dialer: &websocket.Dialer{
+			HandshakeTimeout: 10 * time.Second,
 		},
 	}
-}
-
-// RunConversation connects to the agent via WebSocket and drives a multi-turn
-// conversation using the provided scenario turns. It collects the full transcript
-// including assistant responses, tool calls, and tool results.
-func (c *Client) RunConversation(ctx context.Context, turns []ScenarioTurn) (*ConversationResult, error) {
-	start := time.Now()
-
-	conn, err := c.dialer.DialContext(ctx, c.wsURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to agent: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	// Wait for connected message with session ID
-	sessionID, err := waitForConnected(conn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to receive connected message: %w", err)
-	}
-
-	result := &ConversationResult{
-		SessionID: sessionID,
-		Messages:  make([]Message, 0, len(turns)*2),
-	}
-
-	for _, turn := range turns {
-		// Record the user message
-		result.Messages = append(result.Messages, Message{
-			Role:      "user",
-			Content:   turn.Content,
-			Timestamp: time.Now(),
-		})
-
-		// Send the user message
-		if err := sendMessage(conn, sessionID, turn.Content); err != nil {
-			result.Error = fmt.Sprintf("failed to send message: %v", err)
-			result.Duration = time.Since(start)
-			return result, nil
-		}
-
-		// Collect response messages until done
-		turnMsgs, turnErr := collectTurnResponse(ctx, conn)
-		result.Messages = append(result.Messages, turnMsgs...)
-		if turnErr != nil {
-			result.Error = turnErr.Error()
-			result.Duration = time.Since(start)
-			return result, nil
-		}
-	}
-
-	result.Duration = time.Since(start)
-	return result, nil
 }
 
 // waitForConnected reads messages until it receives a "connected" message,

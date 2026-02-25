@@ -2,6 +2,13 @@ module github.com/altairalabs/omnia
 
 go 1.25.6
 
+replace (
+	github.com/AltairaLabs/PromptKit/pkg => ./promptkit-local/pkg
+	github.com/AltairaLabs/PromptKit/runtime => ./promptkit-local/runtime
+	github.com/AltairaLabs/PromptKit/sdk => ./promptkit-local/sdk
+	github.com/AltairaLabs/PromptKit/tools/arena => ./promptkit-local/tools/arena
+)
+
 require (
 	cloud.google.com/go/kms v1.25.0
 	cloud.google.com/go/storage v1.60.0

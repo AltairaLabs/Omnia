@@ -39,6 +39,11 @@ const (
 	statusFail = "fail"
 )
 
+// Execution mode constants.
+const (
+	executionModeFleet = "fleet"
+)
+
 // Config holds the worker configuration from environment variables.
 type Config struct {
 	// Job identification
@@ -132,7 +137,7 @@ func loadConfig() (*Config, error) {
 	if cfg.ContentPath == "" {
 		return nil, errors.New("ARENA_CONTENT_PATH is required")
 	}
-	if cfg.ExecutionMode == "fleet" && cfg.FleetWSURL == "" {
+	if cfg.ExecutionMode == executionModeFleet && cfg.FleetWSURL == "" {
 		return nil, errors.New("ARENA_FLEET_WS_URL is required when ARENA_EXECUTION_MODE is fleet")
 	}
 
@@ -282,7 +287,11 @@ func reportWorkItemResult(
 	}
 
 	resultJSON, _ := json.Marshal(result)
-	fmt.Printf("  [%s] %s (%.0fms)\n", result.Status, item.ID, result.DurationMs)
+	if result.Status == statusFail && result.Error != "" {
+		fmt.Printf("  [%s] %s (%.0fms): %s\n", result.Status, item.ID, result.DurationMs, result.Error)
+	} else {
+		fmt.Printf("  [%s] %s (%.0fms)\n", result.Status, item.ID, result.DurationMs)
+	}
 	if err := q.Ack(ctx, jobID, item.ID, resultJSON); err != nil {
 		fmt.Printf("  Warning: failed to ack item %s: %v\n", item.ID, err)
 	}
@@ -294,10 +303,6 @@ func executeWorkItem(
 	item *queue.WorkItem,
 	bundlePath string,
 ) (*ExecutionResult, error) {
-	if cfg.ExecutionMode == "fleet" {
-		return executeFleetWorkItem(ctx, cfg, item, bundlePath)
-	}
-
 	start := time.Now()
 
 	result := &ExecutionResult{
@@ -357,6 +362,20 @@ func executeWorkItem(
 		}
 	}
 
+	// For fleet mode, connect to the agent and prepare provider injection
+	var fleetProvider *fleet.Provider
+	if cfg.ExecutionMode == executionModeFleet {
+		fleetProvider = fleet.NewProvider("fleet-agent", cfg.FleetWSURL, nil)
+		if err := fleetProvider.Connect(ctx); err != nil {
+			return nil, fmt.Errorf("failed to connect to fleet agent: %w", err)
+		}
+		defer func() { _ = fleetProvider.Close() }()
+
+		if cfg.Verbose {
+			fmt.Printf("  Fleet mode: connected to %s\n", cfg.FleetWSURL)
+		}
+	}
+
 	// Build registries and executors from the config
 	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, a2aCleanup, _, err :=
 		engine.BuildEngineComponents(arenaCfg)
@@ -365,6 +384,11 @@ func executeWorkItem(
 	}
 	if a2aCleanup != nil {
 		defer a2aCleanup()
+	}
+
+	// For fleet mode, register the fleet provider into the engine's registry
+	if fleetProvider != nil {
+		providerRegistry.Register(fleetProvider)
 	}
 
 	// Create engine with all components
@@ -378,12 +402,14 @@ func executeWorkItem(
 		}
 	}()
 
-	// Validate provider credentials before execution
-	if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
-		result.Status = statusFail
-		result.Error = err.Error()
-		result.DurationMs = float64(time.Since(start).Milliseconds())
-		return result, nil
+	// Validate provider credentials before execution (skip for fleet — no external credentials needed)
+	if cfg.ExecutionMode != executionModeFleet {
+		if err := providers.ValidateProviderCredentials(arenaCfg, item.ProviderID); err != nil {
+			result.Status = statusFail
+			result.Error = err.Error()
+			result.DurationMs = float64(time.Since(start).Milliseconds())
+			return result, nil
+		}
 	}
 
 	// Determine scenario filter
@@ -392,9 +418,12 @@ func executeWorkItem(
 		scenarioFilter = []string{item.ScenarioID}
 	}
 
-	// Determine provider filter - empty means use all providers from arena config
+	// Determine provider filter
+	// For fleet mode, route to the fleet provider only
 	providerFilter := []string{}
-	if item.ProviderID != "" {
+	if cfg.ExecutionMode == executionModeFleet {
+		providerFilter = []string{"fleet-agent"}
+	} else if item.ProviderID != "" {
 		providerFilter = []string{item.ProviderID}
 	}
 
@@ -417,7 +446,9 @@ func executeWorkItem(
 
 	if cfg.Verbose {
 		providerDesc := "all providers"
-		if item.ProviderID != "" {
+		if cfg.ExecutionMode == executionModeFleet {
+			providerDesc = "fleet agent"
+		} else if item.ProviderID != "" {
 			providerDesc = "provider " + item.ProviderID
 		}
 		fmt.Printf("  Executing %d scenario(s) with %s\n",
@@ -468,139 +499,6 @@ func findArenaConfigFile(bundlePath, configFile string) string {
 	return ""
 }
 
-// executeFleetWorkItem runs a scenario against a deployed agent via WebSocket.
-func executeFleetWorkItem(
-	ctx context.Context,
-	cfg *Config,
-	item *queue.WorkItem,
-	bundlePath string,
-) (*ExecutionResult, error) {
-	start := time.Now()
-
-	// Find and parse the scenario file
-	scenarioPath := findScenarioFile(bundlePath, cfg.ConfigFile, item.ScenarioID)
-	if scenarioPath == "" {
-		return nil, fmt.Errorf("scenario file not found for ID %q in %s", item.ScenarioID, bundlePath)
-	}
-
-	turns, err := fleet.ParseScenarioFile(scenarioPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse scenario file: %w", err)
-	}
-
-	if cfg.Verbose {
-		fmt.Printf("  Fleet mode: running %d turn(s) against %s\n", len(turns), cfg.FleetWSURL)
-	}
-
-	// Create fleet client and run conversation
-	client := fleet.NewClient(cfg.FleetWSURL)
-	convResult, err := client.RunConversation(ctx, turns)
-	if err != nil {
-		return nil, fmt.Errorf("fleet conversation failed: %w", err)
-	}
-
-	// Build execution result from conversation transcript
-	result := &ExecutionResult{
-		Status:     statusPass,
-		DurationMs: float64(time.Since(start).Milliseconds()),
-		Metrics: map[string]float64{
-			"totalDurationMs": float64(convResult.Duration.Milliseconds()),
-			"turnCount":       float64(len(turns)),
-			"messageCount":    float64(len(convResult.Messages)),
-		},
-	}
-
-	if convResult.Error != "" {
-		result.Status = statusFail
-		result.Error = convResult.Error
-	}
-
-	if cfg.Verbose {
-		fmt.Printf("  Fleet result: %s (session=%s, messages=%d, duration=%v)\n",
-			result.Status, convResult.SessionID, len(convResult.Messages), convResult.Duration)
-	}
-
-	return result, nil
-}
-
-// findScenarioFile locates the scenario file for a given scenario ID within the bundle.
-// It reads the arena config to find scenario file entries, then checks each for a matching ID.
-func findScenarioFile(bundlePath, configFile, scenarioID string) string {
-	if scenarioID == "" || scenarioID == "default" {
-		return ""
-	}
-
-	configPath := findArenaConfigFile(bundlePath, configFile)
-	if configPath == "" {
-		return ""
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return ""
-	}
-
-	var cfg struct {
-		Spec struct {
-			Scenarios []struct {
-				File string `yaml:"file"`
-			} `yaml:"scenarios"`
-		} `yaml:"spec"`
-	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return ""
-	}
-
-	configDir := filepath.Dir(configPath)
-	for _, entry := range cfg.Spec.Scenarios {
-		if entry.File == "" {
-			continue
-		}
-		scenarioPath := filepath.Join(configDir, entry.File)
-		if matchesScenarioID(scenarioPath, entry.File, scenarioID) {
-			return scenarioPath
-		}
-	}
-
-	return ""
-}
-
-// matchesScenarioID checks if a scenario file matches the given scenario ID.
-// Uses the same fallback chain as the partitioner: spec.id > metadata.name > filename derivation.
-func matchesScenarioID(absPath, relativePath, targetID string) bool {
-	data, err := os.ReadFile(absPath)
-	if err != nil {
-		return false
-	}
-
-	var sf struct {
-		Metadata struct {
-			Name string `yaml:"name"`
-		} `yaml:"metadata"`
-		Spec struct {
-			ID string `yaml:"id"`
-		} `yaml:"spec"`
-	}
-	if err := yaml.Unmarshal(data, &sf); err != nil {
-		return false
-	}
-
-	// Check spec.id first
-	if sf.Spec.ID != "" {
-		return sf.Spec.ID == targetID
-	}
-	// Check metadata.name
-	if sf.Metadata.Name != "" {
-		return sf.Metadata.Name == targetID
-	}
-	// Fall back to filename derivation
-	base := filepath.Base(relativePath)
-	for ext := filepath.Ext(base); ext != ""; ext = filepath.Ext(base) {
-		base = strings.TrimSuffix(base, ext)
-	}
-	return base == targetID
-}
-
 // runAggregator collects and aggregates run results.
 type runAggregator struct {
 	passCount     int
@@ -635,11 +533,11 @@ func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaCon
 		}
 	}
 
-	a.processAssertions(meta.ConversationAssertionResults)
+	a.processAssertions(runID, meta.ConversationAssertionResults)
 }
 
 // processAssertions extracts assertion results and adjusts pass/fail counts.
-func (a *runAggregator) processAssertions(assertions []arenastatestore.ConversationValidationResult) {
+func (a *runAggregator) processAssertions(runID string, assertions []arenastatestore.ConversationValidationResult) {
 	for _, assertion := range assertions {
 		a.assertions = append(a.assertions, AssertionResult{
 			Name:    assertion.Type,
@@ -653,9 +551,14 @@ func (a *runAggregator) processAssertions(assertions []arenastatestore.Conversat
 			}
 			fmt.Printf("      Assertion [%s] %s: %s\n", assertion.Type, status, assertion.Message)
 		}
-		if !assertion.Passed && a.passCount > 0 {
-			a.passCount--
-			a.failCount++
+		if !assertion.Passed {
+			errMsg := fmt.Sprintf("run %s: assertion [%s] failed: %s",
+				runID, assertion.Type, assertion.Message)
+			a.errors = append(a.errors, errMsg)
+			if a.passCount > 0 {
+				a.passCount--
+				a.failCount++
+			}
 		}
 	}
 }

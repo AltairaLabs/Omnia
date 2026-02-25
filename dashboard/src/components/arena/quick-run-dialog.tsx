@@ -27,12 +27,22 @@ import { useProjectJobsWithRun, type QuickRunRequest } from "@/hooks/use-project
 import { useProjectDeployment } from "@/hooks/use-project-deployment";
 import type { ArenaJobType, ExecutionMode } from "@/types/arena";
 
+export interface QuickRunInitialValues {
+  name?: string;
+  executionMode?: ExecutionMode;
+  targetAgent?: string;
+  includePatterns?: string;
+  excludePatterns?: string;
+  verbose?: boolean;
+}
+
 interface QuickRunDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly projectId: string | undefined;
   readonly type: ArenaJobType;
   readonly onJobCreated?: (jobName: string) => void;
+  readonly initialValues?: QuickRunInitialValues;
 }
 
 const JOB_TYPE_LABELS: Record<ArenaJobType, string> = {
@@ -77,6 +87,7 @@ export function QuickRunDialog({
   projectId,
   type,
   onJobCreated,
+  initialValues,
 }: QuickRunDialogProps) {
   const { toast } = useToast();
   const { deployed, running, run } = useProjectJobsWithRun(projectId);
@@ -86,12 +97,12 @@ export function QuickRunDialog({
   const { data: agents } = useAgents({ phase: "Running" });
 
   // Form state
-  const [name, setName] = useState("");
-  const [includePatterns, setIncludePatterns] = useState("");
-  const [excludePatterns, setExcludePatterns] = useState("");
-  const [verbose, setVerbose] = useState(false);
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("direct");
-  const [targetAgent, setTargetAgent] = useState("");
+  const [name, setName] = useState(initialValues?.name ?? "");
+  const [includePatterns, setIncludePatterns] = useState(initialValues?.includePatterns ?? "");
+  const [excludePatterns, setExcludePatterns] = useState(initialValues?.excludePatterns ?? "");
+  const [verbose, setVerbose] = useState(initialValues?.verbose ?? false);
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>(initialValues?.executionMode ?? "direct");
+  const [targetAgent, setTargetAgent] = useState(initialValues?.targetAgent ?? "");
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -99,8 +110,9 @@ export function QuickRunDialog({
 
       if (!projectId) return;
 
-      // Auto-deploy if not deployed
-      if (!deployed || !deploymentStatus?.deployed) {
+      // Auto-deploy if not deployed (use && so that if either endpoint
+      // confirms deployment we skip the unnecessary re-deploy)
+      if (!deployed && !deploymentStatus?.deployed) {
         try {
           toast({
             title: "Deploying",

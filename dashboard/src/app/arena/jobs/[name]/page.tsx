@@ -40,6 +40,7 @@ import {
   FileText,
   Cpu,
   Wrench,
+  Copy,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -48,6 +49,7 @@ import {
   getConditionIcon,
 } from "@/components/arena";
 import { LogViewer } from "@/components/logs";
+import { QuickRunDialog, type QuickRunInitialValues } from "@/components/arena/quick-run-dialog";
 import type {
   ArenaJob,
   ArenaJobPhase,
@@ -784,6 +786,16 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
   );
 }
 
+function buildCloneInitialValues(job: ArenaJob): QuickRunInitialValues {
+  return {
+    executionMode: job.spec?.execution?.mode ?? "direct",
+    targetAgent: job.spec?.execution?.target?.agentRuntimeRef?.name ?? "",
+    includePatterns: job.spec?.scenarios?.include?.join(", ") ?? "",
+    excludePatterns: job.spec?.scenarios?.exclude?.join(", ") ?? "",
+    verbose: job.spec?.verbose ?? false,
+  };
+}
+
 function LoadingSkeleton() {
   return (
     <div className="flex flex-col h-full">
@@ -813,9 +825,11 @@ export default function ArenaJobDetailPage() {
 
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
 
   const isRunning = job?.status?.phase === "Running" || job?.status?.phase === "Pending";
   const isFinished = job?.status?.phase === "Succeeded" || job?.status?.phase === "Failed" || job?.status?.phase === "Cancelled";
+  const projectId = job?.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"];
 
   const handleCancel = async () => {
     if (!confirm(`Are you sure you want to cancel job "${jobName}"?`)) {
@@ -918,6 +932,15 @@ export default function ArenaJobDetailPage() {
                 Cancel
               </Button>
             )}
+            {isFinished && projectId && canEdit && (
+              <Button
+                variant="outline"
+                onClick={() => setCloneDialogOpen(true)}
+              >
+                <Copy className="h-4 w-4 mr-2" />
+                Clone
+              </Button>
+            )}
             {isFinished && canEdit && (
               <Button
                 variant="destructive"
@@ -950,6 +973,18 @@ export default function ArenaJobDetailPage() {
             Source: {job.spec?.sourceRef?.name}
           </Link>
         </div>
+
+        {/* Clone Dialog */}
+        {projectId && job.spec?.type && (
+          <QuickRunDialog
+            open={cloneDialogOpen}
+            onOpenChange={setCloneDialogOpen}
+            projectId={projectId}
+            type={job.spec.type}
+            initialValues={buildCloneInitialValues(job)}
+            onJobCreated={(newJobName) => router.push(`/arena/jobs/${newJobName}`)}
+          />
+        )}
 
         {/* Tabs */}
         <Tabs defaultValue="overview" className="space-y-4">
