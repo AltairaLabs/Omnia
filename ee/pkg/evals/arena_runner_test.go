@@ -181,7 +181,7 @@ func TestRunArenaAssertion_EmptyMessages(t *testing.T) {
 	}
 }
 
-func TestRunArenaAssertion_ContentIncludesAny_Pass(t *testing.T) {
+func TestRunArenaAssertion_ContainsAny_Pass(t *testing.T) {
 	messages := []session.Message{
 		{
 			ID: "m1", Role: session.RoleUser,
@@ -209,11 +209,11 @@ func TestRunArenaAssertion_ContentIncludesAny_Pass(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Passed {
-		t.Error("expected content_includes_any to pass")
+		t.Error("expected contains_any to pass")
 	}
 }
 
-func TestRunArenaAssertion_ContentNotIncludes_Pass(t *testing.T) {
+func TestRunArenaAssertion_ContentExcludes_Pass(t *testing.T) {
 	messages := []session.Message{
 		{
 			ID: "m1", Role: session.RoleUser,
@@ -241,11 +241,11 @@ func TestRunArenaAssertion_ContentNotIncludes_Pass(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Passed {
-		t.Error("expected content_not_includes to pass")
+		t.Error("expected content_excludes to pass")
 	}
 }
 
-func TestRunArenaAssertion_ContentNotIncludes_Fail(t *testing.T) {
+func TestRunArenaAssertion_ContentExcludes_Fail(t *testing.T) {
 	messages := []session.Message{
 		{
 			ID: "m1", Role: session.RoleAssistant,
@@ -269,7 +269,7 @@ func TestRunArenaAssertion_ContentNotIncludes_Fail(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Passed {
-		t.Error("expected content_not_includes to fail when content contains forbidden word")
+		t.Error("expected content_excludes to fail when content contains forbidden word")
 	}
 }
 
@@ -286,9 +286,9 @@ func TestRunArenaAssertion_NilAssertionParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// With no tool_names specified, the handler fails (missing required param).
+	// With no tool_names specified, tools_called fails (no tool_names specified)
 	if result.Passed {
-		t.Error("expected tools_called with nil params to fail (missing tool_names)")
+		t.Error("expected tools_called with nil params to fail (no tool_names)")
 	}
 }
 
@@ -435,7 +435,7 @@ func TestRunArenaAssertion_ToolsNotCalled_Fail(t *testing.T) {
 	}
 }
 
-func TestExtractToolCallRecords(t *testing.T) {
+func TestBuildEvalContext(t *testing.T) {
 	messages := ConvertToTypesMessages([]session.Message{
 		{
 			ID: "m1", Role: session.RoleUser,
@@ -455,13 +455,16 @@ func TestExtractToolCallRecords(t *testing.T) {
 		},
 	})
 
-	records := extractToolCallRecords(messages)
+	ctx := buildEvalContext(messages)
 
-	if len(records) != 1 {
-		t.Fatalf("expected 1 tool call record, got %d", len(records))
+	if len(ctx.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(ctx.Messages))
+	}
+	if len(ctx.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call record, got %d", len(ctx.ToolCalls))
 	}
 
-	tc := records[0]
+	tc := ctx.ToolCalls[0]
 	if tc.ToolName != "search" {
 		t.Errorf("expected tool name 'search', got %q", tc.ToolName)
 	}
@@ -473,7 +476,7 @@ func TestExtractToolCallRecords(t *testing.T) {
 	}
 }
 
-func TestExtractToolCallRecords_NoToolCalls(t *testing.T) {
+func TestBuildEvalContext_NoToolCalls(t *testing.T) {
 	messages := ConvertToTypesMessages([]session.Message{
 		{
 			ID: "m1", Role: session.RoleUser,
@@ -485,10 +488,13 @@ func TestExtractToolCallRecords_NoToolCalls(t *testing.T) {
 		},
 	})
 
-	records := extractToolCallRecords(messages)
+	ctx := buildEvalContext(messages)
 
-	if len(records) != 0 {
-		t.Errorf("expected 0 tool call records, got %d", len(records))
+	if len(ctx.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(ctx.Messages))
+	}
+	if len(ctx.ToolCalls) != 0 {
+		t.Errorf("expected 0 tool call records, got %d", len(ctx.ToolCalls))
 	}
 }
 
