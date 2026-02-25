@@ -287,15 +287,8 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	sessionService := api.NewSessionService(registry, svcCfg, log)
 	handler := api.NewHandler(sessionService, log)
 
-	// Eval results.
-	evalStore := pgprovider.NewEvalStore(pool)
-	evalService := api.NewEvalService(evalStore, log)
-	evalService.SetMessageFetcher(sessionService)
-	evalHandler := api.NewEvalHandler(evalService, log)
-
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
-	evalHandler.RegisterRoutes(mux)
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
 	mux.Handle("GET /metrics", promhttp.Handler())
 

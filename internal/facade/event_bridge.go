@@ -66,9 +66,8 @@ type EventBridge struct {
 	namespace     string
 	logger        *slog.Logger
 
-	mu           sync.RWMutex
-	enabled      bool
-	evalListener *EvalListener
+	mu      sync.RWMutex
+	enabled bool
 }
 
 // NewEventBridge creates a bridge that forwards EventBus events to session-api.
@@ -94,20 +93,6 @@ func (b *EventBridge) IsEnabled() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.enabled
-}
-
-// SetEvalListener attaches an EvalListener that will be called after each event.
-func (b *EventBridge) SetEvalListener(listener *EvalListener) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.evalListener = listener
-}
-
-// getEvalListener returns the current eval listener, if any.
-func (b *EventBridge) getEvalListener() *EvalListener {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.evalListener
 }
 
 // HandleEvent processes an EventBus event and forwards enriched data
@@ -141,26 +126,7 @@ func (b *EventBridge) HandleEvent(ctx context.Context, event EventBusEvent) erro
 		return fmt.Errorf("failed to update session stats: %w", err)
 	}
 
-	b.notifyEvalListener(ctx, event)
-
 	return nil
-}
-
-// notifyEvalListener calls the eval listener if one is set.
-// Eval errors are logged but do not fail the event pipeline.
-func (b *EventBridge) notifyEvalListener(ctx context.Context, event EventBusEvent) {
-	listener := b.getEvalListener()
-	if listener == nil {
-		return
-	}
-
-	if err := listener.OnEvent(ctx, event); err != nil {
-		b.logger.ErrorContext(ctx, "eval listener error",
-			"error", err,
-			"eventType", event.Type,
-			"sessionID", event.SessionID,
-		)
-	}
 }
 
 // buildMessageAndStats converts an EventBusEvent into a session message

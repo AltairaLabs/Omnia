@@ -20,36 +20,77 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"time"
+	"net/http"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
-
-	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/providers"
 )
 
 // Sentinel errors for eval result operations.
 var (
-	ErrMissingEvalResults    = errors.New("at least one eval result is required")
-	ErrMissingEvalStore      = errors.New("eval store is not configured")
-	ErrMissingEvalDefinition = errors.New("at least one eval definition is required")
-	ErrNoMessages            = errors.New("session has no messages")
+	ErrMissingEvalResults = errors.New("at least one eval result is required")
+	ErrMissingEvalStore   = errors.New("eval store is not configured")
 )
 
-// MessageFetcher abstracts message retrieval for eval execution.
-// This allows the eval service to fetch messages without depending on the full SessionService.
-type MessageFetcher interface {
-	GetMessages(ctx context.Context, sessionID string, opts providers.MessageQueryOpts) ([]*session.Message, error)
+// EvalDefinition represents a single eval to run against session messages.
+type EvalDefinition struct {
+	ID      string         `json:"id"`
+	Type    string         `json:"type"`
+	Trigger string         `json:"trigger"`
+	Params  map[string]any `json:"params,omitempty"`
+}
+
+// EvaluateRequest is the JSON body for eval execution requests.
+type EvaluateRequest struct {
+	Evals []EvalDefinition `json:"evals"`
+}
+
+// EvaluateResultItem represents a single eval result.
+type EvaluateResultItem struct {
+	EvalID     string   `json:"evalId"`
+	EvalType   string   `json:"evalType"`
+	Trigger    string   `json:"trigger"`
+	Passed     bool     `json:"passed"`
+	Score      *float64 `json:"score,omitempty"`
+	DurationMs int      `json:"durationMs"`
+	Source     string   `json:"source"`
+}
+
+// EvaluateResponseSummary contains aggregate counts for an evaluation run.
+type EvaluateResponseSummary struct {
+	Total  int `json:"total"`
+	Passed int `json:"passed"`
+	Failed int `json:"failed"`
+}
+
+// EvaluateResponse is the JSON response for eval execution.
+type EvaluateResponse struct {
+	Results []EvaluateResultItem    `json:"results"`
+	Summary EvaluateResponseSummary `json:"summary"`
+}
+
+// EvalResultListResponse is the JSON response for eval result list endpoints.
+type EvalResultListResponse struct {
+	Results []*EvalResult `json:"results"`
+	Total   int64         `json:"total"`
+	HasMore bool          `json:"hasMore"`
+}
+
+// EvalResultSessionResponse is the JSON response for session eval results.
+type EvalResultSessionResponse struct {
+	Results []*EvalResult `json:"results"`
+}
+
+// EvalResultSummaryResponse is the JSON response for eval result summary.
+type EvalResultSummaryResponse struct {
+	Summaries []*EvalResultSummary `json:"summaries"`
 }
 
 // EvalService provides business logic for eval result CRUD operations.
 type EvalService struct {
-	store          EvalStore
-	messageFetcher MessageFetcher
-	log            logr.Logger
+	store EvalStore
+	log   logr.Logger
 }
 
 // NewEvalService creates a new EvalService with the given store.
@@ -58,11 +99,6 @@ func NewEvalService(store EvalStore, log logr.Logger) *EvalService {
 		store: store,
 		log:   log.WithName("eval-service"),
 	}
-}
-
-// SetMessageFetcher sets the message fetcher used by EvaluateSession.
-func (s *EvalService) SetMessageFetcher(mf MessageFetcher) {
-	s.messageFetcher = mf
 }
 
 // CreateEvalResults persists one or more eval results.
@@ -103,124 +139,18 @@ func (s *EvalService) GetEvalResultSummary(ctx context.Context, opts EvalResultS
 	return s.store.GetEvalResultSummary(ctx, opts)
 }
 
-// EvaluateSession runs rule-based evals against a session's messages,
-// stores the results, and returns them.
-func (s *EvalService) EvaluateSession(
-	ctx context.Context, sessionID string, evals []EvalDefinition,
-) (*EvaluateResponse, error) {
-	if err := s.validateEvaluateRequest(sessionID, evals); err != nil {
-		return nil, err
-	}
-
-	msgs, err := s.fetchMessages(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	results := s.runEvals(evals, msgs)
-	resp := buildEvaluateResponse(results)
-
-	s.storeResults(ctx, sessionID, results)
-
-	return resp, nil
-}
-
-// validateEvaluateRequest checks preconditions for running evals.
-func (s *EvalService) validateEvaluateRequest(sessionID string, evals []EvalDefinition) error {
-	if sessionID == "" {
-		return ErrMissingSessionID
-	}
-	if len(evals) == 0 {
-		return ErrMissingEvalDefinition
-	}
-	return nil
-}
-
-// fetchMessages retrieves messages for the session.
-func (s *EvalService) fetchMessages(ctx context.Context, sessionID string) ([]session.Message, error) {
-	if s.messageFetcher == nil {
-		return nil, fmt.Errorf("message fetcher not configured")
-	}
-
-	msgPtrs, err := s.messageFetcher.GetMessages(ctx, sessionID, providers.MessageQueryOpts{
-		Limit: maxEvalMessageLimit,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if len(msgPtrs) == 0 {
-		return nil, ErrNoMessages
-	}
-
-	msgs := make([]session.Message, 0, len(msgPtrs))
-	for _, m := range msgPtrs {
-		msgs = append(msgs, *m)
-	}
-	return msgs, nil
-}
-
-// maxEvalMessageLimit is the maximum number of messages to fetch for evaluation.
-const maxEvalMessageLimit = 1000
-
-// runEvals executes each eval definition and collects results.
-func (s *EvalService) runEvals(evals []EvalDefinition, msgs []session.Message) []EvaluateResultItem {
-	results := make([]EvaluateResultItem, 0, len(evals))
-	for _, evalDef := range evals {
-		item, err := RunRuleEval(evalDef, msgs)
-		if err != nil {
-			s.log.Error(err, "eval failed", "evalId", evalDef.ID)
-			continue
-		}
-		results = append(results, item)
-	}
-	return results
-}
-
-// buildEvaluateResponse creates the response from eval results.
-func buildEvaluateResponse(results []EvaluateResultItem) *EvaluateResponse {
-	passed := 0
-	for _, r := range results {
-		if r.Passed {
-			passed++
-		}
-	}
-	return &EvaluateResponse{
-		Results: results,
-		Summary: EvaluateResponseSummary{
-			Total:  len(results),
-			Passed: passed,
-			Failed: len(results) - passed,
-		},
-	}
-}
-
-// storeResults persists eval results on a best-effort basis.
-func (s *EvalService) storeResults(ctx context.Context, sessionID string, items []EvaluateResultItem) {
-	if s.store == nil || len(items) == 0 {
-		return
-	}
-
-	now := time.Now()
-	records := make([]*EvalResult, 0, len(items))
-	for _, item := range items {
-		dur := item.DurationMs
-		r := &EvalResult{
-			ID:         uuid.New().String(),
-			SessionID:  sessionID,
-			EvalID:     item.EvalID,
-			EvalType:   item.EvalType,
-			Trigger:    item.Trigger,
-			Passed:     item.Passed,
-			Score:      item.Score,
-			DurationMs: &dur,
-			Source:     "manual",
-			CreatedAt:  now,
-		}
-		records = append(records, r)
-	}
-
-	if err := s.store.InsertEvalResults(ctx, records); err != nil {
-		s.log.Error(err, "failed to store manual eval results", "sessionID", sessionID)
+// writeEvalError maps eval-specific errors to HTTP responses.
+func writeEvalError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrMissingEvalResults):
+		w.Header().Set(headerContentType, contentTypeJSON)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+	case errors.Is(err, ErrMissingEvalStore):
+		w.Header().Set(headerContentType, contentTypeJSON)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "eval store not configured"})
+	default:
+		writeError(w, err)
 	}
 }

@@ -143,7 +143,7 @@ func TestProcessEvent_NonAssistantMessage_Skipped(t *testing.T) {
 		sessionAPI: mock,
 		namespace:  "ns",
 		logger:     testLogger(),
-		evalRunner: api.RunRuleEval,
+		evalRunner: RunRuleEval,
 	}
 
 	event := api.SessionEvent{
@@ -165,7 +165,7 @@ func TestProcessEvent_SessionAPIError(t *testing.T) {
 		sessionAPI: mock,
 		namespace:  "ns",
 		logger:     testLogger(),
-		evalRunner: api.RunRuleEval,
+		evalRunner: RunRuleEval,
 	}
 
 	event := api.SessionEvent{
@@ -192,7 +192,7 @@ func TestProcessEvent_GetMessagesError(t *testing.T) {
 		sessionAPI: mock,
 		namespace:  "ns",
 		logger:     testLogger(),
-		evalRunner: api.RunRuleEval,
+		evalRunner: RunRuleEval,
 	}
 
 	event := api.SessionEvent{
@@ -600,7 +600,7 @@ func TestProcessStreams(t *testing.T) {
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
-		evalRunner:    api.RunRuleEval,
+		evalRunner:    RunRuleEval,
 	}
 
 	streamKey := testStreamKey
@@ -650,7 +650,7 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
-		evalRunner:    api.RunRuleEval,
+		evalRunner:    RunRuleEval,
 	}
 
 	streamKey := testStreamKey
@@ -689,7 +689,7 @@ func TestHandleMessage_ProcessError_NoAck(t *testing.T) {
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
-		evalRunner:    api.RunRuleEval,
+		evalRunner:    RunRuleEval,
 	}
 
 	streamKey := testStreamKey
@@ -796,7 +796,7 @@ func TestProcessEvent_WriteError(t *testing.T) {
 		sessionAPI: mock,
 		namespace:  "ns",
 		logger:     testLogger(),
-		evalRunner: api.RunRuleEval,
+		evalRunner: RunRuleEval,
 	}
 
 	// Since filterPerTurnDeterministicEvals(nil) returns empty, processEvent returns nil.
@@ -828,7 +828,7 @@ func TestProcessEvent_SessionCompleted_TriggersCompletion(t *testing.T) {
 		sessionAPI: mock,
 		namespace:  "ns",
 		logger:     testLogger(),
-		evalRunner: api.RunRuleEval,
+		evalRunner: RunRuleEval,
 	}
 
 	// The tracker is lazily initialized and the onComplete callback is nil
@@ -861,7 +861,7 @@ func TestProcessEvent_AssistantMessage_RecordsActivity(t *testing.T) {
 		sessionAPI: mock,
 		namespace:  "ns",
 		logger:     testLogger(),
-		evalRunner: api.RunRuleEval,
+		evalRunner: RunRuleEval,
 	}
 
 	event := api.SessionEvent{

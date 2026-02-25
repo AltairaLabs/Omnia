@@ -1,27 +1,18 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: Apache-2.0
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: FSL-1.1-Apache-2.0
+This file is part of Omnia Enterprise and is subject to the
+Functional Source License. See ee/LICENSE for details.
 */
 
-package api
+package evals
 
 import (
 	"testing"
 
 	"github.com/altairalabs/omnia/internal/session"
+	api "github.com/altairalabs/omnia/internal/session/api"
 )
 
 func assistantMsg(content string) session.Message {
@@ -57,7 +48,7 @@ func TestRunRuleEval_Contains_AllMatch(t *testing.T) {
 		assistantMsg("hello world"),
 		assistantMsg("hello there"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-contains",
 		Type:   EvalTypeContains,
 		Params: map[string]any{"value": "hello"},
@@ -82,7 +73,7 @@ func TestRunRuleEval_Contains_PartialMatch(t *testing.T) {
 		assistantMsg("hello world"),
 		assistantMsg("goodbye world"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-contains",
 		Type:   EvalTypeContains,
 		Params: map[string]any{"value": "hello"},
@@ -101,7 +92,7 @@ func TestRunRuleEval_Contains_PartialMatch(t *testing.T) {
 
 func TestRunRuleEval_Contains_NoMessages(t *testing.T) {
 	msgs := []session.Message{userMsg("hello")}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-contains",
 		Type:   EvalTypeContains,
 		Params: map[string]any{"value": "hello"},
@@ -116,7 +107,7 @@ func TestRunRuleEval_Contains_NoMessages(t *testing.T) {
 }
 
 func TestRunRuleEval_Contains_MissingParam(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-contains",
 		Type:   EvalTypeContains,
 		Params: map[string]any{},
@@ -132,7 +123,7 @@ func TestRunRuleEval_NotContains_Pass(t *testing.T) {
 		assistantMsg("hello world"),
 		assistantMsg("hello there"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-not-contains",
 		Type:   EvalTypeNotContains,
 		Params: map[string]any{"value": "error"},
@@ -150,7 +141,7 @@ func TestRunRuleEval_NotContains_Fail(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("hello error world"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-not-contains",
 		Type:   EvalTypeNotContains,
 		Params: map[string]any{"value": "error"},
@@ -165,7 +156,7 @@ func TestRunRuleEval_NotContains_Fail(t *testing.T) {
 }
 
 func TestRunRuleEval_NotContains_NoMessages(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-not-contains",
 		Type:   EvalTypeNotContains,
 		Params: map[string]any{"value": "error"},
@@ -184,7 +175,7 @@ func TestRunRuleEval_MaxLength_Pass(t *testing.T) {
 		assistantMsg("short"),
 		assistantMsg("also short"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-max-length",
 		Type:   EvalTypeMaxLength,
 		Params: map[string]any{"maxLength": float64(100)},
@@ -202,7 +193,7 @@ func TestRunRuleEval_MaxLength_Fail(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("this is a longer message that exceeds our limit"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-max-length",
 		Type:   EvalTypeMaxLength,
 		Params: map[string]any{"maxLength": float64(10)},
@@ -217,7 +208,7 @@ func TestRunRuleEval_MaxLength_Fail(t *testing.T) {
 }
 
 func TestRunRuleEval_MaxLength_NoMessages(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-max-length",
 		Type:   EvalTypeMaxLength,
 		Params: map[string]any{"maxLength": float64(100)},
@@ -232,7 +223,7 @@ func TestRunRuleEval_MaxLength_NoMessages(t *testing.T) {
 }
 
 func TestRunRuleEval_MaxLength_MissingParam(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:   "test-max-length",
 		Type: EvalTypeMaxLength,
 	}
@@ -246,7 +237,7 @@ func TestRunRuleEval_MinLength_Pass(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("this is a sufficient message"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-min-length",
 		Type:   EvalTypeMinLength,
 		Params: map[string]any{"minLength": float64(5)},
@@ -264,7 +255,7 @@ func TestRunRuleEval_MinLength_Fail(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("hi"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-min-length",
 		Type:   EvalTypeMinLength,
 		Params: map[string]any{"minLength": float64(50)},
@@ -279,7 +270,7 @@ func TestRunRuleEval_MinLength_Fail(t *testing.T) {
 }
 
 func TestRunRuleEval_MinLength_NoMessages(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-min-length",
 		Type:   EvalTypeMinLength,
 		Params: map[string]any{"minLength": float64(5)},
@@ -297,7 +288,7 @@ func TestRunRuleEval_RegexMatch_Pass(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("The answer is 42."),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-regex",
 		Type:   EvalTypeRegexMatch,
 		Params: map[string]any{"pattern": `\d+`},
@@ -315,7 +306,7 @@ func TestRunRuleEval_RegexMatch_Fail(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("no numbers here"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-regex",
 		Type:   EvalTypeRegexMatch,
 		Params: map[string]any{"pattern": `^\d+$`},
@@ -333,7 +324,7 @@ func TestRunRuleEval_RegexMatch_InvalidPattern(t *testing.T) {
 	msgs := []session.Message{
 		assistantMsg("test"),
 	}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-regex",
 		Type:   EvalTypeRegexMatch,
 		Params: map[string]any{"pattern": `[invalid`},
@@ -345,7 +336,7 @@ func TestRunRuleEval_RegexMatch_InvalidPattern(t *testing.T) {
 }
 
 func TestRunRuleEval_RegexMatch_NoMessages(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-regex",
 		Type:   EvalTypeRegexMatch,
 		Params: map[string]any{"pattern": `\d+`},
@@ -360,7 +351,7 @@ func TestRunRuleEval_RegexMatch_NoMessages(t *testing.T) {
 }
 
 func TestRunRuleEval_UnsupportedType(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:   "test-unknown",
 		Type: "unknown_type",
 	}
@@ -372,7 +363,7 @@ func TestRunRuleEval_UnsupportedType(t *testing.T) {
 
 func TestRunRuleEval_SetsMetadata(t *testing.T) {
 	msgs := []session.Message{assistantMsg("hello")}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:      "meta-check",
 		Type:    EvalTypeContains,
 		Trigger: "per_turn",
@@ -432,7 +423,7 @@ func TestGetStringParam_Missing(t *testing.T) {
 }
 
 func TestRunRuleEval_NotContains_MissingParam(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-not-contains",
 		Type:   EvalTypeNotContains,
 		Params: map[string]any{},
@@ -444,7 +435,7 @@ func TestRunRuleEval_NotContains_MissingParam(t *testing.T) {
 }
 
 func TestRunRuleEval_MinLength_MissingParam(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-min-length",
 		Type:   EvalTypeMinLength,
 		Params: nil,
@@ -456,7 +447,7 @@ func TestRunRuleEval_MinLength_MissingParam(t *testing.T) {
 }
 
 func TestRunRuleEval_RegexMatch_MissingParam(t *testing.T) {
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-regex",
 		Type:   EvalTypeRegexMatch,
 		Params: map[string]any{},
@@ -469,7 +460,7 @@ func TestRunRuleEval_RegexMatch_MissingParam(t *testing.T) {
 
 func TestRunRuleEval_MaxLength_IntParam(t *testing.T) {
 	msgs := []session.Message{assistantMsg("hi")}
-	evalDef := EvalDefinition{
+	evalDef := api.EvalDefinition{
 		ID:     "test-max-int",
 		Type:   EvalTypeMaxLength,
 		Params: map[string]any{"maxLength": 100},
@@ -480,30 +471,5 @@ func TestRunRuleEval_MaxLength_IntParam(t *testing.T) {
 	}
 	if !item.Passed {
 		t.Fatal("expected passed=true")
-	}
-}
-
-func TestBuildEvaluateResponse(t *testing.T) {
-	results := []EvaluateResultItem{
-		{EvalID: "e1", Passed: true},
-		{EvalID: "e2", Passed: false},
-		{EvalID: "e3", Passed: true},
-	}
-	resp := buildEvaluateResponse(results)
-	if resp.Summary.Total != 3 {
-		t.Fatalf("expected total=3, got %d", resp.Summary.Total)
-	}
-	if resp.Summary.Passed != 2 {
-		t.Fatalf("expected passed=2, got %d", resp.Summary.Passed)
-	}
-	if resp.Summary.Failed != 1 {
-		t.Fatalf("expected failed=1, got %d", resp.Summary.Failed)
-	}
-}
-
-func TestBuildEvaluateResponse_Empty(t *testing.T) {
-	resp := buildEvaluateResponse(nil)
-	if resp.Summary.Total != 0 {
-		t.Fatalf("expected total=0, got %d", resp.Summary.Total)
 	}
 }

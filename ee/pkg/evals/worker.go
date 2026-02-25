@@ -38,7 +38,6 @@ const (
 )
 
 // EvalRunner executes a rule-based eval against session messages.
-// This interface wraps api.RunRuleEval to allow testing.
 type EvalRunner func(evalDef api.EvalDefinition, messages []session.Message) (api.EvaluateResultItem, error)
 
 // WorkerConfig holds the configuration for an EvalWorker.
@@ -47,8 +46,8 @@ type WorkerConfig struct {
 	SessionAPI  SessionAPIClient
 	Namespace   string
 	Logger      *slog.Logger
-	// EvalRunner overrides the default eval runner (api.RunRuleEval).
-	// If nil, api.RunRuleEval is used.
+	// EvalRunner overrides the default eval runner.
+	// If nil, a dispatcher that routes to RunArenaAssertion or RunRuleEval is used.
 	EvalRunner EvalRunner
 	// InactivityTimeout overrides the default completion inactivity timeout.
 	// If zero, DefaultInactivityTimeout is used.
@@ -79,7 +78,12 @@ type EvalWorker struct {
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
 	runner := config.EvalRunner
 	if runner == nil {
-		runner = NewEvalDispatcher()
+		runner = func(def api.EvalDefinition, msgs []session.Message) (api.EvaluateResultItem, error) {
+			if def.Type == EvalTypeArenaAssertion {
+				return RunArenaAssertion(def, msgs)
+			}
+			return RunRuleEval(def, msgs)
+		}
 	}
 
 	timeout := config.InactivityTimeout
@@ -456,6 +460,12 @@ func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName
 	}
 
 	return result
+}
+
+// isDeterministicEval returns true for eval types that are deterministic
+// (not requiring an LLM call) and can be run synchronously in-process.
+func isDeterministicEval(evalType string) bool {
+	return evalType != evalTypeLLMJudge
 }
 
 // filterPerTurnDeterministicEvals filters eval definitions to per_turn deterministic evals.
