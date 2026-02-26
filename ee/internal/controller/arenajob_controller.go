@@ -21,7 +21,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -185,7 +184,7 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Info("Job configuration not allowed by license",
 				"type", jobType, "replicas", replicas, "hasSchedule", hasSchedule, "error", err)
 			arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
-			r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+			SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
 				"LicenseViolation", err.Error())
 			if r.Recorder != nil {
 				r.Recorder.Event(arenaJob, corev1.EventTypeWarning, "LicenseViolation",
@@ -210,7 +209,7 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		r.handleValidationError(ctx, arenaJob, ArenaJobConditionTypeSourceValid, err)
 		return ctrl.Result{}, nil
 	}
-	r.setCondition(arenaJob, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
+	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeSourceValid, metav1.ConditionTrue,
 		"SourceValid", fmt.Sprintf("ArenaSource %s is valid and ready", arenaJob.Spec.SourceRef.Name))
 
 	// Check if we already have a K8s Job
@@ -224,7 +223,7 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// Create the K8s Job
 		if err := r.createWorkerJob(ctx, arenaJob, source); err != nil {
 			log.Error(err, "failed to create worker job")
-			r.setCondition(arenaJob, ArenaJobConditionTypeJobCreated, metav1.ConditionFalse,
+			SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeJobCreated, metav1.ConditionFalse,
 				"JobCreationFailed", err.Error())
 			if statusErr := r.Status().Update(ctx, arenaJob); statusErr != nil {
 				log.Error(statusErr, "failed to update status")
@@ -236,9 +235,9 @@ func (r *ArenaJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseRunning
 		now := metav1.Now()
 		arenaJob.Status.StartTime = &now
-		r.setCondition(arenaJob, ArenaJobConditionTypeJobCreated, metav1.ConditionTrue,
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeJobCreated, metav1.ConditionTrue,
 			"JobCreated", "Worker job created successfully")
-		r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
 			"JobRunning", "Job is running")
 
 		if r.Recorder != nil {
@@ -1410,9 +1409,9 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				// Set phase based on aggregated test results, not just K8s job completion
 				if hasTestFailures {
 					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
-					r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
 						"TestsFailed", "Job completed but some tests failed")
-					r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
 						"Failed", "Job completed but some tests failed")
 					if r.Recorder != nil {
 						r.Recorder.Event(arenaJob, corev1.EventTypeWarning, ArenaJobEventReasonJobFailed,
@@ -1423,9 +1422,9 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 						"failed", failedItems)
 				} else {
 					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseSucceeded
-					r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
 						"JobSucceeded", "Job completed successfully")
-					r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionTrue,
+					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionTrue,
 						"Succeeded", "Job completed successfully")
 					if r.Recorder != nil {
 						r.Recorder.Event(arenaJob, corev1.EventTypeNormal, ArenaJobEventReasonJobSucceeded,
@@ -1439,9 +1438,9 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
 				now := metav1.Now()
 				arenaJob.Status.CompletionTime = &now
-				r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+				SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
 					"JobFailed", condition.Message)
-				r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+				SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
 					"Failed", condition.Message)
 				if r.Recorder != nil {
 					r.Recorder.Event(arenaJob, corev1.EventTypeWarning, ArenaJobEventReasonJobFailed,
@@ -1454,7 +1453,7 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 
 	// If job is still running
 	if arenaJob.Status.Phase == omniav1alpha1.ArenaJobPhaseRunning {
-		r.setCondition(arenaJob, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
+		SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionTrue,
 			"JobRunning", fmt.Sprintf("Job running: %d/%d completed", job.Status.Succeeded, completions))
 	}
 }
@@ -1464,8 +1463,8 @@ func (r *ArenaJobReconciler) handleValidationError(ctx context.Context, arenaJob
 	log := logf.FromContext(ctx)
 
 	arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
-	r.setCondition(arenaJob, conditionType, metav1.ConditionFalse, "ValidationFailed", err.Error())
-	r.setCondition(arenaJob, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, conditionType, metav1.ConditionFalse, "ValidationFailed", err.Error())
+	SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
 		"ValidationFailed", err.Error())
 
 	if r.Recorder != nil {
@@ -1475,18 +1474,6 @@ func (r *ArenaJobReconciler) handleValidationError(ctx context.Context, arenaJob
 	if statusErr := r.Status().Update(ctx, arenaJob); statusErr != nil {
 		log.Error(statusErr, "failed to update status after validation error")
 	}
-}
-
-// setCondition sets a condition on the ArenaJob status.
-func (r *ArenaJobReconciler) setCondition(arenaJob *omniav1alpha1.ArenaJob, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	meta.SetStatusCondition(&arenaJob.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: arenaJob.Generation,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
 }
 
 // findArenaJobsForSource maps ArenaSource changes to ArenaJob reconcile requests.

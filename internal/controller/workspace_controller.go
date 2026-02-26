@@ -25,7 +25,6 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -141,7 +140,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Reconcile namespace
 	if err := r.reconcileNamespace(ctx, workspace); err != nil {
-		r.setCondition(workspace, ConditionTypeNamespaceReady, metav1.ConditionFalse,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeNamespaceReady, metav1.ConditionFalse,
 			"NamespaceFailed", err.Error())
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
 		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
@@ -149,12 +148,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(workspace, ConditionTypeNamespaceReady, metav1.ConditionTrue,
+	SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeNamespaceReady, metav1.ConditionTrue,
 		"NamespaceReady", "Namespace is ready")
 
 	// Reconcile ServiceAccounts
 	if err := r.reconcileServiceAccounts(ctx, workspace); err != nil {
-		r.setCondition(workspace, ConditionTypeServiceAccountsReady, metav1.ConditionFalse,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeServiceAccountsReady, metav1.ConditionFalse,
 			"ServiceAccountsFailed", err.Error())
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
 		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
@@ -162,12 +161,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(workspace, ConditionTypeServiceAccountsReady, metav1.ConditionTrue,
+	SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeServiceAccountsReady, metav1.ConditionTrue,
 		"ServiceAccountsReady", "ServiceAccounts are ready")
 
 	// Reconcile RoleBindings for ServiceAccounts
 	if err := r.reconcileRoleBindings(ctx, workspace); err != nil {
-		r.setCondition(workspace, ConditionTypeRoleBindingsReady, metav1.ConditionFalse,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeRoleBindingsReady, metav1.ConditionFalse,
 			"RoleBindingsFailed", err.Error())
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
 		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
@@ -175,12 +174,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(workspace, ConditionTypeRoleBindingsReady, metav1.ConditionTrue,
+	SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeRoleBindingsReady, metav1.ConditionTrue,
 		"RoleBindingsReady", "RoleBindings are ready")
 
 	// Reconcile NetworkPolicy
 	if err := r.reconcileNetworkPolicy(ctx, workspace); err != nil {
-		r.setCondition(workspace, ConditionTypeNetworkPolicyReady, metav1.ConditionFalse,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeNetworkPolicyReady, metav1.ConditionFalse,
 			"NetworkPolicyFailed", err.Error())
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
 		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
@@ -188,12 +187,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(workspace, ConditionTypeNetworkPolicyReady, metav1.ConditionTrue,
+	SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeNetworkPolicyReady, metav1.ConditionTrue,
 		"NetworkPolicyReady", "NetworkPolicy is ready")
 
 	// Reconcile Storage (PVC)
 	if err := r.reconcileStorage(ctx, workspace); err != nil {
-		r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionFalse,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeStorageReady, metav1.ConditionFalse,
 			"StorageFailed", err.Error())
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
 		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
@@ -207,16 +206,16 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if workspace.Status.Storage != nil && workspace.Status.Storage.Phase != "" {
 		if workspace.Status.Storage.Phase != string(corev1.ClaimBound) {
 			storageProvisioning = true
-			r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionFalse,
+			SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeStorageReady, metav1.ConditionFalse,
 				"StorageProvisioning", fmt.Sprintf("PVC %s is %s, waiting for volume to be provisioned",
 					workspace.Status.Storage.PVCName, workspace.Status.Storage.Phase))
 		} else {
-			r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
+			SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeStorageReady, metav1.ConditionTrue,
 				"StorageReady", "Storage is ready")
 		}
 	} else {
 		// Storage not enabled or not configured
-		r.setCondition(workspace, ConditionTypeStorageReady, metav1.ConditionTrue,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeStorageReady, metav1.ConditionTrue,
 			"StorageNotRequired", "Storage is not enabled for this workspace")
 	}
 
@@ -226,11 +225,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Set overall Ready condition based on all components
 	if storageProvisioning {
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhasePending
-		r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionFalse,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeWorkspaceReady, metav1.ConditionFalse,
 			"StorageProvisioning", "Waiting for storage to be provisioned")
 	} else {
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseReady
-		r.setCondition(workspace, ConditionTypeWorkspaceReady, metav1.ConditionTrue,
+		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeWorkspaceReady, metav1.ConditionTrue,
 			"WorkspaceReady", "Workspace is ready")
 	}
 
@@ -976,21 +975,6 @@ func (r *WorkspaceReconciler) updateMemberCount(workspace *omniav1alpha1.Workspa
 	}
 
 	workspace.Status.Members = count
-}
-
-func (r *WorkspaceReconciler) setCondition(
-	workspace *omniav1alpha1.Workspace,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&workspace.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: workspace.Generation,
-		Reason:             reason,
-		Message:            message,
-	})
 }
 
 // sanitizeName converts a name to a valid Kubernetes name component

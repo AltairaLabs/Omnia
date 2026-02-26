@@ -22,7 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -139,7 +138,7 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		if job, ok := r.inProgress.LoadAndDelete(req.NamespacedName); ok {
 			job.(*templateFetchJob).cancel()
 		}
-		r.setCondition(source, ArenaTemplateSourceConditionTypeReady, metav1.ConditionFalse,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeReady, metav1.ConditionFalse,
 			"Suspended", "ArenaTemplateSource reconciliation is suspended")
 		if err := r.Status().Update(ctx, source); err != nil {
 			log.Error(err, "Failed to update status")
@@ -154,7 +153,7 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		if err := r.LicenseValidator.ValidateArenaSource(ctx, sourceType); err != nil {
 			log.Info("Source type not allowed by license", "type", sourceType, "error", err)
 			source.Status.Phase = omniav1alpha1.ArenaTemplateSourcePhaseError
-			r.setCondition(source, ArenaTemplateSourceConditionTypeReady, metav1.ConditionFalse,
+			SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeReady, metav1.ConditionFalse,
 				"LicenseViolation", err.Error())
 			if r.Recorder != nil {
 				r.Recorder.Event(source, corev1.EventTypeWarning, "LicenseViolation",
@@ -237,13 +236,13 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		source.Status.HeadVersion = version
 		source.Status.Phase = omniav1alpha1.ArenaTemplateSourcePhaseReady
 
-		r.setCondition(source, ArenaTemplateSourceConditionTypeFetching, metav1.ConditionFalse,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeFetching, metav1.ConditionFalse,
 			"FetchComplete", "Successfully fetched content")
-		r.setCondition(source, ArenaTemplateSourceConditionTypeTemplatesScanned, metav1.ConditionTrue,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeTemplatesScanned, metav1.ConditionTrue,
 			"ScanComplete", fmt.Sprintf("Discovered %d templates", len(result.templates)))
-		r.setCondition(source, ArenaTemplateSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
 			"ArtifactAvailable", fmt.Sprintf("Content synced at revision %s", result.artifact.Revision))
-		r.setCondition(source, ArenaTemplateSourceConditionTypeReady, metav1.ConditionTrue,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeReady, metav1.ConditionTrue,
 			"Ready", "ArenaTemplateSource is ready")
 
 		nextFetch := metav1.NewTime(time.Now().Add(syncInterval))
@@ -295,7 +294,7 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	// Set phase to fetching
 	source.Status.Phase = omniav1alpha1.ArenaTemplateSourcePhaseFetching
-	r.setCondition(source, ArenaTemplateSourceConditionTypeFetching, metav1.ConditionTrue,
+	SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeFetching, metav1.ConditionTrue,
 		"FetchInProgress", "Fetching templates from source")
 	now := metav1.Now()
 	source.Status.LastFetchTime = &now
@@ -820,9 +819,9 @@ func (r *ArenaTemplateSourceReconciler) handleFetchError(ctx context.Context, so
 
 	source.Status.Phase = omniav1alpha1.ArenaTemplateSourcePhaseError
 	source.Status.Message = err.Error()
-	r.setCondition(source, ArenaTemplateSourceConditionTypeFetching, metav1.ConditionFalse,
+	SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeFetching, metav1.ConditionFalse,
 		"FetchFailed", err.Error())
-	r.setCondition(source, ArenaTemplateSourceConditionTypeReady, metav1.ConditionFalse,
+	SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeReady, metav1.ConditionFalse,
 		"FetchError", err.Error())
 
 	if r.Recorder != nil {
@@ -832,23 +831,6 @@ func (r *ArenaTemplateSourceReconciler) handleFetchError(ctx context.Context, so
 	if statusErr := r.Status().Update(ctx, source); statusErr != nil {
 		log.Error(statusErr, "Failed to update status after fetch error")
 	}
-}
-
-// setCondition sets a condition on the ArenaTemplateSource status.
-func (r *ArenaTemplateSourceReconciler) setCondition(
-	source *omniav1alpha1.ArenaTemplateSource,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&source.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: source.Generation,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
 }
 
 // SetupWithManager sets up the controller with the Manager.
