@@ -5,10 +5,10 @@ go 1.25.6
 require (
 	cloud.google.com/go/kms v1.25.0
 	cloud.google.com/go/storage v1.60.0
-	github.com/AltairaLabs/PromptKit/pkg v1.3.1
-	github.com/AltairaLabs/PromptKit/runtime v1.3.1
-	github.com/AltairaLabs/PromptKit/sdk v1.3.1
-	github.com/AltairaLabs/PromptKit/tools/arena v1.3.1
+	github.com/AltairaLabs/PromptKit/pkg v1.3.2
+	github.com/AltairaLabs/PromptKit/runtime v1.3.2
+	github.com/AltairaLabs/PromptKit/sdk v1.3.2
+	github.com/AltairaLabs/PromptKit/tools/arena v1.3.2
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
@@ -244,7 +244,9 @@ require (
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.38.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
+	go.opentelemetry.io/contrib/propagators/aws v1.40.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.40.0 // indirect
 	go.opentelemetry.io/otel/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.40.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

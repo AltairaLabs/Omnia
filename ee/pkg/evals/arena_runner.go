@@ -16,8 +16,9 @@ import (
 	"fmt"
 	"time"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register built-in eval handlers.
 	"github.com/AltairaLabs/PromptKit/runtime/types"
-	"github.com/AltairaLabs/PromptKit/tools/arena/assertions"
 
 	"github.com/altairalabs/omnia/internal/session"
 	api "github.com/altairalabs/omnia/internal/session/api"
@@ -46,49 +47,69 @@ func RunArenaAssertion(def api.EvalDefinition, messages []session.Message) (api.
 	assertionParams := extractAssertionParams(def.Params)
 
 	typesMessages := ConvertToTypesMessages(messages)
-	convCtx := buildConversationContext(typesMessages)
+	toolCalls := extractToolCallRecords(typesMessages)
 
-	registry := assertions.NewConversationAssertionRegistry()
-	assertion := assertions.ConversationAssertion{
-		Type:   assertionType,
-		Params: assertionParams,
+	registry := runtimeevals.NewEvalTypeRegistry()
+	runner := runtimeevals.NewEvalRunner(registry)
+
+	evalDef := runtimeevals.EvalDef{
+		ID:      def.ID,
+		Type:    assertionType,
+		Trigger: runtimeevals.TriggerOnConversationComplete,
+		Params:  assertionParams,
 	}
 
-	result := registry.ValidateConversation(context.Background(), assertion, convCtx)
+	evalCtx := &runtimeevals.EvalContext{
+		Messages:  typesMessages,
+		ToolCalls: toolCalls,
+		SessionID: def.ID,
+	}
+
+	results := runner.RunConversationEvals(context.Background(), []runtimeevals.EvalDef{evalDef}, evalCtx)
 
 	durationMs := int(time.Since(start).Milliseconds())
-	score := scoreFromPassed(result.Passed)
+
+	if len(results) == 0 {
+		// Handler not found or eval was skipped
+		score := 0.0
+		return api.EvaluateResultItem{
+			EvalID:     def.ID,
+			EvalType:   EvalTypeArenaAssertion,
+			Trigger:    def.Trigger,
+			Passed:     false,
+			Score:      &score,
+			DurationMs: durationMs,
+			Source:     "manual",
+		}, nil
+	}
+
+	r := results[0]
+	score := scoreFromPassed(r.Passed)
 
 	return api.EvaluateResultItem{
 		EvalID:     def.ID,
 		EvalType:   EvalTypeArenaAssertion,
 		Trigger:    def.Trigger,
-		Passed:     result.Passed,
+		Passed:     r.Passed,
 		Score:      &score,
 		DurationMs: durationMs,
 		Source:     "manual",
 	}, nil
 }
 
-// buildConversationContext constructs the ConversationContext needed by arena
-// assertion validators from a slice of types.Message.
-func buildConversationContext(messages []types.Message) *assertions.ConversationContext {
-	convCtx := &assertions.ConversationContext{
-		AllTurns: messages,
-	}
-
+// extractToolCallRecords builds ToolCallRecord entries from messages for the EvalContext.
+func extractToolCallRecords(messages []types.Message) []runtimeevals.ToolCallRecord {
+	var records []runtimeevals.ToolCallRecord
 	for i, msg := range messages {
 		for _, tc := range msg.ToolCalls {
-			record := assertions.ToolCallRecord{
+			records = append(records, runtimeevals.ToolCallRecord{
 				TurnIndex: i,
 				ToolName:  tc.Name,
 				Arguments: parseArgsToMap(tc.Args),
-			}
-			convCtx.ToolCalls = append(convCtx.ToolCalls, record)
+			})
 		}
 	}
-
-	return convCtx
+	return records
 }
 
 // parseArgsToMap converts JSON-encoded arguments to a map.

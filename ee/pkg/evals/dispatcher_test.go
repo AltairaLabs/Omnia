@@ -47,7 +47,7 @@ func TestNewEvalDispatcher_ArenaAssertion(t *testing.T) {
 		Type:    EvalTypeArenaAssertion,
 		Trigger: "on_session_complete",
 		Params: map[string]any{
-			"assertion_type": "content_includes_any",
+			"assertion_type": "contains_any",
 			"assertion_params": map[string]any{
 				"patterns": []any{"hello"},
 			},
