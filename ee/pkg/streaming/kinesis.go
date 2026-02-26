@@ -10,7 +10,6 @@ package streaming
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 )
 
@@ -70,13 +69,9 @@ func NewKinesisPublisher(client KinesisClient, config KinesisPublisherConfig) *K
 
 // Publish sends a single event to the Kinesis stream.
 func (p *KinesisPublisher) Publish(ctx context.Context, event *SessionEvent) error {
-	if event == nil {
-		return fmt.Errorf("event must not be nil")
-	}
-
-	data, err := json.Marshal(event)
+	data, err := marshalEvent(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return err
 	}
 
 	partitionKey := extractPartitionKey(event, p.config.PartitionKeyField)
@@ -107,13 +102,9 @@ func (p *KinesisPublisher) PublishBatch(ctx context.Context, events []*SessionEv
 func (p *KinesisPublisher) marshalEvents(events []*SessionEvent) ([]KinesisRecord, error) {
 	records := make([]KinesisRecord, 0, len(events))
 	for i, event := range events {
-		if event == nil {
-			return nil, fmt.Errorf("event at index %d must not be nil", i)
-		}
-
-		data, err := json.Marshal(event)
+		data, err := marshalEvent(event)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal event at index %d: %w", i, err)
+			return nil, fmt.Errorf("event at index %d: %w", i, err)
 		}
 
 		records = append(records, KinesisRecord{

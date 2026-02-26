@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
+	"github.com/altairalabs/omnia/internal/httputil"
 )
 
 // HTTP handler constants to avoid string duplication.
@@ -33,8 +35,6 @@ const (
 	errMethodNotAllowed = "method not allowed"
 	errInvalidPath      = "invalid path"
 	errFailedToEncode   = "failed to encode response"
-	contentTypeJSON     = "application/json"
-	headerContentType   = "Content-Type"
 	pathMediaDownload   = "/media/download/"
 )
 
@@ -169,7 +169,7 @@ func (h *Handler) handleRequestUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(creds); err != nil {
 		h.log.Error(err, errFailedToEncode)
 	}
@@ -337,7 +337,7 @@ func (h *Handler) handleConfirmUpload(w http.ResponseWriter, r *http.Request) {
 	h.metrics.UploadCompleted(info.SizeBytes, duration)
 	h.log.Info("upload confirmed", "uploadID", uploadID, "bytes", info.SizeBytes)
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(info); err != nil {
 		h.log.Error(err, errFailedToEncode)
 	}
@@ -394,7 +394,7 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(info); err != nil {
 		h.log.Error(err, errFailedToEncode)
 	}

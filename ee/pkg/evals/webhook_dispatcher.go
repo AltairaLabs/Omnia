@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
@@ -28,8 +29,6 @@ const (
 	maxRetries          = 3
 	initialRetryBackoff = 1 * time.Second
 	backoffMultiplier   = 2
-	contentTypeJSON     = "application/json"
-	contentTypeHeader   = "Content-Type"
 )
 
 // WebhookDispatcher evaluates recent eval results against configured
@@ -211,7 +210,7 @@ func (d *WebhookDispatcher) doPost(
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set(contentTypeHeader, contentTypeJSON)
+	req.Header.Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	for k, v := range cfg.Headers {
 		req.Header.Set(k, v)
 	}

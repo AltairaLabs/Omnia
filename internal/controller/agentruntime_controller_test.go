@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -2677,21 +2678,21 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 	Describe("ptr helper function", func() {
 		It("should return a pointer to an int32 value", func() {
 			val := int32(42)
-			result := ptr(val)
+			result := ptr.To(val)
 			Expect(result).NotTo(BeNil())
 			Expect(*result).To(Equal(int32(42)))
 		})
 
 		It("should return a pointer to a bool value", func() {
 			val := true
-			result := ptr(val)
+			result := ptr.To(val)
 			Expect(result).NotTo(BeNil())
 			Expect(*result).To(BeTrue())
 		})
 
 		It("should return a pointer to a string value", func() {
 			val := "test"
-			result := ptr(val)
+			result := ptr.To(val)
 			Expect(result).NotTo(BeNil())
 			Expect(*result).To(Equal("test"))
 		})
@@ -2699,19 +2700,19 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 
 	Describe("ptrSelectPolicy helper function", func() {
 		It("should return a pointer to MaxChangePolicySelect", func() {
-			result := ptrSelectPolicy(autoscalingv2.MaxChangePolicySelect)
+			result := ptr.To(autoscalingv2.MaxChangePolicySelect)
 			Expect(result).NotTo(BeNil())
 			Expect(*result).To(Equal(autoscalingv2.MaxChangePolicySelect))
 		})
 
 		It("should return a pointer to MinChangePolicySelect", func() {
-			result := ptrSelectPolicy(autoscalingv2.MinChangePolicySelect)
+			result := ptr.To(autoscalingv2.MinChangePolicySelect)
 			Expect(result).NotTo(BeNil())
 			Expect(*result).To(Equal(autoscalingv2.MinChangePolicySelect))
 		})
 
 		It("should return a pointer to DisabledPolicySelect", func() {
-			result := ptrSelectPolicy(autoscalingv2.DisabledPolicySelect)
+			result := ptr.To(autoscalingv2.DisabledPolicySelect)
 			Expect(result).NotTo(BeNil())
 			Expect(*result).To(Equal(autoscalingv2.DisabledPolicySelect))
 		})
@@ -2844,8 +2845,8 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 							Enabled: true,
 							Type:    omniav1alpha1.AutoscalerTypeKEDA,
 							KEDA: &omniav1alpha1.KEDAConfig{
-								PollingInterval: ptr(int32(15)),
-								CooldownPeriod:  ptr(int32(60)),
+								PollingInterval: ptr.To(int32(15)),
+								CooldownPeriod:  ptr.To(int32(60)),
 								Triggers: []omniav1alpha1.KEDATrigger{
 									{
 										Type: "cpu",
@@ -2881,7 +2882,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 							Enabled: true,
 							Type:    omniav1alpha1.AutoscalerTypeKEDA,
 							KEDA: &omniav1alpha1.KEDAConfig{
-								PollingInterval: ptr(int32(15)),
+								PollingInterval: ptr.To(int32(15)),
 								Triggers:        []omniav1alpha1.KEDATrigger{}, // Empty list
 							},
 						},

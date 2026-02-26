@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -101,21 +102,21 @@ func newGlobalPolicy(name string) *omniav1alpha1.SessionPrivacyPolicy {
 			UserOptOut: &omniav1alpha1.UserOptOutConfig{
 				Enabled:             true,
 				HonorDeleteRequests: true,
-				DeleteWithinDays:    ptr[int32](30),
+				DeleteWithinDays:    ptr.To(int32(30)),
 			},
 			Retention: &omniav1alpha1.PrivacyRetentionConfig{
 				Facade: &omniav1alpha1.PrivacyRetentionTierConfig{
-					WarmDays: ptr[int32](90),
-					ColdDays: ptr[int32](365),
+					WarmDays: ptr.To(int32(90)),
+					ColdDays: ptr.To(int32(365)),
 				},
 				RichData: &omniav1alpha1.PrivacyRetentionTierConfig{
-					WarmDays: ptr[int32](30),
-					ColdDays: ptr[int32](180),
+					WarmDays: ptr.To(int32(30)),
+					ColdDays: ptr.To(int32(180)),
 				},
 			},
 			AuditLog: &omniav1alpha1.AuditLogConfig{
 				Enabled:       true,
-				RetentionDays: ptr[int32](365),
+				RetentionDays: ptr.To(int32(365)),
 			},
 		},
 	}
@@ -143,12 +144,12 @@ func newWorkspacePolicy(name, workspaceName string) *omniav1alpha1.SessionPrivac
 			UserOptOut: &omniav1alpha1.UserOptOutConfig{
 				Enabled:             true,
 				HonorDeleteRequests: true,
-				DeleteWithinDays:    ptr[int32](14), // Stricter: faster deletion
+				DeleteWithinDays:    ptr.To(int32(14)), // Stricter: faster deletion
 			},
 			Retention: &omniav1alpha1.PrivacyRetentionConfig{
 				Facade: &omniav1alpha1.PrivacyRetentionTierConfig{
-					WarmDays: ptr[int32](60), // Stricter: less retention
-					ColdDays: ptr[int32](180),
+					WarmDays: ptr.To(int32(60)), // Stricter: less retention
+					ColdDays: ptr.To(int32(180)),
 				},
 			},
 		},
@@ -529,13 +530,13 @@ func TestComputeEffectivePolicy_AuditLogTrueWins(t *testing.T) {
 	global := newGlobalPolicy("global")
 	global.Spec.AuditLog = &omniav1alpha1.AuditLogConfig{
 		Enabled:       true,
-		RetentionDays: ptr[int32](365),
+		RetentionDays: ptr.To(int32(365)),
 	}
 
 	ws := newWorkspacePolicy("ws", "workspace")
 	ws.Spec.AuditLog = &omniav1alpha1.AuditLogConfig{
 		Enabled:       false, // Tries to disable — true wins
-		RetentionDays: ptr[int32](90),
+		RetentionDays: ptr.To(int32(90)),
 	}
 
 	chain := []*omniav1alpha1.SessionPrivacyPolicy{global, ws}
@@ -556,7 +557,7 @@ func TestComputeEffectivePolicy_RetentionMinimumWins(t *testing.T) {
 	ws := newWorkspacePolicy("ws", "workspace")
 	ws.Spec.Retention = &omniav1alpha1.PrivacyRetentionConfig{
 		RichData: &omniav1alpha1.PrivacyRetentionTierConfig{
-			WarmDays: ptr[int32](7), // Stricter than global's 30
+			WarmDays: ptr.To(int32(7)), // Stricter than global's 30
 		},
 	}
 
@@ -708,7 +709,7 @@ func TestMergeEncryption_ProviderOverrideIncludesKeyID(t *testing.T) {
 func TestMergeRetention_NilBase(t *testing.T) {
 	override := &omniav1alpha1.PrivacyRetentionConfig{
 		Facade: &omniav1alpha1.PrivacyRetentionTierConfig{
-			WarmDays: ptr[int32](30),
+			WarmDays: ptr.To(int32(30)),
 		},
 	}
 	result := mergeRetention(nil, override)
@@ -719,7 +720,7 @@ func TestMergeRetention_NilBase(t *testing.T) {
 func TestMergeRetention_NilOverride(t *testing.T) {
 	base := &omniav1alpha1.PrivacyRetentionConfig{
 		Facade: &omniav1alpha1.PrivacyRetentionTierConfig{
-			WarmDays: ptr[int32](90),
+			WarmDays: ptr.To(int32(90)),
 		},
 	}
 	result := mergeRetention(base, nil)
@@ -729,8 +730,8 @@ func TestMergeRetention_NilOverride(t *testing.T) {
 
 func TestMergeRetentionTier_NilBase(t *testing.T) {
 	override := &omniav1alpha1.PrivacyRetentionTierConfig{
-		WarmDays: ptr[int32](15),
-		ColdDays: ptr[int32](60),
+		WarmDays: ptr.To(int32(15)),
+		ColdDays: ptr.To(int32(60)),
 	}
 	result := mergeRetentionTier(nil, override)
 	require.NotNil(t, result)
@@ -740,7 +741,7 @@ func TestMergeRetentionTier_NilBase(t *testing.T) {
 
 func TestMergeRetentionTier_NilOverride(t *testing.T) {
 	base := &omniav1alpha1.PrivacyRetentionTierConfig{
-		WarmDays: ptr[int32](30),
+		WarmDays: ptr.To(int32(30)),
 	}
 	result := mergeRetentionTier(base, nil)
 	require.NotNil(t, result)
@@ -752,22 +753,22 @@ func TestMinInt32Ptr_BothNil(t *testing.T) {
 }
 
 func TestMinInt32Ptr_AOnly(t *testing.T) {
-	a := ptr[int32](10)
+	a := ptr.To(int32(10))
 	result := minInt32Ptr(a, nil)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(10), *result)
 }
 
 func TestMinInt32Ptr_BOnly(t *testing.T) {
-	b := ptr[int32](20)
+	b := ptr.To(int32(20))
 	result := minInt32Ptr(nil, b)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(20), *result)
 }
 
 func TestMinInt32Ptr_BSmaller(t *testing.T) {
-	a := ptr[int32](20)
-	b := ptr[int32](10)
+	a := ptr.To(int32(20))
+	b := ptr.To(int32(10))
 	result := minInt32Ptr(a, b)
 	require.NotNil(t, result)
 	assert.Equal(t, int32(10), *result)
@@ -776,7 +777,7 @@ func TestMinInt32Ptr_BSmaller(t *testing.T) {
 func TestMergeAuditLog_NilBase(t *testing.T) {
 	override := &omniav1alpha1.AuditLogConfig{
 		Enabled:       true,
-		RetentionDays: ptr[int32](90),
+		RetentionDays: ptr.To(int32(90)),
 	}
 	result := mergeAuditLog(nil, override)
 	require.NotNil(t, result)
@@ -787,7 +788,7 @@ func TestMergeAuditLog_NilBase(t *testing.T) {
 func TestMergeAuditLog_NilOverride(t *testing.T) {
 	base := &omniav1alpha1.AuditLogConfig{
 		Enabled:       true,
-		RetentionDays: ptr[int32](365),
+		RetentionDays: ptr.To(int32(365)),
 	}
 	result := mergeAuditLog(base, nil)
 	require.NotNil(t, result)
@@ -798,7 +799,7 @@ func TestMergeAuditLog_NilOverride(t *testing.T) {
 func TestMergeUserOptOut_NilBase(t *testing.T) {
 	override := &omniav1alpha1.UserOptOutConfig{
 		Enabled:          true,
-		DeleteWithinDays: ptr[int32](7),
+		DeleteWithinDays: ptr.To(int32(7)),
 	}
 	result := mergeUserOptOut(nil, override)
 	require.NotNil(t, result)

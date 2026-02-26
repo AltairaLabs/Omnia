@@ -22,12 +22,8 @@ import (
 	"github.com/IBM/sarama"
 )
 
-// Error messages used by the Kafka publisher.
-const (
-	errMsgPublisherClosed = "publisher is closed"
-	errMsgNilEvent        = "event must not be nil"
-	errMsgMarshalFailed   = "failed to marshal event"
-)
+// errMsgPublisherClosed is a Kafka-specific error message.
+const errMsgPublisherClosed = "publisher is closed"
 
 // saramaProducer abstracts the sarama.AsyncProducer for testing.
 type saramaProducer interface {
@@ -91,7 +87,7 @@ func newKafkaPublisherWithProducer(
 // Publish sends a single session event to Kafka. It is non-blocking.
 func (kp *KafkaPublisher) Publish(_ context.Context, event *SessionEvent) error {
 	if event == nil {
-		return errors.New(errMsgNilEvent)
+		return errors.New(ErrMsgNilEvent)
 	}
 
 	kp.mu.RLock()
@@ -156,7 +152,7 @@ func (kp *KafkaPublisher) Close() error {
 func (kp *KafkaPublisher) buildMessage(event *SessionEvent) (*sarama.ProducerMessage, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", errMsgMarshalFailed, err)
+		return nil, fmt.Errorf("%s: %w", ErrMsgMarshalFail, err)
 	}
 
 	msg := &sarama.ProducerMessage{

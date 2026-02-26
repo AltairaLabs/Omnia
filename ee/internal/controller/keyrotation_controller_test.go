@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -510,7 +511,7 @@ func TestKeyRotation_InvalidCronSchedule(t *testing.T) {
 
 func TestKeyRotation_CustomBatchSize(t *testing.T) {
 	policy := newKeyRotationPolicy()
-	policy.Spec.Encryption.KeyRotation.BatchSize = ptr[int32](50)
+	policy.Spec.Encryption.KeyRotation.BatchSize = ptr.To(int32(50))
 
 	reconciler, _, _ := setupKeyRotationTest(t, policy, newEncryptionSecret())
 	assert.Equal(t, 50, reconciler.getBatchSize(policy))

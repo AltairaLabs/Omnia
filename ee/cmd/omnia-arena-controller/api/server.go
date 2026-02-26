@@ -18,12 +18,7 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/ee/pkg/license"
-)
-
-// HTTP header and content type constants.
-const (
-	headerContentType = "Content-Type"
-	contentTypeJSON   = "application/json"
+	"github.com/altairalabs/omnia/internal/httputil"
 )
 
 // Server provides HTTP API endpoints for arena operations.
@@ -128,7 +123,7 @@ func (s *Server) handleRenderTemplate(w http.ResponseWriter, r *http.Request) {
 		s.log.Error(err, "failed to render template",
 			"templatePath", req.TemplatePath,
 			"outputPath", req.OutputPath)
-		w.Header().Set(headerContentType, contentTypeJSON)
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(RenderTemplateResponse{
 			Success: false,
@@ -137,7 +132,7 @@ func (s *Server) handleRenderTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		s.log.Error(err, "failed to encode response")
 	}
@@ -195,7 +190,7 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	result, err := PreviewTemplate(req.TemplatePath, req.ProjectName, req.Variables)
 	if err != nil {
 		s.log.Error(err, "failed to preview template", "templatePath", req.TemplatePath)
-		w.Header().Set(headerContentType, contentTypeJSON)
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(PreviewTemplateResponse{
 			Errors: []string{err.Error()},
@@ -203,7 +198,7 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		s.log.Error(err, "failed to encode response")
 	}
@@ -249,7 +244,7 @@ func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 		lic = license.OpenCoreLicense()
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(toLicenseResponse(lic)); err != nil {
 		s.log.Error(err, "failed to encode license response")
 	}

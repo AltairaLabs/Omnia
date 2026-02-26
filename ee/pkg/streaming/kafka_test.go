@@ -134,8 +134,8 @@ func TestKafkaPublisher_PublishNilEvent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil event")
 	}
-	if err.Error() != errMsgNilEvent {
-		t.Errorf("expected error %q, got %q", errMsgNilEvent, err.Error())
+	if err.Error() != ErrMsgNilEvent {
+		t.Errorf("expected error %q, got %q", ErrMsgNilEvent, err.Error())
 	}
 
 	if err := pub.Close(); err != nil {

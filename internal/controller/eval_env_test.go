@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+
+	"k8s.io/utils/ptr"
 )
 
 func TestBuildEvalEnvVars(t *testing.T) {
@@ -69,8 +71,8 @@ func TestBuildEvalEnvVars(t *testing.T) {
 			evalConfig: &omniav1alpha1.EvalConfig{
 				Enabled: true,
 				Sampling: &omniav1alpha1.EvalSampling{
-					DefaultRate:  ptr(int32(50)),
-					LLMJudgeRate: ptr(int32(5)),
+					DefaultRate:  ptr.To(int32(50)),
+					LLMJudgeRate: ptr.To(int32(5)),
 				},
 			},
 			wantLen:  3,
@@ -109,8 +111,8 @@ func TestBuildEvalEnvVars_Values(t *testing.T) {
 			},
 		},
 		Sampling: &omniav1alpha1.EvalSampling{
-			DefaultRate:  ptr(int32(75)),
-			LLMJudgeRate: ptr(int32(20)),
+			DefaultRate:  ptr.To(int32(75)),
+			LLMJudgeRate: ptr.To(int32(20)),
 		},
 	}
 

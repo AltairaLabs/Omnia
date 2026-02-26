@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -133,8 +134,8 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 		Kind:               agentRuntime.Kind,
 		Name:               agentRuntime.Name,
 		UID:                agentRuntime.UID,
-		Controller:         ptr(true),
-		BlockOwnerDeletion: ptr(true),
+		Controller:         ptr.To(true),
+		BlockOwnerDeletion: ptr.To(true),
 	}
 	scaledObject.SetOwnerReferences([]metav1.OwnerReference{ownerRef})
 
@@ -365,7 +366,7 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 				},
 				ScaleUp: &autoscalingv2.HPAScalingRules{
 					// Scale up faster than scale down (responsive to load)
-					StabilizationWindowSeconds: ptr(int32(0)),
+					StabilizationWindowSeconds: ptr.To(int32(0)),
 					Policies: []autoscalingv2.HPAScalingPolicy{
 						{
 							Type:          autoscalingv2.PercentScalingPolicy,
@@ -378,7 +379,7 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 							PeriodSeconds: 15,
 						},
 					},
-					SelectPolicy: ptrSelectPolicy(autoscalingv2.MaxChangePolicySelect),
+					SelectPolicy: ptr.To(autoscalingv2.MaxChangePolicySelect),
 				},
 			},
 		}
