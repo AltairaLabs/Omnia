@@ -9,6 +9,7 @@ import type {
   ContentPart,
 } from "@/types/websocket";
 import { useConsoleStore, useSession } from "@/stores";
+import { generateId } from "@/lib/utils";
 
 interface UseDevConsoleOptions {
   /** Unique session identifier for the dev console */
@@ -38,13 +39,6 @@ interface UseDevConsoleReturn extends ConsoleState {
 
 // WebSocket proxy port (matches server.js)
 const WS_PROXY_PORT = process.env.NEXT_PUBLIC_WS_PROXY_PORT || "3002";
-
-// Generate unique IDs with counter to guarantee uniqueness
-let idCounter = 0;
-function generateId(): string {
-  idCounter += 1;
-  return `${Date.now()}-${idCounter}-${crypto.randomUUID().slice(0, 8)}`;
-}
 
 /**
  * Extract text content from content parts.

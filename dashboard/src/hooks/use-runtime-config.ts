@@ -95,22 +95,6 @@ export function useGrafanaUrl() {
 }
 
 /**
- * Check if Loki (logs) is enabled.
- */
-export function useLokiEnabled() {
-  const { config, loading } = useRuntimeConfig();
-  return { lokiEnabled: config.lokiEnabled, loading };
-}
-
-/**
- * Check if Tempo (traces) is enabled.
- */
-export function useTempoEnabled() {
-  const { config, loading } = useRuntimeConfig();
-  return { tempoEnabled: config.tempoEnabled, loading };
-}
-
-/**
  * Get observability features status (Loki and Tempo).
  */
 export function useObservabilityConfig() {

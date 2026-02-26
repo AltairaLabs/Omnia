@@ -6,8 +6,6 @@ import {
   useDemoMode,
   useReadOnlyMode,
   useGrafanaUrl,
-  useLokiEnabled,
-  useTempoEnabled,
   useObservabilityConfig,
 } from "./use-runtime-config";
 
@@ -266,112 +264,6 @@ describe("useGrafanaUrl", () => {
     });
 
     expect(typeof result.current.grafanaUrl).toBe("string");
-  });
-});
-
-describe("useLokiEnabled", () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it("should return lokiEnabled and loading state", () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({
-        demoMode: false,
-        readOnlyMode: false,
-        readOnlyMessage: "",
-        wsProxyUrl: "",
-        grafanaUrl: "",
-        lokiEnabled: true,
-        tempoEnabled: false,
-      }),
-    });
-
-    const { result } = renderHook(() => useLokiEnabled());
-
-    expect(result.current).toHaveProperty("lokiEnabled");
-    expect(result.current).toHaveProperty("loading");
-    expect(typeof result.current.lokiEnabled).toBe("boolean");
-    expect(typeof result.current.loading).toBe("boolean");
-  });
-
-  it("should reflect loki enabled state from config", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({
-        demoMode: false,
-        readOnlyMode: false,
-        readOnlyMessage: "",
-        wsProxyUrl: "",
-        grafanaUrl: "",
-        lokiEnabled: true,
-        tempoEnabled: false,
-      }),
-    });
-
-    const { result } = renderHook(() => useLokiEnabled());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    expect(typeof result.current.lokiEnabled).toBe("boolean");
-  });
-});
-
-describe("useTempoEnabled", () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it("should return tempoEnabled and loading state", () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({
-        demoMode: false,
-        readOnlyMode: false,
-        readOnlyMessage: "",
-        wsProxyUrl: "",
-        grafanaUrl: "",
-        lokiEnabled: false,
-        tempoEnabled: true,
-      }),
-    });
-
-    const { result } = renderHook(() => useTempoEnabled());
-
-    expect(result.current).toHaveProperty("tempoEnabled");
-    expect(result.current).toHaveProperty("loading");
-    expect(typeof result.current.tempoEnabled).toBe("boolean");
-    expect(typeof result.current.loading).toBe("boolean");
-  });
-
-  it("should reflect tempo enabled state from config", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({
-        demoMode: false,
-        readOnlyMode: false,
-        readOnlyMessage: "",
-        wsProxyUrl: "",
-        grafanaUrl: "",
-        lokiEnabled: false,
-        tempoEnabled: true,
-      }),
-    });
-
-    const { result } = renderHook(() => useTempoEnabled());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    expect(typeof result.current.tempoEnabled).toBe("boolean");
   });
 });
 

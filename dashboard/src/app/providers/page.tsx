@@ -23,8 +23,7 @@ import { ProviderStatusBadge } from "@/components/providers/provider-status-badg
 import { ProviderTypeIcon } from "@/components/providers/provider-type-icon";
 import { ProviderDialog } from "@/components/providers/provider-dialog";
 import { SharedBadge } from "@/components/shared";
-import { formatCost } from "@/lib/pricing";
-import { formatTokens } from "@/lib/utils";
+import { formatCost, formatTokens } from "@/lib/pricing";
 import { useProviders, useSharedProviders } from "@/hooks";
 import { useProviderMetrics } from "@/hooks/use-provider-metrics";
 import { useWorkspace } from "@/contexts/workspace-context";

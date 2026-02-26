@@ -10,6 +10,7 @@ import type {
 } from "@/types/websocket";
 import { useDataService, type AgentConnection } from "@/lib/data";
 import { useConsoleStore, useSession } from "@/stores";
+import { generateId } from "@/lib/utils";
 
 interface UseAgentConsoleOptions {
   agentName: string;
@@ -23,13 +24,6 @@ interface UseAgentConsoleReturn extends ConsoleState {
   connect: () => void;
   disconnect: () => void;
   clearMessages: () => void;
-}
-
-// Generate unique IDs with counter to guarantee uniqueness
-let idCounter = 0;
-function generateId(): string {
-  idCounter += 1;
-  return `${Date.now()}-${idCounter}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /**

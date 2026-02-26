@@ -130,38 +130,3 @@ export function RequirePermission({
   return <>{fallback}</>;
 }
 
-/**
- * Props for PermissionGate component (alternative API).
- */
-interface PermissionGateProps {
-  /** The permission required */
-  permission: PermissionType;
-
-  /** Render function that receives permission state */
-  children: (props: { hasPermission: boolean; disabled: boolean }) => ReactNode;
-}
-
-/**
- * Render prop component for more complex permission-based rendering.
- *
- * @example
- * ```tsx
- * <PermissionGate permission="write">
- *   {({ hasPermission, disabled }) => (
- *     <Button
- *       disabled={disabled}
- *       variant={hasPermission ? "default" : "outline"}
- *       onClick={hasPermission ? onCreate : showUpgradeDialog}
- *     >
- *       Create
- *     </Button>
- *   )}
- * </PermissionGate>
- * ```
- */
-export function PermissionGate({ permission, children }: PermissionGateProps) {
-  const { permissions } = useWorkspacePermissions();
-  const hasPermission = permissions[permission];
-
-  return <>{children({ hasPermission, disabled: !hasPermission })}</>;
-}
