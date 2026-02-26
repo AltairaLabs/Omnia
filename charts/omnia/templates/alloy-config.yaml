@@ -1,0 +1,48 @@
+{{- if and .Values.tracing.alloy.enabled .Values.tracing.alloy.tempo.endpoint }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-alloy-config
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alloy
+data:
+  config.alloy: |
+    // ==========================================================================
+    // Omnia OTLP Fan-Out Configuration
+    // Receives OTLP traces and forwards to both session-api and Tempo.
+    // ==========================================================================
+
+    // OTLP gRPC receiver — agents send traces here
+    otelcol.receiver.otlp "default" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+      output {
+        traces = [
+          otelcol.exporter.otlphttp.session_api.input,
+          otelcol.exporter.otlp.tempo.input,
+        ]
+      }
+    }
+
+    // Fan-out 1: Session-API OTLP endpoint (full payload for session reconstruction)
+    otelcol.exporter.otlphttp "session_api" {
+      client {
+        endpoint = "http://{{ include "omnia.fullname" . }}-session-api:{{ .Values.sessionApi.service.port }}"
+        tls {
+          insecure = true
+        }
+      }
+    }
+
+    // Fan-out 2: Tempo (distributed tracing backend)
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = {{ .Values.tracing.alloy.tempo.endpoint | quote }}
+        tls {
+          insecure = true
+        }
+      }
+    }
+{{- end }}

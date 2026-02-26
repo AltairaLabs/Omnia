@@ -24,6 +24,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/go-logr/logr"
 )
 
@@ -143,11 +144,11 @@ func (s *EvalService) GetEvalResultSummary(ctx context.Context, opts EvalResultS
 func writeEvalError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrMissingEvalResults):
-		w.Header().Set(headerContentType, contentTypeJSON)
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
 	case errors.Is(err, ErrMissingEvalStore):
-		w.Header().Set(headerContentType, contentTypeJSON)
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "eval store not configured"})
 	default:

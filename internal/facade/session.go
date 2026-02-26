@@ -94,9 +94,9 @@ func (s *Server) setSessionTraceAttributes(ctx context.Context, c *Connection, s
 		return
 	}
 	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(attribute.String("omnia.session_id", sessionID))
+	span.SetAttributes(attribute.String("session.id", sessionID))
 	if c.sessionSpan != nil {
-		c.sessionSpan.SetAttributes(attribute.String("omnia.session_id", sessionID))
+		c.sessionSpan.SetAttributes(attribute.String("session.id", sessionID))
 	}
 }
 

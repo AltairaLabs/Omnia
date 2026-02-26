@@ -19,6 +19,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"go.opentelemetry.io/otel/trace"
@@ -68,7 +69,9 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 	log.V(1).Info("executing tool for conversation")
 
 	// Call the tool through the manager
+	start := time.Now()
 	result, err := s.toolManager.Call(ctx, toolName, args)
+	durationMs := int(time.Since(start).Milliseconds())
 	if err != nil {
 		if span != nil {
 			tracing.RecordError(span, err)
@@ -78,11 +81,7 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 
 	// Add tool result metrics to span
 	if span != nil {
-		resultSize := 0
-		if result.Content != nil {
-			resultSize = len(fmt.Sprintf("%v", result.Content))
-		}
-		tracing.AddToolResult(span, result.IsError, resultSize)
+		tracing.AddToolResult(span, result.IsError, durationMs)
 		if result.IsError {
 			tracing.RecordError(span, fmt.Errorf("tool error: %v", result.Content))
 		} else {
