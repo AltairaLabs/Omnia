@@ -86,4 +86,6 @@ export type { ToolRegistryPreviewResult } from "./use-tool-registry-preview";
 export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionEvalResults } from "./use-sessions";
 export { useEvalSummary, useRecentEvalFailures } from "./use-eval-quality";
 export type { EvalSummaryParams, EvalListParams } from "./use-eval-quality";
+export { useEvalPassRateTrends, useEvalMetrics, EVAL_TREND_RANGES } from "./use-eval-trends";
+export type { EvalTrendPoint, EvalMetricInfo, EvalTrendRange } from "./use-eval-trends";
 export { useDebounce } from "./use-debounce";

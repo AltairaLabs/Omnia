@@ -35,7 +35,7 @@ export const GET = withWorkspaceAccess(
     const params = new URLSearchParams();
     params.set("namespace", name);
 
-    const forwardParams = ["agentName", "createdAfter", "createdBefore"];
+    const forwardParams = ["agentName", "evalType", "createdAfter", "createdBefore"];
     for (const key of forwardParams) {
       const value = request.nextUrl.searchParams.get(key);
       if (value) params.set(key, value);

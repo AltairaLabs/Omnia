@@ -585,6 +585,82 @@ func TestGetEvalResultSummary_FilterDateRange(t *testing.T) {
 	assert.Empty(t, summaries)
 }
 
+// --- ListEvalResults with EvalType filter -----------------------------------
+
+func TestListEvalResults_FilterEvalType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	store := newEvalStore(t)
+	ctx := context.Background()
+	sid := testSessionID
+	seedSession(t, store, sid)
+
+	r1 := makeEvalResult(sid, "eval-type-1", "assertion")
+	r2 := makeEvalResult(sid, "eval-type-2", "llm_judge")
+	require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{r1}))
+	require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{r2}))
+
+	results, total, err := store.ListEvalResults(ctx, api.EvalResultListOpts{EvalType: "assertion"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "assertion", results[0].EvalType)
+}
+
+func TestListEvalResults_FilterEvalTypeWithOtherFilters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	store := newEvalStore(t)
+	ctx := context.Background()
+	sid := testSessionID
+	seedSession(t, store, sid)
+
+	r1 := makeEvalResult(sid, "eval-combo-type", "assertion")
+	r1.AgentName = "agent-combo"
+	r1.Passed = true
+	r2 := makeEvalResult(sid, "eval-combo-type", "llm_judge")
+	r2.AgentName = "agent-combo"
+	r2.Passed = true
+	require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{r1, r2}))
+
+	results, total, err := store.ListEvalResults(ctx, api.EvalResultListOpts{
+		AgentName: "agent-combo",
+		EvalType:  "llm_judge",
+		Passed:    ptrBool(true),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	assert.Len(t, results, 1)
+	assert.Equal(t, "llm_judge", results[0].EvalType)
+}
+
+// --- GetEvalResultSummary with EvalType filter ------------------------------
+
+func TestGetEvalResultSummary_FilterEvalType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	store := newEvalStore(t)
+	ctx := context.Background()
+	sid := testSessionID
+	seedSession(t, store, sid)
+
+	r1 := makeEvalResult(sid, "eval-st-1", "assertion")
+	r2 := makeEvalResult(sid, "eval-st-2", "llm_judge")
+	require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{r1}))
+	require.NoError(t, store.InsertEvalResults(ctx, []*api.EvalResult{r2}))
+
+	summaries, err := store.GetEvalResultSummary(ctx, api.EvalResultSummaryOpts{EvalType: "assertion"})
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "assertion", summaries[0].EvalType)
+}
+
 // --- Helper unit tests ------------------------------------------------------
 
 func TestNullJSONB(t *testing.T) {
@@ -633,12 +709,13 @@ func TestApplyEvalFilters(t *testing.T) {
 		AgentName:     "agent",
 		Namespace:     "ns",
 		EvalID:        "eid",
+		EvalType:      "assertion",
 		Passed:        ptrBool(true),
 		CreatedAfter:  now.Add(-time.Hour),
 		CreatedBefore: now,
 	})
-	assert.Len(t, qb.clauses, 6)
-	assert.Len(t, qb.args, 6)
+	assert.Len(t, qb.clauses, 7)
+	assert.Len(t, qb.args, 7)
 }
 
 func TestApplySummaryFilters(t *testing.T) {
@@ -647,11 +724,12 @@ func TestApplySummaryFilters(t *testing.T) {
 	applySummaryFilters(qb, api.EvalResultSummaryOpts{
 		AgentName:     "agent",
 		Namespace:     "ns",
+		EvalType:      "assertion",
 		CreatedAfter:  now.Add(-time.Hour),
 		CreatedBefore: now,
 	})
-	assert.Len(t, qb.clauses, 4)
-	assert.Len(t, qb.args, 4)
+	assert.Len(t, qb.clauses, 5)
+	assert.Len(t, qb.args, 5)
 }
 
 func TestApplyEvalFilters_Empty(t *testing.T) {

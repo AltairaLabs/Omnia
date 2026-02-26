@@ -65,6 +65,7 @@ type EvalResultListOpts struct {
 	AgentName     string
 	Namespace     string
 	EvalID        string
+	EvalType      string
 	Passed        *bool
 	CreatedAfter  time.Time
 	CreatedBefore time.Time
@@ -74,6 +75,7 @@ type EvalResultListOpts struct {
 type EvalResultSummaryOpts struct {
 	AgentName     string
 	Namespace     string
+	EvalType      string
 	CreatedAfter  time.Time
 	CreatedBefore time.Time
 }

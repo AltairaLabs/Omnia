@@ -212,6 +212,9 @@ func applyEvalFilters(qb *evalQueryBuilder, opts api.EvalResultListOpts) {
 	if opts.EvalID != "" {
 		qb.add("eval_id=$?", opts.EvalID)
 	}
+	if opts.EvalType != "" {
+		qb.add("eval_type=$?", opts.EvalType)
+	}
 	if opts.Passed != nil {
 		qb.add("passed=$?", *opts.Passed)
 	}
@@ -229,6 +232,9 @@ func applySummaryFilters(qb *evalQueryBuilder, opts api.EvalResultSummaryOpts) {
 	}
 	if opts.Namespace != "" {
 		qb.add("namespace=$?", opts.Namespace)
+	}
+	if opts.EvalType != "" {
+		qb.add("eval_type=$?", opts.EvalType)
 	}
 	if !opts.CreatedAfter.IsZero() {
 		qb.add("created_at >= $?", opts.CreatedAfter)

@@ -16,6 +16,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 
 export interface EvalSummaryParams {
   agentName?: string;
+  evalType?: string;
   createdAfter?: string;
   createdBefore?: string;
 }
@@ -23,6 +24,7 @@ export interface EvalSummaryParams {
 export interface EvalListParams {
   agentName?: string;
   evalId?: string;
+  evalType?: string;
   passed?: boolean;
   limit?: number;
   offset?: number;
@@ -39,6 +41,7 @@ export function useEvalSummary(params?: EvalSummaryParams) {
       "eval-summary",
       currentWorkspace?.name,
       params?.agentName,
+      params?.evalType,
       params?.createdAfter,
       params?.createdBefore,
     ],
@@ -68,6 +71,7 @@ export function useRecentEvalFailures(params?: EvalListParams) {
       currentWorkspace?.name,
       mergedParams.agentName,
       mergedParams.evalId,
+      mergedParams.evalType,
       mergedParams.limit,
       mergedParams.offset,
     ],
