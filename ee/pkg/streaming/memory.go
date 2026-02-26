@@ -37,7 +37,7 @@ func NewMemoryPublisher() *MemoryPublisher {
 // Publish stores an event in memory.
 func (m *MemoryPublisher) Publish(_ context.Context, event *SessionEvent) error {
 	if event == nil {
-		return errors.New(errMsgNilEvent)
+		return errors.New(ErrMsgNilEvent)
 	}
 
 	m.mu.Lock()

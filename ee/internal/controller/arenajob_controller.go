@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -1005,9 +1006,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot: ptr(true),
-						RunAsUser:    ptr(int64(65532)), // nonroot user
-						FSGroup:      ptr(int64(65532)),
+						RunAsNonRoot: ptr.To(true),
+						RunAsUser:    ptr.To(int64(65532)), // nonroot user
+						FSGroup:      ptr.To(int64(65532)),
 						SeccompProfile: &corev1.SeccompProfile{
 							Type: corev1.SeccompProfileTypeRuntimeDefault,
 						},
@@ -1020,9 +1021,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 							ImagePullPolicy: r.getWorkerImagePullPolicy(),
 							Env:             env,
 							SecurityContext: &corev1.SecurityContext{
-								AllowPrivilegeEscalation: ptr(false),
-								ReadOnlyRootFilesystem:   ptr(true),
-								RunAsNonRoot:             ptr(true),
+								AllowPrivilegeEscalation: ptr.To(false),
+								ReadOnlyRootFilesystem:   ptr.To(true),
+								RunAsNonRoot:             ptr.To(true),
 								Capabilities: &corev1.Capabilities{
 									Drop: []corev1.Capability{"ALL"},
 								},

@@ -27,15 +27,13 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
 
 // Handler constants.
 const (
-	contentTypeJSON   = "application/json"
-	headerContentType = "Content-Type"
-
 	defaultListLimit    = 20
 	maxListLimit        = 100
 	defaultMessageLimit = 50
@@ -304,7 +302,7 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(SessionResponse{Session: sess})
 }
@@ -462,7 +460,7 @@ func parseTimeParam(s string) (time.Time, error) {
 
 // writeJSON writes a JSON 200 OK response.
 func writeJSON(w http.ResponseWriter, data any) {
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		// Response is already partially written; log but don't try to write another error.
 		_ = err
@@ -504,7 +502,7 @@ func writeError(w http.ResponseWriter, err error) {
 		}
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
 }

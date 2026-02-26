@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -28,10 +29,6 @@ func newFakeClient(objs ...client.Object) client.Client {
 		WithScheme(newTestScheme()).
 		WithObjects(objs...).
 		Build()
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }
 
 func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
@@ -57,7 +54,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(true),
+						Enabled: ptr.To(true),
 						Size:    "5Gi",
 					},
 				},
@@ -77,7 +74,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled:      ptr(true),
+						Enabled:      ptr.To(true),
 						StorageClass: "custom-nfs",
 					},
 				},
@@ -98,7 +95,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(true),
+						Enabled: ptr.To(true),
 					},
 				},
 			},
@@ -119,7 +116,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(false),
+						Enabled: ptr.To(false),
 					},
 				},
 			},
@@ -155,7 +152,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(true),
+						Enabled: ptr.To(true),
 					},
 				},
 			},
@@ -203,7 +200,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled:     ptr(true),
+						Enabled:     ptr.To(true),
 						AccessModes: []string{"ReadWriteOnce", "ReadOnlyMany"},
 					},
 				},
@@ -223,7 +220,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(true),
+						Enabled: ptr.To(true),
 						Size:    "invalid-size",
 					},
 				},
@@ -243,7 +240,7 @@ func TestStorageManager_EnsureWorkspacePVC(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(true),
+						Enabled: ptr.To(true),
 					},
 				},
 			},
@@ -356,7 +353,7 @@ func TestStorageManager_GetWorkspacePVCName(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(true),
+						Enabled: ptr.To(true),
 					},
 				},
 			},
@@ -374,7 +371,7 @@ func TestStorageManager_GetWorkspacePVCName(t *testing.T) {
 						Name: "test-ns",
 					},
 					Storage: &omniav1alpha1.WorkspaceStorageConfig{
-						Enabled: ptr(false),
+						Enabled: ptr.To(false),
 					},
 				},
 			},
@@ -435,7 +432,7 @@ func TestStorageManager_PVCExists(t *testing.T) {
 				Name: "test-ns",
 			},
 			Storage: &omniav1alpha1.WorkspaceStorageConfig{
-				Enabled: ptr(true),
+				Enabled: ptr.To(true),
 			},
 		},
 	}

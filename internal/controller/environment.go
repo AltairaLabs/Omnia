@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -178,7 +179,7 @@ func buildSecretKeyEnvVar(secretRef *corev1.LocalObjectReference, envName, secre
 			SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: *secretRef,
 				Key:                  secretKey,
-				Optional:             boolPtr(true),
+				Optional:             ptr.To(true),
 			},
 		},
 	}

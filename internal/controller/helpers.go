@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -33,19 +32,6 @@ func SetCondition(conditions *[]metav1.Condition, generation int64, condType str
 		Reason:             reason,
 		Message:            message,
 	})
-}
-
-// Helper functions for creating pointers
-func ptr[T any](v T) *T {
-	return &v
-}
-
-func ptrSelectPolicy(p autoscalingv2.ScalingPolicySelect) *autoscalingv2.ScalingPolicySelect {
-	return &p
-}
-
-func boolPtr(b bool) *bool {
-	return &b
 }
 
 // providerKeyMapping maps provider types to their expected API key env var names.

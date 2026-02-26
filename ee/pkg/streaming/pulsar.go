@@ -10,7 +10,6 @@ package streaming
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 )
 
@@ -52,13 +51,9 @@ func NewPulsarPublisher(producer PulsarProducer, config PulsarPublisherConfig) *
 
 // Publish sends a single event to the Pulsar topic.
 func (p *PulsarPublisher) Publish(ctx context.Context, event *SessionEvent) error {
-	if event == nil {
-		return fmt.Errorf("event must not be nil")
-	}
-
-	data, err := json.Marshal(event)
+	data, err := marshalEvent(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return err
 	}
 
 	if err := p.producer.Send(ctx, data); err != nil {
@@ -71,12 +66,7 @@ func (p *PulsarPublisher) Publish(ctx context.Context, event *SessionEvent) erro
 // PublishBatch sends multiple events to the Pulsar topic by iterating and sending each.
 // Pulsar does not have a native batch API at the producer level.
 func (p *PulsarPublisher) PublishBatch(ctx context.Context, events []*SessionEvent) error {
-	for i, event := range events {
-		if err := p.Publish(ctx, event); err != nil {
-			return fmt.Errorf("failed to publish event at index %d: %w", i, err)
-		}
-	}
-	return nil
+	return defaultPublishBatch(ctx, events, p.Publish)
 }
 
 // Close closes the underlying Pulsar producer.

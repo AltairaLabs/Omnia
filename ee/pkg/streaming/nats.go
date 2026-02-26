@@ -10,7 +10,6 @@ package streaming
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 )
 
@@ -52,13 +51,9 @@ func NewNATSPublisher(js JetStreamPublisher, config NATSPublisherConfig) *NATSPu
 
 // Publish sends a single event to the configured NATS subject.
 func (p *NATSPublisher) Publish(ctx context.Context, event *SessionEvent) error {
-	if event == nil {
-		return fmt.Errorf("event must not be nil")
-	}
-
-	data, err := json.Marshal(event)
+	data, err := marshalEvent(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return err
 	}
 
 	if err := p.js.Publish(ctx, p.config.Subject, data); err != nil {
@@ -71,12 +66,7 @@ func (p *NATSPublisher) Publish(ctx context.Context, event *SessionEvent) error 
 // PublishBatch sends multiple events to the configured NATS subject by iterating
 // and publishing each individually.
 func (p *NATSPublisher) PublishBatch(ctx context.Context, events []*SessionEvent) error {
-	for i, event := range events {
-		if err := p.Publish(ctx, event); err != nil {
-			return fmt.Errorf("failed to publish event at index %d: %w", i, err)
-		}
-	}
-	return nil
+	return defaultPublishBatch(ctx, events, p.Publish)
 }
 
 // Close is a no-op for NATS as the connection is externally managed.

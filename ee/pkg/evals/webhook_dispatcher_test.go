@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
@@ -309,8 +310,9 @@ func TestCheckAndFire_CustomHeaders(t *testing.T) {
 	if receivedHeaders.Get("X-Custom") != "custom-value" {
 		t.Errorf("expected X-Custom header, got %q", receivedHeaders.Get("X-Custom"))
 	}
-	if receivedHeaders.Get(contentTypeHeader) != contentTypeJSON {
-		t.Errorf("expected Content-Type %q, got %q", contentTypeJSON, receivedHeaders.Get(contentTypeHeader))
+	if receivedHeaders.Get(httputil.HeaderContentType) != httputil.ContentTypeJSON {
+		got := receivedHeaders.Get(httputil.HeaderContentType)
+		t.Errorf("expected Content-Type %q, got %q", httputil.ContentTypeJSON, got)
 	}
 }
 

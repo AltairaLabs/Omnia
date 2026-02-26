@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -411,8 +412,8 @@ func TestIsSyncEnabled(t *testing.T) {
 		want    bool
 	}{
 		{"nil means enabled", nil, true},
-		{"explicit true", ptr(true), true},
-		{"explicit false", ptr(false), false},
+		{"explicit true", ptr.To(true), true},
+		{"explicit false", ptr.To(false), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

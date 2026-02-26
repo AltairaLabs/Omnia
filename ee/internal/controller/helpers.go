@@ -29,11 +29,6 @@ func SetCondition(conditions *[]metav1.Condition, generation int64, condType str
 	})
 }
 
-// ptr is a helper function for creating pointers to values.
-func ptr[T any](v T) *T {
-	return &v
-}
-
 // GetWorkspaceForNamespace looks up the workspace name from a namespace's labels.
 // Returns the namespace name as fallback if the workspace label is not found or
 // if the client is nil.
