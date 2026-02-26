@@ -120,7 +120,7 @@ async function discoverEvalMetrics(): Promise<string[]> {
         names.add(name);
       }
     }
-    return Array.from(names).sort();
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
   } catch {
     return [];
   }

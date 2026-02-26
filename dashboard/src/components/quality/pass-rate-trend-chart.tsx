@@ -88,7 +88,7 @@ export function PassRateTrendChart({
 
     return {
       chartData: formatted,
-      seriesNames: Array.from(nameSet).sort(),
+      seriesNames: Array.from(nameSet).sort((a, b) => a.localeCompare(b)),
     };
   }, [trends]);
 
