@@ -101,60 +101,6 @@ export async function isPrometheusAvailable(): Promise<boolean> {
 }
 
 /**
- * Helper to extract a scalar value from a Prometheus vector result.
- *
- * @param result - Prometheus response
- * @param metricFilter - Optional filter for specific label values
- * @returns The numeric value or 0 if not found
- */
-export function extractScalar(
-  result: PrometheusResponse<PrometheusVectorResult>,
-  metricFilter?: Record<string, string>
-): number {
-  if (result.status !== "success" || !result.data?.result) {
-    return 0;
-  }
-
-  for (const item of result.data.result) {
-    if (metricFilter) {
-      const matches = Object.entries(metricFilter).every(
-        ([key, value]) => item.metric[key] === value
-      );
-      if (!matches) continue;
-    }
-    return Number.parseFloat(item.value[1]) || 0;
-  }
-
-  return 0;
-}
-
-/**
- * Helper to aggregate values from a Prometheus vector result.
- *
- * @param result - Prometheus response
- * @param groupBy - Label to group results by
- * @returns Map of label value to sum of values
- */
-export function aggregateByLabel(
-  result: PrometheusResponse<PrometheusVectorResult>,
-  groupBy: string
-): Map<string, number> {
-  const aggregated = new Map<string, number>();
-
-  if (result.status !== "success" || !result.data?.result) {
-    return aggregated;
-  }
-
-  for (const item of result.data.result) {
-    const key = item.metric[groupBy] || "unknown";
-    const value = Number.parseFloat(item.value[1]) || 0;
-    aggregated.set(key, (aggregated.get(key) || 0) + value);
-  }
-
-  return aggregated;
-}
-
-/**
  * Convert a Prometheus matrix result to time series data.
  *
  * @param result - Prometheus range query response

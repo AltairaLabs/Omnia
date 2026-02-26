@@ -13,11 +13,8 @@ vi.mock("@/contexts/workspace-context", () => ({
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
   useTemplateSources,
-  useTemplateSource,
   useTemplateSourceMutations,
-  useTemplates,
   useAllTemplates,
-  useTemplate,
   useTemplateRendering,
 } from "./use-template-sources";
 
@@ -175,56 +172,6 @@ describe("use-template-sources hooks", () => {
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledTimes(2);
       });
-    });
-  });
-
-  // ==========================================================================
-  // useTemplateSource
-  // ==========================================================================
-  describe("useTemplateSource", () => {
-    it("returns null when id is not provided", async () => {
-      const { result } = renderHook(() => useTemplateSource(undefined));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-      expect(result.current.source).toBeNull();
-    });
-
-    it("fetches single source by id", async () => {
-      const source = createMockSource();
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(source),
-      });
-
-      const { result } = renderHook(() => useTemplateSource("test-source"));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.source).toEqual(source);
-      expect(mockFetch).toHaveBeenCalledWith(
-        "/api/workspaces/test-workspace/arena/template-sources/test-source"
-      );
-    });
-
-    it("handles 404 error", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: "Not Found",
-      });
-
-      const { result } = renderHook(() => useTemplateSource("nonexistent"));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.source).toBeNull();
-      expect(result.current.error?.message).toBe("Template source not found");
     });
   });
 
@@ -438,37 +385,6 @@ describe("use-template-sources hooks", () => {
   });
 
   // ==========================================================================
-  // useTemplates
-  // ==========================================================================
-  describe("useTemplates", () => {
-    it("returns empty array when source id not provided", async () => {
-      const { result } = renderHook(() => useTemplates(undefined));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-      expect(result.current.templates).toEqual([]);
-    });
-
-    it("fetches templates from a source", async () => {
-      const templates = [createMockTemplate()];
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ templates }),
-      });
-
-      const { result } = renderHook(() => useTemplates("test-source"));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.templates).toEqual(templates);
-      expect(result.current.error).toBeNull();
-    });
-  });
-
-  // ==========================================================================
   // useAllTemplates
   // ==========================================================================
   describe("useAllTemplates", () => {
@@ -544,71 +460,6 @@ describe("use-template-sources hooks", () => {
 
       expect(result.current.templates).toHaveLength(1);
       expect(result.current.templates[0].name).toBe("t1");
-    });
-  });
-
-  // ==========================================================================
-  // useTemplate
-  // ==========================================================================
-  describe("useTemplate", () => {
-    it("returns null when source or template id not provided", async () => {
-      const { result } = renderHook(() => useTemplate(undefined, undefined));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-      expect(result.current.template).toBeNull();
-    });
-
-    it("fetches single template details", async () => {
-      const template = createMockTemplate();
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ template, sourceName: "test-source", sourcePhase: "Ready" }),
-      });
-
-      const { result } = renderHook(() => useTemplate("test-source", "test-template"));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.template).toEqual(template);
-      expect(result.current.sourceName).toBe("test-source");
-    });
-
-    it("handles 404 error for template", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: "Not Found",
-      });
-
-      const { result } = renderHook(() => useTemplate("test-source", "nonexistent"));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.template).toBeNull();
-      expect(result.current.error?.message).toBe("Template not found");
-    });
-
-    it("handles generic fetch error", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "Internal Server Error",
-      });
-
-      const { result } = renderHook(() => useTemplate("test-source", "test-template"));
-
-      await waitFor(() => {
-        expect(result.current.loading).toBe(false);
-      });
-
-      expect(result.current.template).toBeNull();
-      expect(result.current.error).not.toBeNull();
     });
   });
 
