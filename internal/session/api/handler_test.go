@@ -131,6 +131,24 @@ func (m *mockWarmStore) UpdateSession(_ context.Context, s *session.Session) err
 	m.sessions[s.ID] = s
 	return nil
 }
+
+func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.TotalInputTokens += int64(update.AddInputTokens)
+	s.TotalOutputTokens += int64(update.AddOutputTokens)
+	s.EstimatedCostUSD += update.AddCostUSD
+	s.ToolCallCount += update.AddToolCalls
+	s.MessageCount += update.AddMessages
+	if update.SetStatus != "" {
+		s.Status = update.SetStatus
+	}
+	m.updatedSessions = append(m.updatedSessions, s)
+	return nil
+}
+
 func (m *mockWarmStore) DeleteSession(_ context.Context, id string) error {
 	if _, ok := m.sessions[id]; !ok {
 		return session.ErrSessionNotFound
@@ -1749,5 +1767,51 @@ func TestHandleRegisterRoutes_WriteEndpoints(t *testing.T) {
 				t.Fatalf("expected %d, got %d", rt.want, rec.Code)
 			}
 		})
+	}
+}
+
+func TestHandleCreateSession_BodyTooLarge(t *testing.T) {
+	warm := newMockWarmStore()
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	// Set a very small body limit (50 bytes).
+	h := NewHandler(svc, logr.Discard(), 50)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Send a body larger than 50 bytes.
+	largeBody := `{"id":"s1","agentName":"agent","namespace":"ns","workspaceName":"a-very-long-workspace-name-to-exceed-limit"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(largeBody))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+}
+
+func TestNewHandler_DefaultMaxBodySize(t *testing.T) {
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+	if h.maxBodySize != DefaultMaxBodySize {
+		t.Fatalf("expected default body size %d, got %d", DefaultMaxBodySize, h.maxBodySize)
+	}
+}
+
+func TestNewHandler_CustomMaxBodySize(t *testing.T) {
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard(), 1024)
+	if h.maxBodySize != 1024 {
+		t.Fatalf("expected body size 1024, got %d", h.maxBodySize)
+	}
+}
+
+func TestWriteError_BodyTooLarge(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, ErrBodyTooLarge)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
 	}
 }

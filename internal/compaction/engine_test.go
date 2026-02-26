@@ -77,23 +77,35 @@ func (m *mockWarmStore) DeleteSessionsBatch(_ context.Context, ids []string) err
 
 // Unused interface methods — satisfy the interface.
 func (m *mockWarmStore) CreateSession(context.Context, *session.Session) error { return nil }
+
 func (m *mockWarmStore) GetSession(context.Context, string) (*session.Session, error) {
 	return nil, nil
 }
-func (m *mockWarmStore) UpdateSession(context.Context, *session.Session) error         { return nil }
+
+func (m *mockWarmStore) UpdateSession(context.Context, *session.Session) error { return nil }
+
+func (m *mockWarmStore) UpdateSessionStats(context.Context, string, session.SessionStatsUpdate) error {
+	return nil
+}
+
 func (m *mockWarmStore) DeleteSession(context.Context, string) error                   { return nil }
 func (m *mockWarmStore) AppendMessage(context.Context, string, *session.Message) error { return nil }
+
 func (m *mockWarmStore) GetMessages(context.Context, string, providers.MessageQueryOpts) ([]*session.Message, error) {
 	return nil, nil
 }
+
 func (m *mockWarmStore) ListSessions(context.Context, providers.SessionListOpts) (*providers.SessionPage, error) {
 	return nil, nil
 }
+
 func (m *mockWarmStore) SearchSessions(context.Context, string, providers.SessionListOpts) (*providers.SessionPage, error) {
 	return nil, nil
 }
+
 func (m *mockWarmStore) CreatePartition(context.Context, time.Time) error { return nil }
 func (m *mockWarmStore) DropPartition(context.Context, time.Time) error   { return nil }
+
 func (m *mockWarmStore) ListPartitions(context.Context) ([]providers.PartitionInfo, error) {
 	return nil, nil
 }

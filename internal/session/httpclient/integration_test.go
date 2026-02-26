@@ -89,6 +89,24 @@ func (w *integrationWarmStore) AppendMessage(_ context.Context, sessionID string
 	return nil
 }
 
+func (w *integrationWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s, ok := w.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.TotalInputTokens += int64(update.AddInputTokens)
+	s.TotalOutputTokens += int64(update.AddOutputTokens)
+	s.EstimatedCostUSD += update.AddCostUSD
+	s.ToolCallCount += update.AddToolCalls
+	s.MessageCount += update.AddMessages
+	if update.SetStatus != "" {
+		s.Status = update.SetStatus
+	}
+	return nil
+}
+
 func (w *integrationWarmStore) DeleteSession(_ context.Context, id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

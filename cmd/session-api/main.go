@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -239,17 +240,61 @@ func run() error {
 	return nil
 }
 
-// initPool creates and returns a pgxpool connection pool.
+// Pool configuration defaults.
+const (
+	defaultMaxConns        = 25
+	defaultMinConns        = 5
+	defaultMaxConnLifetime = time.Hour
+	defaultMaxConnIdleTime = 30 * time.Minute
+)
+
+// initPool creates and returns a pgxpool connection pool with configured limits.
+// Pool settings are read from environment variables with sensible defaults:
+//
+//	PG_MAX_CONNS (default 25), PG_MIN_CONNS (default 5),
+//	PG_MAX_CONN_LIFETIME (default 1h), PG_MAX_CONN_IDLE_TIME (default 30m).
 func initPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		return nil, fmt.Errorf("parsing postgres connection string: %w", err)
 	}
+
+	poolCfg.MaxConns = envInt32("PG_MAX_CONNS", defaultMaxConns)
+	poolCfg.MinConns = envInt32("PG_MIN_CONNS", defaultMinConns)
+	poolCfg.MaxConnLifetime = envDuration("PG_MAX_CONN_LIFETIME", defaultMaxConnLifetime)
+	poolCfg.MaxConnIdleTime = envDuration("PG_MAX_CONN_IDLE_TIME", defaultMaxConnIdleTime)
+
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating postgres pool: %w", err)
 	}
 	return pool, nil
+}
+
+// envInt32 reads an environment variable as int32, returning def on missing/invalid values.
+func envInt32(key string, def int32) int32 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		return def
+	}
+	return int32(n)
+}
+
+// envDuration reads an environment variable as a time.Duration, returning def on missing/invalid.
+func envDuration(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return def
+	}
+	return d
 }
 
 // runMigrations applies database schema migrations.

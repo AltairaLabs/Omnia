@@ -717,6 +717,12 @@ func (m *MockWarmStoreProvider) UpdateSession(
 	return nil
 }
 
+func (m *MockWarmStoreProvider) UpdateSessionStats(
+	_ context.Context, _ string, _ session.SessionStatsUpdate,
+) error {
+	return nil
+}
+
 func (m *MockWarmStoreProvider) DeleteSession(
 	_ context.Context, id string,
 ) error {

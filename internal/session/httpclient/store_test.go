@@ -370,6 +370,28 @@ func TestServerErrorResponses(t *testing.T) {
 	}
 }
 
+func TestWithHTTPTimeout(t *testing.T) {
+	store := NewStore("http://unused", logr.Discard(), WithHTTPTimeout(5*time.Second))
+	if store.httpClient.Timeout != 5*time.Second {
+		t.Fatalf("expected 5s timeout, got %v", store.httpClient.Timeout)
+	}
+}
+
+func TestWithHTTPClient(t *testing.T) {
+	custom := &http.Client{Timeout: 99 * time.Second}
+	store := NewStore("http://unused", logr.Discard(), WithHTTPClient(custom))
+	if store.httpClient != custom {
+		t.Fatal("expected custom HTTP client to be used")
+	}
+}
+
+func TestDefaultHTTPTimeout(t *testing.T) {
+	store := NewStore("http://unused", logr.Discard())
+	if store.httpClient.Timeout != DefaultHTTPTimeout {
+		t.Fatalf("expected default timeout %v, got %v", DefaultHTTPTimeout, store.httpClient.Timeout)
+	}
+}
+
 func TestReadErrorInvalidJSON(t *testing.T) {
 	// Server that returns 500 with non-JSON body.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

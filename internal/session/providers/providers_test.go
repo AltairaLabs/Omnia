@@ -171,6 +171,22 @@ func (m *mockWarmStore) UpdateSession(_ context.Context, s *session.Session) err
 	return nil
 }
 
+func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.TotalInputTokens += int64(update.AddInputTokens)
+	s.TotalOutputTokens += int64(update.AddOutputTokens)
+	s.EstimatedCostUSD += update.AddCostUSD
+	s.ToolCallCount += update.AddToolCalls
+	s.MessageCount += update.AddMessages
+	if update.SetStatus != "" {
+		s.Status = update.SetStatus
+	}
+	return nil
+}
+
 func (m *mockWarmStore) DeleteSession(_ context.Context, sessionID string) error {
 	if _, ok := m.sessions[sessionID]; !ok {
 		return session.ErrSessionNotFound

@@ -36,6 +36,26 @@ import (
 // ErrNotImplemented is returned for Store methods not needed by the facade.
 var ErrNotImplemented = errors.New("not implemented by HTTP session client")
 
+// Default timeout for HTTP requests to the session-api.
+const DefaultHTTPTimeout = 30 * time.Second
+
+// StoreOption is a functional option for configuring the HTTP session store.
+type StoreOption func(*Store)
+
+// WithHTTPTimeout sets the timeout for HTTP requests. Defaults to 30s.
+func WithHTTPTimeout(d time.Duration) StoreOption {
+	return func(s *Store) {
+		s.httpClient.Timeout = d
+	}
+}
+
+// WithHTTPClient sets a custom HTTP client. When set, WithHTTPTimeout is ignored.
+func WithHTTPClient(c *http.Client) StoreOption {
+	return func(s *Store) {
+		s.httpClient = c
+	}
+}
+
 // Store implements session.Store by calling the session-api over HTTP.
 // It is used by the facade's recordingResponseWriter for session persistence.
 type Store struct {
@@ -45,14 +65,18 @@ type Store struct {
 }
 
 // NewStore creates a new HTTP-backed session store.
-func NewStore(baseURL string, log logr.Logger) *Store {
-	return &Store{
+func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
+	s := &Store{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: DefaultHTTPTimeout,
 		},
 		log: log.WithName("session-httpclient"),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // createSessionRequest mirrors the session-api CreateSessionRequest.
