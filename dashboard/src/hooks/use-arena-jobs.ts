@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
+import { handleMutationResponse } from "@/lib/api/fetch-helpers";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
@@ -109,14 +110,6 @@ export function useArenaJob(name: string | undefined): UseArenaJobResult {
     error: error as Error | null,
     refetch,
   };
-}
-
-async function handleMutationResponse(response: Response, fallbackMsg: string): Promise<Response> {
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || fallbackMsg);
-  }
-  return response;
 }
 
 /**
