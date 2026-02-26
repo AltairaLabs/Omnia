@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
+	"github.com/altairalabs/omnia/internal/pgutil"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
@@ -160,11 +161,12 @@ func (l *Logger) Query(ctx context.Context, opts QueryOpts) (*QueryResult, error
 	}
 
 	qb := buildQueryFilters(opts)
-	where := qb.where()
+	where := qb.Where()
 
 	// Count total matching entries.
 	var total int64
-	if err := l.pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log WHERE 1=1"+where, qb.args...).Scan(&total); err != nil {
+	countSQL := "SELECT COUNT(*) FROM audit_log WHERE 1=1" + where
+	if err := l.pool.QueryRow(ctx, countSQL, qb.Args()...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("audit: count query: %w", err)
 	}
 
@@ -176,9 +178,9 @@ func (l *Logger) Query(ctx context.Context, opts QueryOpts) (*QueryResult, error
 		workspace, agent_name, namespace, query, result_count,
 		host(ip_address), user_agent, reason, metadata
 		FROM audit_log WHERE 1=1` + where + ` ORDER BY timestamp DESC`
-	dataQuery = qb.appendPagination(dataQuery, limit, offset)
+	dataQuery = qb.AppendPagination(dataQuery, limit, offset)
 
-	rows, err := l.pool.Query(ctx, dataQuery, qb.args...)
+	rows, err := l.pool.Query(ctx, dataQuery, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("audit: data query: %w", err)
 	}
@@ -294,25 +296,25 @@ func (l *Logger) writeBatch(entries []*Entry) {
 // --- query helpers ----------------------------------------------------------
 
 // buildQueryFilters constructs WHERE clause filters from QueryOpts.
-func buildQueryFilters(opts QueryOpts) *queryBuilder {
-	qb := &queryBuilder{}
+func buildQueryFilters(opts QueryOpts) *pgutil.QueryBuilder {
+	qb := &pgutil.QueryBuilder{}
 	if opts.SessionID != "" {
-		qb.add("session_id = $?", opts.SessionID)
+		qb.Add("session_id = $?", opts.SessionID)
 	}
 	if opts.UserID != "" {
-		qb.add("user_id = $?", opts.UserID)
+		qb.Add("user_id = $?", opts.UserID)
 	}
 	if opts.Workspace != "" {
-		qb.add("workspace = $?", opts.Workspace)
+		qb.Add("workspace = $?", opts.Workspace)
 	}
 	if len(opts.EventTypes) > 0 {
-		qb.add("event_type = ANY($?)", opts.EventTypes)
+		qb.Add("event_type = ANY($?)", opts.EventTypes)
 	}
 	if !opts.From.IsZero() {
-		qb.add("timestamp >= $?", opts.From)
+		qb.Add("timestamp >= $?", opts.From)
 	}
 	if !opts.To.IsZero() {
-		qb.add("timestamp < $?", opts.To)
+		qb.Add("timestamp < $?", opts.To)
 	}
 	return qb
 }
@@ -355,15 +357,15 @@ func scanEntry(row interface{ Scan(dest ...any) error }) (*Entry, error) {
 		return nil, fmt.Errorf("audit: scan row: %w", err)
 	}
 
-	e.SessionID = derefString(sessionID)
-	e.UserID = derefString(userID)
-	e.Workspace = derefString(workspace)
-	e.AgentName = derefString(agentName)
-	e.Namespace = derefString(ns)
-	e.Query = derefString(query)
-	e.IPAddress = derefString(ipAddr)
-	e.UserAgent = derefString(userAgent)
-	e.Reason = derefString(reason)
+	e.SessionID = pgutil.DerefString(sessionID)
+	e.UserID = pgutil.DerefString(userID)
+	e.Workspace = pgutil.DerefString(workspace)
+	e.AgentName = pgutil.DerefString(agentName)
+	e.Namespace = pgutil.DerefString(ns)
+	e.Query = pgutil.DerefString(query)
+	e.IPAddress = pgutil.DerefString(ipAddr)
+	e.UserAgent = pgutil.DerefString(userAgent)
+	e.Reason = pgutil.DerefString(reason)
 	if resultCount != nil {
 		e.ResultCount = *resultCount
 	}
@@ -399,11 +401,11 @@ func buildBatchInsert(entries []*Entry) (string, []any) {
 
 		args = append(args,
 			e.Timestamp, e.EventType,
-			nullString(e.SessionID), nullString(e.UserID),
-			nullString(e.Workspace), nullString(e.AgentName),
-			nullString(e.Namespace), nullString(e.Query),
-			nullInt(e.ResultCount), nullString(e.IPAddress),
-			nullString(e.UserAgent), nullString(e.Reason),
+			pgutil.NullString(e.SessionID), pgutil.NullString(e.UserID),
+			pgutil.NullString(e.Workspace), pgutil.NullString(e.AgentName),
+			pgutil.NullString(e.Namespace), pgutil.NullString(e.Query),
+			pgutil.NullInt(e.ResultCount), pgutil.NullString(e.IPAddress),
+			pgutil.NullString(e.UserAgent), pgutil.NullString(e.Reason),
 			metadataJSON,
 		)
 	}
@@ -418,45 +420,6 @@ func buildBatchInsert(entries []*Entry) (string, []any) {
 }
 
 // --- helpers ----------------------------------------------------------------
-
-func nullString(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func nullInt(v int) *int {
-	if v == 0 {
-		return nil
-	}
-	return &v
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-// queryBuilder is a minimal helper for building parameterized WHERE clauses.
-type queryBuilder struct {
-	clauses []string
-	args    []any
-}
-
-func (qb *queryBuilder) add(clause string, arg any) {
-	qb.args = append(qb.args, arg)
-	qb.clauses = append(qb.clauses, strings.ReplaceAll(clause, "$?", "$"+strconv.Itoa(len(qb.args))))
-}
-
-func (qb *queryBuilder) where() string {
-	if len(qb.clauses) == 0 {
-		return ""
-	}
-	return " AND " + strings.Join(qb.clauses, " AND ")
-}
 
 // retentionWorker periodically deletes audit entries older than the configured retention period.
 func (l *Logger) retentionWorker() {
@@ -490,16 +453,4 @@ func (l *Logger) deleteExpiredEntries() {
 	}
 	l.log.V(1).Info("audit retention cleanup completed",
 		"cutoff", cutoff, "deleted", result.RowsAffected())
-}
-
-func (qb *queryBuilder) appendPagination(query string, limit, offset int) string {
-	if limit > 0 {
-		qb.args = append(qb.args, limit)
-		query += " LIMIT $" + strconv.Itoa(len(qb.args))
-	}
-	if offset > 0 {
-		qb.args = append(qb.args, offset)
-		query += " OFFSET $" + strconv.Itoa(len(qb.args))
-	}
-	return query
 }

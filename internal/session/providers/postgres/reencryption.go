@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/altairalabs/omnia/ee/pkg/encryption"
+	"github.com/altairalabs/omnia/internal/pgutil"
 	"github.com/altairalabs/omnia/internal/session"
 )
 
@@ -73,7 +74,7 @@ func (p *Provider) GetEncryptedMessageBatch(
 func (p *Provider) UpdateMessageContent(ctx context.Context, _ string, msg *session.Message) error {
 	query := `UPDATE messages SET content = $1, metadata = $2 WHERE id = $3`
 
-	_, err := p.pool.Exec(ctx, query, msg.Content, marshalJSONB(msg.Metadata), msg.ID)
+	_, err := p.pool.Exec(ctx, query, msg.Content, pgutil.MarshalJSONB(msg.Metadata), msg.ID)
 	if err != nil {
 		return fmt.Errorf("updating message content: %w", err)
 	}
