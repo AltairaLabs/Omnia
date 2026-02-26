@@ -2007,7 +2007,7 @@ spec:
 			reconciler := &ArenaJobReconciler{
 				Client: nil,
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "test-namespace")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "test-namespace")
 			Expect(result).To(Equal("test-namespace"))
 		})
 
@@ -2030,7 +2030,7 @@ spec:
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "ns-with-workspace-label")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "ns-with-workspace-label")
 			Expect(result).To(Equal("my-workspace"))
 		})
 
@@ -2050,7 +2050,7 @@ spec:
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "ns-without-workspace-label")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "ns-without-workspace-label")
 			Expect(result).To(Equal("ns-without-workspace-label"))
 		})
 
@@ -2060,7 +2060,7 @@ spec:
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "non-existent-namespace")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "non-existent-namespace")
 			Expect(result).To(Equal("non-existent-namespace"))
 		})
 	})

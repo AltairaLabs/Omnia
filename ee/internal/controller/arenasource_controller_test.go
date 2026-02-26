@@ -732,7 +732,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			creds, err := reconciler.loadOCICredentials(ctx, arenaSourceNamespace, "docker-config-secret")
+			creds, err := LoadOCICredentials(ctx, reconciler.Client, arenaSourceNamespace, "docker-config-secret")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(creds.DockerConfig).NotTo(BeEmpty())
 			Expect(creds.DockerConfig).To(ContainSubstring("registry.example.com"))
@@ -1090,7 +1090,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     20,
 			}
 
-			_, _, _, err = reconciler.storeArtifact(source, artifact)
+			_, _, err = reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("WorkspaceContentPath is required"))
 		})
@@ -1349,9 +1349,8 @@ var _ = Describe("ArenaSource Controller", func() {
 				Revision: "rev1",
 			}
 
-			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			contentPath, version, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(BeEmpty(), "URL should be empty in filesystem mode")
 			Expect(contentPath).To(Equal("arena/test-no-change/.arena/versions/abc123"))
 			Expect(version).To(Equal("abc123"))
 		})
@@ -1394,9 +1393,8 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     100,
 			}
 
-			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			contentPath, version, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(BeEmpty(), "URL should be empty in filesystem mode")
 			Expect(version).NotTo(BeEmpty(), "Version should be set")
 			Expect(contentPath).To(ContainSubstring(".arena/versions/"))
 
@@ -1450,12 +1448,12 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			By("syncing first time")
-			contentPath1, version1, _, err := reconciler.storeArtifact(source, artifact)
+			contentPath1, version1, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("syncing second time with same content")
 			artifact.Revision = "rev2" // Different revision but same content
-			contentPath2, version2, _, err := reconciler.storeArtifact(source, artifact)
+			contentPath2, version2, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying same version was returned")
@@ -1508,7 +1506,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     50,
 			}
 
-			_, version, _, err := reconciler.storeArtifact(source, artifact)
+			_, version, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying old versions were garbage collected")
@@ -1619,7 +1617,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			reconciler := &ArenaSourceReconciler{
 				Client: k8sClient,
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "ws-test-namespace")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "ws-test-namespace")
 			Expect(result).To(Equal("my-workspace"))
 		})
 
@@ -1639,7 +1637,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			reconciler := &ArenaSourceReconciler{
 				Client: k8sClient,
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "ws-test-no-label")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "ws-test-no-label")
 			Expect(result).To(Equal("ws-test-no-label"))
 		})
 
@@ -1648,7 +1646,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			reconciler := &ArenaSourceReconciler{
 				Client: k8sClient,
 			}
-			result := reconciler.getWorkspaceForNamespace(ctx, "nonexistent-namespace")
+			result := GetWorkspaceForNamespace(ctx, reconciler.Client, "nonexistent-namespace")
 			Expect(result).To(Equal("nonexistent-namespace"))
 		})
 	})
@@ -1661,8 +1659,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			By("calling updateHEAD")
-			reconciler := &ArenaSourceReconciler{}
-			err = reconciler.updateHEAD(tmpDir, "v1.0.0")
+			err = UpdateHEAD(tmpDir, "v1.0.0")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying HEAD file exists with correct content")
@@ -1677,14 +1674,12 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
-			reconciler := &ArenaSourceReconciler{}
-
 			By("creating first version")
-			err = reconciler.updateHEAD(tmpDir, "v1.0.0")
+			err = UpdateHEAD(tmpDir, "v1.0.0")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("updating to second version")
-			err = reconciler.updateHEAD(tmpDir, "v2.0.0")
+			err = UpdateHEAD(tmpDir, "v2.0.0")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying HEAD has new version")
@@ -1710,7 +1705,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
-			err = reconciler.gcOldVersions(tmpDir)
+			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Both versions should still exist
@@ -1725,7 +1720,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
-			err = reconciler.gcOldVersions(tmpDir)
+			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -1749,7 +1744,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 3}
-			err = reconciler.gcOldVersions(tmpDir)
+			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Should have 3 versions left (the newest ones)
@@ -1779,7 +1774,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			}
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 0} // Should default to 10
-			err = reconciler.gcOldVersions(tmpDir)
+			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// All 5 should remain (under default of 10)
@@ -1805,7 +1800,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(os.WriteFile(filepath.Join(versionsDir, "README.txt"), []byte("info"), 0644)).To(Succeed())
 
 			reconciler := &ArenaSourceReconciler{MaxVersionsPerSource: 5}
-			err = reconciler.gcOldVersions(tmpDir)
+			err = GCOldVersions(tmpDir, reconciler.MaxVersionsPerSource)
 			Expect(err).NotTo(HaveOccurred())
 
 			// All entries should remain
@@ -1851,12 +1846,12 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     50,
 			}
 
-			contentPath1, version1, _, err := reconciler.storeArtifact(source, artifact)
+			contentPath1, version1, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(version1).NotTo(BeEmpty())
 
 			By("syncing again with same content (should skip)")
-			contentPath2, version2, _, err := reconciler.storeArtifact(source, artifact)
+			contentPath2, version2, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(version2).To(Equal(version1))
 			Expect(contentPath2).To(Equal(contentPath1))
@@ -1869,8 +1864,7 @@ var _ = Describe("ArenaSource Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = os.RemoveAll(tmpDir) }()
 
-			reconciler := &ArenaSourceReconciler{}
-			err = reconciler.updateHEAD(tmpDir, "test-version")
+			err = UpdateHEAD(tmpDir, "test-version")
 			Expect(err).NotTo(HaveOccurred())
 
 			content, err := os.ReadFile(filepath.Join(tmpDir, ".arena", "HEAD"))
@@ -2081,9 +2075,8 @@ var _ = Describe("ArenaSource Controller", func() {
 				Size:     50,
 			}
 
-			contentPath, version, url, err := reconciler.storeArtifact(source, artifact)
+			contentPath, version, err := reconciler.storeArtifact(ctx, source, artifact)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(url).To(BeEmpty())
 			Expect(version).NotTo(BeEmpty())
 			Expect(contentPath).To(ContainSubstring("arena/my-source"))
 		})
