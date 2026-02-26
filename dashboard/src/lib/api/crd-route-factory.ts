@@ -36,6 +36,7 @@ import {
 } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
+import type { AuditAction } from "@/lib/audit";
 
 /**
  * Metadata shape expected on CRD resources for update merging.
@@ -213,70 +214,31 @@ export function createCollectionRoutes<T>(config: CollectionRouteConfig) {
 
 // ─── Item routes (workspace-scoped) ──────────────────────────────────────
 
-/**
- * Build the GET handler for a workspace-scoped item route.
- */
-function buildItemGet<T>(config: ItemRouteConfig) {
-  const { kind, plural, resourceLabel, paramKey, errorLabel } = config;
-
-  type RouteParams = { name: string } & Record<string, string>;
-
-  return withWorkspaceAccess<RouteParams>(
-    "viewer",
-    async (
-      _request: NextRequest,
-      context: WorkspaceRouteContext<RouteParams>,
-      access: WorkspaceAccess,
-      user: User
-    ): Promise<NextResponse> => {
-      const params = await context.params;
-      const workspaceName = params.name;
-      const itemName = params[paramKey];
-      let auditCtx;
-
-      try {
-        const result = await getWorkspaceResource<T>(
-          workspaceName,
-          access.role!,
-          plural,
-          itemName,
-          resourceLabel
-        );
-        if (!result.ok) return result.response;
-
-        auditCtx = createAuditContext(
-          workspaceName,
-          result.workspace.spec.namespace.name,
-          user,
-          access.role!,
-          kind
-        );
-
-        auditSuccess(auditCtx, "get", itemName);
-        return NextResponse.json(result.resource);
-      } catch (error) {
-        if (auditCtx) {
-          auditError(auditCtx, "get", itemName, error, 500);
-        }
-        return handleK8sError(error, `access ${errorLabel}`);
-      }
-    }
-  );
-}
+type ItemRouteParams = { name: string } & Record<string, string>;
 
 /**
- * Build the PUT handler for a workspace-scoped item route.
+ * Wrap a workspace-scoped item action with common param extraction,
+ * resource lookup, audit context creation, and error handling.
  */
-function buildItemPut<T extends CrdResource>(config: ItemRouteConfig) {
+function withItemAction<T>(
+  config: ItemRouteConfig,
+  role: "viewer" | "editor",
+  action: AuditAction,
+  handler: (ctx: {
+    request: NextRequest;
+    workspaceName: string;
+    itemName: string;
+    result: Extract<Awaited<ReturnType<typeof getWorkspaceResource<T>>>, { ok: true }>;
+    auditCtx: ReturnType<typeof createAuditContext>;
+  }) => Promise<NextResponse>
+) {
   const { kind, plural, resourceLabel, paramKey, errorLabel } = config;
 
-  type RouteParams = { name: string } & Record<string, string>;
-
-  return withWorkspaceAccess<RouteParams>(
-    "editor",
+  return withWorkspaceAccess<ItemRouteParams>(
+    role,
     async (
       request: NextRequest,
-      context: WorkspaceRouteContext<RouteParams>,
+      context: WorkspaceRouteContext<ItemRouteParams>,
       access: WorkspaceAccess,
       user: User
     ): Promise<NextResponse> => {
@@ -287,72 +249,50 @@ function buildItemPut<T extends CrdResource>(config: ItemRouteConfig) {
 
       try {
         const result = await getWorkspaceResource<T>(
-          workspaceName,
-          access.role!,
-          plural,
-          itemName,
-          resourceLabel
+          workspaceName, access.role!, plural, itemName, resourceLabel
         );
         if (!result.ok) return result.response;
 
         auditCtx = createAuditContext(
-          workspaceName,
-          result.workspace.spec.namespace.name,
-          user,
-          access.role!,
-          kind
+          workspaceName, result.workspace.spec.namespace.name,
+          user, access.role!, kind
         );
 
-        const body = await request.json();
-        const updated: T = {
-          ...result.resource,
-          metadata: {
-            ...result.resource.metadata,
-            labels: {
-              ...result.resource.metadata?.labels,
-              ...body.metadata?.labels,
-              [WORKSPACE_LABEL]: workspaceName,
-            },
-            annotations: {
-              ...result.resource.metadata?.annotations,
-              ...body.metadata?.annotations,
-            },
-          },
-          spec: body.spec || result.resource.spec,
-        };
-
-        const saved = await updateCrd<T>(
-          result.clientOptions,
-          plural,
-          itemName,
-          updated
-        );
-
-        auditSuccess(auditCtx, "update", itemName);
-        return NextResponse.json(saved);
+        return await handler({
+          request, workspaceName, itemName,
+          result: result as Extract<typeof result, { ok: true }>,
+          auditCtx,
+        });
       } catch (error) {
         if (auditCtx) {
-          auditError(auditCtx, "update", itemName, error, 500);
+          auditError(auditCtx, action, itemName, error, 500);
         }
-        return handleK8sError(error, `update ${errorLabel}`);
+        return handleK8sError(error, `${action} ${errorLabel}`);
       }
     }
   );
 }
 
 /**
- * Build the DELETE handler for a workspace-scoped item route.
+ * Wrap a workspace-scoped delete action with common setup.
+ * Delete uses validateWorkspace instead of getWorkspaceResource.
  */
-function buildItemDelete(config: ItemRouteConfig) {
-  const { kind, plural, paramKey, errorLabel } = config;
+function withDeleteAction(
+  config: ItemRouteConfig,
+  handler: (ctx: {
+    workspaceName: string;
+    itemName: string;
+    clientOptions: Awaited<ReturnType<typeof validateWorkspace>> extends { ok: true; clientOptions: infer C } ? C : never;
+    auditCtx: ReturnType<typeof createAuditContext>;
+  }) => Promise<NextResponse>
+) {
+  const { kind, paramKey, errorLabel } = config;
 
-  type RouteParams = { name: string } & Record<string, string>;
-
-  return withWorkspaceAccess<RouteParams>(
+  return withWorkspaceAccess<ItemRouteParams>(
     "editor",
     async (
       _request: NextRequest,
-      context: WorkspaceRouteContext<RouteParams>,
+      context: WorkspaceRouteContext<ItemRouteParams>,
       access: WorkspaceAccess,
       user: User
     ): Promise<NextResponse> => {
@@ -366,17 +306,15 @@ function buildItemDelete(config: ItemRouteConfig) {
         if (!result.ok) return result.response;
 
         auditCtx = createAuditContext(
-          workspaceName,
-          result.workspace.spec.namespace.name,
-          user,
-          access.role!,
-          kind
+          workspaceName, result.workspace.spec.namespace.name,
+          user, access.role!, kind
         );
 
-        await deleteCrd(result.clientOptions, plural, itemName);
-
-        auditSuccess(auditCtx, "delete", itemName);
-        return new NextResponse(null, { status: 204 });
+        return await handler({
+          workspaceName, itemName,
+          clientOptions: result.clientOptions as never,
+          auditCtx,
+        });
       } catch (error) {
         if (auditCtx) {
           auditError(auditCtx, "delete", itemName, error, 500);
@@ -395,11 +333,42 @@ function buildItemDelete(config: ItemRouteConfig) {
  * DELETE: Deletes the resource from the workspace namespace.
  */
 export function createItemRoutes<T extends CrdResource>(config: ItemRouteConfig) {
-  return {
-    GET: buildItemGet<T>(config),
-    PUT: buildItemPut<T>(config),
-    DELETE: buildItemDelete(config),
-  };
+  const GET = withItemAction<T>(config, "viewer", "get", async ({ itemName, auditCtx, result }) => {
+    auditSuccess(auditCtx, "get", itemName);
+    return NextResponse.json(result.resource);
+  });
+
+  const PUT = withItemAction<T>(config, "editor", "update", async ({ request, workspaceName, itemName, result, auditCtx }) => {
+    const body = await request.json();
+    const updated: T = {
+      ...result.resource,
+      metadata: {
+        ...result.resource.metadata,
+        labels: {
+          ...result.resource.metadata?.labels,
+          ...body.metadata?.labels,
+          [WORKSPACE_LABEL]: workspaceName,
+        },
+        annotations: {
+          ...result.resource.metadata?.annotations,
+          ...body.metadata?.annotations,
+        },
+      },
+      spec: body.spec || result.resource.spec,
+    };
+
+    const saved = await updateCrd<T>(result.clientOptions, config.plural, itemName, updated);
+    auditSuccess(auditCtx, "update", itemName);
+    return NextResponse.json(saved);
+  });
+
+  const DELETE = withDeleteAction(config, async ({ itemName, clientOptions, auditCtx }) => {
+    await deleteCrd(clientOptions as never, config.plural, itemName);
+    auditSuccess(auditCtx, "delete", itemName);
+    return new NextResponse(null, { status: 204 });
+  });
+
+  return { GET, PUT, DELETE };
 }
 
 // ─── Shared collection routes (system namespace) ─────────────────────────
