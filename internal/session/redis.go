@@ -363,21 +363,24 @@ func (r *RedisStore) GetState(ctx context.Context, sessionID string, key string)
 }
 
 // RefreshTTL extends the session's expiration time.
+// This uses a Lua script to atomically check existence, update metadata,
+// and set expiry on all related keys, eliminating the TOCTOU race between
+// EXISTS and EXPIRE.
 func (r *RedisStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
 	if sessionID == "" {
 		return ErrInvalidSessionID
 	}
 
-	// Check if session exists
-	exists, err := r.client.Exists(ctx, r.sessionKey(sessionID)).Result()
-	if err != nil {
-		return fmt.Errorf(errCheckExistence, err)
+	now := time.Now()
+	var expiresAt string
+	var ttlSeconds int64
+	if ttl > 0 {
+		expiresAt = now.Add(ttl).Format(time.RFC3339Nano)
+		ttlSeconds = int64(ttl.Seconds())
+		if ttlSeconds < 1 {
+			ttlSeconds = 1
+		}
 	}
-	if exists == 0 {
-		return ErrSessionNotFound
-	}
-
-	pipe := r.client.Pipeline()
 
 	keys := []string{
 		r.sessionKey(sessionID),
@@ -385,137 +388,188 @@ func (r *RedisStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.
 		r.stateKey(sessionID),
 	}
 
-	for _, key := range keys {
-		if ttl > 0 {
-			pipe.Expire(ctx, key, ttl)
-		} else {
-			pipe.Persist(ctx, key)
-		}
-	}
-
-	// Update session metadata
-	data, err := r.client.Get(ctx, r.sessionKey(sessionID)).Bytes()
+	result, err := refreshTTLScript.Run(ctx, r.client, keys,
+		ttlSeconds,
+		now.Format(time.RFC3339Nano),
+		expiresAt,
+	).Int64()
 	if err != nil {
-		return fmt.Errorf(errGetSession, err)
-	}
-
-	var session Session
-	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf(errUnmarshalSession, err)
-	}
-
-	session.UpdatedAt = time.Now()
-	if ttl > 0 {
-		session.ExpiresAt = time.Now().Add(ttl)
-	} else {
-		session.ExpiresAt = time.Time{}
-	}
-
-	updatedData, err := json.Marshal(session)
-	if err != nil {
-		return fmt.Errorf(errMarshalSession, err)
-	}
-
-	if ttl > 0 {
-		pipe.Set(ctx, r.sessionKey(sessionID), updatedData, ttl)
-	} else {
-		pipe.Set(ctx, r.sessionKey(sessionID), updatedData, 0)
-	}
-
-	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("failed to refresh TTL: %w", err)
+	}
+
+	if result == 0 {
+		return ErrSessionNotFound
 	}
 
 	return nil
 }
 
+// Lua script for atomic TTL refresh.
+// KEYS[1] = session key, KEYS[2] = messages key, KEYS[3] = state key
+// ARGV[1] = ttl in seconds (0 means persist), ARGV[2] = now (RFC3339Nano),
+// ARGV[3] = expiresAt (RFC3339Nano, empty to clear)
+// Returns: 0 = not found, 1 = success
+var refreshTTLScript = redis.NewScript(`
+local data = redis.call('GET', KEYS[1])
+if not data then
+	return 0
+end
+
+local session = cjson.decode(data)
+session['updatedAt'] = ARGV[2]
+
+if ARGV[3] ~= "" then
+	session['expiresAt'] = ARGV[3]
+else
+	session['expiresAt'] = nil
+end
+
+local encoded = cjson.encode(session)
+local ttl = tonumber(ARGV[1])
+
+for i = 1, 3 do
+	if ttl > 0 then
+		redis.call('EXPIRE', KEYS[i], ttl)
+	else
+		redis.call('PERSIST', KEYS[i])
+	end
+end
+
+if ttl > 0 then
+	redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+	redis.call('SET', KEYS[1], encoded)
+end
+
+return 1
+`)
+
 // UpdateSessionStats atomically increments session-level counters.
+// This uses a Lua script to perform a read-modify-write in a single
+// atomic operation, preventing concurrent updates from overwriting each other.
 func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, update SessionStatsUpdate) error {
 	if sessionID == "" {
 		return ErrInvalidSessionID
 	}
 
-	data, err := r.client.Get(ctx, r.sessionKey(sessionID)).Bytes()
+	now := time.Now().Format(time.RFC3339Nano)
+
+	result, err := updateStatsScript.Run(ctx, r.client,
+		[]string{r.sessionKey(sessionID)},
+		update.AddInputTokens,
+		update.AddOutputTokens,
+		update.AddCostUSD,
+		update.AddToolCalls,
+		update.AddMessages,
+		string(update.SetStatus),
+		now,
+	).Int64()
 	if err != nil {
-		if err == redis.Nil {
-			return ErrSessionNotFound
-		}
-		return fmt.Errorf(errGetSession, err)
+		return fmt.Errorf("failed to update session stats: %w", err)
 	}
 
-	var session Session
-	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf(errUnmarshalSession, err)
-	}
-
-	if session.IsExpired() {
+	switch result {
+	case 0:
+		return ErrSessionNotFound
+	case 2:
 		return ErrSessionExpired
 	}
 
-	session.TotalInputTokens += int64(update.AddInputTokens)
-	session.TotalOutputTokens += int64(update.AddOutputTokens)
-	session.EstimatedCostUSD += update.AddCostUSD
-	session.ToolCallCount += update.AddToolCalls
-	session.MessageCount += update.AddMessages
-
-	if update.SetStatus != "" {
-		session.Status = update.SetStatus
-	}
-
-	session.UpdatedAt = time.Now()
-
-	updatedData, err := json.Marshal(session)
-	if err != nil {
-		return fmt.Errorf(errMarshalSession, err)
-	}
-
-	// Preserve TTL if set
-	ttl, err := r.client.TTL(ctx, r.sessionKey(sessionID)).Result()
-	if err != nil {
-		return fmt.Errorf("failed to get TTL: %w", err)
-	}
-
-	if ttl > 0 {
-		return r.client.Set(ctx, r.sessionKey(sessionID), updatedData, ttl).Err()
-	}
-	return r.client.Set(ctx, r.sessionKey(sessionID), updatedData, 0).Err()
+	return nil
 }
+
+// Lua script for atomic update of session stats.
+// KEYS[1] = session key
+// ARGV[1] = addInputTokens, ARGV[2] = addOutputTokens, ARGV[3] = addCostUSD
+// ARGV[4] = addToolCalls, ARGV[5] = addMessages, ARGV[6] = setStatus (empty = no change)
+// ARGV[7] = now (RFC3339Nano)
+// Returns: 0 = not found, 1 = success, 2 = expired
+var updateStatsScript = redis.NewScript(`
+local data = redis.call('GET', KEYS[1])
+if not data then
+	return 0
+end
+
+local session = cjson.decode(data)
+
+-- Check expiry: if expiresAt is set (non-empty, non-zero-time) and in the past, return expired
+local expiresAt = session['expiresAt']
+if expiresAt and expiresAt ~= "" and string.sub(expiresAt, 1, 4) ~= "0001" then
+	local now = ARGV[7]
+	if expiresAt < now then
+		return 2
+	end
+end
+
+session['totalInputTokens'] = (session['totalInputTokens'] or 0) + tonumber(ARGV[1])
+session['totalOutputTokens'] = (session['totalOutputTokens'] or 0) + tonumber(ARGV[2])
+session['estimatedCostUSD'] = (session['estimatedCostUSD'] or 0) + tonumber(ARGV[3])
+session['toolCallCount'] = (session['toolCallCount'] or 0) + tonumber(ARGV[4])
+session['messageCount'] = (session['messageCount'] or 0) + tonumber(ARGV[5])
+
+if ARGV[6] ~= "" then
+	session['status'] = ARGV[6]
+end
+
+session['updatedAt'] = ARGV[7]
+
+local encoded = cjson.encode(session)
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+	redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+	redis.call('SET', KEYS[1], encoded)
+end
+return 1
+`)
 
 // Close releases resources held by the store.
 func (r *RedisStore) Close() error {
 	return r.client.Close()
 }
 
-// updateSessionTimestamp updates the session's UpdatedAt timestamp.
+// updateSessionTimestamp atomically updates the session's UpdatedAt timestamp
+// using a Lua script to prevent concurrent read-modify-write races.
 func (r *RedisStore) updateSessionTimestamp(ctx context.Context, sessionID string) error {
-	data, err := r.client.Get(ctx, r.sessionKey(sessionID)).Bytes()
+	now := time.Now().Format(time.RFC3339Nano)
+
+	result, err := updateTimestampScript.Run(ctx, r.client,
+		[]string{r.sessionKey(sessionID)},
+		now,
+	).Int64()
 	if err != nil {
-		return fmt.Errorf(errGetSession, err)
+		return fmt.Errorf("failed to update session timestamp: %w", err)
 	}
 
-	var session Session
-	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf(errUnmarshalSession, err)
+	if result == 0 {
+		return fmt.Errorf(errGetSession, ErrSessionNotFound)
 	}
 
-	session.UpdatedAt = time.Now()
-
-	updatedData, err := json.Marshal(session)
-	if err != nil {
-		return fmt.Errorf(errMarshalSession, err)
-	}
-
-	// Preserve TTL if set
-	ttl, err := r.client.TTL(ctx, r.sessionKey(sessionID)).Result()
-	if err != nil {
-		return fmt.Errorf("failed to get TTL: %w", err)
-	}
-
-	if ttl > 0 {
-		return r.client.Set(ctx, r.sessionKey(sessionID), updatedData, ttl).Err()
-	}
-	return r.client.Set(ctx, r.sessionKey(sessionID), updatedData, 0).Err()
+	return nil
 }
+
+// Lua script for atomic update of session timestamp.
+// KEYS[1] = session key
+// ARGV[1] = now (RFC3339Nano)
+// Returns 0 if key does not exist, 1 on success.
+var updateTimestampScript = redis.NewScript(`
+local data = redis.call('GET', KEYS[1])
+if not data then
+	return 0
+end
+
+local session = cjson.decode(data)
+session['updatedAt'] = ARGV[1]
+
+local encoded = cjson.encode(session)
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+	redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+	redis.call('SET', KEYS[1], encoded)
+end
+return 1
+`)
 
 // Ensure RedisStore implements Store interface.
 var _ Store = (*RedisStore)(nil)
