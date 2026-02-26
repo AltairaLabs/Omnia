@@ -85,6 +85,10 @@ type ArenaJobReconciler struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	// RedisPasswordSecret is the name of the Kubernetes Secret containing the Redis password.
+	// When set, worker pods receive the password via a secretKeyRef instead of a plain-text env var.
+	// The secret must have a key named "redis-password".
+	RedisPasswordSecret string
 	// WorkspaceContentPath is the base path for workspace content volumes.
 	// When set, workers mount the workspace content PVC and access content directly.
 	// Structure: {WorkspaceContentPath}/{workspace}/{namespace}/{contentPath}
@@ -280,6 +284,35 @@ func (r *ArenaJobReconciler) getExistingJob(ctx context.Context, arenaJob *omnia
 		return nil, err
 	}
 	return job, nil
+}
+
+// redisPasswordSecretKey is the key within the Kubernetes Secret that holds the Redis password.
+const redisPasswordSecretKey = "redis-password"
+
+// buildRedisPasswordEnvVar returns the REDIS_PASSWORD env var for worker pods.
+// When RedisPasswordSecret is set, uses a secretKeyRef for secure injection.
+// Falls back to plain-text value from RedisPassword for backward compatibility.
+func (r *ArenaJobReconciler) buildRedisPasswordEnvVar() []corev1.EnvVar {
+	if r.RedisPasswordSecret != "" {
+		return []corev1.EnvVar{{
+			Name: "REDIS_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: r.RedisPasswordSecret,
+					},
+					Key: redisPasswordSecretKey,
+				},
+			},
+		}}
+	}
+	if r.RedisPassword != "" {
+		return []corev1.EnvVar{{
+			Name:  "REDIS_PASSWORD",
+			Value: r.RedisPassword,
+		}}
+	}
+	return nil
 }
 
 // getJobName returns the name for the K8s Job.
@@ -800,12 +833,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			Value: r.RedisAddr,
 		})
 	}
-	if r.RedisPassword != "" {
-		env = append(env, corev1.EnvVar{
-			Name:  "REDIS_PASSWORD",
-			Value: r.RedisPassword,
-		})
-	}
+	env = append(env, r.buildRedisPasswordEnvVar()...)
 
 	// Add verbose flag for debug logging
 	if arenaJob.Spec.Verbose {

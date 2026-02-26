@@ -19,7 +19,9 @@ package facade
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +37,9 @@ import (
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
+
+// envAllowedOrigins is the environment variable for configuring allowed WebSocket origins.
+const envAllowedOrigins = "OMNIA_ALLOWED_ORIGINS"
 
 // ServerConfig contains configuration for the WebSocket server.
 type ServerConfig struct {
@@ -116,6 +121,7 @@ type Server struct {
 	metrics         ServerMetrics
 	mediaStorage    media.Storage
 	tracingProvider *tracing.Provider
+	allowedOrigins  []string
 	log             logr.Logger
 
 	mu          sync.RWMutex
@@ -149,6 +155,16 @@ func WithTracingProvider(p *tracing.Provider) ServerOption {
 	}
 }
 
+// WithAllowedOrigins sets the allowed origins for WebSocket connections.
+// Origins should be scheme + host (e.g., "https://example.com").
+// When set, only requests from these origins are allowed.
+// When empty, the default gorilla/websocket same-origin check is used.
+func WithAllowedOrigins(origins []string) ServerOption {
+	return func(s *Server) {
+		s.allowedOrigins = origins
+	}
+}
+
 // NewServer creates a new WebSocket server.
 func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, log logr.Logger, opts ...ServerOption) *Server {
 	s := &Server{
@@ -158,21 +174,86 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 		metrics:      &NoOpMetrics{}, // Default to no-op
 		log:          log.WithName("websocket-server"),
 		connections:  make(map[*websocket.Conn]*Connection),
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  cfg.ReadBufferSize,
-			WriteBufferSize: cfg.WriteBufferSize,
-			CheckOrigin: func(r *http.Request) bool {
-				// Allow all origins for now; can be customized
-				return true
-			},
-		},
 	}
 
+	// Apply options first so allowedOrigins is set before building the upgrader
 	for _, opt := range opts {
 		opt(s)
 	}
 
+	// Load allowed origins from environment if not set via options
+	if len(s.allowedOrigins) == 0 {
+		s.allowedOrigins = ParseAllowedOrigins(os.Getenv(envAllowedOrigins))
+	}
+
+	s.upgrader = websocket.Upgrader{
+		ReadBufferSize:  cfg.ReadBufferSize,
+		WriteBufferSize: cfg.WriteBufferSize,
+		CheckOrigin:     s.checkOrigin,
+	}
+
 	return s
+}
+
+// checkOrigin validates the Origin header against the allowed origins list.
+// If no allowed origins are configured, it uses the default gorilla/websocket
+// same-origin check (Origin host must match the Host header).
+func (s *Server) checkOrigin(r *http.Request) bool {
+	// If no allowlist configured, use same-origin policy
+	if len(s.allowedOrigins) == 0 {
+		return checkSameOrigin(r)
+	}
+
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// No Origin header — allow (non-browser clients like curl, gRPC, etc.)
+		return true
+	}
+
+	for _, allowed := range s.allowedOrigins {
+		if strings.EqualFold(origin, allowed) {
+			return true
+		}
+	}
+
+	s.log.V(1).Info("rejected WebSocket connection from disallowed origin",
+		"origin", origin)
+	return false
+}
+
+// checkSameOrigin implements the standard same-origin check for WebSocket
+// connections. It verifies the Origin header's host matches the request's
+// Host header, which is the default gorilla/websocket behavior.
+func checkSameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
+
+// ParseAllowedOrigins parses a comma-separated list of allowed origins.
+// Empty strings and whitespace-only entries are filtered out.
+func ParseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+	if len(origins) == 0 {
+		return nil
+	}
+	return origins
 }
 
 // ServeHTTP handles WebSocket upgrade requests.

@@ -76,6 +76,7 @@ func main() {
 	var nfsPath string
 	var redisAddr string
 	var redisPassword string
+	var redisPasswordSecret string
 	var redisDB int
 	var workerServiceAccountName string
 	var enableWebhooks bool
@@ -103,7 +104,10 @@ func main() {
 	flag.StringVar(&redisAddr, "redis-addr", "",
 		"Redis server address for Arena work queue.")
 	flag.StringVar(&redisPassword, "redis-password", "",
-		"Redis password for Arena work queue.")
+		"Redis password for Arena work queue (deprecated: use --redis-password-secret instead).")
+	flag.StringVar(&redisPasswordSecret, "redis-password-secret", "",
+		"Name of Kubernetes Secret containing Redis password (key: redis-password). "+
+			"When set, workers receive the password via secretKeyRef instead of plain text.")
 	flag.IntVar(&redisDB, "redis-db", 0,
 		"Redis database number for Arena work queue.")
 	flag.StringVar(&workerServiceAccountName, "worker-service-account-name", "",
@@ -265,6 +269,7 @@ func main() {
 		Aggregator:               arenaAggregator,
 		RedisAddr:                redisAddr,
 		RedisPassword:            redisPassword,
+		RedisPasswordSecret:      redisPasswordSecret,
 		RedisDB:                  redisDB,
 		WorkspaceContentPath:     workspaceContentPath,
 		NFSServer:                nfsServer,
