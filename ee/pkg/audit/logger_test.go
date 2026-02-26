@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
+	"github.com/altairalabs/omnia/internal/pgutil"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
@@ -150,29 +151,15 @@ func TestLogEvent_AllFields(t *testing.T) {
 }
 
 func TestNullHelpers(t *testing.T) {
-	assert.Nil(t, nullString(""))
-	assert.Equal(t, "hello", *nullString("hello"))
+	assert.Nil(t, pgutil.NullString(""))
+	assert.Equal(t, "hello", *pgutil.NullString("hello"))
 
-	assert.Nil(t, nullInt(0))
-	assert.Equal(t, 42, *nullInt(42))
+	assert.Nil(t, pgutil.NullInt(0))
+	assert.Equal(t, 42, *pgutil.NullInt(42))
 
-	assert.Equal(t, "", derefString(nil))
+	assert.Equal(t, "", pgutil.DerefString(nil))
 	s := "test"
-	assert.Equal(t, "test", derefString(&s))
-}
-
-func TestQueryBuilder(t *testing.T) {
-	qb := &queryBuilder{}
-	assert.Equal(t, "", qb.where())
-
-	qb.add("session_id = $?", "abc")
-	qb.add("workspace = $?", "prod")
-	assert.Equal(t, " AND session_id = $1 AND workspace = $2", qb.where())
-	assert.Equal(t, []any{"abc", "prod"}, qb.args)
-
-	query := qb.appendPagination("SELECT * FROM t WHERE 1=1"+qb.where(), 10, 5)
-	assert.Contains(t, query, "LIMIT $3")
-	assert.Contains(t, query, "OFFSET $4")
+	assert.Equal(t, "test", pgutil.DerefString(&s))
 }
 
 func TestBuildQueryFilters(t *testing.T) {
@@ -204,8 +191,7 @@ func TestBuildQueryFilters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			qb := buildQueryFilters(tt.opts)
-			assert.Len(t, qb.clauses, tt.wantClauses)
-			assert.Len(t, qb.args, tt.wantClauses)
+			assert.Len(t, qb.Args(), tt.wantClauses)
 		})
 	}
 }

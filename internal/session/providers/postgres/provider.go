@@ -18,17 +18,15 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/altairalabs/omnia/internal/pgutil"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
@@ -85,62 +83,6 @@ func NewFromPool(pool *pgxpool.Pool) *Provider {
 	return &Provider{pool: pool, ownsPool: false}
 }
 
-// --- nullable helpers -------------------------------------------------------
-
-func nullTime(t time.Time) *time.Time {
-	if t.IsZero() {
-		return nil
-	}
-	return &t
-}
-
-func timeOrZero(t *time.Time) time.Time {
-	if t == nil {
-		return time.Time{}
-	}
-	return *t
-}
-
-func nullString(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func stringOrEmpty(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func nullInt32(v int32) *int32 {
-	if v == 0 {
-		return nil
-	}
-	return &v
-}
-
-func marshalJSONB(m map[string]string) []byte {
-	if m == nil {
-		return []byte("{}")
-	}
-	b, _ := json.Marshal(m)
-	return b
-}
-
-func unmarshalJSONB(data []byte) map[string]string {
-	if len(data) == 0 {
-		return nil
-	}
-	var m map[string]string
-	if json.Unmarshal(data, &m) != nil || len(m) == 0 {
-		return nil
-	}
-	return m
-}
-
 // --- row scanners -----------------------------------------------------------
 
 // sessionColumns is the SELECT column list for sessions (no trailing comma).
@@ -151,11 +93,11 @@ const sessionColumns = `id, agent_name, namespace, workspace_name, status,
 
 // populateSession fills nullable fields on a scanned session.
 func populateSession(s *session.Session, workspaceName, lastMsgPreview *string, expiresAt, endedAt *time.Time, stateJSON []byte) {
-	s.WorkspaceName = stringOrEmpty(workspaceName)
-	s.ExpiresAt = timeOrZero(expiresAt)
-	s.EndedAt = timeOrZero(endedAt)
-	s.State = unmarshalJSONB(stateJSON)
-	s.LastMessagePreview = stringOrEmpty(lastMsgPreview)
+	s.WorkspaceName = pgutil.DerefString(workspaceName)
+	s.ExpiresAt = pgutil.TimeOrZero(expiresAt)
+	s.EndedAt = pgutil.TimeOrZero(endedAt)
+	s.State = pgutil.UnmarshalJSONB(stateJSON)
+	s.LastMessagePreview = pgutil.DerefString(lastMsgPreview)
 	if s.Tags == nil {
 		s.Tags = []string{}
 	}
@@ -221,8 +163,8 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 		return nil, fmt.Errorf("postgres: scan message: %w", err)
 	}
 
-	m.ToolCallID = stringOrEmpty(toolCallID)
-	m.Metadata = unmarshalJSONB(metadataJSON)
+	m.ToolCallID = pgutil.DerefString(toolCallID)
+	m.Metadata = pgutil.UnmarshalJSONB(metadataJSON)
 	if inputTokens != nil {
 		m.InputTokens = *inputTokens
 	}
@@ -230,38 +172,6 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 		m.OutputTokens = *outputTokens
 	}
 	return &m, nil
-}
-
-// --- query builder ----------------------------------------------------------
-
-type queryBuilder struct {
-	clauses []string
-	args    []any
-}
-
-func (qb *queryBuilder) add(clause string, arg any) {
-	qb.args = append(qb.args, arg)
-	qb.clauses = append(qb.clauses, strings.ReplaceAll(clause, "$?", "$"+strconv.Itoa(len(qb.args))))
-}
-
-func (qb *queryBuilder) where() string {
-	if len(qb.clauses) == 0 {
-		return ""
-	}
-	return " AND " + strings.Join(qb.clauses, " AND ")
-}
-
-// appendPagination adds LIMIT and OFFSET clauses to the query when non-zero.
-func (qb *queryBuilder) appendPagination(query string, limit, offset int) string {
-	if limit > 0 {
-		qb.args = append(qb.args, limit)
-		query += " LIMIT $" + strconv.Itoa(len(qb.args))
-	}
-	if offset > 0 {
-		qb.args = append(qb.args, offset)
-		query += " OFFSET $" + strconv.Itoa(len(qb.args))
-	}
-	return query
 }
 
 // --- helper: begin transaction ----------------------------------------------
@@ -371,10 +281,10 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 	}
 
 	res, err := p.pool.Exec(ctx, query,
-		s.ID, s.AgentName, s.Namespace, nullString(s.WorkspaceName), s.Status,
-		s.CreatedAt, s.UpdatedAt, nullTime(s.ExpiresAt), nullTime(s.EndedAt),
+		s.ID, s.AgentName, s.Namespace, pgutil.NullString(s.WorkspaceName), s.Status,
+		s.CreatedAt, s.UpdatedAt, pgutil.NullTime(s.ExpiresAt), pgutil.NullTime(s.EndedAt),
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
-		s.EstimatedCostUSD, tags, marshalJSONB(s.State), nullString(s.LastMessagePreview),
+		s.EstimatedCostUSD, tags, pgutil.MarshalJSONB(s.State), pgutil.NullString(s.LastMessagePreview),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: create session: %w", err)
@@ -404,10 +314,10 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 	}
 
 	res, err := p.pool.Exec(ctx, query,
-		s.ID, s.AgentName, s.Namespace, nullString(s.WorkspaceName), s.Status,
-		s.UpdatedAt, nullTime(s.ExpiresAt), nullTime(s.EndedAt),
+		s.ID, s.AgentName, s.Namespace, pgutil.NullString(s.WorkspaceName), s.Status,
+		s.UpdatedAt, pgutil.NullTime(s.ExpiresAt), pgutil.NullTime(s.EndedAt),
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
-		s.EstimatedCostUSD, tags, marshalJSONB(s.State), nullString(s.LastMessagePreview),
+		s.EstimatedCostUSD, tags, pgutil.MarshalJSONB(s.State), pgutil.NullString(s.LastMessagePreview),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: update session: %w", err)
@@ -450,8 +360,8 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 
 	_, err := p.pool.Exec(ctx, query,
 		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
-		nullInt32(msg.InputTokens), nullInt32(msg.OutputTokens),
-		nullString(msg.ToolCallID), marshalJSONB(msg.Metadata), msg.SequenceNum,
+		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
+		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: append message: %w", err)
@@ -464,17 +374,17 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 		return nil, err
 	}
 
-	qb := &queryBuilder{}
-	qb.add("session_id=$?", sessionID)
+	qb := &pgutil.QueryBuilder{}
+	qb.Add("session_id=$?", sessionID)
 
 	if opts.AfterSeq > 0 {
-		qb.add("sequence_num > $?", opts.AfterSeq)
+		qb.Add("sequence_num > $?", opts.AfterSeq)
 	}
 	if opts.BeforeSeq > 0 {
-		qb.add("sequence_num < $?", opts.BeforeSeq)
+		qb.Add("sequence_num < $?", opts.BeforeSeq)
 	}
 	if len(opts.Roles) > 0 {
-		qb.add("role = ANY($?)", opts.Roles)
+		qb.Add("role = ANY($?)", opts.Roles)
 	}
 
 	sort := "ASC"
@@ -483,10 +393,10 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 	}
 
 	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num
-		FROM messages WHERE 1=1` + qb.where() + ` ORDER BY sequence_num ` + sort
-	query = qb.appendPagination(query, opts.Limit, opts.Offset)
+		FROM messages WHERE 1=1` + qb.Where() + ` ORDER BY sequence_num ` + sort
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, query, qb.args...)
+	rows, err := p.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get messages: %w", err)
 	}
@@ -510,7 +420,7 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 }
 
 func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListOpts) (*providers.SessionPage, error) {
-	qb := &queryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	p.applySessionFilters(qb, opts)
 
 	sort := "DESC"
@@ -518,11 +428,11 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 		sort = "ASC"
 	}
 
-	query := `SELECT ` + sessionColumns + `, count(*) OVER() FROM sessions WHERE 1=1` + qb.where() +
+	query := `SELECT ` + sessionColumns + `, count(*) OVER() FROM sessions WHERE 1=1` + qb.Where() +
 		` ORDER BY created_at ` + sort
-	query = qb.appendPagination(query, opts.Limit, opts.Offset)
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, query, qb.args...)
+	rows, err := p.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list sessions: %w", err)
 	}
@@ -530,14 +440,15 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 }
 
 func (p *Provider) SearchSessions(ctx context.Context, query string, opts providers.SessionListOpts) (*providers.SessionPage, error) {
-	qb := &queryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 
 	// CTE to find session IDs matching the FTS query.
-	qb.add("search_vector @@ plainto_tsquery('english', $?)", query)
-	cteClauses := qb.where()
+	qb.Add("search_vector @@ plainto_tsquery('english', $?)", query)
+	cteClauses := qb.Where()
 
 	// Continue accumulating args for session filters.
-	sessionQB := &queryBuilder{args: qb.args}
+	sessionQB := &pgutil.QueryBuilder{}
+	sessionQB.SetArgs(qb.Args())
 	p.applySessionFilters(sessionQB, opts)
 
 	sort := "DESC"
@@ -549,38 +460,38 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
 	) SELECT ` + sessionColumns + `, count(*) OVER()
 	FROM sessions s JOIN matching ms ON ms.session_id = s.id
-	WHERE 1=1` + sessionQB.where() +
+	WHERE 1=1` + sessionQB.Where() +
 		` ORDER BY s.created_at ` + sort
-	sql = sessionQB.appendPagination(sql, opts.Limit, opts.Offset)
+	sql = sessionQB.AppendPagination(sql, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, sql, sessionQB.args...)
+	rows, err := p.pool.Query(ctx, sql, sessionQB.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: search sessions: %w", err)
 	}
 	return collectSessionPage(rows, opts.Offset)
 }
 
-func (p *Provider) applySessionFilters(qb *queryBuilder, opts providers.SessionListOpts) {
+func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.SessionListOpts) {
 	if opts.AgentName != "" {
-		qb.add("agent_name=$?", opts.AgentName)
+		qb.Add("agent_name=$?", opts.AgentName)
 	}
 	if opts.Namespace != "" {
-		qb.add("namespace=$?", opts.Namespace)
+		qb.Add("namespace=$?", opts.Namespace)
 	}
 	if opts.WorkspaceName != "" {
-		qb.add("workspace_name=$?", opts.WorkspaceName)
+		qb.Add("workspace_name=$?", opts.WorkspaceName)
 	}
 	if opts.Status != "" {
-		qb.add("status=$?", string(opts.Status))
+		qb.Add("status=$?", string(opts.Status))
 	}
 	if len(opts.Tags) > 0 {
-		qb.add("tags @> $?", opts.Tags)
+		qb.Add("tags @> $?", opts.Tags)
 	}
 	if !opts.CreatedAfter.IsZero() {
-		qb.add("created_at >= $?", opts.CreatedAfter)
+		qb.Add("created_at >= $?", opts.CreatedAfter)
 	}
 	if !opts.CreatedBefore.IsZero() {
-		qb.add("created_at < $?", opts.CreatedBefore)
+		qb.Add("created_at < $?", opts.CreatedBefore)
 	}
 }
 
@@ -594,8 +505,8 @@ func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact)
 	_, err := p.pool.Exec(ctx, query,
 		artifact.ID, artifact.MessageID, artifact.SessionID,
 		artifact.Type, artifact.MIMEType, artifact.StorageURI,
-		nullInt64(artifact.SizeBytes), nullString(artifact.Filename),
-		nullString(artifact.Checksum), marshalJSONB(artifact.Metadata),
+		pgutil.NullInt64(artifact.SizeBytes), pgutil.NullString(artifact.Filename),
+		pgutil.NullString(artifact.Checksum), pgutil.MarshalJSONB(artifact.Metadata),
 		artifact.CreatedAt,
 	)
 	if err != nil {
@@ -636,13 +547,6 @@ func (p *Provider) DeleteSessionArtifacts(ctx context.Context, sessionID string)
 	return nil
 }
 
-func nullInt64(v int64) *int64 {
-	if v == 0 {
-		return nil
-	}
-	return &v
-}
-
 func scanArtifact(row pgx.Row) (*session.Artifact, error) {
 	var a session.Artifact
 	var sizeBytes *int64
@@ -663,9 +567,9 @@ func scanArtifact(row pgx.Row) (*session.Artifact, error) {
 	if sizeBytes != nil {
 		a.SizeBytes = *sizeBytes
 	}
-	a.Filename = stringOrEmpty(filename)
-	a.Checksum = stringOrEmpty(checksum)
-	a.Metadata = unmarshalJSONB(metadataJSON)
+	a.Filename = pgutil.DerefString(filename)
+	a.Checksum = pgutil.DerefString(checksum)
+	a.Metadata = pgutil.UnmarshalJSONB(metadataJSON)
 	return &a, nil
 }
 

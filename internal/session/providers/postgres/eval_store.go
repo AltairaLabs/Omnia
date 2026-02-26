@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/altairalabs/omnia/internal/pgutil"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
@@ -71,8 +72,8 @@ func (s *EvalStoreImpl) InsertEvalResults(ctx context.Context, results []*api.Ev
 		valueRows = append(valueRows, "("+strings.Join(placeholders, ",")+")")
 
 		args = append(args,
-			r.SessionID, nullString(r.MessageID), r.AgentName, r.Namespace,
-			r.PromptPackName, nullString(r.PromptPackVersion), r.EvalID, r.EvalType, r.Trigger,
+			r.SessionID, pgutil.NullString(r.MessageID), r.AgentName, r.Namespace,
+			r.PromptPackName, pgutil.NullString(r.PromptPackVersion), r.EvalID, r.EvalType, r.Trigger,
 			r.Passed, r.Score, nullJSONB(r.Details), r.DurationMs, r.JudgeTokens, r.JudgeCostUSD,
 			r.Source,
 		)
@@ -100,20 +101,20 @@ func (s *EvalStoreImpl) GetSessionEvalResults(ctx context.Context, sessionID str
 
 // ListEvalResults retrieves eval results matching the given filters with pagination.
 func (s *EvalStoreImpl) ListEvalResults(ctx context.Context, opts api.EvalResultListOpts) ([]*api.EvalResult, int64, error) {
-	qb := &evalQueryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	applyEvalFilters(qb, opts)
 
-	countQuery := `SELECT count(*) FROM eval_results WHERE 1=1` + qb.where()
+	countQuery := `SELECT count(*) FROM eval_results WHERE 1=1` + qb.Where()
 	var total int64
-	if err := s.pool.QueryRow(ctx, countQuery, qb.args...).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, countQuery, qb.Args()...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("postgres: count eval results: %w", err)
 	}
 
-	query := `SELECT ` + evalResultColumns + ` FROM eval_results WHERE 1=1` + qb.where() +
+	query := `SELECT ` + evalResultColumns + ` FROM eval_results WHERE 1=1` + qb.Where() +
 		` ORDER BY created_at DESC`
-	query = qb.appendPagination(query, opts.Limit, opts.Offset)
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
-	rows, err := s.pool.Query(ctx, query, qb.args...)
+	rows, err := s.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres: list eval results: %w", err)
 	}
@@ -127,7 +128,7 @@ func (s *EvalStoreImpl) ListEvalResults(ctx context.Context, opts api.EvalResult
 
 // GetEvalResultSummary returns aggregate statistics grouped by eval_id and eval_type.
 func (s *EvalStoreImpl) GetEvalResultSummary(ctx context.Context, opts api.EvalResultSummaryOpts) ([]*api.EvalResultSummary, error) {
-	qb := &evalQueryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	applySummaryFilters(qb, opts)
 
 	query := `SELECT eval_id, eval_type,
@@ -140,10 +141,10 @@ func (s *EvalStoreImpl) GetEvalResultSummary(ctx context.Context, opts api.EvalR
 		END AS pass_rate,
 		avg(score) AS avg_score,
 		avg(duration_ms) AS avg_duration_ms
-	FROM eval_results WHERE 1=1` + qb.where() +
+	FROM eval_results WHERE 1=1` + qb.Where() +
 		` GROUP BY eval_id, eval_type ORDER BY eval_id`
 
-	rows, err := s.pool.Query(ctx, query, qb.args...)
+	rows, err := s.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get eval result summary: %w", err)
 	}
@@ -172,75 +173,45 @@ func (s *EvalStoreImpl) GetEvalResultSummary(ctx context.Context, opts api.EvalR
 
 // --- helpers ----------------------------------------------------------------
 
-// evalQueryBuilder builds parameterized WHERE clauses for eval queries.
-type evalQueryBuilder struct {
-	clauses []string
-	args    []any
-}
-
-func (qb *evalQueryBuilder) add(clause string, arg any) {
-	qb.args = append(qb.args, arg)
-	qb.clauses = append(qb.clauses, strings.ReplaceAll(clause, "$?", "$"+strconv.Itoa(len(qb.args))))
-}
-
-func (qb *evalQueryBuilder) where() string {
-	if len(qb.clauses) == 0 {
-		return ""
-	}
-	return " AND " + strings.Join(qb.clauses, " AND ")
-}
-
-func (qb *evalQueryBuilder) appendPagination(query string, limit, offset int) string {
-	if limit > 0 {
-		qb.args = append(qb.args, limit)
-		query += " LIMIT $" + strconv.Itoa(len(qb.args))
-	}
-	if offset > 0 {
-		qb.args = append(qb.args, offset)
-		query += " OFFSET $" + strconv.Itoa(len(qb.args))
-	}
-	return query
-}
-
-func applyEvalFilters(qb *evalQueryBuilder, opts api.EvalResultListOpts) {
+func applyEvalFilters(qb *pgutil.QueryBuilder, opts api.EvalResultListOpts) {
 	if opts.AgentName != "" {
-		qb.add("agent_name=$?", opts.AgentName)
+		qb.Add("agent_name=$?", opts.AgentName)
 	}
 	if opts.Namespace != "" {
-		qb.add("namespace=$?", opts.Namespace)
+		qb.Add("namespace=$?", opts.Namespace)
 	}
 	if opts.EvalID != "" {
-		qb.add("eval_id=$?", opts.EvalID)
+		qb.Add("eval_id=$?", opts.EvalID)
 	}
 	if opts.EvalType != "" {
-		qb.add("eval_type=$?", opts.EvalType)
+		qb.Add("eval_type=$?", opts.EvalType)
 	}
 	if opts.Passed != nil {
-		qb.add("passed=$?", *opts.Passed)
+		qb.Add("passed=$?", *opts.Passed)
 	}
 	if !opts.CreatedAfter.IsZero() {
-		qb.add("created_at >= $?", opts.CreatedAfter)
+		qb.Add("created_at >= $?", opts.CreatedAfter)
 	}
 	if !opts.CreatedBefore.IsZero() {
-		qb.add("created_at < $?", opts.CreatedBefore)
+		qb.Add("created_at < $?", opts.CreatedBefore)
 	}
 }
 
-func applySummaryFilters(qb *evalQueryBuilder, opts api.EvalResultSummaryOpts) {
+func applySummaryFilters(qb *pgutil.QueryBuilder, opts api.EvalResultSummaryOpts) {
 	if opts.AgentName != "" {
-		qb.add("agent_name=$?", opts.AgentName)
+		qb.Add("agent_name=$?", opts.AgentName)
 	}
 	if opts.Namespace != "" {
-		qb.add("namespace=$?", opts.Namespace)
+		qb.Add("namespace=$?", opts.Namespace)
 	}
 	if opts.EvalType != "" {
-		qb.add("eval_type=$?", opts.EvalType)
+		qb.Add("eval_type=$?", opts.EvalType)
 	}
 	if !opts.CreatedAfter.IsZero() {
-		qb.add("created_at >= $?", opts.CreatedAfter)
+		qb.Add("created_at >= $?", opts.CreatedAfter)
 	}
 	if !opts.CreatedBefore.IsZero() {
-		qb.add("created_at < $?", opts.CreatedBefore)
+		qb.Add("created_at < $?", opts.CreatedBefore)
 	}
 }
 

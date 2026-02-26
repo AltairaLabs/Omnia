@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/altairalabs/omnia/internal/pgutil"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
@@ -669,41 +670,8 @@ func TestNullJSONB(t *testing.T) {
 	assert.Equal(t, []byte(`{"a":1}`), nullJSONB(json.RawMessage(`{"a":1}`)))
 }
 
-func TestEvalQueryBuilder(t *testing.T) {
-	qb := &evalQueryBuilder{}
-
-	// Empty builder.
-	assert.Equal(t, "", qb.where())
-
-	// Add clauses.
-	qb.add("agent_name=$?", "test")
-	assert.Equal(t, " AND agent_name=$1", qb.where())
-
-	qb.add("namespace=$?", "default")
-	assert.Equal(t, " AND agent_name=$1 AND namespace=$2", qb.where())
-}
-
-func TestEvalQueryBuilder_AppendPagination(t *testing.T) {
-	qb := &evalQueryBuilder{}
-
-	// No limit or offset.
-	q := qb.appendPagination("SELECT * FROM eval_results", 0, 0)
-	assert.Equal(t, "SELECT * FROM eval_results", q)
-
-	// Limit only.
-	qb2 := &evalQueryBuilder{}
-	q2 := qb2.appendPagination("SELECT * FROM eval_results", 10, 0)
-	assert.Contains(t, q2, "LIMIT $1")
-
-	// Limit and offset.
-	qb3 := &evalQueryBuilder{}
-	q3 := qb3.appendPagination("SELECT * FROM eval_results", 10, 5)
-	assert.Contains(t, q3, "LIMIT $1")
-	assert.Contains(t, q3, "OFFSET $2")
-}
-
 func TestApplyEvalFilters(t *testing.T) {
-	qb := &evalQueryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	now := time.Now()
 	applyEvalFilters(qb, api.EvalResultListOpts{
 		AgentName:     "agent",
@@ -714,12 +682,12 @@ func TestApplyEvalFilters(t *testing.T) {
 		CreatedAfter:  now.Add(-time.Hour),
 		CreatedBefore: now,
 	})
-	assert.Len(t, qb.clauses, 7)
-	assert.Len(t, qb.args, 7)
+	assert.Len(t, qb.Args(), 7)
+	assert.Contains(t, qb.Where(), "agent_name=$1")
 }
 
 func TestApplySummaryFilters(t *testing.T) {
-	qb := &evalQueryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	now := time.Now()
 	applySummaryFilters(qb, api.EvalResultSummaryOpts{
 		AgentName:     "agent",
@@ -728,20 +696,20 @@ func TestApplySummaryFilters(t *testing.T) {
 		CreatedAfter:  now.Add(-time.Hour),
 		CreatedBefore: now,
 	})
-	assert.Len(t, qb.clauses, 5)
-	assert.Len(t, qb.args, 5)
+	assert.Len(t, qb.Args(), 5)
+	assert.Contains(t, qb.Where(), "agent_name=$1")
 }
 
 func TestApplyEvalFilters_Empty(t *testing.T) {
-	qb := &evalQueryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	applyEvalFilters(qb, api.EvalResultListOpts{})
-	assert.Empty(t, qb.clauses)
-	assert.Empty(t, qb.args)
+	assert.Empty(t, qb.Args())
+	assert.Empty(t, qb.Where())
 }
 
 func TestApplySummaryFilters_Empty(t *testing.T) {
-	qb := &evalQueryBuilder{}
+	qb := &pgutil.QueryBuilder{}
 	applySummaryFilters(qb, api.EvalResultSummaryOpts{})
-	assert.Empty(t, qb.clauses)
-	assert.Empty(t, qb.args)
+	assert.Empty(t, qb.Args())
+	assert.Empty(t, qb.Where())
 }
