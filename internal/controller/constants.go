@@ -83,8 +83,6 @@ const (
 	DefaultEvalWorkerImage = "ghcr.io/altairalabs/arena-eval-worker:latest"
 	// EvalWorkerContainerName is the container name inside the eval worker Deployment.
 	EvalWorkerContainerName = "eval-worker"
-	// EvalWorkerHealthPort is the health check port for the eval worker.
-	EvalWorkerHealthPort = 8082
 )
 
 // Eval environment variable name constants.

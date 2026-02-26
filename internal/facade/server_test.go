@@ -1329,7 +1329,7 @@ func TestServerWriteBinaryMediaChunk(t *testing.T) {
 			}
 
 			// Test WriteBinaryMediaChunk
-			mediaID := MediaIDFromString("test-media")
+			mediaID := testMediaIDFromString("test-media")
 			payload := []byte("test audio data")
 			return writer.WriteBinaryMediaChunk(mediaID, 0, true, "audio/mp3", payload)
 		},
@@ -1392,7 +1392,7 @@ func TestServerWriteBinaryMediaChunkFallback(t *testing.T) {
 				return errors.New("expected no binary support")
 			}
 
-			mediaID := MediaIDFromString("test-media")
+			mediaID := testMediaIDFromString("test-media")
 			payload := []byte("test audio data")
 			return writer.WriteBinaryMediaChunk(mediaID, 0, true, "audio/mp3", payload)
 		},

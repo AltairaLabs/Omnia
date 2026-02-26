@@ -76,13 +76,6 @@ func startTestServer(t *testing.T, mock *mockRuntimeServer) (string, func()) {
 	return lis.Addr().String(), cleanup
 }
 
-func TestDefaultRuntimeClientConfig(t *testing.T) {
-	cfg := DefaultRuntimeClientConfig()
-
-	assert.Equal(t, "localhost:9000", cfg.Address)
-	assert.Equal(t, 10*time.Second, cfg.DialTimeout)
-}
-
 func TestNewRuntimeClient_Success(t *testing.T) {
 	mock := &mockRuntimeServer{healthy: true, status: "ready"}
 	addr, cleanup := startTestServer(t, mock)

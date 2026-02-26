@@ -109,11 +109,6 @@ type DemoHandler struct {
 	metrics *metrics.LLMMetrics
 }
 
-// NewDemoHandler creates a new DemoHandler.
-func NewDemoHandler() *DemoHandler {
-	return &DemoHandler{}
-}
-
 // NewDemoHandlerWithMetrics creates a DemoHandler with LLM metrics.
 func NewDemoHandlerWithMetrics(cfg DemoMetricsConfig) *DemoHandler {
 	return &DemoHandler{

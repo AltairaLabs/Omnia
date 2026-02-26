@@ -37,16 +37,6 @@ type Config struct {
 	DryRun      bool
 }
 
-// DefaultConfig returns sensible defaults.
-func DefaultConfig() Config {
-	return Config{
-		BatchSize:   1000,
-		MaxRetries:  3,
-		RetryDelay:  5 * time.Second,
-		Compression: "snappy",
-	}
-}
-
 // Result summarises a compaction run.
 type Result struct {
 	SessionsCompacted int64

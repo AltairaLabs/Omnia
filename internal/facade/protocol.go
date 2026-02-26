@@ -89,62 +89,6 @@ func NewTextPart(text string) ContentPart {
 	}
 }
 
-// NewImagePart creates a new image content part with base64 data.
-func NewImagePart(data, mimeType string) ContentPart {
-	return ContentPart{
-		Type: ContentPartTypeImage,
-		Media: &MediaContent{
-			Data:     data,
-			MimeType: mimeType,
-		},
-	}
-}
-
-// NewImagePartFromURL creates a new image content part from a URL.
-func NewImagePartFromURL(url, mimeType string) ContentPart {
-	return ContentPart{
-		Type: ContentPartTypeImage,
-		Media: &MediaContent{
-			URL:      url,
-			MimeType: mimeType,
-		},
-	}
-}
-
-// NewAudioPart creates a new audio content part with base64 data.
-func NewAudioPart(data, mimeType string) ContentPart {
-	return ContentPart{
-		Type: ContentPartTypeAudio,
-		Media: &MediaContent{
-			Data:     data,
-			MimeType: mimeType,
-		},
-	}
-}
-
-// NewAudioPartFromURL creates a new audio content part from a URL.
-func NewAudioPartFromURL(url, mimeType string) ContentPart {
-	return ContentPart{
-		Type: ContentPartTypeAudio,
-		Media: &MediaContent{
-			URL:      url,
-			MimeType: mimeType,
-		},
-	}
-}
-
-// NewFilePart creates a new file content part from a URL.
-func NewFilePart(url, mimeType, filename string) ContentPart {
-	return ContentPart{
-		Type: ContentPartTypeFile,
-		Media: &MediaContent{
-			URL:      url,
-			MimeType: mimeType,
-			Filename: filename,
-		},
-	}
-}
-
 // MessageType represents the type of WebSocket message.
 type MessageType string
 
@@ -370,15 +314,6 @@ func NewErrorMessage(sessionID, code, message string) *ServerMessage {
 			Code:    code,
 			Message: message,
 		},
-		Timestamp: time.Now(),
-	}
-}
-
-// NewConnectedMessage creates a new connected message.
-func NewConnectedMessage(sessionID string) *ServerMessage {
-	return &ServerMessage{
-		Type:      MessageTypeConnected,
-		SessionID: sessionID,
 		Timestamp: time.Now(),
 	}
 }

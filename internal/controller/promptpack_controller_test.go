@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
+	"time"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -128,7 +130,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -300,7 +302,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -426,7 +428,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -604,7 +606,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -695,7 +697,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -785,7 +787,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			requests := reconciler.findPromptPacksForConfigMap(ctx, configMap)
@@ -862,7 +864,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -953,7 +955,7 @@ var _ = Describe("PromptPack Controller", func() {
 			reconciler := &PromptPackReconciler{
 				Client:          k8sClient,
 				Scheme:          k8sClient.Scheme(),
-				SchemaValidator: schema.NewSchemaValidator(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
 			}
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{

@@ -210,8 +210,15 @@ func TestBinaryFrameRoundTrip(t *testing.T) {
 	assert.Equal(t, metadata.MimeType, decodedMetadata.MimeType)
 }
 
+// testMediaIDFromString is a test helper that converts a string to a MediaID.
+func testMediaIDFromString(s string) [MediaIDSize]byte {
+	var id [MediaIDSize]byte
+	copy(id[:], s)
+	return id
+}
+
 func TestNewMediaChunkFrame(t *testing.T) {
-	mediaID := MediaIDFromString("audio-stream")
+	mediaID := testMediaIDFromString("audio-stream")
 	payload := []byte("chunk data here")
 
 	frame, err := NewMediaChunkFrame("session-123", mediaID, 5, true, "audio/wav", payload)
@@ -233,42 +240,6 @@ func TestNewMediaChunkFrame(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "session-123", metadata.SessionID)
 	assert.Equal(t, "audio/wav", metadata.MimeType)
-}
-
-func TestMediaIDFromString(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected [MediaIDSize]byte
-	}{
-		{
-			name:     "short string",
-			input:    "test",
-			expected: [MediaIDSize]byte{'t', 'e', 's', 't', 0, 0, 0, 0, 0, 0, 0, 0},
-		},
-		{
-			name:     "exact length",
-			input:    "123456789012",
-			expected: [MediaIDSize]byte{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '1', '2'},
-		},
-		{
-			name:     "too long (truncated)",
-			input:    "123456789012345",
-			expected: [MediaIDSize]byte{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '1', '2'},
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: [MediaIDSize]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := MediaIDFromString(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }
 
 func TestMediaIDToString(t *testing.T) {

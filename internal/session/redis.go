@@ -96,14 +96,6 @@ func NewRedisStore(cfg RedisConfig) (*RedisStore, error) {
 	}, nil
 }
 
-// NewRedisStoreFromClient creates a new Redis session store from an existing client.
-func NewRedisStoreFromClient(client *redis.Client, keyPrefix string) *RedisStore {
-	return &RedisStore{
-		client:    client,
-		keyPrefix: keyPrefix,
-	}
-}
-
 func (r *RedisStore) sessionKey(sessionID string) string {
 	return r.keyPrefix + sessionKeyPrefix + sessionID
 }

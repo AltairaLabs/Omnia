@@ -73,12 +73,6 @@ type SchemaValidator struct {
 	embeddedLoader gojsonschema.JSONLoader
 }
 
-// NewSchemaValidator creates a validator with default settings.
-// Uses embedded schema as fallback when network is unavailable.
-func NewSchemaValidator() *SchemaValidator {
-	return NewSchemaValidatorWithOptions(logr.Discard(), nil, defaultCacheDuration)
-}
-
 // NewSchemaValidatorWithOptions creates a validator with custom settings.
 func NewSchemaValidatorWithOptions(log logr.Logger, httpClient *http.Client, cacheDuration time.Duration) *SchemaValidator {
 	if httpClient == nil {
@@ -211,17 +205,6 @@ func (v *SchemaValidator) fetchSchema(schemaURL string) (gojsonschema.JSONLoader
 	)
 
 	return gojsonschema.NewStringLoader(string(body)), nil
-}
-
-// GetEmbeddedSchemaVersion returns the version of the embedded schema.
-func GetEmbeddedSchemaVersion() (string, error) {
-	var schema struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal([]byte(embeddedSchema), &schema); err != nil {
-		return "", fmt.Errorf("failed to parse embedded schema: %w", err)
-	}
-	return schema.Version, nil
 }
 
 // extractSchemaURL extracts the $schema URL from pack JSON data.

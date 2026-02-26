@@ -627,22 +627,6 @@ func TestFilterByWorkspaceCutoff(t *testing.T) {
 // Additional coverage tests
 // ---------------------------------------------------------------------------
 
-func TestDefaultConfig(t *testing.T) {
-	cfg := DefaultConfig()
-	if cfg.BatchSize != 1000 {
-		t.Errorf("expected BatchSize 1000, got %d", cfg.BatchSize)
-	}
-	if cfg.MaxRetries != 3 {
-		t.Errorf("expected MaxRetries 3, got %d", cfg.MaxRetries)
-	}
-	if cfg.Compression != "snappy" {
-		t.Errorf("expected Compression snappy, got %s", cfg.Compression)
-	}
-	if cfg.DryRun {
-		t.Error("expected DryRun false")
-	}
-}
-
 func TestRun_WithMetrics(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-10 * 24 * time.Hour)

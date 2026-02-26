@@ -268,15 +268,6 @@ func NewMediaChunkFrame(sessionID string, mediaID [MediaIDSize]byte, sequence ui
 	}, nil
 }
 
-// MediaIDFromString converts a string to a MediaID.
-// If the string is longer than MediaIDSize, it is truncated.
-// If shorter, it is padded with zeros.
-func MediaIDFromString(s string) [MediaIDSize]byte {
-	var id [MediaIDSize]byte
-	copy(id[:], s)
-	return id
-}
-
 // MediaIDToString converts a MediaID to a string, trimming null bytes.
 func MediaIDToString(id [MediaIDSize]byte) string {
 	// Find the first null byte
