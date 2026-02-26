@@ -8,40 +8,12 @@
  * configuration resources.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { getSharedCrd } from "@/lib/k8s/crd-operations";
-import { notFoundResponse, serverErrorResponse, SYSTEM_NAMESPACE } from "@/lib/k8s/workspace-route-helpers";
+import { createSharedItemRoutes } from "@/lib/api/crd-route-factory";
 import type { ToolRegistry } from "@/lib/data/types";
 
-interface RouteContext {
-  params: Promise<{ registryName: string }>;
-}
-
-/**
- * GET /api/shared/toolregistries/:registryName
- *
- * Get a specific shared tool registry by name.
- * No authentication required - read-only configuration data.
- */
-export async function GET(
-  _request: NextRequest,
-  context: RouteContext
-): Promise<NextResponse> {
-  try {
-    const { registryName } = await context.params;
-
-    const toolRegistry = await getSharedCrd<ToolRegistry>(
-      "toolregistries",
-      SYSTEM_NAMESPACE,
-      registryName
-    );
-
-    if (!toolRegistry) {
-      return notFoundResponse(`Tool registry not found: ${registryName}`);
-    }
-
-    return NextResponse.json(toolRegistry);
-  } catch (error) {
-    return serverErrorResponse(error, "Failed to get tool registry");
-  }
-}
+export const { GET } = createSharedItemRoutes<ToolRegistry>({
+  plural: "toolregistries",
+  paramKey: "registryName",
+  resourceLabel: "Tool registry",
+  errorLabel: "tool registry",
+});

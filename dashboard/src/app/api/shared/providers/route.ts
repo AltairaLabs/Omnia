@@ -8,26 +8,10 @@
  * configuration resources.
  */
 
-import { NextResponse } from "next/server";
-import { listSharedCrd } from "@/lib/k8s/crd-operations";
-import { serverErrorResponse, SYSTEM_NAMESPACE } from "@/lib/k8s/workspace-route-helpers";
+import { createSharedCollectionRoutes } from "@/lib/api/crd-route-factory";
 import type { Provider } from "@/lib/data/types";
 
-/**
- * GET /api/shared/providers
- *
- * List all shared providers in the system namespace.
- * No authentication required - read-only configuration data.
- */
-export async function GET(): Promise<NextResponse> {
-  try {
-    const providers = await listSharedCrd<Provider>(
-      "providers",
-      SYSTEM_NAMESPACE
-    );
-
-    return NextResponse.json(providers);
-  } catch (error) {
-    return serverErrorResponse(error, "Failed to list providers");
-  }
-}
+export const { GET } = createSharedCollectionRoutes<Provider>({
+  plural: "providers",
+  errorLabel: "providers",
+});
