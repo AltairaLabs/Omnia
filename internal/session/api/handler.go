@@ -532,10 +532,7 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingNamespace):
 		status = http.StatusBadRequest
 		msg = ErrMissingNamespace.Error()
-	case errors.Is(err, ErrBodyTooLarge):
-		status = http.StatusRequestEntityTooLarge
-		msg = ErrBodyTooLarge.Error()
-	case isMaxBytesError(err):
+	case errors.Is(err, ErrBodyTooLarge) || isMaxBytesError(err):
 		status = http.StatusRequestEntityTooLarge
 		msg = ErrBodyTooLarge.Error()
 	default:

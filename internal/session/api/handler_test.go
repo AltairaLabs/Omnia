@@ -1815,3 +1815,194 @@ func TestWriteError_BodyTooLarge(t *testing.T) {
 		t.Fatalf("expected 413, got %d", rec.Code)
 	}
 }
+
+func TestWriteError_MaxBytesError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, &http.MaxBytesError{Limit: 1024})
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrBodyTooLarge.Error() {
+		t.Fatalf("expected error %q, got %q", ErrBodyTooLarge.Error(), resp.Error)
+	}
+}
+
+func TestWriteError_MissingNamespace(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, ErrMissingNamespace)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrMissingNamespace.Error() {
+		t.Fatalf("expected error %q, got %q", ErrMissingNamespace.Error(), resp.Error)
+	}
+}
+
+func TestHandleUpdateStats_BodyTooLarge(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = testSession("s1")
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	// Use a tiny body limit to trigger MaxBytesError.
+	h := NewHandler(svc, logr.Discard(), 5)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"addInputTokens":100,"addOutputTokens":50,"addMessages":1}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/s1/stats", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+}
+
+func TestHandleUpdateStats_NoBody(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/s1/stats", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleRefreshTTL_BodyTooLarge(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = testSession("s1")
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard(), 5)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"ttlSeconds":7200}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/ttl", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+}
+
+func TestHandleRefreshTTL_NoBody(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/ttl", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleRefreshTTL_NoWarmStore(t *testing.T) {
+	reg := providers.NewRegistry()
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"ttlSeconds":3600}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/nonexistent/ttl", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestHandleAppendMessage_BodyTooLarge(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = testSession("s1")
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard(), 5)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"m10","role":"user","content":"a very long message body exceeding the limit"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/messages", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", rec.Code)
+	}
+}
+
+func TestHandleDeleteSession_InternalError(t *testing.T) {
+	// Delete on a session that exists but warm store has issues.
+	// Use a handler with no warm store to trigger ErrWarmStoreRequired.
+	reg := providers.NewRegistry()
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard())
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestIsMaxBytesError(t *testing.T) {
+	if !isMaxBytesError(&http.MaxBytesError{Limit: 100}) {
+		t.Fatal("expected true for MaxBytesError")
+	}
+	if isMaxBytesError(errors.New("some other error")) {
+		t.Fatal("expected false for non-MaxBytesError")
+	}
+}
+
+func TestParseListParams_WithNamespace(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?workspace=ws&namespace=test-ns", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Namespace != "test-ns" {
+		t.Fatalf("expected namespace test-ns, got %q", opts.Namespace)
+	}
+}
+
+func TestParseListParams_WithValidTimeRange(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?from=2025-01-01T00:00:00Z&to=2025-12-31T23:59:59Z", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.CreatedAfter.IsZero() {
+		t.Fatal("expected non-zero CreatedAfter time")
+	}
+	if opts.CreatedBefore.IsZero() {
+		t.Fatal("expected non-zero CreatedBefore time")
+	}
+}
