@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -200,7 +199,7 @@ func (r *ArenaTemplateSourceReconciler) Reconcile(ctx context.Context, req ctrl.
 		}
 
 		// Store the artifact (sync to filesystem)
-		contentPath, version, err := r.storeArtifact(source, result.artifact)
+		contentPath, version, err := r.storeArtifact(ctx, source, result.artifact)
 		if err != nil {
 			log.Error(err, "Failed to store artifact")
 			r.handleFetchError(ctx, source, err)
@@ -464,7 +463,7 @@ func (r *ArenaTemplateSourceReconciler) createGitFetcher(
 
 	// Load credentials if specified
 	if spec.Git.SecretRef != nil {
-		creds, err := r.loadGitCredentials(ctx, namespace, spec.Git.SecretRef.Name)
+		creds, err := LoadGitCredentials(ctx, r.Client, namespace, spec.Git.SecretRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load git credentials: %w", err)
 		}
@@ -493,7 +492,7 @@ func (r *ArenaTemplateSourceReconciler) createOCIFetcher(
 
 	// Load credentials if specified
 	if spec.OCI.SecretRef != nil {
-		creds, err := r.loadOCICredentials(ctx, namespace, spec.OCI.SecretRef.Name)
+		creds, err := LoadOCICredentials(ctx, r.Client, namespace, spec.OCI.SecretRef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load oci credentials: %w", err)
 		}
@@ -522,61 +521,9 @@ func (r *ArenaTemplateSourceReconciler) createConfigMapFetcher(
 	return fetcher.NewConfigMapFetcher(config, r.Client), nil
 }
 
-// loadGitCredentials loads Git credentials from a Secret.
-func (r *ArenaTemplateSourceReconciler) loadGitCredentials(ctx context.Context, namespace, secretName string) (*fetcher.GitCredentials, error) {
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
-		return nil, err
-	}
-
-	creds := &fetcher.GitCredentials{}
-
-	// HTTPS credentials
-	if username, ok := secret.Data["username"]; ok {
-		creds.Username = string(username)
-	}
-	if password, ok := secret.Data["password"]; ok {
-		creds.Password = string(password)
-	}
-
-	// SSH credentials
-	if identity, ok := secret.Data["identity"]; ok {
-		creds.PrivateKey = identity
-	}
-	if knownHosts, ok := secret.Data["known_hosts"]; ok {
-		creds.KnownHosts = knownHosts
-	}
-
-	return creds, nil
-}
-
-// loadOCICredentials loads OCI credentials from a Secret.
-func (r *ArenaTemplateSourceReconciler) loadOCICredentials(ctx context.Context, namespace, secretName string) (*fetcher.OCICredentials, error) {
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
-		return nil, err
-	}
-
-	creds := &fetcher.OCICredentials{}
-
-	// Basic auth credentials
-	if username, ok := secret.Data["username"]; ok {
-		creds.Username = string(username)
-	}
-	if password, ok := secret.Data["password"]; ok {
-		creds.Password = string(password)
-	}
-
-	// Docker config
-	if dockerConfig, ok := secret.Data[".dockerconfigjson"]; ok {
-		creds.DockerConfig = dockerConfig
-	}
-
-	return creds, nil
-}
-
 // storeArtifact stores the fetched artifact by syncing to the workspace content filesystem.
 func (r *ArenaTemplateSourceReconciler) storeArtifact(
+	ctx context.Context,
 	source *omniav1alpha1.ArenaTemplateSource,
 	artifact *fetcher.Artifact,
 ) (contentPath, version string, err error) {
@@ -592,189 +539,21 @@ func (r *ArenaTemplateSourceReconciler) storeArtifact(
 		return "", "", fmt.Errorf("WorkspaceContentPath is required for storing artifacts")
 	}
 
-	return r.syncToFilesystem(source, artifact)
-}
-
-// syncToFilesystem copies the artifact directory to the workspace content filesystem.
-func (r *ArenaTemplateSourceReconciler) syncToFilesystem(
-	source *omniav1alpha1.ArenaTemplateSource,
-	artifact *fetcher.Artifact,
-) (contentPath, version string, err error) {
-	ctx := context.Background()
-	log := logf.FromContext(ctx).WithValues(
-		"source", source.Name,
-		"namespace", source.Namespace,
-	)
-
-	// Get workspace name from namespace label
-	workspaceName := r.getWorkspaceForNamespace(ctx, source.Namespace)
-
-	// Ensure workspace PVC exists (lazy creation)
-	if r.StorageManager != nil {
-		if _, pvcErr := r.StorageManager.EnsureWorkspacePVC(ctx, workspaceName); pvcErr != nil {
-			log.Error(pvcErr, "failed to ensure workspace PVC exists", "workspace", workspaceName)
-			return "", "", fmt.Errorf("failed to ensure workspace PVC: %w", pvcErr)
-		}
-		log.V(1).Info("workspace PVC ensured", "workspace", workspaceName)
-	}
-
-	// Target path for templates: arena/template-sources/{source-name}
+	workspaceName := GetWorkspaceForNamespace(ctx, r.Client, source.Namespace)
 	targetPath := fmt.Sprintf("arena/template-sources/%s", source.Name)
 
-	// Workspace content structure: {base}/{workspace}/{namespace}/{targetPath}
-	workspacePath := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, targetPath)
-
-	// Use the checksum from the artifact
-	contentHash := strings.TrimPrefix(artifact.Checksum, "sha256:")
-	if contentHash == "" || contentHash == artifact.Checksum || len(contentHash) < 12 {
-		var err error
-		contentHash, err = fetcher.CalculateDirectoryHash(artifact.Path)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to calculate content hash: %w", err)
-		}
+	syncer := &FilesystemSyncer{
+		WorkspaceContentPath: r.WorkspaceContentPath,
+		MaxVersionsPerSource: r.MaxVersionsPerSource,
+		StorageManager:       r.StorageManager,
 	}
 
-	// Short version for display (first 12 chars of SHA256)
-	version = contentHash[:12]
-
-	// Check if this version already exists
-	versionDir := filepath.Join(workspacePath, ".arena", "versions", version)
-	if _, err := os.Stat(versionDir); err == nil {
-		log.V(1).Info("Version already exists, skipping sync", "version", version)
-		contentPath = filepath.Join(targetPath, ".arena", "versions", version)
-		if err := r.updateHEAD(workspacePath, version); err != nil {
-			return "", "", fmt.Errorf("failed to update HEAD: %w", err)
-		}
-		return contentPath, version, nil
-	}
-
-	// Create version directory
-	if err := os.MkdirAll(versionDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create version directory: %w", err)
-	}
-
-	// Try os.Rename first (atomic, same filesystem), fallback to copy
-	if err := os.Rename(artifact.Path, versionDir); err != nil {
-		_ = os.RemoveAll(versionDir)
-		if err := os.MkdirAll(versionDir, 0755); err != nil {
-			return "", "", fmt.Errorf("failed to create version directory: %w", err)
-		}
-		if err := copyDirectory(artifact.Path, versionDir); err != nil {
-			_ = os.RemoveAll(versionDir)
-			return "", "", fmt.Errorf("failed to copy content to version directory: %w", err)
-		}
-	}
-
-	// Update HEAD pointer atomically
-	if err := r.updateHEAD(workspacePath, version); err != nil {
-		return "", "", fmt.Errorf("failed to update HEAD: %w", err)
-	}
-
-	// Garbage collect old versions
-	if err := r.gcOldVersions(workspacePath); err != nil {
-		log.Error(err, "Failed to garbage collect old versions")
-	}
-
-	log.Info("Successfully synced content to filesystem",
-		"version", version,
-		"path", versionDir,
-	)
-
-	contentPath = filepath.Join(targetPath, ".arena", "versions", version)
-	return contentPath, version, nil
-}
-
-// getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
-func (r *ArenaTemplateSourceReconciler) getWorkspaceForNamespace(ctx context.Context, namespace string) string {
-	if r.Client == nil {
-		return namespace
-	}
-	ns := &corev1.Namespace{}
-	if err := r.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
-		return namespace
-	}
-	if wsName, ok := ns.Labels[labelWorkspace]; ok && wsName != "" {
-		return wsName
-	}
-	return namespace
-}
-
-// updateHEAD atomically updates the HEAD pointer to the given version.
-func (r *ArenaTemplateSourceReconciler) updateHEAD(workspacePath, version string) error {
-	arenaDir := filepath.Join(workspacePath, ".arena")
-	if err := os.MkdirAll(arenaDir, 0755); err != nil {
-		return err
-	}
-
-	headPath := filepath.Join(arenaDir, "HEAD")
-	tempPath := headPath + ".tmp"
-
-	if err := os.WriteFile(tempPath, []byte(version), 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tempPath, headPath)
-}
-
-// gcOldVersions removes old versions exceeding MaxVersionsPerSource.
-func (r *ArenaTemplateSourceReconciler) gcOldVersions(workspacePath string) error {
-	versionsDir := filepath.Join(workspacePath, ".arena", "versions")
-
-	entries, err := os.ReadDir(versionsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	maxVersions := r.MaxVersionsPerSource
-	if maxVersions <= 0 {
-		maxVersions = 10
-	}
-
-	if len(entries) <= maxVersions {
-		return nil
-	}
-
-	// Get version directories with their mod times
-	type versionInfo struct {
-		name    string
-		modTime time.Time
-	}
-	versions := make([]versionInfo, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		versions = append(versions, versionInfo{
-			name:    entry.Name(),
-			modTime: info.ModTime(),
-		})
-	}
-
-	// Sort by mod time (oldest first)
-	for i := 0; i < len(versions)-1; i++ {
-		for j := i + 1; j < len(versions); j++ {
-			if versions[i].modTime.After(versions[j].modTime) {
-				versions[i], versions[j] = versions[j], versions[i]
-			}
-		}
-	}
-
-	// Remove oldest versions
-	for i := 0; i < len(versions)-maxVersions; i++ {
-		versionPath := filepath.Join(versionsDir, versions[i].name)
-		if err := os.RemoveAll(versionPath); err != nil {
-			return fmt.Errorf("failed to remove old version %s: %w", versions[i].name, err)
-		}
-	}
-
-	return nil
+	return syncer.SyncToFilesystem(ctx, SyncParams{
+		WorkspaceName: workspaceName,
+		Namespace:     source.Namespace,
+		TargetPath:    targetPath,
+		Artifact:      artifact,
+	})
 }
 
 // TemplateIndexDir is the directory for template index files.
@@ -784,7 +563,7 @@ const TemplateIndexDir = "arena/template-indexes"
 // Path: {WorkspaceContentPath}/{workspace}/{namespace}/arena/template-indexes/{source}.json
 func (r *ArenaTemplateSourceReconciler) writeTemplateIndex(source *omniav1alpha1.ArenaTemplateSource, _ string, templates []arenaTemplate.Template) error {
 	// Get workspace name for the namespace
-	workspaceName := r.getWorkspaceForNamespace(context.Background(), source.Namespace)
+	workspaceName := GetWorkspaceForNamespace(context.Background(), r.Client, source.Namespace)
 
 	// Build index directory path
 	indexDir := filepath.Join(r.WorkspaceContentPath, workspaceName, source.Namespace, TemplateIndexDir)

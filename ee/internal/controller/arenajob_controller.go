@@ -104,25 +104,6 @@ type ArenaJobReconciler struct {
 	WorkerServiceAccountName string
 }
 
-// getWorkspaceForNamespace looks up the workspace name from a namespace's labels.
-// Returns the namespace name as fallback if workspace label is not found.
-func (r *ArenaJobReconciler) getWorkspaceForNamespace(ctx context.Context, namespace string) string {
-	// Handle nil client (e.g., in tests that don't set up the client)
-	if r.Client == nil {
-		return namespace
-	}
-	ns := &corev1.Namespace{}
-	if err := r.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
-		// Fallback to namespace name if we can't look it up
-		return namespace
-	}
-	if wsName, ok := ns.Labels[labelWorkspace]; ok && wsName != "" {
-		return wsName
-	}
-	// Fallback to namespace name
-	return namespace
-}
-
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs/finalizers,verbs=update
@@ -734,7 +715,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	usePVCMount := r.NFSServer == "" || r.NFSPath == ""
 
 	if useWorkspaceContent && usePVCMount && r.StorageManager != nil {
-		workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+		workspaceName := GetWorkspaceForNamespace(ctx, r.Client, arenaJob.Namespace)
 		if _, err := r.StorageManager.EnsureWorkspacePVC(ctx, workspaceName); err != nil {
 			log.Error(err, "failed to ensure workspace PVC exists", "workspace", workspaceName)
 			return fmt.Errorf("failed to ensure workspace PVC: %w", err)
@@ -847,7 +828,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 	// Structure: {workspace}/{namespace}/{contentPath}/{rootPath}
 	var contentSubPath string
 	if source.Status.Artifact != nil && source.Status.Artifact.ContentPath != "" {
-		workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+		workspaceName := GetWorkspaceForNamespace(ctx, r.Client, arenaJob.Namespace)
 		contentSubPath = fmt.Sprintf("%s/%s/%s",
 			workspaceName, arenaJob.Namespace, source.Status.Artifact.ContentPath)
 		if rootPath != "" {
@@ -1129,7 +1110,7 @@ func (r *ArenaJobReconciler) getContentBasePath(ctx context.Context, arenaJob *o
 		return ""
 	}
 
-	workspaceName := r.getWorkspaceForNamespace(ctx, arenaJob.Namespace)
+	workspaceName := GetWorkspaceForNamespace(ctx, r.Client, arenaJob.Namespace)
 
 	// Extract root path from arenaFile
 	var rootPath string
