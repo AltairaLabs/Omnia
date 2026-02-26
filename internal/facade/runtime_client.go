@@ -45,15 +45,6 @@ type RuntimeClientConfig struct {
 	MaxMessageSize int
 }
 
-// DefaultRuntimeClientConfig returns a RuntimeClientConfig with default values.
-func DefaultRuntimeClientConfig() RuntimeClientConfig {
-	return RuntimeClientConfig{
-		Address:        "localhost:9000",
-		DialTimeout:    10 * time.Second,
-		MaxMessageSize: 16 * 1024 * 1024, // 16MB to support base64-encoded images
-	}
-}
-
 // NewRuntimeClient creates a new RuntimeClient connected to the runtime sidecar.
 func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 	// Use default max message size if not specified

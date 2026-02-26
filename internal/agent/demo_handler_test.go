@@ -24,15 +24,8 @@ import (
 	"github.com/altairalabs/omnia/internal/facade"
 )
 
-func TestNewDemoHandler(t *testing.T) {
-	handler := NewDemoHandler()
-	if handler == nil {
-		t.Fatal("NewDemoHandler() returned nil")
-	}
-}
-
 func TestDemoHandler_Name(t *testing.T) {
-	handler := NewDemoHandler()
+	handler := &DemoHandler{}
 	name := handler.Name()
 	if name != string(HandlerModeDemo) {
 		t.Errorf("Name() = %q, want %q", name, HandlerModeDemo)
@@ -53,7 +46,7 @@ func TestDemoHandler_HandleMessage_Greeting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDemoHandler()
+			handler := &DemoHandler{}
 			writer := &mockResponseWriter{}
 			msg := &facade.ClientMessage{Content: tt.content}
 
@@ -78,7 +71,7 @@ func TestDemoHandler_HandleMessage_Greeting(t *testing.T) {
 }
 
 func TestDemoHandler_HandleMessage_PasswordReset(t *testing.T) {
-	handler := NewDemoHandler()
+	handler := &DemoHandler{}
 	writer := &mockResponseWriter{}
 	msg := &facade.ClientMessage{Content: "How do I reset my password?"}
 
@@ -114,7 +107,7 @@ func TestDemoHandler_HandleMessage_PasswordReset(t *testing.T) {
 }
 
 func TestDemoHandler_HandleMessage_Weather(t *testing.T) {
-	handler := NewDemoHandler()
+	handler := &DemoHandler{}
 	writer := &mockResponseWriter{}
 	msg := &facade.ClientMessage{Content: "What's the weather like?"}
 
@@ -150,7 +143,7 @@ func TestDemoHandler_HandleMessage_Weather(t *testing.T) {
 }
 
 func TestDemoHandler_HandleMessage_Default(t *testing.T) {
-	handler := NewDemoHandler()
+	handler := &DemoHandler{}
 	writer := &mockResponseWriter{}
 	msg := &facade.ClientMessage{Content: "Tell me about quantum computing"}
 
@@ -246,7 +239,7 @@ func TestDemoHandler_HandleMessage_ImageResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDemoHandler()
+			handler := &DemoHandler{}
 			writer := &mockResponseWriter{}
 			msg := &facade.ClientMessage{Content: tt.content}
 
@@ -301,7 +294,7 @@ func TestDemoHandler_HandleMessage_AudioResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDemoHandler()
+			handler := &DemoHandler{}
 			writer := &mockResponseWriter{}
 			msg := &facade.ClientMessage{Content: tt.content}
 
@@ -346,7 +339,7 @@ func TestDemoHandler_HandleMessage_VideoResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDemoHandler()
+			handler := &DemoHandler{}
 			writer := &mockResponseWriter{}
 			msg := &facade.ClientMessage{Content: tt.content}
 
@@ -392,7 +385,7 @@ func TestDemoHandler_HandleMessage_DocumentResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDemoHandler()
+			handler := &DemoHandler{}
 			writer := &mockResponseWriter{}
 			msg := &facade.ClientMessage{Content: tt.content}
 
@@ -437,7 +430,7 @@ func TestDemoHandler_HandleMessage_MultiModalResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDemoHandler()
+			handler := &DemoHandler{}
 			writer := &mockResponseWriter{}
 			msg := &facade.ClientMessage{Content: tt.content}
 

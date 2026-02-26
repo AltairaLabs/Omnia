@@ -28,7 +28,7 @@ import (
 )
 
 func TestSchemaValidator_Validate(t *testing.T) {
-	validator := NewSchemaValidator()
+	validator := NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour)
 
 	tests := []struct {
 		name        string
@@ -213,24 +213,9 @@ func TestNewSchemaValidatorWithOptions(t *testing.T) {
 	}
 }
 
-func TestGetEmbeddedSchemaVersion(t *testing.T) {
-	version, err := GetEmbeddedSchemaVersion()
-	if err != nil {
-		t.Errorf("GetEmbeddedSchemaVersion() error = %v", err)
-		return
-	}
-	if version == "" {
-		t.Error("GetEmbeddedSchemaVersion() returned empty version")
-	}
-	// Should be a valid semver-like string
-	if !strings.Contains(version, ".") {
-		t.Errorf("GetEmbeddedSchemaVersion() = %v, expected semver format", version)
-	}
-}
-
 func TestSchemaValidator_UsesEmbeddedSchema(t *testing.T) {
 	// Create validator that will fail network fetch (invalid HTTP client)
-	validator := NewSchemaValidator()
+	validator := NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour)
 
 	// Valid pack should still validate using embedded schema
 	validPack := `{

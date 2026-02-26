@@ -222,20 +222,6 @@ func TestNewErrorMessage(t *testing.T) {
 	}
 }
 
-func TestNewConnectedMessage(t *testing.T) {
-	msg := NewConnectedMessage(testSessionID)
-
-	if msg.Type != MessageTypeConnected {
-		t.Errorf("Type = %v, want %v", msg.Type, MessageTypeConnected)
-	}
-	if msg.SessionID != testSessionID {
-		t.Errorf("SessionID = %v, want %v", msg.SessionID, testSessionID)
-	}
-	if msg.Timestamp.IsZero() {
-		t.Error("Timestamp should not be zero")
-	}
-}
-
 func TestErrorCodes(t *testing.T) {
 	codes := []string{
 		ErrorCodeInvalidMessage,
@@ -343,88 +329,6 @@ func TestNewTextPart(t *testing.T) {
 	}
 }
 
-func TestNewImagePart(t *testing.T) {
-	part := NewImagePart("iVBORw0KGgo=", "image/png")
-
-	if part.Type != ContentPartTypeImage {
-		t.Errorf("Type = %v, want %v", part.Type, ContentPartTypeImage)
-	}
-	if part.Media == nil {
-		t.Fatal("Media should not be nil")
-	}
-	if part.Media.Data != "iVBORw0KGgo=" {
-		t.Errorf("Media.Data = %v, want 'iVBORw0KGgo='", part.Media.Data)
-	}
-	if part.Media.MimeType != "image/png" {
-		t.Errorf("Media.MimeType = %v, want 'image/png'", part.Media.MimeType)
-	}
-}
-
-func TestNewImagePartFromURL(t *testing.T) {
-	part := NewImagePartFromURL("https://example.com/image.png", "image/png")
-
-	if part.Type != ContentPartTypeImage {
-		t.Errorf("Type = %v, want %v", part.Type, ContentPartTypeImage)
-	}
-	if part.Media == nil {
-		t.Fatal("Media should not be nil")
-	}
-	if part.Media.URL != "https://example.com/image.png" {
-		t.Errorf("Media.URL = %v, want 'https://example.com/image.png'", part.Media.URL)
-	}
-	if part.Media.MimeType != "image/png" {
-		t.Errorf("Media.MimeType = %v, want 'image/png'", part.Media.MimeType)
-	}
-}
-
-func TestNewAudioPart(t *testing.T) {
-	part := NewAudioPart("//uQxAAAAAAA", "audio/mp3")
-
-	if part.Type != ContentPartTypeAudio {
-		t.Errorf("Type = %v, want %v", part.Type, ContentPartTypeAudio)
-	}
-	if part.Media == nil {
-		t.Fatal("Media should not be nil")
-	}
-	if part.Media.Data != "//uQxAAAAAAA" {
-		t.Errorf("Media.Data = %v, want '//uQxAAAAAAA'", part.Media.Data)
-	}
-	if part.Media.MimeType != "audio/mp3" {
-		t.Errorf("Media.MimeType = %v, want 'audio/mp3'", part.Media.MimeType)
-	}
-}
-
-func TestNewAudioPartFromURL(t *testing.T) {
-	part := NewAudioPartFromURL("https://example.com/audio.mp3", "audio/mpeg")
-
-	if part.Type != ContentPartTypeAudio {
-		t.Errorf("Type = %v, want %v", part.Type, ContentPartTypeAudio)
-	}
-	if part.Media == nil {
-		t.Fatal("Media should not be nil")
-	}
-	if part.Media.URL != "https://example.com/audio.mp3" {
-		t.Errorf("Media.URL = %v, want 'https://example.com/audio.mp3'", part.Media.URL)
-	}
-}
-
-func TestNewFilePart(t *testing.T) {
-	part := NewFilePart("https://example.com/doc.pdf", "application/pdf", "document.pdf")
-
-	if part.Type != ContentPartTypeFile {
-		t.Errorf("Type = %v, want %v", part.Type, ContentPartTypeFile)
-	}
-	if part.Media == nil {
-		t.Fatal("Media should not be nil")
-	}
-	if part.Media.URL != "https://example.com/doc.pdf" {
-		t.Errorf("Media.URL = %v, want 'https://example.com/doc.pdf'", part.Media.URL)
-	}
-	if part.Media.Filename != "document.pdf" {
-		t.Errorf("Media.Filename = %v, want 'document.pdf'", part.Media.Filename)
-	}
-}
-
 func TestContentPartJSON(t *testing.T) {
 	part := ContentPart{
 		Type: ContentPartTypeImage,
@@ -497,7 +401,7 @@ func TestClientMessageWithParts(t *testing.T) {
 		SessionID: "test-session",
 		Parts: []ContentPart{
 			NewTextPart("What's in this image?"),
-			NewImagePartFromURL("https://example.com/photo.jpg", "image/jpeg"),
+			{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/photo.jpg", MimeType: "image/jpeg"}},
 		},
 	}
 
@@ -528,7 +432,7 @@ func TestServerMessageWithParts(t *testing.T) {
 		SessionID: "test-session",
 		Parts: []ContentPart{
 			NewTextPart("Here's the analysis:"),
-			NewImagePartFromURL("https://example.com/annotated.png", "image/png"),
+			{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/annotated.png", MimeType: "image/png"}},
 		},
 		Timestamp: time.Now(),
 	}
@@ -551,7 +455,7 @@ func TestServerMessageWithParts(t *testing.T) {
 func TestNewDoneMessageWithParts(t *testing.T) {
 	parts := []ContentPart{
 		NewTextPart("Response with image"),
-		NewImagePartFromURL("https://example.com/result.png", "image/png"),
+		{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/result.png", MimeType: "image/png"}},
 	}
 
 	msg := NewDoneMessageWithParts(testSessionID, parts)
@@ -621,7 +525,7 @@ func TestClientMessageGetTextContent(t *testing.T) {
 			name: "text from mixed parts",
 			msg: ClientMessage{
 				Parts: []ContentPart{
-					NewImagePartFromURL("https://example.com/img.png", "image/png"),
+					{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/img.png", MimeType: "image/png"}},
 					NewTextPart("Text after image"),
 				},
 			},
@@ -631,7 +535,7 @@ func TestClientMessageGetTextContent(t *testing.T) {
 			name: "empty when no text",
 			msg: ClientMessage{
 				Parts: []ContentPart{
-					NewImagePartFromURL("https://example.com/img.png", "image/png"),
+					{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/img.png", MimeType: "image/png"}},
 				},
 			},
 			expected: "",
@@ -671,7 +575,7 @@ func TestClientMessageHasMediaContent(t *testing.T) {
 			msg: ClientMessage{
 				Parts: []ContentPart{
 					NewTextPart("Check this"),
-					NewImagePartFromURL("https://example.com/img.png", "image/png"),
+					{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/img.png", MimeType: "image/png"}},
 				},
 			},
 			expected: true,
@@ -680,7 +584,7 @@ func TestClientMessageHasMediaContent(t *testing.T) {
 			name: "has audio - has media",
 			msg: ClientMessage{
 				Parts: []ContentPart{
-					NewAudioPartFromURL("https://example.com/audio.mp3", "audio/mpeg"),
+					{Type: ContentPartTypeAudio, Media: &MediaContent{URL: "https://example.com/audio.mp3", MimeType: "audio/mpeg"}},
 				},
 			},
 			expected: true,
@@ -701,10 +605,10 @@ func TestClientMessageGetMediaParts(t *testing.T) {
 	msg := ClientMessage{
 		Parts: []ContentPart{
 			NewTextPart("Analyze these:"),
-			NewImagePartFromURL("https://example.com/img1.png", "image/png"),
+			{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/img1.png", MimeType: "image/png"}},
 			NewTextPart("And this:"),
-			NewImagePartFromURL("https://example.com/img2.png", "image/png"),
-			NewAudioPartFromURL("https://example.com/audio.mp3", "audio/mpeg"),
+			{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/img2.png", MimeType: "image/png"}},
+			{Type: ContentPartTypeAudio, Media: &MediaContent{URL: "https://example.com/audio.mp3", MimeType: "audio/mpeg"}},
 		},
 	}
 
@@ -784,7 +688,7 @@ func TestServerMessageHasMediaContent(t *testing.T) {
 			msg: ServerMessage{
 				Parts: []ContentPart{
 					NewTextPart("Here's the result"),
-					NewImagePartFromURL("https://example.com/result.png", "image/png"),
+					{Type: ContentPartTypeImage, Media: &MediaContent{URL: "https://example.com/result.png", MimeType: "image/png"}},
 				},
 			},
 			expected: true,
