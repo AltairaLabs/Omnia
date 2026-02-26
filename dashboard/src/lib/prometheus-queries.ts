@@ -333,3 +333,51 @@ export const SystemQueries = {
     return `sum by (${LABELS.PROVIDER}) (increase(${LLM_METRICS.COST_USD}[${window}]))`;
   },
 };
+
+// =============================================================================
+// EVAL QUERIES
+// =============================================================================
+// Eval metrics are dynamically named (defined in PromptPacks) with prefix
+// "omnia_eval_". They are emitted by the runtime's MetricCollector as gauge,
+// counter, histogram, or boolean types with no labels.
+
+/** Regex pattern to discover all eval metrics in Prometheus. */
+export const EVAL_METRIC_PATTERN = "omnia_eval_.*";
+
+export const EvalQueries = {
+  /**
+   * Discover all eval metrics. Returns one result per metric name.
+   */
+  discoverMetrics(): string {
+    return `{__name__=~"${EVAL_METRIC_PATTERN}"}`;
+  },
+
+  /**
+   * Current value of a specific eval metric (instant query).
+   */
+  metricValue(metricName: string): string {
+    return metricName;
+  },
+
+  /**
+   * Aggregate value of a specific eval metric across all instances.
+   */
+  metricSum(metricName: string): string {
+    return `sum(${metricName})`;
+  },
+
+  /**
+   * Average value of a specific eval metric over a time window.
+   * Useful for gauge/boolean metrics to get pass rate over time.
+   */
+  metricAvgOverTime(metricName: string, window = "1h"): string {
+    return `avg_over_time(${metricName}[${window}])`;
+  },
+
+  /**
+   * Rate of change for counter-type eval metrics.
+   */
+  metricRate(metricName: string, window = "5m"): string {
+    return `rate(${metricName}[${window}])`;
+  },
+};

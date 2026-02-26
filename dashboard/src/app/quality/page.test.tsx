@@ -14,11 +14,13 @@ import React from "react";
 const mockUseEvalSummary = vi.fn();
 const mockUseRecentEvalFailures = vi.fn();
 const mockUseAgents = vi.fn();
+const mockUseEvalMetrics = vi.fn();
 
 vi.mock("@/hooks", () => ({
   useEvalSummary: (...args: unknown[]) => mockUseEvalSummary(...args),
   useRecentEvalFailures: (...args: unknown[]) => mockUseRecentEvalFailures(...args),
   useAgents: () => mockUseAgents(),
+  useEvalMetrics: () => mockUseEvalMetrics(),
 }));
 
 vi.mock("@/components/layout", () => ({
@@ -38,6 +40,24 @@ vi.mock("next/link", () => ({
 
 vi.mock("date-fns", () => ({
   formatDistanceToNow: () => "2 hours ago",
+}));
+
+vi.mock("@/components/quality/assertion-type-breakdown", () => ({
+  AssertionTypeBreakdown: () => React.createElement("div", { "data-testid": "assertion-breakdown" }, "AssertionTypeBreakdown"),
+}));
+
+vi.mock("@/components/quality/failing-sessions-table", () => ({
+  FailingSessionsTable: () => React.createElement("div", { "data-testid": "failing-sessions" }, "FailingSessionsTable"),
+}));
+
+vi.mock("@/components/quality/pass-rate-trend-chart", () => ({
+  PassRateTrendChart: () => React.createElement("div", { "data-testid": "trend-chart" }, "PassRateTrendChart"),
+}));
+
+vi.mock("@/components/quality/alert-config-panel", () => ({
+  AlertConfigPanel: () => React.createElement("div", { "data-testid": "alert-config" }, "AlertConfigPanel"),
+  buildAlertThresholdMap: () => new Map(),
+  loadAlerts: () => [],
 }));
 
 import QualityPage from "./page";
@@ -96,6 +116,7 @@ describe("QualityPage", () => {
         { metadata: { name: "agent-2" } },
       ],
     });
+    mockUseEvalMetrics.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
   it("renders header with title", () => {

@@ -398,12 +398,14 @@ export class SessionApiService {
     workspace: string,
     params?: {
       agentName?: string;
+      evalType?: string;
       createdAfter?: string;
       createdBefore?: string;
     }
   ): Promise<EvalResultSummary[]> {
     const searchParams = new URLSearchParams();
     if (params?.agentName) searchParams.set("agentName", params.agentName);
+    if (params?.evalType) searchParams.set("evalType", params.evalType);
     if (params?.createdAfter) searchParams.set("createdAfter", params.createdAfter);
     if (params?.createdBefore) searchParams.set("createdBefore", params.createdBefore);
 
@@ -429,6 +431,7 @@ export class SessionApiService {
     params?: {
       agentName?: string;
       evalId?: string;
+      evalType?: string;
       passed?: boolean;
       limit?: number;
       offset?: number;
@@ -437,6 +440,7 @@ export class SessionApiService {
     const searchParams = new URLSearchParams();
     if (params?.agentName) searchParams.set("agentName", params.agentName);
     if (params?.evalId) searchParams.set("evalId", params.evalId);
+    if (params?.evalType) searchParams.set("evalType", params.evalType);
     if (params?.passed !== undefined) searchParams.set("passed", String(params.passed));
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));

@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -42,9 +43,13 @@ import {
   XCircle,
   Activity,
 } from "lucide-react";
-import { useEvalSummary, useRecentEvalFailures, useAgents } from "@/hooks";
+import { useEvalSummary, useRecentEvalFailures, useAgents, useEvalMetrics, type EvalTrendRange } from "@/hooks";
 import { formatDistanceToNow } from "date-fns";
 import type { EvalResultSummary } from "@/types/eval";
+import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-breakdown";
+import { FailingSessionsTable } from "@/components/quality/failing-sessions-table";
+import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
+import { AlertConfigPanel, buildAlertThresholdMap, loadAlerts, type EvalAlert } from "@/components/quality/alert-config-panel";
 
 /** Time range presets for filtering. */
 const TIME_RANGES: { label: string; value: string }[] = [
@@ -340,6 +345,9 @@ function RecentFailures({
 export default function QualityPage() {
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [timeRange, setTimeRange] = useState<string>("7d");
+  const [activeMetric, setActiveMetric] = useState<string | undefined>();
+  const [trendTimeRange, setTrendTimeRange] = useState<EvalTrendRange>("24h");
+  const [alerts, setAlerts] = useState<EvalAlert[]>(() => loadAlerts());
 
   const createdAfter = getTimeRangeFrom(timeRange);
   const agentName = agentFilter === "all" ? undefined : agentFilter;
@@ -347,6 +355,7 @@ export default function QualityPage() {
   const summaryQuery = useEvalSummary({ agentName, createdAfter });
   const failuresQuery = useRecentEvalFailures({ agentName, limit: 10 });
   const agentsQuery = useAgents();
+  const metricsQuery = useEvalMetrics();
 
   const agentNames = useMemo(() => {
     if (!agentsQuery.data) return [];
@@ -354,6 +363,11 @@ export default function QualityPage() {
   }, [agentsQuery.data]);
 
   const summaries = summaryQuery.data || [];
+  const alertThresholds = useMemo(() => buildAlertThresholdMap(alerts), [alerts]);
+
+  const handleAlertsChange = useCallback((updated: EvalAlert[]) => {
+    setAlerts(updated);
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -403,18 +417,44 @@ export default function QualityPage() {
           </Alert>
         )}
 
-        {/* Summary cards */}
-        <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
+        <Tabs defaultValue="overview">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="assertions">Assertions</TabsTrigger>
+          </TabsList>
 
-        {/* Eval pass rate table */}
-        <EvalPassRateTable summaries={summaries} isLoading={summaryQuery.isLoading} />
+          <TabsContent value="overview" className="space-y-6 mt-4">
+            <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
+            <EvalPassRateTable summaries={summaries} isLoading={summaryQuery.isLoading} />
+            <RecentFailures
+              isLoading={failuresQuery.isLoading}
+              data={failuresQuery.data}
+              error={failuresQuery.error}
+            />
+          </TabsContent>
 
-        {/* Recent failures */}
-        <RecentFailures
-          isLoading={failuresQuery.isLoading}
-          data={failuresQuery.data}
-          error={failuresQuery.error}
-        />
+          <TabsContent value="assertions" className="space-y-6 mt-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <AssertionTypeBreakdown
+                activeMetric={activeMetric}
+                onSelectMetric={setActiveMetric}
+                alertThresholds={alertThresholds}
+              />
+              <FailingSessionsTable
+                evalType={activeMetric}
+                agentName={agentName}
+              />
+            </div>
+            <PassRateTrendChart
+              timeRange={trendTimeRange}
+              onTimeRangeChange={setTrendTimeRange}
+            />
+            <AlertConfigPanel
+              availableMetrics={metricsQuery.data}
+              onAlertsChange={handleAlertsChange}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
