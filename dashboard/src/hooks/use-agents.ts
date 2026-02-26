@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDataService, type AgentRuntime as ServiceAgentRuntime } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntime, AgentRuntimePhase } from "@/types";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 interface UseAgentsOptions {
   phase?: AgentRuntimePhase;
@@ -39,7 +40,7 @@ export function useAgents(options: UseAgentsOptions = {}) {
     },
     enabled: !!currentWorkspace,
     // Ensure fresh data on workspace change
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }
@@ -67,7 +68,7 @@ export function useAgent(name: string, _namespace?: string) {
       return (agent as unknown as AgentRuntime) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

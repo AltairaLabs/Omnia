@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDataService, type ToolRegistry as ServiceToolRegistry } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ToolRegistry, ToolRegistryPhase } from "@/types";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 interface UseToolRegistriesOptions {
   phase?: ToolRegistryPhase;
@@ -37,7 +38,7 @@ export function useToolRegistries(options: UseToolRegistriesOptions = {}) {
       return registries;
     },
     enabled: !!currentWorkspace,
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }
@@ -65,7 +66,7 @@ export function useToolRegistry(name: string, _namespace?: string) {
       return (registry as unknown as ToolRegistry) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

@@ -5,6 +5,7 @@ import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { DataServiceProvider } from "@/lib/data";
 import { WorkspaceProvider } from "@/contexts/workspace-context";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 export function Providers({ children }: Readonly<{ children: React.ReactNode }>) {
   const [queryClient] = useState(
@@ -12,7 +13,7 @@ export function Providers({ children }: Readonly<{ children: React.ReactNode }>)
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 30 * 1000, // 30 seconds
+            staleTime: DEFAULT_STALE_TIME,
             refetchOnWindowFocus: false,
           },
         },

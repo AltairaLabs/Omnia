@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDataService, type PromptPack as ServicePromptPack } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { PromptPack, PromptPackPhase } from "@/types";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 interface UsePromptPacksOptions {
   phase?: PromptPackPhase;
@@ -39,7 +40,7 @@ export function usePromptPacks(options: UsePromptPacksOptions = {}) {
     },
     enabled: !!currentWorkspace,
     // Ensure fresh data on workspace change
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }
@@ -67,7 +68,7 @@ export function usePromptPack(name: string, _namespace?: string) {
       return (pack as unknown as PromptPack) || null;
     },
     enabled: !!name && !!currentWorkspace,
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

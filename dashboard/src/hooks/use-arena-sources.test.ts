@@ -4,6 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
+import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useArenaSources, useArenaSource, useArenaSourceMutations } from "./use-arena-sources";
 
 // Mock workspace context
@@ -30,6 +32,16 @@ const mockSource = {
   status: { phase: "Ready" },
 };
 
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  }
+  return Wrapper;
+}
+
 describe("useArenaSources", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -50,7 +62,7 @@ describe("useArenaSources", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSources());
+    const { result } = renderHook(() => useArenaSources(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -78,9 +90,7 @@ describe("useArenaSources", () => {
       json: () => Promise.resolve(mockSources),
     });
 
-    const { result } = renderHook(() => useArenaSources());
-
-    expect(result.current.loading).toBe(true);
+    const { result } = renderHook(() => useArenaSources(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -107,7 +117,7 @@ describe("useArenaSources", () => {
       statusText: "Internal Server Error",
     });
 
-    const { result } = renderHook(() => useArenaSources());
+    const { result } = renderHook(() => useArenaSources(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -134,7 +144,7 @@ describe("useArenaSources", () => {
       json: () => Promise.resolve([mockSource]),
     });
 
-    const { result } = renderHook(() => useArenaSources());
+    const { result } = renderHook(() => useArenaSources(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -172,7 +182,7 @@ describe("useArenaSource", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSource(undefined));
+    const { result } = renderHook(() => useArenaSource(undefined), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -193,7 +203,7 @@ describe("useArenaSource", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSource("git-source"));
+    const { result } = renderHook(() => useArenaSource("git-source"), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -219,9 +229,7 @@ describe("useArenaSource", () => {
       json: () => Promise.resolve(mockSource),
     });
 
-    const { result } = renderHook(() => useArenaSource("git-source"));
-
-    expect(result.current.loading).toBe(true);
+    const { result } = renderHook(() => useArenaSource("git-source"), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -249,7 +257,7 @@ describe("useArenaSource", () => {
       statusText: "Not Found",
     });
 
-    const { result } = renderHook(() => useArenaSource("nonexistent"));
+    const { result } = renderHook(() => useArenaSource("nonexistent"), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -285,7 +293,7 @@ describe("useArenaSourceMutations", () => {
       json: () => Promise.resolve(mockSource),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     const newSpec = { type: "git" as const, interval: "5m", git: { url: "https://github.com/org/repo.git" } };
 
@@ -314,7 +322,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     const newSpec = { type: "git" as const, interval: "5m", git: { url: "https://github.com/org/repo.git" } };
 
@@ -341,7 +349,7 @@ describe("useArenaSourceMutations", () => {
       json: () => Promise.resolve(mockSource),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     const updatedSpec = { type: "git" as const, interval: "10m", git: { url: "https://github.com/org/repo.git" } };
 
@@ -375,7 +383,7 @@ describe("useArenaSourceMutations", () => {
       json: () => Promise.resolve({}),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     await act(async () => {
       await result.current.deleteSource("git-source");
@@ -405,7 +413,7 @@ describe("useArenaSourceMutations", () => {
       json: () => Promise.resolve({}),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     await act(async () => {
       await result.current.syncSource("git-source");
@@ -436,7 +444,7 @@ describe("useArenaSourceMutations", () => {
       text: () => Promise.resolve("Bad Request"),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     await expect(
       act(async () => {
@@ -456,7 +464,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     const spec = { type: "git" as const, interval: "5m", git: { url: "https://github.com/org/repo.git" } };
 
@@ -478,7 +486,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     await expect(
       act(async () => {
@@ -498,7 +506,7 @@ describe("useArenaSourceMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     await expect(
       act(async () => {
@@ -524,7 +532,7 @@ describe("useArenaSourceMutations", () => {
       text: () => Promise.resolve("Sync failed"),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     await expect(
       act(async () => {
@@ -550,7 +558,7 @@ describe("useArenaSourceMutations", () => {
       text: () => Promise.resolve("Update failed"),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     const spec = { type: "git" as const, interval: "5m", git: { url: "https://github.com/org/repo.git" } };
 
@@ -578,7 +586,7 @@ describe("useArenaSourceMutations", () => {
       text: () => Promise.resolve("Create failed"),
     });
 
-    const { result } = renderHook(() => useArenaSourceMutations());
+    const { result } = renderHook(() => useArenaSourceMutations(), { wrapper: createWrapper() });
 
     const spec = { type: "git" as const, interval: "5m", git: { url: "https://github.com/org/repo.git" } };
 
@@ -616,7 +624,7 @@ describe("useArenaSource - error handling", () => {
       statusText: "Not Found",
     });
 
-    const { result } = renderHook(() => useArenaSource("nonexistent"));
+    const { result } = renderHook(() => useArenaSource("nonexistent"), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);

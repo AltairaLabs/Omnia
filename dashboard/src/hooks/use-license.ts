@@ -1,6 +1,6 @@
 "use client";
 
-import useSWR from "swr";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type License,
   type LicenseFeatures,
@@ -19,8 +19,8 @@ const LICENSE_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 /**
  * Fetcher function for license data.
  */
-async function fetcher(url: string): Promise<License> {
-  const response = await fetch(url);
+async function fetcher(): Promise<License> {
+  const response = await fetch("/api/license");
   if (!response.ok) {
     throw new Error("Failed to fetch license");
   }
@@ -74,16 +74,16 @@ export interface UseLicenseResult {
  * ```
  */
 export function useLicense(): UseLicenseResult {
-  const { data, error, isLoading, mutate } = useSWR<License>(
-    "/api/license",
-    fetcher,
-    {
-      fallbackData: OPEN_CORE_LICENSE,
-      refreshInterval: LICENSE_REFRESH_INTERVAL,
-      revalidateOnFocus: false,
-      shouldRetryOnError: false,
-    }
-  );
+  const queryClient = useQueryClient();
+
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["license"],
+    queryFn: fetcher,
+    placeholderData: OPEN_CORE_LICENSE,
+    refetchInterval: LICENSE_REFRESH_INTERVAL,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 
   // Use open-core license as fallback
   const license = data ?? OPEN_CORE_LICENSE;
@@ -91,7 +91,7 @@ export function useLicense(): UseLicenseResult {
   return {
     license,
     isLoading,
-    error,
+    error: error as Error | undefined,
     canUseFeature: (feature: keyof LicenseFeatures) => license.features[feature],
     canUseSourceType: (sourceType: string) => canUseSourceType(license, sourceType),
     canUseJobType: (jobType: string) => canUseJobType(license, jobType),
@@ -100,6 +100,6 @@ export function useLicense(): UseLicenseResult {
     canUseScenarioCount: (count: number) => canUseScenarioCount(license, count),
     isExpired: isLicenseExpired(license),
     isEnterprise: isEnterpriseLicense(license),
-    refresh: () => mutate(),
+    refresh: () => queryClient.invalidateQueries({ queryKey: ["license"] }),
   };
 }

@@ -14,6 +14,7 @@ import {
   type PrometheusMatrixResult,
 } from "@/lib/prometheus";
 import { LLM_METRICS, LABELS } from "@/lib/prometheus-queries";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 export interface AgentCostData {
   available: boolean;
@@ -153,7 +154,7 @@ export function useAgentCost(namespace: string, agentName: string) {
     queryKey: ["agent-cost", namespace, agentName],
     queryFn: () => fetchAgentCost(namespace, agentName),
     refetchInterval: 60000, // Refresh every minute
-    staleTime: 30000, // Consider stale after 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     enabled: Boolean(namespace && agentName),
   });
 }

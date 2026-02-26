@@ -13,6 +13,7 @@ import {
 } from "@/lib/prometheus";
 import { AgentQueries, LLM_METRICS } from "@/lib/prometheus-queries";
 import { useDemoMode } from "./use-runtime-config";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 export interface ActivityDataPoint {
   time: string;
@@ -177,7 +178,7 @@ export function useAgentActivity() {
     },
     enabled: !demoLoading,
     refetchInterval: isDemoMode ? false : 60000, // Refresh every minute in live mode
-    staleTime: 30000,
+    staleTime: DEFAULT_STALE_TIME,
   });
 
   return {

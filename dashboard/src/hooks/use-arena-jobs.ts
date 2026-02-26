@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
+import { handleMutationResponse } from "@/lib/api/fetch-helpers";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
@@ -34,6 +36,37 @@ interface UseArenaJobMutationsResult {
   error: Error | null;
 }
 
+function buildJobsUrl(workspace: string, options?: UseArenaJobsOptions): string {
+  const params = new URLSearchParams();
+  if (options?.sourceRef) params.set("sourceRef", options.sourceRef);
+  if (options?.type) params.set("type", options.type);
+  if (options?.phase) params.set("phase", options.phase);
+
+  const queryString = params.toString();
+  const suffix = queryString ? `?${queryString}` : "";
+  return `/api/workspaces/${workspace}/arena/jobs${suffix}`;
+}
+
+async function fetchJobs(workspace: string, options?: UseArenaJobsOptions): Promise<ArenaJob[]> {
+  const url = buildJobsUrl(workspace, options);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch jobs: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+async function fetchJob(workspace: string, name: string): Promise<ArenaJob> {
+  const response = await fetch(`/api/workspaces/${workspace}/arena/jobs/${name}`);
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Job not found");
+    }
+    throw new Error(`Failed to fetch job: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 /**
  * Hook to fetch Arena jobs for the current workspace.
  * Supports optional filtering by sourceRef, type, or phase.
@@ -41,53 +74,19 @@ interface UseArenaJobMutationsResult {
 export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [jobs, setJobs] = useState<ArenaJob[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace) {
-      setJobs([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const params = new URLSearchParams();
-      if (options?.sourceRef) params.set("sourceRef", options.sourceRef);
-      if (options?.type) params.set("type", options.type);
-      if (options?.phase) params.set("phase", options.phase);
-
-      const queryString = params.toString();
-      const suffix = queryString ? `?${queryString}` : "";
-      const url = `/api/workspaces/${workspace}/arena/jobs${suffix}`;
-
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch jobs: ${response.statusText}`);
-      }
-      const data = await response.json();
-      setJobs(data);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setJobs([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, options?.sourceRef, options?.type, options?.phase]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["arena-jobs", workspace, options?.sourceRef, options?.type, options?.phase],
+    queryFn: () => fetchJobs(workspace!, options),
+    enabled: !!workspace,
+    staleTime: DEFAULT_STALE_TIME,
+  });
 
   return {
-    jobs,
-    loading,
-    error,
-    refetch: fetchData,
+    jobs: data ?? [],
+    loading: isLoading,
+    error: error as Error | null,
+    refetch,
   };
 }
 
@@ -97,49 +96,19 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
 export function useArenaJob(name: string | undefined): UseArenaJobResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [job, setJob] = useState<ArenaJob | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace || !name) {
-      setJob(null);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/jobs/${name}`);
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error("Job not found");
-        }
-        throw new Error(`Failed to fetch job: ${response.statusText}`);
-      }
-
-      const jobData = await response.json();
-      setJob(jobData);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setJob(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, name]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["arena-job", workspace, name],
+    queryFn: () => fetchJob(workspace!, name!),
+    enabled: !!workspace && !!name,
+    staleTime: DEFAULT_STALE_TIME,
+  });
 
   return {
-    job,
-    loading,
-    error,
-    refetch: fetchData,
+    job: data ?? null,
+    loading: isLoading,
+    error: error as Error | null,
+    refetch,
   };
 }
 
@@ -149,109 +118,61 @@ export function useArenaJob(name: string | undefined): UseArenaJobResult {
 export function useArenaJobMutations(): UseArenaJobMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
-  const createJob = useCallback(
-    async (name: string, spec: ArenaJob["spec"]): Promise<ArenaJob> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
+  const invalidateJobs = () => {
+    queryClient.invalidateQueries({ queryKey: ["arena-jobs", workspace] });
+  };
 
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/jobs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metadata: { name }, spec }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create job");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const createMutation = useMutation({
+    mutationFn: async ({ name, spec }: { name: string; spec: ArenaJob["spec"] }) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: { name }, spec }),
+      });
+      await handleMutationResponse(response, "Failed to create job");
+      return response.json() as Promise<ArenaJob>;
     },
-    [workspace]
-  );
+    onSuccess: invalidateJobs,
+  });
 
-  const cancelJob = useCallback(
-    async (name: string): Promise<ArenaJob> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/jobs/${name}/cancel`,
-          { method: "POST" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to cancel job");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const cancelMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/jobs/${name}/cancel`, {
+        method: "POST",
+      });
+      await handleMutationResponse(response, "Failed to cancel job");
+      return response.json() as Promise<ArenaJob>;
     },
-    [workspace]
-  );
+    onSuccess: invalidateJobs,
+  });
 
-  const deleteJob = useCallback(
-    async (name: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/jobs/${name}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete job");
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const deleteMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/jobs/${name}`, {
+        method: "DELETE",
+      });
+      await handleMutationResponse(response, "Failed to delete job");
     },
-    [workspace]
-  );
+    onSuccess: invalidateJobs,
+  });
+
+  const isPending = createMutation.isPending || cancelMutation.isPending
+    || deleteMutation.isPending;
+
+  const activeError = createMutation.error ?? cancelMutation.error
+    ?? deleteMutation.error;
 
   return {
-    createJob,
-    cancelJob,
-    deleteJob,
-    loading,
-    error,
+    createJob: (name: string, spec: ArenaJob["spec"]) =>
+      createMutation.mutateAsync({ name, spec }),
+    cancelJob: (name: string) => cancelMutation.mutateAsync(name),
+    deleteJob: (name: string) => deleteMutation.mutateAsync(name),
+    loading: isPending,
+    error: (activeError as Error) ?? null,
   };
 }

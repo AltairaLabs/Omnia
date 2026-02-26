@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useDataService, type ToolRegistry as ServiceToolRegistry } from "@/lib/data";
 import type { ToolRegistry } from "@/types";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 /**
  * Fetches shared tool registries from the system namespace.
@@ -17,7 +18,7 @@ export function useSharedToolRegistries() {
       const registries = await service.getSharedToolRegistries();
       return registries as unknown as ToolRegistry[];
     },
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }
@@ -35,7 +36,7 @@ export function useSharedToolRegistry(name: string) {
       return (registry as unknown as ToolRegistry) || null;
     },
     enabled: !!name,
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

@@ -11,6 +11,7 @@ import {
   type PrometheusVectorResult,
 } from "@/lib/prometheus";
 import { LLMQueries, LLM_METRICS, buildFilter } from "@/lib/prometheus-queries";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 export interface ProviderMetricsData {
   /** Whether Prometheus is available */
@@ -208,6 +209,6 @@ export function useProviderMetrics(providerName: string, providerType?: string) 
     },
     enabled: !!providerType,
     refetchInterval: 60000, // Refresh every minute
-    staleTime: 30000, // Consider data stale after 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
   });
 }

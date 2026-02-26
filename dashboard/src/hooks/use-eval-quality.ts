@@ -13,6 +13,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { SessionApiService } from "@/lib/data/session-api-service";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 export interface EvalSummaryParams {
   agentName?: string;
@@ -53,7 +54,7 @@ export function useEvalSummary(params?: EvalSummaryParams) {
       return service.getEvalResultsSummary(currentWorkspace.name, params);
     },
     enabled: !!currentWorkspace,
-    staleTime: 30000,
+    staleTime: DEFAULT_STALE_TIME,
   });
 }
 
@@ -83,6 +84,6 @@ export function useRecentEvalFailures(params?: EvalListParams) {
       return service.getEvalResults(currentWorkspace.name, mergedParams);
     },
     enabled: !!currentWorkspace,
-    staleTime: 30000,
+    staleTime: DEFAULT_STALE_TIME,
   });
 }

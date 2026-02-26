@@ -12,7 +12,7 @@ import {
 import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
 import { CostBadge } from "@/components/cost";
-import { getMockAgentUsage } from "@/lib/mock-data";
+import { useAgentCost } from "@/hooks";
 import type { AgentRuntime } from "@/types";
 
 interface AgentTableProps {
@@ -32,6 +32,25 @@ function formatAge(timestamp?: string): string {
   if (days > 0) return `${days}d`;
   if (hours > 0) return `${hours}h`;
   return "<1h";
+}
+
+/**
+ * Renders the cost cell for an agent row using real Prometheus data.
+ */
+function AgentCostCell({ namespace, name }: Readonly<{ namespace: string; name: string }>) {
+  const { data: costData } = useAgentCost(namespace, name);
+
+  if (!costData?.available) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  return (
+    <CostBadge
+      inputTokens={costData.inputTokens}
+      outputTokens={costData.outputTokens}
+      model=""
+    />
+  );
 }
 
 export function AgentTable({ agents }: Readonly<AgentTableProps>) {
@@ -78,20 +97,10 @@ export function AgentTable({ agents }: Readonly<AgentTableProps>) {
                 {agent.spec.providerRef?.name || agent.spec.provider?.type || "-"}
               </TableCell>
               <TableCell>
-                {(() => {
-                  const usage = getMockAgentUsage(
-                    agent.metadata.namespace || "default",
-                    agent.metadata.name || ""
-                  );
-                  if (!usage) return <span className="text-muted-foreground">-</span>;
-                  return (
-                    <CostBadge
-                      inputTokens={usage.inputTokens}
-                      outputTokens={usage.outputTokens}
-                      model={usage.model}
-                    />
-                  );
-                })()}
+                <AgentCostCell
+                  namespace={agent.metadata.namespace || "default"}
+                  name={agent.metadata.name || ""}
+                />
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatAge(agent.metadata.creationTimestamp)}
