@@ -429,8 +429,7 @@ var _ = Describe("ArenaJob Controller", func() {
 				},
 			}
 
-			reconciler := &ArenaJobReconciler{}
-			reconciler.setCondition(job, ArenaJobConditionTypeReady, metav1.ConditionTrue, "TestReason", "Test message")
+			SetCondition(&job.Status.Conditions, job.Generation, ArenaJobConditionTypeReady, metav1.ConditionTrue, "TestReason", "Test message")
 
 			condition := meta.FindStatusCondition(job.Status.Conditions, ArenaJobConditionTypeReady)
 			Expect(condition).NotTo(BeNil())

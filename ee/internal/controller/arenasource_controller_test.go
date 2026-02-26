@@ -821,8 +821,7 @@ var _ = Describe("ArenaSource Controller", func() {
 				},
 			}
 
-			reconciler := &ArenaSourceReconciler{}
-			reconciler.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue, "TestReason", "Test message")
+			SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionTrue, "TestReason", "Test message")
 
 			condition := meta.FindStatusCondition(source.Status.Conditions, ArenaSourceConditionTypeReady)
 			Expect(condition).NotTo(BeNil())

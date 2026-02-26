@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -142,7 +141,7 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if job, ok := r.inProgress.LoadAndDelete(req.NamespacedName); ok {
 			job.(*fetchJob).cancel()
 		}
-		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
 			"Suspended", "ArenaSource reconciliation is suspended")
 		if err := r.Status().Update(ctx, source); err != nil {
 			log.Error(err, "Failed to update status")
@@ -157,7 +156,7 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err := r.LicenseValidator.ValidateArenaSource(ctx, sourceType); err != nil {
 			log.Info("Source type not allowed by license", "type", sourceType, "error", err)
 			source.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
-			r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+			SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
 				"LicenseViolation", err.Error())
 			if r.Recorder != nil {
 				r.Recorder.Event(source, corev1.EventTypeWarning, "LicenseViolation",
@@ -179,7 +178,7 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	interval, err := time.ParseDuration(source.Spec.Interval)
 	if err != nil {
 		log.Error(err, "Invalid interval format")
-		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
 			"InvalidInterval", fmt.Sprintf("Invalid interval format: %v", err))
 		source.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
 		if statusErr := r.Status().Update(ctx, source); statusErr != nil {
@@ -257,15 +256,15 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 		}
 
-		r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
 			"FetchComplete", "Successfully fetched artifact")
 		availableMsg := fmt.Sprintf("Artifact available at revision %s", result.artifact.Revision)
 		if version != "" {
 			availableMsg = fmt.Sprintf("Content synced at revision %s, version %s", result.artifact.Revision, version)
 		}
-		r.setCondition(source, ArenaSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeArtifactAvailable, metav1.ConditionTrue,
 			"ArtifactAvailable", availableMsg)
-		r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
+		SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionTrue,
 			"Ready", "ArenaSource is ready")
 
 		nextFetch := metav1.NewTime(time.Now().Add(interval))
@@ -312,7 +311,7 @@ func (r *ArenaSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Set phase to fetching
 	source.Status.Phase = omniav1alpha1.ArenaSourcePhaseFetching
-	r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionTrue,
+	SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeFetching, metav1.ConditionTrue,
 		"FetchInProgress", "Fetching artifact from source")
 	now := metav1.Now()
 	source.Status.LastFetchTime = &now
@@ -846,9 +845,9 @@ func (r *ArenaSourceReconciler) handleFetchError(ctx context.Context, source *om
 	log := logf.FromContext(ctx)
 
 	source.Status.Phase = omniav1alpha1.ArenaSourcePhaseError
-	r.setCondition(source, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
+	SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeFetching, metav1.ConditionFalse,
 		"FetchFailed", err.Error())
-	r.setCondition(source, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
+	SetCondition(&source.Status.Conditions, source.Generation, ArenaSourceConditionTypeReady, metav1.ConditionFalse,
 		"FetchError", err.Error())
 
 	if r.Recorder != nil {
@@ -858,18 +857,6 @@ func (r *ArenaSourceReconciler) handleFetchError(ctx context.Context, source *om
 	if statusErr := r.Status().Update(ctx, source); statusErr != nil {
 		log.Error(statusErr, "Failed to update status after fetch error")
 	}
-}
-
-// setCondition sets a condition on the ArenaSource status.
-func (r *ArenaSourceReconciler) setCondition(source *omniav1alpha1.ArenaSource, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	meta.SetStatusCondition(&source.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: source.Generation,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -22,7 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -95,16 +94,16 @@ func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Determine phase based on tool availability and validation
 	if len(validationErrors) > 0 {
 		toolRegistry.Status.Phase = omniav1alpha1.ToolRegistryPhaseFailed
-		r.setCondition(toolRegistry, ToolRegistryConditionTypeHandlersValid, metav1.ConditionFalse,
+		SetCondition(&toolRegistry.Status.Conditions, toolRegistry.Generation, ToolRegistryConditionTypeHandlersValid, metav1.ConditionFalse,
 			"ValidationFailed", fmt.Sprintf("Handler validation errors: %v", validationErrors))
 	} else {
 		toolRegistry.Status.Phase = r.determinePhase(discoveredTools)
-		r.setCondition(toolRegistry, ToolRegistryConditionTypeHandlersValid, metav1.ConditionTrue,
+		SetCondition(&toolRegistry.Status.Conditions, toolRegistry.Generation, ToolRegistryConditionTypeHandlersValid, metav1.ConditionTrue,
 			"HandlersValid", "All handlers validated successfully")
 	}
 
 	// Set discovery condition
-	r.setCondition(toolRegistry, ToolRegistryConditionTypeToolsDiscovered, metav1.ConditionTrue,
+	SetCondition(&toolRegistry.Status.Conditions, toolRegistry.Generation, ToolRegistryConditionTypeToolsDiscovered, metav1.ConditionTrue,
 		"ToolsDiscovered", fmt.Sprintf("Discovered %d tool(s) from %d handler(s)",
 			len(discoveredTools), len(toolRegistry.Spec.Handlers)))
 
@@ -345,22 +344,6 @@ func (r *ToolRegistryReconciler) determinePhase(discoveredTools []omniav1alpha1.
 		return omniav1alpha1.ToolRegistryPhaseDegraded
 	}
 	return omniav1alpha1.ToolRegistryPhaseFailed
-}
-
-// setCondition sets a condition on the ToolRegistry status.
-func (r *ToolRegistryReconciler) setCondition(
-	toolRegistry *omniav1alpha1.ToolRegistry,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&toolRegistry.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: toolRegistry.Generation,
-		Reason:             reason,
-		Message:            message,
-	})
 }
 
 // findToolRegistriesForService maps a Service to ToolRegistries that might reference it.

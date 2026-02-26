@@ -22,7 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -91,37 +90,37 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Step 1: Validate the source configuration (ConfigMap exists, has pack.json)
 	packJSON, err := r.validateSource(ctx, promptPack)
 	if err != nil {
-		r.setCondition(promptPack, PromptPackConditionTypeSourceValid, metav1.ConditionFalse,
+		SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeSourceValid, metav1.ConditionFalse,
 			"SourceValidationFailed", err.Error())
 		// Clear schema condition when source is invalid
-		r.setCondition(promptPack, PromptPackConditionTypeSchemaValid, metav1.ConditionUnknown,
+		SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeSchemaValid, metav1.ConditionUnknown,
 			"SourceInvalid", "Cannot validate schema: source is invalid")
 		promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseFailed
 		if r.Recorder != nil {
 			r.Recorder.Event(promptPack, corev1.EventTypeWarning, EventReasonSourceValidationFailed, err.Error())
 		}
 		if statusErr := r.Status().Update(ctx, promptPack); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(promptPack, PromptPackConditionTypeSourceValid, metav1.ConditionTrue,
+	SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeSourceValid, metav1.ConditionTrue,
 		"SourceValid", "Source configuration is valid")
 
 	// Step 2: Validate pack.json content against the PromptPack schema
 	if err := r.validateSchema(promptPack, packJSON); err != nil {
-		r.setCondition(promptPack, PromptPackConditionTypeSchemaValid, metav1.ConditionFalse,
+		SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeSchemaValid, metav1.ConditionFalse,
 			"SchemaValidationFailed", err.Error())
 		promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseFailed
 		if r.Recorder != nil {
 			r.Recorder.Event(promptPack, corev1.EventTypeWarning, EventReasonSchemaValidationFailed, err.Error())
 		}
 		if statusErr := r.Status().Update(ctx, promptPack); statusErr != nil {
-			log.Error(statusErr, "Failed to update status")
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(promptPack, PromptPackConditionTypeSchemaValid, metav1.ConditionTrue,
+	SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeSchemaValid, metav1.ConditionTrue,
 		"SchemaValid", "pack.json content is valid")
 
 	// Find all AgentRuntimes referencing this PromptPack
@@ -137,10 +136,10 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Set notification condition
 	if len(referencingRuntimes) > 0 {
-		r.setCondition(promptPack, PromptPackConditionTypeAgentsNotified, metav1.ConditionTrue,
+		SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeAgentsNotified, metav1.ConditionTrue,
 			"AgentsNotified", fmt.Sprintf("Notified %d AgentRuntime(s)", len(referencingRuntimes)))
 	} else {
-		r.setCondition(promptPack, PromptPackConditionTypeAgentsNotified, metav1.ConditionTrue,
+		SetCondition(&promptPack.Status.Conditions, promptPack.Generation, PromptPackConditionTypeAgentsNotified, metav1.ConditionTrue,
 			"NoAgentsToNotify", "No AgentRuntimes reference this PromptPack")
 	}
 
@@ -272,22 +271,6 @@ func (r *PromptPackReconciler) updateRolloutStatus(promptPack *omniav1alpha1.Pro
 			}
 		}
 	}
-}
-
-// setCondition sets a condition on the PromptPack status.
-func (r *PromptPackReconciler) setCondition(
-	promptPack *omniav1alpha1.PromptPack,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&promptPack.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: promptPack.Generation,
-		Reason:             reason,
-		Message:            message,
-	})
 }
 
 // findPromptPacksForConfigMap maps a ConfigMap to PromptPacks that reference it.

@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -133,38 +132,38 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 
 	// Validate the policy spec
 	if err := r.validatePolicy(policy); err != nil {
-		r.setCondition(policy, RetentionConditionTypePolicyValid, metav1.ConditionFalse,
+		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypePolicyValid, metav1.ConditionFalse,
 			"ValidationFailed", err.Error())
-		r.setCondition(policy, RetentionConditionTypeReady, metav1.ConditionFalse,
+		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeReady, metav1.ConditionFalse,
 			"ValidationFailed", "Policy validation failed")
 		r.emitEvent(policy, corev1.EventTypeWarning, RetentionEventReasonValidationFailed, err.Error())
 		policy.Status.Phase = omniav1alpha1.SessionRetentionPolicyPhaseError
 		policy.Status.ObservedGeneration = policy.Generation
 		if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
-			log.Error(statusErr, errMsgFailedToUpdateStatus)
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
 		}
 		if r.Metrics != nil {
 			r.Metrics.RecordReconcileError(policy.Name, "validation")
 		}
 		return ctrl.Result{}, err
 	}
-	r.setCondition(policy, RetentionConditionTypePolicyValid, metav1.ConditionTrue,
+	SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypePolicyValid, metav1.ConditionTrue,
 		"Valid", "Policy spec is valid")
 	r.emitEvent(policy, corev1.EventTypeNormal, RetentionEventReasonValidated, "Policy spec validated successfully")
 
 	// Resolve workspace references
 	resolvedCount, err := r.resolveWorkspaces(ctx, policy)
 	if err != nil {
-		r.setCondition(policy, RetentionConditionTypeWorkspacesResolved, metav1.ConditionFalse,
+		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionFalse,
 			"ResolutionFailed", err.Error())
-		r.setCondition(policy, RetentionConditionTypeReady, metav1.ConditionFalse,
+		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeReady, metav1.ConditionFalse,
 			"WorkspaceResolutionFailed", "Workspace resolution failed")
 		r.emitEvent(policy, corev1.EventTypeWarning, RetentionEventReasonWorkspacesMissing, err.Error())
 		policy.Status.Phase = omniav1alpha1.SessionRetentionPolicyPhaseError
 		policy.Status.ObservedGeneration = policy.Generation
 		policy.Status.WorkspaceCount = resolvedCount
 		if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
-			log.Error(statusErr, errMsgFailedToUpdateStatus)
+			log.Error(statusErr, logMsgFailedToUpdateStatus)
 		}
 		if r.Metrics != nil {
 			r.Metrics.RecordReconcileError(policy.Name, "workspace_resolution")
@@ -173,10 +172,10 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 	}
 
 	if len(policy.Spec.PerWorkspace) == 0 {
-		r.setCondition(policy, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
+		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
 			"NoOverrides", "No per-workspace overrides configured")
 	} else {
-		r.setCondition(policy, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
+		SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeWorkspacesResolved, metav1.ConditionTrue,
 			"AllResolved", fmt.Sprintf("All %d workspace references resolved", resolvedCount))
 		r.emitEvent(policy, corev1.EventTypeNormal, RetentionEventReasonWorkspacesResolved,
 			fmt.Sprintf("All %d workspace references resolved", resolvedCount))
@@ -185,14 +184,14 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 	// Sync ConfigMap
 	if r.Namespace != "" {
 		if err := r.reconcileRetentionConfigMap(ctx, policy); err != nil {
-			r.setCondition(policy, RetentionConditionTypeReady, metav1.ConditionFalse,
+			SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeReady, metav1.ConditionFalse,
 				"ConfigSyncFailed", "Failed to sync retention ConfigMap")
 			r.emitEvent(policy, corev1.EventTypeWarning, RetentionEventReasonConfigSyncFailed, err.Error())
 			policy.Status.Phase = omniav1alpha1.SessionRetentionPolicyPhaseError
 			policy.Status.ObservedGeneration = policy.Generation
 			policy.Status.WorkspaceCount = resolvedCount
 			if statusErr := r.Status().Update(ctx, policy); statusErr != nil {
-				log.Error(statusErr, errMsgFailedToUpdateStatus)
+				log.Error(statusErr, logMsgFailedToUpdateStatus)
 			}
 			if r.Metrics != nil {
 				r.Metrics.RecordConfigMapSyncError(policy.Name)
@@ -204,7 +203,7 @@ func (r *SessionRetentionPolicyReconciler) Reconcile(ctx context.Context, req ct
 	}
 
 	// Set Ready condition — all sub-conditions passed
-	r.setCondition(policy, RetentionConditionTypeReady, metav1.ConditionTrue,
+	SetCondition(&policy.Status.Conditions, policy.Generation, RetentionConditionTypeReady, metav1.ConditionTrue,
 		"AllChecksPass", "Policy is valid, workspaces resolved, and config synced")
 
 	// Set final status
@@ -378,22 +377,6 @@ func (r *SessionRetentionPolicyReconciler) resolveWorkspaces(ctx context.Context
 	}
 
 	return resolved, nil
-}
-
-// setCondition sets a condition on the SessionRetentionPolicy status.
-func (r *SessionRetentionPolicyReconciler) setCondition(
-	policy *omniav1alpha1.SessionRetentionPolicy,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&policy.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: policy.Generation,
-		Reason:             reason,
-		Message:            message,
-	})
 }
 
 // findPoliciesForWorkspace maps a Workspace to SessionRetentionPolicies that reference it.

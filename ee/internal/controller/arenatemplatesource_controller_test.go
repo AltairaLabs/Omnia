@@ -384,8 +384,6 @@ spec:
 
 	Context("Condition management", func() {
 		It("should set conditions correctly", func() {
-			reconciler := &ArenaTemplateSourceReconciler{}
-
 			source := &omniav1alpha1.ArenaTemplateSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test",
@@ -394,7 +392,7 @@ spec:
 				},
 			}
 
-			reconciler.setCondition(source, ArenaTemplateSourceConditionTypeReady,
+			SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeReady,
 				metav1.ConditionTrue, "Ready", "Source is ready")
 
 			Expect(source.Status.Conditions).To(HaveLen(1))
@@ -406,8 +404,6 @@ spec:
 		})
 
 		It("should update existing condition", func() {
-			reconciler := &ArenaTemplateSourceReconciler{}
-
 			source := &omniav1alpha1.ArenaTemplateSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test",
@@ -427,7 +423,7 @@ spec:
 				},
 			}
 
-			reconciler.setCondition(source, ArenaTemplateSourceConditionTypeReady,
+			SetCondition(&source.Status.Conditions, source.Generation, ArenaTemplateSourceConditionTypeReady,
 				metav1.ConditionTrue, "Ready", "Now ready")
 
 			Expect(source.Status.Conditions).To(HaveLen(1))

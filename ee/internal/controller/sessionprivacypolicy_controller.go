@@ -15,7 +15,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -134,8 +133,8 @@ func (r *SessionPrivacyPolicyReconciler) handleOrphanedPolicy(
 	log.Info("no parent policy found", "level", policy.Spec.Level)
 
 	msg := fmt.Sprintf("no parent policy found for %s-level policy", policy.Spec.Level)
-	r.setCondition(policy, ConditionTypeParentFound, metav1.ConditionFalse, EventReasonParentNotFound, msg)
-	r.setCondition(policy, ConditionTypeReady, metav1.ConditionFalse,
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeParentFound, metav1.ConditionFalse, EventReasonParentNotFound, msg)
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeReady, metav1.ConditionFalse,
 		EventReasonParentNotFound, "policy requires a parent but none was found")
 	policy.Status.Phase = omniav1alpha1.SessionPrivacyPolicyPhaseError
 	r.recordEvent(policy, corev1.EventTypeWarning, EventReasonParentNotFound,
@@ -154,10 +153,10 @@ func (r *SessionPrivacyPolicyReconciler) setParentFoundCondition(
 	policy *omniav1alpha1.SessionPrivacyPolicy, parent *omniav1alpha1.SessionPrivacyPolicy,
 ) {
 	if policy.Spec.Level == omniav1alpha1.PolicyLevelGlobal {
-		r.setCondition(policy, ConditionTypeParentFound, metav1.ConditionTrue,
+		SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeParentFound, metav1.ConditionTrue,
 			"NotApplicable", "global policies have no parent")
 	} else {
-		r.setCondition(policy, ConditionTypeParentFound, metav1.ConditionTrue,
+		SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeParentFound, metav1.ConditionTrue,
 			EventReasonPolicyValidated, fmt.Sprintf("parent policy found: %s", parent.Name))
 	}
 }
@@ -169,9 +168,9 @@ func (r *SessionPrivacyPolicyReconciler) handleStoreError(
 	log := logf.FromContext(ctx)
 	log.Error(err, "failed to store effective policy")
 
-	r.setCondition(policy, ConditionTypeEffectivePolicyStored, metav1.ConditionFalse,
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeEffectivePolicyStored, metav1.ConditionFalse,
 		EventReasonConfigMapSyncFailed, err.Error())
-	r.setCondition(policy, ConditionTypeReady, metav1.ConditionFalse,
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeReady, metav1.ConditionFalse,
 		EventReasonConfigMapSyncFailed, "failed to store effective policy in ConfigMap")
 	policy.Status.Phase = omniav1alpha1.SessionPrivacyPolicyPhaseError
 	r.recordEvent(policy, corev1.EventTypeWarning, EventReasonConfigMapSyncFailed, err.Error())
@@ -186,9 +185,9 @@ func (r *SessionPrivacyPolicyReconciler) handleStoreError(
 
 // setSuccessStatus sets the success conditions on the policy.
 func (r *SessionPrivacyPolicyReconciler) setSuccessStatus(policy *omniav1alpha1.SessionPrivacyPolicy) {
-	r.setCondition(policy, ConditionTypeEffectivePolicyStored, metav1.ConditionTrue,
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeEffectivePolicyStored, metav1.ConditionTrue,
 		EventReasonEffectivePolicyComputed, "effective policy stored in ConfigMap")
-	r.setCondition(policy, ConditionTypeReady, metav1.ConditionTrue,
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeReady, metav1.ConditionTrue,
 		EventReasonPolicyValidated, "policy is active and effective policy is stored")
 	policy.Status.Phase = omniav1alpha1.SessionPrivacyPolicyPhaseActive
 	r.recordEvent(policy, corev1.EventTypeNormal, EventReasonEffectivePolicyComputed,
@@ -729,23 +728,6 @@ func (r *SessionPrivacyPolicyReconciler) cleanupEffectivePolicy(ctx context.Cont
 	return nil
 }
 
-// setCondition sets a condition on the SessionPrivacyPolicy status.
-func (r *SessionPrivacyPolicyReconciler) setCondition(
-	policy *omniav1alpha1.SessionPrivacyPolicy,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&policy.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: policy.Generation,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-}
-
 // setErrorStatus sets an error status on the policy and persists it.
 func (r *SessionPrivacyPolicyReconciler) setErrorStatus(
 	ctx context.Context,
@@ -753,7 +735,7 @@ func (r *SessionPrivacyPolicyReconciler) setErrorStatus(
 	reason, message string,
 ) {
 	log := logf.FromContext(ctx)
-	r.setCondition(policy, ConditionTypeReady, metav1.ConditionFalse, reason, message)
+	SetCondition(&policy.Status.Conditions, policy.Generation, ConditionTypeReady, metav1.ConditionFalse, reason, message)
 	policy.Status.Phase = omniav1alpha1.SessionPrivacyPolicyPhaseError
 	r.recordEvent(policy, corev1.EventTypeWarning, reason, message)
 	if statusErr := r.Status().Update(ctx, policy); statusErr != nil {

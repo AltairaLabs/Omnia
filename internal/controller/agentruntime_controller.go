@@ -26,7 +26,6 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -85,7 +84,7 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypePromptPackReady, "PromptPackNotFound", err)
 		return nil, nil, nil, ctrl.Result{}, err
 	}
-	r.setCondition(agentRuntime, ConditionTypePromptPackReady, metav1.ConditionTrue,
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypePromptPackReady, metav1.ConditionTrue,
 		"PromptPackFound", "PromptPack resource found")
 
 	// Fetch optional ToolRegistry
@@ -93,11 +92,11 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 	if agentRuntime.Spec.ToolRegistryRef != nil {
 		toolRegistry, err = r.fetchToolRegistry(ctx, agentRuntime)
 		if err != nil {
-			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionFalse,
+			SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeToolRegistryReady, metav1.ConditionFalse,
 				"ToolRegistryNotFound", err.Error())
 			log.Info("ToolRegistry not found, continuing without tools", "error", err)
 		} else {
-			r.setCondition(agentRuntime, ConditionTypeToolRegistryReady, metav1.ConditionTrue,
+			SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeToolRegistryReady, metav1.ConditionTrue,
 				"ToolRegistryFound", "ToolRegistry resource found")
 		}
 	}
@@ -129,7 +128,7 @@ func (r *AgentRuntimeReconciler) reconcileProviderRef(
 	// Check if Provider is explicitly in Error phase. Empty phase is treated as Ready
 	// (the default state before Provider controller reconciles).
 	if provider.Status.Phase == omniav1alpha1.ProviderPhaseError {
-		r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionFalse,
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
 			"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
 		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
@@ -137,7 +136,7 @@ func (r *AgentRuntimeReconciler) reconcileProviderRef(
 		}
 		return nil, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
-	r.setCondition(agentRuntime, ConditionTypeProviderReady, metav1.ConditionTrue,
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionTrue,
 		"ProviderFound", "Provider resource found and ready")
 	return provider, ctrl.Result{}, nil
 }
@@ -151,7 +150,7 @@ func (r *AgentRuntimeReconciler) handleRefError(
 	reason string,
 	err error,
 ) {
-	r.setCondition(agentRuntime, condType, metav1.ConditionFalse, reason, err.Error())
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, condType, metav1.ConditionFalse, reason, err.Error())
 	agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseFailed
 	if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
 		log.Error(statusErr, logMsgFailedToUpdateStatus)
@@ -180,7 +179,7 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeDeploymentReady, "DeploymentFailed", err)
 		return nil, err
 	}
-	r.setCondition(agentRuntime, ConditionTypeDeploymentReady, metav1.ConditionTrue,
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeDeploymentReady, metav1.ConditionTrue,
 		"DeploymentCreated", "Deployment created/updated successfully")
 
 	// Reconcile Service
@@ -188,7 +187,7 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeServiceReady, "ServiceFailed", err)
 		return nil, err
 	}
-	r.setCondition(agentRuntime, ConditionTypeServiceReady, metav1.ConditionTrue,
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeServiceReady, metav1.ConditionTrue,
 		"ServiceCreated", "Service created/updated successfully")
 
 	return deployment, nil
@@ -262,11 +261,11 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Set overall Ready condition
 	if agentRuntime.Status.Replicas != nil && agentRuntime.Status.Replicas.Ready > 0 {
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhaseRunning
-		r.setCondition(agentRuntime, ConditionTypeReady, metav1.ConditionTrue,
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeReady, metav1.ConditionTrue,
 			"RuntimeReady", "AgentRuntime is ready")
 	} else {
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
-		r.setCondition(agentRuntime, ConditionTypeReady, metav1.ConditionFalse,
+		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeReady, metav1.ConditionFalse,
 			"RuntimeNotReady", "Waiting for pods to be ready")
 	}
 
@@ -422,21 +421,6 @@ func (r *AgentRuntimeReconciler) updateStatusFromDeployment(
 
 	version := promptPack.Spec.Version
 	agentRuntime.Status.ActiveVersion = &version
-}
-
-func (r *AgentRuntimeReconciler) setCondition(
-	agentRuntime *omniav1alpha1.AgentRuntime,
-	conditionType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) {
-	meta.SetStatusCondition(&agentRuntime.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: agentRuntime.Generation,
-		Reason:             reason,
-		Message:            message,
-	})
 }
 
 // SetupWithManager sets up the controller with the Manager.
