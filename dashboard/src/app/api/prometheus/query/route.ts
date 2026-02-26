@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { PROMETHEUS_FETCH_TIMEOUT_MS } from "@/lib/query-config";
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL;
 
@@ -44,11 +45,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     targetUrl.searchParams.set("time", time);
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROMETHEUS_FETCH_TIMEOUT_MS);
+
   try {
     const response = await fetch(targetUrl.toString(), {
       headers: {
         Accept: "application/json",
       },
+      signal: controller.signal,
     });
 
     const data = await response.json();
@@ -57,6 +62,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       status: response.status,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return NextResponse.json(
+        {
+          status: "error",
+          errorType: "timeout",
+          error: "Prometheus query timed out",
+        },
+        { status: 504 }
+      );
+    }
+
     console.error("Prometheus query error:", error);
     return NextResponse.json(
       {
@@ -67,5 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
       { status: 502 }
     );
+  } finally {
+    clearTimeout(timeout);
   }
 }

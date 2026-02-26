@@ -19,6 +19,7 @@ import {
   type PrometheusVectorResult,
 } from "@/lib/prometheus";
 import { EvalQueries } from "@/lib/prometheus-queries";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 /** Time range options for trend queries. */
 export const EVAL_TREND_RANGES = {
@@ -101,7 +102,7 @@ export function useEvalMetrics() {
 
       return results;
     },
-    staleTime: 30000,
+    staleTime: DEFAULT_STALE_TIME,
     retry: false,
   });
 }

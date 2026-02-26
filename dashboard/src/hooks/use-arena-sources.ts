@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ArenaSource } from "@/types/arena";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
@@ -29,50 +30,44 @@ interface UseArenaSourceMutationsResult {
   error: Error | null;
 }
 
+async function fetchSources(workspace: string): Promise<ArenaSource[]> {
+  const response = await fetch(`/api/workspaces/${workspace}/arena/sources`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch sources: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+async function fetchSource(workspace: string, name: string): Promise<ArenaSource> {
+  const response = await fetch(`/api/workspaces/${workspace}/arena/sources/${name}`);
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Source not found");
+    }
+    throw new Error(`Failed to fetch source: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 /**
  * Hook to fetch Arena sources for the current workspace.
  */
 export function useArenaSources(): UseArenaSourcesResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [sources, setSources] = useState<ArenaSource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace) {
-      setSources([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/sources`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch sources: ${response.statusText}`);
-      }
-      const data = await response.json();
-      setSources(data);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setSources([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["arena-sources", workspace],
+    queryFn: () => fetchSources(workspace!),
+    enabled: !!workspace,
+    staleTime: DEFAULT_STALE_TIME,
+  });
 
   return {
-    sources,
-    loading,
-    error,
-    refetch: fetchData,
+    sources: data ?? [],
+    loading: isLoading,
+    error: error as Error | null,
+    refetch,
   };
 }
 
@@ -82,50 +77,28 @@ export function useArenaSources(): UseArenaSourcesResult {
 export function useArenaSource(name: string | undefined): UseArenaSourceResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [source, setSource] = useState<ArenaSource | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchData = useCallback(async () => {
-    if (!workspace || !name) {
-      setSource(null);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`/api/workspaces/${workspace}/arena/sources/${name}`);
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error("Source not found");
-        }
-        throw new Error(`Failed to fetch source: ${response.statusText}`);
-      }
-
-      const sourceData = await response.json();
-      setSource(sourceData);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setSource(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace, name]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["arena-source", workspace, name],
+    queryFn: () => fetchSource(workspace!, name!),
+    enabled: !!workspace && !!name,
+    staleTime: DEFAULT_STALE_TIME,
+  });
 
   return {
-    source,
-    loading,
-    error,
-    refetch: fetchData,
+    source: data ?? null,
+    loading: isLoading,
+    error: error as Error | null,
+    refetch,
   };
+}
+
+async function handleMutationResponse(response: Response, fallbackMsg: string): Promise<Response> {
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || fallbackMsg);
+  }
+  return response;
 }
 
 /**
@@ -134,144 +107,76 @@ export function useArenaSource(name: string | undefined): UseArenaSourceResult {
 export function useArenaSourceMutations(): UseArenaSourceMutationsResult {
   const { currentWorkspace } = useWorkspace();
   const workspace = currentWorkspace?.name;
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
-  const createSource = useCallback(
-    async (name: string, spec: ArenaSource["spec"]): Promise<ArenaSource> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
+  const invalidateSources = () => {
+    queryClient.invalidateQueries({ queryKey: ["arena-sources", workspace] });
+  };
 
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(`/api/workspaces/${workspace}/arena/sources`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metadata: { name }, spec }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to create source");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const createMutation = useMutation({
+    mutationFn: async ({ name, spec }: { name: string; spec: ArenaSource["spec"] }) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: { name }, spec }),
+      });
+      await handleMutationResponse(response, "Failed to create source");
+      return response.json() as Promise<ArenaSource>;
     },
-    [workspace]
-  );
+    onSuccess: invalidateSources,
+  });
 
-  const updateSource = useCallback(
-    async (name: string, spec: ArenaSource["spec"]): Promise<ArenaSource> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/sources/${name}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ spec }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to update source");
-        }
-
-        return response.json();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const updateMutation = useMutation({
+    mutationFn: async ({ name, spec }: { name: string; spec: ArenaSource["spec"] }) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/sources/${name}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec }),
+      });
+      await handleMutationResponse(response, "Failed to update source");
+      return response.json() as Promise<ArenaSource>;
     },
-    [workspace]
-  );
+    onSuccess: invalidateSources,
+  });
 
-  const deleteSource = useCallback(
-    async (name: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/sources/${name}`,
-          { method: "DELETE" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to delete source");
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const deleteMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/sources/${name}`, {
+        method: "DELETE",
+      });
+      await handleMutationResponse(response, "Failed to delete source");
     },
-    [workspace]
-  );
+    onSuccess: invalidateSources,
+  });
 
-  const syncSource = useCallback(
-    async (name: string): Promise<void> => {
-      if (!workspace) {
-        throw new Error(NO_WORKSPACE_ERROR);
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(
-          `/api/workspaces/${workspace}/arena/sources/${name}/sync`,
-          { method: "POST" }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || "Failed to sync source");
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        setError(error);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+  const syncMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+      const response = await fetch(`/api/workspaces/${workspace}/arena/sources/${name}/sync`, {
+        method: "POST",
+      });
+      await handleMutationResponse(response, "Failed to sync source");
     },
-    [workspace]
-  );
+    onSuccess: invalidateSources,
+  });
+
+  const isPending = createMutation.isPending || updateMutation.isPending
+    || deleteMutation.isPending || syncMutation.isPending;
+
+  const activeError = createMutation.error ?? updateMutation.error
+    ?? deleteMutation.error ?? syncMutation.error;
 
   return {
-    createSource,
-    updateSource,
-    deleteSource,
-    syncSource,
-    loading,
-    error,
+    createSource: (name: string, spec: ArenaSource["spec"]) =>
+      createMutation.mutateAsync({ name, spec }),
+    updateSource: (name: string, spec: ArenaSource["spec"]) =>
+      updateMutation.mutateAsync({ name, spec }),
+    deleteSource: (name: string) => deleteMutation.mutateAsync(name),
+    syncSource: (name: string) => syncMutation.mutateAsync(name),
+    loading: isPending,
+    error: (activeError as Error) ?? null,
   };
 }

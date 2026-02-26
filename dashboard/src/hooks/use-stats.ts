@@ -5,6 +5,7 @@ import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { queryPrometheus, isPrometheusAvailable } from "@/lib/prometheus";
 import { AgentQueries } from "@/lib/prometheus-queries";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 // Stats type with required nested objects for dashboard display
 export interface DashboardStats {
@@ -106,7 +107,7 @@ export function useStats() {
     },
     enabled: !!currentWorkspace,
     refetchInterval: 30000, // Refetch every 30 seconds
-    staleTime: 30000, // 30 seconds - matches refetch interval
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

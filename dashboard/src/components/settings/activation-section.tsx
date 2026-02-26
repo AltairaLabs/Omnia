@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import useSWR from "swr";
+import { useState, useCallback, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Server, Clock, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,12 +121,20 @@ function DeactivateButton({ fingerprint, clusterName, onDeactivate }: Deactivate
  */
 export function ActivationSection() {
   const { isEnterprise } = useLicense();
-  const { data, isLoading, mutate } = useSWR<ActivationsResponse>(
-    isEnterprise ? "/api/license/activations" : null,
-    fetcher
-  );
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(() => ["activations"], []);
+
+  const { data, isLoading } = useQuery({
+    queryKey,
+    queryFn: () => fetcher("/api/license/activations"),
+    enabled: isEnterprise,
+  });
 
   const activations = data?.activations ?? [];
+
+  const handleRefresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey });
+  }, [queryClient, queryKey]);
 
   // Don't show for non-enterprise
   if (!isEnterprise) {
@@ -144,7 +152,7 @@ export function ActivationSection() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => mutate()}
+            onClick={handleRefresh}
             disabled={isLoading}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
@@ -188,7 +196,7 @@ export function ActivationSection() {
                     <DeactivateButton
                       fingerprint={activation.fingerprint}
                       clusterName={activation.clusterName}
-                      onDeactivate={() => mutate()}
+                      onDeactivate={handleRefresh}
                     />
                   </TableCell>
                 </TableRow>

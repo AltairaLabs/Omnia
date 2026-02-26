@@ -5,8 +5,8 @@
  * as well as establish WebSocket connections to the dev console.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import useSWR from "swr";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ArenaDevSession } from "@/types/arena";
 
 const API_BASE = "/api/workspaces";
@@ -41,14 +41,29 @@ interface UseDevSessionResult {
   refresh: () => Promise<void>;
 }
 
-const fetcher = async (url: string) => {
+async function fetcher(url: string): Promise<ArenaDevSession[]> {
   const response = await fetch(url);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: "Unknown error" }));
     throw new Error(error.message || `HTTP ${response.status}`);
   }
   return response.json();
-};
+}
+
+function findActiveSession(sessions: ArenaDevSession[] | undefined): ArenaDevSession | null {
+  return sessions?.find(
+    (s) =>
+      s.status?.phase === "Ready" ||
+      s.status?.phase === "Starting" ||
+      s.status?.phase === "Pending"
+  ) ?? null;
+}
+
+function hasPendingSession(sessions: ArenaDevSession[] | undefined): boolean {
+  return !!sessions?.find(
+    (s) => s.status?.phase === "Pending" || s.status?.phase === "Starting"
+  );
+}
 
 /**
  * Hook to manage an Arena dev session for interactive testing.
@@ -56,46 +71,42 @@ const fetcher = async (url: string) => {
 export function useDevSession({
   workspace,
   projectId,
-  pollingInterval = 5000, // Increased from 2000ms to reduce API call frequency
+  pollingInterval = 5000,
   autoCreate = false,
 }: UseDevSessionOptions): UseDevSessionResult {
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<Error | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const queryClient = useQueryClient();
+
+  const queryKey = useMemo(
+    () => ["dev-sessions", workspace, projectId],
+    [workspace, projectId]
+  );
 
   // Fetch sessions for this project
   const {
     data: sessions,
     error: fetchError,
     isLoading: isFetching,
-    mutate,
-  } = useSWR<ArenaDevSession[]>(
-    workspace && projectId
-      ? `${API_BASE}/${workspace}/arena/dev-sessions?projectId=${projectId}`
-      : null,
-    fetcher,
-    {
-      // Poll when waiting for session to be ready
-      refreshInterval: (data) => {
-        const activeSession = data?.find(
-          (s) => s.status?.phase === "Pending" || s.status?.phase === "Starting"
-        );
-        return activeSession ? pollingInterval : 0;
-      },
-    }
-  );
+  } = useQuery({
+    queryKey,
+    queryFn: () => fetcher(`${API_BASE}/${workspace}/arena/dev-sessions?projectId=${projectId}`),
+    enabled: !!workspace && !!projectId,
+    refetchInterval: (query) => {
+      return hasPendingSession(query.state.data) ? pollingInterval : false;
+    },
+  });
 
   // Find the active session (Ready, Starting, or Pending)
-  const session =
-    sessions?.find(
-      (s) =>
-        s.status?.phase === "Ready" ||
-        s.status?.phase === "Starting" ||
-        s.status?.phase === "Pending"
-    ) || null;
+  const session = findActiveSession(sessions);
 
   const isReady = session?.status?.phase === "Ready";
   const endpoint = isReady ? session?.status?.endpoint || null : null;
+
+  const invalidate = useCallback(() => {
+    return queryClient.invalidateQueries({ queryKey });
+  }, [queryClient, queryKey]);
 
   // Create a new session
   const createSession = useCallback(
@@ -119,7 +130,7 @@ export function useDevSession({
         }
 
         const created = await response.json();
-        await mutate();
+        await invalidate();
         return created;
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -129,7 +140,7 @@ export function useDevSession({
         setIsCreating(false);
       }
     },
-    [workspace, projectId, mutate]
+    [workspace, projectId, invalidate]
   );
 
   // Delete the current session
@@ -146,8 +157,8 @@ export function useDevSession({
       throw new Error(error.message);
     }
 
-    await mutate();
-  }, [workspace, session, mutate]);
+    await invalidate();
+  }, [workspace, session, invalidate]);
 
   // Send heartbeat to keep session alive
   const sendHeartbeat = useCallback(async (): Promise<void> => {
@@ -171,8 +182,8 @@ export function useDevSession({
 
   // Refresh session data
   const refresh = useCallback(async (): Promise<void> => {
-    await mutate();
-  }, [mutate]);
+    await invalidate();
+  }, [invalidate]);
 
   // Auto-create session if requested
   useEffect(() => {

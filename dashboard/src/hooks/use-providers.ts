@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDataService, type Provider as ServiceProvider } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { Provider } from "@/types";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 type ProviderPhase = "Ready" | "Error";
 
@@ -39,7 +40,7 @@ export function useProviders(options: UseProvidersOptions = {}) {
     },
     enabled: !!currentWorkspace,
     // Reasonable stale time to prevent duplicate fetches during component re-renders
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }
@@ -64,7 +65,7 @@ export function useProvider(name: string | undefined, _namespace?: string) {
     },
     enabled: !!name && !!currentWorkspace,
     // Reasonable stale time to prevent duplicate fetches during component re-renders
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

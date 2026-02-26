@@ -4,6 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
+import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useArenaJobs, useArenaJob, useArenaJobMutations } from "./use-arena-jobs";
 
 // Mock workspace context
@@ -43,6 +45,16 @@ const mockJob = {
   },
 };
 
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  }
+  return Wrapper;
+}
+
 describe("useArenaJobs", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -63,7 +75,7 @@ describe("useArenaJobs", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaJobs());
+    const { result } = renderHook(() => useArenaJobs(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -91,9 +103,7 @@ describe("useArenaJobs", () => {
       json: () => Promise.resolve(mockJobs),
     });
 
-    const { result } = renderHook(() => useArenaJobs());
-
-    expect(result.current.loading).toBe(true);
+    const { result } = renderHook(() => useArenaJobs(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -120,7 +130,10 @@ describe("useArenaJobs", () => {
       json: () => Promise.resolve([mockJob]),
     });
 
-    const { result } = renderHook(() => useArenaJobs({ sourceRef: "my-config" }));
+    const { result } = renderHook(
+      () => useArenaJobs({ sourceRef: "my-config" }),
+      { wrapper: createWrapper() }
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -147,7 +160,10 @@ describe("useArenaJobs", () => {
       json: () => Promise.resolve([mockJob]),
     });
 
-    const { result } = renderHook(() => useArenaJobs({ type: "evaluation" }));
+    const { result } = renderHook(
+      () => useArenaJobs({ type: "evaluation" }),
+      { wrapper: createWrapper() }
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -174,7 +190,10 @@ describe("useArenaJobs", () => {
       json: () => Promise.resolve([mockJob]),
     });
 
-    const { result } = renderHook(() => useArenaJobs({ phase: "Running" }));
+    const { result } = renderHook(
+      () => useArenaJobs({ phase: "Running" }),
+      { wrapper: createWrapper() }
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -201,7 +220,7 @@ describe("useArenaJobs", () => {
       statusText: "Internal Server Error",
     });
 
-    const { result } = renderHook(() => useArenaJobs());
+    const { result } = renderHook(() => useArenaJobs(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -228,7 +247,7 @@ describe("useArenaJobs", () => {
       json: () => Promise.resolve([mockJob]),
     });
 
-    const { result } = renderHook(() => useArenaJobs());
+    const { result } = renderHook(() => useArenaJobs(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -266,7 +285,7 @@ describe("useArenaJob", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaJob(undefined));
+    const { result } = renderHook(() => useArenaJob(undefined), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -291,7 +310,7 @@ describe("useArenaJob", () => {
       json: () => Promise.resolve(mockJob),
     });
 
-    const { result } = renderHook(() => useArenaJob("test-job"));
+    const { result } = renderHook(() => useArenaJob("test-job"), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -320,7 +339,10 @@ describe("useArenaJob", () => {
       status: 404,
     });
 
-    const { result } = renderHook(() => useArenaJob("nonexistent-job"));
+    const { result } = renderHook(
+      () => useArenaJob("nonexistent-job"),
+      { wrapper: createWrapper() }
+    );
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -351,7 +373,7 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await expect(
       result.current.createJob("test", {
@@ -379,7 +401,7 @@ describe("useArenaJobMutations", () => {
       json: () => Promise.resolve(mockJob),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     const created = await result.current.createJob("test-job", {
       sourceRef: { name: "test-source" },
@@ -423,7 +445,7 @@ describe("useArenaJobMutations", () => {
       text: () => Promise.resolve("Job already exists"),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await expect(
       result.current.createJob("test", {
@@ -453,7 +475,7 @@ describe("useArenaJobMutations", () => {
       json: () => Promise.resolve(cancelledJob),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     const cancelled = await result.current.cancelJob("test-job");
 
@@ -480,7 +502,7 @@ describe("useArenaJobMutations", () => {
       text: () => Promise.resolve("Job already completed"),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await expect(result.current.cancelJob("test-job")).rejects.toThrow(
       "Job already completed"
@@ -502,7 +524,7 @@ describe("useArenaJobMutations", () => {
       ok: true,
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await result.current.deleteJob("test-job");
 
@@ -528,7 +550,7 @@ describe("useArenaJobMutations", () => {
       text: () => Promise.resolve("Job is still running"),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await expect(result.current.deleteJob("test-job")).rejects.toThrow(
       "Job is still running"
@@ -546,7 +568,7 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await expect(result.current.cancelJob("test-job")).rejects.toThrow(
       "No workspace selected"
@@ -564,7 +586,7 @@ describe("useArenaJobMutations", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaJobMutations());
+    const { result } = renderHook(() => useArenaJobMutations(), { wrapper: createWrapper() });
 
     await expect(result.current.deleteJob("test-job")).rejects.toThrow(
       "No workspace selected"

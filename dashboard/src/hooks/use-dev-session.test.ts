@@ -4,6 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
+import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -25,6 +27,16 @@ const mockPendingSession = {
   status: { phase: "Pending" },
 };
 
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  }
+  return Wrapper;
+}
+
 describe("useDevSession", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -42,11 +54,13 @@ describe("useDevSession", () => {
     });
 
     const { useDevSession } = await import("./use-dev-session");
-    const { result } = renderHook(() =>
-      useDevSession({
-        workspace: "test-workspace",
-        projectId: "project-1",
-      })
+    const { result } = renderHook(
+      () =>
+        useDevSession({
+          workspace: "test-workspace",
+          projectId: "project-1",
+        }),
+      { wrapper: createWrapper() }
     );
 
     await waitFor(() => {
@@ -65,11 +79,13 @@ describe("useDevSession", () => {
     });
 
     const { useDevSession } = await import("./use-dev-session");
-    const { result } = renderHook(() =>
-      useDevSession({
-        workspace: "test-workspace-2",
-        projectId: "project-2",
-      })
+    const { result } = renderHook(
+      () =>
+        useDevSession({
+          workspace: "test-workspace-2",
+          projectId: "project-2",
+        }),
+      { wrapper: createWrapper() }
     );
 
     await waitFor(() => {
@@ -88,11 +104,13 @@ describe("useDevSession", () => {
     });
 
     const { useDevSession } = await import("./use-dev-session");
-    const { result } = renderHook(() =>
-      useDevSession({
-        workspace: "test-workspace-3",
-        projectId: "project-3",
-      })
+    const { result } = renderHook(
+      () =>
+        useDevSession({
+          workspace: "test-workspace-3",
+          projectId: "project-3",
+        }),
+      { wrapper: createWrapper() }
     );
 
     await waitFor(() => {
@@ -106,11 +124,13 @@ describe("useDevSession", () => {
 
   it("does not fetch when workspace is empty", async () => {
     const { useDevSession } = await import("./use-dev-session");
-    const { result } = renderHook(() =>
-      useDevSession({
-        workspace: "",
-        projectId: "project-1",
-      })
+    const { result } = renderHook(
+      () =>
+        useDevSession({
+          workspace: "",
+          projectId: "project-1",
+        }),
+      { wrapper: createWrapper() }
     );
 
     // Wait a tick to ensure any async operations would have started
@@ -122,11 +142,13 @@ describe("useDevSession", () => {
 
   it("does not fetch when projectId is empty", async () => {
     const { useDevSession } = await import("./use-dev-session");
-    const { result } = renderHook(() =>
-      useDevSession({
-        workspace: "test-workspace",
-        projectId: "",
-      })
+    const { result } = renderHook(
+      () =>
+        useDevSession({
+          workspace: "test-workspace",
+          projectId: "",
+        }),
+      { wrapper: createWrapper() }
     );
 
     // Wait a tick to ensure any async operations would have started
@@ -143,11 +165,13 @@ describe("useDevSession", () => {
     });
 
     const { useDevSession } = await import("./use-dev-session");
-    const { result } = renderHook(() =>
-      useDevSession({
-        workspace: "test-workspace-4",
-        projectId: "project-4",
-      })
+    const { result } = renderHook(
+      () =>
+        useDevSession({
+          workspace: "test-workspace-4",
+          projectId: "project-4",
+        }),
+      { wrapper: createWrapper() }
     );
 
     await waitFor(() => {
@@ -178,11 +202,13 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-5",
-          projectId: "project-5",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-5",
+            projectId: "project-5",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -211,11 +237,13 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-6",
-          projectId: "project-6",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-6",
+            projectId: "project-6",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -249,11 +277,13 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-7",
-          projectId: "project-7",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-7",
+            projectId: "project-7",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -278,11 +308,13 @@ describe("useDevSession", () => {
       });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-8",
-          projectId: "project-8",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-8",
+            projectId: "project-8",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -314,11 +346,13 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-16",
-          projectId: "project-16",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-16",
+            projectId: "project-16",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -351,11 +385,13 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-17",
-          projectId: "project-17",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-17",
+            projectId: "project-17",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -388,11 +424,13 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-9",
-          projectId: "project-9",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-9",
+            projectId: "project-9",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -418,11 +456,13 @@ describe("useDevSession", () => {
       });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-10",
-          projectId: "project-10",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-10",
+            projectId: "project-10",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -452,11 +492,13 @@ describe("useDevSession", () => {
         .mockRejectedValueOnce(new Error("Network error"));
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-11",
-          projectId: "project-11",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-11",
+            projectId: "project-11",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -481,11 +523,13 @@ describe("useDevSession", () => {
       });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-12",
-          projectId: "project-12",
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-12",
+            projectId: "project-12",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -496,8 +540,6 @@ describe("useDevSession", () => {
         await result.current.refresh();
       });
 
-      // SWR mutate may not always trigger a new fetch immediately,
-      // but the function should be callable
       expect(result.current.refresh).toBeDefined();
     });
   });
@@ -510,11 +552,13 @@ describe("useDevSession", () => {
       });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result, unmount } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-15",
-          projectId: "project-15",
-        })
+      const { result, unmount } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-15",
+            projectId: "project-15",
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -549,12 +593,14 @@ describe("useDevSession", () => {
         });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-13",
-          projectId: "project-13",
-          autoCreate: true,
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-13",
+            projectId: "project-13",
+            autoCreate: true,
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {
@@ -575,12 +621,14 @@ describe("useDevSession", () => {
       });
 
       const { useDevSession } = await import("./use-dev-session");
-      const { result } = renderHook(() =>
-        useDevSession({
-          workspace: "test-workspace-14",
-          projectId: "project-14",
-          autoCreate: true,
-        })
+      const { result } = renderHook(
+        () =>
+          useDevSession({
+            workspace: "test-workspace-14",
+            projectId: "project-14",
+            autoCreate: true,
+          }),
+        { wrapper: createWrapper() }
       );
 
       await waitFor(() => {

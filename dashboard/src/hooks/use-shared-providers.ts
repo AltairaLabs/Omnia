@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useDataService, type Provider as ServiceProvider } from "@/lib/data";
 import type { Provider } from "@/types";
+import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 /**
  * Fetches shared providers from the system namespace.
@@ -17,7 +18,7 @@ export function useSharedProviders() {
       const providers = await service.getSharedProviders();
       return providers as unknown as Provider[];
     },
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }
@@ -35,7 +36,7 @@ export function useSharedProvider(name: string) {
       return (provider as unknown as Provider) || null;
     },
     enabled: !!name,
-    staleTime: 30000, // 30 seconds
+    staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale
   });
 }

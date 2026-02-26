@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { SWRConfig } from "swr";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { useLicense } from "./use-license";
 import { OPEN_CORE_LICENSE, type License } from "@/types/license";
@@ -9,9 +9,16 @@ import { OPEN_CORE_LICENSE, type License } from "@/types/license";
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-// Wrapper to clear SWR cache between tests
-const wrapper = ({ children }: { children: React.ReactNode }) =>
-  React.createElement(SWRConfig, { value: { provider: () => new Map() } }, children);
+// Wrapper to provide React Query context and clear cache between tests
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  }
+  return Wrapper;
+}
 
 describe("useLicense", () => {
   beforeEach(() => {
@@ -19,30 +26,31 @@ describe("useLicense", () => {
     mockFetch.mockReset();
   });
 
-  it("should return open-core license as fallback data initially", () => {
+  it("should return open-core license as placeholder data initially", () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(OPEN_CORE_LICENSE),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
-    // Fallback data should be available immediately
+    // Placeholder data should be available immediately
     expect(result.current.license).toEqual(OPEN_CORE_LICENSE);
     expect(result.current.isEnterprise).toBe(false);
   });
 
-  it("should return isLoading true while fetching", async () => {
+  it("should have placeholder data while fetching", async () => {
     let resolvePromise: (value: Response) => void;
     const fetchPromise = new Promise<Response>((resolve) => {
       resolvePromise = resolve;
     });
     mockFetch.mockReturnValue(fetchPromise);
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
-    // Initially loading
-    expect(result.current.isLoading).toBe(true);
+    // With placeholderData, isLoading is false but data is the placeholder
+    // This is correct React Query behavior: placeholderData prevents loading state
+    expect(result.current.license).toEqual(OPEN_CORE_LICENSE);
 
     // Resolve the fetch
     resolvePromise!({
@@ -82,7 +90,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -98,13 +106,13 @@ describe("useLicense", () => {
       status: 500,
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    // Should fall back to open-core
+    // Should fall back to open-core (placeholder data)
     expect(result.current.license).toEqual(OPEN_CORE_LICENSE);
     expect(result.current.isEnterprise).toBe(false);
   });
@@ -125,7 +133,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -150,7 +158,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -176,7 +184,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -202,7 +210,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -226,7 +234,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -251,7 +259,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(enterpriseLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.license.tier).toBe("enterprise");
@@ -272,7 +280,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(expiredLicense),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.isExpired).toBe(true);
@@ -285,7 +293,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(OPEN_CORE_LICENSE),
     });
 
-    const { result } = renderHook(() => useLicense(), { wrapper });
+    const { result } = renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -309,7 +317,7 @@ describe("useLicense", () => {
       json: () => Promise.resolve(OPEN_CORE_LICENSE),
     });
 
-    renderHook(() => useLicense(), { wrapper });
+    renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith("/api/license");
