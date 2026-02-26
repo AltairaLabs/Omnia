@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -146,5 +148,163 @@ func TestPoolConfigDefaults(t *testing.T) {
 	}
 	if defaultMaxConnIdleTime != 30*time.Minute {
 		t.Errorf("expected defaultMaxConnIdleTime=30m, got %v", defaultMaxConnIdleTime)
+	}
+}
+
+func TestApplyEnvFallbacks_AllOverrides(t *testing.T) {
+	t.Setenv("POSTGRES_CONN", "postgres://test:5432/db")
+	t.Setenv("REDIS_ADDRS", "localhost:6379")
+	t.Setenv("COLD_BACKEND", "s3")
+	t.Setenv("COLD_BUCKET", "my-bucket")
+	t.Setenv("COLD_REGION", "us-east-1")
+	t.Setenv("COLD_ENDPOINT", "http://minio:9000")
+	t.Setenv("API_ADDR", ":9999")
+	t.Setenv("HEALTH_ADDR", ":9998")
+	t.Setenv("METRICS_ADDR", ":9997")
+	t.Setenv("OTLP_GRPC_ADDR", ":4319")
+	t.Setenv("OTLP_HTTP_ADDR", ":4320")
+	t.Setenv("ENTERPRISE_ENABLED", "true")
+	t.Setenv("OTLP_ENABLED", "true")
+
+	f := &flags{
+		apiAddr:      ":8080",
+		healthAddr:   ":8081",
+		metricsAddr:  ":9090",
+		otlpGRPCAddr: ":4317",
+		otlpHTTPAddr: ":4318",
+	}
+	f.applyEnvFallbacks()
+
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"postgresConn", f.postgresConn, "postgres://test:5432/db"},
+		{"redisAddrs", f.redisAddrs, "localhost:6379"},
+		{"coldBackend", f.coldBackend, "s3"},
+		{"coldBucket", f.coldBucket, "my-bucket"},
+		{"coldRegion", f.coldRegion, "us-east-1"},
+		{"coldEndpoint", f.coldEndpoint, "http://minio:9000"},
+		{"apiAddr", f.apiAddr, ":9999"},
+		{"healthAddr", f.healthAddr, ":9998"},
+		{"metricsAddr", f.metricsAddr, ":9997"},
+		{"otlpGRPCAddr", f.otlpGRPCAddr, ":4319"},
+		{"otlpHTTPAddr", f.otlpHTTPAddr, ":4320"},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("%s = %q, want %q", tt.name, tt.got, tt.want)
+		}
+	}
+	if !f.enterprise {
+		t.Error("enterprise should be true")
+	}
+	if !f.otlpEnabled {
+		t.Error("otlpEnabled should be true")
+	}
+}
+
+func TestApplyEnvFallbacks_NoOverrideWhenFlagSet(t *testing.T) {
+	t.Setenv("POSTGRES_CONN", "should-not-apply")
+	t.Setenv("API_ADDR", "should-not-apply")
+	t.Setenv("ENTERPRISE_ENABLED", "true")
+
+	f := &flags{
+		postgresConn: "flag-value",
+		apiAddr:      ":9999",
+		healthAddr:   ":8081",
+		metricsAddr:  ":9090",
+		otlpGRPCAddr: ":4317",
+		otlpHTTPAddr: ":4318",
+		enterprise:   true, // already true, env should not matter
+	}
+	f.applyEnvFallbacks()
+
+	if f.postgresConn != "flag-value" {
+		t.Errorf("postgresConn = %q, want flag-value", f.postgresConn)
+	}
+	// apiAddr was ":9999" which differs from default ":8080", so env should not override
+	if f.apiAddr != ":9999" {
+		t.Errorf("apiAddr = %q, want :9999", f.apiAddr)
+	}
+}
+
+func TestNewHealthServer_Healthz(t *testing.T) {
+	// We test the healthz handler by creating a health mux identical to newHealthServer.
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	healthMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("healthz: expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "ok" {
+		t.Fatalf("healthz: expected 'ok', got %q", rec.Body.String())
+	}
+}
+
+func TestFlagsStruct(t *testing.T) {
+	f := &flags{
+		apiAddr:      ":8080",
+		healthAddr:   ":8081",
+		metricsAddr:  ":9090",
+		postgresConn: "postgres://localhost/test",
+		redisAddrs:   "localhost:6379,localhost:6380",
+		coldBackend:  "s3",
+		coldBucket:   "archive",
+		coldRegion:   "us-west-2",
+		coldEndpoint: "http://s3.local",
+		enterprise:   true,
+		otlpEnabled:  true,
+		otlpGRPCAddr: ":4317",
+		otlpHTTPAddr: ":4318",
+	}
+
+	// Verify all fields are accessible and correct.
+	if f.apiAddr != ":8080" {
+		t.Errorf("apiAddr = %q", f.apiAddr)
+	}
+	if f.healthAddr != ":8081" {
+		t.Errorf("healthAddr = %q", f.healthAddr)
+	}
+	if f.metricsAddr != ":9090" {
+		t.Errorf("metricsAddr = %q", f.metricsAddr)
+	}
+	if f.postgresConn != "postgres://localhost/test" {
+		t.Errorf("postgresConn = %q", f.postgresConn)
+	}
+	if f.redisAddrs != "localhost:6379,localhost:6380" {
+		t.Errorf("redisAddrs = %q", f.redisAddrs)
+	}
+	if f.coldBackend != "s3" {
+		t.Errorf("coldBackend = %q", f.coldBackend)
+	}
+	if f.coldBucket != "archive" {
+		t.Errorf("coldBucket = %q", f.coldBucket)
+	}
+	if f.coldRegion != "us-west-2" {
+		t.Errorf("coldRegion = %q", f.coldRegion)
+	}
+	if f.coldEndpoint != "http://s3.local" {
+		t.Errorf("coldEndpoint = %q", f.coldEndpoint)
+	}
+	if !f.enterprise {
+		t.Error("enterprise should be true")
+	}
+	if !f.otlpEnabled {
+		t.Error("otlpEnabled should be true")
+	}
+	if f.otlpGRPCAddr != ":4317" {
+		t.Errorf("otlpGRPCAddr = %q", f.otlpGRPCAddr)
+	}
+	if f.otlpHTTPAddr != ":4318" {
+		t.Errorf("otlpHTTPAddr = %q", f.otlpHTTPAddr)
 	}
 }

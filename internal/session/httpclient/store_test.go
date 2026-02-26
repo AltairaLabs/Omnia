@@ -155,6 +155,24 @@ func TestCreateSession(t *testing.T) {
 	}
 }
 
+func TestCreateSession_NoTTL(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+
+	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "test-agent",
+		Namespace: "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sess.ID == "" {
+		t.Fatal("expected non-empty session ID")
+	}
+}
+
 func TestGetSession_Found(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
@@ -189,6 +207,28 @@ func TestGetSession_NotFound(t *testing.T) {
 	_, err := store.GetSession(context.Background(), "nonexistent")
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestGetSession_ServerError(t *testing.T) {
+	// Server returns 500 with valid JSON error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "database down"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	_, err := store.GetSession(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected error with status 500, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "database down") {
+		t.Fatalf("expected error message, got: %v", err)
 	}
 }
 
@@ -230,6 +270,26 @@ func TestAppendMessage_NotFound(t *testing.T) {
 	}
 }
 
+func TestAppendMessage_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "internal error"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	err := store.AppendMessage(context.Background(), "x", session.Message{
+		ID: "m1", Role: session.RoleUser, Content: "hi",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got: %v", err)
+	}
+}
+
 func TestUpdateSessionStats_OK(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
@@ -268,6 +328,26 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionStats_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "internal error"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	err := store.UpdateSessionStats(context.Background(), "x", session.SessionStatsUpdate{
+		AddMessages: 1,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got: %v", err)
+	}
+}
+
 func TestRefreshTTL_OK(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
@@ -297,6 +377,24 @@ func TestRefreshTTL_NotFound(t *testing.T) {
 	err := store.RefreshTTL(context.Background(), "nonexistent", time.Hour)
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestRefreshTTL_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "internal error"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	err := store.RefreshTTL(context.Background(), "x", time.Hour)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected 500 error, got: %v", err)
 	}
 }
 
@@ -408,5 +506,85 @@ func TestReadErrorInvalidJSON(t *testing.T) {
 	// Should fall back to "HTTP 500" format.
 	if !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected error to contain status code, got: %v", err)
+	}
+}
+
+func TestCancelledContext(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := store.GetSession(ctx, "x")
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestDoJSON_RequestCreationError(t *testing.T) {
+	// Use an invalid base URL that will fail request creation.
+	store := NewStore("://invalid-url", logr.Discard())
+
+	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+}
+
+func TestDoRequest_NilBody(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+
+	// GetSession uses doRequest with nil body
+	_, err := store.GetSession(context.Background(), "nonexistent")
+	if err != session.ErrSessionNotFound {
+		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestCreateSession_InvalidResponseJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("not valid json"))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+	})
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("expected decode error, got: %v", err)
+	}
+}
+
+func TestGetSession_InvalidResponseJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not valid json"))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	_, err := store.GetSession(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("expected decode error, got: %v", err)
 	}
 }
