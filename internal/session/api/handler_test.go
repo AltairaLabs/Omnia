@@ -1978,6 +1978,42 @@ func TestIsMaxBytesError(t *testing.T) {
 	if isMaxBytesError(errors.New("some other error")) {
 		t.Fatal("expected false for non-MaxBytesError")
 	}
+	if isMaxBytesError(nil) {
+		t.Fatal("expected false for nil error")
+	}
+}
+
+func TestWriteJSON_Success(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeJSON(rec, map[string]string{"key": "value"})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
+}
+
+func TestWriteJSON_EncoderError(t *testing.T) {
+	// json.Encoder.Encode will fail on channels
+	rec := httptest.NewRecorder()
+	writeJSON(rec, make(chan int))
+
+	// Should still set the content type header even if encode fails
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
+}
+
+func TestNewHandler_ZeroBodySizeUsesDefault(t *testing.T) {
+	svc := NewSessionService(providers.NewRegistry(), ServiceConfig{}, logr.Discard())
+	h := NewHandler(svc, logr.Discard(), 0)
+	if h.maxBodySize != DefaultMaxBodySize {
+		t.Fatalf("expected default max body size for zero, got %d", h.maxBodySize)
+	}
 }
 
 func TestParseListParams_WithNamespace(t *testing.T) {
@@ -2004,5 +2040,95 @@ func TestParseListParams_WithValidTimeRange(t *testing.T) {
 	}
 	if opts.CreatedBefore.IsZero() {
 		t.Fatal("expected non-zero CreatedBefore time")
+	}
+}
+
+func TestServiceUpdateSessionStats_CompletionTransition(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:     "s1",
+		Status: session.SessionStatusActive,
+	}
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens:  100,
+		AddOutputTokens: 50,
+		SetStatus:       session.SessionStatusCompleted,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := warm.sessions["s1"]
+	if got.Status != session.SessionStatusCompleted {
+		t.Errorf("expected completed status, got %q", got.Status)
+	}
+	if got.TotalInputTokens != 100 {
+		t.Errorf("expected 100 input tokens, got %d", got.TotalInputTokens)
+	}
+}
+
+func TestServiceUpdateSessionStats_AlreadyCompleted(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:     "s1",
+		Status: session.SessionStatusCompleted,
+	}
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens: 10,
+		SetStatus:      session.SessionStatusCompleted,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestServiceUpdateSessionStats_NoStatus(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:     "s1",
+		Status: session.SessionStatusActive,
+	}
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warm.sessions["s1"].Status != session.SessionStatusActive {
+		t.Error("status should remain active")
+	}
+}
+
+func TestServiceUpdateSessionStats_MissingSessionID(t *testing.T) {
+	reg := providers.NewRegistry()
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+
+	err := svc.UpdateSessionStats(context.Background(), "", session.SessionStatsUpdate{})
+	if !errors.Is(err, ErrMissingSessionID) {
+		t.Errorf("expected ErrMissingSessionID, got %v", err)
+	}
+}
+
+func TestServiceUpdateSessionStats_NoWarmStore(t *testing.T) {
+	reg := providers.NewRegistry()
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{})
+	if !errors.Is(err, ErrWarmStoreRequired) {
+		t.Errorf("expected ErrWarmStoreRequired, got %v", err)
 	}
 }

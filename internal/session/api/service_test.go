@@ -216,6 +216,66 @@ func TestUpdateSessionStats_NoStatusChange(t *testing.T) {
 	assert.Equal(t, session.SessionStatusActive, warm.updatedSessions[0].Status)
 }
 
+func TestUpdateSessionStats_CompletionTransitionPublishes(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:     "s1",
+		Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens: 50,
+		SetStatus:      session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+	require.Len(t, warm.updatedSessions, 1)
+	assert.Equal(t, session.SessionStatusCompleted, warm.updatedSessions[0].Status)
+}
+
+func TestUpdateSessionStats_AlreadyCompletedNoRepublish(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:     "s1",
+		Status: session.SessionStatusCompleted,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	// Updating a session that's already completed should still work
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens: 10,
+		SetStatus:      session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+	require.Len(t, warm.updatedSessions, 1)
+}
+
+func TestUpdateSessionStats_NonCompletedStatusSkipsLookup(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:     "s1",
+		Status: session.SessionStatusActive,
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	// Non-completed status should not trigger the completion lookup/publish path
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, warm.updatedSessions, 1)
+	assert.Equal(t, session.SessionStatusActive, warm.updatedSessions[0].Status)
+}
+
 // --- RefreshTTL ---
 
 func TestRefreshTTL_EmptySessionID(t *testing.T) {
