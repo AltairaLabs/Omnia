@@ -197,7 +197,7 @@ func TestRunArenaAssertion_ContentIncludesAny_Pass(t *testing.T) {
 		ID:   "eval-7",
 		Type: EvalTypeArenaAssertion,
 		Params: map[string]any{
-			"assertion_type": "content_includes_any",
+			"assertion_type": "contains_any",
 			"assertion_params": map[string]any{
 				"patterns": []any{"programming", "language"},
 			},
@@ -229,7 +229,7 @@ func TestRunArenaAssertion_ContentNotIncludes_Pass(t *testing.T) {
 		ID:   "eval-8",
 		Type: EvalTypeArenaAssertion,
 		Params: map[string]any{
-			"assertion_type": "content_not_includes",
+			"assertion_type": "content_excludes",
 			"assertion_params": map[string]any{
 				"patterns": []any{"Python", "Java"},
 			},
@@ -257,7 +257,7 @@ func TestRunArenaAssertion_ContentNotIncludes_Fail(t *testing.T) {
 		ID:   "eval-9",
 		Type: EvalTypeArenaAssertion,
 		Params: map[string]any{
-			"assertion_type": "content_not_includes",
+			"assertion_type": "content_excludes",
 			"assertion_params": map[string]any{
 				"patterns": []any{"Python"},
 			},
@@ -286,9 +286,9 @@ func TestRunArenaAssertion_NilAssertionParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// With no tool_names specified, tools_called passes (no required tools missing)
-	if !result.Passed {
-		t.Error("expected tools_called with nil params to pass (no requirements)")
+	// With no tool_names specified, the handler fails (missing required param).
+	if result.Passed {
+		t.Error("expected tools_called with nil params to fail (missing tool_names)")
 	}
 }
 
@@ -435,7 +435,7 @@ func TestRunArenaAssertion_ToolsNotCalled_Fail(t *testing.T) {
 	}
 }
 
-func TestBuildConversationContext(t *testing.T) {
+func TestExtractToolCallRecords(t *testing.T) {
 	messages := ConvertToTypesMessages([]session.Message{
 		{
 			ID: "m1", Role: session.RoleUser,
@@ -455,16 +455,13 @@ func TestBuildConversationContext(t *testing.T) {
 		},
 	})
 
-	ctx := buildConversationContext(messages)
+	records := extractToolCallRecords(messages)
 
-	if len(ctx.AllTurns) != 3 {
-		t.Fatalf("expected 3 turns, got %d", len(ctx.AllTurns))
-	}
-	if len(ctx.ToolCalls) != 1 {
-		t.Fatalf("expected 1 tool call record, got %d", len(ctx.ToolCalls))
+	if len(records) != 1 {
+		t.Fatalf("expected 1 tool call record, got %d", len(records))
 	}
 
-	tc := ctx.ToolCalls[0]
+	tc := records[0]
 	if tc.ToolName != "search" {
 		t.Errorf("expected tool name 'search', got %q", tc.ToolName)
 	}
@@ -476,7 +473,7 @@ func TestBuildConversationContext(t *testing.T) {
 	}
 }
 
-func TestBuildConversationContext_NoToolCalls(t *testing.T) {
+func TestExtractToolCallRecords_NoToolCalls(t *testing.T) {
 	messages := ConvertToTypesMessages([]session.Message{
 		{
 			ID: "m1", Role: session.RoleUser,
@@ -488,13 +485,10 @@ func TestBuildConversationContext_NoToolCalls(t *testing.T) {
 		},
 	})
 
-	ctx := buildConversationContext(messages)
+	records := extractToolCallRecords(messages)
 
-	if len(ctx.AllTurns) != 2 {
-		t.Fatalf("expected 2 turns, got %d", len(ctx.AllTurns))
-	}
-	if len(ctx.ToolCalls) != 0 {
-		t.Errorf("expected 0 tool call records, got %d", len(ctx.ToolCalls))
+	if len(records) != 0 {
+		t.Errorf("expected 0 tool call records, got %d", len(records))
 	}
 }
 

@@ -873,7 +873,7 @@ func TestEvalListener_OnEvent_ArenaAssertionFlowsThrough(t *testing.T) {
 				Type:    evals.EvalTypeArenaAssertion,
 				Trigger: "per_turn",
 				Params: map[string]any{
-					"assertion_type": "content_includes_any",
+					"assertion_type": "contains_any",
 					"assertion_params": map[string]any{
 						"patterns": []any{"hello"},
 					},
@@ -933,7 +933,7 @@ func TestEvalListener_OnSessionComplete_ArenaAssertionRuns(t *testing.T) {
 				Type:    evals.EvalTypeArenaAssertion,
 				Trigger: "on_session_complete",
 				Params: map[string]any{
-					"assertion_type": "content_includes_any",
+					"assertion_type": "contains_any",
 					"assertion_params": map[string]any{
 						"patterns": []any{"hello"},
 					},
