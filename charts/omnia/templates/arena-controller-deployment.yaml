@@ -29,9 +29,11 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "omnia.serviceAccountName" . }}
       securityContext:
-        # Run as root to write to shared workspace-content PVC
-        runAsNonRoot: false
-        runAsUser: 0
+        runAsNonRoot: {{ .Values.enterprise.arena.controller.podSecurityContext.runAsNonRoot | default true }}
+        runAsUser: {{ .Values.enterprise.arena.controller.podSecurityContext.runAsUser | default 65532 }}
+        fsGroup: {{ .Values.enterprise.arena.controller.podSecurityContext.fsGroup | default 65532 }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: manager
           image: {{ .Values.enterprise.arena.controller.image.repository | default "ghcr.io/altairalabs/omnia-arena-controller" }}:{{ .Values.enterprise.arena.controller.image.tag | default .Chart.AppVersion }}
@@ -51,6 +53,9 @@ spec:
             - --redis-addr={{ include "omnia.fullname" . }}-redis-master.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
             {{- else if .Values.enterprise.arena.queue.redis.host }}
             - --redis-addr={{ .Values.enterprise.arena.queue.redis.host }}:{{ .Values.enterprise.arena.queue.redis.port | default 6379 }}
+            {{- end }}
+            {{- if .Values.enterprise.arena.queue.redis.passwordSecret }}
+            - --redis-password-secret={{ .Values.enterprise.arena.queue.redis.passwordSecret }}
             {{- end }}
             {{- end }}
             {{- if and (or .Values.nfs.server.enabled .Values.nfs.external.server) (not .Values.nfs.csiDriver.enabled) }}

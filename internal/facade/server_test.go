@@ -1441,3 +1441,177 @@ func TestServerWriteBinaryMediaChunkFallback(t *testing.T) {
 		t.Error("Expected is_last to be true")
 	}
 }
+
+func TestParseAllowedOrigins(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:     "single origin",
+			input:    "https://example.com",
+			expected: []string{"https://example.com"},
+		},
+		{
+			name:     "multiple origins",
+			input:    "https://example.com,https://other.com",
+			expected: []string{"https://example.com", "https://other.com"},
+		},
+		{
+			name:     "origins with spaces",
+			input:    " https://example.com , https://other.com ",
+			expected: []string{"https://example.com", "https://other.com"},
+		},
+		{
+			name:     "trailing comma",
+			input:    "https://example.com,",
+			expected: []string{"https://example.com"},
+		},
+		{
+			name:     "whitespace only",
+			input:    "  ,  ,  ",
+			expected: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ParseAllowedOrigins(tc.input)
+			if len(result) != len(tc.expected) {
+				t.Fatalf("ParseAllowedOrigins(%q) returned %d origins, want %d", tc.input, len(result), len(tc.expected))
+			}
+			for i, got := range result {
+				if got != tc.expected[i] {
+					t.Errorf("origin[%d] = %q, want %q", i, got, tc.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestServerCheckOrigin_SameOriginDefault(t *testing.T) {
+	// Without allowed origins, the server should use same-origin policy
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	log := logr.Discard()
+
+	// Clear env var so default same-origin is used
+	t.Setenv("OMNIA_ALLOWED_ORIGINS", "")
+	server := NewServer(cfg, store, nil, log)
+	defer func() { _ = store.Close() }()
+
+	if len(server.allowedOrigins) != 0 {
+		t.Fatalf("expected no allowed origins, got %v", server.allowedOrigins)
+	}
+
+	// Same-origin request should pass
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Host = "example.com"
+	req.Header.Set("Origin", "http://example.com")
+	if !server.checkOrigin(req) {
+		t.Error("same-origin request should be allowed")
+	}
+
+	// Cross-origin request should fail
+	req2 := httptest.NewRequest("GET", "/ws", nil)
+	req2.Host = "example.com"
+	req2.Header.Set("Origin", "http://evil.com")
+	if server.checkOrigin(req2) {
+		t.Error("cross-origin request should be rejected with default same-origin policy")
+	}
+
+	// No Origin header should pass (non-browser client)
+	req3 := httptest.NewRequest("GET", "/ws", nil)
+	req3.Host = "example.com"
+	if !server.checkOrigin(req3) {
+		t.Error("request without Origin header should be allowed")
+	}
+}
+
+func TestServerCheckOrigin_WithAllowedOrigins(t *testing.T) {
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	log := logr.Discard()
+
+	t.Setenv("OMNIA_ALLOWED_ORIGINS", "")
+	server := NewServer(cfg, store, nil, log,
+		WithAllowedOrigins([]string{"https://app.example.com", "https://admin.example.com"}))
+	defer func() { _ = store.Close() }()
+
+	// Allowed origin should pass
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	if !server.checkOrigin(req) {
+		t.Error("allowed origin should be accepted")
+	}
+
+	// Disallowed origin should fail
+	req2 := httptest.NewRequest("GET", "/ws", nil)
+	req2.Header.Set("Origin", "https://evil.com")
+	if server.checkOrigin(req2) {
+		t.Error("disallowed origin should be rejected")
+	}
+
+	// No Origin header should pass
+	req3 := httptest.NewRequest("GET", "/ws", nil)
+	if !server.checkOrigin(req3) {
+		t.Error("request without Origin header should be allowed")
+	}
+
+	// Case insensitive match
+	req4 := httptest.NewRequest("GET", "/ws", nil)
+	req4.Header.Set("Origin", "HTTPS://APP.EXAMPLE.COM")
+	if !server.checkOrigin(req4) {
+		t.Error("origin check should be case-insensitive")
+	}
+}
+
+func TestServerCheckOrigin_FromEnvVar(t *testing.T) {
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	log := logr.Discard()
+
+	t.Setenv("OMNIA_ALLOWED_ORIGINS", "https://from-env.example.com")
+	server := NewServer(cfg, store, nil, log)
+	defer func() { _ = store.Close() }()
+
+	if len(server.allowedOrigins) != 1 {
+		t.Fatalf("expected 1 allowed origin from env, got %d", len(server.allowedOrigins))
+	}
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Origin", "https://from-env.example.com")
+	if !server.checkOrigin(req) {
+		t.Error("origin from env var should be allowed")
+	}
+
+	req2 := httptest.NewRequest("GET", "/ws", nil)
+	req2.Header.Set("Origin", "https://not-from-env.example.com")
+	if server.checkOrigin(req2) {
+		t.Error("origin not in env var should be rejected")
+	}
+}
+
+func TestServerWithAllowedOrigins(t *testing.T) {
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	log := logr.Discard()
+
+	t.Setenv("OMNIA_ALLOWED_ORIGINS", "")
+	origins := []string{"https://example.com"}
+	server := NewServer(cfg, store, nil, log, WithAllowedOrigins(origins))
+	defer func() { _ = store.Close() }()
+
+	if len(server.allowedOrigins) != 1 {
+		t.Fatalf("expected 1 allowed origin, got %d", len(server.allowedOrigins))
+	}
+	if server.allowedOrigins[0] != "https://example.com" {
+		t.Errorf("allowedOrigins[0] = %q, want https://example.com", server.allowedOrigins[0])
+	}
+}

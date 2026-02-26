@@ -66,6 +66,14 @@ enterprise:
         pullPolicy: IfNotPresent
       # -- Resource limits for arena controller
       resources: {}
+      # -- Pod security context for arena controller
+      podSecurityContext:
+        # -- Run as non-root user
+        runAsNonRoot: true
+        # -- User ID (65532 = nonroot distroless user)
+        runAsUser: 65532
+        # -- Group ID for volume ownership
+        fsGroup: 65532
 
     # Worker configuration for ArenaJob execution
     worker:
@@ -106,6 +114,9 @@ enterprise:
         host: ""
         # -- Redis port
         port: 6379
+        # -- Name of Kubernetes Secret containing Redis password (key: "redis-password").
+        # When set, worker pods receive the password via secretKeyRef instead of plain text.
+        passwordSecret: ""
 
     # Dev console for interactive agent testing
     # Dev console image settings used by ArenaDevSession controller to create

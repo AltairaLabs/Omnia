@@ -2830,4 +2830,52 @@ spec:
 			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
 	})
+
+	Context("buildRedisPasswordEnvVar", func() {
+		It("should return secretKeyRef when RedisPasswordSecret is set", func() {
+			reconciler := &ArenaJobReconciler{
+				RedisPasswordSecret: "my-redis-secret",
+			}
+
+			envVars := reconciler.buildRedisPasswordEnvVar()
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("REDIS_PASSWORD"))
+			Expect(envVars[0].Value).To(BeEmpty())
+			Expect(envVars[0].ValueFrom).NotTo(BeNil())
+			Expect(envVars[0].ValueFrom.SecretKeyRef).NotTo(BeNil())
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("my-redis-secret"))
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Key).To(Equal("redis-password"))
+		})
+
+		It("should fall back to plain-text value when only RedisPassword is set", func() {
+			reconciler := &ArenaJobReconciler{
+				RedisPassword: "my-password",
+			}
+
+			envVars := reconciler.buildRedisPasswordEnvVar()
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].Name).To(Equal("REDIS_PASSWORD"))
+			Expect(envVars[0].Value).To(Equal("my-password"))
+			Expect(envVars[0].ValueFrom).To(BeNil())
+		})
+
+		It("should prefer secretKeyRef over plain-text when both are set", func() {
+			reconciler := &ArenaJobReconciler{
+				RedisPassword:       "my-password",
+				RedisPasswordSecret: "my-redis-secret",
+			}
+
+			envVars := reconciler.buildRedisPasswordEnvVar()
+			Expect(envVars).To(HaveLen(1))
+			Expect(envVars[0].ValueFrom).NotTo(BeNil())
+			Expect(envVars[0].ValueFrom.SecretKeyRef.Name).To(Equal("my-redis-secret"))
+		})
+
+		It("should return nil when neither is set", func() {
+			reconciler := &ArenaJobReconciler{}
+
+			envVars := reconciler.buildRedisPasswordEnvVar()
+			Expect(envVars).To(BeNil())
+		})
+	})
 })
