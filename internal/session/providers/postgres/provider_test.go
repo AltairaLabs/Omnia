@@ -1058,7 +1058,7 @@ func TestUpdateSessionStats_Atomic(t *testing.T) {
 
 	// Create a session to update.
 	s := &session.Session{
-		ID:                "stats-test-1",
+		ID:                "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b01",
 		AgentName:         "test-agent",
 		Namespace:         "test-ns",
 		WorkspaceName:     "test-ws",
@@ -1101,7 +1101,7 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	ctx := context.Background()
 	p := newProvider(t)
 
-	err := p.UpdateSessionStats(ctx, "nonexistent-stats", session.SessionStatsUpdate{
+	err := p.UpdateSessionStats(ctx, "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b99", session.SessionStatsUpdate{
 		AddInputTokens: 10,
 	})
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
@@ -1115,7 +1115,7 @@ func TestUpdateSessionStats_EmptyStatus(t *testing.T) {
 	p := newProvider(t)
 
 	s := &session.Session{
-		ID:            "stats-empty-status",
+		ID:            "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b02",
 		AgentName:     "test-agent",
 		Namespace:     "test-ns",
 		WorkspaceName: "test-ws",
