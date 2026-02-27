@@ -18,6 +18,7 @@ import (
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // registers default eval handlers
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/tools/arena/assertions"
 
@@ -34,10 +35,33 @@ const (
 	paramAssertionParams = "assertion_params"
 )
 
+// RunArenaAssertionWithProviders executes a PromptKit arena assertion with
+// provider specs available for LLM judge evals. Provider specs are injected
+// into EvalContext.Metadata["judge_targets"] where PromptKit's llm_judge
+// handler can find them.
+func RunArenaAssertionWithProviders(
+	def api.EvalDefinition,
+	messages []session.Message,
+	providerSpecs map[string]providers.ProviderSpec,
+) (api.EvaluateResultItem, error) {
+	return runArenaAssertionInternal(def, messages, providerSpecs)
+}
+
 // RunArenaAssertion executes a PromptKit arena assertion against session
 // messages using the unified eval pipeline. It matches the EvalRunner function
 // signature so it can be composed with RunRuleEval via a dispatcher.
 func RunArenaAssertion(def api.EvalDefinition, messages []session.Message) (api.EvaluateResultItem, error) {
+	return runArenaAssertionInternal(def, messages, nil)
+}
+
+// runArenaAssertionInternal is the shared implementation for arena assertion execution.
+// When providerSpecs is non-nil, they are injected into EvalContext.Metadata["judge_targets"]
+// so PromptKit's llm_judge handler can create provider instances on demand.
+func runArenaAssertionInternal(
+	def api.EvalDefinition,
+	messages []session.Message,
+	providerSpecs map[string]providers.ProviderSpec,
+) (api.EvaluateResultItem, error) {
 	start := time.Now()
 
 	assertionType, err := extractAssertionType(def.Params)
@@ -58,6 +82,14 @@ func RunArenaAssertion(def api.EvalDefinition, messages []session.Message) (api.
 	// Build EvalContext from messages
 	typesMessages := ConvertToTypesMessages(messages)
 	evalCtx := buildEvalContext(typesMessages)
+
+	// Inject provider specs for LLM judge evals
+	if len(providerSpecs) > 0 {
+		if evalCtx.Metadata == nil {
+			evalCtx.Metadata = make(map[string]any)
+		}
+		evalCtx.Metadata["judge_targets"] = providerSpecs
+	}
 
 	// Create registry with built-in handlers and run the eval
 	registry := runtimeevals.NewEvalTypeRegistry()

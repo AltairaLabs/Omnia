@@ -504,7 +504,7 @@ func TestDetermineSecretKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := determineSecretKey(tt.ref, tt.providerType)
+			got := k8s.DetermineSecretKey(tt.ref, tt.providerType)
 			assert.Equal(t, tt.want, got)
 		})
 	}

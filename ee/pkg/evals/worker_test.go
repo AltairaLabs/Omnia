@@ -1197,7 +1197,7 @@ func TestExecuteSingleEval_Success(t *testing.T) {
 	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
 	msgs := []session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "hi"}}
 
-	result := w.executeSingleEval(def, msgs, event, "agent")
+	result := w.executeSingleEval(def, msgs, event, "agent", nil)
 	require.NotNil(t, result)
 	assert.Equal(t, "e1", result.EvalID)
 	assert.True(t, result.Passed)
@@ -1214,7 +1214,7 @@ func TestExecuteSingleEval_Error(t *testing.T) {
 	def := api.EvalDefinition{ID: "e1", Type: "rule", Trigger: "per_turn"}
 	event := api.SessionEvent{SessionID: "s1"}
 
-	result := w.executeSingleEval(def, nil, event, "agent")
+	result := w.executeSingleEval(def, nil, event, "agent", nil)
 	assert.Nil(t, result)
 }
 
@@ -1243,7 +1243,7 @@ func TestRunEvalsWithSampling_AllSampled(t *testing.T) {
 	msgs := []session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "hi"}}
 	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
 
-	results := w.runEvalsWithSampling(context.Background(), defs, msgs, event, "agent", 1)
+	results := w.runEvalsWithSampling(context.Background(), defs, msgs, event, "agent", 1, nil)
 	assert.Len(t, results, 2)
 }
 
@@ -1266,7 +1266,7 @@ func TestRunEvalsWithSampling_NoneSampled(t *testing.T) {
 	}
 	event := api.SessionEvent{SessionID: "s1"}
 
-	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0)
+	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0, nil)
 	assert.Empty(t, results)
 }
 
@@ -1303,7 +1303,7 @@ func TestRunEvalsWithSampling_RateLimitCancelled(t *testing.T) {
 	}
 	event := api.SessionEvent{SessionID: "s1"}
 
-	results := w.runEvalsWithSampling(cancelledCtx, defs, nil, event, "agent", 0)
+	results := w.runEvalsWithSampling(cancelledCtx, defs, nil, event, "agent", 0, nil)
 	assert.Empty(t, results)
 	assert.Equal(t, 0, callCount, "no evals should run when rate limit fails")
 }
@@ -1332,7 +1332,7 @@ func TestRunEvalsWithSampling_LLMJudgeSampling(t *testing.T) {
 	}
 	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
 
-	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0)
+	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0, nil)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "e1", results[0].EvalID)
 	assert.Equal(t, 1, callCount)

@@ -216,7 +216,7 @@ func injectAPIKey(ctx context.Context, c client.Client, cfg *Config, provider *v
 	}
 
 	// Determine which key in the Secret to read
-	secretKey := determineSecretKey(ref, provider.Spec.Type)
+	secretKey := k8s.DetermineSecretKey(ref, provider.Spec.Type)
 	apiKeyValue, ok := secret.Data[secretKey]
 	if !ok {
 		return fmt.Errorf("secret %s/%s does not contain key %q", provider.Namespace, ref.Name, secretKey)
@@ -233,18 +233,4 @@ func injectAPIKey(ctx context.Context, c client.Client, cfg *Config, provider *v
 	}
 
 	return nil
-}
-
-// determineSecretKey returns the key within the Secret to read the API key from.
-// If the SecretKeyRef has an explicit key, use it. Otherwise, fall back to the
-// provider-appropriate env var name (e.g., ANTHROPIC_API_KEY), then "api-key".
-func determineSecretKey(ref *v1alpha1.SecretKeyRef, providerType v1alpha1.ProviderType) string {
-	if ref.Key != nil {
-		return *ref.Key
-	}
-	// Try provider-appropriate key name
-	if envName := pkgprovider.APIKeyEnvVarName(string(providerType)); envName != "" {
-		return envName
-	}
-	return "api-key"
 }

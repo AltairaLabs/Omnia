@@ -26,6 +26,10 @@ import (
 
 	"github.com/altairalabs/omnia/ee/pkg/evals"
 	"github.com/altairalabs/omnia/pkg/k8s"
+
+	// Register PromptKit provider factories for LLM judge eval execution.
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
+	_ "github.com/AltairaLabs/PromptKit/runtime/providers/openai"
 )
 
 // Environment variable names for worker configuration.
@@ -73,6 +77,7 @@ func main() {
 		SessionAPI:  sessionClient,
 		Namespace:   cfg.Namespace,
 		Logger:      logger,
+		K8sClient:   k8sClient,
 		PackLoader:  packLoader,
 	})
 

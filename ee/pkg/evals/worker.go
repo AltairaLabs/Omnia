@@ -19,6 +19,10 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
+
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
@@ -40,12 +44,23 @@ const (
 // EvalRunner executes a rule-based eval against session messages.
 type EvalRunner func(evalDef api.EvalDefinition, messages []session.Message) (api.EvaluateResultItem, error)
 
+// ProviderAwareEvalRunner executes evals with access to resolved provider specs.
+// The providers map is keyed by provider name (e.g., "default", "judge").
+type ProviderAwareEvalRunner func(
+	evalDef api.EvalDefinition,
+	messages []session.Message,
+	providerSpecs map[string]providers.ProviderSpec,
+) (api.EvaluateResultItem, error)
+
 // WorkerConfig holds the configuration for an EvalWorker.
 type WorkerConfig struct {
 	RedisClient goredis.UniversalClient
 	SessionAPI  SessionAPIClient
 	Namespace   string
 	Logger      *slog.Logger
+	// K8sClient is used to resolve provider specs from CRDs.
+	// If nil, provider resolution is disabled and llm_judge evals will fail.
+	K8sClient client.Client
 	// EvalRunner overrides the default eval runner.
 	// If nil, a dispatcher that routes to RunArenaAssertion or RunRuleEval is used.
 	EvalRunner EvalRunner
@@ -72,10 +87,12 @@ type EvalWorker struct {
 	consumerName      string
 	logger            *slog.Logger
 	evalRunner        EvalRunner
+	evalRunnerPA      ProviderAwareEvalRunner
 	completionTracker *CompletionTracker
 	sampler           *Sampler
 	rateLimiter       *RateLimiter
 	packLoader        *PromptPackLoader
+	providerResolver  *ProviderResolver
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace.
@@ -89,6 +106,8 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 			return RunRuleEval(def, msgs)
 		}
 	}
+
+	paRunner := defaultProviderAwareRunner(runner)
 
 	timeout := config.InactivityTimeout
 	if timeout == 0 {
@@ -105,17 +124,24 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		rateLimiter = NewRateLimiter(nil)
 	}
 
+	var resolver *ProviderResolver
+	if config.K8sClient != nil {
+		resolver = NewProviderResolver(config.K8sClient)
+	}
+
 	w := &EvalWorker{
-		redisClient:   config.RedisClient,
-		sessionAPI:    config.SessionAPI,
-		namespace:     config.Namespace,
-		consumerGroup: consumerGroupPrefix + config.Namespace,
-		consumerName:  hostname(),
-		logger:        config.Logger,
-		evalRunner:    runner,
-		sampler:       sampler,
-		rateLimiter:   rateLimiter,
-		packLoader:    config.PackLoader,
+		redisClient:      config.RedisClient,
+		sessionAPI:       config.SessionAPI,
+		namespace:        config.Namespace,
+		consumerGroup:    consumerGroupPrefix + config.Namespace,
+		consumerName:     hostname(),
+		logger:           config.Logger,
+		evalRunner:       runner,
+		evalRunnerPA:     paRunner,
+		sampler:          sampler,
+		rateLimiter:      rateLimiter,
+		packLoader:       config.PackLoader,
+		providerResolver: resolver,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -271,8 +297,10 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 
 	turnIndex := countAssistantMessages(messages)
 
+	providerSpecs := w.resolveProviders(ctx, event)
+
 	enrichedEvent := enrichEvent(event, packEvals)
-	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex)
+	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex, providerSpecs)
 	return w.writeResults(ctx, results, event.SessionID)
 }
 
@@ -311,8 +339,10 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 
 	turnIndex := countAssistantMessages(messages)
 
+	providerSpecs := w.resolveProviders(ctx, event)
+
 	enrichedEvent := enrichEvent(event, packEvals)
-	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex)
+	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex, providerSpecs)
 	return w.writeResults(ctx, results, sessionID)
 }
 
@@ -372,6 +402,7 @@ func (w *EvalWorker) runEvalsWithSampling(
 	event api.SessionEvent,
 	agentName string,
 	turnIndex int,
+	providerSpecs map[string]providers.ProviderSpec,
 ) []*api.EvalResult {
 	results := make([]*api.EvalResult, 0, len(evalDefs))
 
@@ -394,7 +425,7 @@ func (w *EvalWorker) runEvalsWithSampling(
 			defer w.getRateLimiter().ReleaseJudge()
 		}
 
-		result := w.executeSingleEval(def, messages, event, agentName)
+		result := w.executeSingleEval(def, messages, event, agentName, providerSpecs)
 		if result != nil {
 			results = append(results, result)
 		}
@@ -409,8 +440,9 @@ func (w *EvalWorker) executeSingleEval(
 	messages []session.Message,
 	event api.SessionEvent,
 	agentName string,
+	providerSpecs map[string]providers.ProviderSpec,
 ) *api.EvalResult {
-	item, err := w.evalRunner(def, messages)
+	item, err := w.getProviderAwareRunner()(def, messages, providerSpecs)
 	if err != nil {
 		w.logger.Warn("eval failed",
 			"evalID", def.ID,
@@ -439,6 +471,16 @@ func (w *EvalWorker) getSampler() *Sampler {
 		w.sampler = NewSampler(nil)
 	}
 	return w.sampler
+}
+
+// getProviderAwareRunner returns the provider-aware eval runner, initializing from
+// the legacy evalRunner if needed. This ensures backward compatibility with tests
+// that construct EvalWorker directly without using NewEvalWorker.
+func (w *EvalWorker) getProviderAwareRunner() ProviderAwareEvalRunner {
+	if w.evalRunnerPA == nil {
+		w.evalRunnerPA = defaultProviderAwareRunner(w.evalRunner)
+	}
+	return w.evalRunnerPA
 }
 
 // getRateLimiter returns the rate limiter, initializing a default one if needed.
@@ -634,4 +676,41 @@ func hostname() string {
 		return "unknown"
 	}
 	return h
+}
+
+// defaultProviderAwareRunner wraps a legacy EvalRunner in a ProviderAwareEvalRunner.
+// For arena assertions and PromptKit eval types, it passes providers via
+// RunArenaAssertionWithProviders. Other eval types fall through to the legacy runner.
+func defaultProviderAwareRunner(legacy EvalRunner) ProviderAwareEvalRunner {
+	return func(
+		def api.EvalDefinition,
+		msgs []session.Message,
+		providerSpecs map[string]providers.ProviderSpec,
+	) (api.EvaluateResultItem, error) {
+		if def.Type == EvalTypeArenaAssertion {
+			return RunArenaAssertionWithProviders(def, msgs, providerSpecs)
+		}
+		// Rule-based evals don't need providers
+		return legacy(def, msgs)
+	}
+}
+
+// resolveProviders resolves provider specs from the AgentRuntime CRD.
+// Returns nil if no resolver is configured or resolution fails (logged as warning).
+func (w *EvalWorker) resolveProviders(ctx context.Context, event api.SessionEvent) map[string]providers.ProviderSpec {
+	if w.providerResolver == nil || event.AgentName == "" || event.Namespace == "" {
+		return nil
+	}
+
+	specs, err := w.providerResolver.ResolveProviderSpecs(ctx, event.AgentName, event.Namespace)
+	if err != nil {
+		w.logger.Warn("failed to resolve provider specs",
+			"agentName", event.AgentName,
+			"namespace", event.Namespace,
+			"error", err,
+		)
+		return nil
+	}
+
+	return specs
 }

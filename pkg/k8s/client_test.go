@@ -254,3 +254,82 @@ func TestNewClientWithConfig_InvalidConfig(t *testing.T) {
 		t.Fatal("expected error for invalid config")
 	}
 }
+
+func strPtr(s string) *string { return &s }
+
+func TestDetermineSecretKey_ExplicitKey(t *testing.T) {
+	ref := &omniav1alpha1.SecretKeyRef{Name: "s", Key: strPtr("custom-key")}
+	got := DetermineSecretKey(ref, omniav1alpha1.ProviderTypeClaude)
+	if got != "custom-key" {
+		t.Errorf("expected custom-key, got %s", got)
+	}
+}
+
+func TestDetermineSecretKey_ClaudeDefault(t *testing.T) {
+	ref := &omniav1alpha1.SecretKeyRef{Name: "s"}
+	got := DetermineSecretKey(ref, omniav1alpha1.ProviderTypeClaude)
+	if got != "ANTHROPIC_API_KEY" {
+		t.Errorf("expected ANTHROPIC_API_KEY, got %s", got)
+	}
+}
+
+func TestDetermineSecretKey_OpenAIDefault(t *testing.T) {
+	ref := &omniav1alpha1.SecretKeyRef{Name: "s"}
+	got := DetermineSecretKey(ref, omniav1alpha1.ProviderTypeOpenAI)
+	if got != "OPENAI_API_KEY" {
+		t.Errorf("expected OPENAI_API_KEY, got %s", got)
+	}
+}
+
+func TestDetermineSecretKey_GeminiDefault(t *testing.T) {
+	ref := &omniav1alpha1.SecretKeyRef{Name: "s"}
+	got := DetermineSecretKey(ref, omniav1alpha1.ProviderTypeGemini)
+	if got != "GEMINI_API_KEY" {
+		t.Errorf("expected GEMINI_API_KEY, got %s", got)
+	}
+}
+
+func TestDetermineSecretKey_UnknownFallback(t *testing.T) {
+	ref := &omniav1alpha1.SecretKeyRef{Name: "s"}
+	got := DetermineSecretKey(ref, "unknown")
+	if got != "api-key" {
+		t.Errorf("expected api-key, got %s", got)
+	}
+}
+
+func TestEffectiveSecretRef_CredentialPreferred(t *testing.T) {
+	provider := &omniav1alpha1.Provider{
+		Spec: omniav1alpha1.ProviderSpec{
+			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "legacy"},
+			Credential: &omniav1alpha1.CredentialConfig{
+				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "preferred"},
+			},
+		},
+	}
+	ref := EffectiveSecretRef(provider)
+	if ref == nil || ref.Name != "preferred" {
+		t.Errorf("expected preferred, got %v", ref)
+	}
+}
+
+func TestEffectiveSecretRef_LegacyFallback(t *testing.T) {
+	provider := &omniav1alpha1.Provider{
+		Spec: omniav1alpha1.ProviderSpec{
+			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "legacy"},
+		},
+	}
+	ref := EffectiveSecretRef(provider)
+	if ref == nil || ref.Name != "legacy" {
+		t.Errorf("expected legacy, got %v", ref)
+	}
+}
+
+func TestEffectiveSecretRef_None(t *testing.T) {
+	provider := &omniav1alpha1.Provider{
+		Spec: omniav1alpha1.ProviderSpec{Type: "mock"},
+	}
+	ref := EffectiveSecretRef(provider)
+	if ref != nil {
+		t.Errorf("expected nil, got %v", ref)
+	}
+}

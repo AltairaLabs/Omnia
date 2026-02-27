@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	pkgprovider "github.com/altairalabs/omnia/pkg/provider"
 )
 
 // GetAgentRuntime fetches an AgentRuntime CRD by name and namespace.
@@ -82,4 +83,17 @@ func EffectiveSecretRef(provider *omniav1alpha1.Provider) *omniav1alpha1.SecretK
 		return provider.Spec.Credential.SecretRef
 	}
 	return provider.Spec.SecretRef
+}
+
+// DetermineSecretKey returns the key within the Secret to read the API key from.
+// If the SecretKeyRef has an explicit key, use it. Otherwise, fall back to the
+// provider-appropriate env var name (e.g., ANTHROPIC_API_KEY), then "api-key".
+func DetermineSecretKey(ref *omniav1alpha1.SecretKeyRef, providerType omniav1alpha1.ProviderType) string {
+	if ref.Key != nil {
+		return *ref.Key
+	}
+	if envName := pkgprovider.APIKeyEnvVarName(string(providerType)); envName != "" {
+		return envName
+	}
+	return "api-key"
 }
