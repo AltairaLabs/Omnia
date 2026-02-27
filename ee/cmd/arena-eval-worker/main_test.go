@@ -15,13 +15,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/rest"
+
+	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 func TestNewK8sClient_Success(t *testing.T) {
-	// client.New succeeds even if the server is unreachable — it's lazy.
+	// NewClientWithConfig succeeds even if the server is unreachable — it's lazy.
 	cfg := &rest.Config{Host: "https://127.0.0.1:0"}
 
-	c, err := newK8sClient(cfg)
+	c, err := k8s.NewClientWithConfig(cfg)
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }

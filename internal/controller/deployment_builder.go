@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"sort"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -42,12 +43,12 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
+	providers map[string]*omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
 
 	// Calculate secret hash for rollout triggering
-	secretHash := r.getSecretHash(ctx, agentRuntime, provider)
+	secretHash := r.getSecretHash(ctx, agentRuntime, providers)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -63,7 +64,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, provider, secretHash)
+		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, providers, secretHash)
 		return nil
 	})
 
@@ -80,62 +81,56 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 func (r *AgentRuntimeReconciler) getSecretHash(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	provider *omniav1alpha1.Provider,
+	providers map[string]*omniav1alpha1.Provider,
 ) string {
-	log := logf.FromContext(ctx)
 	hasher := sha256.New()
 
-	// Include provider's secret if present
-	if provider != nil && provider.Spec.SecretRef != nil {
-		secret := &corev1.Secret{}
-		secretKey := types.NamespacedName{
-			Name:      provider.Spec.SecretRef.Name,
-			Namespace: provider.Namespace,
-		}
-		if err := r.Get(ctx, secretKey, secret); err == nil {
-			// Hash the secret data in a deterministic order
-			keys := make([]string, 0, len(secret.Data))
-			for k := range secret.Data {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				hasher.Write([]byte(k))
-				hasher.Write(secret.Data[k])
-			}
-			log.V(1).Info("Included secret in hash", "secret", secretKey.String())
-		} else {
-			log.V(1).Info("Could not get secret for hash", "secret", secretKey.String(), "error", err)
+	// Include all providers' secrets in sorted key order for determinism
+	providerNames := make([]string, 0, len(providers))
+	for name := range providers {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+
+	for _, name := range providerNames {
+		provider := providers[name]
+		if provider.Spec.SecretRef != nil {
+			r.hashSecretData(ctx, hasher, provider.Spec.SecretRef.Name, provider.Namespace)
 		}
 	}
 
 	// Include inline provider secret if present (legacy)
 	if agentRuntime.Spec.Provider != nil && agentRuntime.Spec.Provider.SecretRef != nil {
-		secret := &corev1.Secret{}
-		secretKey := types.NamespacedName{
-			Name:      agentRuntime.Spec.Provider.SecretRef.Name,
-			Namespace: agentRuntime.Namespace,
-		}
-		if err := r.Get(ctx, secretKey, secret); err == nil {
-			keys := make([]string, 0, len(secret.Data))
-			for k := range secret.Data {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				hasher.Write([]byte(k))
-				hasher.Write(secret.Data[k])
-			}
-			log.V(1).Info("Included inline provider secret in hash", "secret", secretKey.String())
-		}
+		r.hashSecretData(ctx, hasher, agentRuntime.Spec.Provider.SecretRef.Name, agentRuntime.Namespace)
 	}
 
-	hash := hex.EncodeToString(hasher.Sum(nil))
+	hashStr := hex.EncodeToString(hasher.Sum(nil))
 	// Use first 16 chars for brevity
-	if len(hash) > 16 {
-		hash = hash[:16]
+	if len(hashStr) > 16 {
+		hashStr = hashStr[:16]
 	}
-	return hash
+	return hashStr
+}
+
+// hashSecretData reads a secret and writes its data to the hasher in deterministic order.
+func (r *AgentRuntimeReconciler) hashSecretData(ctx context.Context, hasher hash.Hash, secretName, namespace string) {
+	log := logf.FromContext(ctx)
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{Name: secretName, Namespace: namespace}
+	if err := r.Get(ctx, secretKey, secret); err == nil {
+		keys := make([]string, 0, len(secret.Data))
+		for k := range secret.Data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			hasher.Write([]byte(k))
+			hasher.Write(secret.Data[k])
+		}
+		log.V(1).Info("Included secret in hash", "secret", secretKey.String())
+	} else {
+		log.V(1).Info("Could not get secret for hash", "secret", secretKey.String(), "error", err)
+	}
 }
 
 func (r *AgentRuntimeReconciler) buildDeploymentSpec(
@@ -143,7 +138,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
+	providers map[string]*omniav1alpha1.Provider,
 	secretHash string,
 ) {
 	labels := map[string]string{
@@ -167,15 +162,17 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	volumes := r.buildVolumes(agentRuntime, promptPack, toolRegistry)
 
 	// Build facade container
-	facadeContainer := r.buildFacadeContainer(agentRuntime, promptPack, facadePort)
+	facadeContainer := r.buildFacadeContainer(agentRuntime, facadePort)
 
-	// Build runtime container
-	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry, provider)
+	// Build runtime container — select primary provider for runtime env vars
+	primaryProvider := primaryProviderFromMap(providers)
+	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry, primaryProvider)
 
 	// Build pod spec with both containers
 	podSpec := corev1.PodSpec{
-		Containers: []corev1.Container{facadeContainer, runtimeContainer},
-		Volumes:    volumes,
+		ServiceAccountName: facadeServiceAccountName(agentRuntime),
+		Containers:         []corev1.Container{facadeContainer, runtimeContainer},
+		Volumes:            volumes,
 	}
 
 	// Add scheduling constraints if specified
@@ -235,7 +232,6 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 // buildFacadeContainer creates the facade container spec.
 func (r *AgentRuntimeReconciler) buildFacadeContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	promptPack *omniav1alpha1.PromptPack,
 	facadePort int32,
 ) corev1.Container {
 	// Check for CRD image override first, then operator default, then hardcoded default
@@ -270,7 +266,7 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env: r.buildFacadeEnvVars(agentRuntime, promptPack),
+		Env: r.buildFacadeEnvVars(agentRuntime),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
@@ -370,7 +366,6 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 // buildFacadeEnvVars creates environment variables for the facade container.
 func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	promptPack *omniav1alpha1.PromptPack,
 ) []corev1.EnvVar {
 	port := int32(DefaultFacadePort)
 	if agentRuntime.Spec.Facade.Port != nil {
@@ -378,29 +373,22 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	}
 
 	envVars := []corev1.EnvVar{
+		// Identity from Downward API — facade reads CRD directly using these
 		{
-			Name:  "OMNIA_AGENT_NAME",
-			Value: agentRuntime.Name,
+			Name: "OMNIA_AGENT_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+				},
+			},
 		},
 		{
-			Name:  "OMNIA_NAMESPACE",
-			Value: agentRuntime.Namespace,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_NAME",
-			Value: promptPack.Name,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
-			Value: promptPack.Namespace,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_VERSION",
-			Value: promptPack.Spec.Version,
-		},
-		{
-			Name:  "OMNIA_FACADE_TYPE",
-			Value: string(agentRuntime.Spec.Facade.Type),
+			Name: "OMNIA_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
 		},
 		{
 			Name:  "OMNIA_FACADE_PORT",
@@ -618,4 +606,22 @@ func defaultImageForFramework(framework *omniav1alpha1.FrameworkConfig) string {
 	default:
 		return DefaultFrameworkImage
 	}
+}
+
+// primaryProviderFromMap selects the primary provider from a providers map.
+// The "default" key is preferred; otherwise the first entry in sorted key order is used.
+func primaryProviderFromMap(providers map[string]*omniav1alpha1.Provider) *omniav1alpha1.Provider {
+	if len(providers) == 0 {
+		return nil
+	}
+	if p, ok := providers["default"]; ok {
+		return p
+	}
+	// Fall back to first key in sorted order
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return providers[names[0]]
 }

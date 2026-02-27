@@ -303,6 +303,140 @@ func TestFindAgentRuntimesForProvider(t *testing.T) {
 	assert.Equal(t, "agent-using-provider", requests[0].Name)
 }
 
+func TestFindAgentRuntimesForProvider_NamedProviders(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	provider := &omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "judge-provider",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type: "openai",
+		},
+	}
+
+	agentRuntimes := []omniav1alpha1.AgentRuntime{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-with-named-providers",
+				Namespace: "default",
+			},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Providers: []omniav1alpha1.NamedProviderRef{
+					{
+						Name:        "default",
+						ProviderRef: omniav1alpha1.ProviderRef{Name: "main-provider"},
+					},
+					{
+						Name:        "judge",
+						ProviderRef: omniav1alpha1.ProviderRef{Name: "judge-provider"},
+					},
+				},
+				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-without-judge",
+				Namespace: "default",
+			},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Providers: []omniav1alpha1.NamedProviderRef{
+					{
+						Name:        "default",
+						ProviderRef: omniav1alpha1.ProviderRef{Name: "main-provider"},
+					},
+				},
+				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+			},
+		},
+	}
+
+	objs := []runtime.Object{provider}
+	for i := range agentRuntimes {
+		objs = append(objs, &agentRuntimes[i])
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(objs...).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	requests := r.findAgentRuntimesForProvider(context.Background(), provider)
+
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "agent-with-named-providers", requests[0].Name)
+}
+
+func TestFindAgentRuntimesForSecret_NamedProviders(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "judge-key",
+			Namespace: "default",
+			Labels: map[string]string{
+				"omnia.altairalabs.ai/type": "credentials",
+			},
+		},
+	}
+
+	provider := omniav1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "judge-provider",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.ProviderSpec{
+			Type:      "openai",
+			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "judge-key"},
+		},
+	}
+
+	agentRuntime := omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "agent-with-judge",
+			Namespace: "default",
+		},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Providers: []omniav1alpha1.NamedProviderRef{
+				{
+					Name:        "default",
+					ProviderRef: omniav1alpha1.ProviderRef{Name: "main-provider"},
+				},
+				{
+					Name:        "judge",
+					ProviderRef: omniav1alpha1.ProviderRef{Name: "judge-provider"},
+				},
+			},
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(secret, &provider, &agentRuntime).
+		Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	requests := r.findAgentRuntimesForSecret(context.Background(), secret)
+
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "agent-with-judge", requests[0].Name)
+}
+
 func TestFindAgentRuntimesForPromptPack(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
@@ -367,7 +501,7 @@ func TestGetSecretHash(t *testing.T) {
 	tests := []struct {
 		name          string
 		agentRuntime  *omniav1alpha1.AgentRuntime
-		provider      *omniav1alpha1.Provider
+		providers     map[string]*omniav1alpha1.Provider
 		secrets       []*corev1.Secret
 		expectEmpty   bool
 		expectChanged bool // If true, hash should be different from empty
@@ -380,7 +514,7 @@ func TestGetSecretHash(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			provider:    nil,
+			providers:   nil,
 			expectEmpty: false, // Returns a hash even with no data
 		},
 		{
@@ -391,14 +525,16 @@ func TestGetSecretHash(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			provider: &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-provider",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type:      "claude",
-					SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+			providers: map[string]*omniav1alpha1.Provider{
+				"default": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:      "claude",
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+					},
 				},
 			},
 			secrets: []*corev1.Secret{
@@ -423,14 +559,16 @@ func TestGetSecretHash(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			provider: &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-provider",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type:      "claude",
-					SecretRef: &omniav1alpha1.SecretKeyRef{Name: "nonexistent-secret"},
+			providers: map[string]*omniav1alpha1.Provider{
+				"default": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:      "claude",
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "nonexistent-secret"},
+					},
 				},
 			},
 			secrets:     nil,
@@ -450,7 +588,7 @@ func TestGetSecretHash(t *testing.T) {
 					},
 				},
 			},
-			provider: nil,
+			providers: nil,
 			secrets: []*corev1.Secret{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -473,18 +611,69 @@ func TestGetSecretHash(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			provider: &omniav1alpha1.Provider{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "mock-provider",
-					Namespace: "default",
-				},
-				Spec: omniav1alpha1.ProviderSpec{
-					Type: "mock",
-					// No SecretRef
+			providers: map[string]*omniav1alpha1.Provider{
+				"default": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "mock-provider",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type: "mock",
+						// No SecretRef
+					},
 				},
 			},
 			secrets:     nil,
 			expectEmpty: false,
+		},
+		{
+			name: "multiple providers hash all secrets",
+			agentRuntime: &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "default",
+				},
+			},
+			providers: map[string]*omniav1alpha1.Provider{
+				"default": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "provider-a",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:      "claude",
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "secret-a"},
+					},
+				},
+				"judge": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "provider-b",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.ProviderSpec{
+						Type:      "openai",
+						SecretRef: &omniav1alpha1.SecretKeyRef{Name: "secret-b"},
+					},
+				},
+			},
+			secrets: []*corev1.Secret{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "secret-a",
+						Namespace: "default",
+					},
+					Data: map[string][]byte{"KEY": []byte("val-a")},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "secret-b",
+						Namespace: "default",
+					},
+					Data: map[string][]byte{"KEY": []byte("val-b")},
+				},
+			},
+			expectEmpty:   false,
+			expectChanged: true,
 		},
 	}
 
@@ -492,8 +681,8 @@ func TestGetSecretHash(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Build fake client with objects
 			var objs []runtime.Object
-			if tt.provider != nil {
-				objs = append(objs, tt.provider)
+			for _, p := range tt.providers {
+				objs = append(objs, p)
 			}
 			for _, s := range tt.secrets {
 				objs = append(objs, s)
@@ -510,7 +699,7 @@ func TestGetSecretHash(t *testing.T) {
 				Scheme: scheme,
 			}
 
-			hash := r.getSecretHash(context.Background(), tt.agentRuntime, tt.provider)
+			hash := r.getSecretHash(context.Background(), tt.agentRuntime, tt.providers)
 
 			// Hash is always 16 chars (truncated)
 			assert.Len(t, hash, 16, "hash should be 16 characters")
@@ -701,14 +890,16 @@ func TestGetSecretHashDeterministic(t *testing.T) {
 		},
 	}
 
-	provider := &omniav1alpha1.Provider{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-provider",
-			Namespace: "default",
-		},
-		Spec: omniav1alpha1.ProviderSpec{
-			Type:      "claude",
-			SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+	providers := map[string]*omniav1alpha1.Provider{
+		"default": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-provider",
+				Namespace: "default",
+			},
+			Spec: omniav1alpha1.ProviderSpec{
+				Type:      "claude",
+				SecretRef: &omniav1alpha1.SecretKeyRef{Name: "api-secret"},
+			},
 		},
 	}
 
@@ -726,7 +917,7 @@ func TestGetSecretHashDeterministic(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithRuntimeObjects(provider, secret, agentRuntime).
+		WithRuntimeObjects(providers["default"], secret, agentRuntime).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -735,9 +926,9 @@ func TestGetSecretHashDeterministic(t *testing.T) {
 	}
 
 	// Call multiple times to verify determinism
-	hash1 := r.getSecretHash(context.Background(), agentRuntime, provider)
-	hash2 := r.getSecretHash(context.Background(), agentRuntime, provider)
-	hash3 := r.getSecretHash(context.Background(), agentRuntime, provider)
+	hash1 := r.getSecretHash(context.Background(), agentRuntime, providers)
+	hash2 := r.getSecretHash(context.Background(), agentRuntime, providers)
+	hash3 := r.getSecretHash(context.Background(), agentRuntime, providers)
 
 	assert.Equal(t, hash1, hash2, "hash should be deterministic")
 	assert.Equal(t, hash2, hash3, "hash should be deterministic")

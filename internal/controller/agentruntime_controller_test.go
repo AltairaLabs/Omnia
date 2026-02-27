@@ -575,12 +575,15 @@ var _ = Describe("AgentRuntime Controller", func() {
 			for _, env := range facadeContainer.Env {
 				facadeEnvMap[env.Name] = env
 			}
-			Expect(facadeEnvMap["OMNIA_AGENT_NAME"].Value).To(Equal(agentRuntimeKey.Name))
-			Expect(facadeEnvMap["OMNIA_NAMESPACE"].Value).To(Equal(agentRuntimeKey.Namespace))
-			Expect(facadeEnvMap["OMNIA_PROMPTPACK_NAME"].Value).To(Equal(promptPackKey.Name))
-			Expect(facadeEnvMap["OMNIA_PROMPTPACK_VERSION"].Value).To(Equal("2.1.0"))
-			Expect(facadeEnvMap["OMNIA_FACADE_TYPE"].Value).To(Equal(string(omniav1alpha1.FacadeTypeWebSocket)))
-			Expect(facadeEnvMap["OMNIA_FACADE_PORT"].Value).To(Equal("8080"))
+			// OMNIA_AGENT_NAME and OMNIA_NAMESPACE use Downward API (ValueFrom)
+			Expect(facadeEnvMap["OMNIA_AGENT_NAME"].ValueFrom).NotTo(BeNil())
+			Expect(facadeEnvMap["OMNIA_AGENT_NAME"].ValueFrom.FieldRef).NotTo(BeNil())
+			Expect(facadeEnvMap["OMNIA_NAMESPACE"].ValueFrom).NotTo(BeNil())
+			Expect(facadeEnvMap["OMNIA_NAMESPACE"].ValueFrom.FieldRef).NotTo(BeNil())
+			// CRD-derived env vars (PROMPTPACK_NAME, VERSION, FACADE_TYPE) are no longer on facade
+			Expect(facadeEnvMap).NotTo(HaveKey("OMNIA_PROMPTPACK_NAME"))
+			Expect(facadeEnvMap).NotTo(HaveKey("OMNIA_PROMPTPACK_VERSION"))
+			Expect(facadeEnvMap).NotTo(HaveKey("OMNIA_FACADE_TYPE"))
 			Expect(facadeEnvMap["OMNIA_HANDLER_MODE"].Value).To(Equal("runtime"))
 			Expect(facadeEnvMap["OMNIA_RUNTIME_ADDRESS"].Value).To(Equal("localhost:9000"))
 
@@ -2666,6 +2669,248 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(condition.Reason).To(Equal("ProviderFound"))
 		})
 
+	})
+
+	Context("When using spec.providers list", func() {
+		var (
+			ctx        context.Context
+			reconciler *AgentRuntimeReconciler
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			reconciler = &AgentRuntimeReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				FacadeImage:    "test-facade:v1.0.0",
+				FrameworkImage: "test-runtime:v1.0.0",
+			}
+		})
+
+		It("should resolve all providers from spec.providers list", func() {
+			By("creating a namespace for the test")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "providers-list-test",
+				},
+			}
+			_ = k8sClient.Create(ctx, ns)
+
+			By("creating the default Provider")
+			defaultProvider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "default-provider",
+					Namespace: "providers-list-test",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+				},
+			}
+			Expect(k8sClient.Create(ctx, defaultProvider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, defaultProvider) }()
+
+			By("setting default Provider status to Ready")
+			defaultProvider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, defaultProvider)).To(Succeed())
+
+			By("creating the judge Provider")
+			judgeProvider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "judge-provider",
+					Namespace: "providers-list-test",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeOpenAI,
+					Model: "gpt-4o",
+				},
+			}
+			Expect(k8sClient.Create(ctx, judgeProvider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, judgeProvider) }()
+
+			By("setting judge Provider status to Ready")
+			judgeProvider.Status.Phase = omniav1alpha1.ProviderPhaseReady
+			Expect(k8sClient.Status().Update(ctx, judgeProvider)).To(Succeed())
+
+			By("creating the AgentRuntime with spec.providers list")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-with-providers-list",
+					Namespace: "providers-list-test",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{
+							Name:        "default",
+							ProviderRef: omniav1alpha1.ProviderRef{Name: "default-provider"},
+						},
+						{
+							Name:        "judge",
+							ProviderRef: omniav1alpha1.ProviderRef{Name: "judge-provider"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling reconcileProviders")
+			log := logf.FromContext(ctx)
+			providers, result, err := reconciler.reconcileProviders(ctx, log, agentRuntime)
+
+			By("verifying both providers are resolved")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+			Expect(providers).To(HaveLen(2))
+			Expect(providers["default"]).NotTo(BeNil())
+			Expect(providers["default"].Spec.Type).To(Equal(omniav1alpha1.ProviderTypeClaude))
+			Expect(providers["judge"]).NotTo(BeNil())
+			Expect(providers["judge"].Spec.Type).To(Equal(omniav1alpha1.ProviderTypeOpenAI))
+		})
+
+		It("should return error when a provider in the list is not found", func() {
+			By("creating a namespace for the test")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "providers-list-notfound-test",
+				},
+			}
+			_ = k8sClient.Create(ctx, ns)
+
+			By("creating the AgentRuntime with a nonexistent provider in the list")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-missing-provider",
+					Namespace: "providers-list-notfound-test",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{
+							Name:        "default",
+							ProviderRef: omniav1alpha1.ProviderRef{Name: "nonexistent-provider"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling reconcileProviders")
+			log := logf.FromContext(ctx)
+			_, _, err := reconciler.reconcileProviders(ctx, log, agentRuntime)
+
+			By("verifying error is returned")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get Provider"))
+		})
+
+		It("should return empty map when no providers are specified", func() {
+			By("creating a namespace for the test")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "providers-empty-test",
+				},
+			}
+			_ = k8sClient.Create(ctx, ns)
+
+			By("creating the AgentRuntime with no providers and no providerRef")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-no-providers",
+					Namespace: "providers-empty-test",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling reconcileProviders")
+			log := logf.FromContext(ctx)
+			providers, result, err := reconciler.reconcileProviders(ctx, log, agentRuntime)
+
+			By("verifying empty map is returned")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+			Expect(providers).To(BeEmpty())
+		})
+
+		It("should requeue when a provider in the list is in error phase", func() {
+			By("creating a namespace for the test")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "providers-list-error-test",
+				},
+			}
+			_ = k8sClient.Create(ctx, ns)
+
+			By("creating the Provider with error status")
+			errProvider := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "error-provider",
+					Namespace: "providers-list-error-test",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
+				},
+			}
+			Expect(k8sClient.Create(ctx, errProvider)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, errProvider) }()
+
+			errProvider.Status.Phase = omniav1alpha1.ProviderPhaseError
+			Expect(k8sClient.Status().Update(ctx, errProvider)).To(Succeed())
+
+			By("creating the AgentRuntime with the error provider")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-error-provider-list",
+					Namespace: "providers-list-error-test",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{
+							Name:        "default",
+							ProviderRef: omniav1alpha1.ProviderRef{Name: "error-provider"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling reconcileProviders")
+			log := logf.FromContext(ctx)
+			_, result, err := reconciler.reconcileProviders(ctx, log, agentRuntime)
+
+			By("verifying requeue is requested")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+		})
 	})
 })
 

@@ -69,17 +69,17 @@ type JudgeProvider struct {
 	namespace      string
 }
 
-// NewJudgeProvider creates a JudgeProvider from judge mappings and a provider lookup.
+// NewJudgeProvider creates a JudgeProvider from named provider references and a provider lookup.
 // The namespace is used as the default namespace when providerRef.namespace is not set.
 func NewJudgeProvider(
-	judges []v1alpha1.JudgeMapping,
+	providers []v1alpha1.NamedProviderRef,
 	providerLookup ProviderLookup,
 	namespace string,
 ) *JudgeProvider {
-	entries := make(map[string]judgeEntry, len(judges))
-	for _, j := range judges {
-		entries[j.Name] = judgeEntry{
-			providerRef: j.ProviderRef,
+	entries := make(map[string]judgeEntry, len(providers))
+	for _, p := range providers {
+		entries[p.Name] = judgeEntry{
+			providerRef: p.ProviderRef,
 		}
 	}
 	return &JudgeProvider{

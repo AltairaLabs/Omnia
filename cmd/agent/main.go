@@ -55,8 +55,8 @@ func main() {
 	defer func() { _ = zapLog.Sync() }()
 	log := zapr.NewLogger(zapLog)
 
-	// Load configuration from environment
-	cfg, err := agent.LoadFromEnv()
+	// Load configuration — prefers CRD reading, falls back to env vars
+	cfg, err := agent.LoadConfig(context.Background())
 	if err != nil {
 		log.Error(err, "failed to load configuration")
 		os.Exit(1)

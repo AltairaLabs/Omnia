@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -249,26 +248,9 @@ func buildEvalEnvVars(evalConfig *omniav1alpha1.EvalConfig) []corev1.EnvVar {
 		{Name: envEvalsEnabled, Value: "true"},
 	}
 
-	envVars = append(envVars, buildEvalJudgesEnvVar(evalConfig.Judges)...)
 	envVars = append(envVars, buildEvalSamplingEnvVars(evalConfig.Sampling)...)
 
 	return envVars
-}
-
-// buildEvalJudgesEnvVar creates the OMNIA_EVALS_JUDGES env var from judge mappings.
-func buildEvalJudgesEnvVar(judges []omniav1alpha1.JudgeMapping) []corev1.EnvVar {
-	if len(judges) == 0 {
-		return nil
-	}
-
-	judgesJSON, err := json.Marshal(judges)
-	if err != nil {
-		return nil
-	}
-
-	return []corev1.EnvVar{
-		{Name: envEvalsJudges, Value: string(judgesJSON)},
-	}
 }
 
 // buildEvalSamplingEnvVars creates sampling rate env vars with defaults.

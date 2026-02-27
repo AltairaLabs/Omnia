@@ -43,26 +43,51 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForProvider(ctx context.Contex
 
 	var requests []reconcile.Request
 	for _, ar := range agentRuntimes.Items {
-		// Check if this AgentRuntime references the changed Provider
-		if ar.Spec.ProviderRef != nil && ar.Spec.ProviderRef.Name == provider.Name {
-			// Check namespace match (same namespace or explicit namespace reference)
-			providerNS := provider.Namespace
-			arProviderNS := ar.Namespace
-			if ar.Spec.ProviderRef.Namespace != nil {
-				arProviderNS = *ar.Spec.ProviderRef.Namespace
-			}
-			if providerNS == arProviderNS {
-				log.Info("enqueueing AgentRuntime for Provider change", "agentruntime", ar.Name)
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      ar.Name,
-						Namespace: ar.Namespace,
-					},
-				})
-			}
+		if r.agentReferencesProvider(&ar, provider) {
+			log.Info("enqueueing AgentRuntime for Provider change", "agentruntime", ar.Name)
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      ar.Name,
+					Namespace: ar.Namespace,
+				},
+			})
 		}
 	}
 	return requests
+}
+
+// agentReferencesProvider checks if an AgentRuntime references the given Provider
+// via spec.providers, spec.providerRef, or legacy paths.
+func (r *AgentRuntimeReconciler) agentReferencesProvider(ar *omniav1alpha1.AgentRuntime, provider *omniav1alpha1.Provider) bool {
+	// Check spec.providers list
+	for _, np := range ar.Spec.Providers {
+		if r.providerRefMatchesProvider(np.ProviderRef, ar.Namespace, provider) {
+			return true
+		}
+	}
+
+	// Check legacy spec.providerRef
+	if ar.Spec.ProviderRef != nil {
+		return r.providerRefMatchesProvider(*ar.Spec.ProviderRef, ar.Namespace, provider)
+	}
+
+	return false
+}
+
+// providerRefMatchesProvider checks if a ProviderRef matches the given Provider.
+func (r *AgentRuntimeReconciler) providerRefMatchesProvider(
+	ref omniav1alpha1.ProviderRef,
+	defaultNS string,
+	provider *omniav1alpha1.Provider,
+) bool {
+	if ref.Name != provider.Name {
+		return false
+	}
+	refNS := defaultNS
+	if ref.Namespace != nil {
+		refNS = *ref.Namespace
+	}
+	return refNS == provider.Namespace
 }
 
 // findAgentRuntimesForPromptPack returns reconcile requests for all AgentRuntimes
@@ -137,13 +162,34 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForSecret(ctx context.Context,
 			continue
 		}
 
-		// Check if AgentRuntime uses a Provider that references this secret
+		// Check spec.providers list entries
+		for _, np := range ar.Spec.Providers {
+			refNS := ar.Namespace
+			if np.ProviderRef.Namespace != nil {
+				refNS = *np.ProviderRef.Namespace
+			}
+			if refNS == secret.Namespace && providersUsingSecret[np.ProviderRef.Name] {
+				log.Info("enqueueing AgentRuntime for Secret change (via providers list)", "agentruntime", ar.Name)
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      ar.Name,
+						Namespace: ar.Namespace,
+					},
+				})
+				seen[key] = true
+				break
+			}
+		}
+		if seen[key] {
+			continue
+		}
+
+		// Check legacy spec.providerRef
 		if ar.Spec.ProviderRef != nil {
 			providerNS := ar.Namespace
 			if ar.Spec.ProviderRef.Namespace != nil {
 				providerNS = *ar.Spec.ProviderRef.Namespace
 			}
-			// Only check if provider is in the same namespace as the secret
 			if providerNS == secret.Namespace && providersUsingSecret[ar.Spec.ProviderRef.Name] {
 				log.Info("enqueueing AgentRuntime for Secret change (via Provider)", "agentruntime", ar.Name)
 				requests = append(requests, reconcile.Request{
@@ -157,7 +203,7 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForSecret(ctx context.Context,
 			}
 		}
 
-		// Check if AgentRuntime uses inline provider with this secret (legacy)
+		// Check legacy inline provider with this secret
 		if ar.Spec.Provider != nil && ar.Spec.Provider.SecretRef != nil &&
 			ar.Spec.Provider.SecretRef.Name == secret.Name && ar.Namespace == secret.Namespace {
 			log.Info("enqueueing AgentRuntime for Secret change (inline provider)", "agentruntime", ar.Name)

@@ -23,13 +23,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/rest"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/altairalabs/omnia/ee/pkg/evals"
+	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 // Environment variable names for worker configuration.
@@ -55,8 +51,7 @@ func main() {
 	}
 
 	// Set up K8s client for PromptPack ConfigMap reads.
-	k8sCfg := ctrl.GetConfigOrDie()
-	k8sClient, err := newK8sClient(k8sCfg)
+	k8sClient, err := k8s.NewClient()
 	if err != nil {
 		logger.Error("failed to create k8s client", "error", err)
 		os.Exit(1)
@@ -178,22 +173,6 @@ func startHTTPServer(addr string, logger *slog.Logger) {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("metrics server failed", "error", err)
 	}
-}
-
-// newK8sClient creates a controller-runtime client with only the types needed
-// by the eval worker (ConfigMaps for PromptPack data).
-func newK8sClient(cfg *rest.Config) (client.Client, error) {
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("add corev1 to scheme: %w", err)
-	}
-
-	c, err := client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		return nil, fmt.Errorf("create k8s client: %w", err)
-	}
-
-	return c, nil
 }
 
 // buildLogger creates a structured logger from the LOG_LEVEL environment variable.

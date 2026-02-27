@@ -86,6 +86,9 @@ const (
 // Error format strings.
 const errFmtInvalidEnv = "invalid %s: %w"
 
+// envValueTrue is the string value representing true in environment variables.
+const envValueTrue = "true"
+
 // FacadeType represents the type of facade to use.
 type FacadeType string
 
@@ -297,9 +300,9 @@ func LoadFromEnv() (*Config, error) {
 	cfg.MediaAzureKey = os.Getenv(EnvMediaAzureKey)
 
 	// Parse tracing configuration
-	cfg.TracingEnabled = os.Getenv(EnvTracingEnabled) == "true"
+	cfg.TracingEnabled = os.Getenv(EnvTracingEnabled) == envValueTrue
 	cfg.TracingEndpoint = os.Getenv(EnvTracingEndpoint)
-	cfg.TracingInsecure = os.Getenv(EnvTracingInsecure) == "true"
+	cfg.TracingInsecure = os.Getenv(EnvTracingInsecure) == envValueTrue
 
 	tracingSampleRate, err := getEnvAsFloat64(EnvTracingSampleRate, 1.0)
 	if err != nil {

@@ -72,12 +72,12 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
 
 // reconcileReferences fetches and validates all referenced resources.
-// Returns promptPack (required), toolRegistry (optional), provider (optional), and any error.
+// Returns promptPack (required), toolRegistry (optional), providers map, and any error.
 func (r *AgentRuntimeReconciler) reconcileReferences(
 	ctx context.Context,
 	log logr.Logger,
 	agentRuntime *omniav1alpha1.AgentRuntime,
-) (*omniav1alpha1.PromptPack, *omniav1alpha1.ToolRegistry, *omniav1alpha1.Provider, ctrl.Result, error) {
+) (*omniav1alpha1.PromptPack, *omniav1alpha1.ToolRegistry, map[string]*omniav1alpha1.Provider, ctrl.Result, error) {
 	// Fetch required PromptPack
 	promptPack, err := r.fetchPromptPack(ctx, agentRuntime)
 	if err != nil {
@@ -101,32 +101,61 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 		}
 	}
 
-	// Fetch optional Provider
-	var provider *omniav1alpha1.Provider
-	if agentRuntime.Spec.ProviderRef != nil {
-		provider, result, err := r.reconcileProviderRef(ctx, log, agentRuntime)
-		if err != nil || result.RequeueAfter > 0 {
-			return nil, nil, nil, result, err
-		}
-		return promptPack, toolRegistry, provider, ctrl.Result{}, nil
+	// Fetch providers
+	providers, result, err := r.reconcileProviders(ctx, log, agentRuntime)
+	if err != nil || result.RequeueAfter > 0 {
+		return nil, nil, nil, result, err
 	}
 
-	return promptPack, toolRegistry, provider, ctrl.Result{}, nil
+	return promptPack, toolRegistry, providers, ctrl.Result{}, nil
 }
 
-// reconcileProviderRef fetches and validates the Provider reference.
-func (r *AgentRuntimeReconciler) reconcileProviderRef(
+// reconcileProviders resolves the providers map from the AgentRuntime spec.
+// If spec.providers is set, each entry is fetched. Otherwise, falls back to spec.providerRef.
+func (r *AgentRuntimeReconciler) reconcileProviders(
 	ctx context.Context,
 	log logr.Logger,
 	agentRuntime *omniav1alpha1.AgentRuntime,
+) (map[string]*omniav1alpha1.Provider, ctrl.Result, error) {
+	providers := make(map[string]*omniav1alpha1.Provider)
+
+	// New-style: spec.providers list takes precedence
+	if len(agentRuntime.Spec.Providers) > 0 {
+		for _, np := range agentRuntime.Spec.Providers {
+			provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, np.ProviderRef)
+			if err != nil || result.RequeueAfter > 0 {
+				return nil, result, err
+			}
+			providers[np.Name] = provider
+		}
+		return providers, ctrl.Result{}, nil
+	}
+
+	// Legacy: spec.providerRef
+	if agentRuntime.Spec.ProviderRef != nil {
+		provider, result, err := r.fetchAndValidateProvider(ctx, log, agentRuntime, *agentRuntime.Spec.ProviderRef)
+		if err != nil || result.RequeueAfter > 0 {
+			return nil, result, err
+		}
+		providers["default"] = provider
+		return providers, ctrl.Result{}, nil
+	}
+
+	return providers, ctrl.Result{}, nil
+}
+
+// fetchAndValidateProvider fetches a Provider by ref and validates its status.
+func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	ref omniav1alpha1.ProviderRef,
 ) (*omniav1alpha1.Provider, ctrl.Result, error) {
-	provider, err := r.fetchProvider(ctx, agentRuntime)
+	provider, err := r.fetchProviderByRef(ctx, ref, agentRuntime.Namespace)
 	if err != nil {
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeProviderReady, "ProviderNotFound", err)
 		return nil, ctrl.Result{}, err
 	}
-	// Check if Provider is explicitly in Error phase. Empty phase is treated as Ready
-	// (the default state before Provider controller reconciles).
 	if provider.Status.Phase == omniav1alpha1.ProviderPhaseError {
 		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
 			"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
@@ -139,6 +168,15 @@ func (r *AgentRuntimeReconciler) reconcileProviderRef(
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionTrue,
 		"ProviderFound", "Provider resource found and ready")
 	return provider, ctrl.Result{}, nil
+}
+
+// reconcileProviderRef fetches and validates the Provider reference (legacy path).
+func (r *AgentRuntimeReconciler) reconcileProviderRef(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) (*omniav1alpha1.Provider, ctrl.Result, error) {
+	return r.fetchAndValidateProvider(ctx, log, agentRuntime, *agentRuntime.Spec.ProviderRef)
 }
 
 // handleRefError handles reference fetch errors by setting condition, updating status, and logging.
@@ -164,8 +202,14 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
+	providers map[string]*omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
+	// Reconcile facade RBAC (ServiceAccount, Role, RoleBinding)
+	if err := r.reconcileFacadeRBAC(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile facade RBAC")
+		// Don't fail the reconciliation for RBAC errors, just log
+	}
+
 	// Reconcile tools ConfigMap
 	if toolRegistry != nil {
 		if err := r.reconcileToolsConfigMap(ctx, agentRuntime, toolRegistry); err != nil {
@@ -174,7 +218,7 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	}
 
 	// Reconcile Deployment
-	deployment, err := r.reconcileDeployment(ctx, agentRuntime, promptPack, toolRegistry, provider)
+	deployment, err := r.reconcileDeployment(ctx, agentRuntime, promptPack, toolRegistry, providers)
 	if err != nil {
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeDeploymentReady, "DeploymentFailed", err)
 		return nil, err
@@ -232,13 +276,13 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Fetch all references
-	promptPack, toolRegistry, provider, result, err := r.reconcileReferences(ctx, log, agentRuntime)
+	promptPack, toolRegistry, providers, result, err := r.reconcileReferences(ctx, log, agentRuntime)
 	if err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
 	// Reconcile resources
-	deployment, err := r.reconcileResources(ctx, log, agentRuntime, promptPack, toolRegistry, provider)
+	deployment, err := r.reconcileResources(ctx, log, agentRuntime, promptPack, toolRegistry, providers)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -325,10 +369,14 @@ func (r *AgentRuntimeReconciler) fetchToolRegistry(ctx context.Context, agentRun
 }
 
 func (r *AgentRuntimeReconciler) fetchProvider(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.Provider, error) {
-	ref := agentRuntime.Spec.ProviderRef
+	return r.fetchProviderByRef(ctx, *agentRuntime.Spec.ProviderRef, agentRuntime.Namespace)
+}
+
+// fetchProviderByRef fetches a Provider by ref with a default namespace.
+func (r *AgentRuntimeReconciler) fetchProviderByRef(ctx context.Context, ref omniav1alpha1.ProviderRef, defaultNS string) (*omniav1alpha1.Provider, error) {
 	provider := &omniav1alpha1.Provider{}
 
-	namespace := agentRuntime.Namespace
+	namespace := defaultNS
 	if ref.Namespace != nil {
 		namespace = *ref.Namespace
 	}
