@@ -718,6 +718,76 @@ func TestProcessExport_MixedSpans(t *testing.T) {
 	assert.Equal(t, int32(5), stats.AddOutputTokens)
 }
 
+func TestProcessExport_PromptPackAttributes(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	// Span attributes carry PromptPack info (as emitted by the facade).
+	spanAttrs := combineAttrs(
+		outputMsgAttrs(makeMessageValue("assistant", "Hi")),
+		[]*commonpb.KeyValue{
+			{Key: AttrOmniaPromptPackName, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "my-pack"}}},
+			{Key: AttrOmniaPromptPackVersion, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "v2.1"}}},
+		},
+	)
+	span := makeSpan("conv-pp", uint64(time.Now().UnixNano()), spanAttrs)
+	rs := makeResourceSpans("default", "my-agent", span)
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+
+	sess := writer.sessions["conv-pp"]
+	require.NotNil(t, sess)
+	assert.Equal(t, "my-pack", sess.PromptPackName)
+	assert.Equal(t, "v2.1", sess.PromptPackVersion)
+
+	// State map should also include PromptPack attributes.
+	assert.Equal(t, "my-pack", sess.State[AttrOmniaPromptPackName])
+	assert.Equal(t, "v2.1", sess.State[AttrOmniaPromptPackVersion])
+}
+
+func TestProcessExport_PromptPackFromResourceAttrs(t *testing.T) {
+	writer := newMockWriter()
+	transformer := NewTransformer(writer, logr.Discard())
+
+	// PromptPack on resource attrs, not span attrs.
+	span := makeSpan("conv-pp-res", uint64(time.Now().UnixNano()), nil)
+	rs := &tracepb.ResourceSpans{
+		Resource: &resourcepb.Resource{
+			Attributes: []*commonpb.KeyValue{
+				{Key: AttrServiceNamespace, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "ns"}}},
+				{Key: AttrServiceName, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "agent"}}},
+				{Key: AttrOmniaPromptPackName, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "res-pack"}}},
+				{Key: AttrOmniaPromptPackVersion, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "v3"}}},
+			},
+		},
+		ScopeSpans: []*tracepb.ScopeSpans{
+			{Spans: []*tracepb.Span{span}},
+		},
+	}
+
+	processed, err := transformer.ProcessExport(context.Background(), []*tracepb.ResourceSpans{rs})
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+
+	sess := writer.sessions["conv-pp-res"]
+	require.NotNil(t, sess)
+	assert.Equal(t, "res-pack", sess.PromptPackName)
+	assert.Equal(t, "v3", sess.PromptPackVersion)
+}
+
+func TestBuildSessionState_PromptPackAttributes(t *testing.T) {
+	attrs := []*commonpb.KeyValue{
+		{Key: AttrOmniaPromptPackName, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "pack-1"}}},
+		{Key: AttrOmniaPromptPackVersion, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "v1"}}},
+	}
+
+	state := buildSessionState(attrs)
+	assert.Equal(t, "pack-1", state[AttrOmniaPromptPackName])
+	assert.Equal(t, "v1", state[AttrOmniaPromptPackVersion])
+}
+
 func TestProcessExport_ToolSpan_AppendError(t *testing.T) {
 	writer := newMockWriter()
 	writer.appendErr = errors.New("append failed")

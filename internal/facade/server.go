@@ -34,6 +34,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
@@ -323,8 +324,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connCtx, sessionSpan = s.tracingProvider.Tracer().Start(connCtx, "facade.session",
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				attribute.String("omnia.agent_name", agentName),
-				attribute.String("omnia.namespace", namespace),
+				attribute.String(otlp.AttrOmniaAgentName, agentName),
+				attribute.String(otlp.AttrOmniaAgentNamespace, namespace),
+				attribute.String(otlp.AttrOmniaPromptPackName, s.config.PromptPackName),
+				attribute.String(otlp.AttrOmniaPromptPackVersion, s.config.PromptPackVersion),
+				attribute.String(otlp.AttrOmniaPromptPackNamespace, namespace),
 			),
 		)
 		c.sessionSpan = sessionSpan

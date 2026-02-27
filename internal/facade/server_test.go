@@ -1115,123 +1115,69 @@ func TestWithMediaStorage(t *testing.T) {
 	}
 }
 
+// connectAndReadCapabilities dials the WebSocket URL, sends a hello message,
+// and returns the capabilities from the connected response.
+func connectAndReadCapabilities(t *testing.T, url string) *ConnectionCapabilities {
+	t.Helper()
+	ws, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "Hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+
+	if connectedMsg.Connected == nil {
+		t.Fatal("Expected Connected to be set")
+	}
+	if connectedMsg.Connected.Capabilities == nil {
+		t.Fatal("Expected Capabilities to be set")
+	}
+	return connectedMsg.Connected.Capabilities
+}
+
 func TestServerBinaryCapabilityNegotiation(t *testing.T) {
 	handler := &mockHandler{}
 	_, ts := newTestServer(t, handler)
+	expectedMaxPayload := int(DefaultServerConfig().MaxMessageSize)
 
 	t.Run("without binary param", func(t *testing.T) {
-		ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
-		if err != nil {
-			t.Fatalf("Failed to connect: %v", err)
-		}
-		defer func() { _ = ws.Close() }()
-
-		// Send message
-		clientMsg := ClientMessage{
-			Type:    MessageTypeMessage,
-			Content: "Hello",
-		}
-		if err := ws.WriteJSON(clientMsg); err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
-		// Read connected message
-		var connectedMsg ServerMessage
-		if err := ws.ReadJSON(&connectedMsg); err != nil {
-			t.Fatalf("Failed to read connected message: %v", err)
-		}
-
-		// Without binary param, Connected should still be sent (for MaxPayloadSize)
-		// but BinaryFrames should be false
-		if connectedMsg.Connected == nil {
-			t.Fatal("Expected Connected to be set (always sent for MaxPayloadSize)")
-		}
-		if connectedMsg.Connected.Capabilities == nil {
-			t.Fatal("Expected Capabilities to be set")
-		}
-		if connectedMsg.Connected.Capabilities.BinaryFrames {
+		caps := connectAndReadCapabilities(t, wsURL(ts.URL)+"?agent=test-agent")
+		if caps.BinaryFrames {
 			t.Error("Expected BinaryFrames to be false without binary param")
 		}
-		if connectedMsg.Connected.Capabilities.MaxPayloadSize != int(DefaultServerConfig().MaxMessageSize) {
-			t.Errorf("MaxPayloadSize = %d, want %d", connectedMsg.Connected.Capabilities.MaxPayloadSize, DefaultServerConfig().MaxMessageSize)
+		if caps.MaxPayloadSize != expectedMaxPayload {
+			t.Errorf("MaxPayloadSize = %d, want %d", caps.MaxPayloadSize, expectedMaxPayload)
 		}
 	})
 
 	t.Run("with binary=true param", func(t *testing.T) {
-		ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=true", nil)
-		if err != nil {
-			t.Fatalf("Failed to connect: %v", err)
-		}
-		defer func() { _ = ws.Close() }()
-
-		// Send message
-		clientMsg := ClientMessage{
-			Type:    MessageTypeMessage,
-			Content: "Hello",
-		}
-		if err := ws.WriteJSON(clientMsg); err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
-		// Read connected message
-		var connectedMsg ServerMessage
-		if err := ws.ReadJSON(&connectedMsg); err != nil {
-			t.Fatalf("Failed to read connected message: %v", err)
-		}
-
-		// With binary=true, Connected.Capabilities should be set
-		if connectedMsg.Connected == nil {
-			t.Fatal("Expected Connected to be set with binary=true param")
-		}
-		if connectedMsg.Connected.Capabilities == nil {
-			t.Fatal("Expected Capabilities to be set")
-		}
-		if !connectedMsg.Connected.Capabilities.BinaryFrames {
+		caps := connectAndReadCapabilities(t, wsURL(ts.URL)+"?agent=test-agent&binary=true")
+		if !caps.BinaryFrames {
 			t.Error("Expected BinaryFrames to be true")
 		}
-		if connectedMsg.Connected.Capabilities.ProtocolVersion != BinaryVersion {
-			t.Errorf("ProtocolVersion = %d, want %d", connectedMsg.Connected.Capabilities.ProtocolVersion, BinaryVersion)
+		if caps.ProtocolVersion != BinaryVersion {
+			t.Errorf("ProtocolVersion = %d, want %d", caps.ProtocolVersion, BinaryVersion)
 		}
-		if connectedMsg.Connected.Capabilities.MaxPayloadSize != int(DefaultServerConfig().MaxMessageSize) {
-			t.Errorf("MaxPayloadSize = %d, want %d", connectedMsg.Connected.Capabilities.MaxPayloadSize, DefaultServerConfig().MaxMessageSize)
+		if caps.MaxPayloadSize != expectedMaxPayload {
+			t.Errorf("MaxPayloadSize = %d, want %d", caps.MaxPayloadSize, expectedMaxPayload)
 		}
 	})
 
 	t.Run("with binary=false param", func(t *testing.T) {
-		ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent&binary=false", nil)
-		if err != nil {
-			t.Fatalf("Failed to connect: %v", err)
-		}
-		defer func() { _ = ws.Close() }()
-
-		// Send message
-		clientMsg := ClientMessage{
-			Type:    MessageTypeMessage,
-			Content: "Hello",
-		}
-		if err := ws.WriteJSON(clientMsg); err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
-		// Read connected message
-		var connectedMsg ServerMessage
-		if err := ws.ReadJSON(&connectedMsg); err != nil {
-			t.Fatalf("Failed to read connected message: %v", err)
-		}
-
-		// With binary=false, Connected should still be sent (for MaxPayloadSize)
-		// but BinaryFrames should be false
-		if connectedMsg.Connected == nil {
-			t.Fatal("Expected Connected to be set (always sent for MaxPayloadSize)")
-		}
-		if connectedMsg.Connected.Capabilities == nil {
-			t.Fatal("Expected Capabilities to be set")
-		}
-		if connectedMsg.Connected.Capabilities.BinaryFrames {
+		caps := connectAndReadCapabilities(t, wsURL(ts.URL)+"?agent=test-agent&binary=false")
+		if caps.BinaryFrames {
 			t.Error("Expected BinaryFrames to be false with binary=false param")
 		}
-		if connectedMsg.Connected.Capabilities.MaxPayloadSize != int(DefaultServerConfig().MaxMessageSize) {
-			t.Errorf("MaxPayloadSize = %d, want %d", connectedMsg.Connected.Capabilities.MaxPayloadSize, DefaultServerConfig().MaxMessageSize)
+		if caps.MaxPayloadSize != expectedMaxPayload {
+			t.Errorf("MaxPayloadSize = %d, want %d", caps.MaxPayloadSize, expectedMaxPayload)
 		}
 	})
 }

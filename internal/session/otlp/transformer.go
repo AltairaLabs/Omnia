@@ -58,9 +58,11 @@ func NewTransformer(writer SessionWriter, log logr.Logger) *Transformer {
 
 // spanContext holds resource-level attributes extracted once per ResourceSpans.
 type spanContext struct {
-	namespace     string
-	agentName     string
-	resourceAttrs []*commonpb.KeyValue
+	namespace         string
+	agentName         string
+	promptPackName    string
+	promptPackVersion string
+	resourceAttrs     []*commonpb.KeyValue
 }
 
 // ProcessExport processes an OTLP export request and returns the number of
@@ -88,9 +90,11 @@ func (t *Transformer) processResourceSpans(ctx context.Context, rs *tracepb.Reso
 	}
 
 	sc := spanContext{
-		namespace:     getStringAttr(resourceAttrs, AttrServiceNamespace),
-		agentName:     getStringAttr(resourceAttrs, AttrServiceName),
-		resourceAttrs: resourceAttrs,
+		namespace:         getStringAttr(resourceAttrs, AttrServiceNamespace),
+		agentName:         getStringAttr(resourceAttrs, AttrServiceName),
+		promptPackName:    getStringAttr(resourceAttrs, AttrOmniaPromptPackName),
+		promptPackVersion: getStringAttr(resourceAttrs, AttrOmniaPromptPackVersion),
+		resourceAttrs:     resourceAttrs,
 	}
 
 	var processed int
@@ -179,15 +183,28 @@ func (t *Transformer) ensureSession(ctx context.Context, sessionID string, sc sp
 		return err
 	}
 
+	// PromptPack attrs travel on span attributes from the facade, so check
+	// span attrs first, falling back to resource-level values.
+	ppName := getStringAttr(spanAttrs, AttrOmniaPromptPackName)
+	if ppName == "" {
+		ppName = sc.promptPackName
+	}
+	ppVersion := getStringAttr(spanAttrs, AttrOmniaPromptPackVersion)
+	if ppVersion == "" {
+		ppVersion = sc.promptPackVersion
+	}
+
 	now := time.Now()
 	sess := &session.Session{
-		ID:        sessionID,
-		AgentName: sc.agentName,
-		Namespace: sc.namespace,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Status:    session.SessionStatusActive,
-		State:     buildSessionState(spanAttrs),
+		ID:                sessionID,
+		AgentName:         sc.agentName,
+		Namespace:         sc.namespace,
+		PromptPackName:    ppName,
+		PromptPackVersion: ppVersion,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		Status:            session.SessionStatusActive,
+		State:             buildSessionState(spanAttrs),
 	}
 
 	return t.writer.CreateSession(ctx, sess)
@@ -201,6 +218,12 @@ func buildSessionState(attrs []*commonpb.KeyValue) map[string]string {
 	}
 	if model := extractModel(attrs); model != "" {
 		state["gen_ai.model"] = model
+	}
+	if ppName := getStringAttr(attrs, AttrOmniaPromptPackName); ppName != "" {
+		state[AttrOmniaPromptPackName] = ppName
+	}
+	if ppVersion := getStringAttr(attrs, AttrOmniaPromptPackVersion); ppVersion != "" {
+		state[AttrOmniaPromptPackVersion] = ppVersion
 	}
 	if len(state) == 0 {
 		return nil
