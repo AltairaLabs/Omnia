@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ const (
 	envRedisPass    = "REDIS_PASSWORD"
 	envRedisDB      = "REDIS_DB"
 	envNamespace    = "NAMESPACE"
+	envNamespaces   = "NAMESPACES"
 	envSessionAPI   = "SESSION_API_URL"
 	envLogLevel     = "LOG_LEVEL"
 	envMetricsAddr  = "METRICS_ADDR"
@@ -75,7 +77,7 @@ func main() {
 	worker := evals.NewEvalWorker(evals.WorkerConfig{
 		RedisClient: redisClient,
 		SessionAPI:  sessionClient,
-		Namespace:   cfg.Namespace,
+		Namespaces:  cfg.Namespaces,
 		Logger:      logger,
 		K8sClient:   k8sClient,
 		PackLoader:  packLoader,
@@ -97,7 +99,7 @@ func main() {
 	go startHTTPServer(cfg.MetricsAddr, logger)
 
 	logger.Info("starting arena-eval-worker",
-		"namespace", cfg.Namespace,
+		"namespaces", cfg.Namespaces,
 		"redisAddr", cfg.RedisAddr,
 		"sessionAPI", cfg.SessionAPIURL,
 		"metricsAddr", cfg.MetricsAddr,
@@ -116,7 +118,7 @@ type workerEnvConfig struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
-	Namespace     string
+	Namespaces    []string
 	SessionAPIURL string
 	MetricsAddr   string
 }
@@ -126,16 +128,17 @@ func loadConfig() (*workerEnvConfig, error) {
 	cfg := &workerEnvConfig{
 		RedisAddr:     os.Getenv(envRedisAddr),
 		RedisPassword: os.Getenv(envRedisPass),
-		Namespace:     os.Getenv(envNamespace),
 		SessionAPIURL: os.Getenv(envSessionAPI),
 		MetricsAddr:   os.Getenv(envMetricsAddr),
 	}
 
+	cfg.Namespaces = parseNamespaces()
+
 	if cfg.RedisAddr == "" {
 		return nil, fmt.Errorf("%s is required", envRedisAddr)
 	}
-	if cfg.Namespace == "" {
-		return nil, fmt.Errorf("%s is required", envNamespace)
+	if len(cfg.Namespaces) == 0 {
+		return nil, fmt.Errorf("%s or %s is required", envNamespaces, envNamespace)
 	}
 	if cfg.SessionAPIURL == "" {
 		return nil, fmt.Errorf("%s is required", envSessionAPI)
@@ -153,6 +156,26 @@ func loadConfig() (*workerEnvConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseNamespaces reads NAMESPACES (comma-separated) with fallback to NAMESPACE.
+func parseNamespaces() []string {
+	if raw := os.Getenv(envNamespaces); raw != "" {
+		parts := strings.Split(raw, ",")
+		namespaces := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				namespaces = append(namespaces, trimmed)
+			}
+		}
+		if len(namespaces) > 0 {
+			return namespaces
+		}
+	}
+	if ns := os.Getenv(envNamespace); ns != "" {
+		return []string{ns}
+	}
+	return nil
 }
 
 // startHTTPServer starts the metrics and health probe HTTP server.

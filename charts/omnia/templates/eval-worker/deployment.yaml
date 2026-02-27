@@ -29,10 +29,15 @@ spec:
               containerPort: 9090
               protocol: TCP
           env:
+            {{- if .Values.enterprise.evalWorker.namespaces }}
+            - name: NAMESPACES
+              value: {{ join "," .Values.enterprise.evalWorker.namespaces | quote }}
+            {{- else }}
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- end }}
             - name: SESSION_API_URL
               value: {{ printf "http://%s-session-api:%v" (include "omnia.fullname" .) (.Values.sessionApi.service.port | default 8080) }}
             - name: METRICS_ADDR

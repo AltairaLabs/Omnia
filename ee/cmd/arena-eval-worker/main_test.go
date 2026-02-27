@@ -62,7 +62,10 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Save and restore env vars.
-			envKeys := []string{envRedisAddr, envRedisPass, envRedisDB, envNamespace, envSessionAPI, envMetricsAddr}
+			envKeys := []string{
+				envRedisAddr, envRedisPass, envRedisDB,
+				envNamespace, envNamespaces, envSessionAPI, envMetricsAddr,
+			}
 			saved := make(map[string]string)
 			for _, k := range envKeys {
 				saved[k] = ""
@@ -79,7 +82,7 @@ func TestLoadConfig_RequiredFields(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, "localhost:6379", cfg.RedisAddr)
-				assert.Equal(t, "ns", cfg.Namespace)
+				assert.Equal(t, []string{"ns"}, cfg.Namespaces)
 				assert.Equal(t, defaultMetrics, cfg.MetricsAddr)
 			}
 		})
@@ -151,4 +154,56 @@ func TestStartHTTPServer(t *testing.T) {
 
 	go startHTTPServer("127.0.0.1:0", logger)
 	time.Sleep(50 * time.Millisecond)
+}
+
+func TestLoadConfig_NAMESPACES(t *testing.T) {
+	t.Setenv(envRedisAddr, "localhost:6379")
+	t.Setenv(envNamespaces, "ns1,ns2,ns3")
+	t.Setenv(envNamespace, "")
+	t.Setenv(envSessionAPI, "http://session-api:8080")
+	t.Setenv(envMetricsAddr, "")
+	t.Setenv(envRedisDB, "")
+	t.Setenv(envRedisPass, "")
+
+	cfg, err := loadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ns1", "ns2", "ns3"}, cfg.Namespaces)
+}
+
+func TestLoadConfig_NAMESPACES_OverridesNAMESPACE(t *testing.T) {
+	t.Setenv(envRedisAddr, "localhost:6379")
+	t.Setenv(envNamespaces, "ns1,ns2")
+	t.Setenv(envNamespace, "old-ns")
+	t.Setenv(envSessionAPI, "http://session-api:8080")
+	t.Setenv(envMetricsAddr, "")
+	t.Setenv(envRedisDB, "")
+	t.Setenv(envRedisPass, "")
+
+	cfg, err := loadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ns1", "ns2"}, cfg.Namespaces)
+}
+
+func TestParseNamespaces_TrimsWhitespace(t *testing.T) {
+	t.Setenv(envNamespaces, " ns1 , ns2 , ")
+	t.Setenv(envNamespace, "")
+
+	result := parseNamespaces()
+	assert.Equal(t, []string{"ns1", "ns2"}, result)
+}
+
+func TestParseNamespaces_FallbackToNAMESPACE(t *testing.T) {
+	t.Setenv(envNamespaces, "")
+	t.Setenv(envNamespace, "fallback")
+
+	result := parseNamespaces()
+	assert.Equal(t, []string{"fallback"}, result)
+}
+
+func TestParseNamespaces_NeitherSet(t *testing.T) {
+	t.Setenv(envNamespaces, "")
+	t.Setenv(envNamespace, "")
+
+	result := parseNamespaces()
+	assert.Nil(t, result)
 }

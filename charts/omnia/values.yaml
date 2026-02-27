@@ -170,6 +170,11 @@ enterprise:
       requests:
         cpu: 100m
         memory: 128Mi
+    # -- Namespaces to watch for eval events.
+    # If empty, watches the deployment namespace only (single-namespace mode).
+    # If set, watches all listed namespaces (multi-namespace mode) and uses
+    # ClusterRole RBAC instead of namespace-scoped Role.
+    namespaces: []
     # -- Extra environment variables for eval worker (e.g., provider API keys for LLM judges)
     extraEnv: []
     # - name: OPENAI_API_KEY

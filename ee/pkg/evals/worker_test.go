@@ -140,7 +140,7 @@ func TestProcessEvent_AssistantMessage_RunsEvals(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -168,7 +168,7 @@ func TestProcessEvent_NonAssistantMessage_Skipped(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -194,7 +194,7 @@ func TestProcessEvent_SessionAPIError(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 		packLoader: packLoader,
@@ -228,7 +228,7 @@ func TestProcessEvent_GetMessagesError(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 		packLoader: packLoader,
@@ -264,7 +264,7 @@ func TestRunEvals_Success(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -305,7 +305,7 @@ func TestRunEvals_EvalFailure(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -634,17 +634,19 @@ func TestProcessStreams(t *testing.T) {
 		},
 	}
 
+	streamKey := testStreamKey
+
 	w := &EvalWorker{
 		redisClient:   client,
 		sessionAPI:    mock,
-		namespace:     "ns",
+		namespaces:    []string{"ns"},
+		streamKeys:    []string{streamKey},
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
 		evalRunner:    RunRuleEval,
 	}
 
-	streamKey := testStreamKey
 	_ = client.XGroupCreateMkStream(context.Background(), streamKey, "test-group", "0").Err()
 
 	// Add a valid event.
@@ -661,11 +663,11 @@ func TestProcessStreams(t *testing.T) {
 	})
 
 	// Read and process.
-	streams, err := w.readFromStream(context.Background(), streamKey)
+	streams, err := w.readFromStreams(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, streams)
 
-	w.processStreams(context.Background(), streamKey, streams)
+	w.processStreams(context.Background(), streams)
 }
 
 func TestHandleMessage_SuccessfulProcess(t *testing.T) {
@@ -687,7 +689,7 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 	w := &EvalWorker{
 		redisClient:   client,
 		sessionAPI:    mock,
-		namespace:     "ns",
+		namespaces:    []string{"ns"},
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
@@ -730,7 +732,7 @@ func TestHandleMessage_ProcessError_NoAck(t *testing.T) {
 	w := &EvalWorker{
 		redisClient:   client,
 		sessionAPI:    mock,
-		namespace:     "ns",
+		namespaces:    []string{"ns"},
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
@@ -801,7 +803,7 @@ func TestProcessEvent_WriteEvalResults(t *testing.T) {
 	// Create a worker with a patched filterPerTurnDeterministicEvals that returns defs.
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -841,7 +843,7 @@ func TestProcessEvent_WriteError(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -873,7 +875,7 @@ func TestProcessEvent_SessionCompleted_TriggersCompletion(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -906,7 +908,7 @@ func TestProcessEvent_AssistantMessage_RecordsActivity(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -1579,7 +1581,7 @@ func TestProcessAssistantMessage_WithPackEvals(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 		packLoader: packLoader,
@@ -1620,7 +1622,7 @@ func TestProcessAssistantMessage_NoPackName_SkipsEvals(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -1680,4 +1682,195 @@ func TestOnSessionComplete_WithPackEvals(t *testing.T) {
 	assert.Equal(t, "e1", mock.written[0].EvalID)
 	assert.Equal(t, "test-pack", mock.written[0].PromptPackName)
 	assert.Equal(t, "v1", mock.written[0].PromptPackVersion)
+}
+
+// --- Multi-namespace tests ---
+
+func TestNewEvalWorker_MultiNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"ns1", "ns2"},
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"ns1", "ns2"}, w.Namespaces())
+	assert.Equal(t, []string{api.StreamKey("ns1"), api.StreamKey("ns2")}, w.StreamKeys())
+	assert.Equal(t, consumerGroupPrefix+"cluster", w.ConsumerGroup())
+}
+
+func TestNewEvalWorker_SingleNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"ns1"},
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"ns1"}, w.Namespaces())
+	assert.Equal(t, []string{api.StreamKey("ns1")}, w.StreamKeys())
+	assert.Equal(t, consumerGroupPrefix+"ns1", w.ConsumerGroup())
+}
+
+func TestNewEvalWorker_BackwardCompat_DeprecatedNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespace:   "legacy-ns",
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"legacy-ns"}, w.Namespaces())
+	assert.Equal(t, []string{api.StreamKey("legacy-ns")}, w.StreamKeys())
+	assert.Equal(t, consumerGroupPrefix+"legacy-ns", w.ConsumerGroup())
+}
+
+func TestNewEvalWorker_NamespacesOverridesNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"new1", "new2"},
+		Namespace:   "old-ns",
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"new1", "new2"}, w.Namespaces())
+}
+
+func TestStart_CreatesConsumerGroupsOnAllStreams(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: client,
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"ns1", "ns2"},
+		Logger:      testLogger(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Run Start in a goroutine and cancel after a short delay.
+	errCh := make(chan error, 1)
+	go func() { errCh <- w.Start(ctx) }()
+
+	// Give Start time to create consumer groups and enter the consume loop.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	err := <-errCh
+	require.NoError(t, err)
+
+	// Verify consumer groups were created on both streams.
+	for _, ns := range []string{"ns1", "ns2"} {
+		streamKey := api.StreamKey(ns)
+		groups, err := client.XInfoGroups(context.Background(), streamKey).Result()
+		require.NoError(t, err, "consumer group should exist for stream %s", streamKey)
+		require.Len(t, groups, 1)
+		assert.Equal(t, w.ConsumerGroup(), groups[0].Name)
+	}
+}
+
+func TestReadFromStreams_MultiStream(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	stream1 := api.StreamKey("ns1")
+	stream2 := api.StreamKey("ns2")
+
+	w := &EvalWorker{
+		redisClient:   client,
+		namespaces:    []string{"ns1", "ns2"},
+		streamKeys:    []string{stream1, stream2},
+		consumerGroup: "test-group",
+		consumerName:  "test",
+		logger:        testLogger(),
+		evalRunner:    RunRuleEval,
+	}
+
+	// Create consumer groups on both streams.
+	_ = client.XGroupCreateMkStream(context.Background(), stream1, "test-group", "0").Err()
+	_ = client.XGroupCreateMkStream(context.Background(), stream2, "test-group", "0").Err()
+
+	// Add events to both streams.
+	event1 := api.SessionEvent{
+		EventType: eventTypeMessage, SessionID: "s1",
+		MessageRole: "assistant", Namespace: "ns1",
+	}
+	event2 := api.SessionEvent{
+		EventType: eventTypeMessage, SessionID: "s2",
+		MessageRole: "assistant", Namespace: "ns2",
+	}
+
+	data1, _ := json.Marshal(event1)
+	data2, _ := json.Marshal(event2)
+
+	client.XAdd(context.Background(), &goredis.XAddArgs{
+		Stream: stream1,
+		Values: map[string]interface{}{"payload": string(data1)},
+	})
+	client.XAdd(context.Background(), &goredis.XAddArgs{
+		Stream: stream2,
+		Values: map[string]interface{}{"payload": string(data2)},
+	})
+
+	// First read should return at least one message.
+	streams, err := w.readFromStreams(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, streams)
+
+	// Verify the stream key is set on each XStream entry.
+	for _, s := range streams {
+		assert.NotEmpty(t, s.Stream, "stream key should be populated")
+	}
+}
+
+func TestRepeatedGt(t *testing.T) {
+	assert.Equal(t, []string{}, repeatedGt(0))
+	assert.Equal(t, []string{">"}, repeatedGt(1))
+	assert.Equal(t, []string{">", ">", ">"}, repeatedGt(3))
+}
+
+func TestBuildConsumerGroup(t *testing.T) {
+	assert.Equal(t, consumerGroupPrefix+"default", buildConsumerGroup(nil))
+	assert.Equal(t, consumerGroupPrefix+"ns1", buildConsumerGroup([]string{"ns1"}))
+	assert.Equal(t, consumerGroupPrefix+"cluster", buildConsumerGroup([]string{"ns1", "ns2"}))
+}
+
+func TestBuildStreamKeys(t *testing.T) {
+	keys := buildStreamKeys([]string{"ns1", "ns2"})
+	assert.Equal(t, []string{api.StreamKey("ns1"), api.StreamKey("ns2")}, keys)
+}
+
+func TestResolveNamespaces(t *testing.T) {
+	tests := []struct {
+		name   string
+		config WorkerConfig
+		want   []string
+	}{
+		{
+			name:   "namespaces takes precedence",
+			config: WorkerConfig{Namespaces: []string{"a", "b"}, Namespace: "c"},
+			want:   []string{"a", "b"},
+		},
+		{
+			name:   "fallback to namespace",
+			config: WorkerConfig{Namespace: "c"},
+			want:   []string{"c"},
+		},
+		{
+			name:   "empty returns nil",
+			config: WorkerConfig{},
+			want:   nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, resolveNamespaces(tc.config))
+		})
+	}
 }

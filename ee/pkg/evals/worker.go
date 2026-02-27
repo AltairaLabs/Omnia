@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -56,8 +57,13 @@ type ProviderAwareEvalRunner func(
 type WorkerConfig struct {
 	RedisClient goredis.UniversalClient
 	SessionAPI  SessionAPIClient
-	Namespace   string
-	Logger      *slog.Logger
+	// Namespaces is the list of namespaces to watch for eval events.
+	// Each namespace gets its own Redis stream key.
+	Namespaces []string
+	// Namespace is deprecated; use Namespaces instead.
+	// If Namespaces is empty, falls back to []string{Namespace}.
+	Namespace string
+	Logger    *slog.Logger
 	// K8sClient is used to resolve provider specs from CRDs.
 	// If nil, provider resolution is disabled and llm_judge evals will fail.
 	K8sClient client.Client
@@ -82,7 +88,8 @@ type WorkerConfig struct {
 type EvalWorker struct {
 	redisClient       goredis.UniversalClient
 	sessionAPI        SessionAPIClient
-	namespace         string
+	namespaces        []string
+	streamKeys        []string
 	consumerGroup     string
 	consumerName      string
 	logger            *slog.Logger
@@ -95,7 +102,7 @@ type EvalWorker struct {
 	providerResolver  *ProviderResolver
 }
 
-// NewEvalWorker creates a new eval worker for the given namespace.
+// NewEvalWorker creates a new eval worker for the given namespace(s).
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
 	runner := config.EvalRunner
 	if runner == nil {
@@ -129,11 +136,16 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		resolver = NewProviderResolver(config.K8sClient)
 	}
 
+	namespaces := resolveNamespaces(config)
+	streamKeys := buildStreamKeys(namespaces)
+	consumerGroup := buildConsumerGroup(namespaces)
+
 	w := &EvalWorker{
 		redisClient:      config.RedisClient,
 		sessionAPI:       config.SessionAPI,
-		namespace:        config.Namespace,
-		consumerGroup:    consumerGroupPrefix + config.Namespace,
+		namespaces:       namespaces,
+		streamKeys:       streamKeys,
+		consumerGroup:    consumerGroup,
 		consumerName:     hostname(),
 		logger:           config.Logger,
 		evalRunner:       runner,
@@ -149,24 +161,82 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 	return w
 }
 
-// Start begins consuming events from the Redis Stream. It blocks until
+// resolveNamespaces returns the effective namespace list from config,
+// falling back from Namespaces to the deprecated Namespace field.
+func resolveNamespaces(config WorkerConfig) []string {
+	if len(config.Namespaces) > 0 {
+		return config.Namespaces
+	}
+	if config.Namespace != "" {
+		return []string{config.Namespace}
+	}
+	return nil
+}
+
+// buildStreamKeys converts namespaces to Redis stream keys.
+func buildStreamKeys(namespaces []string) []string {
+	keys := make([]string, len(namespaces))
+	for i, ns := range namespaces {
+		keys[i] = api.StreamKey(ns)
+	}
+	return keys
+}
+
+// buildConsumerGroup returns the consumer group name.
+// For multi-namespace mode, uses a "cluster" suffix; for single-namespace, uses the namespace name.
+func buildConsumerGroup(namespaces []string) string {
+	if len(namespaces) > 1 {
+		return consumerGroupPrefix + "cluster"
+	}
+	if len(namespaces) == 1 {
+		return consumerGroupPrefix + namespaces[0]
+	}
+	return consumerGroupPrefix + "default"
+}
+
+// repeatedGt returns a slice of n ">" strings for XREADGROUP multi-stream args.
+func repeatedGt(n int) []string {
+	gt := make([]string, n)
+	for i := range gt {
+		gt[i] = ">"
+	}
+	return gt
+}
+
+// StreamKeys returns the stream keys this worker is subscribed to. Exported for testing.
+func (w *EvalWorker) StreamKeys() []string {
+	return w.streamKeys
+}
+
+// ConsumerGroup returns the consumer group name. Exported for testing.
+func (w *EvalWorker) ConsumerGroup() string {
+	return w.consumerGroup
+}
+
+// Namespaces returns the namespaces this worker watches. Exported for testing.
+func (w *EvalWorker) Namespaces() []string {
+	return w.namespaces
+}
+
+// Start begins consuming events from Redis Streams. It blocks until
 // the context is cancelled or an unrecoverable error occurs.
 func (w *EvalWorker) Start(ctx context.Context) error {
-	streamKey := api.StreamKey(w.namespace)
-
-	if err := w.ensureConsumerGroup(ctx, streamKey); err != nil {
-		return fmt.Errorf("ensure consumer group: %w", err)
+	for _, key := range w.streamKeys {
+		if err := w.ensureConsumerGroup(ctx, key); err != nil {
+			return fmt.Errorf("ensure consumer group on %s: %w", key, err)
+		}
 	}
 
 	w.logger.Info("worker started",
-		"stream", streamKey,
+		"streams", strings.Join(w.streamKeys, ","),
+		"namespaces", strings.Join(w.namespaces, ","),
 		"consumerGroup", w.consumerGroup,
 		"consumer", w.consumerName,
 	)
 
 	go w.completionTracker.StartPeriodicCheck(ctx, periodicCheckInterval)
 
-	return w.consumeLoop(ctx, streamKey)
+	return w.consumeLoop(ctx)
 }
 
 // ensureConsumerGroup creates the consumer group if it does not already exist.
@@ -178,14 +248,14 @@ func (w *EvalWorker) ensureConsumerGroup(ctx context.Context, streamKey string) 
 	return nil
 }
 
-// consumeLoop reads events from the stream in a loop until the context is done.
-func (w *EvalWorker) consumeLoop(ctx context.Context, streamKey string) error {
+// consumeLoop reads events from streams in a loop until the context is done.
+func (w *EvalWorker) consumeLoop(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		streams, err := w.readFromStream(ctx, streamKey)
+		streams, err := w.readFromStreams(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil
@@ -197,26 +267,28 @@ func (w *EvalWorker) consumeLoop(ctx context.Context, streamKey string) error {
 			continue
 		}
 
-		w.processStreams(ctx, streamKey, streams)
+		w.processStreams(ctx, streams)
 	}
 }
 
-// readFromStream performs the XREADGROUP call.
-func (w *EvalWorker) readFromStream(ctx context.Context, streamKey string) ([]goredis.XStream, error) {
+// readFromStreams performs the XREADGROUP call across all stream keys.
+func (w *EvalWorker) readFromStreams(ctx context.Context) ([]goredis.XStream, error) {
+	streamArgs := append(w.streamKeys, repeatedGt(len(w.streamKeys))...)
 	return w.redisClient.XReadGroup(ctx, &goredis.XReadGroupArgs{
 		Group:    w.consumerGroup,
 		Consumer: w.consumerName,
-		Streams:  []string{streamKey, ">"},
+		Streams:  streamArgs,
 		Count:    1,
 		Block:    blockTimeout,
 	}).Result()
 }
 
 // processStreams iterates over stream results and processes each message.
-func (w *EvalWorker) processStreams(ctx context.Context, streamKey string, streams []goredis.XStream) {
+// The stream key for ACK is taken from each XStream entry.
+func (w *EvalWorker) processStreams(ctx context.Context, streams []goredis.XStream) {
 	for _, stream := range streams {
 		for _, msg := range stream.Messages {
-			w.handleMessage(ctx, streamKey, msg)
+			w.handleMessage(ctx, stream.Stream, msg)
 		}
 	}
 }

@@ -1,17 +1,29 @@
 {{- if and .Values.enterprise.enabled .Values.enterprise.evalWorker.enabled }}
+{{- $multiNs := and .Values.enterprise.evalWorker.namespaces (gt (len .Values.enterprise.evalWorker.namespaces) 1) }}
 apiVersion: rbac.authorization.k8s.io/v1
+{{- if $multiNs }}
+kind: ClusterRole
+{{- else }}
 kind: Role
+{{- end }}
 metadata:
   name: {{ include "omnia.evalWorker.fullname" . }}
   labels:
     {{- include "omnia.evalWorker.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["configmaps"]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["agentriuntimes", "providers"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+{{- if $multiNs }}
+kind: ClusterRoleBinding
+{{- else }}
 kind: RoleBinding
+{{- end }}
 metadata:
   name: {{ include "omnia.evalWorker.fullname" . }}
   labels:
@@ -19,8 +31,13 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: {{ include "omnia.evalWorker.fullname" . }}
+    namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
+  {{- if $multiNs }}
+  kind: ClusterRole
+  {{- else }}
   kind: Role
+  {{- end }}
   name: {{ include "omnia.evalWorker.fullname" . }}
 {{- end }}
