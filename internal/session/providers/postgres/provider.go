@@ -92,15 +92,26 @@ const sessionColumns = `id, agent_name, namespace, workspace_name, status,
 	estimated_cost_usd, tags, state, last_message_preview,
 	prompt_pack_name, prompt_pack_version`
 
+// nullableSessionFields groups nullable columns scanned from a session row.
+type nullableSessionFields struct {
+	workspaceName     *string
+	lastMsgPreview    *string
+	promptPackName    *string
+	promptPackVersion *string
+	expiresAt         *time.Time
+	endedAt           *time.Time
+	stateJSON         []byte
+}
+
 // populateSession fills nullable fields on a scanned session.
-func populateSession(s *session.Session, workspaceName, lastMsgPreview, promptPackName, promptPackVersion *string, expiresAt, endedAt *time.Time, stateJSON []byte) {
-	s.WorkspaceName = pgutil.DerefString(workspaceName)
-	s.ExpiresAt = pgutil.TimeOrZero(expiresAt)
-	s.EndedAt = pgutil.TimeOrZero(endedAt)
-	s.State = pgutil.UnmarshalJSONB(stateJSON)
-	s.LastMessagePreview = pgutil.DerefString(lastMsgPreview)
-	s.PromptPackName = pgutil.DerefString(promptPackName)
-	s.PromptPackVersion = pgutil.DerefString(promptPackVersion)
+func populateSession(s *session.Session, n nullableSessionFields) {
+	s.WorkspaceName = pgutil.DerefString(n.workspaceName)
+	s.ExpiresAt = pgutil.TimeOrZero(n.expiresAt)
+	s.EndedAt = pgutil.TimeOrZero(n.endedAt)
+	s.State = pgutil.UnmarshalJSONB(n.stateJSON)
+	s.LastMessagePreview = pgutil.DerefString(n.lastMsgPreview)
+	s.PromptPackName = pgutil.DerefString(n.promptPackName)
+	s.PromptPackVersion = pgutil.DerefString(n.promptPackVersion)
 	if s.Tags == nil {
 		s.Tags = []string{}
 	}
@@ -108,16 +119,14 @@ func populateSession(s *session.Session, workspaceName, lastMsgPreview, promptPa
 
 func scanSession(row pgx.Row) (*session.Session, error) {
 	var s session.Session
-	var workspaceName, lastMsgPreview, promptPackName, promptPackVersion *string
-	var expiresAt, endedAt *time.Time
-	var stateJSON []byte
+	var n nullableSessionFields
 
 	err := row.Scan(
-		&s.ID, &s.AgentName, &s.Namespace, &workspaceName, &s.Status,
-		&s.CreatedAt, &s.UpdatedAt, &expiresAt, &endedAt,
+		&s.ID, &s.AgentName, &s.Namespace, &n.workspaceName, &s.Status,
+		&s.CreatedAt, &s.UpdatedAt, &n.expiresAt, &n.endedAt,
 		&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
-		&s.EstimatedCostUSD, &s.Tags, &stateJSON, &lastMsgPreview,
-		&promptPackName, &promptPackVersion,
+		&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
+		&n.promptPackName, &n.promptPackVersion,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -126,30 +135,28 @@ func scanSession(row pgx.Row) (*session.Session, error) {
 		return nil, fmt.Errorf("postgres: scan session: %w", err)
 	}
 
-	populateSession(&s, workspaceName, lastMsgPreview, promptPackName, promptPackVersion, expiresAt, endedAt, stateJSON)
+	populateSession(&s, n)
 	return &s, nil
 }
 
 func scanSessionWithCount(row pgx.Row) (*session.Session, int64, error) {
 	var s session.Session
-	var workspaceName, lastMsgPreview, promptPackName, promptPackVersion *string
-	var expiresAt, endedAt *time.Time
-	var stateJSON []byte
+	var n nullableSessionFields
 	var totalCount int64
 
 	err := row.Scan(
-		&s.ID, &s.AgentName, &s.Namespace, &workspaceName, &s.Status,
-		&s.CreatedAt, &s.UpdatedAt, &expiresAt, &endedAt,
+		&s.ID, &s.AgentName, &s.Namespace, &n.workspaceName, &s.Status,
+		&s.CreatedAt, &s.UpdatedAt, &n.expiresAt, &n.endedAt,
 		&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
-		&s.EstimatedCostUSD, &s.Tags, &stateJSON, &lastMsgPreview,
-		&promptPackName, &promptPackVersion,
+		&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
+		&n.promptPackName, &n.promptPackVersion,
 		&totalCount,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres: scan session: %w", err)
 	}
 
-	populateSession(&s, workspaceName, lastMsgPreview, promptPackName, promptPackVersion, expiresAt, endedAt, stateJSON)
+	populateSession(&s, n)
 	return &s, totalCount, nil
 }
 
