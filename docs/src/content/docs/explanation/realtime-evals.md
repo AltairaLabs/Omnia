@@ -150,13 +150,9 @@ For PromptKit agents, Pattern C is the primary eval path. Pattern A events still
 
 ## Eval Worker
 
-The eval worker (`eval-worker`) is a long-running Deployment that subscribes to Redis Streams and runs evals for agents using Pattern A. It supports two deployment modes:
+The eval worker (`eval-worker`) is a long-running cluster singleton Deployment that subscribes to Redis Streams and runs evals for agents using Pattern A. It is deployed automatically when enterprise features are enabled.
 
-**Single-namespace mode** (default): The worker watches one namespace, uses namespace-scoped `Role`/`RoleBinding` RBAC, and reads from a single Redis stream. This is the default when no explicit namespace list is configured.
-
-**Multi-namespace mode**: A single worker watches multiple namespaces, uses `ClusterRole`/`ClusterRoleBinding` RBAC, and reads from multiple Redis streams concurrently via `XREADGROUP`. This reduces operational overhead at smaller scale by avoiding one worker deployment per namespace.
-
-Configure the mode via the `enterprise.evalWorker.namespaces` Helm value. See [Eval Worker Helm values](/reference/helm-values/#eval-worker-configuration) for details.
+By default, the worker watches its deployment namespace. To watch additional namespaces, configure the `enterprise.evalWorker.namespaces` Helm value with the list of namespaces to monitor. The worker reads from multiple Redis streams concurrently via `XREADGROUP`. See [Eval Worker Helm values](/reference/helm-values/#eval-worker-configuration) for details.
 
 The worker:
 

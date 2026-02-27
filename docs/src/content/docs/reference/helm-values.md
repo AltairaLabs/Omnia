@@ -250,7 +250,7 @@ The eval worker runs realtime evals for non-PromptKit agents (Pattern A). This i
 ```yaml
 enterprise:
   evalWorker:
-    enabled: false       # Enable eval worker deployment
+    enabled: true        # Deployed by default when enterprise is enabled
     replicaCount: 1      # Number of eval worker replicas
     image:
       repository: ghcr.io/altairalabs/omnia-eval-worker
@@ -279,12 +279,11 @@ enterprise:
       - dev
 ```
 
-When `namespaces` has multiple entries:
-- The worker subscribes to Redis streams for all listed namespaces
-- RBAC switches from namespace-scoped `Role` to cluster-scoped `ClusterRole`
-- A single consumer group is shared across all streams
+When `namespaces` is set, the worker subscribes to Redis streams for all listed namespaces using a single shared consumer group.
 
-When `namespaces` is empty (the default), the worker uses the deployment namespace and namespace-scoped RBAC.
+When `namespaces` is empty (the default), the worker watches only its deployment namespace.
+
+The eval worker always uses `ClusterRole` RBAC since it is deployed as a cluster singleton.
 
 ### Extra Environment Variables
 

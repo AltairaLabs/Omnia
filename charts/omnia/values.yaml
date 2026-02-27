@@ -152,7 +152,7 @@ enterprise:
   # Eval worker for non-PromptKit agent eval execution
   evalWorker:
     # -- Enable eval worker deployment
-    enabled: false
+    enabled: true
     # -- Number of eval worker replicas
     replicaCount: 1
     image:
