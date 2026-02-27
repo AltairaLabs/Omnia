@@ -945,6 +945,19 @@ tracing:
   # Example: omnia-tempo.omnia-system.svc.cluster.local:4317
   endpoint: ""
 
+  # Grafana Alloy OTLP fan-out configuration
+  # When enabled, templates a ConfigMap with Alloy River config that receives
+  # OTLP traces and forwards to both session-api (for session reconstruction)
+  # and Tempo (for distributed tracing).
+  # Note: The Alloy Deployment + Service are not included here — they will be
+  # added when the full observability stack is wired.
+  alloy:
+    # -- Enable Alloy OTLP fan-out config
+    enabled: false
+    tempo:
+      # -- Tempo OTLP gRPC endpoint (e.g., "tempo.monitoring:4317")
+      endpoint: ""
+
 # ============================================================================
 # Subchart configurations (optional observability stack)
 # Set enabled: true to deploy each component

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import ArenaJobDetailPage from "./page";
 
 // Mock useParams and useRouter
@@ -69,6 +69,12 @@ vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
+}));
+
+// Mock QuickRunDialog
+vi.mock("@/components/arena/quick-run-dialog", () => ({
+  QuickRunDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="quick-run-dialog">Quick Run Dialog</div> : null,
 }));
 
 const mockJob = {
@@ -398,5 +404,127 @@ describe("ArenaJobDetailPage", () => {
     expect(screen.getByText("Started")).toBeInTheDocument();
     expect(screen.getByText("Duration")).toBeInTheDocument();
     expect(screen.getByText("Timeout")).toBeInTheDocument();
+  });
+
+  it("shows clone button for finished job with project-id label", async () => {
+    const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
+
+    const finishedJobWithProject = {
+      ...mockJob,
+      metadata: {
+        ...mockJob.metadata,
+        labels: { "arena.omnia.altairalabs.ai/project-id": "proj-123" },
+      },
+      status: { ...mockJob.status, phase: "Succeeded" as const },
+    };
+
+    vi.mocked(useArenaJob).mockReturnValue({
+      job: finishedJobWithProject,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaJobMutations).mockReturnValue({
+      createJob: vi.fn(),
+      cancelJob: mockCancelJob,
+      deleteJob: mockDeleteJob,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaJobDetailPage />);
+
+    expect(screen.getByText("Clone")).toBeInTheDocument();
+  });
+
+  it("does not show clone button for running job", async () => {
+    const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
+
+    const runningJobWithProject = {
+      ...mockJob,
+      metadata: {
+        ...mockJob.metadata,
+        labels: { "arena.omnia.altairalabs.ai/project-id": "proj-123" },
+      },
+    };
+
+    vi.mocked(useArenaJob).mockReturnValue({
+      job: runningJobWithProject,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaJobMutations).mockReturnValue({
+      createJob: vi.fn(),
+      cancelJob: mockCancelJob,
+      deleteJob: mockDeleteJob,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaJobDetailPage />);
+
+    expect(screen.queryByText("Clone")).not.toBeInTheDocument();
+  });
+
+  it("does not show clone button when job has no project-id label", async () => {
+    const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
+
+    const finishedJobNoProject = {
+      ...mockJob,
+      status: { ...mockJob.status, phase: "Succeeded" as const },
+    };
+
+    vi.mocked(useArenaJob).mockReturnValue({
+      job: finishedJobNoProject,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaJobMutations).mockReturnValue({
+      createJob: vi.fn(),
+      cancelJob: mockCancelJob,
+      deleteJob: mockDeleteJob,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaJobDetailPage />);
+
+    expect(screen.queryByText("Clone")).not.toBeInTheDocument();
+  });
+
+  it("opens clone dialog when clone button is clicked", async () => {
+    const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
+
+    const finishedJobWithProject = {
+      ...mockJob,
+      metadata: {
+        ...mockJob.metadata,
+        labels: { "arena.omnia.altairalabs.ai/project-id": "proj-123" },
+      },
+      status: { ...mockJob.status, phase: "Succeeded" as const },
+    };
+
+    vi.mocked(useArenaJob).mockReturnValue({
+      job: finishedJobWithProject,
+      loading: false,
+      error: null,
+      refetch: mockRefetch,
+    });
+    vi.mocked(useArenaJobMutations).mockReturnValue({
+      createJob: vi.fn(),
+      cancelJob: mockCancelJob,
+      deleteJob: mockDeleteJob,
+      loading: false,
+      error: null,
+    });
+
+    render(<ArenaJobDetailPage />);
+
+    const cloneButton = screen.getByText("Clone");
+    fireEvent.click(cloneButton);
+
+    expect(screen.getByTestId("quick-run-dialog")).toBeInTheDocument();
   });
 });

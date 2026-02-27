@@ -1,22 +1,12 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: Apache-2.0
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+SPDX-License-Identifier: FSL-1.1-Apache-2.0
+This file is part of Omnia Enterprise and is subject to the
+Functional Source License. See ee/LICENSE for details.
 */
 
-package api
+package evals
 
 import (
 	"fmt"
@@ -25,6 +15,7 @@ import (
 	"time"
 
 	"github.com/altairalabs/omnia/internal/session"
+	api "github.com/altairalabs/omnia/internal/session/api"
 )
 
 // Supported rule-based eval types.
@@ -36,58 +27,21 @@ const (
 	EvalTypeRegexMatch  = "regex_match"
 )
 
-// EvalDefinition represents a single eval to run against session messages.
-type EvalDefinition struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Trigger string         `json:"trigger"`
-	Params  map[string]any `json:"params,omitempty"`
-}
-
-// EvaluateRequest is the JSON body for POST /api/v1/sessions/{id}/evaluate.
-type EvaluateRequest struct {
-	Evals []EvalDefinition `json:"evals"`
-}
-
-// EvaluateResultItem represents a single eval result in the response.
-type EvaluateResultItem struct {
-	EvalID     string   `json:"evalId"`
-	EvalType   string   `json:"evalType"`
-	Trigger    string   `json:"trigger"`
-	Passed     bool     `json:"passed"`
-	Score      *float64 `json:"score,omitempty"`
-	DurationMs int      `json:"durationMs"`
-	Source     string   `json:"source"`
-}
-
-// EvaluateResponseSummary contains aggregate counts for the evaluation run.
-type EvaluateResponseSummary struct {
-	Total  int `json:"total"`
-	Passed int `json:"passed"`
-	Failed int `json:"failed"`
-}
-
-// EvaluateResponse is the JSON response for the evaluate endpoint.
-type EvaluateResponse struct {
-	Results []EvaluateResultItem    `json:"results"`
-	Summary EvaluateResponseSummary `json:"summary"`
-}
-
 // RunRuleEval executes a single rule-based eval against the given messages.
 // It returns the result item with timing information.
-func RunRuleEval(evalDef EvalDefinition, messages []session.Message) (EvaluateResultItem, error) {
+func RunRuleEval(evalDef api.EvalDefinition, messages []session.Message) (api.EvaluateResultItem, error) {
 	start := time.Now()
 
 	assistantMsgs := filterAssistantMessages(messages)
 
 	passed, score, err := executeRule(evalDef.Type, evalDef.Params, assistantMsgs)
 	if err != nil {
-		return EvaluateResultItem{}, fmt.Errorf("eval %q: %w", evalDef.ID, err)
+		return api.EvaluateResultItem{}, fmt.Errorf("eval %q: %w", evalDef.ID, err)
 	}
 
 	durationMs := int(time.Since(start).Milliseconds())
 
-	item := EvaluateResultItem{
+	item := api.EvaluateResultItem{
 		EvalID:     evalDef.ID,
 		EvalType:   evalDef.Type,
 		Trigger:    evalDef.Trigger,

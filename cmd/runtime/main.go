@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -82,7 +83,22 @@ func main() {
 		"baseURL", cfg.BaseURL,
 		"mockProvider", cfg.MockProvider,
 		"toolsConfigPath", cfg.ToolsConfigPath,
-		"tracingEnabled", cfg.TracingEnabled)
+		"tracingEnabled", cfg.TracingEnabled,
+		"evalEnabled", cfg.EvalEnabled)
+
+	// Load eval definitions and create collector if evals are enabled
+	var evalCollector *evals.MetricCollector
+	var evalDefs []evals.EvalDef
+	if cfg.EvalEnabled {
+		defs, err := pkruntime.LoadPackEvalDefs(cfg.PromptPackPath)
+		if err != nil {
+			log.Error(err, "failed to load eval definitions from pack, continuing without evals")
+		} else {
+			evalDefs = defs
+			evalCollector = evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+			log.Info("evals enabled", "evalCount", len(evalDefs))
+		}
+	}
 
 	// Create state store for conversation persistence
 	var store statestore.Store
@@ -185,6 +201,12 @@ func main() {
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
 	}
+	if evalCollector != nil {
+		serverOpts = append(serverOpts,
+			pkruntime.WithEvalCollector(evalCollector),
+			pkruntime.WithEvalDefs(evalDefs),
+		)
+	}
 	runtimeServer := pkruntime.NewServer(serverOpts...)
 	defer func() { _ = runtimeServer.Close() }()
 
@@ -241,7 +263,16 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	healthMux.Handle("/metrics", promhttp.Handler())
+	if evalCollector != nil {
+		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			// Write standard Prometheus metrics first
+			promhttp.Handler().ServeHTTP(w, r)
+			// Append eval metrics
+			_ = evalCollector.WritePrometheus(w)
+		})
+	} else {
+		healthMux.Handle("/metrics", promhttp.Handler())
+	}
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.HealthPort),

@@ -41,7 +41,7 @@ func run(ctx context.Context) error {
 	fmt.Printf("  Type: %s\n", cfg.JobType)
 	fmt.Printf("  Content: %s (version: %s)\n", cfg.ContentPath, cfg.ContentVersion)
 
-	if cfg.ExecutionMode == "fleet" {
+	if cfg.ExecutionMode == executionModeFleet {
 		fmt.Printf("  Execution mode: fleet (target: %s)\n", cfg.FleetWSURL)
 	} else {
 		fmt.Printf("  Execution mode: direct\n")

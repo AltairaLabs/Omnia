@@ -294,21 +294,25 @@ docker_build(
 
 if ENABLE_ENTERPRISE:
     # Build arena-controller image (enterprise ArenaSource/ArenaJob controllers)
+    arena_controller_only = [
+        './ee/cmd/omnia-arena-controller',
+        './ee/internal',
+        './ee/pkg',
+        './ee/api',
+        './internal',
+        './pkg',
+        './api',
+        './go.mod',
+        './go.sum',
+    ]
+    if USE_LOCAL_PROMPTKIT:
+        arena_controller_only.append('./promptkit-local')
+
     docker_build(
         'omnia-arena-controller-dev',
         context='.',
         dockerfile='./ee/Dockerfile.arena-controller',
-        only=[
-            './ee/cmd/omnia-arena-controller',
-            './ee/internal',
-            './ee/pkg',
-            './ee/api',
-            './internal',
-            './pkg',
-            './api',
-            './go.mod',
-            './go.sum',
-        ],
+        only=arena_controller_only,
     )
 
     # Build arena-worker image (evaluation job worker)
@@ -889,6 +893,24 @@ local_resource(
     labels=['samples'],
     resource_deps=['omnia-controller-manager'],
 )
+
+# Enterprise arena fleet sample: seeds workspace PVC and creates ConfigMap + ArenaSource
+# so users can test fleet mode against echo-agent from the dashboard.
+if ENABLE_ENTERPRISE:
+    local_resource(
+        'arena-fleet-sample',
+        cmd='''
+            kubectl patch workspace dev-agents --type=merge -p '{"spec":{"storage":{"enabled":true,"storageClass":"omnia-nfs","size":"10Gi","accessModes":["ReadWriteMany"]}}}'
+            kubectl delete job arena-fleet-seeder -n omnia-system --ignore-not-found
+            kubectl apply -f config/samples/dev/enterprise/arena-fleet-seeder.yaml
+            kubectl wait --for=condition=complete job/arena-fleet-seeder -n omnia-system --timeout=60s 2>/dev/null || true
+            kubectl apply -f config/samples/dev/enterprise/arena-fleet-sample.yaml
+            kubectl apply -f config/samples/dev/enterprise/arena-promptkit-examples.yaml
+        ''',
+        deps=['config/samples/dev/enterprise/arena-fleet-sample.yaml', 'config/samples/dev/enterprise/arena-fleet-seeder.yaml', 'config/samples/dev/enterprise/arena-promptkit-examples.yaml'],
+        labels=['enterprise'],
+        resource_deps=['omnia-arena-controller', 'sample-resources'],
+    )
 
 # Restart agent pods when facade/framework images are rebuilt
 # Since AgentRuntime deployments are created by the operator (not Tilt),

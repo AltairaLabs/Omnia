@@ -62,6 +62,9 @@ spec:
             - --nfs-server={{ include "omnia.nfsServer" . }}
             - --nfs-path={{ include "omnia.nfsPath" . }}
             {{- end }}
+            {{- if and .Values.nfs.csiDriver.enabled (or .Values.nfs.server.enabled .Values.nfs.external.server) }}
+            - --workspace-storage-class={{ include "omnia.nfsStorageClass" . }}
+            {{- end }}
             - --workspace-content-path=/workspace-content
             {{- if .Values.enterprise.arena.worker.serviceAccount.create }}
             - --worker-service-account-name={{ .Values.enterprise.arena.worker.serviceAccount.name | default (printf "%s-arena-worker" (include "omnia.fullname" .)) }}

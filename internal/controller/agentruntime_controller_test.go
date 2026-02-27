@@ -2979,6 +2979,41 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			}
 		})
 
+		It("should include eval enabled env var when promptPack is provided", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "test-pack",
+					},
+				},
+			}
+
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pack",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+				},
+			}
+
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
+
+			var found bool
+			for _, env := range envVars {
+				if env.Name == "OMNIA_EVAL_ENABLED" && env.Value == "true" {
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue(), "OMNIA_EVAL_ENABLED env var should be set when promptPack is provided")
+		})
+
 		It("should not include mock provider env var when annotation is false", func() {
 			agentRuntime := &omniav1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{

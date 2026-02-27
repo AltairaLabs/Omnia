@@ -11,8 +11,6 @@ Functional Source License. See ee/LICENSE for details.
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
@@ -626,101 +624,6 @@ func TestApplyProviderOverrides(t *testing.T) {
 	})
 }
 
-func TestFindScenarioFile(t *testing.T) {
-	t.Run("finds scenario by spec.id", func(t *testing.T) {
-		dir := t.TempDir()
-		writeFile(t, dir, "config.arena.yaml", `spec:
-  scenarios:
-    - file: greeting.scenario.yaml
-`)
-		writeFile(t, dir, "greeting.scenario.yaml", `metadata:
-  name: Greeting Test
-spec:
-  id: greeting-test
-  turns:
-    - role: user
-      content: "Hello"
-`)
-
-		path := findScenarioFile(dir, "", "greeting-test")
-		assert.Equal(t, filepath.Join(dir, "greeting.scenario.yaml"), path)
-	})
-
-	t.Run("finds scenario by metadata.name when no spec.id", func(t *testing.T) {
-		dir := t.TempDir()
-		writeFile(t, dir, "config.arena.yaml", `spec:
-  scenarios:
-    - file: auth.scenario.yaml
-`)
-		writeFile(t, dir, "auth.scenario.yaml", `metadata:
-  name: auth-test
-spec:
-  turns:
-    - role: user
-      content: "Login"
-`)
-
-		path := findScenarioFile(dir, "", "auth-test")
-		assert.Equal(t, filepath.Join(dir, "auth.scenario.yaml"), path)
-	})
-
-	t.Run("returns empty for unknown scenario ID", func(t *testing.T) {
-		dir := t.TempDir()
-		writeFile(t, dir, "config.arena.yaml", `spec:
-  scenarios:
-    - file: test.scenario.yaml
-`)
-		writeFile(t, dir, "test.scenario.yaml", `spec:
-  id: test-scenario
-`)
-
-		path := findScenarioFile(dir, "", "nonexistent")
-		assert.Empty(t, path)
-	})
-
-	t.Run("returns empty for default scenario ID", func(t *testing.T) {
-		path := findScenarioFile("/tmp", "", "default")
-		assert.Empty(t, path)
-	})
-
-	t.Run("returns empty for empty scenario ID", func(t *testing.T) {
-		path := findScenarioFile("/tmp", "", "")
-		assert.Empty(t, path)
-	})
-}
-
-func TestMatchesScenarioID(t *testing.T) {
-	t.Run("matches by spec.id", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "test.yaml")
-		writeFile(t, dir, "test.yaml", `spec:
-  id: my-scenario
-`)
-		assert.True(t, matchesScenarioID(path, "test.yaml", "my-scenario"))
-		assert.False(t, matchesScenarioID(path, "test.yaml", "other"))
-	})
-
-	t.Run("matches by metadata.name when no spec.id", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "test.yaml")
-		writeFile(t, dir, "test.yaml", `metadata:
-  name: my-name
-spec:
-  turns: []
-`)
-		assert.True(t, matchesScenarioID(path, "test.yaml", "my-name"))
-	})
-
-	t.Run("matches by filename derivation as fallback", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "billing-flow.scenario.yaml")
-		writeFile(t, dir, "billing-flow.scenario.yaml", `spec:
-  turns: []
-`)
-		assert.True(t, matchesScenarioID(path, "billing-flow.scenario.yaml", "billing-flow"))
-	})
-}
-
 func TestLoadConfigFleet(t *testing.T) {
 	t.Run("loads fleet config from env", func(t *testing.T) {
 		t.Setenv("ARENA_JOB_NAME", "test-job")
@@ -753,9 +656,4 @@ func TestLoadConfigFleet(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ARENA_FLEET_WS_URL is required")
 	})
-}
-
-func writeFile(t *testing.T, dir, name, content string) {
-	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
 }

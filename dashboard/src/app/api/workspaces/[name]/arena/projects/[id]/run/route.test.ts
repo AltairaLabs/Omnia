@@ -375,6 +375,117 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
     );
   });
 
+  it("creates fleet mode evaluation with execution config", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { listCrd, createCrd } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+    vi.mocked(listCrd).mockResolvedValue([
+      {
+        metadata: {
+          name: "project-project-1",
+          namespace: "test-ns",
+          labels: { "arena.omnia.altairalabs.ai/project-id": "project-1" },
+        },
+        spec: { type: "configmap", configMap: { name: "arena-project-project-1" }, interval: "5m" },
+        status: { phase: "Ready" },
+      },
+    ]);
+    vi.mocked(createCrd).mockResolvedValue({
+      metadata: { name: "project-1-evaluation-xyz", namespace: "test-ns" },
+      spec: {
+        type: "evaluation",
+        sourceRef: { name: "project-project-1" },
+        execution: { mode: "fleet", target: { agentRuntimeRef: { name: "echo-agent" } } },
+      },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      createMockRequest({
+        type: "evaluation",
+        execution: {
+          mode: "fleet",
+          target: { agentRuntimeRef: { name: "echo-agent" } },
+        },
+      }),
+      createMockContext()
+    );
+
+    expect(response.status).toBe(201);
+    expect(createCrd).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        spec: expect.objectContaining({
+          type: "evaluation",
+          execution: {
+            mode: "fleet",
+            target: { agentRuntimeRef: { name: "echo-agent" } },
+          },
+        }),
+      })
+    );
+  });
+
+  it("omits execution config for direct mode", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { listCrd, createCrd } = await import("@/lib/k8s/crd-operations");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" },
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+    vi.mocked(listCrd).mockResolvedValue([
+      {
+        metadata: {
+          name: "project-project-1",
+          namespace: "test-ns",
+          labels: { "arena.omnia.altairalabs.ai/project-id": "project-1" },
+        },
+        spec: { type: "configmap", configMap: { name: "arena-project-project-1" }, interval: "5m" },
+        status: { phase: "Ready" },
+      },
+    ]);
+    vi.mocked(createCrd).mockResolvedValue({
+      metadata: { name: "project-1-evaluation-xyz", namespace: "test-ns" },
+      spec: { type: "evaluation", sourceRef: { name: "project-project-1" } },
+    });
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      createMockRequest({
+        type: "evaluation",
+        execution: { mode: "direct" },
+      }),
+      createMockContext()
+    );
+
+    expect(response.status).toBe(201);
+    expect(createCrd).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        spec: expect.not.objectContaining({
+          execution: expect.anything(),
+        }),
+      })
+    );
+  });
+
   it("includes scenarios filter when provided", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");

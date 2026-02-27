@@ -36,16 +36,6 @@ import (
 const (
 	// TracerName is the name of the tracer used for runtime spans.
 	TracerName = "omnia-runtime"
-
-	// SpanKindConversation indicates a conversation span.
-	SpanKindConversation = "conversation"
-	// SpanKindLLM indicates an LLM call span.
-	SpanKindLLM = "llm"
-	// SpanKindTool indicates a tool execution span.
-	SpanKindTool = "tool"
-
-	// attrSpanKind is the attribute key for omnia span kind.
-	attrSpanKind = "omnia.span_kind"
 )
 
 // Config holds tracing configuration.
@@ -155,6 +145,15 @@ func (p *Provider) Tracer() trace.Tracer {
 	return p.tracer
 }
 
+// TracerProvider returns the underlying TracerProvider for SDK integration.
+// Returns the configured provider if tracing is enabled, or the global provider otherwise.
+func (p *Provider) TracerProvider() trace.TracerProvider {
+	if p.tp != nil {
+		return p.tp
+	}
+	return otel.GetTracerProvider()
+}
+
 // Shutdown shuts down the tracer provider.
 func (p *Provider) Shutdown(ctx context.Context) error {
 	if p.tp != nil {
@@ -168,8 +167,7 @@ func (p *Provider) StartConversationSpan(ctx context.Context, sessionID string) 
 	ctx, span := p.tracer.Start(ctx, "conversation.turn",
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
-			attribute.String(attrSpanKind, SpanKindConversation),
-			attribute.String("omnia.session_id", sessionID),
+			attribute.String("session.id", sessionID),
 		),
 	)
 	return ctx, span
@@ -180,8 +178,7 @@ func (p *Provider) StartLLMSpan(ctx context.Context, model string) (context.Cont
 	ctx, span := p.tracer.Start(ctx, "llm.call",
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String(attrSpanKind, SpanKindLLM),
-			attribute.String("llm.model", model),
+			attribute.String("gen_ai.request.model", model),
 		),
 	)
 	return ctx, span
@@ -192,7 +189,6 @@ func (p *Provider) StartToolSpan(ctx context.Context, toolName string) (context.
 	ctx, span := p.tracer.Start(ctx, fmt.Sprintf("tool.%s", toolName),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String(attrSpanKind, SpanKindTool),
 			attribute.String("tool.name", toolName),
 		),
 	)
@@ -215,25 +211,26 @@ func SetSuccess(span trace.Span) {
 // AddLLMMetrics adds LLM-specific metrics to a span.
 func AddLLMMetrics(span trace.Span, inputTokens, outputTokens int, costUSD float64) {
 	span.SetAttributes(
-		attribute.Int("llm.input_tokens", inputTokens),
-		attribute.Int("llm.output_tokens", outputTokens),
-		attribute.Int("llm.total_tokens", inputTokens+outputTokens),
-		attribute.Float64("llm.cost_usd", costUSD),
+		attribute.Int("gen_ai.usage.input_tokens", inputTokens),
+		attribute.Int("gen_ai.usage.output_tokens", outputTokens),
+		attribute.Float64("gen_ai.usage.cost", costUSD),
 	)
 }
 
 // AddToolResult adds tool execution result info to a span.
-func AddToolResult(span trace.Span, isError bool, resultSize int) {
+func AddToolResult(span trace.Span, isError bool, durationMs int) {
+	if isError {
+		span.SetStatus(codes.Error, "tool execution failed")
+	}
 	span.SetAttributes(
-		attribute.Bool("tool.is_error", isError),
-		attribute.Int("tool.result_size", resultSize),
+		attribute.Int("tool.duration_ms", durationMs),
 	)
 }
 
 // AddConversationMetrics adds conversation metrics to a span.
 func AddConversationMetrics(span trace.Span, messageLength int, responseLength int) {
 	span.SetAttributes(
-		attribute.Int("conversation.message_length", messageLength),
-		attribute.Int("conversation.response_length", responseLength),
+		attribute.Int("gen_ai.prompt.length", messageLength),
+		attribute.Int("gen_ai.response.length", responseLength),
 	)
 }

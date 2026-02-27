@@ -57,18 +57,21 @@ import {
   Activity,
   Database,
   Gauge,
+  Copy,
 } from "lucide-react";
 import Link from "next/link";
 import {
   ArenaBreadcrumb,
   JobDialog,
 } from "@/components/arena";
+import { QuickRunDialog } from "@/components/arena/quick-run-dialog";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
 
 interface JobActionsProps {
   job: ArenaJob;
   onCancel: () => void;
   onDelete: () => void;
+  onClone: () => void;
   canEdit: boolean;
 }
 
@@ -76,9 +79,12 @@ function JobActions({
   job,
   onCancel,
   onDelete,
+  onClone,
   canEdit,
 }: Readonly<JobActionsProps>) {
   const isRunning = job.status?.phase === "Running" || job.status?.phase === "Pending";
+  const isFinished = job.status?.phase === "Succeeded" || job.status?.phase === "Failed" || job.status?.phase === "Cancelled";
+  const hasProjectId = !!job.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"];
 
   return (
     <DropdownMenu>
@@ -88,6 +94,12 @@ function JobActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {isFinished && hasProjectId && (
+          <DropdownMenuItem onClick={onClone} disabled={!canEdit}>
+            <Copy className="h-4 w-4 mr-2" />
+            Clone
+          </DropdownMenuItem>
+        )}
         {isRunning && (
           <DropdownMenuItem onClick={onCancel} disabled={!canEdit}>
             <XCircle className="h-4 w-4 mr-2" />
@@ -222,11 +234,13 @@ function JobsTable({
   jobs,
   onCancel,
   onDelete,
+  onClone,
   canEdit,
 }: Readonly<{
   jobs: ArenaJob[];
   onCancel: (name: string) => void;
   onDelete: (name: string) => void;
+  onClone: (job: ArenaJob) => void;
   canEdit: boolean;
 }>) {
   if (jobs.length === 0) {
@@ -291,6 +305,7 @@ function JobsTable({
                 job={job}
                 onCancel={() => onCancel(job.metadata?.name || "")}
                 onDelete={() => onDelete(job.metadata?.name || "")}
+                onClone={() => onClone(job)}
                 canEdit={canEdit}
               />
             </TableCell>
@@ -305,11 +320,13 @@ function JobsGrid({
   jobs,
   onCancel,
   onDelete,
+  onClone,
   canEdit,
 }: Readonly<{
   jobs: ArenaJob[];
   onCancel: (name: string) => void;
   onDelete: (name: string) => void;
+  onClone: (job: ArenaJob) => void;
   canEdit: boolean;
 }>) {
   if (jobs.length === 0) {
@@ -344,6 +361,7 @@ function JobsGrid({
               job={job}
               onCancel={() => onCancel(job.metadata?.name || "")}
               onDelete={() => onDelete(job.metadata?.name || "")}
+              onClone={() => onClone(job)}
               canEdit={canEdit}
             />
           </CardHeader>
@@ -421,6 +439,7 @@ export default function ArenaJobsPage() {
   const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
   const [dialogOpen, setDialogOpen] = useState(!!initialSourceRef);
   const [preselectedSource] = useState<string | undefined>(initialSourceRef);
+  const [cloneJob, setCloneJob] = useState<ArenaJob | null>(null);
 
   const filteredJobs = useMemo(() => {
     return jobs.filter((job) => {
@@ -554,6 +573,7 @@ export default function ArenaJobsPage() {
               jobs={filteredJobs}
               onCancel={handleCancel}
               onDelete={handleDelete}
+              onClone={setCloneJob}
               canEdit={canEdit}
             />
           ) : (
@@ -561,6 +581,7 @@ export default function ArenaJobsPage() {
               jobs={filteredJobs}
               onCancel={handleCancel}
               onDelete={handleDelete}
+              onClone={setCloneJob}
               canEdit={canEdit}
             />
           )}
@@ -576,6 +597,27 @@ export default function ArenaJobsPage() {
         onSuccess={handleSaveSuccess}
         onClose={handleDialogClose}
       />
+
+      {/* Clone Dialog */}
+      {cloneJob?.spec?.type && (
+        <QuickRunDialog
+          open={!!cloneJob}
+          onOpenChange={(open) => { if (!open) setCloneJob(null); }}
+          projectId={cloneJob.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"]}
+          type={cloneJob.spec.type}
+          initialValues={{
+            executionMode: cloneJob.spec.execution?.mode ?? "direct",
+            targetAgent: cloneJob.spec.execution?.target?.agentRuntimeRef?.name ?? "",
+            includePatterns: cloneJob.spec.scenarios?.include?.join(", ") ?? "",
+            excludePatterns: cloneJob.spec.scenarios?.exclude?.join(", ") ?? "",
+            verbose: cloneJob.spec.verbose ?? false,
+          }}
+          onJobCreated={() => {
+            setCloneJob(null);
+            refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

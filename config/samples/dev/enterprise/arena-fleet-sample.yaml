@@ -1,0 +1,73 @@
+---
+# ConfigMap containing Arena fleet project files.
+# Keys use __ encoding for path separators (matching the deploy route's encodeFilePathForConfigMap).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arena-project-fleet-echo-test
+  namespace: dev-agents
+  labels:
+    arena.omnia.altairalabs.ai/project-id: fleet-echo-test
+    app.kubernetes.io/managed-by: omnia-arena
+data:
+  # PromptKit arena config — also serves as dashboard metadata.
+  # The worker reads apiVersion/kind/spec; the dashboard reads name/description/tags
+  # (falling back to projectId when those fields are absent from a PromptKit config).
+  config.arena.yaml: |
+    apiVersion: promptkit.altairalabs.ai/v1alpha1
+    kind: ArenaConfig
+    metadata:
+      name: fleet-echo-test
+    spec:
+      providers: []
+      scenarios:
+        - file: scenarios/echo-greeting.scenario.yaml
+        - file: scenarios/echo-math.scenario.yaml
+      defaults:
+        temperature: 0
+        max_tokens: 256
+
+  # Scenario: single-turn greeting
+  scenarios__echo-greeting.scenario.yaml: |
+    apiVersion: promptkit.altairalabs.ai/v1alpha1
+    kind: Scenario
+    metadata:
+      name: echo-greeting
+    spec:
+      id: echo-greeting
+      task_type: assistant
+      description: Single-turn greeting test for the echo agent
+      turns:
+        - role: user
+          content: "Hello! How are you?"
+
+  # Scenario: multi-turn math
+  scenarios__echo-math.scenario.yaml: |
+    apiVersion: promptkit.altairalabs.ai/v1alpha1
+    kind: Scenario
+    metadata:
+      name: echo-math
+    spec:
+      id: echo-math
+      task_type: assistant
+      description: Multi-turn math test for the echo agent
+      turns:
+        - role: user
+          content: "What is 2+2?"
+        - role: user
+          content: "And what is 3+3?"
+---
+# ArenaSource referencing the ConfigMap
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ArenaSource
+metadata:
+  name: project-fleet-echo-test
+  namespace: dev-agents
+  labels:
+    arena.omnia.altairalabs.ai/project-id: fleet-echo-test
+    app.kubernetes.io/managed-by: omnia-arena
+spec:
+  type: configmap
+  configMap:
+    name: arena-project-fleet-echo-test
+  interval: 5m

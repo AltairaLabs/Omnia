@@ -62,6 +62,9 @@ type Config struct {
 	// Tools configuration
 	ToolsConfigPath string // Path to tools.yaml configuration file
 
+	// Eval configuration
+	EvalEnabled bool // Enable real-time evals for PromptKit agents
+
 	// Tracing configuration
 	TracingEnabled    bool    // Enable OpenTelemetry tracing
 	TracingEndpoint   string  // OTLP collector endpoint (e.g., "localhost:4317")
@@ -96,6 +99,7 @@ const (
 	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
 	envMediaBasePath          = "OMNIA_MEDIA_BASE_PATH"
 	envToolsConfigPath        = "OMNIA_TOOLS_CONFIG"
+	envEvalEnabled            = "OMNIA_EVAL_ENABLED"
 	envTracingEnabled         = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint        = "OMNIA_TRACING_ENDPOINT"
 	envTracingSampleRate      = "OMNIA_TRACING_SAMPLE_RATE"
@@ -149,6 +153,7 @@ func LoadConfig() (*Config, error) {
 		MockConfigPath:       getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
 		MediaBasePath:        getEnvOrDefault(envMediaBasePath, defaultMediaBasePath),
 		ToolsConfigPath:      getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
+		EvalEnabled:          os.Getenv(envEvalEnabled) == "true",
 		TracingEnabled:       os.Getenv(envTracingEnabled) == "true",
 		TracingEndpoint:      os.Getenv(envTracingEndpoint),
 		TracingSampleRate:    1.0, // Default to sampling all traces

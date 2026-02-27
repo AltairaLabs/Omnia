@@ -1,0 +1,87 @@
+---
+# Job that seeds the arena project directory on the workspace PVC so the
+# dashboard's project-list API can discover it.
+# Must run in omnia-system because that's where the omnia-workspace-content PVC lives.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: arena-fleet-seeder
+  namespace: omnia-system
+spec:
+  ttlSecondsAfterFinished: 120
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        # Run as root to write to workspace-content PVC (consistent with arena controller)
+        runAsNonRoot: false
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seeder
+          image: busybox:1.36
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          command: ["/bin/sh"]
+          args:
+            - -c
+            - |
+              set -e
+              BASE="/workspace-content/dev-agents/dev-agents/arena/projects/fleet-echo-test"
+              mkdir -p "$BASE/scenarios"
+              cat > "$BASE/config.arena.yaml" <<'EOF'
+              apiVersion: promptkit.altairalabs.ai/v1alpha1
+              kind: ArenaConfig
+              metadata:
+                name: fleet-echo-test
+              spec:
+                providers: []
+                scenarios:
+                  - file: scenarios/echo-greeting.scenario.yaml
+                  - file: scenarios/echo-math.scenario.yaml
+                defaults:
+                  temperature: 0
+                  max_tokens: 256
+              EOF
+              cat > "$BASE/scenarios/echo-greeting.scenario.yaml" <<'EOF'
+              apiVersion: promptkit.altairalabs.ai/v1alpha1
+              kind: Scenario
+              metadata:
+                name: echo-greeting
+              spec:
+                id: echo-greeting
+                task_type: assistant
+                description: Single-turn greeting test for the echo agent
+                turns:
+                  - role: user
+                    content: "Hello! How are you?"
+              EOF
+              cat > "$BASE/scenarios/echo-math.scenario.yaml" <<'EOF'
+              apiVersion: promptkit.altairalabs.ai/v1alpha1
+              kind: Scenario
+              metadata:
+                name: echo-math
+              spec:
+                id: echo-math
+                task_type: assistant
+                description: Multi-turn math test for the echo agent
+                turns:
+                  - role: user
+                    content: "What is 2+2?"
+                  - role: user
+                    content: "And what is 3+3?"
+              EOF
+              echo "Seeded fleet-echo-test project at $BASE"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace-content
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: omnia-workspace-content
