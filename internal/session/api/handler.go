@@ -91,11 +91,13 @@ func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) 
 
 // CreateSessionRequest is the JSON body for POST /api/v1/sessions.
 type CreateSessionRequest struct {
-	ID            string `json:"id"`
-	AgentName     string `json:"agentName"`
-	Namespace     string `json:"namespace"`
-	WorkspaceName string `json:"workspaceName,omitempty"`
-	TTLSeconds    int    `json:"ttlSeconds,omitempty"`
+	ID                string `json:"id"`
+	AgentName         string `json:"agentName"`
+	Namespace         string `json:"namespace"`
+	WorkspaceName     string `json:"workspaceName,omitempty"`
+	TTLSeconds        int    `json:"ttlSeconds,omitempty"`
+	PromptPackName    string `json:"promptPackName,omitempty"`
+	PromptPackVersion string `json:"promptPackVersion,omitempty"`
 }
 
 // AppendMessageRequest is the JSON body for POST /api/v1/sessions/{sessionID}/messages.
@@ -304,13 +306,15 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	sess := &session.Session{
-		ID:            req.ID,
-		AgentName:     req.AgentName,
-		Namespace:     req.Namespace,
-		WorkspaceName: req.WorkspaceName,
-		Status:        session.SessionStatusActive,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                req.ID,
+		AgentName:         req.AgentName,
+		Namespace:         req.Namespace,
+		WorkspaceName:     req.WorkspaceName,
+		PromptPackName:    req.PromptPackName,
+		PromptPackVersion: req.PromptPackVersion,
+		Status:            session.SessionStatusActive,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if req.TTLSeconds > 0 {
 		sess.ExpiresAt = now.Add(time.Duration(req.TTLSeconds) * time.Second)

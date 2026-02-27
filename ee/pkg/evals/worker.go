@@ -58,6 +58,9 @@ type WorkerConfig struct {
 	// RateLimiter controls eval execution throughput.
 	// If nil, a default RateLimiter (50 evals/sec, 5 concurrent judges) is used.
 	RateLimiter *RateLimiter
+	// PackLoader loads eval definitions from PromptPack ConfigMaps.
+	// If nil, no evals are loaded from PromptPacks (original behavior).
+	PackLoader *PromptPackLoader
 }
 
 // EvalWorker consumes session events from Redis Streams and runs evals.
@@ -72,6 +75,7 @@ type EvalWorker struct {
 	completionTracker *CompletionTracker
 	sampler           *Sampler
 	rateLimiter       *RateLimiter
+	packLoader        *PromptPackLoader
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace.
@@ -111,6 +115,7 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		evalRunner:    runner,
 		sampler:       sampler,
 		rateLimiter:   rateLimiter,
+		packLoader:    config.PackLoader,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -242,6 +247,18 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 
 // processAssistantMessage handles assistant message events by running per-turn evals.
 func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.SessionEvent) error {
+	packEvals := w.loadPackEvals(ctx, event)
+	if packEvals == nil {
+		w.logger.Debug("no per_turn evals to run (no pack)", "sessionID", event.SessionID)
+		return nil
+	}
+
+	evalDefs := filterPerTurnEvals(packEvals.Evals)
+	if len(evalDefs) == 0 {
+		w.logger.Debug("no per_turn evals to run", "sessionID", event.SessionID)
+		return nil
+	}
+
 	sess, err := w.sessionAPI.GetSession(ctx, event.SessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
@@ -254,13 +271,8 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 
 	turnIndex := countAssistantMessages(messages)
 
-	evalDefs := filterPerTurnDeterministicEvals(nil)
-	if len(evalDefs) == 0 {
-		w.logger.Debug("no per_turn deterministic evals to run", "sessionID", event.SessionID)
-		return nil
-	}
-
-	results := w.runEvalsWithSampling(ctx, evalDefs, messages, event, sess.AgentName, turnIndex)
+	enrichedEvent := enrichEvent(event, packEvals)
+	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex)
 	return w.writeResults(ctx, results, event.SessionID)
 }
 
@@ -273,6 +285,25 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		return fmt.Errorf("get session: %w", err)
 	}
 
+	event := api.SessionEvent{
+		SessionID:         sessionID,
+		Namespace:         sess.Namespace,
+		PromptPackName:    sess.PromptPackName,
+		PromptPackVersion: sess.PromptPackVersion,
+	}
+
+	packEvals := w.loadPackEvals(ctx, event)
+	if packEvals == nil {
+		w.logger.Debug("no on_session_complete evals to run (no pack)", "sessionID", sessionID)
+		return nil
+	}
+
+	evalDefs := filterOnCompleteEvals(packEvals.Evals)
+	if len(evalDefs) == 0 {
+		w.logger.Debug("no on_session_complete evals to run", "sessionID", sessionID)
+		return nil
+	}
+
 	messages, err := w.sessionAPI.GetSessionMessages(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session messages: %w", err)
@@ -280,17 +311,8 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 
 	turnIndex := countAssistantMessages(messages)
 
-	evalDefs := filterOnCompleteDeterministicEvals(nil)
-	if len(evalDefs) == 0 {
-		w.logger.Debug("no on_session_complete deterministic evals to run", "sessionID", sessionID)
-		return nil
-	}
-
-	event := api.SessionEvent{
-		SessionID: sessionID,
-		Namespace: sess.Namespace,
-	}
-	results := w.runEvalsWithSampling(ctx, evalDefs, messages, event, sess.AgentName, turnIndex)
+	enrichedEvent := enrichEvent(event, packEvals)
+	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex)
 	return w.writeResults(ctx, results, sessionID)
 }
 
@@ -441,17 +463,19 @@ func countAssistantMessages(messages []session.Message) int {
 // toEvalResult converts an EvaluateResultItem to an EvalResult for persistence.
 func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName string) *api.EvalResult {
 	result := &api.EvalResult{
-		SessionID: event.SessionID,
-		MessageID: event.MessageID,
-		AgentName: agentName,
-		Namespace: event.Namespace,
-		EvalID:    item.EvalID,
-		EvalType:  item.EvalType,
-		Trigger:   item.Trigger,
-		Passed:    item.Passed,
-		Score:     item.Score,
-		Source:    evalSource,
-		CreatedAt: time.Now(),
+		SessionID:         event.SessionID,
+		MessageID:         event.MessageID,
+		AgentName:         agentName,
+		Namespace:         event.Namespace,
+		PromptPackName:    event.PromptPackName,
+		PromptPackVersion: event.PromptPackVersion,
+		EvalID:            item.EvalID,
+		EvalType:          item.EvalType,
+		Trigger:           item.Trigger,
+		Passed:            item.Passed,
+		Score:             item.Score,
+		Source:            evalSource,
+		CreatedAt:         time.Now(),
 	}
 
 	if item.DurationMs > 0 {
@@ -483,6 +507,65 @@ func filterPerTurnDeterministicEvals(defs []EvalDef) []api.EvalDefinition {
 		}
 	}
 	return result
+}
+
+// filterPerTurnEvals filters eval definitions to all per_turn evals (including LLM judges).
+func filterPerTurnEvals(defs []EvalDef) []api.EvalDefinition {
+	var result []api.EvalDefinition
+	for _, d := range defs {
+		if d.Trigger == triggerPerTurn {
+			result = append(result, api.EvalDefinition{
+				ID:      d.ID,
+				Type:    d.Type,
+				Trigger: d.Trigger,
+				Params:  d.Params,
+			})
+		}
+	}
+	return result
+}
+
+// filterOnCompleteEvals filters eval definitions to all on_session_complete evals.
+func filterOnCompleteEvals(defs []EvalDef) []api.EvalDefinition {
+	var result []api.EvalDefinition
+	for _, d := range defs {
+		if d.Trigger == triggerOnComplete {
+			result = append(result, api.EvalDefinition{
+				ID:      d.ID,
+				Type:    d.Type,
+				Trigger: d.Trigger,
+				Params:  d.Params,
+			})
+		}
+	}
+	return result
+}
+
+// loadPackEvals loads eval definitions from the PromptPack referenced in the event.
+// Returns nil if no pack loader is configured or the event has no PromptPack name.
+func (w *EvalWorker) loadPackEvals(ctx context.Context, event api.SessionEvent) *PromptPackEvals {
+	if w.packLoader == nil || event.PromptPackName == "" {
+		return nil
+	}
+
+	packEvals, err := w.packLoader.LoadEvals(ctx, event.Namespace, event.PromptPackName, event.PromptPackVersion)
+	if err != nil {
+		w.logger.Warn("failed to load PromptPack evals",
+			"sessionID", event.SessionID,
+			"packName", event.PromptPackName,
+			"error", err,
+		)
+		return nil
+	}
+
+	return packEvals
+}
+
+// enrichEvent copies the event and adds PromptPack metadata for result attribution.
+func enrichEvent(event api.SessionEvent, packEvals *PromptPackEvals) api.SessionEvent {
+	event.PromptPackName = packEvals.PackName
+	event.PromptPackVersion = packEvals.PackVersion
+	return event
 }
 
 // isAssistantMessageEvent returns true if the event is for an assistant message.

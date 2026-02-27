@@ -85,7 +85,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-arena-dev-console-dev'])
+    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-arena-dev-console-dev', 'omnia-eval-worker-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -377,6 +377,28 @@ if ENABLE_ENTERPRISE:
         only=arena_dev_console_only,
     )
 
+    # Build eval-worker image (non-PromptKit agent eval execution)
+    eval_worker_only = [
+        './ee/cmd/arena-eval-worker',
+        './ee/internal',
+        './ee/pkg',
+        './ee/api',
+        './internal',
+        './pkg',
+        './api',
+        './go.mod',
+        './go.sum',
+    ]
+    if USE_LOCAL_PROMPTKIT:
+        eval_worker_only.append('./promptkit-local')
+
+    docker_build(
+        'omnia-eval-worker-dev',
+        context='.',
+        dockerfile='./ee/Dockerfile.eval-worker',
+        only=eval_worker_only,
+    )
+
 # ============================================================================
 # LangChain Runtime - Python-based agent framework
 # ============================================================================
@@ -472,6 +494,11 @@ if ENABLE_ENTERPRISE:
         'enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev',
         'enterprise.arena.devConsole.image.tag=latest',
         'enterprise.arena.devConsole.image.pullPolicy=Never',
+        # Eval worker for non-PromptKit agent eval execution
+        'enterprise.evalWorker.enabled=true',
+        'enterprise.evalWorker.image.repository=omnia-eval-worker-dev',
+        'enterprise.evalWorker.image.tag=latest',
+        'enterprise.evalWorker.image.pullPolicy=Never',
     ])
 else:
     # Disable enterprise features

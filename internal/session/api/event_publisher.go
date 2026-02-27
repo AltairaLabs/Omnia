@@ -37,13 +37,15 @@ const (
 
 // SessionEvent represents a lightweight event published to Redis Streams.
 type SessionEvent struct {
-	EventType   string `json:"eventType"`
-	SessionID   string `json:"sessionId"`
-	AgentName   string `json:"agentName"`
-	Namespace   string `json:"namespace"`
-	MessageID   string `json:"messageId,omitempty"`
-	MessageRole string `json:"messageRole,omitempty"`
-	Timestamp   string `json:"timestamp"`
+	EventType         string `json:"eventType"`
+	SessionID         string `json:"sessionId"`
+	AgentName         string `json:"agentName"`
+	Namespace         string `json:"namespace"`
+	MessageID         string `json:"messageId,omitempty"`
+	MessageRole       string `json:"messageRole,omitempty"`
+	PromptPackName    string `json:"promptPackName,omitempty"`
+	PromptPackVersion string `json:"promptPackVersion,omitempty"`
+	Timestamp         string `json:"timestamp"`
 }
 
 // EventPublisher publishes session events for downstream consumers.

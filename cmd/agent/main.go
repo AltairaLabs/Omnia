@@ -131,6 +131,8 @@ func main() {
 	// Create WebSocket server with metrics
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
+	wsConfig.PromptPackName = cfg.PromptPackName
+	wsConfig.PromptPackVersion = cfg.PromptPackVersion
 	serverOpts := []facade.ServerOption{facade.WithMetrics(metrics)}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, facade.WithTracingProvider(tracingProvider))

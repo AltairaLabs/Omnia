@@ -453,13 +453,15 @@ func (s *SessionService) publishMessageEvent(ctx context.Context, sessionID stri
 	}
 	sess := s.lookupSessionMetadata(ctx, sessionID)
 	event := SessionEvent{
-		EventType:   "message.assistant",
-		SessionID:   sessionID,
-		AgentName:   sess.AgentName,
-		Namespace:   sess.Namespace,
-		MessageID:   msg.ID,
-		MessageRole: string(msg.Role),
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		EventType:         "message.assistant",
+		SessionID:         sessionID,
+		AgentName:         sess.AgentName,
+		Namespace:         sess.Namespace,
+		MessageID:         msg.ID,
+		MessageRole:       string(msg.Role),
+		PromptPackName:    sess.PromptPackName,
+		PromptPackVersion: sess.PromptPackVersion,
+		Timestamp:         time.Now().UTC().Format(time.RFC3339),
 	}
 	s.publishAsync(event)
 }
@@ -470,11 +472,13 @@ func (s *SessionService) publishSessionCompleted(_ context.Context, sess *sessio
 		return
 	}
 	event := SessionEvent{
-		EventType: "session.completed",
-		SessionID: sess.ID,
-		AgentName: sess.AgentName,
-		Namespace: sess.Namespace,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		EventType:         "session.completed",
+		SessionID:         sess.ID,
+		AgentName:         sess.AgentName,
+		Namespace:         sess.Namespace,
+		PromptPackName:    sess.PromptPackName,
+		PromptPackVersion: sess.PromptPackVersion,
+		Timestamp:         time.Now().UTC().Format(time.RFC3339),
 	}
 	s.publishAsync(event)
 }

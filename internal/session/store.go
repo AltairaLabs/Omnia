@@ -148,6 +148,10 @@ type Session struct {
 	Tags []string `json:"tags,omitempty"`
 	// LastMessagePreview is a truncated preview of the last message.
 	LastMessagePreview string `json:"lastMessagePreview,omitempty"`
+	// PromptPackName is the PromptPack associated with this session's agent.
+	PromptPackName string `json:"promptPackName,omitempty"`
+	// PromptPackVersion is the version of the PromptPack at session creation.
+	PromptPackVersion string `json:"promptPackVersion,omitempty"`
 }
 
 // IsExpired returns true if the session has expired.
@@ -170,6 +174,10 @@ type CreateSessionOptions struct {
 	TTL time.Duration
 	// InitialState is optional initial state.
 	InitialState map[string]string
+	// PromptPackName is the PromptPack associated with this session's agent.
+	PromptPackName string
+	// PromptPackVersion is the version of the PromptPack at session creation.
+	PromptPackVersion string
 }
 
 // SessionStatsUpdate contains incremental updates to session-level counters.

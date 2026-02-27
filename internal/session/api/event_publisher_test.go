@@ -319,6 +319,92 @@ func TestRedisEventPublisher_PublishMessageEvent(t *testing.T) {
 	assert.Equal(t, "test-ns", decoded.Namespace)
 }
 
+func TestRedisEventPublisher_PublishMessageEvent_WithPromptPack(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	pub := NewRedisEventPublisher(client, logr.Discard())
+
+	event := SessionEvent{
+		EventType:         "message.assistant",
+		SessionID:         "s1",
+		AgentName:         "agent-1",
+		Namespace:         "test-ns",
+		MessageID:         "m1",
+		MessageRole:       "assistant",
+		PromptPackName:    "my-pack",
+		PromptPackVersion: "v2",
+		Timestamp:         time.Now().Format(time.RFC3339),
+	}
+
+	err := pub.PublishMessageEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	streamKey := StreamKey("test-ns")
+	msgs, err := client.XRange(context.Background(), streamKey, "-", "+").Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	payload := msgs[0].Values["payload"].(string)
+	var decoded SessionEvent
+	err = json.Unmarshal([]byte(payload), &decoded)
+	require.NoError(t, err)
+	assert.Equal(t, "my-pack", decoded.PromptPackName)
+	assert.Equal(t, "v2", decoded.PromptPackVersion)
+}
+
+func TestAppendMessage_AssistantPublishesEventWithPromptPack(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:                "s1",
+		AgentName:         "test-agent",
+		Namespace:         "test-ns",
+		PromptPackName:    "my-pack",
+		PromptPackVersion: "v3",
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	pub := &mockEventPublisher{}
+	svc := newServiceWithPublisher(registry, pub)
+
+	msg := &session.Message{ID: "m1", Role: session.RoleAssistant, Content: "hello"}
+	err := svc.AppendMessage(context.Background(), "s1", msg)
+	require.NoError(t, err)
+
+	events := pub.waitForEvents(t, 1, 2*time.Second)
+	assert.Equal(t, "my-pack", events[0].PromptPackName)
+	assert.Equal(t, "v3", events[0].PromptPackVersion)
+}
+
+func TestUpdateSessionStats_CompletedPublishesEventWithPromptPack(t *testing.T) {
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{
+		ID:                "s1",
+		AgentName:         "test-agent",
+		Namespace:         "test-ns",
+		Status:            session.SessionStatusActive,
+		PromptPackName:    "my-pack",
+		PromptPackVersion: "v3",
+	}
+
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	pub := &mockEventPublisher{}
+	svc := newServiceWithPublisher(registry, pub)
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		SetStatus: session.SessionStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	events := pub.waitForEvents(t, 1, 2*time.Second)
+	assert.Equal(t, "session.completed", events[0].EventType)
+	assert.Equal(t, "my-pack", events[0].PromptPackName)
+	assert.Equal(t, "v3", events[0].PromptPackVersion)
+}
+
 func TestRedisEventPublisher_PublishMultipleEvents(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})

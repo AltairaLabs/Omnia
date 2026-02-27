@@ -57,6 +57,10 @@ type ServerConfig struct {
 	MaxMessageSize int64
 	// SessionTTL is the default TTL for new sessions.
 	SessionTTL time.Duration
+	// PromptPackName is the PromptPack associated with this agent (from env).
+	PromptPackName string
+	// PromptPackVersion is the PromptPack version (from env).
+	PromptPackVersion string
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.

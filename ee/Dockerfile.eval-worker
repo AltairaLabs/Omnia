@@ -1,0 +1,40 @@
+# Build the eval worker binary
+FROM golang:1.26 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+
+# Copy local PromptKit source if present (for development with go.work)
+COPY promptkit-local* /workspace/promptkit-local/
+
+# Set up go.work for local PromptKit if the source directory exists
+RUN if [ -d "/workspace/promptkit-local/tools/arena" ]; then \
+        echo "go 1.25.6" > go.work && \
+        echo "" >> go.work && \
+        echo "use (" >> go.work && \
+        echo "    ." >> go.work && \
+        echo "    ./promptkit-local/pkg" >> go.work && \
+        echo "    ./promptkit-local/runtime" >> go.work && \
+        echo "    ./promptkit-local/sdk" >> go.work && \
+        echo "    ./promptkit-local/tools/arena" >> go.work && \
+        echo ")" >> go.work && \
+        cat go.work; \
+    fi
+
+# Copy only source directories needed for the build
+COPY api/ api/
+COPY ee/ ee/
+COPY pkg/ pkg/
+COPY internal/ internal/
+
+RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
+    go build -a -o arena-eval-worker ./ee/cmd/arena-eval-worker
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/arena-eval-worker .
+USER 65532:65532
+
+ENTRYPOINT ["/arena-eval-worker"]

@@ -1,0 +1,17 @@
+{{- if and .Values.enterprise.enabled .Values.enterprise.evalWorker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.evalWorker.fullname" . }}
+  labels:
+    {{- include "omnia.evalWorker.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9090
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "omnia.evalWorker.selectorLabels" . | nindent 4 }}
+{{- end }}

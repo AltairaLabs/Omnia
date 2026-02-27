@@ -149,6 +149,35 @@ enterprise:
     # -- Fetch timeout
     timeout: 2m
 
+  # Eval worker for non-PromptKit agent eval execution
+  evalWorker:
+    # -- Enable eval worker deployment
+    enabled: false
+    # -- Number of eval worker replicas
+    replicaCount: 1
+    image:
+      # -- Eval worker image repository
+      repository: ghcr.io/altairalabs/omnia-eval-worker
+      # -- Eval worker image tag (defaults to Chart appVersion)
+      tag: ""
+      # -- Eval worker image pull policy
+      pullPolicy: IfNotPresent
+    # -- Resource limits for eval worker
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    # -- Extra environment variables for eval worker (e.g., provider API keys for LLM judges)
+    extraEnv: []
+    # - name: OPENAI_API_KEY
+    #   valueFrom:
+    #     secretKeyRef:
+    #       name: llm-provider-keys
+    #       key: openai-api-key
+
   # PromptKit LSP server for YAML validation
   promptkitLsp:
     # -- Enable PromptKit LSP server

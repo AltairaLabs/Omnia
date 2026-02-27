@@ -1,0 +1,26 @@
+{{- if and .Values.enterprise.enabled .Values.enterprise.evalWorker.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "omnia.evalWorker.fullname" . }}
+  labels:
+    {{- include "omnia.evalWorker.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "omnia.evalWorker.fullname" . }}
+  labels:
+    {{- include "omnia.evalWorker.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "omnia.evalWorker.fullname" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "omnia.evalWorker.fullname" . }}
+{{- end }}
