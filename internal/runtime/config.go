@@ -18,11 +18,13 @@ limitations under the License.
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/provider"
 )
 
@@ -307,6 +309,25 @@ func (cfg *Config) validateProviderType() error {
 		return fmt.Errorf("invalid %s: must be one of %v", envProviderType, provider.ValidTypes)
 	}
 	return nil
+}
+
+// LoadConfigWithContext loads configuration, preferring CRD reading and falling back to env vars.
+func LoadConfigWithContext(ctx context.Context) (*Config, error) {
+	name := os.Getenv(envAgentName)
+	namespace := os.Getenv(envNamespace)
+
+	if name != "" && namespace != "" {
+		c, err := k8s.NewClient()
+		if err == nil {
+			cfg, crdErr := LoadFromCRD(ctx, c, name, namespace)
+			if crdErr == nil {
+				return cfg, nil
+			}
+			// Fall through to env-based loading
+		}
+	}
+
+	return LoadConfig()
 }
 
 func getEnvOrDefault(key, defaultValue string) string {

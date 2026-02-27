@@ -62,13 +62,24 @@ func GetProviderSecret(ctx context.Context, c client.Client, provider *omniav1al
 		return nil, fmt.Errorf("provider %s/%s has no secretRef", provider.Namespace, provider.Name)
 	}
 
+	return GetSecret(ctx, c, provider.Spec.SecretRef.Name, provider.Namespace)
+}
+
+// GetSecret fetches a Secret by name and namespace.
+func GetSecret(ctx context.Context, c client.Client, name, namespace string) (*corev1.Secret, error) {
 	secret := &corev1.Secret{}
-	key := types.NamespacedName{
-		Name:      provider.Spec.SecretRef.Name,
-		Namespace: provider.Namespace,
-	}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
 	if err := c.Get(ctx, key, secret); err != nil {
 		return nil, fmt.Errorf("get Secret %s: %w", key, err)
 	}
 	return secret, nil
+}
+
+// EffectiveSecretRef returns the effective SecretKeyRef for a provider,
+// preferring credential.secretRef over the legacy secretRef field.
+func EffectiveSecretRef(provider *omniav1alpha1.Provider) *omniav1alpha1.SecretKeyRef {
+	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
+		return provider.Spec.Credential.SecretRef
+	}
+	return provider.Spec.SecretRef
 }

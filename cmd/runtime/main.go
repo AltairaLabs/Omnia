@@ -64,8 +64,8 @@ func main() {
 	defer func() { _ = zapLog.Sync() }()
 	log := zapr.NewLogger(zapLog)
 
-	// Load configuration
-	cfg, err := pkruntime.LoadConfig()
+	// Load configuration — prefer CRD reading, fall back to env vars
+	cfg, err := pkruntime.LoadConfigWithContext(context.Background())
 	if err != nil {
 		log.Error(err, "failed to load configuration")
 		os.Exit(1)

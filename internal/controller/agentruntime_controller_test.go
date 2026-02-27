@@ -587,25 +587,21 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(facadeEnvMap["OMNIA_HANDLER_MODE"].Value).To(Equal("runtime"))
 			Expect(facadeEnvMap["OMNIA_RUNTIME_ADDRESS"].Value).To(Equal("localhost:9000"))
 
-			// Check runtime container env vars - API key should be on runtime
+			// Check runtime container env vars — runtime reads CRD directly,
+			// so provider/session/media/eval env vars are no longer injected.
 			runtimeEnvMap := make(map[string]corev1.EnvVar)
 			for _, env := range runtimeContainer.Env {
 				runtimeEnvMap[env.Name] = env
 			}
-			Expect(runtimeEnvMap["OMNIA_AGENT_NAME"].Value).To(Equal(agentRuntimeKey.Name))
+			// OMNIA_AGENT_NAME and OMNIA_NAMESPACE use Downward API (like facade)
+			Expect(runtimeEnvMap["OMNIA_AGENT_NAME"].ValueFrom).NotTo(BeNil())
+			Expect(runtimeEnvMap["OMNIA_AGENT_NAME"].ValueFrom.FieldRef).NotTo(BeNil())
+			Expect(runtimeEnvMap["OMNIA_NAMESPACE"].ValueFrom).NotTo(BeNil())
+			Expect(runtimeEnvMap["OMNIA_NAMESPACE"].ValueFrom.FieldRef).NotTo(BeNil())
 			Expect(runtimeEnvMap["OMNIA_GRPC_PORT"].Value).To(Equal("9000"))
-			// Provider type should be set
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_TYPE"].Value).To(Equal("claude"))
-			// For claude provider, check ANTHROPIC_API_KEY from secret
-			// The env var may appear twice (one with key matching env name, one with api-key fallback)
-			var foundAnthropicKey bool
-			for _, env := range runtimeContainer.Env {
-				if env.Name == anthropicAPIKey && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
-					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("test-secret"))
-					foundAnthropicKey = true
-				}
-			}
-			Expect(foundAnthropicKey).To(BeTrue(), "Expected ANTHROPIC_API_KEY env var from secret")
+			// Provider env vars are no longer injected — runtime reads CRD directly
+			Expect(runtimeEnvMap).NotTo(HaveKey("OMNIA_PROVIDER_TYPE"))
+			Expect(runtimeEnvMap).NotTo(HaveKey("ANTHROPIC_API_KEY"))
 		})
 
 		It("should respect the facade handler mode when specified", func() {
@@ -766,40 +762,19 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(runtimeContainer).NotTo(BeNil())
 
-			// Build env var map
+			// Build env var map — runtime reads CRD directly, provider env vars no longer injected
 			runtimeEnvMap := make(map[string]corev1.EnvVar)
 			for _, env := range runtimeContainer.Env {
 				runtimeEnvMap[env.Name] = env
 			}
 
-			// Check provider type
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_TYPE"].Value).To(Equal("openai"))
-
-			// Check model
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_MODEL"].Value).To(Equal("gpt-4o"))
-
-			// Check base URL
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_BASE_URL"].Value).To(Equal("https://api.openai.com/v1"))
-
-			// Check provider config
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_TEMPERATURE"].Value).To(Equal("0.7"))
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_TOP_P"].Value).To(Equal("0.9"))
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_MAX_TOKENS"].Value).To(Equal("4096"))
-
-			// Check pricing config
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_INPUT_COST"].Value).To(Equal("0.003"))
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_OUTPUT_COST"].Value).To(Equal("0.015"))
-			Expect(runtimeEnvMap["OMNIA_PROVIDER_CACHED_COST"].Value).To(Equal("0.001"))
-
-			// Check OpenAI API key is injected
-			var foundOpenAIKey bool
-			for _, env := range runtimeContainer.Env {
-				if env.Name == "OPENAI_API_KEY" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
-					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("openai-secret"))
-					foundOpenAIKey = true
-				}
-			}
-			Expect(foundOpenAIKey).To(BeTrue(), "Expected OPENAI_API_KEY env var from secret")
+			// Provider env vars are no longer injected — runtime reads CRD directly
+			Expect(runtimeEnvMap).NotTo(HaveKey("OMNIA_PROVIDER_TYPE"))
+			Expect(runtimeEnvMap).NotTo(HaveKey("OMNIA_PROVIDER_MODEL"))
+			Expect(runtimeEnvMap).NotTo(HaveKey("OMNIA_PROVIDER_BASE_URL"))
+			Expect(runtimeEnvMap).NotTo(HaveKey("OPENAI_API_KEY"))
+			// Identity uses Downward API
+			Expect(runtimeEnvMap["OMNIA_AGENT_NAME"].ValueFrom).NotTo(BeNil())
 		})
 
 		It("should handle nil provider config gracefully", func() {
@@ -2236,12 +2211,12 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(runtimeContainer).NotTo(BeNil())
 
+			// Media env vars are no longer injected — runtime reads CRD directly
 			envMap := make(map[string]corev1.EnvVar)
 			for _, env := range runtimeContainer.Env {
 				envMap[env.Name] = env
 			}
-			Expect(envMap).To(HaveKey("OMNIA_MEDIA_BASE_PATH"))
-			Expect(envMap["OMNIA_MEDIA_BASE_PATH"].Value).To(Equal("/custom/media/path"))
+			Expect(envMap).NotTo(HaveKey("OMNIA_MEDIA_BASE_PATH"))
 		})
 
 		It("should mount user-specified volumes and volumeMounts", func() {
@@ -3170,17 +3145,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			promptPack := &omniav1alpha1.PromptPack{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pack",
-					Namespace: "test-ns",
-				},
-				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-				},
-			}
-
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
 
 			// Find the mock provider env var
 			var found bool
@@ -3206,17 +3171,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			promptPack := &omniav1alpha1.PromptPack{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pack",
-					Namespace: "test-ns",
-				},
-				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-				},
-			}
-
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -3224,7 +3179,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			}
 		})
 
-		It("should include eval enabled env var when promptPack is provided", func() {
+		It("should use Downward API for runtime identity env vars", func() {
 			agentRuntime := &omniav1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-agent",
@@ -3237,26 +3192,19 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			promptPack := &omniav1alpha1.PromptPack{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pack",
-					Namespace: "test-ns",
-				},
-				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-				},
-			}
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
-
-			var found bool
-			for _, env := range envVars {
-				if env.Name == "OMNIA_EVAL_ENABLED" && env.Value == "true" {
-					found = true
+			// Verify OMNIA_AGENT_NAME uses Downward API
+			var agentNameEnv *corev1.EnvVar
+			for i := range envVars {
+				if envVars[i].Name == "OMNIA_AGENT_NAME" {
+					agentNameEnv = &envVars[i]
 					break
 				}
 			}
-			Expect(found).To(BeTrue(), "OMNIA_EVAL_ENABLED env var should be set when promptPack is provided")
+			Expect(agentNameEnv).NotTo(BeNil(), "OMNIA_AGENT_NAME should be present")
+			Expect(agentNameEnv.ValueFrom).NotTo(BeNil(), "OMNIA_AGENT_NAME should use ValueFrom")
+			Expect(agentNameEnv.ValueFrom.FieldRef).NotTo(BeNil(), "OMNIA_AGENT_NAME should use FieldRef")
 		})
 
 		It("should not include mock provider env var when annotation is false", func() {
@@ -3275,17 +3223,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			promptPack := &omniav1alpha1.PromptPack{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pack",
-					Namespace: "test-ns",
-				},
-				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-				},
-			}
-
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, promptPack, nil, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {

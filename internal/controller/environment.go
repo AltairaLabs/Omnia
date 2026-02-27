@@ -24,6 +24,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 // buildSessionEnvVars creates environment variables for session configuration.
@@ -184,13 +185,9 @@ func buildSecretKeyEnvVar(secretRef *corev1.LocalObjectReference, envName, secre
 	}
 }
 
-// effectiveSecretRef returns the effective SecretKeyRef for a provider,
-// preferring credential.secretRef over the legacy secretRef field.
+// effectiveSecretRef delegates to the shared pkg/k8s.EffectiveSecretRef.
 func effectiveSecretRef(provider *omniav1alpha1.Provider) *omniav1alpha1.SecretKeyRef {
-	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
-		return provider.Spec.Credential.SecretRef
-	}
-	return provider.Spec.SecretRef
+	return k8s.EffectiveSecretRef(provider)
 }
 
 // buildProviderEnvVarsFromCRD creates environment variables from a Provider CRD.
