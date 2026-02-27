@@ -94,8 +94,8 @@ func (r *AgentRuntimeReconciler) getSecretHash(
 
 	for _, name := range providerNames {
 		provider := providers[name]
-		if provider.Spec.SecretRef != nil {
-			r.hashSecretData(ctx, hasher, provider.Spec.SecretRef.Name, provider.Namespace)
+		if ref := effectiveSecretRef(provider); ref != nil {
+			r.hashSecretData(ctx, hasher, ref.Name, provider.Namespace)
 		}
 	}
 

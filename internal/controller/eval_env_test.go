@@ -19,9 +19,9 @@ package controller
 import (
 	"testing"
 
-	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-
 	"k8s.io/utils/ptr"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 func TestBuildEvalEnvVars(t *testing.T) {
@@ -207,6 +207,101 @@ func TestHasEvalsEnabled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := hasEvalsEnabled(tt.spec); got != tt.want {
 				t.Errorf("hasEvalsEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveSecretRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider *omniav1alpha1.Provider
+		wantName string
+		wantKey  *string
+		wantNil  bool
+	}{
+		{
+			name: "no secret refs returns nil",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{},
+			},
+			wantNil: true,
+		},
+		{
+			name: "legacy secretRef only",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "legacy-secret",
+					},
+				},
+			},
+			wantName: "legacy-secret",
+		},
+		{
+			name: "credential.secretRef only",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "cred-secret",
+							Key:  ptr.To("my-key"),
+						},
+					},
+				},
+			},
+			wantName: "cred-secret",
+			wantKey:  ptr.To("my-key"),
+		},
+		{
+			name: "credential.secretRef preferred over legacy",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "legacy-secret",
+					},
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "cred-secret",
+						},
+					},
+				},
+			},
+			wantName: "cred-secret",
+		},
+		{
+			name: "credential without secretRef falls back to legacy",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "legacy-secret",
+					},
+					Credential: &omniav1alpha1.CredentialConfig{},
+				},
+			},
+			wantName: "legacy-secret",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := effectiveSecretRef(tt.provider)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("effectiveSecretRef() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("effectiveSecretRef() = nil, want non-nil")
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("effectiveSecretRef().Name = %q, want %q", got.Name, tt.wantName)
+			}
+			if tt.wantKey != nil {
+				if got.Key == nil || *got.Key != *tt.wantKey {
+					t.Errorf("effectiveSecretRef().Key = %v, want %q", got.Key, *tt.wantKey)
+				}
 			}
 		})
 	}

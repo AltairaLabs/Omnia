@@ -170,15 +170,6 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 	return provider, ctrl.Result{}, nil
 }
 
-// reconcileProviderRef fetches and validates the Provider reference (legacy path).
-func (r *AgentRuntimeReconciler) reconcileProviderRef(
-	ctx context.Context,
-	log logr.Logger,
-	agentRuntime *omniav1alpha1.AgentRuntime,
-) (*omniav1alpha1.Provider, ctrl.Result, error) {
-	return r.fetchAndValidateProvider(ctx, log, agentRuntime, *agentRuntime.Spec.ProviderRef)
-}
-
 // handleRefError handles reference fetch errors by setting condition, updating status, and logging.
 func (r *AgentRuntimeReconciler) handleRefError(
 	ctx context.Context,
@@ -366,10 +357,6 @@ func (r *AgentRuntimeReconciler) fetchToolRegistry(ctx context.Context, agentRun
 		return nil, fmt.Errorf("failed to get ToolRegistry %s: %w", key, err)
 	}
 	return toolRegistry, nil
-}
-
-func (r *AgentRuntimeReconciler) fetchProvider(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.Provider, error) {
-	return r.fetchProviderByRef(ctx, *agentRuntime.Spec.ProviderRef, agentRuntime.Namespace)
 }
 
 // fetchProviderByRef fetches a Provider by ref with a default namespace.

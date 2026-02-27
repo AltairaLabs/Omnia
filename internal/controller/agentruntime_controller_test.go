@@ -2444,7 +2444,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 			}
 
-			fetchedProvider, err := reconciler.fetchProvider(ctx, agentRuntime)
+			fetchedProvider, err := reconciler.fetchProviderByRef(ctx, *agentRuntime.Spec.ProviderRef, agentRuntime.Namespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fetchedProvider).NotTo(BeNil())
 			Expect(fetchedProvider.Spec.Type).To(Equal(omniav1alpha1.ProviderTypeClaude))
@@ -2506,7 +2506,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 			}
 
-			fetchedProvider, err := reconciler.fetchProvider(ctx, agentRuntime)
+			fetchedProvider, err := reconciler.fetchProviderByRef(ctx, *agentRuntime.Spec.ProviderRef, agentRuntime.Namespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fetchedProvider).NotTo(BeNil())
 			Expect(fetchedProvider.Spec.Type).To(Equal(omniav1alpha1.ProviderTypeOpenAI))
@@ -2526,7 +2526,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 			}
 
-			_, err := reconciler.fetchProvider(ctx, agentRuntime)
+			_, err := reconciler.fetchProviderByRef(ctx, *agentRuntime.Spec.ProviderRef, agentRuntime.Namespace)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to get Provider"))
 		})
@@ -2584,9 +2584,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
 
-			By("calling reconcileProviderRef")
+			By("calling fetchAndValidateProvider")
 			log := logf.FromContext(ctx)
-			fetchedProvider, result, err := reconciler.reconcileProviderRef(ctx, log, agentRuntime)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, *agentRuntime.Spec.ProviderRef)
 
 			By("verifying Provider is returned and no requeue")
 			Expect(err).NotTo(HaveOccurred())
@@ -2653,9 +2653,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
 
-			By("calling reconcileProviderRef")
+			By("calling fetchAndValidateProvider")
 			log := logf.FromContext(ctx)
-			fetchedProvider, result, err := reconciler.reconcileProviderRef(ctx, log, agentRuntime)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, *agentRuntime.Spec.ProviderRef)
 
 			By("verifying Provider is returned (empty phase treated as Ready)")
 			Expect(err).NotTo(HaveOccurred())

@@ -184,6 +184,15 @@ func buildSecretKeyEnvVar(secretRef *corev1.LocalObjectReference, envName, secre
 	}
 }
 
+// effectiveSecretRef returns the effective SecretKeyRef for a provider,
+// preferring credential.secretRef over the legacy secretRef field.
+func effectiveSecretRef(provider *omniav1alpha1.Provider) *omniav1alpha1.SecretKeyRef {
+	if provider.Spec.Credential != nil && provider.Spec.Credential.SecretRef != nil {
+		return provider.Spec.Credential.SecretRef
+	}
+	return provider.Spec.SecretRef
+}
+
 // buildProviderEnvVarsFromCRD creates environment variables from a Provider CRD.
 // This is used when an AgentRuntime references a Provider resource.
 func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvVar {
@@ -213,11 +222,11 @@ func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvV
 		corev1.EnvVar{Name: "OMNIA_PROVIDER_REF_NAMESPACE", Value: provider.Namespace},
 	)
 
-	// API key from secret - only if SecretRef is configured
-	if provider.Spec.SecretRef != nil {
-		secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
-		if provider.Spec.SecretRef.Key != nil {
-			envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *provider.Spec.SecretRef.Key)...)
+	// API key from secret — prefer credential.secretRef over legacy secretRef
+	if ref := effectiveSecretRef(provider); ref != nil {
+		secretRef := corev1.LocalObjectReference{Name: ref.Name}
+		if ref.Key != nil {
+			envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *ref.Key)...)
 		} else {
 			envVars = append(envVars, buildSecretEnvVars(&secretRef, provider.Spec.Type)...)
 		}
