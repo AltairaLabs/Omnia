@@ -14,6 +14,10 @@ spec:
     metadata:
       labels:
         {{- include "omnia.evalWorker.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: {{ include "omnia.evalWorker.fullname" . }}
       securityContext:

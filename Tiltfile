@@ -495,10 +495,11 @@ if ENABLE_ENTERPRISE:
         'enterprise.arena.devConsole.image.tag=latest',
         'enterprise.arena.devConsole.image.pullPolicy=Never',
         # Eval worker for non-PromptKit agent eval execution
-        'enterprise.evalWorker.enabled=true',
         'enterprise.evalWorker.image.repository=omnia-eval-worker-dev',
         'enterprise.evalWorker.image.tag=latest',
         'enterprise.evalWorker.image.pullPolicy=Never',
+        # Wire session-api to Redis so it publishes eval events to streams
+        'sessionApi.redis.addrs=omnia-redis-master:6379',
     ])
 else:
     # Disable enterprise features
@@ -794,6 +795,13 @@ if ENABLE_ENTERPRISE:
         'omnia-promptkit-lsp',
         labels=['enterprise'],
         resource_deps=['omnia-dashboard'],
+    )
+
+    # Eval worker for realtime eval execution (consumes Redis stream events)
+    k8s_resource(
+        'omnia-eval-worker',
+        labels=['enterprise'],
+        resource_deps=['omnia-redis-master', 'omnia-session-api'],
     )
 
 # ============================================================================

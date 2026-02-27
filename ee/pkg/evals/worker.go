@@ -82,6 +82,9 @@ type WorkerConfig struct {
 	// PackLoader loads eval definitions from PromptPack ConfigMaps.
 	// If nil, no evals are loaded from PromptPacks (original behavior).
 	PackLoader *PromptPackLoader
+	// Metrics records Prometheus metrics for the eval worker.
+	// If nil, a NoOpWorkerMetrics is used.
+	Metrics WorkerMetricsRecorder
 }
 
 // EvalWorker consumes session events from Redis Streams and runs evals.
@@ -100,6 +103,7 @@ type EvalWorker struct {
 	rateLimiter       *RateLimiter
 	packLoader        *PromptPackLoader
 	providerResolver  *ProviderResolver
+	metrics           WorkerMetricsRecorder
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
@@ -136,6 +140,11 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		resolver = NewProviderResolver(config.K8sClient)
 	}
 
+	metricsRecorder := config.Metrics
+	if metricsRecorder == nil {
+		metricsRecorder = &NoOpWorkerMetrics{}
+	}
+
 	namespaces := resolveNamespaces(config)
 	streamKeys := buildStreamKeys(namespaces)
 	consumerGroup := buildConsumerGroup(namespaces)
@@ -154,6 +163,7 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		rateLimiter:      rateLimiter,
 		packLoader:       config.PackLoader,
 		providerResolver: resolver,
+		metrics:          metricsRecorder,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -295,12 +305,17 @@ func (w *EvalWorker) processStreams(ctx context.Context, streams []goredis.XStre
 
 // handleMessage processes a single Redis stream message and ACKs it on success.
 func (w *EvalWorker) handleMessage(ctx context.Context, streamKey string, msg goredis.XMessage) {
+	start := time.Now()
+
 	event, err := parseEvent(msg)
 	if err != nil {
 		w.logger.Warn("failed to parse event, skipping", "messageID", msg.ID, "error", err)
+		w.getMetrics().RecordEventReceived("parse_error")
 		w.ackMessage(ctx, streamKey, msg.ID)
 		return
 	}
+
+	w.getMetrics().RecordEventReceived(event.EventType)
 
 	if err := w.processEvent(ctx, event); err != nil {
 		w.logger.Error("failed to process event",
@@ -308,10 +323,12 @@ func (w *EvalWorker) handleMessage(ctx context.Context, streamKey string, msg go
 			"sessionID", event.SessionID,
 			"error", err,
 		)
+		w.getMetrics().RecordEventProcessing(event.EventType, time.Since(start).Seconds())
 		// Don't ACK — Redis will redeliver on next read.
 		return
 	}
 
+	w.getMetrics().RecordEventProcessing(event.EventType, time.Since(start).Seconds())
 	w.ackMessage(ctx, streamKey, msg.ID)
 }
 
@@ -425,9 +442,11 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 	}
 
 	if err := w.sessionAPI.WriteEvalResults(ctx, results); err != nil {
+		w.getMetrics().RecordResultsWritten(len(results), false)
 		return fmt.Errorf("write eval results: %w", err)
 	}
 
+	w.getMetrics().RecordResultsWritten(len(results), true)
 	w.logger.Info("eval results written",
 		"sessionID", sessionID,
 		"count", len(results),
@@ -481,8 +500,10 @@ func (w *EvalWorker) runEvalsWithSampling(
 	for _, def := range evalDefs {
 		isJudge := def.Type == evalTypeLLMJudge
 		if !w.getSampler().ShouldSample(event.SessionID, turnIndex, isJudge) {
+			w.getMetrics().RecordSamplingDecision(def.Type, MetricStatusSkipped)
 			continue
 		}
+		w.getMetrics().RecordSamplingDecision(def.Type, "sampled")
 
 		if err := w.acquireRateLimit(ctx, isJudge); err != nil {
 			w.logger.Warn("rate limit acquisition failed",
@@ -514,8 +535,12 @@ func (w *EvalWorker) executeSingleEval(
 	agentName string,
 	providerSpecs map[string]providers.ProviderSpec,
 ) *api.EvalResult {
+	start := time.Now()
 	item, err := w.getProviderAwareRunner()(def, messages, providerSpecs)
+	duration := time.Since(start).Seconds()
+
 	if err != nil {
+		w.getMetrics().RecordEvalExecuted(def.Type, def.Trigger, MetricStatusError, duration)
 		w.logger.Warn("eval failed",
 			"evalID", def.ID,
 			"sessionID", event.SessionID,
@@ -524,6 +549,7 @@ func (w *EvalWorker) executeSingleEval(
 		return nil
 	}
 
+	w.getMetrics().RecordEvalExecuted(def.Type, def.Trigger, MetricStatusSuccess, duration)
 	item.Source = evalSource
 	return toEvalResult(item, event, agentName)
 }
@@ -553,6 +579,14 @@ func (w *EvalWorker) getProviderAwareRunner() ProviderAwareEvalRunner {
 		w.evalRunnerPA = defaultProviderAwareRunner(w.evalRunner)
 	}
 	return w.evalRunnerPA
+}
+
+// getMetrics returns the metrics recorder, initializing a no-op one if needed.
+func (w *EvalWorker) getMetrics() WorkerMetricsRecorder {
+	if w.metrics == nil {
+		w.metrics = &NoOpWorkerMetrics{}
+	}
+	return w.metrics
 }
 
 // getRateLimiter returns the rate limiter, initializing a default one if needed.

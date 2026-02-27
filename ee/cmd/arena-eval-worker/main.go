@@ -65,6 +65,9 @@ func main() {
 
 	packLoader := evals.NewPromptPackLoader(k8sClient)
 
+	workerMetrics := evals.NewWorkerMetrics(nil)
+	workerMetrics.Initialize()
+
 	redisClient := goredis.NewClient(&goredis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
@@ -81,6 +84,7 @@ func main() {
 		Logger:      logger,
 		K8sClient:   k8sClient,
 		PackLoader:  packLoader,
+		Metrics:     workerMetrics,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
