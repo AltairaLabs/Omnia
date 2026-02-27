@@ -241,6 +241,66 @@ When `enterprise.enabled` is `true`:
 Enterprise features require a valid license. See [Installing a License](/how-to/install-license/) for details.
 :::
 
+## Eval Worker Configuration
+
+The eval worker runs realtime evals for non-PromptKit agents (Pattern A). This is an **enterprise feature**.
+
+### Basic Settings
+
+```yaml
+enterprise:
+  evalWorker:
+    enabled: false       # Enable eval worker deployment
+    replicaCount: 1      # Number of eval worker replicas
+    image:
+      repository: ghcr.io/altairalabs/omnia-eval-worker
+      tag: ""            # Defaults to Chart appVersion
+      pullPolicy: IfNotPresent
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+```
+
+### Multi-Namespace Mode
+
+By default, the eval worker watches only its deployment namespace (single-namespace mode with `Role`/`RoleBinding` RBAC). To watch multiple namespaces from a single worker, set the `namespaces` list:
+
+```yaml
+enterprise:
+  evalWorker:
+    enabled: true
+    namespaces:
+      - production
+      - staging
+      - dev
+```
+
+When `namespaces` has multiple entries:
+- The worker subscribes to Redis streams for all listed namespaces
+- RBAC switches from namespace-scoped `Role` to cluster-scoped `ClusterRole`
+- A single consumer group is shared across all streams
+
+When `namespaces` is empty (the default), the worker uses the deployment namespace and namespace-scoped RBAC.
+
+### Extra Environment Variables
+
+Pass additional environment variables (e.g., provider API keys for LLM judges):
+
+```yaml
+enterprise:
+  evalWorker:
+    extraEnv:
+      - name: OPENAI_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: llm-provider-keys
+            key: openai-api-key
+```
+
 ## Arena Fleet Configuration
 
 Arena Fleet provides distributed testing for PromptKit bundles. This is an **enterprise feature**.

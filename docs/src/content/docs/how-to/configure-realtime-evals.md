@@ -31,8 +31,10 @@ metadata:
 spec:
   promptPackRef:
     name: my-prompts
-  providerRef:
-    name: claude-sonnet
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet
   facade:
     type: websocket
   evals:
@@ -53,9 +55,9 @@ Evals will only execute if the referenced PromptPack contains eval definitions.
 
 ## Configure Judge Providers
 
-LLM judge evals need an LLM to act as the judge. Create Provider CRDs for your judge models, then map them in `evals.judges[]`.
+LLM judge evals need an LLM to act as the judge. Create a Provider CRD for the judge model and add it to the AgentRuntime's `providers` list.
 
-### 1. Create Provider CRDs
+### 1. Create a Provider CRD
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -67,34 +69,26 @@ spec:
   model: claude-haiku-4-5-20251001
   secretRef:
     name: anthropic-api-key
----
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: Provider
-metadata:
-  name: claude-sonnet
-spec:
-  type: claude
-  model: claude-sonnet-4-5-20250929
-  secretRef:
-    name: anthropic-api-key
 ```
 
-### 2. Map Judges in AgentRuntime
+### 2. Add the Judge Provider to AgentRuntime
+
+Add a named provider entry for the judge alongside your default provider:
 
 ```yaml
 spec:
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet       # Primary LLM for the agent
+    - name: judge
+      providerRef:
+        name: claude-haiku        # Cheap/fast model for eval judging
   evals:
     enabled: true
-    judges:
-      - name: fast-judge
-        providerRef:
-          name: claude-haiku
-      - name: strong-judge
-        providerRef:
-          name: claude-sonnet
 ```
 
-The `name` field must match the judge name in your PromptPack eval definitions. For example, if an eval has `"judge": "fast-judge"`, there must be a matching entry in `judges[]`.
+The eval worker resolves provider credentials from the AgentRuntime's `spec.providers` list. The provider name (e.g., `"judge"`) can be referenced in PromptPack eval definitions.
 
 ## Define Evals in PromptPack
 
@@ -237,7 +231,7 @@ curl "http://session-api:8080/api/v1/eval-results/summary?agentName=my-agent"
 
 ### Check the Eval Worker Pod
 
-For non-PromptKit agents (Pattern A), the operator creates an `eval-worker` Deployment in the namespace:
+For non-PromptKit agents (Pattern A), the eval worker must be deployed via Helm (see [Eval Worker Helm values](/reference/helm-values/#eval-worker-configuration)):
 
 ```bash
 # Check if the eval worker is running
@@ -246,6 +240,8 @@ kubectl get deploy -l app.kubernetes.io/component=eval-worker
 # View eval worker logs
 kubectl logs -l app.kubernetes.io/component=eval-worker --tail=50
 ```
+
+In multi-namespace mode, a single eval worker watches multiple namespaces. Check its logs to verify all namespaces are being consumed.
 
 ### Check Eval Results
 
@@ -277,8 +273,13 @@ spec:
     name: customer-support-pack
     track: stable
 
-  providerRef:
-    name: claude-sonnet
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet
+    - name: judge
+      providerRef:
+        name: claude-haiku
 
   facade:
     type: websocket
@@ -290,13 +291,6 @@ spec:
 
   evals:
     enabled: true
-    judges:
-      - name: fast-judge
-        providerRef:
-          name: claude-haiku
-      - name: strong-judge
-        providerRef:
-          name: claude-sonnet
     sampling:
       defaultRate: 100
       llmJudgeRate: 10

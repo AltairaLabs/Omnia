@@ -34,9 +34,39 @@ spec:
     version: "1.0.0"  # Or use track: "canary"
 ```
 
-### `providerRef` (Recommended)
+### `providers` (Recommended)
 
-Reference to a [Provider](/reference/provider/) resource for LLM configuration. This is the recommended approach as it enables centralized credential management and consistent configuration across agents.
+A list of named provider references. Each entry maps a logical name to a [Provider](/reference/provider/) CRD. This is the recommended approach as it enables centralized credential management, consistent configuration across agents, and explicit judge provider mapping for evals.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `providers[].name` | string | Yes |
+| `providers[].providerRef.name` | string | Yes |
+| `providers[].providerRef.namespace` | string | No (defaults to same namespace) |
+
+The `name` field is a logical identifier used to look up providers by role:
+
+| Name | Purpose |
+|------|---------|
+| `default` | Primary LLM provider for the runtime |
+| `judge` | LLM judge for eval execution |
+| Any custom name | Referenced by name in PromptPack eval definitions |
+
+```yaml
+spec:
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet
+    - name: judge
+      providerRef:
+        name: claude-haiku
+        namespace: shared-providers  # Optional cross-namespace reference
+```
+
+### `providerRef` (Deprecated)
+
+Reference to a Provider resource. Use `providers` instead. When `providers` is set, this field is ignored.
 
 | Field | Type | Required |
 |-------|------|----------|
@@ -44,15 +74,15 @@ Reference to a [Provider](/reference/provider/) resource for LLM configuration. 
 | `providerRef.namespace` | string | No (defaults to same namespace) |
 
 ```yaml
+# Deprecated — use providers instead
 spec:
   providerRef:
     name: claude-provider
-    namespace: shared-providers  # Optional
 ```
 
-### `provider` (Inline Configuration)
+### `provider` (Inline Configuration — Deprecated)
 
-Inline provider configuration. Use `providerRef` instead for production deployments.
+Inline provider configuration. Use `providers` with a Provider CRD instead. When `providers` is set, this field is ignored.
 
 | Field | Type | Required |
 |-------|------|----------|
@@ -148,7 +178,7 @@ Provider-specific settings passed as environment variables to PromptKit:
 
 Keys are converted to environment variables with `OMNIA_PROVIDER_` prefix (e.g., `keep_alive` → `OMNIA_PROVIDER_KEEP_ALIVE`).
 
-> **Note**: If both `providerRef` and `provider` are specified, `providerRef` takes precedence.
+> **Note**: When `providers` is set, both `providerRef` and `provider` are ignored. If only the deprecated fields are used, `providerRef` takes precedence over `provider`.
 
 ### `framework`
 
@@ -477,31 +507,22 @@ spec:
     enabled: true
 ```
 
-#### `evals.judges`
+#### Judge Provider Resolution
 
-Maps judge names (referenced in PromptPack eval definitions) to Provider CRDs that supply the LLM for judging.
-
-| Field | Type | Required |
-|-------|------|----------|
-| `evals.judges[].name` | string | Yes |
-| `evals.judges[].providerRef.name` | string | Yes |
-| `evals.judges[].providerRef.namespace` | string | No |
+LLM judge evals resolve their provider from the AgentRuntime's `spec.providers` list. Add a provider named `"judge"` (or any custom name referenced in your PromptPack eval definitions):
 
 ```yaml
 spec:
-  evals:
-    enabled: true
-    judges:
-      - name: fast-judge
-        providerRef:
-          name: claude-haiku
-      - name: strong-judge
-        providerRef:
-          name: claude-sonnet
-          namespace: shared-providers
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet       # Primary LLM for the agent
+    - name: judge
+      providerRef:
+        name: claude-haiku        # Cheap/fast model for eval judging
 ```
 
-The `name` field must match the judge name used in PromptPack eval params (e.g., `"judge": "fast-judge"` in an `llm_judge_turn` eval).
+The eval worker resolves provider credentials from the referenced Provider CRDs and their associated Secrets.
 
 #### `evals.sampling`
 
@@ -596,8 +617,13 @@ spec:
     name: customer-service-prompts
     version: "2.1.0"
 
-  providerRef:
-    name: claude-production
+  providers:
+    - name: default
+      providerRef:
+        name: claude-production
+    - name: judge
+      providerRef:
+        name: claude-haiku
 
   toolRegistryRef:
     name: service-tools
@@ -615,13 +641,6 @@ spec:
 
   evals:
     enabled: true
-    judges:
-      - name: fast-judge
-        providerRef:
-          name: claude-haiku
-      - name: strong-judge
-        providerRef:
-          name: claude-sonnet
     sampling:
       defaultRate: 100
       llmJudgeRate: 10

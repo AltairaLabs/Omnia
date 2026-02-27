@@ -102,7 +102,7 @@ flowchart TB
 
 ### Pattern A: Platform Events (All Agents)
 
-Every AgentRuntime uses the facade's `recordingResponseWriter`, which captures assistant messages, tool calls, token counts, and cost. This data flows through session-api to PostgreSQL. Session-api then publishes lightweight events to Redis Streams. A per-namespace eval worker subscribes and runs evals.
+Every AgentRuntime uses the facade's `recordingResponseWriter`, which captures assistant messages, tool calls, token counts, and cost. This data flows through session-api to PostgreSQL. Session-api then publishes lightweight events to Redis Streams. The eval worker subscribes and runs evals (either per-namespace or across multiple namespaces depending on configuration).
 
 ```mermaid
 flowchart LR
@@ -150,11 +150,17 @@ For PromptKit agents, Pattern C is the primary eval path. Pattern A events still
 
 ## Eval Worker
 
-The eval worker (`eval-worker`) is a long-running Deployment created **per namespace** by the operator. It is deployed in any namespace where an AgentRuntime has `evals.enabled: true` and uses a non-PromptKit framework (Pattern A).
+The eval worker (`eval-worker`) is a long-running Deployment that subscribes to Redis Streams and runs evals for agents using Pattern A. It supports two deployment modes:
+
+**Single-namespace mode** (default): The worker watches one namespace, uses namespace-scoped `Role`/`RoleBinding` RBAC, and reads from a single Redis stream. This is the default when no explicit namespace list is configured.
+
+**Multi-namespace mode**: A single worker watches multiple namespaces, uses `ClusterRole`/`ClusterRoleBinding` RBAC, and reads from multiple Redis streams concurrently via `XREADGROUP`. This reduces operational overhead at smaller scale by avoiding one worker deployment per namespace.
+
+Configure the mode via the `enterprise.evalWorker.namespaces` Helm value. See [Eval Worker Helm values](/reference/helm-values/#eval-worker-configuration) for details.
 
 The worker:
 
-1. Subscribes to Redis Streams events using a consumer group for horizontal scaling
+1. Subscribes to Redis Streams events (one stream per namespace) using a consumer group for horizontal scaling
 2. Looks up the agent's AgentRuntime to check eval config and PromptPack reference
 3. Loads eval definitions from the PromptPack ConfigMap (cached with a Kubernetes watcher)
 4. Fetches session data from session-api
@@ -165,18 +171,17 @@ The worker:
 
 ## Judge Provider Resolution
 
-LLM judge evals reference a judge by name in the PromptPack (e.g., `"judge": "fast-judge"`). The AgentRuntime's `evals.judges[]` maps these names to Provider CRDs:
+LLM judge evals need an LLM provider for judging. The eval worker resolves provider specs from the AgentRuntime's `spec.providers` list. Add a named provider (e.g., `"judge"`) to supply the judge model:
 
 ```yaml
 spec:
-  evals:
-    judges:
-      - name: fast-judge
-        providerRef:
-          name: claude-haiku       # Cheap/fast model for per-turn evals
-      - name: strong-judge
-        providerRef:
-          name: claude-sonnet      # Capable model for session-level evals
+  providers:
+    - name: default
+      providerRef:
+        name: claude-sonnet        # Primary LLM for the agent
+    - name: judge
+      providerRef:
+        name: claude-haiku         # Cheap/fast model for eval judging
 ```
 
 The eval worker (Pattern A) and the facade's eval listener (Pattern C) both resolve these Provider CRDs to obtain credentials for making LLM judge calls. This allows different agents to use different judge models based on their quality requirements and cost constraints.
