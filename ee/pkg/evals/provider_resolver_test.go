@@ -358,6 +358,63 @@ func TestBuildCredential_UnknownProvider(t *testing.T) {
 	assert.Equal(t, "api_key", cred.Type())
 }
 
+func TestConvertPlatformConfig(t *testing.T) {
+	p := &v1alpha1.PlatformConfig{
+		Type:     v1alpha1.PlatformTypeAWS,
+		Region:   "us-west-2",
+		Project:  "my-project",
+		Endpoint: "https://custom.endpoint",
+	}
+
+	pc := convertPlatformConfig(p)
+	assert.Equal(t, "aws", pc.Type)
+	assert.Equal(t, "us-west-2", pc.Region)
+	assert.Equal(t, "my-project", pc.Project)
+	assert.Equal(t, "https://custom.endpoint", pc.Endpoint)
+}
+
+func TestResolveProviderSpecs_PlatformConfig(t *testing.T) {
+	ns := testNamespace
+
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Providers: []v1alpha1.NamedProviderRef{
+				{
+					Name:        "bedrock",
+					ProviderRef: v1alpha1.ProviderRef{Name: "bedrock-prov"},
+				},
+			},
+		},
+	}
+
+	provider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-prov", Namespace: ns},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  "bedrock",
+			Model: "anthropic.claude-3-sonnet",
+			Platform: &v1alpha1.PlatformConfig{
+				Type:   v1alpha1.PlatformTypeAWS,
+				Region: "us-west-2",
+			},
+		},
+	}
+
+	c := buildFakeClient(ar, provider).Build()
+	resolver := NewProviderResolver(c)
+
+	// ResolveProviderSpecs will attempt to create an AWS credential via
+	// the cloud SDK default chain, which fails in test (no AWS identity).
+	// We verify that:
+	// 1. It reaches the platform credential path (not the API key path)
+	// 2. The error is about AWS credential resolution, not a missing secret
+	_, err := resolver.ResolveProviderSpecs(context.Background(), "agent", ns)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolve credential")
+	assert.Contains(t, err.Error(), "platform credential")
+}
+
 func TestResolveProviders_NilResolver(t *testing.T) {
 	w := &EvalWorker{logger: testLogger()}
 	event := api.SessionEvent{AgentName: "agent", Namespace: "ns"}

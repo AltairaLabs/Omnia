@@ -17,6 +17,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	pkconfig "github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/credentials"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 
@@ -132,6 +133,11 @@ func (r *ProviderResolver) resolveOne(
 		spec.Defaults = convertDefaults(provider.Spec.Defaults)
 	}
 
+	if provider.Spec.Platform != nil {
+		spec.Platform = string(provider.Spec.Platform.Type)
+		spec.PlatformConfig = convertPlatformConfig(provider.Spec.Platform)
+	}
+
 	cred, err := r.resolveCredential(ctx, provider)
 	if err != nil {
 		return providers.ProviderSpec{}, fmt.Errorf("resolve credential: %w", err)
@@ -142,6 +148,20 @@ func (r *ProviderResolver) resolveOne(
 }
 
 func (r *ProviderResolver) resolveCredential(
+	ctx context.Context, provider *v1alpha1.Provider,
+) (providers.Credential, error) {
+	// Platform providers (bedrock, vertex, azure-ai) use cloud SDK credential chains
+	if provider.Spec.Platform != nil {
+		return r.resolvePlatformCredential(ctx, provider)
+	}
+
+	// API-key-based providers
+	return r.resolveAPIKeyCredential(ctx, provider)
+}
+
+// resolveAPIKeyCredential resolves credentials from a Kubernetes Secret for
+// providers that use API keys (claude, openai, gemini).
+func (r *ProviderResolver) resolveAPIKeyCredential(
 	ctx context.Context, provider *v1alpha1.Provider,
 ) (providers.Credential, error) {
 	ref := k8s.EffectiveSecretRef(provider)
@@ -169,6 +189,34 @@ func (r *ProviderResolver) resolveCredential(
 	return buildCredential(apiKey, string(provider.Spec.Type)), nil
 }
 
+// resolvePlatformCredential resolves credentials for hyperscaler providers
+// (bedrock, vertex, azure-ai) using PromptKit's credential resolver, which
+// delegates to the cloud SDK's default credential chain (IRSA, GCP workload
+// identity, Azure managed identity, etc.).
+func (r *ProviderResolver) resolvePlatformCredential(
+	ctx context.Context, provider *v1alpha1.Provider,
+) (providers.Credential, error) {
+	platform := provider.Spec.Platform
+	pkPlatformCfg := convertPlatformConfig(platform)
+
+	resolverCfg := credentials.ResolverConfig{
+		ProviderType: string(provider.Spec.Type),
+		PlatformConfig: &pkconfig.PlatformConfig{
+			Type:     pkPlatformCfg.Type,
+			Region:   pkPlatformCfg.Region,
+			Project:  pkPlatformCfg.Project,
+			Endpoint: pkPlatformCfg.Endpoint,
+		},
+	}
+
+	cred, err := credentials.Resolve(ctx, resolverCfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve platform credential for %s: %w", platform.Type, err)
+	}
+
+	return cred, nil
+}
+
 // buildCredential creates a PromptKit credential with provider-appropriate
 // header configuration. This mirrors PromptKit's credentials.createAPIKeyCredential.
 func buildCredential(apiKey, providerType string) providers.Credential {
@@ -185,6 +233,16 @@ func buildCredential(apiKey, providerType string) providers.Credential {
 	}
 
 	return credentials.NewAPIKeyCredential(apiKey, opts...)
+}
+
+// convertPlatformConfig maps Omnia PlatformConfig to PromptKit PlatformConfig.
+func convertPlatformConfig(p *v1alpha1.PlatformConfig) *providers.PlatformConfig {
+	return &providers.PlatformConfig{
+		Type:     string(p.Type),
+		Region:   p.Region,
+		Project:  p.Project,
+		Endpoint: p.Endpoint,
+	}
 }
 
 // convertDefaults maps Omnia ProviderDefaults to PromptKit ProviderDefaults.
