@@ -17,8 +17,9 @@ import (
 	"time"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
-	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register built-in eval handlers.
+	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // registers default eval handlers
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/AltairaLabs/PromptKit/tools/arena/assertions"
 
 	"github.com/altairalabs/omnia/internal/session"
 	api "github.com/altairalabs/omnia/internal/session/api"
@@ -33,9 +34,9 @@ const (
 	paramAssertionParams = "assertion_params"
 )
 
-// RunArenaAssertion executes a PromptKit arena conversation assertion against
-// session messages. It matches the EvalRunner function signature so it can be
-// composed with RunRuleEval via a dispatcher.
+// RunArenaAssertion executes a PromptKit arena assertion against session
+// messages using the unified eval pipeline. It matches the EvalRunner function
+// signature so it can be composed with RunRuleEval via a dispatcher.
 func RunArenaAssertion(def api.EvalDefinition, messages []session.Message) (api.EvaluateResultItem, error) {
 	start := time.Now()
 
@@ -46,32 +47,28 @@ func RunArenaAssertion(def api.EvalDefinition, messages []session.Message) (api.
 
 	assertionParams := extractAssertionParams(def.Params)
 
-	typesMessages := ConvertToTypesMessages(messages)
-	toolCalls := extractToolCallRecords(typesMessages)
+	// Convert assertion to an EvalDef via the unified eval pipeline
+	assertionCfg := assertions.AssertionConfig{
+		Type:   assertionType,
+		Params: assertionParams,
+	}
+	evalDef := assertionCfg.ToConversationEvalDef(0)
+	evalDef.ID = def.ID
 
+	// Build EvalContext from messages
+	typesMessages := ConvertToTypesMessages(messages)
+	evalCtx := buildEvalContext(typesMessages)
+
+	// Create registry with built-in handlers and run the eval
 	registry := runtimeevals.NewEvalTypeRegistry()
 	runner := runtimeevals.NewEvalRunner(registry)
-
-	evalDef := runtimeevals.EvalDef{
-		ID:      def.ID,
-		Type:    assertionType,
-		Trigger: runtimeevals.TriggerOnConversationComplete,
-		Params:  assertionParams,
-	}
-
-	evalCtx := &runtimeevals.EvalContext{
-		Messages:  typesMessages,
-		ToolCalls: toolCalls,
-		SessionID: def.ID,
-	}
-
 	results := runner.RunConversationEvals(context.Background(), []runtimeevals.EvalDef{evalDef}, evalCtx)
 
 	durationMs := int(time.Since(start).Milliseconds())
 
+	// No result means the eval was skipped or filtered
 	if len(results) == 0 {
-		// Handler not found or eval was skipped
-		score := 0.0
+		score := scoreFromPassed(false)
 		return api.EvaluateResultItem{
 			EvalID:     def.ID,
 			EvalType:   EvalTypeArenaAssertion,
@@ -83,33 +80,40 @@ func RunArenaAssertion(def api.EvalDefinition, messages []session.Message) (api.
 		}, nil
 	}
 
-	r := results[0]
-	score := scoreFromPassed(r.Passed)
+	result := results[0]
+	passed := result.Passed && result.Error == ""
+	score := scoreFromPassed(passed)
 
 	return api.EvaluateResultItem{
 		EvalID:     def.ID,
 		EvalType:   EvalTypeArenaAssertion,
 		Trigger:    def.Trigger,
-		Passed:     r.Passed,
+		Passed:     passed,
 		Score:      &score,
 		DurationMs: durationMs,
 		Source:     "manual",
 	}, nil
 }
 
-// extractToolCallRecords builds ToolCallRecord entries from messages for the EvalContext.
-func extractToolCallRecords(messages []types.Message) []runtimeevals.ToolCallRecord {
-	var records []runtimeevals.ToolCallRecord
+// buildEvalContext constructs the EvalContext needed by the unified eval pipeline
+// from a slice of types.Message.
+func buildEvalContext(messages []types.Message) *runtimeevals.EvalContext {
+	evalCtx := &runtimeevals.EvalContext{
+		Messages: messages,
+	}
+
 	for i, msg := range messages {
 		for _, tc := range msg.ToolCalls {
-			records = append(records, runtimeevals.ToolCallRecord{
+			record := runtimeevals.ToolCallRecord{
 				TurnIndex: i,
 				ToolName:  tc.Name,
 				Arguments: parseArgsToMap(tc.Args),
-			})
+			}
+			evalCtx.ToolCalls = append(evalCtx.ToolCalls, record)
 		}
 	}
-	return records
+
+	return evalCtx
 }
 
 // parseArgsToMap converts JSON-encoded arguments to a map.
