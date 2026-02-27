@@ -34,6 +34,7 @@ import (
 type mockHotCache struct {
 	sessions map[string]*hotEntry
 	closed   bool
+	closeErr error
 }
 
 type hotEntry struct {
@@ -123,7 +124,7 @@ func (m *mockHotCache) Ping(_ context.Context) error { return nil }
 
 func (m *mockHotCache) Close() error {
 	m.closed = true
-	return nil
+	return m.closeErr
 }
 
 // Compile-time interface check.
@@ -138,6 +139,7 @@ type mockWarmStore struct {
 	messages   map[string][]*session.Message
 	partitions []PartitionInfo
 	closed     bool
+	closeErr   error
 }
 
 func newMockWarmStore() *mockWarmStore {
@@ -168,6 +170,22 @@ func (m *mockWarmStore) UpdateSession(_ context.Context, s *session.Session) err
 		return session.ErrSessionNotFound
 	}
 	m.sessions[s.ID] = s
+	return nil
+}
+
+func (m *mockWarmStore) UpdateSessionStats(_ context.Context, sessionID string, update session.SessionStatsUpdate) error {
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	s.TotalInputTokens += int64(update.AddInputTokens)
+	s.TotalOutputTokens += int64(update.AddOutputTokens)
+	s.EstimatedCostUSD += update.AddCostUSD
+	s.ToolCallCount += update.AddToolCalls
+	s.MessageCount += update.AddMessages
+	if update.SetStatus != "" {
+		s.Status = update.SetStatus
+	}
 	return nil
 }
 
@@ -416,7 +434,7 @@ func (m *mockWarmStore) Ping(_ context.Context) error { return nil }
 
 func (m *mockWarmStore) Close() error {
 	m.closed = true
-	return nil
+	return m.closeErr
 }
 
 // Compile-time interface check.
@@ -430,6 +448,7 @@ type mockColdArchive struct {
 	sessions map[string]*session.Session
 	dates    map[time.Time]bool
 	closed   bool
+	closeErr error
 }
 
 func newMockColdArchive() *mockColdArchive {
@@ -497,7 +516,7 @@ func (m *mockColdArchive) Ping(_ context.Context) error { return nil }
 
 func (m *mockColdArchive) Close() error {
 	m.closed = true
-	return nil
+	return m.closeErr
 }
 
 // Compile-time interface check.
@@ -1300,5 +1319,65 @@ func TestRegistry_CloseEmpty(t *testing.T) {
 	reg := NewRegistry()
 	if err := reg.Close(); err != nil {
 		t.Fatalf("Close empty registry failed: %v", err)
+	}
+}
+
+func TestRegistry_CloseWithErrors(t *testing.T) {
+	reg := NewRegistry()
+	hot := newMockHotCache()
+	hot.closeErr = errors.New("hot close error")
+	warm := newMockWarmStore()
+	warm.closeErr = errors.New("warm close error")
+	cold := newMockColdArchive()
+	cold.closeErr = errors.New("cold close error")
+
+	reg.SetHotCache(hot)
+	reg.SetWarmStore(warm)
+	reg.SetColdArchive(cold)
+
+	err := reg.Close()
+	if err == nil {
+		t.Fatal("expected error from Close")
+	}
+	if !strings.Contains(err.Error(), "hot close error") {
+		t.Errorf("expected hot close error in %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "warm close error") {
+		t.Errorf("expected warm close error in %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "cold close error") {
+		t.Errorf("expected cold close error in %q", err.Error())
+	}
+	if !hot.closed {
+		t.Error("hot cache should be closed even on error")
+	}
+	if !warm.closed {
+		t.Error("warm store should be closed even on error")
+	}
+	if !cold.closed {
+		t.Error("cold archive should be closed even on error")
+	}
+}
+
+func TestRegistry_CloseWithPartialErrors(t *testing.T) {
+	reg := NewRegistry()
+	hot := newMockHotCache()
+	warm := newMockWarmStore()
+	warm.closeErr = errors.New("warm only error")
+	cold := newMockColdArchive()
+
+	reg.SetHotCache(hot)
+	reg.SetWarmStore(warm)
+	reg.SetColdArchive(cold)
+
+	err := reg.Close()
+	if err == nil {
+		t.Fatal("expected error from Close")
+	}
+	if !strings.Contains(err.Error(), "warm only error") {
+		t.Errorf("expected warm only error in %q", err.Error())
+	}
+	if !hot.closed || !warm.closed || !cold.closed {
+		t.Error("all providers should be closed")
 	}
 }

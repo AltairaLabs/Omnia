@@ -39,6 +39,12 @@ type WarmStoreProvider interface {
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	UpdateSession(ctx context.Context, s *session.Session) error
 
+	// UpdateSessionStats atomically increments session-level counters.
+	// Implementations should use a single atomic SQL statement to avoid
+	// read-modify-write race conditions. Returns session.ErrSessionNotFound
+	// if the session does not exist.
+	UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error
+
 	// DeleteSession removes a session and all its associated data.
 	// Returns session.ErrSessionNotFound if the session does not exist.
 	DeleteSession(ctx context.Context, sessionID string) error

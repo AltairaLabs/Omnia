@@ -38,6 +38,7 @@ var (
 	ErrMissingSessionID  = errors.New("session ID is required")
 	ErrMissingBody       = errors.New("request body is required")
 	ErrMissingNamespace  = errors.New("namespace parameter is required")
+	ErrBodyTooLarge      = errors.New("request body too large")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.
@@ -243,7 +244,9 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 	return nil
 }
 
-// UpdateSessionStats applies incremental counter updates to a session.
+// UpdateSessionStats applies incremental counter updates to a session atomically.
+// The warm store performs the update in a single SQL statement to prevent
+// concurrent updates from overwriting each other.
 func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
@@ -253,28 +256,25 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 		return ErrWarmStoreRequired
 	}
 
-	// Fetch the existing session to apply the incremental updates.
-	sess, err := warm.GetSession(ctx, sessionID)
-	if err != nil {
+	// Check previous status before update so we only publish on actual transitions.
+	var previousStatus session.SessionStatus
+	if update.SetStatus == session.SessionStatusCompleted {
+		if prev, getErr := warm.GetSession(ctx, sessionID); getErr == nil {
+			previousStatus = prev.Status
+		}
+	}
+
+	// Use atomic update to avoid read-modify-write race conditions.
+	if err := warm.UpdateSessionStats(ctx, sessionID, update); err != nil {
 		return err
 	}
 
-	previousStatus := sess.Status
-	sess.TotalInputTokens += int64(update.AddInputTokens)
-	sess.TotalOutputTokens += int64(update.AddOutputTokens)
-	sess.EstimatedCostUSD += update.AddCostUSD
-	sess.ToolCallCount += update.AddToolCalls
-	sess.MessageCount += update.AddMessages
-	if update.SetStatus != "" {
-		sess.Status = update.SetStatus
-	}
-	sess.UpdatedAt = time.Now()
-
-	if err := warm.UpdateSession(ctx, sess); err != nil {
-		return err
-	}
-	if sess.Status == session.SessionStatusCompleted && previousStatus != session.SessionStatusCompleted {
-		s.publishSessionCompleted(ctx, sess)
+	// Only publish completion event when the status actually transitions to completed.
+	if update.SetStatus == session.SessionStatusCompleted && previousStatus != session.SessionStatusCompleted {
+		sess, getErr := warm.GetSession(ctx, sessionID)
+		if getErr == nil {
+			s.publishSessionCompleted(ctx, sess)
+		}
 	}
 	return nil
 }

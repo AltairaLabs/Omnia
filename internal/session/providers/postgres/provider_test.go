@@ -1048,3 +1048,91 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Empty(t, cfg.ConnString)
 	assert.Nil(t, cfg.TLS)
 }
+
+func TestUpdateSessionStats_Atomic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	p := newProvider(t)
+
+	// Create a session to update.
+	s := &session.Session{
+		ID:                "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b01",
+		AgentName:         "test-agent",
+		Namespace:         "test-ns",
+		WorkspaceName:     "test-ws",
+		Status:            session.SessionStatusActive,
+		TotalInputTokens:  100,
+		TotalOutputTokens: 50,
+		ToolCallCount:     3,
+		MessageCount:      5,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	require.NoError(t, p.CreateSession(ctx, s))
+
+	// Apply incremental update.
+	update := session.SessionStatsUpdate{
+		AddInputTokens:  50,
+		AddOutputTokens: 30,
+		AddToolCalls:    2,
+		AddMessages:     1,
+		AddCostUSD:      0.01,
+		SetStatus:       session.SessionStatusCompleted,
+	}
+	require.NoError(t, p.UpdateSessionStats(ctx, s.ID, update))
+
+	// Verify the updates were applied.
+	got, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(150), got.TotalInputTokens)
+	assert.Equal(t, int64(80), got.TotalOutputTokens)
+	assert.Equal(t, int32(5), got.ToolCallCount)
+	assert.Equal(t, int32(6), got.MessageCount)
+	assert.InDelta(t, 0.01, got.EstimatedCostUSD, 0.001)
+	assert.Equal(t, session.SessionStatusCompleted, got.Status)
+}
+
+func TestUpdateSessionStats_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	p := newProvider(t)
+
+	err := p.UpdateSessionStats(ctx, "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b99", session.SessionStatsUpdate{
+		AddInputTokens: 10,
+	})
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}
+
+func TestUpdateSessionStats_EmptyStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	p := newProvider(t)
+
+	s := &session.Session{
+		ID:            "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b02",
+		AgentName:     "test-agent",
+		Namespace:     "test-ns",
+		WorkspaceName: "test-ws",
+		Status:        session.SessionStatusActive,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	require.NoError(t, p.CreateSession(ctx, s))
+
+	// Update without setting status should preserve existing status.
+	update := session.SessionStatsUpdate{
+		AddInputTokens: 10,
+	}
+	require.NoError(t, p.UpdateSessionStats(ctx, s.ID, update))
+
+	got, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Equal(t, session.SessionStatusActive, got.Status)
+	assert.Equal(t, int64(10), got.TotalInputTokens)
+}

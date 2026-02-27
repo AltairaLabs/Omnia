@@ -37,6 +37,9 @@ const (
 	defaultListLimit    = 20
 	maxListLimit        = 100
 	defaultMessageLimit = 50
+
+	// DefaultMaxBodySize is the maximum allowed request body size (10 MB).
+	DefaultMaxBodySize int64 = 10 << 20
 )
 
 // SessionListResponse is the JSON response for session list/search endpoints.
@@ -65,15 +68,22 @@ type ErrorResponse struct {
 
 // Handler provides HTTP endpoints for session history.
 type Handler struct {
-	service *SessionService
-	log     logr.Logger
+	service     *SessionService
+	log         logr.Logger
+	maxBodySize int64
 }
 
 // NewHandler creates a new session API handler.
-func NewHandler(service *SessionService, log logr.Logger) *Handler {
+// An optional maxBodySize can be passed (first value used); defaults to 10 MB.
+func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) *Handler {
+	mbs := DefaultMaxBodySize
+	if len(maxBodySize) > 0 && maxBodySize[0] > 0 {
+		mbs = maxBodySize[0]
+	}
 	return &Handler{
-		service: service,
-		log:     log.WithName("session-handler"),
+		service:     service,
+		log:         log.WithName("session-handler"),
+		maxBodySize: mbs,
 	}
 }
 
@@ -273,10 +283,21 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// limitBody wraps the request body with a max bytes reader to prevent
+// oversized payloads from consuming excessive memory.
+func (h *Handler) limitBody(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+}
+
 // handleCreateSession creates a new session.
 func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	h.limitBody(w, r)
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
 		writeError(w, ErrMissingBody)
 		return
 	}
@@ -315,8 +336,13 @@ func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.limitBody(w, r)
 	var msg session.Message
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
 		writeError(w, ErrMissingBody)
 		return
 	}
@@ -340,8 +366,13 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.limitBody(w, r)
 	var update session.SessionStatsUpdate
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
 		writeError(w, ErrMissingBody)
 		return
 	}
@@ -365,8 +396,13 @@ func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.limitBody(w, r)
 	var req RefreshTTLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isMaxBytesError(err) {
+			writeError(w, ErrBodyTooLarge)
+			return
+		}
 		writeError(w, ErrMissingBody)
 		return
 	}
@@ -494,6 +530,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingNamespace):
 		status = http.StatusBadRequest
 		msg = ErrMissingNamespace.Error()
+	case errors.Is(err, ErrBodyTooLarge) || isMaxBytesError(err):
+		status = http.StatusRequestEntityTooLarge
+		msg = ErrBodyTooLarge.Error()
 	default:
 		var timeErr *time.ParseError
 		if errors.As(err, &timeErr) {
@@ -505,4 +544,10 @@ func writeError(w http.ResponseWriter, err error) {
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
+}
+
+// isMaxBytesError checks if the error is an http.MaxBytesError from MaxBytesReader.
+func isMaxBytesError(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr)
 }

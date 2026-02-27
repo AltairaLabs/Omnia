@@ -21,6 +21,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -68,6 +69,20 @@ const (
 // Default worker image for Arena jobs
 const (
 	DefaultWorkerImage = "ghcr.io/altairalabs/arena-worker:latest"
+)
+
+// Default resource requests and limits for Arena worker containers.
+var (
+	defaultWorkerResources = corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
 )
 
 // ArenaJobReconciler reconciles an ArenaJob object
@@ -334,6 +349,12 @@ func (r *ArenaJobReconciler) getWorkerImagePullPolicy() corev1.PullPolicy {
 		return r.WorkerImagePullPolicy
 	}
 	return corev1.PullIfNotPresent
+}
+
+// getWorkerResources returns the resource requirements for the worker container.
+// Uses the default resource requests/limits (100m/128Mi requests, 500m/512Mi limits).
+func (r *ArenaJobReconciler) getWorkerResources(_ *omniav1alpha1.ArenaJob) corev1.ResourceRequirements {
+	return defaultWorkerResources
 }
 
 // getWorkerServiceAccountName returns the ServiceAccount name for worker pods if any
@@ -1048,6 +1069,7 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 							Image:           r.getWorkerImage(),
 							ImagePullPolicy: r.getWorkerImagePullPolicy(),
 							Env:             env,
+							Resources:       r.getWorkerResources(arenaJob),
 							SecurityContext: &corev1.SecurityContext{
 								AllowPrivilegeEscalation: ptr.To(false),
 								ReadOnlyRootFilesystem:   ptr.To(true),

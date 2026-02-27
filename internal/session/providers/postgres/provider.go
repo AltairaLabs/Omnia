@@ -495,6 +495,38 @@ func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.S
 	}
 }
 
+// UpdateSessionStats atomically increments session counters in a single UPDATE.
+// This avoids the read-modify-write race condition of a separate SELECT + UPDATE.
+func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
+	query := `UPDATE sessions SET
+		total_input_tokens = total_input_tokens + $2,
+		total_output_tokens = total_output_tokens + $3,
+		estimated_cost_usd = estimated_cost_usd + $4,
+		tool_call_count = tool_call_count + $5,
+		message_count = message_count + $6,
+		status = CASE WHEN $7::text = '' THEN status ELSE $7::text END,
+		updated_at = $8
+	WHERE id = $1`
+
+	res, err := p.pool.Exec(ctx, query,
+		sessionID,
+		int64(update.AddInputTokens),
+		int64(update.AddOutputTokens),
+		update.AddCostUSD,
+		update.AddToolCalls,
+		update.AddMessages,
+		string(update.SetStatus),
+		time.Now(),
+	)
+	if err != nil {
+		return fmt.Errorf("postgres: update session stats: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return session.ErrSessionNotFound
+	}
+	return nil
+}
+
 // --- Artifact management ----------------------------------------------------
 
 func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact) error {
