@@ -1021,3 +1021,13 @@ local_resource(
     trigger_mode=TRIGGER_MODE_MANUAL,
     resource_deps=['omnia-controller-manager', 'omnia-session-api'],
 )
+
+# Policy e2e tests — runs only the "Policy E2E" context (AgentPolicy + ToolPolicy CRDs).
+local_resource(
+    'e2e-tests-policy',
+    cmd=_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -ginkgo.focus="Policy E2E" -timeout 10m',
+    labels=['test'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['omnia-controller-manager'],
+)
