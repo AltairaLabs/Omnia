@@ -186,6 +186,11 @@ func (a *MCPAdapter) Call(ctx context.Context, name string, args map[string]any)
 
 	a.log.V(1).Info("calling tool", "name", name)
 
+	// Note: MCP protocol does not support custom headers on tool calls.
+	// Policy propagation fields remain in ctx for colocated MCP servers that
+	// can read Go context directly. For remote MCP servers, a future extension
+	// to the MCP protocol would be needed.
+
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      name,
 		Arguments: args,

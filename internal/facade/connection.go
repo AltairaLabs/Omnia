@@ -38,6 +38,12 @@ type Connection struct {
 	sessionSpan   trace.Span
 	mu            sync.Mutex
 	closed        bool
+
+	// User identity fields extracted from Istio-injected headers on WebSocket upgrade.
+	userID        string
+	userRoles     string
+	userEmail     string
+	authorization string // Original JWT token for passthrough
 }
 
 // handleConnection manages the lifecycle of a WebSocket connection.

@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
@@ -256,6 +257,16 @@ func (a *GRPCAdapter) Call(ctx context.Context, name string, args map[string]any
 	}
 
 	a.log.V(1).Info("calling tool", "name", name)
+
+	// Inject policy propagation metadata into outgoing gRPC context
+	md := PolicyGRPCMetadata(ctx, name, a.config.Name, args)
+	if len(md) > 0 {
+		pairs := make([]string, 0, len(md)*2)
+		for k, v := range md {
+			pairs = append(pairs, k, v)
+		}
+		ctx = metadata.AppendToOutgoingContext(ctx, pairs...)
+	}
 
 	resp, err := client.Execute(ctx, &toolsv1.ToolRequest{
 		ToolName:      name,

@@ -219,6 +219,9 @@ func (a *OpenAPIAdapter) Call(ctx context.Context, name string, args map[string]
 		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
+	// Set policy propagation, tool, and parameter headers
+	SetAllOutboundHeaders(ctx, req, name, a.config.Name, args)
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
