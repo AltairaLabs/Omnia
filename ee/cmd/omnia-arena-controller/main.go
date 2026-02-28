@@ -292,6 +292,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ToolPolicy controller
+	if err := (&controller.ToolPolicyReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("toolpolicy-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, errUnableToCreateController, logKeyController, "ToolPolicy")
+		os.Exit(1)
+	}
+
 	// SessionPrivacyPolicy controller
 	privacyPolicyMetrics := metrics.NewPrivacyPolicyMetrics()
 	privacyPolicyMetrics.Initialize()
