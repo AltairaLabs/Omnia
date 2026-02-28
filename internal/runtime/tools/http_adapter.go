@@ -182,6 +182,9 @@ func (a *HTTPAdapter) Call(ctx context.Context, name string, args map[string]any
 		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
+	// Set policy propagation, tool, and parameter headers
+	SetAllOutboundHeaders(ctx, req, name, a.config.Name, args)
+
 	// Execute request
 	resp, err := client.Do(req)
 	if err != nil {

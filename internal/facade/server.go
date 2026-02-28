@@ -37,6 +37,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // envAllowedOrigins is the environment variable for configuring allowed WebSocket origins.
@@ -292,6 +293,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract user identity from Istio-injected headers on the upgrade request.
+	userID := r.Header.Get(policy.IstioHeaderUserID)
+	userRoles := r.Header.Get(policy.IstioHeaderUserRoles)
+	userEmail := r.Header.Get(policy.IstioHeaderUserEmail)
+	authorization := r.Header.Get("Authorization")
+
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.log.Error(err, "failed to upgrade connection")
@@ -304,6 +311,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		agentName:     agentName,
 		namespace:     namespace,
 		binaryCapable: binaryCapable,
+		userID:        userID,
+		userRoles:     userRoles,
+		userEmail:     userEmail,
+		authorization: authorization,
 	}
 
 	s.mu.Lock()
@@ -317,6 +328,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connCtx := logctx.WithAgent(context.Background(), agentName)
 	connCtx = logctx.WithNamespace(connCtx, namespace)
 	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
+
+	// Store policy propagation fields for gRPC metadata forwarding
+	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{
+		AgentName:     agentName,
+		Namespace:     namespace,
+		RequestID:     logctx.RequestID(connCtx),
+		UserID:        userID,
+		UserRoles:     userRoles,
+		UserEmail:     userEmail,
+		Authorization: authorization,
+	})
 
 	// Start session span if tracing is enabled
 	var sessionSpan trace.Span

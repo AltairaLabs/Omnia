@@ -25,7 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
+	"github.com/altairalabs/omnia/pkg/policy"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -189,4 +191,86 @@ func TestRuntimeClient_Address(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	assert.Equal(t, addr, client.Address())
+}
+
+func TestInjectPolicyMetadata(t *testing.T) {
+	ctx := context.Background()
+	ctx = policy.WithAgentName(ctx, "test-agent")
+	ctx = policy.WithNamespace(ctx, "production")
+	ctx = policy.WithUserID(ctx, "user-1")
+
+	enriched := injectPolicyMetadata(ctx)
+
+	md, ok := metadata.FromOutgoingContext(enriched)
+	require.True(t, ok)
+
+	assert.Equal(t, []string{"test-agent"}, md.Get(policy.HeaderAgentName))
+	assert.Equal(t, []string{"production"}, md.Get(policy.HeaderNamespace))
+	assert.Equal(t, []string{"user-1"}, md.Get(policy.HeaderUserID))
+}
+
+func TestInjectPolicyMetadata_EmptyContext(t *testing.T) {
+	ctx := context.Background()
+	enriched := injectPolicyMetadata(ctx)
+
+	// No metadata should be appended for empty context
+	_, ok := metadata.FromOutgoingContext(enriched)
+	assert.False(t, ok)
+}
+
+func TestInjectPolicyMetadata_WithClaims(t *testing.T) {
+	ctx := context.Background()
+	ctx = policy.WithAgentName(ctx, "agent")
+	ctx = policy.WithClaims(ctx, map[string]string{"team": "eng", "region": "us"})
+
+	enriched := injectPolicyMetadata(ctx)
+
+	md, ok := metadata.FromOutgoingContext(enriched)
+	require.True(t, ok)
+
+	assert.Equal(t, []string{"agent"}, md.Get(policy.HeaderAgentName))
+	assert.Equal(t, []string{"eng"}, md.Get("x-omnia-claim-team"))
+	assert.Equal(t, []string{"us"}, md.Get("x-omnia-claim-region"))
+}
+
+func TestPolicyUnaryClientInterceptor(t *testing.T) {
+	interceptor := policyUnaryClientInterceptor()
+
+	ctx := context.Background()
+	ctx = policy.WithAgentName(ctx, "intercepted-agent")
+
+	var capturedCtx context.Context
+	invoker := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
+		capturedCtx = ctx
+		return nil
+	}
+
+	err := interceptor(ctx, "/test.Method", nil, nil, nil, invoker)
+	assert.NoError(t, err)
+
+	md, ok := metadata.FromOutgoingContext(capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, []string{"intercepted-agent"}, md.Get(policy.HeaderAgentName))
+}
+
+func TestPolicyStreamClientInterceptor(t *testing.T) {
+	interceptor := policyStreamClientInterceptor()
+
+	ctx := context.Background()
+	ctx = policy.WithAgentName(ctx, "stream-agent")
+	ctx = policy.WithUserID(ctx, "stream-user")
+
+	var capturedCtx context.Context
+	streamer := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		capturedCtx = ctx
+		return nil, nil
+	}
+
+	_, err := interceptor(ctx, nil, nil, "/test.Stream", streamer)
+	assert.NoError(t, err)
+
+	md, ok := metadata.FromOutgoingContext(capturedCtx)
+	require.True(t, ok)
+	assert.Equal(t, []string{"stream-agent"}, md.Get(policy.HeaderAgentName))
+	assert.Equal(t, []string{"stream-user"}, md.Get(policy.HeaderUserID))
 }
