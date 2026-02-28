@@ -85,6 +85,37 @@ spec:
                     - claim
                     x-kubernetes-list-type: map
                 type: object
+              limits:
+                description: limits defines rate limits for the agent.
+                properties:
+                  maxToolCallsPerSession:
+                    description: maxToolCallsPerSession caps the number of tool calls
+                      allowed in a single session.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              providerAccess:
+                description: providerAccess restricts which providers and models an
+                  agent can use.
+                properties:
+                  allowedModels:
+                    description: |-
+                      allowedModels is the list of allowed model identifiers.
+                      When set, only requests for these models are permitted.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                  allowedProviders:
+                    description: |-
+                      allowedProviders is the list of allowed provider names.
+                      When set, only requests to these providers are permitted.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                type: object
               selector:
                 description: selector determines which agents this policy applies
                   to.

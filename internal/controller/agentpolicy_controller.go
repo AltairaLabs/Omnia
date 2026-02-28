@@ -23,6 +23,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -53,6 +54,18 @@ const (
 	claimHeaderRequiredPrefix = "X-Omnia-Claim-"
 )
 
+// Istio AuthorizationPolicy constants.
+const (
+	istioAuthPolicyAPIVersion = "security.istio.io/v1"
+	istioAuthPolicyKind       = "AuthorizationPolicy"
+	istioActionAllow          = "ALLOW"
+	istioActionDeny           = "DENY"
+	headerProviderName        = "X-Omnia-Provider"
+	headerModelName           = "X-Omnia-Model"
+	authPolicySuffixAllow     = "-provider-allow"
+	authPolicySuffixDeny      = "-provider-deny"
+)
+
 // AgentPolicyReconciler reconciles an AgentPolicy object.
 type AgentPolicyReconciler struct {
 	client.Client
@@ -64,6 +77,7 @@ type AgentPolicyReconciler struct {
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentpolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentpolicies/finalizers,verbs=update
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=security.istio.io,resources=authorizationpolicies,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile reconciles the AgentPolicy resource.
 func (r *AgentPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -87,6 +101,18 @@ func (r *AgentPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Error(statusErr, logMsgFailedToUpdateStatus)
 		}
 		return ctrl.Result{}, nil // Do not retry validation errors
+	}
+
+	// Reconcile Istio AuthorizationPolicies for provider access
+	if policy.Spec.ProviderAccess != nil {
+		if err := r.reconcileAuthorizationPolicies(ctx, policy); err != nil {
+			log.Error(err, "failed to reconcile Istio AuthorizationPolicies")
+			return ctrl.Result{}, err
+		}
+	} else {
+		if err := r.cleanupAuthorizationPolicies(ctx, policy); err != nil {
+			log.Error(err, "failed to clean up Istio AuthorizationPolicies")
+		}
 	}
 
 	// Count matched agents
@@ -120,10 +146,47 @@ func (r *AgentPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 // validatePolicy validates the AgentPolicy spec.
 func (r *AgentPolicyReconciler) validatePolicy(policy *omniav1alpha1.AgentPolicy) error {
-	if policy.Spec.ClaimMapping == nil {
+	if policy.Spec.ClaimMapping != nil {
+		if err := validateClaimMappings(policy.Spec.ClaimMapping.ForwardClaims); err != nil {
+			return err
+		}
+	}
+	if err := validateProviderAccess(policy.Spec.ProviderAccess); err != nil {
+		return err
+	}
+	return validateAgentLimits(policy.Spec.Limits)
+}
+
+// validateProviderAccess validates the provider access configuration.
+func validateProviderAccess(pa *omniav1alpha1.ProviderAccessConfig) error {
+	if pa == nil {
 		return nil
 	}
-	return validateClaimMappings(policy.Spec.ClaimMapping.ForwardClaims)
+	if len(pa.AllowedProviders) == 0 && len(pa.AllowedModels) == 0 {
+		return fmt.Errorf("providerAccess must specify at least allowedProviders or allowedModels")
+	}
+	for _, p := range pa.AllowedProviders {
+		if p == "" {
+			return fmt.Errorf("allowedProviders entries must not be empty")
+		}
+	}
+	for _, m := range pa.AllowedModels {
+		if m == "" {
+			return fmt.Errorf("allowedModels entries must not be empty")
+		}
+	}
+	return nil
+}
+
+// validateAgentLimits validates the agent limits configuration.
+func validateAgentLimits(limits *omniav1alpha1.AgentLimits) error {
+	if limits == nil {
+		return nil
+	}
+	if limits.MaxToolCallsPerSession != nil && *limits.MaxToolCallsPerSession <= 0 {
+		return fmt.Errorf("maxToolCallsPerSession must be positive")
+	}
+	return nil
 }
 
 // validateClaimMappings validates each claim mapping entry.
@@ -228,6 +291,154 @@ func (r *AgentPolicyReconciler) policyMatchesAgent(policy *omniav1alpha1.AgentPo
 		}
 	}
 	return false
+}
+
+// reconcileAuthorizationPolicies creates/updates Istio AuthorizationPolicies for provider access.
+func (r *AgentPolicyReconciler) reconcileAuthorizationPolicies(ctx context.Context, policy *omniav1alpha1.AgentPolicy) error {
+	allowPolicy := buildAllowPolicy(policy)
+	if err := r.applyUnstructured(ctx, allowPolicy); err != nil {
+		return fmt.Errorf("failed to apply allow AuthorizationPolicy: %w", err)
+	}
+
+	denyPolicy := buildDenyPolicy(policy)
+	if err := r.applyUnstructured(ctx, denyPolicy); err != nil {
+		return fmt.Errorf("failed to apply deny AuthorizationPolicy: %w", err)
+	}
+	return nil
+}
+
+// buildAllowPolicy creates an Istio AuthorizationPolicy ALLOW rule for allowed providers/models.
+func buildAllowPolicy(policy *omniav1alpha1.AgentPolicy) *unstructured.Unstructured {
+	rules := buildAllowRules(policy.Spec.ProviderAccess)
+	obj := newIstioAuthPolicy(policy, policy.Name+authPolicySuffixAllow, istioActionAllow, rules)
+	return obj
+}
+
+// buildAllowRules constructs the ALLOW rules for provider and model headers.
+func buildAllowRules(pa *omniav1alpha1.ProviderAccessConfig) []interface{} {
+	var whenClauses []interface{}
+	if len(pa.AllowedProviders) > 0 {
+		values := make([]interface{}, len(pa.AllowedProviders))
+		for i, v := range pa.AllowedProviders {
+			values[i] = v
+		}
+		whenClauses = append(whenClauses, map[string]interface{}{
+			"key":    "request.headers[" + headerProviderName + "]",
+			"values": values,
+		})
+	}
+	if len(pa.AllowedModels) > 0 {
+		values := make([]interface{}, len(pa.AllowedModels))
+		for i, v := range pa.AllowedModels {
+			values[i] = v
+		}
+		whenClauses = append(whenClauses, map[string]interface{}{
+			"key":    "request.headers[" + headerModelName + "]",
+			"values": values,
+		})
+	}
+	return []interface{}{
+		map[string]interface{}{
+			"when": whenClauses,
+		},
+	}
+}
+
+// buildDenyPolicy creates an Istio AuthorizationPolicy DENY catch-all rule.
+func buildDenyPolicy(policy *omniav1alpha1.AgentPolicy) *unstructured.Unstructured {
+	pa := policy.Spec.ProviderAccess
+	var whenClauses []interface{}
+	if len(pa.AllowedProviders) > 0 {
+		values := make([]interface{}, len(pa.AllowedProviders))
+		for i, v := range pa.AllowedProviders {
+			values[i] = v
+		}
+		whenClauses = append(whenClauses, map[string]interface{}{
+			"key":       "request.headers[" + headerProviderName + "]",
+			"notValues": values,
+		})
+	}
+	if len(pa.AllowedModels) > 0 {
+		values := make([]interface{}, len(pa.AllowedModels))
+		for i, v := range pa.AllowedModels {
+			values[i] = v
+		}
+		whenClauses = append(whenClauses, map[string]interface{}{
+			"key":       "request.headers[" + headerModelName + "]",
+			"notValues": values,
+		})
+	}
+	rules := []interface{}{
+		map[string]interface{}{
+			"when": whenClauses,
+		},
+	}
+	return newIstioAuthPolicy(policy, policy.Name+authPolicySuffixDeny, istioActionDeny, rules)
+}
+
+// newIstioAuthPolicy creates a base Istio AuthorizationPolicy unstructured object.
+func newIstioAuthPolicy(policy *omniav1alpha1.AgentPolicy, name, action string, rules []interface{}) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetAPIVersion(istioAuthPolicyAPIVersion)
+	obj.SetKind(istioAuthPolicyKind)
+	obj.SetName(name)
+	obj.SetNamespace(policy.Namespace)
+	obj.SetLabels(map[string]string{
+		labelAppManagedBy: labelValueOmniaOperator,
+		labelAppName:      "agentpolicy",
+		labelAppInstance:  policy.Name,
+	})
+	obj.SetOwnerReferences([]metav1.OwnerReference{
+		*metav1.NewControllerRef(policy, omniav1alpha1.GroupVersion.WithKind("AgentPolicy")),
+	})
+	_ = unstructured.SetNestedField(obj.Object, action, "spec", "action")
+	_ = unstructured.SetNestedSlice(obj.Object, rules, "spec", "rules")
+	return obj
+}
+
+// applyUnstructured creates or updates an unstructured resource.
+func (r *AgentPolicyReconciler) applyUnstructured(ctx context.Context, obj *unstructured.Unstructured) error {
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(obj.GroupVersionKind())
+
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+	}, existing)
+
+	if apierrors.IsNotFound(err) {
+		return r.Create(ctx, obj)
+	}
+	if err != nil {
+		return err
+	}
+
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	return r.Update(ctx, obj)
+}
+
+// cleanupAuthorizationPolicies removes Istio AuthorizationPolicies owned by this policy.
+func (r *AgentPolicyReconciler) cleanupAuthorizationPolicies(ctx context.Context, policy *omniav1alpha1.AgentPolicy) error {
+	for _, suffix := range []string{authPolicySuffixAllow, authPolicySuffixDeny} {
+		obj := &unstructured.Unstructured{}
+		obj.SetAPIVersion(istioAuthPolicyAPIVersion)
+		obj.SetKind(istioAuthPolicyKind)
+
+		err := r.Get(ctx, types.NamespacedName{
+			Name:      policy.Name + suffix,
+			Namespace: policy.Namespace,
+		}, obj)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

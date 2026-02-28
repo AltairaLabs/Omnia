@@ -53,6 +53,29 @@ type ClaimMapping struct {
 	ForwardClaims []ClaimMappingEntry `json:"forwardClaims,omitempty"`
 }
 
+// ProviderAccessConfig restricts which providers and models an agent can use.
+type ProviderAccessConfig struct {
+	// allowedProviders is the list of allowed provider names.
+	// When set, only requests to these providers are permitted.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	AllowedProviders []string `json:"allowedProviders,omitempty"`
+
+	// allowedModels is the list of allowed model identifiers.
+	// When set, only requests for these models are permitted.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	AllowedModels []string `json:"allowedModels,omitempty"`
+}
+
+// AgentLimits defines rate limits and resource caps for the agent.
+type AgentLimits struct {
+	// maxToolCallsPerSession caps the number of tool calls allowed in a single session.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxToolCallsPerSession *int32 `json:"maxToolCallsPerSession,omitempty"`
+}
+
 // AgentPolicySpec defines the desired state of AgentPolicy.
 type AgentPolicySpec struct {
 	// selector determines which agents this policy applies to.
@@ -62,6 +85,14 @@ type AgentPolicySpec struct {
 	// claimMapping configures JWT claim extraction and header forwarding.
 	// +optional
 	ClaimMapping *ClaimMapping `json:"claimMapping,omitempty"`
+
+	// providerAccess restricts which providers and models an agent can use.
+	// +optional
+	ProviderAccess *ProviderAccessConfig `json:"providerAccess,omitempty"`
+
+	// limits defines rate limits for the agent.
+	// +optional
+	Limits *AgentLimits `json:"limits,omitempty"`
 }
 
 // AgentPolicyPhase represents the current phase of the AgentPolicy.

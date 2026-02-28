@@ -127,6 +127,7 @@ type Server struct {
 	metrics         ServerMetrics
 	mediaStorage    media.Storage
 	tracingProvider *tracing.Provider
+	policyProvider  PolicyProvider
 	allowedOrigins  []string
 	log             logr.Logger
 
@@ -315,6 +316,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userRoles:     userRoles,
 		userEmail:     userEmail,
 		authorization: authorization,
+	}
+
+	// Apply tool call limit from policy if configured
+	if s.policyProvider != nil {
+		if limits := s.policyProvider.GetLimits(namespace, agentName); limits != nil && limits.MaxToolCallsPerSession > 0 {
+			c.toolCallLimiter = NewToolCallLimiter(limits.MaxToolCallsPerSession)
+		}
 	}
 
 	s.mu.Lock()

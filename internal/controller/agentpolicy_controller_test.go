@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -497,4 +498,454 @@ func TestFindPoliciesForAgent(t *testing.T) {
 	}
 	requests = r.findPoliciesForAgent(context.Background(), agentOther)
 	assert.Len(t, requests, 1) // Only policy-all matches
+}
+
+// --- Provider access validation tests ---
+
+func TestValidateProviderAccess_Nil(t *testing.T) {
+	err := validateProviderAccess(nil)
+	assert.NoError(t, err)
+}
+
+func TestValidateProviderAccess_ValidProviders(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedProviders: []string{"claude", "openai"},
+	}
+	err := validateProviderAccess(pa)
+	assert.NoError(t, err)
+}
+
+func TestValidateProviderAccess_ValidModels(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedModels: []string{"claude-3-opus", "gpt-4"},
+	}
+	err := validateProviderAccess(pa)
+	assert.NoError(t, err)
+}
+
+func TestValidateProviderAccess_BothProvidersAndModels(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedProviders: []string{"claude"},
+		AllowedModels:    []string{"claude-3-opus"},
+	}
+	err := validateProviderAccess(pa)
+	assert.NoError(t, err)
+}
+
+func TestValidateProviderAccess_EmptyBoth(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{}
+	err := validateProviderAccess(pa)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must specify at least")
+}
+
+func TestValidateProviderAccess_EmptyProviderEntry(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedProviders: []string{"claude", ""},
+	}
+	err := validateProviderAccess(pa)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestValidateProviderAccess_EmptyModelEntry(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedModels: []string{""},
+	}
+	err := validateProviderAccess(pa)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+// --- Agent limits validation tests ---
+
+func TestValidateAgentLimits_Nil(t *testing.T) {
+	err := validateAgentLimits(nil)
+	assert.NoError(t, err)
+}
+
+func TestValidateAgentLimits_ValidPositive(t *testing.T) {
+	val := int32(100)
+	limits := &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val}
+	err := validateAgentLimits(limits)
+	assert.NoError(t, err)
+}
+
+func TestValidateAgentLimits_Zero(t *testing.T) {
+	val := int32(0)
+	limits := &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val}
+	err := validateAgentLimits(limits)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must be positive")
+}
+
+func TestValidateAgentLimits_Negative(t *testing.T) {
+	val := int32(-5)
+	limits := &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val}
+	err := validateAgentLimits(limits)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must be positive")
+}
+
+func TestValidateAgentLimits_NilMaxToolCalls(t *testing.T) {
+	limits := &omniav1alpha1.AgentLimits{}
+	err := validateAgentLimits(limits)
+	assert.NoError(t, err)
+}
+
+// --- Combined policy validation tests ---
+
+func TestValidatePolicy_ProviderAccessValid(t *testing.T) {
+	r := &AgentPolicyReconciler{}
+	policy := &omniav1alpha1.AgentPolicy{
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ProviderAccess: &omniav1alpha1.ProviderAccessConfig{
+				AllowedProviders: []string{"claude"},
+			},
+		},
+	}
+	err := r.validatePolicy(policy)
+	assert.NoError(t, err)
+}
+
+func TestValidatePolicy_ProviderAccessInvalid(t *testing.T) {
+	r := &AgentPolicyReconciler{}
+	policy := &omniav1alpha1.AgentPolicy{
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ProviderAccess: &omniav1alpha1.ProviderAccessConfig{},
+		},
+	}
+	err := r.validatePolicy(policy)
+	assert.Error(t, err)
+}
+
+func TestValidatePolicy_LimitsValid(t *testing.T) {
+	r := &AgentPolicyReconciler{}
+	val := int32(50)
+	policy := &omniav1alpha1.AgentPolicy{
+		Spec: omniav1alpha1.AgentPolicySpec{
+			Limits: &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val},
+		},
+	}
+	err := r.validatePolicy(policy)
+	assert.NoError(t, err)
+}
+
+func TestValidatePolicy_LimitsInvalid(t *testing.T) {
+	r := &AgentPolicyReconciler{}
+	val := int32(-1)
+	policy := &omniav1alpha1.AgentPolicy{
+		Spec: omniav1alpha1.AgentPolicySpec{
+			Limits: &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val},
+		},
+	}
+	err := r.validatePolicy(policy)
+	assert.Error(t, err)
+}
+
+// --- Reconcile tests with provider access (Istio AuthorizationPolicy) ---
+
+func TestReconcile_WithProviderAccess(t *testing.T) {
+	scheme := newTestScheme(t)
+
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "provider-policy",
+			Namespace:  "default",
+			Generation: 1,
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ProviderAccess: &omniav1alpha1.ProviderAccessConfig{
+				AllowedProviders: []string{"claude", "openai"},
+				AllowedModels:    []string{"claude-3-opus"},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(policy).
+		WithStatusSubresource(policy).
+		Build()
+
+	r := &AgentPolicyReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "provider-policy", Namespace: "default"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	// Verify status is active
+	updated := &omniav1alpha1.AgentPolicy{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "provider-policy", Namespace: "default"}, updated)
+	require.NoError(t, err)
+	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseActive, updated.Status.Phase)
+
+	// Verify Istio AuthorizationPolicies were created
+	allowPolicy := &unstructured.Unstructured{}
+	allowPolicy.SetAPIVersion(istioAuthPolicyAPIVersion)
+	allowPolicy.SetKind(istioAuthPolicyKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "provider-policy" + authPolicySuffixAllow,
+		Namespace: "default",
+	}, allowPolicy)
+	assert.NoError(t, err, "allow AuthorizationPolicy should exist")
+
+	denyPolicy := &unstructured.Unstructured{}
+	denyPolicy.SetAPIVersion(istioAuthPolicyAPIVersion)
+	denyPolicy.SetKind(istioAuthPolicyKind)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "provider-policy" + authPolicySuffixDeny,
+		Namespace: "default",
+	}, denyPolicy)
+	assert.NoError(t, err, "deny AuthorizationPolicy should exist")
+}
+
+func TestReconcile_WithLimits(t *testing.T) {
+	scheme := newTestScheme(t)
+
+	val := int32(50)
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "limits-policy",
+			Namespace:  "default",
+			Generation: 1,
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			Limits: &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(policy).
+		WithStatusSubresource(policy).
+		Build()
+
+	r := &AgentPolicyReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "limits-policy", Namespace: "default"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	updated := &omniav1alpha1.AgentPolicy{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "limits-policy", Namespace: "default"}, updated)
+	require.NoError(t, err)
+	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseActive, updated.Status.Phase)
+}
+
+// --- Istio AuthorizationPolicy builder unit tests ---
+
+func TestBuildAllowPolicy(t *testing.T) {
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-policy",
+			Namespace: "default",
+			UID:       "abc-123",
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ProviderAccess: &omniav1alpha1.ProviderAccessConfig{
+				AllowedProviders: []string{"claude"},
+				AllowedModels:    []string{"claude-3-opus"},
+			},
+		},
+	}
+
+	obj := buildAllowPolicy(policy)
+
+	assert.Equal(t, istioAuthPolicyAPIVersion, obj.GetAPIVersion())
+	assert.Equal(t, istioAuthPolicyKind, obj.GetKind())
+	assert.Equal(t, "test-policy"+authPolicySuffixAllow, obj.GetName())
+	assert.Equal(t, "default", obj.GetNamespace())
+
+	// Verify action
+	action, _, _ := unstructured.NestedString(obj.Object, "spec", "action")
+	assert.Equal(t, istioActionAllow, action)
+
+	// Verify owner reference
+	refs := obj.GetOwnerReferences()
+	assert.Len(t, refs, 1)
+	assert.Equal(t, "test-policy", refs[0].Name)
+}
+
+func TestBuildDenyPolicy(t *testing.T) {
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-policy",
+			Namespace: "default",
+			UID:       "abc-123",
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ProviderAccess: &omniav1alpha1.ProviderAccessConfig{
+				AllowedProviders: []string{"openai"},
+			},
+		},
+	}
+
+	obj := buildDenyPolicy(policy)
+
+	assert.Equal(t, "test-policy"+authPolicySuffixDeny, obj.GetName())
+
+	action, _, _ := unstructured.NestedString(obj.Object, "spec", "action")
+	assert.Equal(t, istioActionDeny, action)
+
+	// Verify rules exist
+	rules, _, _ := unstructured.NestedSlice(obj.Object, "spec", "rules")
+	assert.Len(t, rules, 1)
+}
+
+func TestBuildAllowRules_ProvidersOnly(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedProviders: []string{"claude", "openai"},
+	}
+	rules := buildAllowRules(pa)
+	assert.Len(t, rules, 1)
+
+	rule := rules[0].(map[string]interface{})
+	when := rule["when"].([]interface{})
+	assert.Len(t, when, 1) // Only providers, no models
+}
+
+func TestBuildAllowRules_ModelsOnly(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedModels: []string{"claude-3-opus"},
+	}
+	rules := buildAllowRules(pa)
+	assert.Len(t, rules, 1)
+
+	rule := rules[0].(map[string]interface{})
+	when := rule["when"].([]interface{})
+	assert.Len(t, when, 1) // Only models, no providers
+}
+
+func TestBuildAllowRules_Both(t *testing.T) {
+	pa := &omniav1alpha1.ProviderAccessConfig{
+		AllowedProviders: []string{"claude"},
+		AllowedModels:    []string{"claude-3-opus"},
+	}
+	rules := buildAllowRules(pa)
+	assert.Len(t, rules, 1)
+
+	rule := rules[0].(map[string]interface{})
+	when := rule["when"].([]interface{})
+	assert.Len(t, when, 2) // Both providers and models
+}
+
+func TestNewIstioAuthPolicy_Labels(t *testing.T) {
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-policy",
+			Namespace: "test-ns",
+			UID:       "uid-123",
+		},
+	}
+
+	obj := newIstioAuthPolicy(policy, "my-policy-allow", istioActionAllow, nil)
+
+	labels := obj.GetLabels()
+	assert.Equal(t, labelValueOmniaOperator, labels[labelAppManagedBy])
+	assert.Equal(t, "agentpolicy", labels[labelAppName])
+	assert.Equal(t, "my-policy", labels[labelAppInstance])
+}
+
+func TestCleanupAuthorizationPolicies_NothingToClean(t *testing.T) {
+	scheme := newTestScheme(t)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	r := &AgentPolicyReconciler{Client: fakeClient, Scheme: scheme}
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+	}
+
+	// Should not error when there's nothing to clean up
+	err := r.cleanupAuthorizationPolicies(context.Background(), policy)
+	assert.NoError(t, err)
+}
+
+func TestReconcile_InvalidProviderAccess_SetsErrorStatus(t *testing.T) {
+	scheme := newTestScheme(t)
+
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "bad-provider-policy",
+			Namespace:  "default",
+			Generation: 1,
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			ProviderAccess: &omniav1alpha1.ProviderAccessConfig{},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(policy).
+		WithStatusSubresource(policy).
+		Build()
+
+	r := &AgentPolicyReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "bad-provider-policy", Namespace: "default"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	updated := &omniav1alpha1.AgentPolicy{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "bad-provider-policy", Namespace: "default"}, updated)
+	require.NoError(t, err)
+	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseError, updated.Status.Phase)
+}
+
+func TestReconcile_InvalidLimits_SetsErrorStatus(t *testing.T) {
+	scheme := newTestScheme(t)
+
+	val := int32(0)
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "bad-limits-policy",
+			Namespace:  "default",
+			Generation: 1,
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			Limits: &omniav1alpha1.AgentLimits{MaxToolCallsPerSession: &val},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(policy).
+		WithStatusSubresource(policy).
+		Build()
+
+	r := &AgentPolicyReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "bad-limits-policy", Namespace: "default"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	updated := &omniav1alpha1.AgentPolicy{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "bad-limits-policy", Namespace: "default"}, updated)
+	require.NoError(t, err)
+	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseError, updated.Status.Phase)
 }

@@ -113,8 +113,14 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 		log.Error(err, "failed to store user message")
 	}
 
+	// Wrap writer with rate-limit decorator if a tool call limit is set
+	var limitedWriter ResponseWriter = writer
+	if c.toolCallLimiter != nil {
+		limitedWriter = newRateLimitedWriter(writer, c.toolCallLimiter)
+	}
+
 	// Wrap writer with recording decorator to persist assistant responses
-	recWriter := newRecordingWriter(writer, s.sessionStore, sessionID, log)
+	recWriter := newRecordingWriter(limitedWriter, s.sessionStore, sessionID, log)
 
 	// Handle message
 	if s.handler != nil {

@@ -44,6 +44,9 @@ type Connection struct {
 	userRoles     string
 	userEmail     string
 	authorization string // Original JWT token for passthrough
+
+	// toolCallLimiter enforces per-session tool call limits from AgentPolicy.
+	toolCallLimiter *ToolCallLimiter
 }
 
 // handleConnection manages the lifecycle of a WebSocket connection.
