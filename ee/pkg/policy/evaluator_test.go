@@ -806,6 +806,353 @@ func TestMatchesSelector(t *testing.T) {
 	}
 }
 
+func newTestPolicyWithHeaders(
+	name string,
+	rules []omniav1alpha1.PolicyRule,
+	headers []omniav1alpha1.HeaderInjectionRule,
+) *omniav1alpha1.ToolPolicy {
+	p := newTestPolicy(name, rules)
+	p.Spec.HeaderInjection = headers
+	return p
+}
+
+func TestCompilePolicy_HeaderInjectionStaticValue(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("static-header", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Custom-Header", Value: "static-value"},
+		},
+	)
+
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+	if eval.PolicyCount() != 1 {
+		t.Errorf("PolicyCount() = %d, want 1", eval.PolicyCount())
+	}
+}
+
+func TestCompilePolicy_HeaderInjectionCELValue(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("cel-header", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Derived", CEL: "headers['X-Omnia-Claim-team']"},
+		},
+	)
+
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+}
+
+func TestCompilePolicy_HeaderInjectionBothValueAndCEL(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("both-set", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Bad", Value: "static", CEL: "headers['X-Test']"},
+		},
+	)
+
+	if err := eval.CompilePolicy(policy); err == nil {
+		t.Fatal("CompilePolicy() expected error when both value and cel are set")
+	}
+}
+
+func TestCompilePolicy_HeaderInjectionNeitherValueNorCEL(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("neither-set", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Empty"},
+		},
+	)
+
+	if err := eval.CompilePolicy(policy); err == nil {
+		t.Fatal("CompilePolicy() expected error when neither value nor cel is set")
+	}
+}
+
+func TestCompilePolicy_HeaderInjectionInvalidCEL(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("bad-cel-header", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Bad", CEL: "invalid CEL %%%"},
+		},
+	)
+
+	if err := eval.CompilePolicy(policy); err == nil {
+		t.Fatal("CompilePolicy() expected error for invalid CEL in header injection")
+	}
+}
+
+func TestEvaluateHeaderInjection_StaticValue(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("static-inject", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Api-Key", Value: "secret-key-123"},
+		},
+	)
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+	}
+
+	result, err := eval.EvaluateHeaderInjection(headers, nil)
+	if err != nil {
+		t.Fatalf("EvaluateHeaderInjection() error = %v", err)
+	}
+	if result["X-Api-Key"] != "secret-key-123" {
+		t.Errorf("X-Api-Key = %q, want %q", result["X-Api-Key"], "secret-key-123")
+	}
+}
+
+func TestEvaluateHeaderInjection_CELValue(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("cel-inject", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Team", CEL: "headers['X-Omnia-Claim-team']"},
+		},
+	)
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:       "process_refund",
+		HeaderToolRegistry:   "customer-tools",
+		"X-Omnia-Claim-team": "billing",
+	}
+
+	result, err := eval.EvaluateHeaderInjection(headers, nil)
+	if err != nil {
+		t.Fatalf("EvaluateHeaderInjection() error = %v", err)
+	}
+	if result["X-Team"] != "billing" {
+		t.Errorf("X-Team = %q, want %q", result["X-Team"], "billing")
+	}
+}
+
+func TestEvaluateHeaderInjection_CELWithBody(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("body-inject", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Region", CEL: "string(body.region)"},
+		},
+	)
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+	}
+	body := map[string]interface{}{"region": "us-east-1"}
+
+	result, err := eval.EvaluateHeaderInjection(headers, body)
+	if err != nil {
+		t.Fatalf("EvaluateHeaderInjection() error = %v", err)
+	}
+	if result["X-Region"] != "us-east-1" {
+		t.Errorf("X-Region = %q, want %q", result["X-Region"], "us-east-1")
+	}
+}
+
+func TestEvaluateHeaderInjection_MultipleHeaders(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("multi-inject", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Static", Value: "fixed"},
+			{Header: "X-Dynamic", CEL: "headers['X-Omnia-Claim-team']"},
+		},
+	)
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:       "process_refund",
+		HeaderToolRegistry:   "customer-tools",
+		"X-Omnia-Claim-team": "support",
+	}
+
+	result, err := eval.EvaluateHeaderInjection(headers, nil)
+	if err != nil {
+		t.Fatalf("EvaluateHeaderInjection() error = %v", err)
+	}
+	if result["X-Static"] != "fixed" {
+		t.Errorf("X-Static = %q, want %q", result["X-Static"], "fixed")
+	}
+	if result["X-Dynamic"] != "support" {
+		t.Errorf("X-Dynamic = %q, want %q", result["X-Dynamic"], "support")
+	}
+}
+
+func TestEvaluateHeaderInjection_NoMatchingPolicy(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("no-match", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Should-Not-Appear", Value: "nope"},
+		},
+	)
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "other-registry",
+	}
+
+	result, err := eval.EvaluateHeaderInjection(headers, nil)
+	if err != nil {
+		t.Fatalf("EvaluateHeaderInjection() error = %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty result, got %v", result)
+	}
+}
+
+func TestEvaluateHeaderInjection_CELErrorOnFailureDeny(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	// CEL that will error at runtime (accessing missing key)
+	policy := newTestPolicyWithHeaders("cel-error-deny", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Fail", CEL: "int(headers['X-Missing-Key'])"},
+		},
+	)
+	policy.Spec.OnFailure = omniav1alpha1.OnFailureDeny
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+	}
+
+	_, err = eval.EvaluateHeaderInjection(headers, nil)
+	if err == nil {
+		t.Fatal("EvaluateHeaderInjection() expected error with onFailure=deny")
+	}
+}
+
+func TestEvaluateHeaderInjection_CELErrorOnFailureAllow(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicyWithHeaders("cel-error-allow", minimalRules(),
+		[]omniav1alpha1.HeaderInjectionRule{
+			{Header: "X-Fail", CEL: "int(headers['X-Missing-Key'])"},
+			{Header: "X-Static", Value: "should-still-appear"},
+		},
+	)
+	policy.Spec.OnFailure = omniav1alpha1.OnFailureAllow
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+	}
+
+	result, err := eval.EvaluateHeaderInjection(headers, nil)
+	if err != nil {
+		t.Fatalf("EvaluateHeaderInjection() unexpected error with onFailure=allow: %v", err)
+	}
+	// The failing header should be skipped, but the static one should still be present
+	if result["X-Static"] != "should-still-appear" {
+		t.Errorf("X-Static = %q, want %q", result["X-Static"], "should-still-appear")
+	}
+	if _, ok := result["X-Fail"]; ok {
+		t.Error("X-Fail should not be present after CEL error with onFailure=allow")
+	}
+}
+
+func TestValidateHeaderInjectionRule(t *testing.T) {
+	tests := []struct {
+		name    string
+		rule    omniav1alpha1.HeaderInjectionRule
+		wantErr bool
+	}{
+		{"static value only", omniav1alpha1.HeaderInjectionRule{Header: "X-H", Value: "v"}, false},
+		{"cel only", omniav1alpha1.HeaderInjectionRule{Header: "X-H", CEL: "'v'"}, false},
+		{"both set", omniav1alpha1.HeaderInjectionRule{Header: "X-H", Value: "v", CEL: "'v'"}, true},
+		{"neither set", omniav1alpha1.HeaderInjectionRule{Header: "X-H"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateHeaderInjectionRule(tt.rule)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateHeaderInjectionRule() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// minimalRules returns a minimal set of policy rules for testing header injection.
+func minimalRules() []omniav1alpha1.PolicyRule {
+	return []omniav1alpha1.PolicyRule{
+		{
+			Name: "allow-all",
+			Deny: omniav1alpha1.PolicyRuleDeny{
+				CEL:     "false",
+				Message: "never deny",
+			},
+		},
+	}
+}
+
 func TestEvaluate_RequiredClaimsMultiple(t *testing.T) {
 	eval, err := NewEvaluator()
 	if err != nil {

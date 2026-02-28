@@ -53,16 +53,24 @@ type CompiledRule struct {
 	Message string
 }
 
+// CompiledHeaderInjection holds a pre-compiled header injection rule.
+type CompiledHeaderInjection struct {
+	Header  string
+	Value   string      // static value (if set)
+	Program cel.Program // CEL program (if set, mutually exclusive with Value)
+}
+
 // CompiledPolicy holds a set of pre-compiled rules for a ToolPolicy.
 type CompiledPolicy struct {
-	Name           string
-	Namespace      string
-	Selector       omniav1alpha1.ToolPolicySelector
-	Rules          []CompiledRule
-	RequiredClaims []omniav1alpha1.RequiredClaim
-	Mode           omniav1alpha1.PolicyMode
-	OnFailure      omniav1alpha1.OnFailureAction
-	Audit          *omniav1alpha1.ToolPolicyAuditConfig
+	Name            string
+	Namespace       string
+	Selector        omniav1alpha1.ToolPolicySelector
+	Rules           []CompiledRule
+	HeaderInjection []CompiledHeaderInjection
+	RequiredClaims  []omniav1alpha1.RequiredClaim
+	Mode            omniav1alpha1.PolicyMode
+	OnFailure       omniav1alpha1.OnFailureAction
+	Audit           *omniav1alpha1.ToolPolicyAuditConfig
 }
 
 // Evaluator compiles and evaluates CEL-based ToolPolicy rules.
@@ -132,7 +140,67 @@ func (e *Evaluator) compileRules(policy *omniav1alpha1.ToolPolicy) (*CompiledPol
 		})
 	}
 
+	injections, err := e.compileHeaderInjection(policy.Spec.HeaderInjection)
+	if err != nil {
+		return nil, err
+	}
+	compiled.HeaderInjection = injections
+
 	return compiled, nil
+}
+
+// compileHeaderInjection compiles header injection rules.
+func (e *Evaluator) compileHeaderInjection(
+	rules []omniav1alpha1.HeaderInjectionRule,
+) ([]CompiledHeaderInjection, error) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+
+	result := make([]CompiledHeaderInjection, 0, len(rules))
+	for _, rule := range rules {
+		compiled, err := e.compileSingleHeaderInjection(rule)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, compiled)
+	}
+	return result, nil
+}
+
+// compileSingleHeaderInjection compiles a single header injection rule.
+func (e *Evaluator) compileSingleHeaderInjection(
+	rule omniav1alpha1.HeaderInjectionRule,
+) (CompiledHeaderInjection, error) {
+	if err := validateHeaderInjectionRule(rule); err != nil {
+		return CompiledHeaderInjection{}, err
+	}
+
+	compiled := CompiledHeaderInjection{Header: rule.Header}
+	if rule.Value != "" {
+		compiled.Value = rule.Value
+		return compiled, nil
+	}
+
+	program, err := compileCEL(e.env, rule.CEL)
+	if err != nil {
+		return CompiledHeaderInjection{}, fmt.Errorf("header %q: %w", rule.Header, err)
+	}
+	compiled.Program = program
+	return compiled, nil
+}
+
+// validateHeaderInjectionRule checks that exactly one of value or cel is set.
+func validateHeaderInjectionRule(rule omniav1alpha1.HeaderInjectionRule) error {
+	hasValue := rule.Value != ""
+	hasCEL := rule.CEL != ""
+	if hasValue && hasCEL {
+		return fmt.Errorf("header %q: value and cel are mutually exclusive", rule.Header)
+	}
+	if !hasValue && !hasCEL {
+		return fmt.Errorf("header %q: one of value or cel must be set", rule.Header)
+	}
+	return nil
 }
 
 // compileCEL compiles a single CEL expression.
@@ -181,6 +249,61 @@ func (e *Evaluator) Evaluate(headers map[string]string, body map[string]interfac
 		return *auditDecision
 	}
 	return Decision{Allowed: true}
+}
+
+// EvaluateHeaderInjection evaluates header injection rules for all matching policies.
+// It returns a map of header-name to header-value for all injection rules.
+func (e *Evaluator) EvaluateHeaderInjection(
+	headers map[string]string,
+	body map[string]interface{},
+) (map[string]string, error) {
+	e.mu.RLock()
+	matching := e.findMatchingPolicies(headers)
+	e.mu.RUnlock()
+
+	result := make(map[string]string)
+	activation := buildActivation(headers, body)
+
+	for _, p := range matching {
+		if err := evaluatePolicyHeaderInjection(p, activation, result); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+// evaluatePolicyHeaderInjection evaluates header injection rules for a single policy.
+func evaluatePolicyHeaderInjection(
+	p *CompiledPolicy,
+	activation map[string]interface{},
+	result map[string]string,
+) error {
+	for _, inj := range p.HeaderInjection {
+		value, err := evaluateSingleHeaderInjection(inj, activation)
+		if err != nil {
+			if p.OnFailure == omniav1alpha1.OnFailureAllow {
+				continue
+			}
+			return fmt.Errorf("header %q: %w", inj.Header, err)
+		}
+		result[inj.Header] = value
+	}
+	return nil
+}
+
+// evaluateSingleHeaderInjection evaluates one header injection rule.
+func evaluateSingleHeaderInjection(
+	inj CompiledHeaderInjection,
+	activation map[string]interface{},
+) (string, error) {
+	if inj.Program == nil {
+		return inj.Value, nil
+	}
+	out, _, err := inj.Program.Eval(activation)
+	if err != nil {
+		return "", fmt.Errorf("CEL evaluation error: %w", err)
+	}
+	return fmt.Sprintf("%v", out.Value()), nil
 }
 
 // findMatchingPolicies returns policies whose selector matches the request headers.
