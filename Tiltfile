@@ -185,6 +185,7 @@ operator_only = [
     './api',
     './internal',
     './pkg',
+    './ee',
     './go.mod',
     './go.sum',
     # Embedded files for go:embed directives
@@ -211,7 +212,7 @@ docker_build(
     dockerfile='./Dockerfile.session-api',
     only=[
         './cmd/session-api',
-        './internal/session',
+        './internal',
         './ee/pkg',
         './ee/internal',
         './pkg',
@@ -231,6 +232,7 @@ docker_build(
     dockerfile='./Dockerfile.agent',
     only=[
         './cmd/agent',
+        './api',
         './internal/agent',
         './internal/facade',
         './internal/session',
@@ -258,27 +260,6 @@ runtime_build_args = {}
 if USE_LOCAL_PROMPTKIT:
     runtime_only.append('./promptkit-local')
     runtime_build_args['USE_LOCAL_PROMPTKIT'] = 'true'
-
-if USE_LOCAL_PROMPTKIT:
-    # Sync local PromptKit source for development builds
-    # This copies all subdirectories needed by go.mod replace directives:
-    # - pkg: config types used by discovery.go
-    # - runtime: agent runtime components
-    # - sdk: SDK types
-    # - tools/arena: promptarena CLI and engine
-    local_resource(
-        'sync-promptkit',
-        cmd='''
-            mkdir -p promptkit-local/tools
-            rsync -av --delete "%s/pkg/" promptkit-local/pkg/
-            rsync -av --delete "%s/runtime/" promptkit-local/runtime/
-            rsync -av --delete "%s/sdk/" promptkit-local/sdk/
-            rsync -av --delete "%s/tools/arena/" promptkit-local/tools/arena/
-            echo "Synced PromptKit from %s"
-        ''' % (PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH),
-        deps=[PROMPTKIT_PATH + '/pkg', PROMPTKIT_PATH + '/runtime', PROMPTKIT_PATH + '/sdk', PROMPTKIT_PATH + '/tools/arena'],
-        labels=['dev'],
-    )
 
 docker_build(
     'omnia-runtime-dev',
@@ -498,6 +479,8 @@ if ENABLE_ENTERPRISE:
         'enterprise.evalWorker.image.repository=omnia-eval-worker-dev',
         'enterprise.evalWorker.image.tag=latest',
         'enterprise.evalWorker.image.pullPolicy=Never',
+        # Watch all dev namespaces for eval events (not just omnia-system)
+        'enterprise.evalWorker.namespaces={dev-agents,omnia-demo}',
         # Wire session-api to Redis so it publishes eval events to streams
         'sessionApi.redis.addrs=omnia-redis-master:6379',
     ])
@@ -947,6 +930,26 @@ if ENABLE_ENTERPRISE:
         resource_deps=['omnia-arena-controller', 'sample-resources'],
     )
 
+# Rebuild facade/runtime images and restart agent pods.
+# Since these images are passed as CLI args to the operator (not in K8s YAML),
+# Tilt won't automatically rebuild them. These buttons let you trigger rebuilds
+# from the UI, then restart-agents rolls out the new images.
+local_resource(
+    'rebuild-facade',
+    cmd='docker build -f Dockerfile.agent -t omnia-facade-dev:latest .',
+    labels=['agents'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+    'rebuild-runtime',
+    cmd='docker build -f Dockerfile.runtime -t omnia-runtime-dev:latest .',
+    labels=['agents'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
 # Restart agent pods when facade/framework images are rebuilt
 # Since AgentRuntime deployments are created by the operator (not Tilt),
 # we need to manually trigger a rollout when the source changes
@@ -1009,7 +1012,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'omnia-session-api', 'omnia-arena-controller'],
+    resource_deps=['omnia-controller-manager', 'omnia-session-api'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
 )
 
 # CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).

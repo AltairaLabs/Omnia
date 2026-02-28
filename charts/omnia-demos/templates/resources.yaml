@@ -309,7 +309,7 @@ data:
       "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "demo-tools-prompts",
       "name": "Demo Tools Prompts",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "template_engine": {
         "version": "v1",
         "syntax": "{{"{{variable}}"}}"
@@ -318,13 +318,117 @@ data:
         "default": {
           "id": "default",
           "name": "Tools Assistant",
-          "version": "1.0.0",
+          "version": "1.1.0",
           "system_template": {{ .Values.toolsDemo.promptPack.systemPrompt | toJson }},
+          "tools": ["get_weather", "calculate"],
           "parameters": {
             "temperature": 0.7
+          },
+          "validators": [
+            {
+              "type": "max_length",
+              "enabled": true,
+              "fail_on_violation": false,
+              "params": {
+                "max_characters": 2000
+              }
+            }
+          ],
+          "evals": [
+            {
+              "id": "response-conciseness",
+              "type": "max_length",
+              "trigger": "every_turn",
+              "description": "Ensures responses stay under 1500 characters",
+              "params": {
+                "maxLength": 1500
+              },
+              "metric": {
+                "name": "response_conciseness",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "no-hallucinated-urls",
+              "type": "regex_match",
+              "trigger": "every_turn",
+              "description": "Flags fabricated URLs — only example.com is allowed",
+              "params": {
+                "pattern": "https?://(?!example\\.com)[a-zA-Z0-9.-]+\\.[a-z]{2,}",
+                "should_match": false
+              },
+              "metric": {
+                "name": "no_hallucinated_urls",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "tool-explanation",
+              "type": "contains",
+              "trigger": "every_turn",
+              "description": "Checks the assistant explains what it is doing when using tools",
+              "params": {
+                "value": "let me|I'll|I will|here's|result|weather|calculat",
+                "regex": true
+              },
+              "metric": {
+                "name": "tool_explanation",
+                "type": "boolean"
+              }
+            }
+          ]
+        }
+      },
+
+      "tools": {
+        "get_weather": {
+          "name": "get_weather",
+          "description": "Get current weather for a given location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name or coordinates"
+              }
+            },
+            "required": ["location"]
+          }
+        },
+        "calculate": {
+          "name": "calculate",
+          "description": "Evaluate a mathematical expression",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "expression": {
+                "type": "string",
+                "description": "Mathematical expression to evaluate"
+              }
+            },
+            "required": ["expression"]
           }
         }
-      }
+      },
+
+      "evals": [
+        {
+          "id": "session-helpfulness",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "sample_percentage": 25,
+          "description": "Judges overall session helpfulness and appropriate tool usage",
+          "params": {
+            "judge_prompt": "Review the full conversation. Did the assistant use available tools effectively and provide helpful, accurate responses? Score 1-5.",
+            "passing_score": 3
+          },
+          "metric": {
+            "name": "session_helpfulness",
+            "type": "gauge",
+            "range": { "min": 0, "max": 1 }
+          }
+        }
+      ]
     }
 ---
 # PromptPack for the tools demo agent

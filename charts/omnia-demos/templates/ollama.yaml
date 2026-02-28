@@ -10,6 +10,8 @@ metadata:
   labels:
     app.kubernetes.io/name: ollama
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+  annotations:
+    "helm.sh/resource-policy": keep
 spec:
   accessModes:
     - ReadWriteOnce

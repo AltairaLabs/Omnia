@@ -13,6 +13,10 @@ vi.mock("@/lib/auth/workspace-authz", () => ({
   checkWorkspaceAccess: vi.fn(),
 }));
 
+vi.mock("@/lib/k8s/workspace-route-helpers", () => ({
+  getWorkspace: vi.fn(),
+}));
+
 const mockUser = {
   id: "testuser-id",
   provider: "oauth" as const,
@@ -51,9 +55,11 @@ describe("GET /api/workspaces/[name]/sessions", () => {
   it("proxies sessions list to backend", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -70,16 +76,18 @@ describe("GET /api/workspaces/[name]/sessions", () => {
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
     expect(fetchUrl).toContain("/api/v1/sessions?");
-    expect(fetchUrl).toContain("workspace=test-ws");
+    expect(fetchUrl).toContain("namespace=test-ns");
     expect(fetchUrl).not.toContain("search");
   });
 
   it("routes to search endpoint when q param is present", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -100,9 +108,11 @@ describe("GET /api/workspaces/[name]/sessions", () => {
   it("forwards filter query params", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -136,9 +146,11 @@ describe("GET /api/workspaces/[name]/sessions", () => {
   it("returns 502 on fetch error", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
 
     mockFetch.mockRejectedValueOnce(new Error("Connection refused"));
 
@@ -146,6 +158,21 @@ describe("GET /api/workspaces/[name]/sessions", () => {
     const response = await GET(createMockRequest(), createMockContext());
 
     expect(response.status).toBe(502);
+  });
+
+  it("returns 404 when workspace not found", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue(null);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(404);
   });
 
   it("returns 403 when user lacks workspace access", async () => {

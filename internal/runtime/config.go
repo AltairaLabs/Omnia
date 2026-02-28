@@ -312,6 +312,8 @@ func (cfg *Config) validateProviderType() error {
 }
 
 // LoadConfigWithContext loads configuration, preferring CRD reading and falling back to env vars.
+// When running in-cluster (k8s client available), CRD loading errors are propagated — the
+// silent fallback to env vars was masking misconfigurations (e.g., missing provider type).
 func LoadConfigWithContext(ctx context.Context) (*Config, error) {
 	name := os.Getenv(envAgentName)
 	namespace := os.Getenv(envNamespace)
@@ -320,11 +322,12 @@ func LoadConfigWithContext(ctx context.Context) (*Config, error) {
 		c, err := k8s.NewClient()
 		if err == nil {
 			cfg, crdErr := LoadFromCRD(ctx, c, name, namespace)
-			if crdErr == nil {
-				return cfg, nil
+			if crdErr != nil {
+				return nil, fmt.Errorf("load config from CRD: %w", crdErr)
 			}
-			// Fall through to env-based loading
+			return cfg, nil
 		}
+		// k8s client failed — not running in-cluster, fall through to env vars
 	}
 
 	return LoadConfig()

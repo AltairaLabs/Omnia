@@ -13,13 +13,11 @@ import React from "react";
 // Mock hooks
 const mockUseEvalSummary = vi.fn();
 const mockUseRecentEvalFailures = vi.fn();
-const mockUseAgents = vi.fn();
 const mockUseEvalMetrics = vi.fn();
 
 vi.mock("@/hooks", () => ({
   useEvalSummary: (...args: unknown[]) => mockUseEvalSummary(...args),
   useRecentEvalFailures: (...args: unknown[]) => mockUseRecentEvalFailures(...args),
-  useAgents: () => mockUseAgents(),
   useEvalMetrics: () => mockUseEvalMetrics(),
 }));
 
@@ -110,12 +108,6 @@ const mockFailures = {
 
 describe("QualityPage", () => {
   beforeEach(() => {
-    mockUseAgents.mockReturnValue({
-      data: [
-        { metadata: { name: "agent-1" } },
-        { metadata: { name: "agent-2" } },
-      ],
-    });
     mockUseEvalMetrics.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
@@ -148,14 +140,13 @@ describe("QualityPage", () => {
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    // Total evals: 100 + 50 = 150
-    expect(screen.getByText("150")).toBeInTheDocument();
-    // Overall pass rate: (85 + 48) / 150 * 100 = 88.7%
-    expect(screen.getByText("88.7%")).toBeInTheDocument();
-    // Total passed: 85 + 48 = 133
-    expect(screen.getByText("133")).toBeInTheDocument();
-    // Eval types: verify the label exists
-    expect(screen.getByText("Eval Types")).toBeInTheDocument();
+    // Active Evals: 2 metrics
+    expect(screen.getByText("Active Evals")).toBeInTheDocument();
+    // Overall pass rate: mean of 85.0 and 96.0 = 90.5%
+    expect(screen.getByText("90.5%")).toBeInTheDocument();
+    // Passing: 1 (safety at 96% >= 90), Failing: 0 (none < 70)
+    expect(screen.getByText("Passing")).toBeInTheDocument();
+    expect(screen.getByText("Failing")).toBeInTheDocument();
   });
 
   it("renders eval pass rate table", () => {
@@ -214,16 +205,5 @@ describe("QualityPage", () => {
 
     expect(screen.getByText("Error loading quality data")).toBeInTheDocument();
     expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
-  });
-
-  it("renders time range selector with 7d default", () => {
-    mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
-
-    const Wrapper = createWrapper();
-    render(<Wrapper><QualityPage /></Wrapper>);
-
-    // The select should show "Last 7d" as the default
-    expect(screen.getByText("Last 7d")).toBeInTheDocument();
   });
 });

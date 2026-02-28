@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 
 	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/session"
@@ -37,6 +38,9 @@ const (
 	defaultListLimit    = 20
 	maxListLimit        = 100
 	defaultMessageLimit = 50
+	maxStringParamLen   = 253 // K8s name limit
+	maxSearchQueryLen   = 500
+	maxOffsetLimit      = 10000
 
 	// DefaultMaxBodySize is the maximum allowed request body size (10 MB).
 	DefaultMaxBodySize int64 = 10 << 20
@@ -148,6 +152,39 @@ func extractRequestContext(r *http.Request) RequestContext {
 	}
 }
 
+// sessionIDFromRequest extracts and validates the session ID path parameter.
+// Returns the session ID or an error if missing or not a valid UUID.
+func sessionIDFromRequest(r *http.Request) (string, error) {
+	id := r.PathValue("sessionID")
+	if id == "" {
+		return "", ErrMissingSessionID
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return "", ErrInvalidSessionID
+	}
+	return id, nil
+}
+
+// truncateParam silently truncates s to maxLen if it exceeds the limit.
+func truncateParam(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen]
+	}
+	return s
+}
+
+// validSessionStatus returns true if s is one of the known session status values.
+func validSessionStatus(s session.SessionStatus) bool {
+	switch s {
+	case session.SessionStatusActive,
+		session.SessionStatusCompleted,
+		session.SessionStatusError,
+		session.SessionStatusExpired:
+		return true
+	}
+	return false
+}
+
 // handleListSessions returns a paginated list of sessions filtered by workspace.
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	opts, err := parseListParams(r)
@@ -156,7 +193,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if opts.WorkspaceName == "" {
+	if opts.Namespace == "" {
 		writeError(w, ErrMissingWorkspace)
 		return
 	}
@@ -183,6 +220,10 @@ func (h *Handler) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrMissingQuery)
 		return
 	}
+	if len(q) > maxSearchQueryLen {
+		writeError(w, ErrSearchQueryTooLong)
+		return
+	}
 
 	opts, err := parseListParams(r)
 	if err != nil {
@@ -190,7 +231,7 @@ func (h *Handler) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if opts.WorkspaceName == "" {
+	if opts.Namespace == "" {
 		writeError(w, ErrMissingWorkspace)
 		return
 	}
@@ -212,9 +253,9 @@ func (h *Handler) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 
 // handleGetSession returns a single session by ID including its messages.
 func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, ErrMissingSessionID)
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -248,9 +289,9 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 
 // handleGetMessages returns messages for a session with filtering.
 func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, ErrMissingSessionID)
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -304,6 +345,13 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ID != "" {
+		if _, err := uuid.Parse(req.ID); err != nil {
+			writeError(w, ErrInvalidSessionID)
+			return
+		}
+	}
+
 	now := time.Now()
 	sess := &session.Session{
 		ID:                req.ID,
@@ -334,9 +382,9 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 // handleAppendMessage appends a message to a session.
 func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, ErrMissingSessionID)
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -364,9 +412,9 @@ func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
 
 // handleUpdateStats applies incremental counter updates to a session.
 func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, ErrMissingSessionID)
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -394,9 +442,9 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 
 // handleRefreshTTL extends the expiry of a session.
 func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, ErrMissingSessionID)
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -425,9 +473,9 @@ func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteSession deletes a session by ID.
 func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, ErrMissingSessionID)
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -448,17 +496,28 @@ func parseListParams(r *http.Request) (providers.SessionListOpts, error) {
 	q := r.URL.Query()
 
 	limit := min(parseIntParam(r, "limit", defaultListLimit), maxListLimit)
+	offset := min(parseIntParam(r, "offset", 0), maxOffsetLimit)
+
+	// The "workspace" query param carries the Kubernetes namespace that scopes sessions.
+	// Accept both "workspace" and "namespace" for backwards compatibility.
+	ns := q.Get("workspace")
+	if ns == "" {
+		ns = q.Get("namespace")
+	}
 
 	opts := providers.SessionListOpts{
-		Limit:         limit,
-		Offset:        parseIntParam(r, "offset", 0),
-		WorkspaceName: q.Get("workspace"),
-		AgentName:     q.Get("agent"),
-		Namespace:     q.Get("namespace"),
+		Limit:     limit,
+		Offset:    offset,
+		Namespace: truncateParam(ns, maxStringParamLen),
+		AgentName: truncateParam(q.Get("agent"), maxStringParamLen),
 	}
 
 	if status := q.Get("status"); status != "" {
-		opts.Status = session.SessionStatus(status)
+		s := session.SessionStatus(status)
+		if !validSessionStatus(s) {
+			return opts, ErrInvalidStatus
+		}
+		opts.Status = s
 	}
 
 	if from := q.Get("from"); from != "" {
@@ -528,12 +587,21 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingSessionID):
 		status = http.StatusBadRequest
 		msg = ErrMissingSessionID.Error()
+	case errors.Is(err, ErrInvalidSessionID):
+		status = http.StatusBadRequest
+		msg = ErrInvalidSessionID.Error()
 	case errors.Is(err, ErrMissingBody):
 		status = http.StatusBadRequest
 		msg = ErrMissingBody.Error()
 	case errors.Is(err, ErrMissingNamespace):
 		status = http.StatusBadRequest
 		msg = ErrMissingNamespace.Error()
+	case errors.Is(err, ErrInvalidStatus):
+		status = http.StatusBadRequest
+		msg = ErrInvalidStatus.Error()
+	case errors.Is(err, ErrSearchQueryTooLong):
+		status = http.StatusBadRequest
+		msg = ErrSearchQueryTooLong.Error()
 	case errors.Is(err, ErrBodyTooLarge) || isMaxBytesError(err):
 		status = http.StatusRequestEntityTooLarge
 		msg = ErrBodyTooLarge.Error()

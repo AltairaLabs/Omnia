@@ -152,7 +152,6 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
 		AgentName:         c.agentName,
 		Namespace:         c.namespace,
-		WorkspaceName:     c.namespace,
 		TTL:               s.config.SessionTTL,
 		PromptPackName:    s.config.PromptPackName,
 		PromptPackVersion: s.config.PromptPackVersion,

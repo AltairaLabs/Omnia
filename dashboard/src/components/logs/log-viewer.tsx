@@ -117,9 +117,10 @@ function LogContent({
 
   return (
     <>
-      {filteredLogs.map((log) => (
+      {filteredLogs.map((log, index) => (
         <div
-          key={`${log.timestamp.getTime()}-${log.level}-${log.container}-${log.message.slice(0, 32)}`}
+          // eslint-disable-next-line react/no-array-index-key -- log entries have no stable unique ID
+          key={`${index}-${log.timestamp.getTime()}-${log.level}`}
           className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
         >
           <span className="text-muted-foreground shrink-0">

@@ -130,21 +130,129 @@ data:
       "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "demo-prompts",
       "name": "Demo Prompts",
-      "version": "1.0.0",
+      "version": "2.0.0",
+      "description": "Demo pack showcasing evals, validators, tools, and workflow features.",
       "template_engine": {
         "version": "v1",
-        "syntax": "{{variable}}"
+        "syntax": "{{variable}}",
+        "features": ["basic_substitution"]
       },
       "prompts": {
         "default": {
           "id": "default",
-          "name": "Default",
-          "version": "1.0.0",
-          "system_template": "You are a helpful AI assistant for demo purposes. Be concise and friendly in your responses.",
+          "name": "General Assistant",
+          "description": "Friendly general-purpose assistant with tool access.",
+          "version": "2.0.0",
+          "system_template": "You are a helpful AI assistant for demo purposes. Be concise and friendly in your responses. You can use tools to look up weather and perform calculations.",
+          "tools": ["get_weather", "calculate"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 3
+          },
           "parameters": {
-            "temperature": 0.7
+            "temperature": 0.7,
+            "max_tokens": 1024
+          },
+          "validators": [
+            {
+              "type": "max_length",
+              "enabled": true,
+              "fail_on_violation": false,
+              "params": {
+                "max_characters": 2000
+              }
+            }
+          ],
+          "evals": [
+            {
+              "id": "helpfulness",
+              "type": "llm_judge",
+              "trigger": "sample_turns",
+              "sample_percentage": 20,
+              "description": "Assess response helpfulness",
+              "params": {
+                "judge_prompt": "Rate the response for helpfulness and accuracy on a 1-5 scale.",
+                "passing_score": 3
+              },
+              "metric": {
+                "name": "helpfulness_score",
+                "type": "gauge",
+                "range": { "min": 0, "max": 1 }
+              }
+            },
+            {
+              "id": "conciseness",
+              "type": "max_length",
+              "trigger": "every_turn",
+              "description": "Verify responses stay concise",
+              "params": {
+                "maxLength": 1500
+              },
+              "metric": {
+                "name": "response_concise",
+                "type": "boolean"
+              }
+            }
+          ]
+        }
+      },
+      "tools": {
+        "get_weather": {
+          "name": "get_weather",
+          "description": "Get current weather for a location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name or coordinates"
+              }
+            },
+            "required": ["location"]
+          }
+        },
+        "calculate": {
+          "name": "calculate",
+          "description": "Perform mathematical calculations",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "expression": {
+                "type": "string",
+                "description": "Mathematical expression to evaluate"
+              }
+            },
+            "required": ["expression"]
           }
         }
+      },
+      "evals": [
+        {
+          "id": "no-hallucination-urls",
+          "type": "regex_match",
+          "trigger": "every_turn",
+          "description": "Flag responses that fabricate URLs",
+          "params": {
+            "pattern": "https?://(?!example\\.com)[a-z0-9.-]+\\.[a-z]{2,}",
+            "should_match": false
+          },
+          "metric": {
+            "name": "no_hallucinated_urls",
+            "type": "boolean"
+          }
+        }
+      ],
+      "skills": [
+        {
+          "name": "demo-guidelines",
+          "description": "Guidelines for demo conversations",
+          "instructions": "This is a demo environment. Keep responses brief and showcase tool usage when relevant. Avoid making real API calls or referencing production systems."
+        }
+      ],
+      "metadata": {
+        "domain": "demo",
+        "language": "en",
+        "tags": ["demo", "general", "tools"]
       }
     }
 ---
@@ -159,7 +267,7 @@ spec:
     type: configmap
     configMapRef:
       name: demo-prompts
-  version: "1.0.0"
+  version: "2.0.0"
   rollout:
     type: immediate
 ---

@@ -16,13 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -34,7 +27,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
-  ShieldCheck,
   TrendingUp,
   Bot,
   AlertCircle,
@@ -43,7 +35,7 @@ import {
   XCircle,
   Activity,
 } from "lucide-react";
-import { useEvalSummary, useRecentEvalFailures, useAgents, useEvalMetrics, type EvalTrendRange } from "@/hooks";
+import { useEvalSummary, useRecentEvalFailures, useEvalMetrics, type EvalTrendRange } from "@/hooks";
 import { formatDistanceToNow } from "date-fns";
 import type { EvalResultSummary } from "@/types/eval";
 import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-breakdown";
@@ -51,33 +43,19 @@ import { FailingSessionsTable } from "@/components/quality/failing-sessions-tabl
 import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
 import { AlertConfigPanel, buildAlertThresholdMap, loadAlerts, type EvalAlert } from "@/components/quality/alert-config-panel";
 
-/** Time range presets for filtering. */
-const TIME_RANGES: { label: string; value: string }[] = [
-  { label: "All Time", value: "all" },
-  { label: "Last 1h", value: "1h" },
-  { label: "Last 24h", value: "24h" },
-  { label: "Last 7d", value: "7d" },
-  { label: "Last 30d", value: "30d" },
-];
+const PASS_THRESHOLD = 90;
+const FAIL_THRESHOLD = 70;
 
-const TIME_MS: Record<string, number> = {
-  "1h": 60 * 60 * 1000,
-  "24h": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
-};
-
-function getTimeRangeFrom(value: string): string | undefined {
-  if (value === "all") return undefined;
-  return new Date(Date.now() - (TIME_MS[value] || 0)).toISOString();
-}
-
-/** Compute aggregate stats from summaries. */
+/** Compute aggregate stats from Prometheus gauge summaries. */
 function computeAggregateStats(summaries: EvalResultSummary[]) {
-  const totalEvals = summaries.reduce((sum, s) => sum + s.total, 0);
-  const totalPassed = summaries.reduce((sum, s) => sum + s.passed, 0);
-  const overallPassRate = totalEvals > 0 ? (totalPassed / totalEvals) * 100 : 0;
-  return { totalEvals, totalPassed, overallPassRate, evalCount: summaries.length };
+  const activeEvals = summaries.length;
+  const overallPassRate =
+    activeEvals > 0
+      ? summaries.reduce((sum, s) => sum + s.passRate, 0) / activeEvals
+      : 0;
+  const passing = summaries.filter((s) => s.passRate >= PASS_THRESHOLD).length;
+  const failing = summaries.filter((s) => s.passRate < FAIL_THRESHOLD).length;
+  return { activeEvals, overallPassRate, passing, failing };
 }
 
 function getPassRateColor(rate: number): string {
@@ -145,9 +123,9 @@ function SummaryCards({
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Total Evals Run</span>
+            <span className="text-sm text-muted-foreground">Active Evals</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.totalEvals.toLocaleString()}</p>
+          <p className="text-2xl font-bold mt-1">{stats.activeEvals}</p>
         </CardContent>
       </Card>
       <Card>
@@ -164,19 +142,19 @@ function SummaryCards({
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Eval Types</span>
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <span className="text-sm text-muted-foreground">Passing</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.evalCount}</p>
+          <p className="text-2xl font-bold mt-1">{stats.passing}</p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <span className="text-sm text-muted-foreground">Total Passed</span>
+            <XCircle className="h-4 w-4 text-red-500" />
+            <span className="text-sm text-muted-foreground">Failing</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.totalPassed.toLocaleString()}</p>
+          <p className="text-2xl font-bold mt-1">{stats.failing}</p>
         </CardContent>
       </Card>
     </div>
@@ -208,9 +186,6 @@ function EvalPassRateTable({
             <TableHead>Type</TableHead>
             <TableHead>Pass Rate</TableHead>
             <TableHead>Progress</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead className="text-right">Passed</TableHead>
-            <TableHead className="text-right">Failed</TableHead>
             <TableHead className="text-right">Avg Score</TableHead>
           </TableRow>
         </TableHeader>
@@ -224,7 +199,7 @@ function EvalPassRateTable({
           )}
           {!isLoading && sorted.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                 No eval data available
               </TableCell>
             </TableRow>
@@ -243,9 +218,6 @@ function EvalPassRateTable({
               <TableCell className="w-[160px]">
                 <Progress value={summary.passRate} className="h-2" />
               </TableCell>
-              <TableCell className="text-right">{summary.total}</TableCell>
-              <TableCell className="text-right text-green-600 dark:text-green-400">{summary.passed}</TableCell>
-              <TableCell className="text-right text-red-600 dark:text-red-400">{summary.failed}</TableCell>
               <TableCell className="text-right">
                 {summary.avgScore === undefined ? "-" : summary.avgScore.toFixed(2)}
               </TableCell>
@@ -343,24 +315,13 @@ function RecentFailures({
 }
 
 export default function QualityPage() {
-  const [agentFilter, setAgentFilter] = useState<string>("all");
-  const [timeRange, setTimeRange] = useState<string>("7d");
   const [activeMetric, setActiveMetric] = useState<string | undefined>();
   const [trendTimeRange, setTrendTimeRange] = useState<EvalTrendRange>("24h");
   const [alerts, setAlerts] = useState<EvalAlert[]>(() => loadAlerts());
 
-  const createdAfter = getTimeRangeFrom(timeRange);
-  const agentName = agentFilter === "all" ? undefined : agentFilter;
-
-  const summaryQuery = useEvalSummary({ agentName, createdAfter });
-  const failuresQuery = useRecentEvalFailures({ agentName, limit: 10 });
-  const agentsQuery = useAgents();
+  const summaryQuery = useEvalSummary();
+  const failuresQuery = useRecentEvalFailures();
   const metricsQuery = useEvalMetrics();
-
-  const agentNames = useMemo(() => {
-    if (!agentsQuery.data) return [];
-    return [...new Set(agentsQuery.data.map((a) => a.metadata?.name).filter(Boolean))] as string[];
-  }, [agentsQuery.data]);
 
   const summaries = summaryQuery.data || [];
   const alertThresholds = useMemo(() => buildAlertThresholdMap(alerts), [alerts]);
@@ -377,35 +338,6 @@ export default function QualityPage() {
       />
 
       <div className="flex-1 p-6 space-y-6">
-        {/* Filters */}
-        <div className="flex items-center gap-4">
-          <Select value={agentFilter} onValueChange={setAgentFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Agent" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Agents</SelectItem>
-              {agentNames.map((agent) => (
-                <SelectItem key={agent} value={agent}>
-                  {agent}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Time Range" />
-            </SelectTrigger>
-            <SelectContent>
-              {TIME_RANGES.map((range) => (
-                <SelectItem key={range.value} value={range.value}>
-                  {range.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
         {/* Error state */}
         {summaryQuery.error && (
           <Alert variant="destructive">
@@ -442,7 +374,6 @@ export default function QualityPage() {
               />
               <FailingSessionsTable
                 evalType={activeMetric}
-                agentName={agentName}
               />
             </div>
             <PassRateTrendChart

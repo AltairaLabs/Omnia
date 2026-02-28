@@ -12,7 +12,7 @@ spec:
     configMapRef:
       name: customer-support-prompts
   # Semantic version for this prompt pack
-  version: "1.0.0"
+  version: "2.0.0"
   # Rollout strategy - immediate deployment
   rollout:
     type: immediate
@@ -26,29 +26,361 @@ metadata:
 data:
   pack.json: |
     {
-      "$schema": "https://promptpack.org/schema/v1/promptpack.schema.json",
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "customer-support",
       "name": "Customer Support Assistant",
-      "version": "1.0.0",
+      "version": "2.0.0",
+      "description": "Full-featured customer support pack with workflow, evals, validators, and tools.",
       "template_engine": {
         "version": "v1",
-        "syntax": "{{variable}}"
+        "syntax": "{{variable}}",
+        "features": ["basic_substitution", "fragments"]
       },
+      "fragments": {
+        "brand_voice": "Always respond in a warm, professional tone. Use the customer's name when available. Never use jargon."
+      },
+
       "prompts": {
-        "support": {
-          "id": "support",
-          "name": "Support Agent",
+        "triage": {
+          "id": "triage",
+          "name": "Triage Agent",
+          "description": "Routes incoming requests to the right specialist prompt.",
           "version": "1.0.0",
-          "system_template": "You are a helpful customer support agent for TechCorp. Be polite, professional, and helpful. If you cannot answer a question, offer to escalate to a human agent.",
+          "system_template": "You are the front-desk triage agent for {{company}}. Classify the customer's request and route it.\n\n{{brand_voice}}\n\nCategories:\n- billing: payment, invoice, subscription, or refund issues\n- technical: product bugs, errors, or how-to questions\n- general: everything else\n\nRespond with the category and a brief summary of the issue.",
+          "variables": [
+            {
+              "name": "company",
+              "type": "string",
+              "required": true,
+              "description": "Company name shown to the customer",
+              "example": "TechCorp"
+            }
+          ],
+          "parameters": {
+            "temperature": 0.3,
+            "max_tokens": 256
+          },
+          "evals": [
+            {
+              "id": "triage-accuracy",
+              "type": "contains",
+              "trigger": "every_turn",
+              "description": "Triage response must include a category keyword",
+              "params": {
+                "value": "billing|technical|general",
+                "regex": true
+              },
+              "metric": {
+                "name": "triage_accuracy",
+                "type": "boolean"
+              }
+            }
+          ]
+        },
+
+        "billing": {
+          "id": "billing",
+          "name": "Billing Support",
+          "description": "Handles payment, invoice, and subscription questions.",
+          "version": "1.0.0",
+          "system_template": "You are a billing support specialist for {{company}}.\n\n{{brand_voice}}\n\nYou have access to order and subscription tools. Look up details before answering. If you cannot resolve the issue, escalate to a human agent.",
+          "variables": [
+            {
+              "name": "company",
+              "type": "string",
+              "required": true,
+              "description": "Company name",
+              "example": "TechCorp"
+            }
+          ],
+          "tools": ["lookup_order", "lookup_subscription"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 3,
+            "max_tool_calls_per_turn": 5
+          },
+          "parameters": {
+            "temperature": 0.5,
+            "max_tokens": 1024
+          },
+          "validators": [
+            {
+              "type": "pii_detection",
+              "enabled": true,
+              "fail_on_violation": true,
+              "params": {
+                "types": ["credit_card", "ssn"]
+              }
+            },
+            {
+              "type": "max_length",
+              "enabled": true,
+              "fail_on_violation": false,
+              "params": {
+                "max_characters": 2000
+              }
+            }
+          ],
+          "evals": [
+            {
+              "id": "billing-helpfulness",
+              "type": "llm_judge",
+              "trigger": "every_turn",
+              "description": "Judge whether the billing response is helpful and accurate",
+              "params": {
+                "judge_prompt": "Rate the assistant's billing support response. Was it accurate, complete, and did it use the available tools appropriately? Score 1-5.",
+                "passing_score": 4
+              },
+              "metric": {
+                "name": "billing_helpfulness",
+                "type": "gauge",
+                "range": { "min": 0, "max": 1 }
+              }
+            },
+            {
+              "id": "no-pii-leak",
+              "type": "regex_match",
+              "trigger": "every_turn",
+              "description": "Ensure no credit card numbers appear in responses",
+              "params": {
+                "pattern": "\\b\\d{4}[- ]?\\d{4}[- ]?\\d{4}[- ]?\\d{4}\\b",
+                "should_match": false
+              },
+              "metric": {
+                "name": "billing_pii_safe",
+                "type": "boolean"
+              }
+            }
+          ]
+        },
+
+        "technical": {
+          "id": "technical",
+          "name": "Technical Support",
+          "description": "Handles product bugs, errors, and how-to questions.",
+          "version": "1.0.0",
+          "system_template": "You are a technical support engineer for {{company}}.\n\n{{brand_voice}}\n\nProvide clear, step-by-step instructions. Include relevant error codes when available. If the issue requires a bug report, help the customer file one.",
+          "variables": [
+            {
+              "name": "company",
+              "type": "string",
+              "required": true,
+              "description": "Company name",
+              "example": "TechCorp"
+            }
+          ],
+          "tools": ["search_knowledge_base", "create_ticket"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 5
+          },
+          "parameters": {
+            "temperature": 0.3,
+            "max_tokens": 2048
+          },
+          "evals": [
+            {
+              "id": "tech-resolution",
+              "type": "llm_judge",
+              "trigger": "on_session_complete",
+              "description": "Assess whether the technical issue was resolved",
+              "params": {
+                "judge_prompt": "Review the full conversation. Was the customer's technical issue resolved or appropriately escalated? Score 1-5.",
+                "passing_score": 3
+              },
+              "metric": {
+                "name": "tech_resolution_rate",
+                "type": "gauge",
+                "range": { "min": 0, "max": 1 }
+              }
+            }
+          ]
+        },
+
+        "closing": {
+          "id": "closing",
+          "name": "Session Closing",
+          "description": "Wraps up the support session with a summary.",
+          "version": "1.0.0",
+          "system_template": "You are closing a support session for {{company}}.\n\n{{brand_voice}}\n\nSummarize what was discussed and resolved. Ask if there's anything else the customer needs. Thank them for reaching out.",
+          "variables": [
+            {
+              "name": "company",
+              "type": "string",
+              "required": true,
+              "description": "Company name",
+              "example": "TechCorp"
+            }
+          ],
           "parameters": {
             "temperature": 0.7,
-            "max_tokens": 1024
+            "max_tokens": 512
           }
         }
       },
+
+      "tools": {
+        "lookup_order": {
+          "name": "lookup_order",
+          "description": "Look up order details by order ID",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "The order ID to look up"
+              }
+            },
+            "required": ["order_id"]
+          }
+        },
+        "lookup_subscription": {
+          "name": "lookup_subscription",
+          "description": "Look up a customer's subscription status",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "customer_email": {
+                "type": "string",
+                "description": "Customer email address"
+              }
+            },
+            "required": ["customer_email"]
+          }
+        },
+        "search_knowledge_base": {
+          "name": "search_knowledge_base",
+          "description": "Search the technical knowledge base for troubleshooting articles",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query"
+              },
+              "product": {
+                "type": "string",
+                "description": "Product name to filter results"
+              }
+            },
+            "required": ["query"]
+          }
+        },
+        "create_ticket": {
+          "name": "create_ticket",
+          "description": "Create a support ticket for escalation",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Ticket title"
+              },
+              "description": {
+                "type": "string",
+                "description": "Detailed description of the issue"
+              },
+              "priority": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"],
+                "description": "Ticket priority"
+              }
+            },
+            "required": ["title", "description"]
+          }
+        }
+      },
+
+      "evals": [
+        {
+          "id": "brand-consistency",
+          "type": "llm_judge",
+          "trigger": "sample_turns",
+          "sample_percentage": 10,
+          "description": "Check that all responses maintain the brand voice",
+          "params": {
+            "judge_prompt": "Does this response maintain a warm, professional tone without jargon? Score 1-5.",
+            "passing_score": 4
+          },
+          "metric": {
+            "name": "brand_consistency",
+            "type": "gauge",
+            "range": { "min": 0, "max": 1 }
+          }
+        },
+        {
+          "id": "response-length",
+          "type": "max_length",
+          "trigger": "every_turn",
+          "description": "Ensure responses stay within reasonable length",
+          "params": {
+            "maxLength": 3000
+          },
+          "metric": {
+            "name": "response_length_ok",
+            "type": "boolean"
+          }
+        }
+      ],
+
+      "workflow": {
+        "version": 1,
+        "entry": "triage",
+        "states": {
+          "triage": {
+            "prompt_task": "triage",
+            "description": "Classify the incoming request",
+            "on_event": {
+              "billing": "billing_support",
+              "technical": "tech_support",
+              "general": "closing"
+            }
+          },
+          "billing_support": {
+            "prompt_task": "billing",
+            "description": "Handle billing and payment issues",
+            "persistence": "persistent",
+            "on_event": {
+              "resolved": "closing",
+              "escalate": "closing"
+            }
+          },
+          "tech_support": {
+            "prompt_task": "technical",
+            "description": "Handle technical issues and troubleshooting",
+            "persistence": "persistent",
+            "on_event": {
+              "resolved": "closing",
+              "escalate": "closing"
+            }
+          },
+          "closing": {
+            "prompt_task": "closing",
+            "description": "Wrap up the support session",
+            "on_event": {
+              "new_issue": "triage",
+              "done": "triage"
+            }
+          }
+        }
+      },
+
+      "skills": [
+        {
+          "name": "escalation-protocol",
+          "description": "Steps for escalating unresolved customer issues",
+          "instructions": "When a customer issue cannot be resolved within 3 exchanges:\n1. Acknowledge the complexity of the issue\n2. Collect all relevant case details (order ID, error messages, steps to reproduce)\n3. Create a support ticket using the create_ticket tool with appropriate priority\n4. Provide the customer with their ticket number and expected follow-up timeline"
+        },
+        {
+          "name": "refund-policy",
+          "description": "Company refund and return policies",
+          "instructions": "Refund policy:\n- Full refund within 30 days of purchase for unused products\n- Prorated refund for subscriptions cancelled mid-cycle\n- No refunds on services already rendered\n- Refunds processed within 5-7 business days to original payment method"
+        }
+      ],
+
       "metadata": {
         "domain": "customer-service",
         "language": "en",
-        "tags": ["support", "helpdesk"]
+        "tags": ["support", "billing", "technical", "workflow"]
       }
     }

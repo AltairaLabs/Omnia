@@ -1010,8 +1010,10 @@ prometheus:
     prefixURL: /prometheus
     baseURL: /prometheus
     # Enable remote write receiver for Tempo metrics-generator
+    # Enable lifecycle API so configmap-reload can trigger config reloads
     extraFlags:
       - web.enable-remote-write-receiver
+      - web.enable-lifecycle
   # -- Disable alertmanager
   alertmanager:
     enabled: false
