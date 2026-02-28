@@ -104,17 +104,22 @@ func (r *AgentPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	SetCondition(&policy.Status.Conditions, policy.Generation,
 		AgentPolicyConditionTypeValid, metav1.ConditionTrue,
 		EventReasonPolicyValid, "Policy configuration is valid")
+
+	appliedMsg := buildAppliedMessage(policy.Spec.Mode, matchedCount)
 	SetCondition(&policy.Status.Conditions, policy.Generation,
 		AgentPolicyConditionTypeApplied, metav1.ConditionTrue,
-		EventReasonPolicyApplied, fmt.Sprintf("Policy applied to %d agent(s)", matchedCount))
+		EventReasonPolicyApplied, appliedMsg)
 
 	if err := r.Status().Update(ctx, policy); err != nil {
 		log.Error(err, logMsgFailedToUpdateStatus)
 		return ctrl.Result{}, err
 	}
 
-	log.Info("successfully reconciled AgentPolicy",
-		"name", req.Name, "matchedAgents", matchedCount)
+	logFields := []any{"name", req.Name, "matchedAgents", matchedCount}
+	if policy.Spec.Mode == omniav1alpha1.AgentPolicyModePermissive {
+		logFields = append(logFields, "mode", string(omniav1alpha1.AgentPolicyModePermissive))
+	}
+	log.Info("successfully reconciled AgentPolicy", logFields...)
 	return ctrl.Result{}, nil
 }
 
@@ -154,6 +159,14 @@ func validateClaimEntry(entry omniav1alpha1.ClaimMappingEntry, seenHeaders map[s
 	}
 	seenHeaders[headerLower] = true
 	return nil
+}
+
+// buildAppliedMessage creates the status message based on mode and matched agent count.
+func buildAppliedMessage(mode omniav1alpha1.AgentPolicyMode, matchedCount int32) string {
+	if mode == omniav1alpha1.AgentPolicyModePermissive {
+		return fmt.Sprintf("Policy applied in permissive mode to %d agent(s) (audit only, not enforcing)", matchedCount)
+	}
+	return fmt.Sprintf("Policy applied to %d agent(s)", matchedCount)
 }
 
 // setErrorStatus sets the policy status to Error with appropriate conditions.

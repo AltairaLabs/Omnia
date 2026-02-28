@@ -23,6 +23,13 @@ const (
 	headerContentType = "Content-Type"
 )
 
+// Logging constants for policy decisions.
+const (
+	logMsgPolicyDecision = "policy_decision"
+	logDecisionAllow     = "allow"
+	logDecisionDeny      = "deny"
+)
+
 // DenialResponse is the JSON response returned when a request is denied.
 type DenialResponse struct {
 	Error   string `json:"error"`
@@ -119,6 +126,34 @@ func (h *ProxyHandler) logDecision(r *http.Request, decision Decision) {
 		return
 	}
 
+	if decision.WouldDeny {
+		h.logAuditDecision(r, decision)
+		return
+	}
+
+	h.logEnforceDecision(r, decision)
+}
+
+// logAuditDecision logs a structured audit-mode decision where the request would have been denied.
+func (h *ProxyHandler) logAuditDecision(r *http.Request, decision Decision) {
+	decisionStr := logDecisionAllow
+	if decision.DeniedBy != "" {
+		decisionStr = logDecisionDeny
+	}
+	h.logger.Info(logMsgPolicyDecision,
+		"decision", decisionStr,
+		"wouldDeny", true,
+		"mode", string(decision.Mode),
+		"policy", decision.Policy,
+		"rule", decision.DeniedBy,
+		"message", decision.Message,
+		"path", r.URL.Path,
+		"method", r.Method,
+	)
+}
+
+// logEnforceDecision logs a standard enforce-mode policy decision.
+func (h *ProxyHandler) logEnforceDecision(r *http.Request, decision Decision) {
 	fields := []any{
 		"path", r.URL.Path,
 		"method", r.Method,
@@ -129,11 +164,15 @@ func (h *ProxyHandler) logDecision(r *http.Request, decision Decision) {
 		fields = append(fields, "deniedBy", decision.DeniedBy, "message", decision.Message)
 	}
 
+	if decision.Policy != "" {
+		fields = append(fields, "policy", decision.Policy)
+	}
+
 	if decision.Error != nil {
 		fields = append(fields, "error", decision.Error.Error())
 	}
 
-	h.logger.Info("policy decision", fields...)
+	h.logger.Info(logMsgPolicyDecision, fields...)
 }
 
 // HealthHandler returns a simple health check handler for the proxy.

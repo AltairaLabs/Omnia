@@ -463,6 +463,104 @@ func TestCountMatchedAgents_Filtered(t *testing.T) {
 	assert.Equal(t, int32(1), count)
 }
 
+func TestReconcile_PermissiveMode(t *testing.T) {
+	scheme := newTestScheme(t)
+
+	policy := &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "permissive-policy",
+			Namespace:  "default",
+			Generation: 1,
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			Mode: omniav1alpha1.AgentPolicyModePermissive,
+			ClaimMapping: &omniav1alpha1.ClaimMapping{
+				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
+					{Claim: "team", Header: "X-Omnia-Claim-Team"},
+				},
+			},
+		},
+	}
+
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: "default"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
+			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(policy, agent).
+		WithStatusSubresource(policy).
+		Build()
+
+	r := &AgentPolicyReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "permissive-policy", Namespace: "default"},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	updated := &omniav1alpha1.AgentPolicy{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "permissive-policy", Namespace: "default"}, updated)
+	require.NoError(t, err)
+	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseActive, updated.Status.Phase)
+	assert.Equal(t, int32(1), updated.Status.MatchedAgents)
+
+	// Verify permissive mode is reflected in conditions
+	var appliedCondition *metav1.Condition
+	for i := range updated.Status.Conditions {
+		if updated.Status.Conditions[i].Type == AgentPolicyConditionTypeApplied {
+			appliedCondition = &updated.Status.Conditions[i]
+			break
+		}
+	}
+	require.NotNil(t, appliedCondition)
+	assert.Contains(t, appliedCondition.Message, "permissive mode")
+}
+
+func TestBuildAppliedMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     omniav1alpha1.AgentPolicyMode
+		count    int32
+		contains string
+	}{
+		{
+			name:     "enforce mode",
+			mode:     omniav1alpha1.AgentPolicyModeEnforce,
+			count:    3,
+			contains: "Policy applied to 3 agent(s)",
+		},
+		{
+			name:     "permissive mode",
+			mode:     omniav1alpha1.AgentPolicyModePermissive,
+			count:    2,
+			contains: "permissive mode",
+		},
+		{
+			name:     "empty mode defaults to enforce behavior",
+			mode:     "",
+			count:    1,
+			contains: "Policy applied to 1 agent(s)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := buildAppliedMessage(tt.mode, tt.count)
+			assert.Contains(t, msg, tt.contains)
+		})
+	}
+}
+
 func TestFindPoliciesForAgent(t *testing.T) {
 	scheme := newTestScheme(t)
 

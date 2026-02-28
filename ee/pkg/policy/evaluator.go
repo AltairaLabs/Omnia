@@ -37,6 +37,13 @@ type Decision struct {
 	Message string
 	// Error is set if evaluation encountered an error.
 	Error error
+	// Mode is the policy mode that produced this decision.
+	Mode omniav1alpha1.PolicyMode
+	// WouldDeny indicates whether the request would have been denied in enforce mode.
+	// This is true when the policy is in audit mode and a rule matched.
+	WouldDeny bool
+	// Policy is the name of the policy that produced this decision.
+	Policy string
 }
 
 // CompiledRule holds a pre-compiled CEL program for a single policy rule.
@@ -311,7 +318,10 @@ func handleEvalError(ruleName string, err error, onFailure omniav1alpha1.OnFailu
 // applyMode adjusts the decision based on the policy mode.
 // In audit mode, denials are converted to allow but the decision info is preserved.
 func applyMode(policy *CompiledPolicy, decision Decision) Decision {
+	decision.Mode = policy.Mode
+	decision.Policy = policy.Name
 	if policy.Mode == omniav1alpha1.PolicyModeAudit {
+		decision.WouldDeny = true
 		decision.Allowed = true
 	}
 	return decision
