@@ -64,6 +64,53 @@ const (
 	AgentPolicyModePermissive AgentPolicyMode = "permissive"
 )
 
+// ToolAccessMode defines whether the tool access config is an allowlist or denylist.
+// +kubebuilder:validation:Enum=allowlist;denylist
+type ToolAccessMode string
+
+const (
+	// ToolAccessModeAllowlist only permits explicitly listed tools.
+	ToolAccessModeAllowlist ToolAccessMode = "allowlist"
+	// ToolAccessModeDenylist blocks explicitly listed tools.
+	ToolAccessModeDenylist ToolAccessMode = "denylist"
+)
+
+// ToolAccessRule identifies tools within a specific registry.
+type ToolAccessRule struct {
+	// registry is the name of the ToolRegistry resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Registry string `json:"registry"`
+
+	// tools is the list of tool names within the registry.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Tools []string `json:"tools"`
+}
+
+// ToolAccessConfig defines tool allowlist/denylist rules.
+type ToolAccessConfig struct {
+	// mode is the access control mode: "allowlist" or "denylist".
+	// +kubebuilder:validation:Required
+	Mode ToolAccessMode `json:"mode"`
+
+	// rules is the list of tool access rules.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Rules []ToolAccessRule `json:"rules"`
+}
+
+// OnFailureAction defines behavior when policy evaluation fails.
+// +kubebuilder:validation:Enum=deny;allow
+type OnFailureAction string
+
+const (
+	// OnFailureDeny denies requests when policy evaluation fails (default).
+	OnFailureDeny OnFailureAction = "deny"
+	// OnFailureAllow allows requests when policy evaluation fails.
+	OnFailureAllow OnFailureAction = "allow"
+)
+
 // AgentPolicySpec defines the desired state of AgentPolicy.
 type AgentPolicySpec struct {
 	// selector determines which agents this policy applies to.
@@ -74,11 +121,20 @@ type AgentPolicySpec struct {
 	// +optional
 	ClaimMapping *ClaimMapping `json:"claimMapping,omitempty"`
 
+	// toolAccess defines tool allowlist/denylist rules.
+	// +optional
+	ToolAccess *ToolAccessConfig `json:"toolAccess,omitempty"`
+
 	// mode is the enforcement mode: "enforce" (default) or "permissive".
 	// In permissive mode, policy decisions are logged but traffic is not blocked.
 	// +kubebuilder:default="enforce"
 	// +optional
 	Mode AgentPolicyMode `json:"mode,omitempty"`
+
+	// onFailure defines behavior when policy evaluation fails: "deny" (default) or "allow".
+	// +optional
+	// +kubebuilder:default=deny
+	OnFailure OnFailureAction `json:"onFailure,omitempty"`
 }
 
 // AgentPolicyPhase represents the current phase of the AgentPolicy.

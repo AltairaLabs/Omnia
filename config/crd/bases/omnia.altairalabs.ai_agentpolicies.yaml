@@ -97,6 +97,14 @@ spec:
                 - enforce
                 - permissive
                 type: string
+              onFailure:
+                default: deny
+                description: 'onFailure defines behavior when policy evaluation fails:
+                  "deny" (default) or "allow".'
+                enum:
+                - deny
+                - allow
+                type: string
               selector:
                 description: selector determines which agents this policy applies
                   to.
@@ -108,6 +116,43 @@ spec:
                     items:
                       type: string
                     type: array
+                type: object
+              toolAccess:
+                description: toolAccess defines tool allowlist/denylist rules.
+                properties:
+                  mode:
+                    description: 'mode is the access control mode: "allowlist" or
+                      "denylist".'
+                    enum:
+                    - allowlist
+                    - denylist
+                    type: string
+                  rules:
+                    description: rules is the list of tool access rules.
+                    items:
+                      description: ToolAccessRule identifies tools within a specific
+                        registry.
+                      properties:
+                        registry:
+                          description: registry is the name of the ToolRegistry resource.
+                          minLength: 1
+                          type: string
+                        tools:
+                          description: tools is the list of tool names within the
+                            registry.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                      required:
+                      - registry
+                      - tools
+                      type: object
+                    minItems: 1
+                    type: array
+                required:
+                - mode
+                - rules
                 type: object
             type: object
           status:
