@@ -90,7 +90,47 @@ func (r *ToolPolicyReconciler) validateAndCompile(
 			return fmt.Errorf("rule %q: %w", rule.Name, err)
 		}
 	}
+	if err := validateHeaderInjectionRules(r.Evaluator, tp.Spec.HeaderInjection); err != nil {
+		return err
+	}
 	return r.Evaluator.CompilePolicy(tp)
+}
+
+// validateHeaderInjectionRules validates all header injection rules.
+func validateHeaderInjectionRules(
+	eval *policy.Evaluator,
+	rules []omniav1alpha1.HeaderInjectionRule,
+) error {
+	for _, rule := range rules {
+		if err := validateSingleHeaderInjectionRule(eval, rule); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSingleHeaderInjectionRule validates a single header injection rule.
+func validateSingleHeaderInjectionRule(
+	eval *policy.Evaluator,
+	rule omniav1alpha1.HeaderInjectionRule,
+) error {
+	if rule.Header == "" {
+		return fmt.Errorf("header injection: header name is required")
+	}
+	hasValue := rule.Value != ""
+	hasCEL := rule.CEL != ""
+	if hasValue && hasCEL {
+		return fmt.Errorf("header %q: value and cel are mutually exclusive", rule.Header)
+	}
+	if !hasValue && !hasCEL {
+		return fmt.Errorf("header %q: one of value or cel must be set", rule.Header)
+	}
+	if hasCEL {
+		if err := eval.ValidateCEL(rule.CEL); err != nil {
+			return fmt.Errorf("header %q: %w", rule.Header, err)
+		}
+	}
+	return nil
 }
 
 // handleCompileError sets error status and returns the result.

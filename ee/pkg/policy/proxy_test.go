@@ -386,6 +386,126 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
+func TestProxyHandler_HeaderInjection(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	// Track what headers the upstream receives via channel
+	headersCh := make(chan http.Header, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headersCh <- r.Header.Clone()
+		w.Header().Set(headerContentType, contentTypeJSON)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"forwarded"}`))
+	}))
+	defer upstream.Close()
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	handler := NewProxyHandler(eval, upstreamURL, testLogger())
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "inject-test", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "allow-all",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "false",
+						Message: "never deny",
+					},
+				},
+			},
+			HeaderInjection: []omniav1alpha1.HeaderInjectionRule{
+				{Header: "X-Injected-Static", Value: "injected-value"},
+				{Header: "X-Injected-Dynamic", CEL: "headers['X-Omnia-Claim-Team']"},
+			},
+			Mode:      omniav1alpha1.PolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "some_tool")
+	req.Header.Set(HeaderToolRegistry, "test-registry")
+	req.Header.Set("X-Omnia-Claim-Team", "engineering")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	receivedHeaders := <-headersCh
+	if receivedHeaders.Get("X-Injected-Static") != "injected-value" {
+		t.Errorf("X-Injected-Static = %q, want %q", receivedHeaders.Get("X-Injected-Static"), "injected-value")
+	}
+	if receivedHeaders.Get("X-Injected-Dynamic") != "engineering" {
+		t.Errorf("X-Injected-Dynamic = %q, want %q", receivedHeaders.Get("X-Injected-Dynamic"), "engineering")
+	}
+}
+
+func TestProxyHandler_HeaderInjectionNotAppliedOnDeny(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("upstream should not be called when request is denied")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	handler := NewProxyHandler(eval, upstreamURL, testLogger())
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "deny-with-inject", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "deny-registry",
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "deny-all",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "true",
+						Message: "always deny",
+					},
+				},
+			},
+			HeaderInjection: []omniav1alpha1.HeaderInjectionRule{
+				{Header: "X-Should-Not-Inject", Value: "nope"},
+			},
+			Mode:      omniav1alpha1.PolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "some_tool")
+	req.Header.Set(HeaderToolRegistry, "deny-registry")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestWriteDenialResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	decision := Decision{

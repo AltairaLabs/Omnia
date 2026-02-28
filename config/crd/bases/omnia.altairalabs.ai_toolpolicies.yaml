@@ -71,6 +71,30 @@ spec:
                       type: string
                     type: array
                 type: object
+              headerInjection:
+                description: headerInjection defines headers to inject into tool call
+                  requests after policy evaluation passes.
+                items:
+                  description: HeaderInjectionRule defines a header to inject into
+                    tool call requests.
+                  properties:
+                    cel:
+                      description: |-
+                        cel is a CEL expression that computes the header value dynamically.
+                        Available variables: headers (map<string, string>), body (map<string, dyn>).
+                      type: string
+                    header:
+                      description: header is the HTTP header name to inject.
+                      minLength: 1
+                      type: string
+                    value:
+                      description: value is a static header value (mutually exclusive
+                        with cel).
+                      type: string
+                  required:
+                  - header
+                  type: object
+                type: array
               mode:
                 default: enforce
                 description: mode determines whether the policy enforces or only audits

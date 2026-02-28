@@ -90,6 +90,23 @@ type RequiredClaim struct {
 	Message string `json:"message"`
 }
 
+// HeaderInjectionRule defines a header to inject into tool call requests.
+type HeaderInjectionRule struct {
+	// header is the HTTP header name to inject.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Header string `json:"header"`
+
+	// value is a static header value (mutually exclusive with cel).
+	// +optional
+	Value string `json:"value,omitempty"`
+
+	// cel is a CEL expression that computes the header value dynamically.
+	// Available variables: headers (map<string, string>), body (map<string, dyn>).
+	// +optional
+	CEL string `json:"cel,omitempty"`
+}
+
 // ToolPolicyAuditConfig configures audit logging for the policy.
 type ToolPolicyAuditConfig struct {
 	// logDecisions enables logging of all policy decisions (allow/deny).
@@ -126,6 +143,10 @@ type ToolPolicySpec struct {
 	// +kubebuilder:default="deny"
 	// +optional
 	OnFailure OnFailureAction `json:"onFailure,omitempty"`
+
+	// headerInjection defines headers to inject into tool call requests after policy evaluation passes.
+	// +optional
+	HeaderInjection []HeaderInjectionRule `json:"headerInjection,omitempty"`
 
 	// audit configures audit logging for policy decisions.
 	// +optional

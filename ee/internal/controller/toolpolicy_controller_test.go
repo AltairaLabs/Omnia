@@ -207,6 +207,223 @@ var _ = Describe("ToolPolicy Controller", func() {
 		})
 	})
 
+	Context("When reconciling a ToolPolicy with valid header injection", func() {
+		It("should set Active phase and compile header injection rules", func() {
+			policyName := "test-header-inject-valid"
+			tp := &omniav1alpha1.ToolPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      policyName,
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ToolPolicySpec{
+					Selector: omniav1alpha1.ToolPolicySelector{
+						Registry: "test-registry",
+					},
+					Rules: []omniav1alpha1.PolicyRule{
+						{
+							Name: "allow-all",
+							Deny: omniav1alpha1.PolicyRuleDeny{
+								CEL:     "false",
+								Message: "never deny",
+							},
+						},
+					},
+					HeaderInjection: []omniav1alpha1.HeaderInjectionRule{
+						{Header: "X-Static", Value: "static-val"},
+						{Header: "X-Dynamic", CEL: "headers['X-Omnia-Claim-team']"},
+					},
+					Mode:      omniav1alpha1.PolicyModeEnforce,
+					OnFailure: omniav1alpha1.OnFailureDeny,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, tp)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, tp)
+			})
+
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			updated := &omniav1alpha1.ToolPolicy{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				}, updated)).To(Succeed())
+				g.Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolPolicyPhaseActive))
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
+	Context("When reconciling a ToolPolicy with invalid header injection (both value and cel)", func() {
+		It("should set Error phase", func() {
+			policyName := "test-header-inject-both"
+			tp := &omniav1alpha1.ToolPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      policyName,
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ToolPolicySpec{
+					Selector: omniav1alpha1.ToolPolicySelector{
+						Registry: "test-registry",
+					},
+					Rules: []omniav1alpha1.PolicyRule{
+						{
+							Name: "allow-all",
+							Deny: omniav1alpha1.PolicyRuleDeny{
+								CEL:     "false",
+								Message: "never deny",
+							},
+						},
+					},
+					HeaderInjection: []omniav1alpha1.HeaderInjectionRule{
+						{Header: "X-Bad", Value: "static", CEL: "headers['X-Test']"},
+					},
+					Mode:      omniav1alpha1.PolicyModeEnforce,
+					OnFailure: omniav1alpha1.OnFailureDeny,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, tp)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, tp)
+			})
+
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			updated := &omniav1alpha1.ToolPolicy{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				}, updated)).To(Succeed())
+				g.Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolPolicyPhaseError))
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
+	Context("When reconciling a ToolPolicy with invalid header injection CEL", func() {
+		It("should set Error phase", func() {
+			policyName := "test-header-inject-bad-cel"
+			tp := &omniav1alpha1.ToolPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      policyName,
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ToolPolicySpec{
+					Selector: omniav1alpha1.ToolPolicySelector{
+						Registry: "test-registry",
+					},
+					Rules: []omniav1alpha1.PolicyRule{
+						{
+							Name: "allow-all",
+							Deny: omniav1alpha1.PolicyRuleDeny{
+								CEL:     "false",
+								Message: "never deny",
+							},
+						},
+					},
+					HeaderInjection: []omniav1alpha1.HeaderInjectionRule{
+						{Header: "X-Bad", CEL: "invalid cel %%%"},
+					},
+					Mode:      omniav1alpha1.PolicyModeEnforce,
+					OnFailure: omniav1alpha1.OnFailureDeny,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, tp)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, tp)
+			})
+
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			updated := &omniav1alpha1.ToolPolicy{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				}, updated)).To(Succeed())
+				g.Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolPolicyPhaseError))
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
+	Context("When reconciling a ToolPolicy with header injection missing header name", func() {
+		It("should set Error phase", func() {
+			policyName := "test-header-inject-no-name"
+			tp := &omniav1alpha1.ToolPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      policyName,
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ToolPolicySpec{
+					Selector: omniav1alpha1.ToolPolicySelector{
+						Registry: "test-registry",
+					},
+					Rules: []omniav1alpha1.PolicyRule{
+						{
+							Name: "allow-all",
+							Deny: omniav1alpha1.PolicyRuleDeny{
+								CEL:     "false",
+								Message: "never deny",
+							},
+						},
+					},
+					HeaderInjection: []omniav1alpha1.HeaderInjectionRule{
+						{Header: "", Value: "some-value"},
+					},
+					Mode:      omniav1alpha1.PolicyModeEnforce,
+					OnFailure: omniav1alpha1.OnFailureDeny,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, tp)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, tp)
+			})
+
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			updated := &omniav1alpha1.ToolPolicy{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				}, updated)).To(Succeed())
+				g.Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolPolicyPhaseError))
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
 	Context("When reconciling a ToolPolicy with multiple rules", func() {
 		It("should compile all rules and set correct ruleCount", func() {
 			policyName := "test-multi-rule"
