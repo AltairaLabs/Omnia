@@ -27,7 +27,7 @@ export default defineConfig({
   globalTimeout: process.env.CI ? 10 * 60 * 1000 : undefined,
   /* Reporter to use */
   reporter: process.env.CI
-    ? [['junit', { outputFile: 'e2e-multimodal-results.xml' }], ['html', { open: 'never' }]]
+    ? [['junit', { outputFile: 'test-results/multimodal/junit.xml' }], ['html', { open: 'never' }]]
     : [['html', { open: 'on-failure' }]],
   /* Shared settings for all projects */
   use: {
