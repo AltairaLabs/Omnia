@@ -357,6 +357,92 @@ func TestEvaluate_AuditModeAllowsDenied(t *testing.T) {
 	if decision.DeniedBy != "always-deny" {
 		t.Errorf("DeniedBy = %q, want %q (should report rule even in audit mode)", decision.DeniedBy, "always-deny")
 	}
+	if !decision.WouldDeny {
+		t.Error("WouldDeny = false, want true in audit mode when rule matches")
+	}
+	if decision.Mode != omniav1alpha1.PolicyModeAudit {
+		t.Errorf("Mode = %q, want %q", decision.Mode, omniav1alpha1.PolicyModeAudit)
+	}
+	if decision.Policy != "audit-policy" {
+		t.Errorf("Policy = %q, want %q", decision.Policy, "audit-policy")
+	}
+}
+
+func TestEvaluate_AuditModeRequiredClaimsMissing(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicy("audit-claims-policy", []omniav1alpha1.PolicyRule{
+		{
+			Name: "no-deny",
+			Deny: omniav1alpha1.PolicyRuleDeny{CEL: "false", Message: "never"},
+		},
+	})
+	policy.Spec.Mode = omniav1alpha1.PolicyModeAudit
+	policy.Spec.RequiredClaims = []omniav1alpha1.RequiredClaim{
+		{Claim: "team", Message: "team required"},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+	}
+
+	decision := eval.Evaluate(headers, nil)
+	if !decision.Allowed {
+		t.Error("Evaluate() Allowed = false, want true in audit mode even with missing claim")
+	}
+	if !decision.WouldDeny {
+		t.Error("WouldDeny = false, want true when claim is missing in audit mode")
+	}
+	if decision.DeniedBy != "required-claim:team" {
+		t.Errorf("DeniedBy = %q, want %q", decision.DeniedBy, "required-claim:team")
+	}
+}
+
+func TestEvaluate_EnforceModeDecisionFields(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	policy := newTestPolicy("enforce-policy", []omniav1alpha1.PolicyRule{
+		{
+			Name: "deny-rule",
+			Deny: omniav1alpha1.PolicyRuleDeny{
+				CEL:     "true",
+				Message: "always deny",
+			},
+		},
+	})
+	policy.Spec.Mode = omniav1alpha1.PolicyModeEnforce
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	headers := map[string]string{
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+	}
+
+	decision := eval.Evaluate(headers, nil)
+	if decision.Allowed {
+		t.Error("Evaluate() Allowed = true, want false in enforce mode")
+	}
+	if decision.WouldDeny {
+		t.Error("WouldDeny = true, want false in enforce mode (actual denial, not hypothetical)")
+	}
+	if decision.Mode != omniav1alpha1.PolicyModeEnforce {
+		t.Errorf("Mode = %q, want %q", decision.Mode, omniav1alpha1.PolicyModeEnforce)
+	}
+	if decision.Policy != "enforce-policy" {
+		t.Errorf("Policy = %q, want %q", decision.Policy, "enforce-policy")
+	}
 }
 
 func TestEvaluate_OnFailureAllow(t *testing.T) {

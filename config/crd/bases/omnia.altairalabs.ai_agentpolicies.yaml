@@ -15,6 +15,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -85,6 +88,15 @@ spec:
                     - claim
                     x-kubernetes-list-type: map
                 type: object
+              mode:
+                default: enforce
+                description: |-
+                  mode is the enforcement mode: "enforce" (default) or "permissive".
+                  In permissive mode, policy decisions are logged but traffic is not blocked.
+                enum:
+                - enforce
+                - permissive
+                type: string
               selector:
                 description: selector determines which agents this policy applies
                   to.

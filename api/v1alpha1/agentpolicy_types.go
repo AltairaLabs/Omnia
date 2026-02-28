@@ -53,6 +53,17 @@ type ClaimMapping struct {
 	ForwardClaims []ClaimMappingEntry `json:"forwardClaims,omitempty"`
 }
 
+// AgentPolicyMode defines how the agent policy is applied.
+// +kubebuilder:validation:Enum=enforce;permissive
+type AgentPolicyMode string
+
+const (
+	// AgentPolicyModeEnforce applies the policy with full enforcement.
+	AgentPolicyModeEnforce AgentPolicyMode = "enforce"
+	// AgentPolicyModePermissive logs policy decisions without blocking traffic.
+	AgentPolicyModePermissive AgentPolicyMode = "permissive"
+)
+
 // AgentPolicySpec defines the desired state of AgentPolicy.
 type AgentPolicySpec struct {
 	// selector determines which agents this policy applies to.
@@ -62,6 +73,12 @@ type AgentPolicySpec struct {
 	// claimMapping configures JWT claim extraction and header forwarding.
 	// +optional
 	ClaimMapping *ClaimMapping `json:"claimMapping,omitempty"`
+
+	// mode is the enforcement mode: "enforce" (default) or "permissive".
+	// In permissive mode, policy decisions are logged but traffic is not blocked.
+	// +kubebuilder:default="enforce"
+	// +optional
+	Mode AgentPolicyMode `json:"mode,omitempty"`
 }
 
 // AgentPolicyPhase represents the current phase of the AgentPolicy.
@@ -98,6 +115,7 @@ type AgentPolicyStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Matched",type=integer,JSONPath=`.status.matchedAgents`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

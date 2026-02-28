@@ -202,6 +202,117 @@ func TestProxyHandler_WithJSONBody(t *testing.T) {
 	}
 }
 
+func TestProxyHandler_AuditModeForwardsRequest(t *testing.T) {
+	eval, upstream, handler := setupProxyTest(t)
+	defer upstream.Close()
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "audit-test", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+				Tools:    []string{"blocked_tool"},
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "block-all",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "true",
+						Message: "all requests blocked",
+					},
+				},
+			},
+			Mode:      omniav1alpha1.PolicyModeAudit,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "blocked_tool")
+	req.Header.Set(HeaderToolRegistry, "test-registry")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// In audit mode, request should be forwarded (200) not blocked (403)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (audit mode should forward)", rec.Code, http.StatusOK)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["status"] != "forwarded" {
+		t.Errorf("body status = %q, want %q", body["status"], "forwarded")
+	}
+}
+
+func TestProxyHandler_AuditModeLogsDecision(t *testing.T) {
+	eval, upstream, _ := setupProxyTest(t)
+	defer upstream.Close()
+
+	// Use a buffer-based logger to capture log output
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	upstreamURL, _ := url.Parse(upstream.URL)
+	handler := NewProxyHandler(eval, upstreamURL, logger)
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "audit-log-test", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+				Tools:    []string{"logged_tool"},
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "deny-rule",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "true",
+						Message: "would be denied",
+					},
+				},
+			},
+			Mode:      omniav1alpha1.PolicyModeAudit,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "logged_tool")
+	req.Header.Set(HeaderToolRegistry, "test-registry")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Verify the request was forwarded
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	// Verify log output contains audit fields
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "policy_decision") {
+		t.Error("log output missing 'policy_decision' message")
+	}
+	if !strings.Contains(logOutput, `"wouldDeny":true`) {
+		t.Error("log output missing 'wouldDeny:true' field")
+	}
+	if !strings.Contains(logOutput, `"mode":"audit"`) {
+		t.Error("log output missing 'mode:audit' field")
+	}
+	if !strings.Contains(logOutput, `"policy":"audit-log-test"`) {
+		t.Error("log output missing policy name")
+	}
+}
+
 func TestExtractHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Test", "value1")
