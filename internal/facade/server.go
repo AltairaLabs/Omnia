@@ -34,6 +34,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
@@ -57,6 +58,10 @@ type ServerConfig struct {
 	MaxMessageSize int64
 	// SessionTTL is the default TTL for new sessions.
 	SessionTTL time.Duration
+	// PromptPackName is the PromptPack associated with this agent (from env).
+	PromptPackName string
+	// PromptPackVersion is the PromptPack version (from env).
+	PromptPackVersion string
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
@@ -319,8 +324,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		connCtx, sessionSpan = s.tracingProvider.Tracer().Start(connCtx, "facade.session",
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
-				attribute.String("omnia.agent_name", agentName),
-				attribute.String("omnia.namespace", namespace),
+				attribute.String(otlp.AttrOmniaAgentName, agentName),
+				attribute.String(otlp.AttrOmniaAgentNamespace, namespace),
+				attribute.String(otlp.AttrOmniaPromptPackName, s.config.PromptPackName),
+				attribute.String(otlp.AttrOmniaPromptPackVersion, s.config.PromptPackVersion),
+				attribute.String(otlp.AttrOmniaPromptPackNamespace, namespace),
 			),
 		)
 		c.sessionSpan = sessionSpan

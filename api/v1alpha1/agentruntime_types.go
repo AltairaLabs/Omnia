@@ -336,6 +336,20 @@ type ProviderPricing struct {
 	CachedCostPer1K *string `json:"cachedCostPer1K,omitempty"`
 }
 
+// NamedProviderRef associates a name with a Provider CRD reference.
+// The name is used to look up providers by role (e.g. "default", "judge").
+type NamedProviderRef struct {
+	// name is the logical name for this provider (e.g. "default", "judge", "embeddings").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// providerRef references the Provider CRD.
+	// +kubebuilder:validation:Required
+	ProviderRef ProviderRef `json:"providerRef"`
+}
+
 // ProviderRef references a Provider resource.
 type ProviderRef struct {
 	// name is the name of the Provider resource.
@@ -631,11 +645,6 @@ type EvalConfig struct {
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 
-	// judges maps judge names (referenced in PromptPack eval definitions)
-	// to Provider CRDs that supply the LLM for judging.
-	// +optional
-	Judges []JudgeMapping `json:"judges,omitempty"`
-
 	// sampling configures eval sampling rates to control cost.
 	// +optional
 	Sampling *EvalSampling `json:"sampling,omitempty"`
@@ -648,18 +657,6 @@ type EvalConfig struct {
 	// for on_session_complete evals.
 	// +optional
 	SessionCompletion *SessionCompletionConfig `json:"sessionCompletion,omitempty"`
-}
-
-// JudgeMapping maps a judge name to a Provider CRD.
-type JudgeMapping struct {
-	// name is the judge name as referenced in PromptPack eval params
-	// (e.g., "fast-judge", "strong-judge").
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
-
-	// providerRef references the Provider CRD to use for this judge.
-	// +kubebuilder:validation:Required
-	ProviderRef ProviderRef `json:"providerRef"`
 }
 
 // EvalSampling configures sampling rates for evals.
@@ -735,15 +732,22 @@ type AgentRuntimeSpec struct {
 	// +optional
 	Media *MediaConfig `json:"media,omitempty"`
 
+	// providers is a list of named provider references.
+	// Each entry maps a logical name to a Provider CRD.
+	// The "default" name is used as the primary provider for the runtime.
+	// Deprecates providerRef and provider fields.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Providers []NamedProviderRef `json:"providers,omitempty"`
+
 	// providerRef references a Provider resource for LLM configuration.
-	// If specified, the referenced Provider's configuration is used.
-	// If both providerRef and provider are specified, providerRef takes precedence.
+	// Deprecated: Use providers instead. When providers is set, this field is ignored.
 	// +optional
 	ProviderRef *ProviderRef `json:"providerRef,omitempty"`
 
 	// provider configures the LLM provider inline (type, model, credentials, tuning).
-	// If not specified and providerRef is also not specified, PromptKit's auto-detection
-	// is used with credentials from a secret named "<agentruntime-name>-provider" if it exists.
+	// Deprecated: Use providers with a Provider CRD instead. When providers is set, this field is ignored.
 	// +optional
 	Provider *ProviderConfig `json:"provider,omitempty"`
 

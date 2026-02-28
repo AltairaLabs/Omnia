@@ -88,7 +88,6 @@ const (
 // Eval environment variable name constants.
 const (
 	envEvalsEnabled       = "OMNIA_EVALS_ENABLED"
-	envEvalsJudges        = "OMNIA_EVALS_JUDGES"
 	envEvalsSamplingDef   = "OMNIA_EVALS_SAMPLING_DEFAULT"
 	envEvalsSamplingJudge = "OMNIA_EVALS_SAMPLING_LLM_JUDGE"
 	envRedisAddr          = "REDIS_ADDR"

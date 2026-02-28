@@ -21,6 +21,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/session"
@@ -87,6 +91,29 @@ func (m *mockSessionAPI) GetSessionEvalResults(_ context.Context, _ string) ([]*
 	return m.sessionEvalResults, nil
 }
 
+// newTestPackLoader creates a PromptPackLoader backed by a fake K8s client
+// with a ConfigMap containing the given eval definitions.
+func newTestPackLoader(namespace, packName string, evalDefs []EvalDef) *PromptPackLoader {
+	packData, _ := json.Marshal(packJSON{
+		ID:      packName,
+		Version: "v1",
+		Evals:   evalDefs,
+	})
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      packName,
+			Namespace: namespace,
+		},
+		Data: map[string]string{
+			packJSONKey: string(packData),
+		},
+	}
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
+	return NewPromptPackLoader(fakeClient)
+}
+
 func TestProcessEvent_AssistantMessage_RunsEvals(t *testing.T) {
 	mock := &mockSessionAPI{
 		session: &session.Session{
@@ -113,7 +140,7 @@ func TestProcessEvent_AssistantMessage_RunsEvals(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -141,7 +168,7 @@ func TestProcessEvent_NonAssistantMessage_Skipped(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -161,17 +188,24 @@ func TestProcessEvent_SessionAPIError(t *testing.T) {
 		getSessionErr: fmt.Errorf("connection refused"),
 	}
 
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerPerTurn, Params: map[string]any{"value": "x"}},
+	})
+
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
+		packLoader: packLoader,
 	}
 
 	event := api.SessionEvent{
-		EventType:   eventTypeMessage,
-		SessionID:   "s1",
-		MessageRole: "assistant",
+		EventType:      eventTypeMessage,
+		SessionID:      "s1",
+		MessageRole:    "assistant",
+		Namespace:      "ns",
+		PromptPackName: "test-pack",
 	}
 
 	err := w.processEvent(context.Background(), event)
@@ -188,17 +222,24 @@ func TestProcessEvent_GetMessagesError(t *testing.T) {
 		getMessagesErr: fmt.Errorf("timeout"),
 	}
 
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerPerTurn, Params: map[string]any{"value": "x"}},
+	})
+
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
+		packLoader: packLoader,
 	}
 
 	event := api.SessionEvent{
-		EventType:   eventTypeMessage,
-		SessionID:   "s1",
-		MessageRole: "assistant",
+		EventType:      eventTypeMessage,
+		SessionID:      "s1",
+		MessageRole:    "assistant",
+		Namespace:      "ns",
+		PromptPackName: "test-pack",
 	}
 
 	err := w.processEvent(context.Background(), event)
@@ -223,7 +264,7 @@ func TestRunEvals_Success(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -264,7 +305,7 @@ func TestRunEvals_EvalFailure(t *testing.T) {
 	}
 
 	w := &EvalWorker{
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -593,17 +634,19 @@ func TestProcessStreams(t *testing.T) {
 		},
 	}
 
+	streamKey := testStreamKey
+
 	w := &EvalWorker{
 		redisClient:   client,
 		sessionAPI:    mock,
-		namespace:     "ns",
+		namespaces:    []string{"ns"},
+		streamKeys:    []string{streamKey},
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
 		evalRunner:    RunRuleEval,
 	}
 
-	streamKey := testStreamKey
 	_ = client.XGroupCreateMkStream(context.Background(), streamKey, "test-group", "0").Err()
 
 	// Add a valid event.
@@ -620,11 +663,11 @@ func TestProcessStreams(t *testing.T) {
 	})
 
 	// Read and process.
-	streams, err := w.readFromStream(context.Background(), streamKey)
+	streams, err := w.readFromStreams(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, streams)
 
-	w.processStreams(context.Background(), streamKey, streams)
+	w.processStreams(context.Background(), streams)
 }
 
 func TestHandleMessage_SuccessfulProcess(t *testing.T) {
@@ -646,7 +689,7 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 	w := &EvalWorker{
 		redisClient:   client,
 		sessionAPI:    mock,
-		namespace:     "ns",
+		namespaces:    []string{"ns"},
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
@@ -682,24 +725,30 @@ func TestHandleMessage_ProcessError_NoAck(t *testing.T) {
 		getSessionErr: fmt.Errorf("connection refused"),
 	}
 
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerPerTurn, Params: map[string]any{"value": "x"}},
+	})
+
 	w := &EvalWorker{
 		redisClient:   client,
 		sessionAPI:    mock,
-		namespace:     "ns",
+		namespaces:    []string{"ns"},
 		consumerGroup: "test-group",
 		consumerName:  "test",
 		logger:        testLogger(),
 		evalRunner:    RunRuleEval,
+		packLoader:    packLoader,
 	}
 
 	streamKey := testStreamKey
 	_ = client.XGroupCreateMkStream(context.Background(), streamKey, "test-group", "0").Err()
 
 	event := api.SessionEvent{
-		EventType:   eventTypeMessage,
-		SessionID:   "s1",
-		MessageRole: "assistant",
-		Namespace:   "ns",
+		EventType:      eventTypeMessage,
+		SessionID:      "s1",
+		MessageRole:    "assistant",
+		Namespace:      "ns",
+		PromptPackName: "test-pack",
 	}
 	data, _ := json.Marshal(event)
 
@@ -754,7 +803,7 @@ func TestProcessEvent_WriteEvalResults(t *testing.T) {
 	// Create a worker with a patched filterPerTurnDeterministicEvals that returns defs.
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: runner,
 	}
@@ -794,7 +843,7 @@ func TestProcessEvent_WriteError(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -826,7 +875,7 @@ func TestProcessEvent_SessionCompleted_TriggersCompletion(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -859,7 +908,7 @@ func TestProcessEvent_AssistantMessage_RecordsActivity(t *testing.T) {
 
 	w := &EvalWorker{
 		sessionAPI: mock,
-		namespace:  "ns",
+		namespaces: []string{"ns"},
 		logger:     testLogger(),
 		evalRunner: RunRuleEval,
 	}
@@ -1011,18 +1060,24 @@ func TestOnSessionComplete_GetSessionError(t *testing.T) {
 func TestOnSessionComplete_GetMessagesError(t *testing.T) {
 	mock := &mockSessionAPI{
 		session: &session.Session{
-			ID:        "s1",
-			AgentName: "test-agent",
-			Namespace: "ns",
+			ID:             "s1",
+			AgentName:      "test-agent",
+			Namespace:      "ns",
+			PromptPackName: "test-pack",
 		},
 		getMessagesErr: fmt.Errorf("timeout"),
 	}
+
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerOnComplete, Params: map[string]any{"value": "x"}},
+	})
 
 	w := NewEvalWorker(WorkerConfig{
 		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
 		SessionAPI:  mock,
 		Namespace:   "ns",
 		Logger:      testLogger(),
+		PackLoader:  packLoader,
 	})
 
 	err := w.onSessionComplete(context.Background(), "s1")
@@ -1144,7 +1199,7 @@ func TestExecuteSingleEval_Success(t *testing.T) {
 	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
 	msgs := []session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "hi"}}
 
-	result := w.executeSingleEval(def, msgs, event, "agent")
+	result := w.executeSingleEval(def, msgs, event, "agent", nil)
 	require.NotNil(t, result)
 	assert.Equal(t, "e1", result.EvalID)
 	assert.True(t, result.Passed)
@@ -1161,7 +1216,7 @@ func TestExecuteSingleEval_Error(t *testing.T) {
 	def := api.EvalDefinition{ID: "e1", Type: "rule", Trigger: "per_turn"}
 	event := api.SessionEvent{SessionID: "s1"}
 
-	result := w.executeSingleEval(def, nil, event, "agent")
+	result := w.executeSingleEval(def, nil, event, "agent", nil)
 	assert.Nil(t, result)
 }
 
@@ -1190,7 +1245,7 @@ func TestRunEvalsWithSampling_AllSampled(t *testing.T) {
 	msgs := []session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "hi"}}
 	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
 
-	results := w.runEvalsWithSampling(context.Background(), defs, msgs, event, "agent", 1)
+	results := w.runEvalsWithSampling(context.Background(), defs, msgs, event, "agent", 1, nil)
 	assert.Len(t, results, 2)
 }
 
@@ -1213,7 +1268,7 @@ func TestRunEvalsWithSampling_NoneSampled(t *testing.T) {
 	}
 	event := api.SessionEvent{SessionID: "s1"}
 
-	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0)
+	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0, nil)
 	assert.Empty(t, results)
 }
 
@@ -1250,7 +1305,7 @@ func TestRunEvalsWithSampling_RateLimitCancelled(t *testing.T) {
 	}
 	event := api.SessionEvent{SessionID: "s1"}
 
-	results := w.runEvalsWithSampling(cancelledCtx, defs, nil, event, "agent", 0)
+	results := w.runEvalsWithSampling(cancelledCtx, defs, nil, event, "agent", 0, nil)
 	assert.Empty(t, results)
 	assert.Equal(t, 0, callCount, "no evals should run when rate limit fails")
 }
@@ -1279,7 +1334,7 @@ func TestRunEvalsWithSampling_LLMJudgeSampling(t *testing.T) {
 	}
 	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
 
-	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0)
+	results := w.runEvalsWithSampling(context.Background(), defs, nil, event, "agent", 0, nil)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "e1", results[0].EvalID)
 	assert.Equal(t, 1, callCount)
@@ -1344,4 +1399,478 @@ func TestNewEvalWorker_WithSamplerAndRateLimiter(t *testing.T) {
 
 	assert.Same(t, sampler, w.sampler)
 	assert.Same(t, rateLimiter, w.rateLimiter)
+}
+
+// --- New tests for PromptPack integration ---
+
+func TestFilterPerTurnEvals(t *testing.T) {
+	defs := []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerPerTurn, Params: map[string]any{"value": "x"}},
+		{ID: "e2", Type: evalTypeLLMJudge, Trigger: triggerPerTurn},
+		{ID: "e3", Type: "rule", Trigger: triggerOnComplete},
+		{ID: "e4", Type: "rule", Trigger: triggerPerTurn, Params: map[string]any{"maxLength": 100}},
+	}
+
+	result := filterPerTurnEvals(defs)
+
+	require.Len(t, result, 3)
+	assert.Equal(t, "e1", result[0].ID)
+	assert.Equal(t, "e2", result[1].ID) // LLM judge included
+	assert.Equal(t, evalTypeLLMJudge, result[1].Type)
+	assert.Equal(t, "e4", result[2].ID)
+	assert.Equal(t, map[string]any{"value": "x"}, result[0].Params)
+}
+
+func TestFilterPerTurnEvals_Nil(t *testing.T) {
+	result := filterPerTurnEvals(nil)
+	assert.Empty(t, result)
+}
+
+func TestFilterOnCompleteEvals(t *testing.T) {
+	defs := []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerPerTurn},
+		{ID: "e2", Type: "rule", Trigger: triggerOnComplete, Params: map[string]any{"value": "x"}},
+		{ID: "e3", Type: evalTypeLLMJudge, Trigger: triggerOnComplete},
+		{ID: "e4", Type: "rule", Trigger: triggerOnComplete, Params: map[string]any{"maxLength": 100}},
+	}
+
+	result := filterOnCompleteEvals(defs)
+
+	require.Len(t, result, 3)
+	assert.Equal(t, "e2", result[0].ID)
+	assert.Equal(t, "e3", result[1].ID) // LLM judge included
+	assert.Equal(t, evalTypeLLMJudge, result[1].Type)
+	assert.Equal(t, "e4", result[2].ID)
+}
+
+func TestFilterOnCompleteEvals_Nil(t *testing.T) {
+	result := filterOnCompleteEvals(nil)
+	assert.Empty(t, result)
+}
+
+func TestLoadPackEvals_WithPack(t *testing.T) {
+	packLoader := newTestPackLoader("ns", "my-pack", []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerPerTurn},
+	})
+
+	w := &EvalWorker{
+		logger:     testLogger(),
+		packLoader: packLoader,
+	}
+
+	event := api.SessionEvent{
+		SessionID:      "s1",
+		Namespace:      "ns",
+		PromptPackName: "my-pack",
+	}
+
+	result := w.loadPackEvals(context.Background(), event)
+	require.NotNil(t, result)
+	assert.Equal(t, "my-pack", result.PackName)
+	assert.Equal(t, "v1", result.PackVersion)
+	assert.Len(t, result.Evals, 1)
+}
+
+func TestLoadPackEvals_NoPackLoader(t *testing.T) {
+	w := &EvalWorker{logger: testLogger()}
+
+	event := api.SessionEvent{
+		SessionID:      "s1",
+		PromptPackName: "my-pack",
+	}
+
+	result := w.loadPackEvals(context.Background(), event)
+	assert.Nil(t, result)
+}
+
+func TestLoadPackEvals_NoPackName(t *testing.T) {
+	packLoader := newTestPackLoader("other-ns", "my-pack", nil)
+	w := &EvalWorker{
+		logger:     testLogger(),
+		packLoader: packLoader,
+	}
+
+	event := api.SessionEvent{SessionID: "s1", Namespace: "other-ns"}
+
+	result := w.loadPackEvals(context.Background(), event)
+	assert.Nil(t, result)
+}
+
+func TestEnrichEvent(t *testing.T) {
+	event := api.SessionEvent{
+		SessionID: "s1",
+		Namespace: "ns",
+	}
+	packEvals := &PromptPackEvals{
+		PackName:    "my-pack",
+		PackVersion: "v2",
+	}
+
+	enriched := enrichEvent(event, packEvals)
+	assert.Equal(t, "my-pack", enriched.PromptPackName)
+	assert.Equal(t, "v2", enriched.PromptPackVersion)
+	// Original event should not be modified (value semantics).
+	assert.Empty(t, event.PromptPackName)
+}
+
+func TestToEvalResult_WithPromptPack(t *testing.T) {
+	item := api.EvaluateResultItem{
+		EvalID:   "e1",
+		EvalType: "rule",
+		Trigger:  triggerPerTurn,
+		Passed:   true,
+		Source:   evalSource,
+	}
+	event := api.SessionEvent{
+		SessionID:         "s1",
+		Namespace:         "ns",
+		PromptPackName:    "my-pack",
+		PromptPackVersion: "v3",
+	}
+
+	result := toEvalResult(item, event, "agent")
+	assert.Equal(t, "my-pack", result.PromptPackName)
+	assert.Equal(t, "v3", result.PromptPackVersion)
+}
+
+func TestNewEvalWorker_WithPackLoader(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	packLoader := newTestPackLoader("ns", "pack", nil)
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: client,
+		SessionAPI:  &mockSessionAPI{},
+		Namespace:   "ns",
+		Logger:      testLogger(),
+		PackLoader:  packLoader,
+	})
+
+	assert.Same(t, packLoader, w.packLoader)
+}
+
+func TestProcessAssistantMessage_WithPackEvals(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:        "s1",
+			AgentName: "test-agent",
+			Namespace: "ns",
+		},
+		messages: []session.Message{
+			{ID: "m1", Role: session.RoleUser, Content: "hello"},
+			{ID: "m2", Role: session.RoleAssistant, Content: "hi there"},
+		},
+	}
+
+	runner := func(def api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		return api.EvaluateResultItem{
+			EvalID:     def.ID,
+			EvalType:   def.Type,
+			Trigger:    def.Trigger,
+			Passed:     true,
+			DurationMs: 5,
+		}, nil
+	}
+
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "contains", Trigger: triggerPerTurn, Params: map[string]any{"value": "x"}},
+		{ID: "e2", Type: "max_length", Trigger: triggerPerTurn, Params: map[string]any{"maxLength": 100}},
+	})
+
+	w := &EvalWorker{
+		sessionAPI: mock,
+		namespaces: []string{"ns"},
+		logger:     testLogger(),
+		evalRunner: runner,
+		packLoader: packLoader,
+	}
+
+	event := api.SessionEvent{
+		EventType:      eventTypeMessage,
+		SessionID:      "s1",
+		AgentName:      "test-agent",
+		Namespace:      "ns",
+		MessageID:      "m2",
+		MessageRole:    "assistant",
+		PromptPackName: "test-pack",
+		Timestamp:      time.Now().Format(time.RFC3339),
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+	require.Len(t, mock.written, 2)
+	assert.Equal(t, "e1", mock.written[0].EvalID)
+	assert.Equal(t, "e2", mock.written[1].EvalID)
+	assert.Equal(t, "test-pack", mock.written[0].PromptPackName)
+	assert.Equal(t, "v1", mock.written[0].PromptPackVersion)
+	assert.True(t, mock.written[0].Passed)
+}
+
+func TestProcessAssistantMessage_NoPackName_SkipsEvals(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:        "s1",
+			AgentName: "test-agent",
+			Namespace: "ns",
+		},
+		messages: []session.Message{
+			{ID: "m1", Role: session.RoleAssistant, Content: "hi"},
+		},
+	}
+
+	w := &EvalWorker{
+		sessionAPI: mock,
+		namespaces: []string{"ns"},
+		logger:     testLogger(),
+		evalRunner: RunRuleEval,
+	}
+
+	event := api.SessionEvent{
+		EventType:   eventTypeMessage,
+		SessionID:   "s1",
+		MessageRole: "assistant",
+		Namespace:   "ns",
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+	assert.Empty(t, mock.written, "no evals should run when no pack name")
+}
+
+func TestOnSessionComplete_WithPackEvals(t *testing.T) {
+	mock := &mockSessionAPI{
+		session: &session.Session{
+			ID:             "s1",
+			AgentName:      "test-agent",
+			Namespace:      "ns",
+			PromptPackName: "test-pack",
+		},
+		messages: []session.Message{
+			{ID: "m1", Role: session.RoleUser, Content: "hello"},
+			{ID: "m2", Role: session.RoleAssistant, Content: "hi there"},
+		},
+	}
+
+	runner := func(def api.EvalDefinition, _ []session.Message) (api.EvaluateResultItem, error) {
+		return api.EvaluateResultItem{
+			EvalID:     def.ID,
+			EvalType:   def.Type,
+			Trigger:    def.Trigger,
+			Passed:     true,
+			DurationMs: 3,
+		}, nil
+	}
+
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "rule", Trigger: triggerOnComplete, Params: map[string]any{"value": "x"}},
+	})
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  mock,
+		Namespace:   "ns",
+		Logger:      testLogger(),
+		EvalRunner:  runner,
+		PackLoader:  packLoader,
+	})
+
+	err := w.onSessionComplete(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Len(t, mock.written, 1)
+	assert.Equal(t, "e1", mock.written[0].EvalID)
+	assert.Equal(t, "test-pack", mock.written[0].PromptPackName)
+	assert.Equal(t, "v1", mock.written[0].PromptPackVersion)
+}
+
+// --- Multi-namespace tests ---
+
+func TestNewEvalWorker_MultiNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"ns1", "ns2"},
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"ns1", "ns2"}, w.Namespaces())
+	assert.Equal(t, []string{api.StreamKey("ns1"), api.StreamKey("ns2")}, w.StreamKeys())
+	assert.Equal(t, consumerGroupPrefix+"cluster", w.ConsumerGroup())
+}
+
+func TestNewEvalWorker_SingleNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"ns1"},
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"ns1"}, w.Namespaces())
+	assert.Equal(t, []string{api.StreamKey("ns1")}, w.StreamKeys())
+	assert.Equal(t, consumerGroupPrefix+"ns1", w.ConsumerGroup())
+}
+
+func TestNewEvalWorker_BackwardCompat_DeprecatedNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespace:   "legacy-ns",
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"legacy-ns"}, w.Namespaces())
+	assert.Equal(t, []string{api.StreamKey("legacy-ns")}, w.StreamKeys())
+	assert.Equal(t, consumerGroupPrefix+"legacy-ns", w.ConsumerGroup())
+}
+
+func TestNewEvalWorker_NamespacesOverridesNamespace(t *testing.T) {
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: goredis.NewClient(&goredis.Options{Addr: "localhost:0"}),
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"new1", "new2"},
+		Namespace:   "old-ns",
+		Logger:      testLogger(),
+	})
+
+	assert.Equal(t, []string{"new1", "new2"}, w.Namespaces())
+}
+
+func TestStart_CreatesConsumerGroupsOnAllStreams(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient: client,
+		SessionAPI:  &mockSessionAPI{},
+		Namespaces:  []string{"ns1", "ns2"},
+		Logger:      testLogger(),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Run Start in a goroutine and cancel after a short delay.
+	errCh := make(chan error, 1)
+	go func() { errCh <- w.Start(ctx) }()
+
+	// Give Start time to create consumer groups and enter the consume loop.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	err := <-errCh
+	require.NoError(t, err)
+
+	// Verify consumer groups were created on both streams.
+	for _, ns := range []string{"ns1", "ns2"} {
+		streamKey := api.StreamKey(ns)
+		groups, err := client.XInfoGroups(context.Background(), streamKey).Result()
+		require.NoError(t, err, "consumer group should exist for stream %s", streamKey)
+		require.Len(t, groups, 1)
+		assert.Equal(t, w.ConsumerGroup(), groups[0].Name)
+	}
+}
+
+func TestReadFromStreams_MultiStream(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	stream1 := api.StreamKey("ns1")
+	stream2 := api.StreamKey("ns2")
+
+	w := &EvalWorker{
+		redisClient:   client,
+		namespaces:    []string{"ns1", "ns2"},
+		streamKeys:    []string{stream1, stream2},
+		consumerGroup: "test-group",
+		consumerName:  "test",
+		logger:        testLogger(),
+		evalRunner:    RunRuleEval,
+	}
+
+	// Create consumer groups on both streams.
+	_ = client.XGroupCreateMkStream(context.Background(), stream1, "test-group", "0").Err()
+	_ = client.XGroupCreateMkStream(context.Background(), stream2, "test-group", "0").Err()
+
+	// Add events to both streams.
+	event1 := api.SessionEvent{
+		EventType: eventTypeMessage, SessionID: "s1",
+		MessageRole: "assistant", Namespace: "ns1",
+	}
+	event2 := api.SessionEvent{
+		EventType: eventTypeMessage, SessionID: "s2",
+		MessageRole: "assistant", Namespace: "ns2",
+	}
+
+	data1, _ := json.Marshal(event1)
+	data2, _ := json.Marshal(event2)
+
+	client.XAdd(context.Background(), &goredis.XAddArgs{
+		Stream: stream1,
+		Values: map[string]interface{}{"payload": string(data1)},
+	})
+	client.XAdd(context.Background(), &goredis.XAddArgs{
+		Stream: stream2,
+		Values: map[string]interface{}{"payload": string(data2)},
+	})
+
+	// First read should return at least one message.
+	streams, err := w.readFromStreams(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, streams)
+
+	// Verify the stream key is set on each XStream entry.
+	for _, s := range streams {
+		assert.NotEmpty(t, s.Stream, "stream key should be populated")
+	}
+}
+
+func TestRepeatedGt(t *testing.T) {
+	assert.Equal(t, []string{}, repeatedGt(0))
+	assert.Equal(t, []string{">"}, repeatedGt(1))
+	assert.Equal(t, []string{">", ">", ">"}, repeatedGt(3))
+}
+
+func TestBuildConsumerGroup(t *testing.T) {
+	assert.Equal(t, consumerGroupPrefix+"default", buildConsumerGroup(nil))
+	assert.Equal(t, consumerGroupPrefix+"ns1", buildConsumerGroup([]string{"ns1"}))
+	assert.Equal(t, consumerGroupPrefix+"cluster", buildConsumerGroup([]string{"ns1", "ns2"}))
+}
+
+func TestBuildStreamKeys(t *testing.T) {
+	keys := buildStreamKeys([]string{"ns1", "ns2"})
+	assert.Equal(t, []string{api.StreamKey("ns1"), api.StreamKey("ns2")}, keys)
+}
+
+func TestResolveNamespaces(t *testing.T) {
+	tests := []struct {
+		name   string
+		config WorkerConfig
+		want   []string
+	}{
+		{
+			name:   "namespaces takes precedence",
+			config: WorkerConfig{Namespaces: []string{"a", "b"}, Namespace: "c"},
+			want:   []string{"a", "b"},
+		},
+		{
+			name:   "fallback to namespace",
+			config: WorkerConfig{Namespace: "c"},
+			want:   []string{"c"},
+		},
+		{
+			name:   "empty returns nil",
+			config: WorkerConfig{},
+			want:   nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, resolveNamespaces(tc.config))
+		})
+	}
 }

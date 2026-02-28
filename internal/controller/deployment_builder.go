@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"sort"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -42,12 +43,12 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
+	providers map[string]*omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
 
 	// Calculate secret hash for rollout triggering
-	secretHash := r.getSecretHash(ctx, agentRuntime, provider)
+	secretHash := r.getSecretHash(ctx, agentRuntime, providers)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -63,7 +64,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, provider, secretHash)
+		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, secretHash)
 		return nil
 	})
 
@@ -80,62 +81,56 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 func (r *AgentRuntimeReconciler) getSecretHash(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	provider *omniav1alpha1.Provider,
+	providers map[string]*omniav1alpha1.Provider,
 ) string {
-	log := logf.FromContext(ctx)
 	hasher := sha256.New()
 
-	// Include provider's secret if present
-	if provider != nil && provider.Spec.SecretRef != nil {
-		secret := &corev1.Secret{}
-		secretKey := types.NamespacedName{
-			Name:      provider.Spec.SecretRef.Name,
-			Namespace: provider.Namespace,
-		}
-		if err := r.Get(ctx, secretKey, secret); err == nil {
-			// Hash the secret data in a deterministic order
-			keys := make([]string, 0, len(secret.Data))
-			for k := range secret.Data {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				hasher.Write([]byte(k))
-				hasher.Write(secret.Data[k])
-			}
-			log.V(1).Info("Included secret in hash", "secret", secretKey.String())
-		} else {
-			log.V(1).Info("Could not get secret for hash", "secret", secretKey.String(), "error", err)
+	// Include all providers' secrets in sorted key order for determinism
+	providerNames := make([]string, 0, len(providers))
+	for name := range providers {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+
+	for _, name := range providerNames {
+		provider := providers[name]
+		if ref := effectiveSecretRef(provider); ref != nil {
+			r.hashSecretData(ctx, hasher, ref.Name, provider.Namespace)
 		}
 	}
 
 	// Include inline provider secret if present (legacy)
 	if agentRuntime.Spec.Provider != nil && agentRuntime.Spec.Provider.SecretRef != nil {
-		secret := &corev1.Secret{}
-		secretKey := types.NamespacedName{
-			Name:      agentRuntime.Spec.Provider.SecretRef.Name,
-			Namespace: agentRuntime.Namespace,
-		}
-		if err := r.Get(ctx, secretKey, secret); err == nil {
-			keys := make([]string, 0, len(secret.Data))
-			for k := range secret.Data {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				hasher.Write([]byte(k))
-				hasher.Write(secret.Data[k])
-			}
-			log.V(1).Info("Included inline provider secret in hash", "secret", secretKey.String())
-		}
+		r.hashSecretData(ctx, hasher, agentRuntime.Spec.Provider.SecretRef.Name, agentRuntime.Namespace)
 	}
 
-	hash := hex.EncodeToString(hasher.Sum(nil))
+	hashStr := hex.EncodeToString(hasher.Sum(nil))
 	// Use first 16 chars for brevity
-	if len(hash) > 16 {
-		hash = hash[:16]
+	if len(hashStr) > 16 {
+		hashStr = hashStr[:16]
 	}
-	return hash
+	return hashStr
+}
+
+// hashSecretData reads a secret and writes its data to the hasher in deterministic order.
+func (r *AgentRuntimeReconciler) hashSecretData(ctx context.Context, hasher hash.Hash, secretName, namespace string) {
+	log := logf.FromContext(ctx)
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{Name: secretName, Namespace: namespace}
+	if err := r.Get(ctx, secretKey, secret); err == nil {
+		keys := make([]string, 0, len(secret.Data))
+		for k := range secret.Data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			hasher.Write([]byte(k))
+			hasher.Write(secret.Data[k])
+		}
+		log.V(1).Info("Included secret in hash", "secret", secretKey.String())
+	} else {
+		log.V(1).Info("Could not get secret for hash", "secret", secretKey.String(), "error", err)
+	}
 }
 
 func (r *AgentRuntimeReconciler) buildDeploymentSpec(
@@ -143,7 +138,6 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
 	secretHash string,
 ) {
 	labels := map[string]string{
@@ -167,15 +161,16 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	volumes := r.buildVolumes(agentRuntime, promptPack, toolRegistry)
 
 	// Build facade container
-	facadeContainer := r.buildFacadeContainer(agentRuntime, promptPack, facadePort)
+	facadeContainer := r.buildFacadeContainer(agentRuntime, facadePort)
 
-	// Build runtime container
-	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry, provider)
+	// Build runtime container — runtime reads CRD directly for provider/session/media/eval config
+	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
 
 	// Build pod spec with both containers
 	podSpec := corev1.PodSpec{
-		Containers: []corev1.Container{facadeContainer, runtimeContainer},
-		Volumes:    volumes,
+		ServiceAccountName: facadeServiceAccountName(agentRuntime),
+		Containers:         []corev1.Container{facadeContainer, runtimeContainer},
+		Volumes:            volumes,
 	}
 
 	// Add scheduling constraints if specified
@@ -235,7 +230,6 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 // buildFacadeContainer creates the facade container spec.
 func (r *AgentRuntimeReconciler) buildFacadeContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	promptPack *omniav1alpha1.PromptPack,
 	facadePort int32,
 ) corev1.Container {
 	// Check for CRD image override first, then operator default, then hardcoded default
@@ -270,7 +264,7 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env: r.buildFacadeEnvVars(agentRuntime, promptPack),
+		Env: r.buildFacadeEnvVars(agentRuntime),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
@@ -297,11 +291,11 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 }
 
 // buildRuntimeContainer creates the runtime container spec.
+// promptPack is only needed for volume mounts (the pack file mount path).
 func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
 ) corev1.Container {
 	// Check for CRD image override first, then operator default, then framework-specific default
 	frameworkImage := ""
@@ -335,7 +329,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry, provider),
+		Env:          r.buildRuntimeEnvVars(agentRuntime, toolRegistry),
 		VolumeMounts: r.buildRuntimeVolumeMounts(agentRuntime, promptPack, toolRegistry),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
@@ -370,7 +364,6 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 // buildFacadeEnvVars creates environment variables for the facade container.
 func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	promptPack *omniav1alpha1.PromptPack,
 ) []corev1.EnvVar {
 	port := int32(DefaultFacadePort)
 	if agentRuntime.Spec.Facade.Port != nil {
@@ -378,29 +371,22 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	}
 
 	envVars := []corev1.EnvVar{
+		// Identity from Downward API — facade reads CRD directly using these
 		{
-			Name:  "OMNIA_AGENT_NAME",
-			Value: agentRuntime.Name,
+			Name: "OMNIA_AGENT_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+				},
+			},
 		},
 		{
-			Name:  "OMNIA_NAMESPACE",
-			Value: agentRuntime.Namespace,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_NAME",
-			Value: promptPack.Name,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
-			Value: promptPack.Namespace,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_VERSION",
-			Value: promptPack.Spec.Version,
-		},
-		{
-			Name:  "OMNIA_FACADE_TYPE",
-			Value: string(agentRuntime.Spec.Facade.Type),
+			Name: "OMNIA_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
 		},
 		{
 			Name:  "OMNIA_FACADE_PORT",
@@ -474,34 +460,31 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 }
 
 // buildRuntimeEnvVars creates environment variables for the runtime container.
+// The runtime reads CRD directly for provider, session, media, eval, and promptpack config.
+// Only identity, mount paths, ports, tools, tracing, and mock annotation are injected here.
 func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
-	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
-	provider *omniav1alpha1.Provider,
 ) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
+		// Identity from Downward API — runtime reads CRD directly using these
 		{
-			Name:  "OMNIA_AGENT_NAME",
-			Value: agentRuntime.Name,
+			Name: "OMNIA_AGENT_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+				},
+			},
 		},
 		{
-			Name:  "OMNIA_NAMESPACE",
-			Value: agentRuntime.Namespace,
+			Name: "OMNIA_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
 		},
-		{
-			Name:  "OMNIA_PROMPTPACK_NAME",
-			Value: promptPack.Name,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_NAMESPACE",
-			Value: promptPack.Namespace,
-		},
-		{
-			Name:  "OMNIA_PROMPTPACK_VERSION",
-			Value: promptPack.Spec.Version,
-		},
-		// PromptPack path for the runtime to load
+		// PromptPack path for the runtime to load (mount-path, operator controls)
 		{
 			Name:  "OMNIA_PROMPTPACK_PATH",
 			Value: PromptPackMountPath + "/pack.json",
@@ -523,14 +506,6 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		},
 	}
 
-	// Add provider configuration
-	// Provider CRD takes precedence over inline provider config
-	if provider != nil {
-		envVars = append(envVars, buildProviderEnvVarsFromCRD(provider)...)
-	} else {
-		envVars = append(envVars, buildProviderEnvVars(agentRuntime.Spec.Provider)...)
-	}
-
 	// Add tool registry info if present
 	if toolRegistry != nil {
 		envVars = append(envVars, corev1.EnvVar{
@@ -545,17 +520,6 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_TOOLS_CONFIG_PATH",
 			Value: ToolsMountPath + "/" + ToolsConfigFileName,
-		})
-	}
-
-	// Add session config for conversation persistence
-	envVars = append(envVars, buildSessionEnvVars(agentRuntime.Spec.Session, "OMNIA_SESSION_URL")...)
-
-	// Add media config for mock provider responses
-	if agentRuntime.Spec.Media != nil && agentRuntime.Spec.Media.BasePath != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_MEDIA_BASE_PATH",
-			Value: agentRuntime.Spec.Media.BasePath,
 		})
 	}
 
@@ -585,12 +549,6 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			},
 		)
 	}
-
-	// Enable real-time evals — promptPack is always non-nil when this function is called
-	envVars = append(envVars, corev1.EnvVar{
-		Name:  "OMNIA_EVAL_ENABLED",
-		Value: "true",
-	})
 
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {

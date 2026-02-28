@@ -249,6 +249,14 @@ func TestIndexedToSessionMessages_Empty(t *testing.T) {
 	assert.Nil(t, indexedToSessionMessages(nil))
 }
 
+func TestOmniaAttributeConstants(t *testing.T) {
+	assert.Equal(t, "omnia.agent.name", AttrOmniaAgentName)
+	assert.Equal(t, "omnia.agent.namespace", AttrOmniaAgentNamespace)
+	assert.Equal(t, "omnia.promptpack.name", AttrOmniaPromptPackName)
+	assert.Equal(t, "omnia.promptpack.version", AttrOmniaPromptPackVersion)
+	assert.Equal(t, "omnia.promptpack.namespace", AttrOmniaPromptPackNamespace)
+}
+
 func TestToMessageRole(t *testing.T) {
 	assert.Equal(t, session.RoleUser, toMessageRole("user"))
 	assert.Equal(t, session.RoleAssistant, toMessageRole("assistant"))

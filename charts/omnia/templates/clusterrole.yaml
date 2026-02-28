@@ -63,6 +63,33 @@ rules:
       - patch
       - update
       - watch
+  # ServiceAccounts for agent facade RBAC
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Roles and RoleBindings for agent facade CRD-reading permissions
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - roles
+      - rolebindings
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   # Deployments for agent pods
   - apiGroups:
       - apps
@@ -275,32 +302,8 @@ rules:
       - patch
       - update
       - watch
-  # RBAC for ArenaDevSession controller (creates ServiceAccount, Role, RoleBinding per session)
-  - apiGroups:
-      - ""
-    resources:
-      - serviceaccounts
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - rbac.authorization.k8s.io
-    resources:
-      - roles
-      - rolebindings
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
+  # Note: ServiceAccounts, Roles, and RoleBindings RBAC rules are defined above
+  # (outside enterprise conditional) since the core AgentRuntime controller also uses them.
   {{- end }}
   # HorizontalPodAutoscaler for standard autoscaling
   - apiGroups:

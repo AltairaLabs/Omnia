@@ -311,9 +311,10 @@ func runMigrations(connStr string, log logr.Logger) error {
 	return nil
 }
 
-// buildAPIMux assembles the HTTP mux with all API routes. Returns the mux and
-// a cleanup function for the audit logger (no-op when enterprise is disabled).
-func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (*http.ServeMux, func()) {
+// buildAPIMux assembles the HTTP handler with all API routes, wrapped with
+// Prometheus metrics middleware. Returns the handler and a cleanup function
+// for the audit logger (no-op when enterprise is disabled).
+func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (http.Handler, func()) {
 	svcCfg := api.ServiceConfig{}
 	cleanup := func() {}
 
@@ -326,8 +327,11 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 		cleanup = func() { _ = auditLogger.Close() }
 	}
 
+	httpMetrics := api.NewHTTPMetrics(nil)
+	httpMetrics.Initialize()
+
 	// Event publisher (reuses the same Redis used for hot cache, if configured).
-	svcCfg.EventPublisher = initEventPublisher(registry, log)
+	svcCfg.EventPublisher = initEventPublisher(registry, log, httpMetrics)
 
 	sessionService := api.NewSessionService(registry, svcCfg, log)
 	handler := api.NewHandler(sessionService, log)
@@ -337,7 +341,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
 	mux.Handle("GET /metrics", promhttp.Handler())
 
-	return mux, cleanup
+	return api.MetricsMiddleware(httpMetrics, mux), cleanup
 }
 
 // registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when
@@ -438,7 +442,7 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*provider
 
 // initEventPublisher creates an EventPublisher backed by the Redis client from
 // the hot cache provider, if available. Returns nil when Redis is not configured.
-func initEventPublisher(registry *providers.Registry, log logr.Logger) api.EventPublisher {
+func initEventPublisher(registry *providers.Registry, log logr.Logger, httpMetrics ...*api.HTTPMetrics) api.EventPublisher {
 	hot, err := registry.HotCache()
 	if err != nil {
 		return nil
@@ -448,7 +452,11 @@ func initEventPublisher(registry *providers.Registry, log logr.Logger) api.Event
 		return nil
 	}
 	log.Info("event publisher enabled (Redis Streams)")
-	return api.NewRedisEventPublisher(rp.RedisClient(), log)
+	var m *api.HTTPMetrics
+	if len(httpMetrics) > 0 {
+		m = httpMetrics[0]
+	}
+	return api.NewRedisEventPublisher(rp.RedisClient(), log, m)
 }
 
 // startOTLPServers creates and starts the OTLP gRPC and HTTP servers.

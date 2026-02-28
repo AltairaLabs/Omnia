@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -25,6 +24,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 // buildSessionEnvVars creates environment variables for session configuration.
@@ -185,6 +185,11 @@ func buildSecretKeyEnvVar(secretRef *corev1.LocalObjectReference, envName, secre
 	}
 }
 
+// effectiveSecretRef delegates to the shared pkg/k8s.EffectiveSecretRef.
+func effectiveSecretRef(provider *omniav1alpha1.Provider) *omniav1alpha1.SecretKeyRef {
+	return k8s.EffectiveSecretRef(provider)
+}
+
 // buildProviderEnvVarsFromCRD creates environment variables from a Provider CRD.
 // This is used when an AgentRuntime references a Provider resource.
 func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvVar {
@@ -214,11 +219,11 @@ func buildProviderEnvVarsFromCRD(provider *omniav1alpha1.Provider) []corev1.EnvV
 		corev1.EnvVar{Name: "OMNIA_PROVIDER_REF_NAMESPACE", Value: provider.Namespace},
 	)
 
-	// API key from secret - only if SecretRef is configured
-	if provider.Spec.SecretRef != nil {
-		secretRef := corev1.LocalObjectReference{Name: provider.Spec.SecretRef.Name}
-		if provider.Spec.SecretRef.Key != nil {
-			envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *provider.Spec.SecretRef.Key)...)
+	// API key from secret — prefer credential.secretRef over legacy secretRef
+	if ref := effectiveSecretRef(provider); ref != nil {
+		secretRef := corev1.LocalObjectReference{Name: ref.Name}
+		if ref.Key != nil {
+			envVars = append(envVars, buildSecretEnvVarsWithKey(&secretRef, provider.Spec.Type, *ref.Key)...)
 		} else {
 			envVars = append(envVars, buildSecretEnvVars(&secretRef, provider.Spec.Type)...)
 		}
@@ -249,26 +254,9 @@ func buildEvalEnvVars(evalConfig *omniav1alpha1.EvalConfig) []corev1.EnvVar {
 		{Name: envEvalsEnabled, Value: "true"},
 	}
 
-	envVars = append(envVars, buildEvalJudgesEnvVar(evalConfig.Judges)...)
 	envVars = append(envVars, buildEvalSamplingEnvVars(evalConfig.Sampling)...)
 
 	return envVars
-}
-
-// buildEvalJudgesEnvVar creates the OMNIA_EVALS_JUDGES env var from judge mappings.
-func buildEvalJudgesEnvVar(judges []omniav1alpha1.JudgeMapping) []corev1.EnvVar {
-	if len(judges) == 0 {
-		return nil
-	}
-
-	judgesJSON, err := json.Marshal(judges)
-	if err != nil {
-		return nil
-	}
-
-	return []corev1.EnvVar{
-		{Name: envEvalsJudges, Value: string(judgesJSON)},
-	}
 }
 
 // buildEvalSamplingEnvVars creates sampling rate env vars with defaults.

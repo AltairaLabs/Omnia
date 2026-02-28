@@ -66,6 +66,15 @@ const (
 	AttrServiceNamespace = "service.namespace"
 )
 
+// Omnia custom attribute keys.
+const (
+	AttrOmniaAgentName           = "omnia.agent.name"
+	AttrOmniaAgentNamespace      = "omnia.agent.namespace"
+	AttrOmniaPromptPackName      = "omnia.promptpack.name"
+	AttrOmniaPromptPackVersion   = "omnia.promptpack.version"
+	AttrOmniaPromptPackNamespace = "omnia.promptpack.namespace"
+)
+
 // PromptKit tool span attribute keys.
 const (
 	AttrToolName       = "tool.name"

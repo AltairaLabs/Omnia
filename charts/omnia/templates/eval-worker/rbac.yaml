@@ -1,0 +1,30 @@
+{{- if and .Values.enterprise.enabled .Values.enterprise.evalWorker.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.evalWorker.fullname" . }}
+  labels:
+    {{- include "omnia.evalWorker.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["agentriuntimes", "providers"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "omnia.evalWorker.fullname" . }}
+  labels:
+    {{- include "omnia.evalWorker.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "omnia.evalWorker.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "omnia.evalWorker.fullname" . }}
+{{- end }}

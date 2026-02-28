@@ -129,6 +129,45 @@ Detailed metrics for pipelines, stages, tools, and validations:
 | `omnia_runtime_validations_total` | Counter | validator, validator_type, status | Total validations |
 | `omnia_runtime_validation_duration_seconds` | Histogram | validator, validator_type | Validation duration |
 
+### Eval Worker Metrics
+
+The eval worker exposes metrics for event processing, eval execution, sampling, and result persistence. These are available when `enterprise.evalWorker.enabled` is true. The eval worker pod includes Prometheus scrape annotations automatically.
+
+**Event Processing:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_eval_worker_events_received_total` | Counter | event_type | Session events consumed from Redis Streams |
+| `omnia_eval_worker_event_processing_duration_seconds` | Histogram | event_type | End-to-end time to process a stream event |
+| `omnia_eval_worker_stream_lag` | Gauge | stream | Pending messages per Redis stream (consumer lag) |
+
+**Eval Execution:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_eval_worker_evals_executed_total` | Counter | eval_type, trigger, status | Total eval executions (success/error) |
+| `omnia_eval_worker_eval_duration_seconds` | Histogram | eval_type, trigger | Eval execution duration |
+| `omnia_eval_worker_evals_sampled_total` | Counter | eval_type, decision | Sampling decisions (sampled vs skipped) |
+| `omnia_eval_worker_results_written_total` | Counter | status | Eval results written to session-api |
+
+### Session API Metrics
+
+The session-api exposes HTTP request metrics and event publishing metrics. Prometheus scrape annotations are included on the deployment by default.
+
+**HTTP Requests:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_session_api_requests_total` | Counter | method, route, status_code | Total HTTP requests |
+| `omnia_session_api_request_duration_seconds` | Histogram | method, route, status_code | HTTP request duration |
+
+**Event Publishing (requires Redis):**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_session_api_events_published_total` | Counter | status | Redis stream publish attempts (success/error) |
+| `omnia_session_api_event_publish_duration_seconds` | Histogram | — | Time to publish an event to Redis Streams |
+
 ### Query Metrics in Grafana
 
 1. Open Grafana and go to **Explore**
@@ -156,6 +195,27 @@ sum(rate(omnia_runtime_tool_calls_total{status="error"}[5m])) / sum(rate(omnia_r
 
 # Average pipeline duration
 histogram_quantile(0.5, rate(omnia_runtime_pipeline_duration_seconds_bucket[5m]))
+
+# Eval worker: evals per second by type
+sum by (eval_type) (rate(omnia_eval_worker_evals_executed_total[5m]))
+
+# Eval worker: eval pass/fail rate
+sum(rate(omnia_eval_worker_evals_executed_total{status="error"}[5m])) / sum(rate(omnia_eval_worker_evals_executed_total[5m]))
+
+# Eval worker: consumer lag across all streams
+omnia_eval_worker_stream_lag
+
+# Eval worker: P95 eval duration by type
+histogram_quantile(0.95, rate(omnia_eval_worker_eval_duration_seconds_bucket[5m]))
+
+# Session API: request rate by route
+sum by (route) (rate(omnia_session_api_requests_total[5m]))
+
+# Session API: P99 request latency
+histogram_quantile(0.99, rate(omnia_session_api_request_duration_seconds_bucket[5m]))
+
+# Session API: event publish error rate
+rate(omnia_session_api_events_published_total{status="error"}[5m])
 ```
 
 ## View Agent Logs

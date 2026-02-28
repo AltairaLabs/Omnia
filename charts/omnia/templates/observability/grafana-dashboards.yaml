@@ -14,4 +14,6 @@ data:
 {{ .Files.Get "dashboards/omnia-costs.json" | indent 4 }}
   omnia-agent-detail.json: |
 {{ tpl (.Files.Get "dashboards/omnia-agent-detail.json.tpl") . | indent 4 }}
+  omnia-platform-services.json: |
+{{ .Files.Get "dashboards/omnia-platform-services.json" | indent 4 }}
 {{- end }}

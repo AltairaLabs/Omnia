@@ -149,6 +149,40 @@ enterprise:
     # -- Fetch timeout
     timeout: 2m
 
+  # Eval worker for non-PromptKit agent eval execution
+  evalWorker:
+    # -- Enable eval worker deployment
+    enabled: true
+    # -- Number of eval worker replicas
+    replicaCount: 1
+    image:
+      # -- Eval worker image repository
+      repository: ghcr.io/altairalabs/omnia-eval-worker
+      # -- Eval worker image tag (defaults to Chart appVersion)
+      tag: ""
+      # -- Eval worker image pull policy
+      pullPolicy: IfNotPresent
+    # -- Resource limits for eval worker
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    # -- Namespaces to watch for eval events.
+    # If empty, watches the deployment namespace only (single-namespace mode).
+    # If set, watches all listed namespaces (multi-namespace mode) and uses
+    # ClusterRole RBAC instead of namespace-scoped Role.
+    namespaces: []
+    # -- Extra environment variables for eval worker (e.g., provider API keys for LLM judges)
+    extraEnv: []
+    # - name: OPENAI_API_KEY
+    #   valueFrom:
+    #     secretKeyRef:
+    #       name: llm-provider-keys
+    #       key: openai-api-key
+
   # PromptKit LSP server for YAML validation
   promptkitLsp:
     # -- Enable PromptKit LSP server
@@ -1046,6 +1080,48 @@ prometheus:
           target_label: agent
         - target_label: container
           replacement: runtime
+    # Scrape Omnia session-api pods (HTTP request metrics, event publishing)
+    - job_name: 'omnia-session-api'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          action: keep
+          regex: session-api
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+    # Scrape Omnia eval-worker pods (eval execution, event processing, stream lag)
+    - job_name: 'omnia-eval-worker'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          action: keep
+          regex: eval-worker
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
 
 # Grafana configuration (dashboards)
 # See: https://github.com/grafana/helm-charts/tree/main/charts/grafana

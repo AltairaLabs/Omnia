@@ -81,21 +81,6 @@ export interface AgentRuntimeSpec {
   evals?: {
     /** enabled activates eval execution for this agent's sessions. */
     enabled?: boolean;
-    /** judges maps judge names (referenced in PromptPack eval definitions)
-     * to Provider CRDs that supply the LLM for judging. */
-    judges?: {
-      /** name is the judge name as referenced in PromptPack eval params
-       * (e.g., "fast-judge", "strong-judge"). */
-      name: string;
-      /** providerRef references the Provider CRD to use for this judge. */
-      providerRef: {
-        /** name is the name of the Provider resource. */
-        name: string;
-        /** namespace is the namespace of the Provider resource.
-         * If not specified, the same namespace as the AgentRuntime is used. */
-        namespace?: string;
-      };
-    }[];
     /** rateLimit configures eval execution rate limits. */
     rateLimit?: {
       /** maxConcurrentJudgeCalls is the maximum concurrent LLM judge API calls. */
@@ -253,8 +238,7 @@ export interface AgentRuntimeSpec {
     version?: string;
   };
   /** provider configures the LLM provider inline (type, model, credentials, tuning).
-   * If not specified and providerRef is also not specified, PromptKit's auto-detection
-   * is used with credentials from a secret named "<agentruntime-name>-provider" if it exists. */
+   * Deprecated: Use providers with a Provider CRD instead. When providers is set, this field is ignored. */
   provider?: {
     /** additionalConfig contains provider-specific settings passed to PromptKit.
      * For Ollama: "keep_alive" (e.g., "5m") to keep model loaded between requests.
@@ -317,8 +301,7 @@ export interface AgentRuntimeSpec {
     type: "claude" | "openai" | "gemini" | "ollama" | "mock" | "bedrock" | "vertex" | "azure-ai";
   };
   /** providerRef references a Provider resource for LLM configuration.
-   * If specified, the referenced Provider's configuration is used.
-   * If both providerRef and provider are specified, providerRef takes precedence. */
+   * Deprecated: Use providers instead. When providers is set, this field is ignored. */
   providerRef?: {
     /** name is the name of the Provider resource. */
     name: string;
@@ -326,6 +309,22 @@ export interface AgentRuntimeSpec {
      * If not specified, the same namespace as the AgentRuntime is used. */
     namespace?: string;
   };
+  /** providers is a list of named provider references.
+   * Each entry maps a logical name to a Provider CRD.
+   * The "default" name is used as the primary provider for the runtime.
+   * Deprecates providerRef and provider fields. */
+  providers?: {
+    /** name is the logical name for this provider (e.g. "default", "judge", "embeddings"). */
+    name: string;
+    /** providerRef references the Provider CRD. */
+    providerRef: {
+      /** name is the name of the Provider resource. */
+      name: string;
+      /** namespace is the namespace of the Provider resource.
+       * If not specified, the same namespace as the AgentRuntime is used. */
+      namespace?: string;
+    };
+  }[];
   /** runtime configures deployment settings like replicas and resources. */
   runtime?: {
     /** affinity defines affinity rules for pod scheduling. */

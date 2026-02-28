@@ -81,11 +81,13 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 
 // createSessionRequest mirrors the session-api CreateSessionRequest.
 type createSessionRequest struct {
-	ID            string `json:"id"`
-	AgentName     string `json:"agentName"`
-	Namespace     string `json:"namespace"`
-	WorkspaceName string `json:"workspaceName,omitempty"`
-	TTLSeconds    int    `json:"ttlSeconds,omitempty"`
+	ID                string `json:"id"`
+	AgentName         string `json:"agentName"`
+	Namespace         string `json:"namespace"`
+	WorkspaceName     string `json:"workspaceName,omitempty"`
+	TTLSeconds        int    `json:"ttlSeconds,omitempty"`
+	PromptPackName    string `json:"promptPackName,omitempty"`
+	PromptPackVersion string `json:"promptPackVersion,omitempty"`
 }
 
 // sessionResponse mirrors the session-api SessionResponse.
@@ -102,10 +104,12 @@ type refreshTTLRequest struct {
 func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
 	id := uuid.New().String()
 	reqBody := createSessionRequest{
-		ID:            id,
-		AgentName:     opts.AgentName,
-		Namespace:     opts.Namespace,
-		WorkspaceName: opts.WorkspaceName,
+		ID:                id,
+		AgentName:         opts.AgentName,
+		Namespace:         opts.Namespace,
+		WorkspaceName:     opts.WorkspaceName,
+		PromptPackName:    opts.PromptPackName,
+		PromptPackVersion: opts.PromptPackVersion,
 	}
 	if opts.TTL > 0 {
 		reqBody.TTLSeconds = int(opts.TTL.Seconds())

@@ -160,3 +160,39 @@ Session API image
 {{- $tag := default .Chart.AppVersion .Values.sessionApi.image.tag }}
 {{- printf "%s:%s" .Values.sessionApi.image.repository $tag }}
 {{- end }}
+
+{{/*
+Eval Worker fullname
+*/}}
+{{- define "omnia.evalWorker.fullname" -}}
+{{- printf "%s-eval-worker" (include "omnia.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Eval Worker labels
+*/}}
+{{- define "omnia.evalWorker.labels" -}}
+helm.sh/chart: {{ include "omnia.chart" . }}
+{{ include "omnia.evalWorker.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Eval Worker selector labels
+*/}}
+{{- define "omnia.evalWorker.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "omnia.name" . }}-eval-worker
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: eval-worker
+{{- end }}
+
+{{/*
+Eval Worker image
+*/}}
+{{- define "omnia.evalWorker.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.enterprise.evalWorker.image.tag }}
+{{- printf "%s:%s" .Values.enterprise.evalWorker.image.repository $tag }}
+{{- end }}

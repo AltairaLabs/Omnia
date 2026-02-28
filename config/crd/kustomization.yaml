@@ -6,8 +6,14 @@ resources:
 - bases/omnia.altairalabs.ai_promptpacks.yaml
 - bases/omnia.altairalabs.ai_providers.yaml
 - bases/omnia.altairalabs.ai_toolregistries.yaml
-- bases/omnia.altairalabs.ai_arenasources.yaml
+- bases/omnia.altairalabs.ai_arenadevsessions.yaml
 - bases/omnia.altairalabs.ai_arenajobs.yaml
+- bases/omnia.altairalabs.ai_arenasources.yaml
+- bases/omnia.altairalabs.ai_arenatemplatesources.yaml
+- bases/omnia.altairalabs.ai_sessionanalyticssyncs.yaml
+- bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml
+- bases/omnia.altairalabs.ai_sessionretentionpolicies.yaml
+- bases/omnia.altairalabs.ai_sessionstreamingconfigs.yaml
 - bases/omnia.altairalabs.ai_workspaces.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 

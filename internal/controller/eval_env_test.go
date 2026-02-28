@@ -17,12 +17,11 @@ limitations under the License.
 package controller
 
 import (
-	"encoding/json"
 	"testing"
 
-	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-
 	"k8s.io/utils/ptr"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 func TestBuildEvalEnvVars(t *testing.T) {
@@ -49,22 +48,6 @@ func TestBuildEvalEnvVars(t *testing.T) {
 			},
 			wantLen:  3, // enabled + default sampling + llm judge sampling
 			wantKeys: []string{envEvalsEnabled, envEvalsSamplingDef, envEvalsSamplingJudge},
-		},
-		{
-			name: "enabled with judges",
-			evalConfig: &omniav1alpha1.EvalConfig{
-				Enabled: true,
-				Judges: []omniav1alpha1.JudgeMapping{
-					{
-						Name: "fast-judge",
-						ProviderRef: omniav1alpha1.ProviderRef{
-							Name: "claude-provider",
-						},
-					},
-				},
-			},
-			wantLen:  4, // enabled + judges + default sampling + llm judge sampling
-			wantKeys: []string{envEvalsEnabled, envEvalsJudges, envEvalsSamplingDef, envEvalsSamplingJudge},
 		},
 		{
 			name: "enabled with custom sampling rates",
@@ -104,12 +87,6 @@ func TestBuildEvalEnvVars(t *testing.T) {
 func TestBuildEvalEnvVars_Values(t *testing.T) {
 	evalConfig := &omniav1alpha1.EvalConfig{
 		Enabled: true,
-		Judges: []omniav1alpha1.JudgeMapping{
-			{
-				Name:        "fast-judge",
-				ProviderRef: omniav1alpha1.ProviderRef{Name: "claude"},
-			},
-		},
 		Sampling: &omniav1alpha1.EvalSampling{
 			DefaultRate:  ptr.To(int32(75)),
 			LLMJudgeRate: ptr.To(int32(20)),
@@ -122,8 +99,8 @@ func TestBuildEvalEnvVars_Values(t *testing.T) {
 		envMap[e.Name] = e.Value
 	}
 
-	if envMap[envEvalsEnabled] != "true" {
-		t.Errorf("OMNIA_EVALS_ENABLED = %q, want %q", envMap[envEvalsEnabled], "true")
+	if envMap[envEvalsEnabled] != labelValueTrue {
+		t.Errorf("OMNIA_EVALS_ENABLED = %q, want %q", envMap[envEvalsEnabled], labelValueTrue)
 	}
 
 	if envMap[envEvalsSamplingDef] != "75" {
@@ -132,15 +109,6 @@ func TestBuildEvalEnvVars_Values(t *testing.T) {
 
 	if envMap[envEvalsSamplingJudge] != "20" {
 		t.Errorf("OMNIA_EVALS_SAMPLING_LLM_JUDGE = %q, want %q", envMap[envEvalsSamplingJudge], "20")
-	}
-
-	// Verify judges JSON is valid
-	var judges []omniav1alpha1.JudgeMapping
-	if err := json.Unmarshal([]byte(envMap[envEvalsJudges]), &judges); err != nil {
-		t.Fatalf("failed to unmarshal judges JSON: %v", err)
-	}
-	if len(judges) != 1 || judges[0].Name != "fast-judge" {
-		t.Errorf("judges JSON = %v, want 1 judge named fast-judge", judges)
 	}
 }
 
@@ -156,18 +124,6 @@ func TestBuildEvalSamplingEnvVars_Defaults(t *testing.T) {
 	}
 	if envMap[envEvalsSamplingJudge] != "10" {
 		t.Errorf("llm judge rate = %q, want %q", envMap[envEvalsSamplingJudge], "10")
-	}
-}
-
-func TestBuildEvalJudgesEnvVar_Empty(t *testing.T) {
-	got := buildEvalJudgesEnvVar(nil)
-	if len(got) != 0 {
-		t.Errorf("buildEvalJudgesEnvVar(nil) returned %d vars, want 0", len(got))
-	}
-
-	got = buildEvalJudgesEnvVar([]omniav1alpha1.JudgeMapping{})
-	if len(got) != 0 {
-		t.Errorf("buildEvalJudgesEnvVar([]) returned %d vars, want 0", len(got))
 	}
 }
 
@@ -251,6 +207,101 @@ func TestHasEvalsEnabled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := hasEvalsEnabled(tt.spec); got != tt.want {
 				t.Errorf("hasEvalsEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveSecretRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider *omniav1alpha1.Provider
+		wantName string
+		wantKey  *string
+		wantNil  bool
+	}{
+		{
+			name: "no secret refs returns nil",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{},
+			},
+			wantNil: true,
+		},
+		{
+			name: "legacy secretRef only",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "legacy-secret",
+					},
+				},
+			},
+			wantName: "legacy-secret",
+		},
+		{
+			name: "credential.secretRef only",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "cred-secret",
+							Key:  ptr.To("my-key"),
+						},
+					},
+				},
+			},
+			wantName: "cred-secret",
+			wantKey:  ptr.To("my-key"),
+		},
+		{
+			name: "credential.secretRef preferred over legacy",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "legacy-secret",
+					},
+					Credential: &omniav1alpha1.CredentialConfig{
+						SecretRef: &omniav1alpha1.SecretKeyRef{
+							Name: "cred-secret",
+						},
+					},
+				},
+			},
+			wantName: "cred-secret",
+		},
+		{
+			name: "credential without secretRef falls back to legacy",
+			provider: &omniav1alpha1.Provider{
+				Spec: omniav1alpha1.ProviderSpec{
+					SecretRef: &omniav1alpha1.SecretKeyRef{
+						Name: "legacy-secret",
+					},
+					Credential: &omniav1alpha1.CredentialConfig{},
+				},
+			},
+			wantName: "legacy-secret",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := effectiveSecretRef(tt.provider)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("effectiveSecretRef() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("effectiveSecretRef() = nil, want non-nil")
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("effectiveSecretRef().Name = %q, want %q", got.Name, tt.wantName)
+			}
+			if tt.wantKey != nil {
+				if got.Key == nil || *got.Key != *tt.wantKey {
+					t.Errorf("effectiveSecretRef().Key = %v, want %q", got.Key, *tt.wantKey)
+				}
 			}
 		})
 	}

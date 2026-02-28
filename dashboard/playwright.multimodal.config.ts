@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
 
+const DASHBOARD_URL = 'http://localhost:3000';
+
 /**
  * Playwright configuration for multi-modal console E2E tests.
  *
@@ -15,20 +17,22 @@ export default defineConfig({
   testDir: './e2e/tests/multimodal',
   /* Fail the build on CI if you accidentally left test.only in the source code */
   forbidOnly: !!process.env.CI,
-  /* Retry failed tests on CI */
-  retries: process.env.CI ? 2 : 0,
+  /* Retry failed tests on CI — keep low to fail fast */
+  retries: process.env.CI ? 1 : 0,
   /* Single worker to avoid WebSocket connection conflicts with the test agent */
   workers: 1,
-  /* Longer timeout for multi-modal tests that involve streaming */
-  timeout: 60000,
+  /* Timeout per test — streaming responses should complete well within 30s */
+  timeout: 30000,
+  /* Global timeout — abort entire run if infrastructure is broken (e.g. WS origin rejected) */
+  globalTimeout: process.env.CI ? 10 * 60 * 1000 : undefined,
   /* Reporter to use */
   reporter: process.env.CI
-    ? [['junit', { outputFile: 'e2e-multimodal-results.xml' }], ['html', { open: 'never' }]]
+    ? [['junit', { outputFile: 'test-results/multimodal/junit.xml' }], ['html', { open: 'never' }]]
     : [['html', { open: 'on-failure' }]],
   /* Shared settings for all projects */
   use: {
     /* Base URL for the app */
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || DASHBOARD_URL,
     /* Collect trace when retrying a failed test */
     trace: 'on-first-retry',
     /* Capture screenshots on failure */
@@ -52,7 +56,7 @@ export default defineConfig({
     {
       // Dashboard server - uses demo mode for mock data but real WebSocket for console
       command: 'npm run dev',
-      url: 'http://localhost:3000',
+      url: DASHBOARD_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
       env: {
@@ -82,6 +86,8 @@ export default defineConfig({
         OMNIA_FACADE_PORT: '8080',
         OMNIA_HEALTH_PORT: '8081',
         OMNIA_SESSION_TYPE: 'memory',
+        // Allow cross-origin WebSocket from dashboard (localhost:3000 → agent on :8080)
+        OMNIA_ALLOWED_ORIGINS: DASHBOARD_URL,
       },
     },
   ],

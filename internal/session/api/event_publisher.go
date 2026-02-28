@@ -37,13 +37,15 @@ const (
 
 // SessionEvent represents a lightweight event published to Redis Streams.
 type SessionEvent struct {
-	EventType   string `json:"eventType"`
-	SessionID   string `json:"sessionId"`
-	AgentName   string `json:"agentName"`
-	Namespace   string `json:"namespace"`
-	MessageID   string `json:"messageId,omitempty"`
-	MessageRole string `json:"messageRole,omitempty"`
-	Timestamp   string `json:"timestamp"`
+	EventType         string `json:"eventType"`
+	SessionID         string `json:"sessionId"`
+	AgentName         string `json:"agentName"`
+	Namespace         string `json:"namespace"`
+	MessageID         string `json:"messageId,omitempty"`
+	MessageRole       string `json:"messageRole,omitempty"`
+	PromptPackName    string `json:"promptPackName,omitempty"`
+	PromptPackVersion string `json:"promptPackVersion,omitempty"`
+	Timestamp         string `json:"timestamp"`
 }
 
 // EventPublisher publishes session events for downstream consumers.
@@ -54,16 +56,23 @@ type EventPublisher interface {
 
 // RedisEventPublisher publishes events to Redis Streams.
 type RedisEventPublisher struct {
-	client goredis.UniversalClient
-	log    logr.Logger
+	client  goredis.UniversalClient
+	log     logr.Logger
+	metrics *HTTPMetrics
 }
 
 // NewRedisEventPublisher creates a new RedisEventPublisher.
 // The caller retains ownership of the Redis client; Close is a no-op.
-func NewRedisEventPublisher(client goredis.UniversalClient, log logr.Logger) *RedisEventPublisher {
+// An optional HTTPMetrics can be passed to record publish metrics.
+func NewRedisEventPublisher(client goredis.UniversalClient, log logr.Logger, metrics ...*HTTPMetrics) *RedisEventPublisher {
+	var m *HTTPMetrics
+	if len(metrics) > 0 {
+		m = metrics[0]
+	}
 	return &RedisEventPublisher{
-		client: client,
-		log:    log.WithName("event-publisher"),
+		client:  client,
+		log:     log.WithName("event-publisher"),
+		metrics: m,
 	}
 }
 
@@ -79,7 +88,8 @@ func (p *RedisEventPublisher) PublishMessageEvent(ctx context.Context, event Ses
 	pubCtx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
 
-	return p.client.XAdd(pubCtx, &goredis.XAddArgs{
+	start := time.Now()
+	pubErr := p.client.XAdd(pubCtx, &goredis.XAddArgs{
 		Stream: streamKey,
 		MaxLen: streamMaxLen,
 		Approx: true,
@@ -87,6 +97,18 @@ func (p *RedisEventPublisher) PublishMessageEvent(ctx context.Context, event Ses
 			"payload": string(payload),
 		},
 	}).Err()
+
+	if p.metrics != nil {
+		duration := time.Since(start).Seconds()
+		p.metrics.EventPublishDuration.Observe(duration)
+		if pubErr != nil {
+			p.metrics.EventsPublished.WithLabelValues("error").Inc()
+		} else {
+			p.metrics.EventsPublished.WithLabelValues("success").Inc()
+		}
+	}
+
+	return pubErr
 }
 
 // Close is a no-op because the publisher does not own the Redis client.

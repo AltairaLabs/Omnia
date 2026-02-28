@@ -49,7 +49,7 @@ func TestResolve_Success(t *testing.T) {
 		},
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "fast-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "my-openai"},
@@ -87,7 +87,7 @@ func TestResolve_FallsBackToProviderModel(t *testing.T) {
 		},
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "strong-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "my-claude"},
@@ -126,7 +126,7 @@ func TestResolve_ProviderLookupFailure(t *testing.T) {
 		err: fmt.Errorf("connection refused"),
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "test-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "missing-provider"},
@@ -155,7 +155,7 @@ func TestResolve_MissingAPIKey(t *testing.T) {
 		},
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "bad-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "no-key-provider"},
@@ -190,7 +190,7 @@ func TestResolve_MultipleJudges(t *testing.T) {
 		},
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "fast-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "openai-provider"},
@@ -233,7 +233,7 @@ func TestResolve_CrossNamespaceProviderRef(t *testing.T) {
 		},
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name: "cross-ns-judge",
 			ProviderRef: v1alpha1.ProviderRef{
@@ -257,7 +257,7 @@ func TestResolve_CrossNamespaceProviderRef(t *testing.T) {
 func TestResolve_MissingNamespace(t *testing.T) {
 	lookup := &MockProviderLookup{}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "test-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "some-provider"},
@@ -291,7 +291,7 @@ func TestResolve_ExtraConfig(t *testing.T) {
 		},
 	}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{
 			Name:        "azure-judge",
 			ProviderRef: v1alpha1.ProviderRef{Name: "azure-provider"},
@@ -315,7 +315,7 @@ func TestResolve_ExtraConfig(t *testing.T) {
 func TestJudgeNames(t *testing.T) {
 	lookup := &MockProviderLookup{}
 
-	judges := []v1alpha1.JudgeMapping{
+	judges := []v1alpha1.NamedProviderRef{
 		{Name: "alpha", ProviderRef: v1alpha1.ProviderRef{Name: "p1"}},
 		{Name: "beta", ProviderRef: v1alpha1.ProviderRef{Name: "p2"}},
 		{Name: "gamma", ProviderRef: v1alpha1.ProviderRef{Name: "p3"}},
@@ -348,7 +348,7 @@ func TestNewJudgeProvider_NilJudges(t *testing.T) {
 
 func TestNewJudgeProvider_EmptyJudges(t *testing.T) {
 	lookup := &MockProviderLookup{}
-	jp := NewJudgeProvider([]v1alpha1.JudgeMapping{}, lookup, "default")
+	jp := NewJudgeProvider([]v1alpha1.NamedProviderRef{}, lookup, "default")
 
 	names := jp.JudgeNames()
 	if len(names) != 0 {
