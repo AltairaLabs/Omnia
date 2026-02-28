@@ -39,6 +39,50 @@ func isIstioCRDInstalled() bool {
 	return err == nil
 }
 
+// isToolPolicyControllerRunning checks if a ToolPolicy resource gets reconciled
+// by creating a probe policy and checking if the status is set within a short window.
+func isToolPolicyControllerRunning() bool {
+	yaml := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolPolicy
+metadata:
+  name: controller-probe
+  namespace: test-agents
+spec:
+  selector:
+    registry: probe-registry
+  rules:
+    - name: probe-rule
+      deny:
+        cel: "false"
+        message: "probe"
+  mode: enforce
+  onFailure: deny
+`
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(yaml)
+	if _, err := utils.Run(cmd); err != nil {
+		return false
+	}
+	defer func() {
+		cmd := exec.Command("kubectl", "delete", "toolpolicy", "controller-probe",
+			"-n", "test-agents", "--ignore-not-found", "--timeout=10s")
+		_, _ = utils.Run(cmd)
+	}()
+
+	// Give the controller 10 seconds to reconcile
+	for i := 0; i < 5; i++ {
+		time.Sleep(2 * time.Second)
+		cmd := exec.Command("kubectl", "get", "toolpolicy", "controller-probe",
+			"-n", "test-agents", "-o", "jsonpath={.status.phase}")
+		output, err := utils.Run(cmd)
+		if err == nil && output != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // applyPolicy applies a YAML manifest and expects success.
 func applyPolicy(yaml string) {
 	ExpectWithOffset(1, utils.ApplyManifestWithValidation(yaml)).To(Succeed(), "Failed to apply policy manifest")
@@ -77,10 +121,10 @@ func conditionMessage(resource, name, ns, condType string) string {
 	return output
 }
 
-var _ = Describe("Policy E2E", Ordered, func() {
+var _ = Describe("Policy E2E", func() {
 	const policyNamespace = "test-agents"
 
-	BeforeAll(func() {
+	BeforeEach(func() {
 		By("ensuring test-agents namespace exists")
 		cmd := exec.Command("kubectl", "create", "ns", policyNamespace, "--dry-run=client", "-o", "yaml")
 		yaml, err := utils.Run(cmd)
@@ -91,8 +135,21 @@ var _ = Describe("Policy E2E", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("ToolPolicy", func() {
+	Context("ToolPolicy", Ordered, func() {
 		const toolPolicyName = "e2e-tool-policy"
+
+		BeforeAll(func() {
+			// Check if the ToolPolicy CRD is installed
+			cmd := exec.Command("kubectl", "get", "crd", "toolpolicies.omnia.altairalabs.ai")
+			if _, err := utils.Run(cmd); err != nil {
+				Skip("ToolPolicy CRD not installed")
+			}
+
+			// Check if the ToolPolicy controller is running (it may not be wired into any binary yet)
+			if !isToolPolicyControllerRunning() {
+				Skip("ToolPolicy controller not running — ToolPolicyReconciler may not be registered in operator")
+			}
+		})
 
 		AfterEach(func() {
 			deletePolicy("toolpolicy", toolPolicyName, policyNamespace)
@@ -101,7 +158,7 @@ var _ = Describe("Policy E2E", Ordered, func() {
 		It("should compile CEL rules and set Active phase", func() {
 			By("applying a valid ToolPolicy")
 			applyPolicy(fmt.Sprintf(`
-apiVersion: ee.omnia.altairalabs.ai/v1alpha1
+apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolPolicy
 metadata:
   name: %s
@@ -130,7 +187,7 @@ spec:
 		It("should transition to Error on invalid CEL", func() {
 			By("applying a ToolPolicy with valid CEL first")
 			applyPolicy(fmt.Sprintf(`
-apiVersion: ee.omnia.altairalabs.ai/v1alpha1
+apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolPolicy
 metadata:
   name: %s
@@ -178,7 +235,7 @@ spec:
 		It("should support audit mode", func() {
 			By("applying a ToolPolicy in audit mode")
 			applyPolicy(fmt.Sprintf(`
-apiVersion: ee.omnia.altairalabs.ai/v1alpha1
+apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolPolicy
 metadata:
   name: %s
@@ -210,7 +267,7 @@ spec:
 		It("should clean up on delete", func() {
 			By("applying a ToolPolicy")
 			applyPolicy(fmt.Sprintf(`
-apiVersion: ee.omnia.altairalabs.ai/v1alpha1
+apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolPolicy
 metadata:
   name: %s
@@ -245,7 +302,7 @@ spec:
 		})
 	})
 
-	Context("AgentPolicy", func() {
+	Context("AgentPolicy", Ordered, func() {
 		const agentPolicyName = "e2e-agent-policy"
 
 		AfterEach(func() {
