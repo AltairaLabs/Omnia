@@ -41,7 +41,10 @@ func Scheme() *runtime.Scheme {
 // NewClient creates a controller-runtime client with the Omnia CRD scheme registered.
 // Uses in-cluster config (service account token).
 func NewClient() (client.Client, error) {
-	cfg := ctrl.GetConfigOrDie()
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("get k8s config: %w", err)
+	}
 	return NewClientWithConfig(cfg)
 }
 

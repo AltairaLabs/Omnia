@@ -219,6 +219,18 @@ func TestGetProviderSecret_SecretNotFound(t *testing.T) {
 	}
 }
 
+func TestNewClient_NoClusterConfig(t *testing.T) {
+	// Unset KUBECONFIG and HOME to ensure no K8s config is available.
+	t.Setenv("KUBECONFIG", "/nonexistent/path")
+	t.Setenv("HOME", "/nonexistent")
+
+	// Outside a K8s cluster, NewClient should return an error (not panic).
+	_, err := NewClient()
+	if err == nil {
+		t.Fatal("expected error when no K8s config available")
+	}
+}
+
 func TestNewClientWithConfig_Success(t *testing.T) {
 	// Start a minimal HTTPS server to act as a fake API server.
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
