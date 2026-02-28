@@ -32,6 +32,7 @@ jobs:
   multimodal-e2e:
     name: Multimodal Console Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # E2E tests are informational for PRs - they don't block merging
     continue-on-error: ${{ github.event_name == 'pull_request' }}
 

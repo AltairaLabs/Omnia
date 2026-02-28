@@ -67,12 +67,13 @@ export const test = base.extend<{
     // Route format: /agents/[name]?namespace=...&tab=console
     await page.goto('/agents/e2e-test-agent?namespace=default&tab=console');
 
-    // Wait for WebSocket connection to establish
-    await page.waitForSelector(SELECTORS.connectionStatus, { timeout: 10000 });
+    // Wait for WebSocket connection to establish — if this fails, the agent
+    // is likely unreachable (wrong port, origin rejected, binary crashed).
+    await page.waitForSelector(SELECTORS.connectionStatus, { timeout: 8000 });
 
     // Wait for connection to be established (should show "Connected")
     await expect(page.locator(SELECTORS.connectionStatus)).toContainText('Connected', {
-      timeout: 15000,
+      timeout: 10000,
     });
 
     // eslint-disable-next-line react-hooks/rules-of-hooks
