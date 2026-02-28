@@ -113,6 +113,7 @@ rules:
   - sessionanalyticssyncs/status
   - sessionprivacypolicies/status
   - sessionstreamingconfigs/status
+  - toolpolicies/status
   verbs:
   - get
   - patch
@@ -123,6 +124,7 @@ rules:
   - sessionanalyticssyncs
   - sessionprivacypolicies
   - sessionstreamingconfigs
+  - toolpolicies
   verbs:
   - get
   - list
