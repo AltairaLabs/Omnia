@@ -60,6 +60,10 @@ spec:
               audit:
                 description: audit configures audit logging for policy decisions.
                 properties:
+                  enabled:
+                    description: 'enabled controls whether audit logging is active
+                      (default: true).'
+                    type: boolean
                   logDecisions:
                     description: logDecisions enables logging of all policy decisions
                       (allow/deny).

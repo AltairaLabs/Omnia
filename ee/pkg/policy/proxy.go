@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 )
 
 // Proxy response and content type constants.
 const (
 	contentTypeJSON   = "application/json"
 	headerContentType = "Content-Type"
+	policyTypeToolStr = "tool"
 )
 
 // DenialResponse is the JSON response returned when a request is denied.
@@ -36,6 +38,7 @@ type ProxyHandler struct {
 	evaluator *Evaluator
 	upstream  *httputil.ReverseProxy
 	logger    *slog.Logger
+	audit     *AuditLogger
 }
 
 // NewProxyHandler creates a new policy proxy HTTP handler.
@@ -45,6 +48,7 @@ func NewProxyHandler(evaluator *Evaluator, upstreamURL *url.URL, logger *slog.Lo
 		evaluator: evaluator,
 		upstream:  proxy,
 		logger:    logger,
+		audit:     NewAuditLogger(logger),
 	}
 }
 
@@ -53,8 +57,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headers := extractHeaders(r)
 	body := parseBody(r, h.logger)
 
+	start := time.Now()
 	decision := h.evaluator.Evaluate(headers, body)
+	duration := time.Since(start)
 
+	h.recordMetrics(decision, headers, duration)
+	h.emitAuditLog(decision, headers)
 	h.logDecision(r, decision)
 
 	if !decision.Allowed {
@@ -63,6 +71,51 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.upstream.ServeHTTP(w, r)
+}
+
+// recordMetrics records Prometheus metrics for the policy decision.
+func (h *ProxyHandler) recordMetrics(decision Decision, headers map[string]string, duration time.Duration) {
+	PolicyEvaluationDuration.WithLabelValues(policyTypeToolStr).Observe(duration.Seconds())
+
+	decisionLabel := decisionAllow
+	if !decision.Allowed || decision.DeniedBy != "" {
+		decisionLabel = decisionDeny
+	}
+
+	policyName := decision.PolicyName
+	ruleName := decision.DeniedBy
+	PolicyDecisionsTotal.WithLabelValues(policyTypeToolStr, policyName, ruleName, decisionLabel).Inc()
+
+	if decisionLabel == decisionDeny {
+		agent := headers[HeaderAgentName]
+		tool := headers[HeaderToolName]
+		PolicyDenialsTotal.WithLabelValues(policyName, ruleName, agent, tool).Inc()
+	}
+}
+
+// emitAuditLog emits a structured audit log entry for the decision.
+func (h *ProxyHandler) emitAuditLog(decision Decision, headers map[string]string) {
+	decisionStr := decisionAllow
+	if !decision.Allowed || decision.DeniedBy != "" {
+		decisionStr = decisionDeny
+	}
+
+	mode := decision.PolicyMode
+	if mode == "" {
+		mode = "enforce"
+	}
+
+	h.audit.Log(AuditEntry{
+		Decision: decisionStr,
+		Policy:   decision.PolicyName,
+		Rule:     decision.DeniedBy,
+		Agent:    headers[HeaderAgentName],
+		Tool:     headers[HeaderToolName],
+		User:     headers[HeaderUser],
+		Session:  headers[HeaderSessionID],
+		Message:  decision.Message,
+		Mode:     mode,
+	})
 }
 
 // extractHeaders converts HTTP request headers into a flat string map.

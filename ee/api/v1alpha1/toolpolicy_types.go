@@ -92,6 +92,10 @@ type RequiredClaim struct {
 
 // ToolPolicyAuditConfig configures audit logging for the policy.
 type ToolPolicyAuditConfig struct {
+	// enabled controls whether audit logging is active (default: true).
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// logDecisions enables logging of all policy decisions (allow/deny).
 	// +optional
 	LogDecisions bool `json:"logDecisions,omitempty"`

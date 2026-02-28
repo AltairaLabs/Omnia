@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -306,5 +307,235 @@ func TestWriteDenialResponse(t *testing.T) {
 	}
 	if resp.Message != "test denial" {
 		t.Errorf("message = %q, want %q", resp.Message, "test denial")
+	}
+}
+
+func TestProxyHandler_RecordsMetricsOnDeny(t *testing.T) {
+	PolicyDecisionsTotal.Reset()
+	PolicyDenialsTotal.Reset()
+	PolicyEvaluationDuration.Reset()
+
+	eval, upstream, handler := setupProxyTest(t)
+	defer upstream.Close()
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "metrics-test", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+				Tools:    []string{"denied_tool"},
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "deny-rule",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "true",
+						Message: "denied",
+					},
+				},
+			},
+			Mode:      omniav1alpha1.PolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "denied_tool")
+	req.Header.Set(HeaderToolRegistry, "test-registry")
+	req.Header.Set(HeaderAgentName, "agent-x")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+
+	// Verify decisions counter was incremented for deny
+	denyVal := getCounterValue(PolicyDecisionsTotal, "tool", "metrics-test", "deny-rule", "deny")
+	if denyVal < 1 {
+		t.Errorf("decisions deny counter = %f, want >= 1", denyVal)
+	}
+
+	// Verify denials counter was incremented
+	denialsVal := getCounterValue(PolicyDenialsTotal, "metrics-test", "deny-rule", "agent-x", "denied_tool")
+	if denialsVal < 1 {
+		t.Errorf("denials counter = %f, want >= 1", denialsVal)
+	}
+
+	// Verify histogram has at least one observation
+	histCount := getHistogramCount(PolicyEvaluationDuration, "tool")
+	if histCount < 1 {
+		t.Errorf("histogram count = %d, want >= 1", histCount)
+	}
+}
+
+func TestProxyHandler_RecordsMetricsOnAllow(t *testing.T) {
+	PolicyDecisionsTotal.Reset()
+	PolicyEvaluationDuration.Reset()
+
+	eval, upstream, handler := setupProxyTest(t)
+	defer upstream.Close()
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "allow-metrics", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+				Tools:    []string{"ok_tool"},
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "pass-rule",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "false",
+						Message: "never",
+					},
+				},
+			},
+			Mode:      omniav1alpha1.PolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "ok_tool")
+	req.Header.Set(HeaderToolRegistry, "test-registry")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	allowVal := getCounterValue(PolicyDecisionsTotal, "tool", "allow-metrics", "", "allow")
+	if allowVal < 1 {
+		t.Errorf("decisions allow counter = %f, want >= 1", allowVal)
+	}
+}
+
+func TestProxyHandler_EmitsAuditLog(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	handler := NewProxyHandler(eval, upstreamURL, logger)
+
+	policy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "audit-test", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+				Tools:    []string{"my_tool"},
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "block-rule",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "true",
+						Message: "blocked for audit test",
+					},
+				},
+			},
+			Mode:      omniav1alpha1.PolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(policy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/invoke", nil)
+	req.Header.Set(HeaderToolName, "my_tool")
+	req.Header.Set(HeaderToolRegistry, "test-registry")
+	req.Header.Set(HeaderAgentName, "agent-1")
+	req.Header.Set(HeaderUser, "alice")
+	req.Header.Set(HeaderSessionID, "sess-99")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	output := buf.String()
+	if !strings.Contains(output, "policy.audit") {
+		t.Error("audit log not found in output")
+	}
+	if !strings.Contains(output, "audit-test") {
+		t.Error("policy name not found in audit log")
+	}
+	if !strings.Contains(output, "agent-1") {
+		t.Error("agent name not found in audit log")
+	}
+	if !strings.Contains(output, "alice") {
+		t.Error("user not found in audit log")
+	}
+	if !strings.Contains(output, "sess-99") {
+		t.Error("session ID not found in audit log")
+	}
+}
+
+func TestRecordMetrics_DurationObservation(t *testing.T) {
+	PolicyEvaluationDuration.Reset()
+
+	h := &ProxyHandler{logger: testLogger(), audit: NewAuditLogger(testLogger())}
+	decision := Decision{Allowed: true, PolicyName: "test-policy"}
+	headers := map[string]string{}
+
+	h.recordMetrics(decision, headers, 50*time.Millisecond)
+
+	count := getHistogramCount(PolicyEvaluationDuration, "tool")
+	if count < 1 {
+		t.Errorf("histogram count = %d, want >= 1", count)
+	}
+}
+
+func TestEmitAuditLog_DefaultMode(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	h := &ProxyHandler{logger: logger, audit: NewAuditLogger(logger)}
+	decision := Decision{Allowed: true}
+	headers := map[string]string{}
+
+	h.emitAuditLog(decision, headers)
+
+	if !strings.Contains(buf.String(), "enforce") {
+		t.Error("default mode should be 'enforce' when PolicyMode is empty")
+	}
+}
+
+func TestNewProxyHandler(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	upstreamURL, _ := url.Parse("http://localhost:9090")
+	handler := NewProxyHandler(eval, upstreamURL, testLogger())
+
+	if handler.evaluator != eval {
+		t.Error("evaluator not set correctly")
+	}
+	if handler.audit == nil {
+		t.Error("audit logger not initialized")
+	}
+	if handler.upstream == nil {
+		t.Error("upstream proxy not initialized")
 	}
 }

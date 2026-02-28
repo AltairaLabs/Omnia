@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -82,6 +84,8 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
+	policy.RegisterMetrics(prometheus.DefaultRegisterer)
+
 	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, logger)
 	proxyHandler := policy.NewProxyHandler(evaluator, upstreamURL, logger)
 
@@ -94,6 +98,7 @@ func run(logger *slog.Logger) error {
 	healthMux := http.NewServeMux()
 	healthMux.HandleFunc("/healthz", policy.HealthHandler())
 	healthMux.HandleFunc("/readyz", policy.HealthHandler())
+	healthMux.Handle("/metrics", promhttp.Handler())
 	healthSrv := &http.Server{
 		Addr:              healthAddr,
 		Handler:           healthMux,

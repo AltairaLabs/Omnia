@@ -37,6 +37,10 @@ type Decision struct {
 	Message string
 	// Error is set if evaluation encountered an error.
 	Error error
+	// PolicyName is the name of the policy that produced this decision.
+	PolicyName string
+	// PolicyMode is the mode (enforce/audit) of the policy that produced this decision.
+	PolicyMode string
 }
 
 // CompiledRule holds a pre-compiled CEL program for a single policy rule.
@@ -159,21 +163,24 @@ func (e *Evaluator) Evaluate(headers map[string]string, body map[string]interfac
 	e.mu.RUnlock()
 
 	var auditDecision *Decision
+	var lastDecision Decision
 	for _, p := range matching {
-		decision := e.evaluatePolicy(p, headers, body)
-		if !decision.Allowed {
-			return decision
+		lastDecision = e.evaluatePolicy(p, headers, body)
+		if !lastDecision.Allowed {
+			return lastDecision
 		}
 		// Track the first audit-mode denial for reporting
-		if auditDecision == nil && decision.DeniedBy != "" {
-			d := decision
+		if auditDecision == nil && lastDecision.DeniedBy != "" {
+			d := lastDecision
 			auditDecision = &d
 		}
 	}
 	if auditDecision != nil {
 		return *auditDecision
 	}
-	return Decision{Allowed: true}
+	// Preserve policy metadata from the last evaluated policy
+	lastDecision.Allowed = true
+	return lastDecision
 }
 
 // findMatchingPolicies returns policies whose selector matches the request headers.
@@ -226,10 +233,12 @@ func (e *Evaluator) evaluatePolicy(
 		}
 		// Propagate errors even if the rule allowed the request (onFailure=allow)
 		if decision.Error != nil {
+			decision.PolicyName = policy.Name
+			decision.PolicyMode = string(policy.Mode)
 			return decision
 		}
 	}
-	return Decision{Allowed: true}
+	return Decision{Allowed: true, PolicyName: policy.Name, PolicyMode: string(policy.Mode)}
 }
 
 // checkRequiredClaims verifies that all required claims are present in headers.
@@ -311,6 +320,8 @@ func handleEvalError(ruleName string, err error, onFailure omniav1alpha1.OnFailu
 // applyMode adjusts the decision based on the policy mode.
 // In audit mode, denials are converted to allow but the decision info is preserved.
 func applyMode(policy *CompiledPolicy, decision Decision) Decision {
+	decision.PolicyName = policy.Name
+	decision.PolicyMode = string(policy.Mode)
 	if policy.Mode == omniav1alpha1.PolicyModeAudit {
 		decision.Allowed = true
 	}
