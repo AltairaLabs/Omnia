@@ -40,6 +40,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -71,6 +72,7 @@ type Server struct {
 	// Evals
 	evalCollector *evals.MetricCollector
 	evalDefs      []evals.EvalDef
+	evalMetrics   metrics.EvalMetricsRecorder
 
 	// Metrics
 	metrics        *Metrics
@@ -200,6 +202,13 @@ func WithEvalCollector(c *evals.MetricCollector) ServerOption {
 func WithEvalDefs(defs []evals.EvalDef) ServerOption {
 	return func(s *Server) {
 		s.evalDefs = defs
+	}
+}
+
+// WithEvalMetrics sets the eval Prometheus metrics recorder for the server.
+func WithEvalMetrics(m metrics.EvalMetricsRecorder) ServerOption {
+	return func(s *Server) {
+		s.evalMetrics = m
 	}
 }
 

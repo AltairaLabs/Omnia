@@ -28,8 +28,15 @@ import (
 func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversation) {
 	eventBus := conv.EventBus()
 	if eventBus == nil {
+		s.log.V(1).Info("event bus unavailable",
+			"sessionID", sessionID)
 		return
 	}
+
+	s.log.V(1).Info("event bus subscribed",
+		"sessionID", sessionID,
+		"hasMetrics", s.metrics != nil,
+		"hasRuntimeMetrics", s.runtimeMetrics != nil)
 
 	// Subscribe to provider call completed events to record Prometheus metrics
 	eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {

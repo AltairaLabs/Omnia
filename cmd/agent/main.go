@@ -26,9 +26,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
@@ -36,6 +34,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 const (
@@ -47,13 +46,12 @@ const (
 
 func main() {
 	// Initialize logger
-	zapLog, err := zap.NewProduction()
+	log, syncLog, err := logging.NewLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() { _ = zapLog.Sync() }()
-	log := zapr.NewLogger(zapLog)
+	defer syncLog()
 
 	// Load configuration — prefers CRD reading, falls back to env vars
 	cfg, err := agent.LoadConfig(context.Background())
@@ -250,7 +248,7 @@ func initSessionStore(cfg *agent.Config, log logr.Logger) (session.Store, error)
 	}
 }
 
-func closeStore(store session.Store, log interface{ Error(error, string, ...any) }) {
+func closeStore(store session.Store, log logr.Logger) {
 	if closer, ok := store.(interface{ Close() error }); ok {
 		if err := closer.Close(); err != nil {
 			log.Error(err, "error closing session store")
@@ -308,10 +306,7 @@ func redactURL(url string) string {
 
 // createHandler creates the appropriate message handler based on configuration.
 // Returns the handler and an optional cleanup function.
-func createHandler(cfg *agent.Config, log interface {
-	Info(string, ...any)
-	Error(error, string, ...any)
-}) (facade.MessageHandler, func()) {
+func createHandler(cfg *agent.Config, log logr.Logger) (facade.MessageHandler, func()) {
 	switch cfg.HandlerMode {
 	case agent.HandlerModeEcho:
 		log.Info("using echo handler mode")
@@ -336,6 +331,7 @@ func createHandler(cfg *agent.Config, log interface {
 			client, err = facade.NewRuntimeClient(facade.RuntimeClientConfig{
 				Address:     cfg.RuntimeAddress,
 				DialTimeout: 5 * time.Second,
+				Log:         log,
 			})
 			if err == nil {
 				log.Info("connected to runtime", "address", cfg.RuntimeAddress, "attempt", i+1)
@@ -367,10 +363,9 @@ func createHandler(cfg *agent.Config, log interface {
 
 // initMediaStorage creates the appropriate media storage backend based on configuration.
 // Returns the storage and an optional cleanup function.
-func initMediaStorage(cfg *agent.Config, log interface {
-	Info(string, ...any)
-	Error(error, string, ...any)
-}) (media.Storage, func()) {
+//
+//nolint:gocognit // switch over storage backends
+func initMediaStorage(cfg *agent.Config, log logr.Logger) (media.Storage, func()) {
 	ctx := context.Background()
 
 	switch cfg.MediaStorageType {

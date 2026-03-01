@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -36,6 +37,7 @@ type RuntimeClient struct {
 	conn   *grpc.ClientConn
 	client runtimev1.RuntimeServiceClient
 	addr   string
+	log    logr.Logger
 }
 
 // RuntimeClientConfig contains configuration for the runtime client.
@@ -46,6 +48,8 @@ type RuntimeClientConfig struct {
 	DialTimeout time.Duration
 	// MaxMessageSize is the maximum message size in bytes (default 16MB).
 	MaxMessageSize int
+	// Log is an optional logger. If zero-value, a discard logger is used.
+	Log logr.Logger
 }
 
 // NewRuntimeClient creates a new RuntimeClient connected to the runtime sidecar.
@@ -72,10 +76,16 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 		return nil, fmt.Errorf("failed to create runtime client for %s: %w", cfg.Address, err)
 	}
 
+	log := cfg.Log
+	if log.GetSink() == nil {
+		log = logr.Discard()
+	}
+
 	client := &RuntimeClient{
 		conn:   conn,
 		client: runtimev1.NewRuntimeServiceClient(conn),
 		addr:   cfg.Address,
+		log:    log,
 	}
 
 	// Verify connection with a health check
@@ -85,8 +95,7 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 	_, err = client.Health(ctx)
 	if err != nil {
 		if closeErr := conn.Close(); closeErr != nil {
-			// Log close error but return the primary connection error
-			fmt.Printf("Warning: failed to close connection after health check failure: %v\n", closeErr)
+			log.Error(closeErr, "failed to close connection after health check failure")
 		}
 		return nil, fmt.Errorf("failed to connect to runtime at %s: %w", cfg.Address, err)
 	}

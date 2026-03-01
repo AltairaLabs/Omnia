@@ -50,10 +50,11 @@ LANGCHAIN_RUNTIME_PATH = os.getenv('LANGCHAIN_RUNTIME_PATH', '../omnia-langchain
 # Set to True to build runtime with local PromptKit source for debugging
 # Can be set via environment: USE_LOCAL_PROMPTKIT=true PROMPTKIT_PATH=/path/to/PromptKit tilt up
 # This allows rapid iteration on PromptKit changes without publishing releases
-# Auto-enables if promptkit-local/tools exists (arena worker needs promptarena)
-_promptkit_local_exists = os.path.exists('./promptkit-local/tools/arena/cmd/promptarena/main.go')
-USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or _promptkit_local_exists
+# Auto-enables if promptkit-local/ has content (from rsync) or PROMPTKIT_PATH source exists
 PROMPTKIT_PATH = os.getenv('PROMPTKIT_PATH', '../PromptKit')
+_promptkit_local_exists = os.path.exists('./promptkit-local/tools/arena/cmd/promptarena/main.go')
+_promptkit_source_exists = os.path.exists(PROMPTKIT_PATH + '/runtime')
+USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or _promptkit_local_exists or _promptkit_source_exists
 
 # Set to True to enable full production-like stack
 # Includes: Istio service mesh, Tempo (tracing), Loki (logging), Alloy (collector),
@@ -220,6 +221,36 @@ docker_build(
         './go.sum',
     ],
 )
+
+# ============================================================================
+# Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
+# ============================================================================
+# Docker COPY does not follow symlinks, so we rsync the actual PromptKit source
+# into a real directory. This runs automatically when PromptKit source changes.
+
+if USE_LOCAL_PROMPTKIT:
+    local_resource(
+        'sync-promptkit',
+        cmd='rsync -a --delete ' +
+            '--include="runtime/***" ' +
+            '--include="sdk/***" ' +
+            '--include="server/***" ' +
+            '--include="pkg/***" ' +
+            '--include="tools/***" ' +
+            '--include="go.work" ' +
+            '--include="go.work.sum" ' +
+            '--exclude="*" ' +
+            PROMPTKIT_PATH + '/ ./promptkit-local/',
+        deps=[
+            PROMPTKIT_PATH + '/runtime',
+            PROMPTKIT_PATH + '/sdk',
+            PROMPTKIT_PATH + '/server',
+            PROMPTKIT_PATH + '/pkg',
+            PROMPTKIT_PATH + '/tools',
+            PROMPTKIT_PATH + '/go.work',
+        ],
+        labels=['build'],
+    )
 
 # ============================================================================
 # Agent Images - Facade and Runtime containers for AgentRuntime pods
@@ -942,9 +973,14 @@ local_resource(
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+_rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
+if USE_LOCAL_PROMPTKIT:
+    _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
+_rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
+
 local_resource(
     'rebuild-runtime',
-    cmd='docker build -f Dockerfile.runtime -t omnia-runtime-dev:latest .',
+    cmd=_rebuild_runtime_cmd,
     labels=['agents'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,

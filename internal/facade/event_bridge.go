@@ -22,10 +22,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 
 	"github.com/altairalabs/omnia/internal/session"
@@ -64,19 +64,19 @@ type EventBridge struct {
 	sessionClient EventBridgeSessionClient
 	agentName     string
 	namespace     string
-	logger        *slog.Logger
+	log           logr.Logger
 
 	mu      sync.RWMutex
 	enabled bool
 }
 
 // NewEventBridge creates a bridge that forwards EventBus events to session-api.
-func NewEventBridge(sessionClient EventBridgeSessionClient, agentName, namespace string, logger *slog.Logger) *EventBridge {
+func NewEventBridge(sessionClient EventBridgeSessionClient, agentName, namespace string, log logr.Logger) *EventBridge {
 	return &EventBridge{
 		sessionClient: sessionClient,
 		agentName:     agentName,
 		namespace:     namespace,
-		logger:        logger.With("component", "event-bridge"),
+		log:           log.WithName("event-bridge"),
 		enabled:       false,
 	}
 }
@@ -85,6 +85,9 @@ func NewEventBridge(sessionClient EventBridgeSessionClient, agentName, namespace
 func (b *EventBridge) SetEnabled(enabled bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.log.V(1).Info("event bridge state changed",
+		"enabled", enabled,
+		"previous", b.enabled)
 	b.enabled = enabled
 }
 
@@ -99,6 +102,10 @@ func (b *EventBridge) IsEnabled() bool {
 // to the session store. Returns nil immediately if the bridge is disabled.
 func (b *EventBridge) HandleEvent(ctx context.Context, event EventBusEvent) error {
 	if !b.IsEnabled() {
+		b.log.V(1).Info("event bridge skipped",
+			"reason", "disabled",
+			"eventType", event.Type,
+			"sessionID", event.SessionID)
 		return nil
 	}
 
@@ -106,11 +113,15 @@ func (b *EventBridge) HandleEvent(ctx context.Context, event EventBusEvent) erro
 		return fmt.Errorf("event missing session ID")
 	}
 
+	b.log.V(1).Info("event bridge forwarding",
+		"eventType", event.Type,
+		"sessionID", event.SessionID,
+		"dataLength", len(event.Data))
+
 	msg, statsUpdate := b.buildMessageAndStats(event)
 
 	if err := b.sessionClient.AppendMessage(ctx, event.SessionID, msg); err != nil {
-		b.logger.ErrorContext(ctx, "failed to append event message",
-			"error", err,
+		b.log.Error(err, "failed to append event message",
 			"eventType", event.Type,
 			"sessionID", event.SessionID,
 		)
@@ -118,13 +129,17 @@ func (b *EventBridge) HandleEvent(ctx context.Context, event EventBusEvent) erro
 	}
 
 	if err := b.sessionClient.UpdateSessionStats(ctx, event.SessionID, statsUpdate); err != nil {
-		b.logger.ErrorContext(ctx, "failed to update session stats",
-			"error", err,
+		b.log.Error(err, "failed to update session stats",
 			"eventType", event.Type,
 			"sessionID", event.SessionID,
 		)
 		return fmt.Errorf("failed to update session stats: %w", err)
 	}
+
+	b.log.V(1).Info("event bridge forwarded",
+		"eventType", event.Type,
+		"sessionID", event.SessionID,
+		"messageID", msg.ID)
 
 	return nil
 }

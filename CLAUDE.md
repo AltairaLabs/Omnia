@@ -164,6 +164,31 @@ Exceptions configured in `sonar-project.properties` — cognitive complexity is 
 - **Formatting**: `gofmt` and `goimports` are enforced. Run before committing.
 - Runtime and runtime test packages (`internal/runtime/`, `cmd/runtime/`) are excluded from golangci-lint because they depend on the unpublished PromptKit SDK.
 
+## Structured Logging
+
+All Go code uses **structured logging** via `logr.Logger` backed by Zap (`pkg/logging/`). Production emits JSON; development emits human-readable output.
+
+**Rules:**
+- **Message**: Short, stable event name — NOT a prose sentence. Think grep-able identifier. Examples: `"stream starting"`, `"eval options built"`, `"event bridge skipped"`.
+- **Context**: ALL variable data goes in key-value pairs, never interpolated into the message string. Conditions and reasons go in keys like `"reason"`, not in the message.
+- **Levels**: `V(0)` = info (default), `V(1)` = debug (enabled via `LOG_LEVEL=debug`), `V(2)` = trace. Use `V(1)` for diagnostic/pipeline visibility. Use `.Error(err, ...)` for errors.
+- **Keys**: Use camelCase (`"evalDefCount"`, `"sessionID"`, `"hasMetrics"`). Boolean keys use `has` prefix (`"hasEvalCollector"`).
+
+```go
+// GOOD — structured
+log.V(1).Info("eval options built",
+    "evalDefCount", len(defs),
+    "registeredTypes", registry.Types())
+
+log.V(1).Info("event bridge skipped",
+    "reason", "disabled",
+    "eventType", event.Type)
+
+// BAD — prose message with context baked in
+log.V(1).Info("eval options skipped: no eval collector configured")
+log.V(1).Info("forwarding event to session-api successfully")
+```
+
 ## Dashboard Code Standards
 
 - **No nested ternaries** — ESLint `sonarjs/no-nested-conditional` is an error. Extract to variables or if/else.

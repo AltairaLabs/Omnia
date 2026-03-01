@@ -181,15 +181,15 @@ data:
               }
             },
             {
-              "id": "conciseness",
-              "type": "max_length",
+              "id": "contains-mock",
+              "type": "contains",
               "trigger": "every_turn",
-              "description": "Verify responses stay concise",
+              "description": "Verify response contains expected content",
               "params": {
-                "maxLength": 1500
+                "patterns": ["response"]
               },
               "metric": {
-                "name": "response_concise",
+                "name": "response_contains_expected",
                 "type": "boolean"
               }
             }
@@ -229,12 +229,12 @@ data:
       "evals": [
         {
           "id": "no-hallucination-urls",
-          "type": "regex_match",
+          "type": "regex",
           "trigger": "every_turn",
           "description": "Flag responses that fabricate URLs",
           "params": {
-            "pattern": "https?://(?!example\\.com)[a-z0-9.-]+\\.[a-z]{2,}",
-            "should_match": false
+            "pattern": "https?://[a-zA-Z0-9.-]+\\.[a-z]{2,}",
+            "expect_match": false
           },
           "metric": {
             "name": "no_hallucinated_urls",
@@ -334,11 +334,17 @@ spec:
     type: websocket
     port: 8080
     handler: demo
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "1h"
   runtime:
     replicas: 1
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       requests:
         cpu: "50m"
@@ -364,11 +370,17 @@ spec:
     type: websocket
     port: 8080
     handler: runtime
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "1h"
   runtime:
     replicas: 1
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       requests:
         cpu: "100m"
@@ -392,11 +404,17 @@ spec:
     type: websocket
     port: 8080
     handler: echo
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "30m"
   runtime:
     replicas: 1
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       requests:
         cpu: "25m"

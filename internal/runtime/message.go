@@ -46,6 +46,10 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	scenario := s.extractScenario(metadata, content, log)
 	log.V(1).Info("processing message", "contentLength", len(content), "scenario", scenario)
 
+	log.V(1).Info("message eval config",
+		"hasEvalCollector", s.evalCollector != nil,
+		"evalDefCount", len(s.evalDefs))
+
 	// Get or create conversation for this session
 	conv, err := s.getOrCreateConversation(ctx, sessionID)
 	if err != nil {
@@ -98,6 +102,11 @@ func (s *Server) prepareMessageContent(content string, scenario string, log logr
 
 // streamResponse streams the LLM response and sends chunks to the client.
 func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, content string, opts []sdk.SendOption) (*sdk.Response, string, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+	log.V(1).Info("stream starting",
+		"hasEvalCollector", s.evalCollector != nil,
+		"contentLength", len(content))
+
 	streamCh := conv.Stream(ctx, content, opts...)
 	var finalResponse *sdk.Response
 	var accumulatedContent strings.Builder
@@ -123,6 +132,10 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 			finalResponse = chunk.Message
 		}
 	}
+
+	log.V(1).Info("stream complete",
+		"hasResponse", finalResponse != nil,
+		"responseLength", accumulatedContent.Len())
 
 	return finalResponse, accumulatedContent.String(), nil
 }

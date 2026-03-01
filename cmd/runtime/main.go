@@ -26,43 +26,33 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
+	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register default eval type handlers
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/logging"
+	pkmetrics "github.com/altairalabs/omnia/pkg/metrics"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
 func main() {
-	// Create logger with configurable log level
-	var zapLog *zap.Logger
-	var err error
-
-	logLevel := os.Getenv("LOG_LEVEL")
-	if logLevel == "debug" || logLevel == "trace" {
-		cfg := zap.NewDevelopmentConfig()
-		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-		zapLog, err = cfg.Build()
-	} else {
-		zapLog, err = zap.NewProduction()
-	}
+	// Initialize logger (respects LOG_LEVEL env var)
+	log, syncLog, err := logging.NewLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() { _ = zapLog.Sync() }()
-	log := zapr.NewLogger(zapLog)
+	defer syncLog()
 
 	// Load configuration — prefer CRD reading, fall back to env vars
 	cfg, err := pkruntime.LoadConfigWithContext(context.Background())
@@ -90,13 +80,24 @@ func main() {
 	var evalCollector *evals.MetricCollector
 	var evalDefs []evals.EvalDef
 	if cfg.EvalEnabled {
-		defs, err := pkruntime.LoadPackEvalDefs(cfg.PromptPackPath)
+		// Load ALL eval definitions (pack-level + prompt-level) so that
+		// per-turn evals defined inside prompts are also executed.
+		defs, err := pkruntime.LoadAllEvalDefs(cfg.PromptPackPath)
 		if err != nil {
 			log.Error(err, "failed to load eval definitions from pack, continuing without evals")
 		} else {
 			evalDefs = defs
 			evalCollector = evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
 			log.Info("evals enabled", "evalCount", len(evalDefs))
+		}
+
+		// Validate all eval types have registered handlers.
+		// This surfaces misconfigured eval types at startup rather than silently
+		// failing when conversations run.
+		if missing := pkruntime.ValidateEvalDefs(evalDefs); len(missing) > 0 {
+			log.Error(fmt.Errorf("unregistered eval types: %v", missing),
+				"some eval types in the pack have no registered handler and will fail at runtime",
+				"missingTypes", missing, "evalCount", len(evalDefs))
 		}
 	}
 
@@ -202,9 +203,14 @@ func main() {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
 	}
 	if evalCollector != nil {
+		evalM := pkmetrics.NewEvalMetrics(pkmetrics.EvalMetricsConfig{
+			AgentName: cfg.AgentName,
+			Namespace: cfg.Namespace,
+		})
 		serverOpts = append(serverOpts,
 			pkruntime.WithEvalCollector(evalCollector),
 			pkruntime.WithEvalDefs(evalDefs),
+			pkruntime.WithEvalMetrics(evalM),
 		)
 	}
 	runtimeServer := pkruntime.NewServer(serverOpts...)
@@ -265,9 +271,9 @@ func main() {
 	})
 	if evalCollector != nil {
 		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-			// Write standard Prometheus metrics first
+			// Write standard Prometheus metrics (includes EvalMetrics registered via promauto)
 			promhttp.Handler().ServeHTTP(w, r)
-			// Append eval metrics
+			// Append SDK-internal eval metrics for backward compatibility
 			_ = evalCollector.WritePrometheus(w)
 		})
 	} else {
