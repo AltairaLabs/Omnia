@@ -375,6 +375,7 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.V(1).Info("session created", "sessionID", sess.ID, "agent", req.AgentName, "namespace", req.Namespace)
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(SessionResponse{Session: sess})
@@ -407,6 +408,7 @@ func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.V(1).Info("message appended", "sessionID", sessionID, "role", msg.Role)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -437,6 +439,7 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.V(1).Info("session stats updated", "sessionID", sessionID)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -468,6 +471,7 @@ func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.V(1).Info("session TTL refreshed", "sessionID", sessionID, "ttlSeconds", req.TTLSeconds)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -488,6 +492,7 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.V(1).Info("session deleted", "sessionID", sessionID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
