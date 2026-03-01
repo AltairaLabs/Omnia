@@ -16,4 +16,16 @@ data:
 {{ tpl (.Files.Get "dashboards/omnia-agent-detail.json.tpl") . | indent 4 }}
   omnia-platform-services.json: |
 {{ .Files.Get "dashboards/omnia-platform-services.json" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnia.fullname" . }}-grafana-quality
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  omnia-quality.json: |
+{{ .Files.Get "dashboards/omnia-quality.json" | indent 4 }}
 {{- end }}

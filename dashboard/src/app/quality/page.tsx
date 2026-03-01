@@ -9,12 +9,19 @@
 
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -35,26 +42,40 @@ import {
   XCircle,
   Activity,
 } from "lucide-react";
-import { useEvalSummary, useRecentEvalFailures, useEvalMetrics, type EvalTrendRange } from "@/hooks";
+import { useEvalSummary, useRecentEvalFailures, useEvalFilter, type EvalTrendRange, useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
+import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
 import type { EvalResultSummary } from "@/types/eval";
 import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-breakdown";
 import { FailingSessionsTable } from "@/components/quality/failing-sessions-table";
 import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
-import { AlertConfigPanel, buildAlertThresholdMap, loadAlerts, type EvalAlert } from "@/components/quality/alert-config-panel";
 
 const PASS_THRESHOLD = 90;
 const FAIL_THRESHOLD = 70;
 
+const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
+  { label: "Last 1h", value: "1h" },
+  { label: "Last 6h", value: "6h" },
+  { label: "Last 24h", value: "24h" },
+  { label: "Last 7d", value: "7d" },
+  { label: "Last 30d", value: "30d" },
+];
+
+/** Check whether a summary represents a gauge/boolean (score-based) metric. */
+function isScoreMetric(s: EvalResultSummary): boolean {
+  return !s.metricType || s.metricType === "gauge" || s.metricType === "boolean";
+}
+
 /** Compute aggregate stats from Prometheus gauge summaries. */
 function computeAggregateStats(summaries: EvalResultSummary[]) {
+  const scoreMetrics = summaries.filter(isScoreMetric);
   const activeEvals = summaries.length;
   const overallPassRate =
-    activeEvals > 0
-      ? summaries.reduce((sum, s) => sum + s.passRate, 0) / activeEvals
+    scoreMetrics.length > 0
+      ? scoreMetrics.reduce((sum, s) => sum + s.passRate, 0) / scoreMetrics.length
       : 0;
-  const passing = summaries.filter((s) => s.passRate >= PASS_THRESHOLD).length;
-  const failing = summaries.filter((s) => s.passRate < FAIL_THRESHOLD).length;
+  const passing = scoreMetrics.filter((s) => s.passRate >= PASS_THRESHOLD).length;
+  const failing = scoreMetrics.filter((s) => s.passRate < FAIL_THRESHOLD).length;
   return { activeEvals, overallPassRate, passing, failing };
 }
 
@@ -177,7 +198,7 @@ function EvalPassRateTable({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Pass Rate by Eval</CardTitle>
+        <CardTitle className="text-base">Eval Metrics</CardTitle>
       </CardHeader>
       <Table>
         <TableHeader>
@@ -210,17 +231,35 @@ function EvalPassRateTable({
               <TableCell>
                 <Badge variant="outline">{summary.evalType}</Badge>
               </TableCell>
-              <TableCell>
-                <Badge variant={getPassRateVariant(summary.passRate)}>
-                  {summary.passRate.toFixed(1)}%
-                </Badge>
-              </TableCell>
-              <TableCell className="w-[160px]">
-                <Progress value={summary.passRate} className="h-2" />
-              </TableCell>
-              <TableCell className="text-right">
-                {summary.avgScore === undefined ? "-" : summary.avgScore.toFixed(2)}
-              </TableCell>
+              {isScoreMetric(summary) ? (
+                <>
+                  <TableCell>
+                    <Badge variant={getPassRateVariant(summary.passRate)}>
+                      {summary.passRate.toFixed(1)}%
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="w-[160px]">
+                    <Progress value={summary.passRate} className="h-2" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {summary.avgScore === undefined ? "-" : summary.avgScore.toFixed(2)}
+                  </TableCell>
+                </>
+              ) : (
+                <>
+                  <TableCell>
+                    <span className="text-muted-foreground font-mono">
+                      {summary.metricType === "counter" ? summary.total.toLocaleString() : (summary.avgScore?.toFixed(3) ?? "-")}
+                    </span>
+                  </TableCell>
+                  <TableCell className="w-[160px]">
+                    <span className="text-xs text-muted-foreground">
+                      {summary.metricType === "counter" ? "count" : "duration"}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right">-</TableCell>
+                </>
+              )}
             </TableRow>
           ))}
         </TableBody>
@@ -314,21 +353,92 @@ function RecentFailures({
   );
 }
 
+/** Filter bar with time range, agent, and promptpack selectors. */
+function FilterBar({
+  timeRange,
+  onTimeRangeChange,
+  agents,
+  promptpacks,
+  selectedAgent,
+  selectedPromptPack,
+  onAgentChange,
+  onPromptPackChange,
+}: Readonly<{
+  timeRange: EvalTrendRange;
+  onTimeRangeChange: (range: EvalTrendRange) => void;
+  agents: string[];
+  promptpacks: string[];
+  selectedAgent: string | undefined;
+  selectedPromptPack: string | undefined;
+  onAgentChange: (agent: string | undefined) => void;
+  onPromptPackChange: (pp: string | undefined) => void;
+}>) {
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <Select value={timeRange} onValueChange={(v) => onTimeRangeChange(v as EvalTrendRange)}>
+        <SelectTrigger className="w-[130px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {TIME_RANGE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {agents.length > 0 && (
+        <Select
+          value={selectedAgent ?? "__all__"}
+          onValueChange={(v) => onAgentChange(v === "__all__" ? undefined : v)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All agents" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All agents</SelectItem>
+            {agents.map((a) => (
+              <SelectItem key={a} value={a}>{a}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {promptpacks.length > 0 && (
+        <Select
+          value={selectedPromptPack ?? "__all__"}
+          onValueChange={(v) => onPromptPackChange(v === "__all__" ? undefined : v)}
+        >
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="All prompt packs" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All prompt packs</SelectItem>
+            {promptpacks.map((p) => (
+              <SelectItem key={p} value={p}>{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
 export default function QualityPage() {
   const [activeMetric, setActiveMetric] = useState<string | undefined>();
   const [trendTimeRange, setTrendTimeRange] = useState<EvalTrendRange>("24h");
-  const [alerts, setAlerts] = useState<EvalAlert[]>(() => loadAlerts());
 
-  const summaryQuery = useEvalSummary();
+  const grafanaConfig = useGrafana();
+  const grafanaUrl = buildDashboardUrl(grafanaConfig, GRAFANA_DASHBOARDS.QUALITY);
+
+  const evalFilter = useEvalFilter();
+  const { filter } = evalFilter;
+
+  const summaryQuery = useEvalSummary(filter);
   const failuresQuery = useRecentEvalFailures();
-  const metricsQuery = useEvalMetrics();
 
   const summaries = summaryQuery.data || [];
-  const alertThresholds = useMemo(() => buildAlertThresholdMap(alerts), [alerts]);
-
-  const handleAlertsChange = useCallback((updated: EvalAlert[]) => {
-    setAlerts(updated);
-  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -338,6 +448,28 @@ export default function QualityPage() {
       />
 
       <div className="flex-1 p-6 space-y-6">
+        {/* Top-level filter bar */}
+        <div className="flex items-center justify-between gap-4">
+          <FilterBar
+            timeRange={trendTimeRange}
+            onTimeRangeChange={setTrendTimeRange}
+            agents={evalFilter.agents}
+            promptpacks={evalFilter.promptpacks}
+            selectedAgent={evalFilter.selectedAgent}
+            selectedPromptPack={evalFilter.selectedPromptPack}
+            onAgentChange={evalFilter.setAgent}
+            onPromptPackChange={evalFilter.setPromptPack}
+          />
+          {grafanaUrl && (
+            <Button variant="ghost" size="sm" asChild>
+              <a href={grafanaUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                View in Grafana
+              </a>
+            </Button>
+          )}
+        </div>
+
         {/* Error state */}
         {summaryQuery.error && (
           <Alert variant="destructive">
@@ -370,7 +502,7 @@ export default function QualityPage() {
               <AssertionTypeBreakdown
                 activeMetric={activeMetric}
                 onSelectMetric={setActiveMetric}
-                alertThresholds={alertThresholds}
+                filter={filter}
               />
               <FailingSessionsTable
                 evalType={activeMetric}
@@ -378,11 +510,7 @@ export default function QualityPage() {
             </div>
             <PassRateTrendChart
               timeRange={trendTimeRange}
-              onTimeRangeChange={setTrendTimeRange}
-            />
-            <AlertConfigPanel
-              availableMetrics={metricsQuery.data}
-              onAlertsChange={handleAlertsChange}
+              filter={filter}
             />
           </TabsContent>
         </Tabs>

@@ -28,6 +28,7 @@ export {
   OVERVIEW_PANELS,
   AGENT_DETAIL_PANELS,
   COSTS_PANELS,
+  QUALITY_PANELS,
 } from "./use-grafana";
 export { useSystemMetrics } from "./use-system-metrics";
 export { useAgentActivity } from "./use-agent-activity";
@@ -88,5 +89,7 @@ export { useEvalSummary, useRecentEvalFailures } from "./use-eval-quality";
 export type { EvalListParams } from "./use-eval-quality";
 export { useEvalPassRateTrends, useEvalMetrics, EVAL_TREND_RANGES } from "./use-eval-trends";
 export type { EvalTrendPoint, EvalMetricInfo, EvalTrendRange } from "./use-eval-trends";
+export { useEvalFilter } from "./use-eval-filter";
+export type { UseEvalFilterResult } from "./use-eval-filter";
 export { useDebounce } from "./use-debounce";
 export { usePromptPackMutations } from "./use-promptpack-mutations";

@@ -13,12 +13,17 @@ import React from "react";
 // Mock hooks
 const mockUseEvalSummary = vi.fn();
 const mockUseRecentEvalFailures = vi.fn();
-const mockUseEvalMetrics = vi.fn();
+const mockUseEvalFilter = vi.fn();
+const mockUseGrafana = vi.fn();
+const mockBuildDashboardUrl = vi.fn();
 
 vi.mock("@/hooks", () => ({
   useEvalSummary: (...args: unknown[]) => mockUseEvalSummary(...args),
   useRecentEvalFailures: (...args: unknown[]) => mockUseRecentEvalFailures(...args),
-  useEvalMetrics: () => mockUseEvalMetrics(),
+  useEvalFilter: () => mockUseEvalFilter(),
+  useGrafana: () => mockUseGrafana(),
+  buildDashboardUrl: (...args: unknown[]) => mockBuildDashboardUrl(...args),
+  GRAFANA_DASHBOARDS: { QUALITY: "omnia-quality" },
 }));
 
 vi.mock("@/components/layout", () => ({
@@ -52,13 +57,18 @@ vi.mock("@/components/quality/pass-rate-trend-chart", () => ({
   PassRateTrendChart: () => React.createElement("div", { "data-testid": "trend-chart" }, "PassRateTrendChart"),
 }));
 
-vi.mock("@/components/quality/alert-config-panel", () => ({
-  AlertConfigPanel: () => React.createElement("div", { "data-testid": "alert-config" }, "AlertConfigPanel"),
-  buildAlertThresholdMap: () => new Map(),
-  loadAlerts: () => [],
-}));
-
 import QualityPage from "./page";
+
+const defaultEvalFilter = {
+  agents: [],
+  promptpacks: [],
+  selectedAgent: undefined,
+  selectedPromptPack: undefined,
+  setAgent: vi.fn(),
+  setPromptPack: vi.fn(),
+  filter: {},
+  isLoading: false,
+};
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -79,6 +89,7 @@ const mockSummaries = [
     failed: 15,
     passRate: 85.0,
     avgScore: 0.85,
+    metricType: "gauge" as const,
   },
   {
     evalId: "safety",
@@ -87,6 +98,7 @@ const mockSummaries = [
     passed: 48,
     failed: 2,
     passRate: 96.0,
+    metricType: "gauge" as const,
   },
 ];
 
@@ -108,7 +120,9 @@ const mockFailures = {
 
 describe("QualityPage", () => {
   beforeEach(() => {
-    mockUseEvalMetrics.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockUseEvalFilter.mockReturnValue(defaultEvalFilter);
+    mockUseGrafana.mockReturnValue({ enabled: false, baseUrl: null, remotePath: "/grafana/", orgId: 1 });
+    mockBuildDashboardUrl.mockReturnValue(null);
   });
 
   it("renders header with title", () => {
@@ -149,14 +163,14 @@ describe("QualityPage", () => {
     expect(screen.getByText("Failing")).toBeInTheDocument();
   });
 
-  it("renders eval pass rate table", () => {
+  it("renders eval metrics table", () => {
     mockUseEvalSummary.mockReturnValue({ data: mockSummaries, isLoading: false, error: null });
     mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    expect(screen.getByText("Pass Rate by Eval")).toBeInTheDocument();
+    expect(screen.getByText("Eval Metrics")).toBeInTheDocument();
     expect(screen.getByText("safety")).toBeInTheDocument();
     expect(screen.getByText("85.0%")).toBeInTheDocument();
     expect(screen.getByText("96.0%")).toBeInTheDocument();
@@ -192,6 +206,54 @@ describe("QualityPage", () => {
     expect(screen.getByText("No recent failures")).toBeInTheDocument();
   });
 
+  it("excludes counter metrics from overall pass rate", () => {
+    const mixedSummaries = [
+      ...mockSummaries,
+      {
+        evalId: "executed_total",
+        evalType: "counter",
+        total: 47,
+        passed: 0,
+        failed: 0,
+        passRate: 0,
+        metricType: "counter" as const,
+      },
+    ];
+    mockUseEvalSummary.mockReturnValue({ data: mixedSummaries, isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    // Overall pass rate should only average gauge metrics: (85.0 + 96.0) / 2 = 90.5%
+    // NOT (85.0 + 96.0 + 0) / 3 = 60.3%
+    expect(screen.getByText("90.5%")).toBeInTheDocument();
+    // Active Evals count includes all 3
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("renders counter metrics with raw count instead of pass rate", () => {
+    const counterSummaries = [
+      {
+        evalId: "executed_total",
+        evalType: "counter",
+        total: 47,
+        passed: 0,
+        failed: 0,
+        passRate: 0,
+        metricType: "counter" as const,
+      },
+    ];
+    mockUseEvalSummary.mockReturnValue({ data: counterSummaries, isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: { evalResults: [], total: 0 }, isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    expect(screen.getByText("47")).toBeInTheDocument();
+    expect(screen.getByText("count")).toBeInTheDocument();
+  });
+
   it("shows error alert when summary fetch fails", () => {
     mockUseEvalSummary.mockReturnValue({
       data: undefined,
@@ -205,5 +267,56 @@ describe("QualityPage", () => {
 
     expect(screen.getByText("Error loading quality data")).toBeInTheDocument();
     expect(screen.getByText("Failed to fetch")).toBeInTheDocument();
+  });
+
+  it("renders time range selector", () => {
+    mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    // Default time range is 24h
+    expect(screen.getByText("Last 24h")).toBeInTheDocument();
+  });
+
+  it("renders View in Grafana link when Grafana is enabled", () => {
+    mockBuildDashboardUrl.mockReturnValue("https://grafana.local/grafana/d/omnia-quality/_?orgId=1");
+    mockUseGrafana.mockReturnValue({ enabled: true, baseUrl: "https://grafana.local", remotePath: "/grafana/", orgId: 1 });
+    mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    const link = screen.getByText("View in Grafana");
+    expect(link).toBeInTheDocument();
+    expect(link.closest("a")).toHaveAttribute("href", "https://grafana.local/grafana/d/omnia-quality/_?orgId=1");
+    expect(link.closest("a")).toHaveAttribute("target", "_blank");
+  });
+
+  it("does not render View in Grafana link when Grafana is disabled", () => {
+    mockBuildDashboardUrl.mockReturnValue(null);
+    mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    expect(screen.queryByText("View in Grafana")).not.toBeInTheDocument();
+  });
+
+  it("renders agent filter when agents available", () => {
+    mockUseEvalFilter.mockReturnValue({
+      ...defaultEvalFilter,
+      agents: ["chatbot", "support"],
+    });
+    mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    expect(screen.getByText("All agents")).toBeInTheDocument();
   });
 });
