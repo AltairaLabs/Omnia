@@ -105,6 +105,7 @@ export interface LogEntry {
   level: string;
   message: string;
   container?: string;
+  fields?: Record<string, unknown>;
 }
 
 // Stats response

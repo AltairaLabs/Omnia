@@ -40,19 +40,25 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 	pkmetrics "github.com/altairalabs/omnia/pkg/metrics"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
+	"github.com/go-logr/zapr"
 )
 
 func main() {
-	// Initialize logger (respects LOG_LEVEL env var)
-	log, syncLog, err := logging.NewLogger()
+	// Initialize logger (respects LOG_LEVEL env var).
+	// Create the Zap logger directly so we can derive both logr (for Omnia)
+	// and slog (for PromptKit SDK) from the same Zap core without a lossy bridge.
+	zapLog, err := logging.NewZapLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer syncLog()
+	defer func() { _ = zapLog.Sync() }()
+	log := zapr.NewLogger(zapLog)
+	sdkLogger := logging.SlogFromZap(zapLog)
 
 	// Load configuration — prefer CRD reading, fall back to env vars
 	cfg, err := pkruntime.LoadConfigWithContext(context.Background())
@@ -87,7 +93,14 @@ func main() {
 			log.Error(err, "failed to load eval definitions from pack, continuing without evals")
 		} else {
 			evalDefs = defs
-			evalCollector = evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+			evalCollector = evals.NewMetricCollector(
+				evals.WithNamespace("omnia_eval"),
+				evals.WithLabels(map[string]string{
+					"agent":           cfg.AgentName,
+					"namespace":       cfg.Namespace,
+					"promptpack_name": cfg.PromptPackName,
+				}),
+			)
 			log.Info("evals enabled", "evalCount", len(evalDefs))
 		}
 
@@ -98,6 +111,22 @@ func main() {
 			log.Error(fmt.Errorf("unregistered eval types: %v", missing),
 				"some eval types in the pack have no registered handler and will fail at runtime",
 				"missingTypes", missing, "evalCount", len(evalDefs))
+		}
+	}
+
+	// Validate pack content and report to AgentRuntime status.
+	// This runs regardless of whether evals are enabled — it validates
+	// the pack file itself and any eval definitions found.
+	packValidationWarnings := validatePackContent(cfg.PromptPackPath, evalDefs, log)
+	if cfg.AgentName != "" && cfg.Namespace != "" {
+		patchCtx, patchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer patchCancel()
+		k8sClient, k8sErr := k8s.NewClient()
+		if k8sErr != nil {
+			log.Error(k8sErr, "failed to create k8s client for pack validation reporting")
+		} else if patchErr := reportPackValidation(patchCtx, k8sClient,
+			cfg.AgentName, cfg.Namespace, packValidationWarnings); patchErr != nil {
+			log.Error(patchErr, "failed to patch PackContentValid condition")
 		}
 	}
 
@@ -185,6 +214,7 @@ func main() {
 	// Create runtime server
 	serverOpts := []pkruntime.ServerOption{
 		pkruntime.WithLogger(log),
+		pkruntime.WithSlogLogger(sdkLogger),
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
 		pkruntime.WithStateStore(store),
@@ -270,9 +300,16 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if evalCollector != nil {
+		// Disable compression so we can safely append SDK eval metrics after
+		// the standard Prometheus output. promhttp.Handler() negotiates gzip
+		// with the client; appending raw bytes after a gzip stream corrupts
+		// the response ("gzip: invalid header").
+		uncompressedHandler := promhttp.HandlerFor(
+			prometheus.DefaultGatherer,
+			promhttp.HandlerOpts{DisableCompression: true},
+		)
 		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-			// Write standard Prometheus metrics (includes EvalMetrics registered via promauto)
-			promhttp.Handler().ServeHTTP(w, r)
+			uncompressedHandler.ServeHTTP(w, r)
 			// Append SDK-internal eval metrics for backward compatibility
 			_ = evalCollector.WritePrometheus(w)
 		})

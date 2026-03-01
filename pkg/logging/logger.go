@@ -20,11 +20,13 @@ limitations under the License.
 package logging
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
+	"go.uber.org/zap/exp/zapslog"
 )
 
 // NewLogger creates a logr.Logger backed by Zap.
@@ -39,6 +41,32 @@ func NewLogger() (logr.Logger, func(), error) {
 	}
 	sync := func() { _ = zapLog.Sync() }
 	return zapr.NewLogger(zapLog), sync, nil
+}
+
+// NewZapLogger creates a *zap.Logger configured via the LOG_LEVEL env var.
+// Use this when you need both a logr.Logger (via zapr.NewLogger) and an
+// *slog.Logger (via SlogFromZap) backed by the same Zap core.
+func NewZapLogger() (*zap.Logger, error) {
+	return newZapLogger(os.Getenv("LOG_LEVEL"))
+}
+
+// SlogFromZap creates an *slog.Logger that writes directly to the Zap core.
+// This produces output identical to other Zap-backed loggers (logr via zapr,
+// native Zap) — same JSON structure, level names, and timestamps.
+//
+// Prefer this over SlogFromLogr, which introduces a lossy double-bridge
+// (slog → logr → zapr → Zap) that can mismap levels and drop timestamps.
+func SlogFromZap(z *zap.Logger) *slog.Logger {
+	return slog.New(zapslog.NewHandler(z.Core(), zapslog.WithCaller(true)))
+}
+
+// SlogFromLogr converts a logr.Logger into an *slog.Logger.
+//
+// Deprecated: This uses a lossy bridge (slog → logr.ToSlogHandler → zapr → Zap)
+// that can mismap warn levels and drop slog record timestamps.
+// Use SlogFromZap with NewZapLogger instead.
+func SlogFromLogr(l logr.Logger) *slog.Logger {
+	return slog.New(logr.ToSlogHandler(l))
 }
 
 func newZapLogger(level string) (*zap.Logger, error) {

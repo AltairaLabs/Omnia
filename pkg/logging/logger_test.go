@@ -19,10 +19,13 @@ limitations under the License.
 package logging
 
 import (
+	"log/slog"
 	"testing"
 
+	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestNewZapLogger_Production(t *testing.T) {
@@ -84,6 +87,109 @@ func TestNewLogger_UsesEnvVar(t *testing.T) {
 
 	if !log.GetSink().Enabled(int(zapcore.DebugLevel)) {
 		t.Error("logger should be debug-enabled when LOG_LEVEL=debug")
+	}
+}
+
+func TestSlogFromLogr(t *testing.T) {
+	// Create an observable Zap core so we can verify the log reaches the Zap backend.
+	core, logs := observer.New(zapcore.InfoLevel)
+	zapLogger := zap.New(core)
+	logrLogger := zapr.NewLogger(zapLogger)
+
+	sl := SlogFromLogr(logrLogger)
+
+	if sl == nil {
+		t.Fatal("expected non-nil *slog.Logger")
+	}
+
+	// Log through slog and verify it arrives in the Zap observer.
+	sl.Info("bridge test", slog.String("key", "value"))
+
+	if logs.Len() != 1 {
+		t.Fatalf("expected 1 log entry, got %d", logs.Len())
+	}
+
+	entry := logs.All()[0]
+	if entry.Message != "bridge test" {
+		t.Errorf("expected message %q, got %q", "bridge test", entry.Message)
+	}
+
+	// Verify structured key-value pair survived the bridge.
+	found := false
+	for _, f := range entry.ContextMap() {
+		if f == "value" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected key=value in context, got %v", entry.ContextMap())
+	}
+}
+
+func TestNewZapLogger_UsesEnvVar(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "debug")
+
+	zapLog, err := NewZapLogger()
+	if err != nil {
+		t.Fatalf("NewZapLogger returned error: %v", err)
+	}
+
+	if !zapLog.Core().Enabled(zap.DebugLevel) {
+		t.Error("logger should be debug-enabled when LOG_LEVEL=debug")
+	}
+}
+
+func TestSlogFromZap(t *testing.T) {
+	// Create an observable Zap core so we can verify the log reaches the Zap backend.
+	core, logs := observer.New(zapcore.InfoLevel)
+	zapLogger := zap.New(core)
+
+	sl := SlogFromZap(zapLogger)
+
+	if sl == nil {
+		t.Fatal("expected non-nil *slog.Logger")
+	}
+
+	// Log through slog and verify it arrives in the Zap observer.
+	sl.Info("direct bridge test", slog.String("key", "value"))
+
+	if logs.Len() != 1 {
+		t.Fatalf("expected 1 log entry, got %d", logs.Len())
+	}
+
+	entry := logs.All()[0]
+	if entry.Message != "direct bridge test" {
+		t.Errorf("expected message %q, got %q", "direct bridge test", entry.Message)
+	}
+
+	// Verify structured key-value pair survived the bridge.
+	found := false
+	for _, f := range entry.ContextMap() {
+		if f == "value" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected key=value in context, got %v", entry.ContextMap())
+	}
+}
+
+func TestSlogFromZap_WarnLevel(t *testing.T) {
+	// Verify that slog.Warn maps to Zap WarnLevel (not info, which was the bug
+	// with the old logr.ToSlogHandler bridge).
+	core, logs := observer.New(zapcore.DebugLevel)
+	zapLogger := zap.New(core)
+
+	sl := SlogFromZap(zapLogger)
+	sl.Warn("warning test")
+
+	if logs.Len() != 1 {
+		t.Fatalf("expected 1 log entry, got %d", logs.Len())
+	}
+
+	entry := logs.All()[0]
+	if entry.Level != zapcore.WarnLevel {
+		t.Errorf("expected WarnLevel, got %v", entry.Level)
 	}
 }
 

@@ -13,6 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   useLogs,
@@ -29,6 +34,14 @@ export interface LogEntry {
   level: "info" | "warn" | "error" | "debug";
   message: string;
   container?: string;
+  fields?: Record<string, unknown>;
+}
+
+/** Format a field value for display in the detail popover */
+function formatFieldValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }
 
 interface BaseLogViewerProps {
@@ -140,6 +153,25 @@ function LogContent({
             </span>
           )}
           <span className="break-all">{log.message}</span>
+          {log.fields && Object.keys(log.fields).length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="shrink-0 text-muted-foreground hover:text-foreground text-xs px-1 rounded hover:bg-muted">
+                  [&hellip;]
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-80 max-h-64 overflow-auto p-3">
+                <div className="space-y-1 font-mono text-xs">
+                  {Object.entries(log.fields).map(([key, value]) => (
+                    <div key={key} className="flex gap-2">
+                      <span className="text-muted-foreground shrink-0">{key}:</span>
+                      <span className="break-all">{formatFieldValue(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
       ))}
     </>
@@ -196,6 +228,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       level: (log.level || "info") as LogEntry["level"],
       message: log.message || "",
       container: log.container,
+      fields: log.fields,
     }));
   }, [apiLogs]);
 
@@ -248,7 +281,10 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       .map(
         (log) => {
           const containerPart = log.container ? ` [${log.container}]` : "";
-          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart} ${log.message}`;
+          const fieldsPart = log.fields && Object.keys(log.fields).length > 0
+            ? ` ${JSON.stringify(log.fields)}`
+            : "";
+          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart} ${log.message}${fieldsPart}`;
         }
       )
       .join("\n");
