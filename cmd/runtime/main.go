@@ -34,9 +34,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/stats"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register default eval type handlers
+	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -59,6 +61,7 @@ func main() {
 	defer func() { _ = zapLog.Sync() }()
 	log := zapr.NewLogger(zapLog)
 	sdkLogger := logging.SlogFromZap(zapLog)
+	logger.SetLogger(sdkLogger) // Set immediately so all PromptKit logging uses the Zap backend
 
 	// Load configuration — prefer CRD reading, fall back to env vars
 	cfg, err := pkruntime.LoadConfigWithContext(context.Background())
@@ -266,7 +269,9 @@ func main() {
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithFilter(isNotHealthCheck),
+		)),
 	)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 
@@ -350,4 +355,9 @@ func main() {
 	grpcServer.GracefulStop()
 
 	log.Info("shutdown complete")
+}
+
+// isNotHealthCheck filters out gRPC health check RPCs from tracing.
+func isNotHealthCheck(info *stats.RPCTagInfo) bool {
+	return info.FullMethodName != "/grpc.health.v1.Health/Check"
 }

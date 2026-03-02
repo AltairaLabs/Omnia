@@ -123,7 +123,7 @@ func TestProvider_StartConversationSpan(t *testing.T) {
 func TestProvider_StartLLMSpan(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartLLMSpan(context.Background(), "claude-3-opus")
+	_, span := provider.StartLLMSpan(context.Background(), "claude-3-opus", "anthropic")
 	span.End()
 
 	spans := exporter.GetSpans()
@@ -132,8 +132,8 @@ func TestProvider_StartLLMSpan(t *testing.T) {
 	}
 
 	s := spans[0]
-	if s.Name != "llm.call" {
-		t.Errorf("expected span name 'llm.call', got %q", s.Name)
+	if s.Name != "chat claude-3-opus" {
+		t.Errorf("expected span name 'chat claude-3-opus', got %q", s.Name)
 	}
 	if s.SpanKind != trace.SpanKindClient {
 		t.Errorf("expected SpanKindClient, got %v", s.SpanKind)
@@ -208,7 +208,7 @@ func TestSetSuccess(t *testing.T) {
 func TestAddLLMMetrics(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartLLMSpan(context.Background(), "test-model")
+	_, span := provider.StartLLMSpan(context.Background(), "test-model", "openai")
 	AddLLMMetrics(span, 100, 200, 0.05)
 	span.End()
 

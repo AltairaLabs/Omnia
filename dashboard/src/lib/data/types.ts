@@ -106,6 +106,8 @@ export interface LogEntry {
   message: string;
   container?: string;
   fields?: Record<string, unknown>;
+  /** Original unparsed log line from the container */
+  raw?: string;
 }
 
 // Stats response

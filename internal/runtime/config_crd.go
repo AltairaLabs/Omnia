@@ -83,7 +83,13 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// Tools config path from env (mount-path based)
 	cfg.ToolsConfigPath = getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath)
 
-	// Parse env-only overrides (ports, tracing, etc.)
+	// Tracing config from env (injected by operator from Helm values)
+	cfg.TracingEnabled = os.Getenv(envTracingEnabled) == "true"
+	cfg.TracingEndpoint = os.Getenv(envTracingEndpoint)
+	cfg.TracingInsecure = os.Getenv(envTracingInsecure) == "true"
+	cfg.TracingSampleRate = 1.0
+
+	// Parse env-only overrides (ports, tracing sample rate, etc.)
 	if err := cfg.parseEnvironmentOverrides(); err != nil {
 		return nil, err
 	}

@@ -545,10 +545,15 @@ if ENABLE_OBSERVABILITY:
         'dashboard.prometheus.url=http://omnia-prometheus-server:80/prometheus',
         # Use localhost URL for browser access to Grafana iframes
         'dashboard.grafana.url=http://localhost:3001',
-        # Disable Loki/Alloy/Tempo for simpler setup (use ENABLE_FULL_STACK for full observability)
-        'loki.enabled=false',
-        'alloy.enabled=false',
-        'tempo.enabled=false',
+        # Enable Loki + Alloy + Tempo for logs and traces (queryable in Grafana)
+        'loki.enabled=true',
+        'alloy.enabled=true',
+        'tempo.enabled=true',
+        # Enable tracing: facade/runtime → Alloy (OTLP) → Tempo + session-api
+        'tracing.enabled=true',
+        'tracing.endpoint=omnia-alloy.omnia-system.svc.cluster.local:4317',
+        # Enable OTLP ingestion on session-api so Alloy can forward traces
+        'sessionApi.otlp.enabled=true',
     ])
 else:
     helm_set.extend([
@@ -575,17 +580,8 @@ if ENABLE_FULL_STACK:
         'gateway.className=istio',
         'internalGateway.enabled=true',
         'internalGateway.className=istio',
-        # Enable distributed tracing for agent runtimes
-        'tracing.enabled=true',
-        'tracing.endpoint=omnia-tempo.omnia-system.svc.cluster.local:4317',
-        # Enable Tempo for distributed tracing
-        # Uses chart defaults for persistence
-        'tempo.enabled=true',
-        # Enable Loki for log aggregation
-        # Uses chart defaults: SingleBinary mode, persistence enabled, ruler disabled
-        'loki.enabled=true',
-        # Enable Alloy for telemetry collection
-        'alloy.enabled=true',
+        # Tracing goes through Alloy (already set in ENABLE_OBSERVABILITY above)
+        # Alloy fans out to Tempo + session-api
         # Configure dashboard with builtin auth
         'dashboard.auth.mode=builtin',
         'dashboard.auth.sessionSecret=dev-session-secret-do-not-use-in-prod',
@@ -726,17 +722,29 @@ if ENABLE_OBSERVABILITY:
         port_forwards=['3001:3000'],  # Grafana UI (container port 3000, local 3001)
     )
 
-    # Tempo for distributed tracing (only with ENABLE_FULL_STACK)
-    if ENABLE_FULL_STACK:
-        k8s_resource(
-            'omnia-tempo',
-            labels=['observability'],
-            port_forwards=[
-                '3200:3200',   # Tempo HTTP API
-                '4317:4317',   # OTLP gRPC
-                '4318:4318',   # OTLP HTTP
-            ],
-        )
+    # Loki for log aggregation (queryable in Grafana → Explore)
+    k8s_resource(
+        'omnia-loki',
+        labels=['observability'],
+        port_forwards=['3100:3100'],  # Loki HTTP API
+    )
+
+    # Alloy for log collection (collects pod logs and ships to Loki)
+    k8s_resource(
+        'omnia-alloy',
+        labels=['observability'],
+    )
+
+    # Tempo for distributed tracing
+    k8s_resource(
+        'omnia-tempo',
+        labels=['observability'],
+        port_forwards=[
+            '3200:3200',   # Tempo HTTP API
+            '4317:4317',   # OTLP gRPC
+            '4318:4318',   # OTLP HTTP
+        ],
+    )
 
 # ============================================================================
 # Redis for Arena Queue (Enterprise only)
@@ -821,24 +829,11 @@ if ENABLE_ENTERPRISE:
     )
 
 # ============================================================================
-# Full Stack Mode Resources (Istio, Tempo, Loki, Alloy)
+# Full Stack Mode Resources (Istio, Gateway API)
 # ============================================================================
 
 if ENABLE_FULL_STACK:
-    # Note: Tempo resource already defined in ENABLE_OBSERVABILITY above
-
-    # Loki for log aggregation
-    k8s_resource(
-        'omnia-loki',
-        labels=['observability'],
-        port_forwards=['3100:3100'],  # Loki HTTP API
-    )
-
-    # Alloy for telemetry collection
-    k8s_resource(
-        'omnia-alloy',
-        labels=['observability'],
-    )
+    # Note: Loki, Alloy, and Tempo resources are defined in ENABLE_OBSERVABILITY above
 
     # Gateway API and Istio resources that need CRDs installed first
     k8s_resource(
@@ -965,32 +960,40 @@ if ENABLE_ENTERPRISE:
 
 # Rebuild facade/runtime images and restart agent pods.
 # Since these images are passed as CLI args to the operator (not in K8s YAML),
-# Tilt won't automatically rebuild them. These buttons let you trigger rebuilds
-# from the UI, then restart-agents rolls out the new images.
-local_resource(
-    'rebuild-facade',
-    cmd='docker build -f Dockerfile.agent -t omnia-facade-dev:latest .',
-    labels=['agents'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
-)
+# Tilt can't track them as k8s_image_json_path resources. Instead, we watch
+# source deps, rebuild images, and restart pods in a single atomic flow.
 
+_rebuild_facade_cmd = 'docker build -f Dockerfile.agent -t omnia-facade-dev:latest .'
 _rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
 if USE_LOCAL_PROMPTKIT:
     _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
 _rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
 
+_restart_cmd = '''
+    kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+    kubectl rollout restart deployment -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+'''
+
+# Manual buttons to rebuild individual images and restart pods
 local_resource(
-    'rebuild-runtime',
-    cmd=_rebuild_runtime_cmd,
+    'rebuild-facade',
+    cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
     labels=['agents'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
-# Restart agent pods when facade/framework images are rebuilt
+local_resource(
+    'rebuild-runtime',
+    cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
+    labels=['agents'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Auto-rebuild images and restart agent pods when source changes.
 # Since AgentRuntime deployments are created by the operator (not Tilt),
-# we need to manually trigger a rollout when the source changes
+# we rebuild both images and roll out new pods in one step.
 restart_agents_deps = [
     './cmd/agent',
     './internal/agent',
@@ -1008,10 +1011,7 @@ if USE_LOCAL_PROMPTKIT:
 
 local_resource(
     'restart-agents',
-    cmd='''
-        kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
-        kubectl rollout restart deployment -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
-    ''',
+    cmd=_rebuild_facade_cmd + ' && ' + _rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=restart_agents_deps,
     labels=['agents'],
     resource_deps=['sample-resources'],

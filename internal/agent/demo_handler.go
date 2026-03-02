@@ -21,7 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
@@ -107,12 +110,27 @@ func estimateTokens(text string) int {
 // Useful for demos and screenshots.
 type DemoHandler struct {
 	metrics *metrics.LLMMetrics
+	tracer  *tracing.Provider
 }
 
 // NewDemoHandlerWithMetrics creates a DemoHandler with LLM metrics.
-func NewDemoHandlerWithMetrics(cfg DemoMetricsConfig) *DemoHandler {
-	return &DemoHandler{
+func NewDemoHandlerWithMetrics(cfg DemoMetricsConfig, opts ...DemoHandlerOption) *DemoHandler {
+	h := &DemoHandler{
 		metrics: newDemoLLMMetrics(cfg),
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// DemoHandlerOption configures the DemoHandler.
+type DemoHandlerOption func(*DemoHandler)
+
+// WithDemoTracing sets the tracing provider for the demo handler.
+func WithDemoTracing(tp *tracing.Provider) DemoHandlerOption {
+	return func(h *DemoHandler) {
+		h.tracer = tp
 	}
 }
 
@@ -128,8 +146,22 @@ func (h *DemoHandler) HandleMessage(
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {
+	// Start conversation span
+	if h.tracer != nil {
+		var convSpan trace.Span
+		ctx, convSpan = h.tracer.StartConversationSpan(ctx, sessionID)
+		defer convSpan.End()
+	}
+
 	content := strings.ToLower(msg.Content)
 	startTime := time.Now()
+
+	// Start LLM span
+	if h.tracer != nil {
+		var llmSpan trace.Span
+		ctx, llmSpan = h.tracer.StartLLMSpan(ctx, demoModel, demoProvider)
+		defer llmSpan.End()
+	}
 
 	// Simulate thinking delay
 	time.Sleep(200 * time.Millisecond)
@@ -173,7 +205,26 @@ func (h *DemoHandler) HandleMessage(
 	return err
 }
 
-func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, writer facade.ResponseWriter) (string, error) {
+// simulateToolCall wraps a simulated tool call with a tracing span.
+func (h *DemoHandler) simulateToolCall(ctx context.Context, writer facade.ResponseWriter, toolName string, call *facade.ToolCallInfo, result *facade.ToolResultInfo, delay time.Duration) error {
+	var toolSpan trace.Span
+	if h.tracer != nil {
+		_, toolSpan = h.tracer.StartToolSpan(ctx, toolName)
+		defer toolSpan.End()
+	}
+
+	if err := writer.WriteToolCall(call); err != nil {
+		return err
+	}
+	time.Sleep(delay)
+
+	if toolSpan != nil {
+		tracing.SetSuccess(toolSpan)
+	}
+	return writer.WriteToolResult(result)
+}
+
+func (h *DemoHandler) handlePasswordReset(ctx context.Context, sessionID string, writer facade.ResponseWriter) (string, error) {
 	// Stream initial response
 	chunks := []string{
 		"I can help you ",
@@ -190,27 +241,25 @@ func (h *DemoHandler) handlePasswordReset(_ context.Context, sessionID string, w
 		time.Sleep(80 * time.Millisecond)
 	}
 
-	// Simulate tool call
-	if err := writer.WriteToolCall(&facade.ToolCallInfo{
-		ID:   "call_001",
-		Name: "lookup-user",
-		Arguments: map[string]interface{}{
-			"session_id": sessionID,
+	// Simulate tool call with tracing
+	if err := h.simulateToolCall(ctx, writer, "lookup-user",
+		&facade.ToolCallInfo{
+			ID:   "call_001",
+			Name: "lookup-user",
+			Arguments: map[string]interface{}{
+				"session_id": sessionID,
+			},
 		},
-	}); err != nil {
-		return "", err
-	}
-	time.Sleep(400 * time.Millisecond)
-
-	// Tool result
-	if err := writer.WriteToolResult(&facade.ToolResultInfo{
-		ID: "call_001",
-		Result: map[string]interface{}{
-			"status":       "found",
-			"email":        "user@example.com",
-			"account_type": "premium",
+		&facade.ToolResultInfo{
+			ID: "call_001",
+			Result: map[string]interface{}{
+				"status":       "found",
+				"email":        "user@example.com",
+				"account_type": "premium",
+			},
 		},
-	}); err != nil {
+		400*time.Millisecond,
+	); err != nil {
 		return "", err
 	}
 
@@ -231,7 +280,7 @@ The reset link will expire in 24 hours. Let me know if you need any other help!`
 	return fullResponse, writer.WriteDone(finalResponse)
 }
 
-func (h *DemoHandler) handleWeatherQuery(_ context.Context, _ string, writer facade.ResponseWriter) (string, error) {
+func (h *DemoHandler) handleWeatherQuery(ctx context.Context, _ string, writer facade.ResponseWriter) (string, error) {
 	// Stream initial response
 	fullResponse := "Checking the weather for you"
 	if err := writer.WriteChunk(fullResponse); err != nil {
@@ -247,28 +296,26 @@ func (h *DemoHandler) handleWeatherQuery(_ context.Context, _ string, writer fac
 		time.Sleep(150 * time.Millisecond)
 	}
 
-	// Simulate tool call
-	if err := writer.WriteToolCall(&facade.ToolCallInfo{
-		ID:   "call_002",
-		Name: "weather",
-		Arguments: map[string]interface{}{
-			"location": "Denver, CO",
+	// Simulate tool call with tracing
+	if err := h.simulateToolCall(ctx, writer, "weather",
+		&facade.ToolCallInfo{
+			ID:   "call_002",
+			Name: "weather",
+			Arguments: map[string]interface{}{
+				"location": "Denver, CO",
+			},
 		},
-	}); err != nil {
-		return "", err
-	}
-	time.Sleep(500 * time.Millisecond)
-
-	// Tool result
-	if err := writer.WriteToolResult(&facade.ToolResultInfo{
-		ID: "call_002",
-		Result: map[string]interface{}{
-			"temperature": "72°F",
-			"condition":   "Sunny",
-			"humidity":    "45%",
-			"wind":        "5 mph NW",
+		&facade.ToolResultInfo{
+			ID: "call_002",
+			Result: map[string]interface{}{
+				"temperature": "72°F",
+				"condition":   "Sunny",
+				"humidity":    "45%",
+				"wind":        "5 mph NW",
+			},
 		},
-	}); err != nil {
+		500*time.Millisecond,
+	); err != nil {
 		return "", err
 	}
 

@@ -178,13 +178,13 @@ export function parseLogLine(line: string, containerName: string): LogEntry {
   // Try Zap production JSON first
   const zapJson = tryParseZapJSON(body, k8sTimestamp, containerName);
   if (zapJson) {
-    return zapJson;
+    return { ...zapJson, raw: line };
   }
 
   // Try Zap development format
   const zapDev = tryParseZapDev(body, k8sTimestamp, containerName);
   if (zapDev) {
-    return zapDev;
+    return { ...zapDev, raw: line };
   }
 
   // Fallback: unstructured text
@@ -193,5 +193,6 @@ export function parseLogLine(line: string, containerName: string): LogEntry {
     level: "",
     message: body,
     container: containerName,
+    raw: line,
   };
 }

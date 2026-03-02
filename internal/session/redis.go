@@ -454,6 +454,11 @@ func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, u
 
 	now := time.Now().Format(time.RFC3339Nano)
 
+	var endedAt string
+	if !update.SetEndedAt.IsZero() {
+		endedAt = update.SetEndedAt.Format(time.RFC3339Nano)
+	}
+
 	result, err := updateStatsScript.Run(ctx, r.client,
 		[]string{r.sessionKey(sessionID)},
 		update.AddInputTokens,
@@ -463,6 +468,7 @@ func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, u
 		update.AddMessages,
 		string(update.SetStatus),
 		now,
+		endedAt,
 	).Int64()
 	if err != nil {
 		return fmt.Errorf("failed to update session stats: %w", err)
@@ -482,7 +488,7 @@ func (r *RedisStore) UpdateSessionStats(ctx context.Context, sessionID string, u
 // KEYS[1] = session key
 // ARGV[1] = addInputTokens, ARGV[2] = addOutputTokens, ARGV[3] = addCostUSD
 // ARGV[4] = addToolCalls, ARGV[5] = addMessages, ARGV[6] = setStatus (empty = no change)
-// ARGV[7] = now (RFC3339Nano)
+// ARGV[7] = now (RFC3339Nano), ARGV[8] = setEndedAt (RFC3339Nano, empty = no change)
 // Returns: 0 = not found, 1 = success, 2 = expired
 var updateStatsScript = redis.NewScript(`
 local data = redis.call('GET', KEYS[1])
@@ -507,8 +513,16 @@ session['estimatedCostUSD'] = (session['estimatedCostUSD'] or 0) + tonumber(ARGV
 session['toolCallCount'] = (session['toolCallCount'] or 0) + tonumber(ARGV[4])
 session['messageCount'] = (session['messageCount'] or 0) + tonumber(ARGV[5])
 
+-- Only apply status if not already terminal
 if ARGV[6] ~= "" then
-	session['status'] = ARGV[6]
+	local cur = session['status'] or ''
+	if cur ~= 'completed' and cur ~= 'error' and cur ~= 'expired' then
+		session['status'] = ARGV[6]
+	end
+end
+
+if ARGV[8] ~= "" then
+	session['endedAt'] = ARGV[8]
 end
 
 session['updatedAt'] = ARGV[7]

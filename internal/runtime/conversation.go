@@ -99,6 +99,11 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		sdk.WithConversationID(sessionID),
 	}, s.sdkOptions...)
 
+	// Pass Omnia's logger to the SDK so all output flows through the same Zap backend.
+	if s.sdkLogger != nil {
+		opts = append(opts, sdk.WithLogger(s.sdkLogger))
+	}
+
 	// Add provider based on configuration
 	if s.mockProvider {
 		log.Info("using mock provider for conversation")

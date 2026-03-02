@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useRef, useState, useCallback, useMemo } from "react";
 import { Download, Search, X, RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,7 @@ export interface LogEntry {
   message: string;
   container?: string;
   fields?: Record<string, unknown>;
+  raw?: string;
 }
 
 /** Format a field value for display in the detail popover */
@@ -135,6 +136,7 @@ function LogContent({
           // eslint-disable-next-line react/no-array-index-key -- log entries have no stable unique ID
           key={`${index}-${log.timestamp.getTime()}-${log.level}`}
           className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
+          title={log.raw}
         >
           <span className="text-muted-foreground shrink-0">
             {formatTimestamp(log.timestamp)}
@@ -229,6 +231,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       message: log.message || "",
       container: log.container,
       fields: log.fields,
+      raw: log.raw,
     }));
   }, [apiLogs]);
 
@@ -237,20 +240,12 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   const [selectedLevels, setSelectedLevels] = useState<Set<string>>(
     new Set(["info", "warn", "error", "debug"])
   );
-  const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Determine if we should show container selector (hide for single container)
   const showContainerSelector = containers.length > 1;
 
-  // Auto-scroll to bottom when new logs arrive
-  useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs, autoScroll]);
-
-  // Filter logs based on user selections
+  // Filter logs based on user selections, newest first
   const filteredLogs = logs.filter((log) => {
     if (showContainerSelector && selectedContainer !== "all" && log.container !== selectedContainer) {
       return false;
@@ -262,7 +257,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       return false;
     }
     return true;
-  });
+  }).toReversed();
 
   const toggleLevel = useCallback((level: string) => {
     setSelectedLevels((prev) => {
@@ -307,7 +302,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   };
 
   return (
-    <div className={cn("flex flex-col h-[600px] border rounded-lg", className)}>
+    <div className={cn("flex flex-col h-[600px] border rounded-lg overflow-hidden", className)}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b bg-muted/30">
         {/* Refresh button */}
@@ -437,22 +432,10 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
         </div>
       </div>
 
-      {/* Auto-scroll indicator */}
-      {!autoScroll && (
-        <button
-          onClick={() => setAutoScroll(true)}
-          className="px-4 py-1 text-xs text-center bg-muted hover:bg-muted/80 border-b"
-        >
-          Auto-scroll paused. Click to resume.
-        </button>
-      )}
-
       {/* Log entries */}
       <ScrollArea
-        className="flex-1 font-mono text-xs"
+        className="flex-1 min-h-0 font-mono text-xs"
         ref={scrollRef}
-        onMouseEnter={() => setAutoScroll(false)}
-        onMouseLeave={() => setAutoScroll(true)}
       >
         <div className="p-2">
           <LogContent

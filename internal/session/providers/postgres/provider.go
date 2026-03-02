@@ -520,8 +520,12 @@ func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, upd
 		estimated_cost_usd = estimated_cost_usd + $4,
 		tool_call_count = tool_call_count + $5,
 		message_count = message_count + $6,
-		status = CASE WHEN $7::text = '' THEN status ELSE $7::text END,
-		updated_at = $8
+		status = CASE
+			WHEN status IN ('completed','error','expired') THEN status
+			WHEN $7::text = '' THEN status
+			ELSE $7::text END,
+		updated_at = $8,
+		ended_at = CASE WHEN $9::timestamptz IS NULL THEN ended_at ELSE $9::timestamptz END
 	WHERE id = $1`
 
 	res, err := p.pool.Exec(ctx, query,
@@ -533,6 +537,7 @@ func (p *Provider) UpdateSessionStats(ctx context.Context, sessionID string, upd
 		update.AddMessages,
 		string(update.SetStatus),
 		time.Now(),
+		pgutil.NullTime(update.SetEndedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: update session stats: %w", err)

@@ -107,12 +107,22 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 		"hasEvalCollector", s.evalCollector != nil,
 		"contentLength", len(content))
 
+	// Start LLM span around the streaming call
+	var llmSpan trace.Span
+	if s.tracingProvider != nil {
+		ctx, llmSpan = s.tracingProvider.StartLLMSpan(ctx, s.model, s.providerType)
+		defer llmSpan.End()
+	}
+
 	streamCh := conv.Stream(ctx, content, opts...)
 	var finalResponse *sdk.Response
 	var accumulatedContent strings.Builder
 
 	for chunk := range streamCh {
 		if chunk.Error != nil {
+			if llmSpan != nil {
+				tracing.RecordError(llmSpan, chunk.Error)
+			}
 			return nil, "", fmt.Errorf("failed to send message: provider stream failed: %w", chunk.Error)
 		}
 
@@ -131,6 +141,13 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 		case sdk.ChunkDone:
 			finalResponse = chunk.Message
 		}
+	}
+
+	// Add GenAI metrics to the LLM span before it ends
+	if llmSpan != nil && finalResponse != nil && finalResponse.TokensUsed() > 0 {
+		tracing.AddLLMMetrics(llmSpan, finalResponse.InputTokens(), finalResponse.OutputTokens(), finalResponse.Cost())
+		tracing.AddFinishReason(llmSpan, "stop")
+		tracing.SetSuccess(llmSpan)
 	}
 
 	log.V(1).Info("stream complete",

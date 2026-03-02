@@ -118,7 +118,7 @@ func main() {
 	defer closeStore(store, log)
 
 	// Create message handler based on mode
-	handler, handlerCleanup := createHandler(cfg, log)
+	handler, handlerCleanup := createHandler(cfg, log, tracingProvider)
 	if handlerCleanup != nil {
 		defer handlerCleanup()
 	}
@@ -306,18 +306,21 @@ func redactURL(url string) string {
 
 // createHandler creates the appropriate message handler based on configuration.
 // Returns the handler and an optional cleanup function.
-func createHandler(cfg *agent.Config, log logr.Logger) (facade.MessageHandler, func()) {
+func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (facade.MessageHandler, func()) {
 	switch cfg.HandlerMode {
 	case agent.HandlerModeEcho:
 		log.Info("using echo handler mode")
 		return agent.NewEchoHandler(), nil
 	case agent.HandlerModeDemo:
 		log.Info("using demo handler mode with LLM metrics")
+		var demoOpts []agent.DemoHandlerOption
+		if tp != nil {
+			demoOpts = append(demoOpts, agent.WithDemoTracing(tp))
+		}
 		return agent.NewDemoHandlerWithMetrics(agent.DemoMetricsConfig{
 			AgentName: cfg.AgentName,
 			Namespace: cfg.Namespace,
-			// PromptPack and Provider ref fields can be set when agent config supports them
-		}), nil
+		}, demoOpts...), nil
 	case agent.HandlerModeRuntime:
 		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
 

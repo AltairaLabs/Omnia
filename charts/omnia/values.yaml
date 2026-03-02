@@ -1224,6 +1224,12 @@ alloy:
   # -- Enable Alloy telemetry collector
   enabled: false
   alloy:
+    # Expose OTLP gRPC port so facade/runtime can send traces
+    extraPorts:
+      - name: otlp-grpc
+        port: 4317
+        targetPort: 4317
+        protocol: TCP
     # Alloy configuration using River syntax
     configMap:
       content: |
@@ -1352,6 +1358,42 @@ alloy:
         loki.write "default" {
           endpoint {
             url = "http://omnia-loki:3100/loki/api/v1/push"
+          }
+        }
+
+        // ======================================================================
+        // OTLP Trace Fan-Out
+        // Receives OTLP traces from facade/runtime and forwards to both
+        // session-api (session reconstruction) and Tempo (distributed tracing).
+        // ======================================================================
+
+        // OTLP gRPC receiver — agents send traces here on port 4317
+        otelcol.receiver.otlp "default" {
+          grpc {
+            endpoint = "0.0.0.0:4317"
+          }
+          output {
+            traces = [otelcol.exporter.otlphttp.session_api.input, otelcol.exporter.otlp.tempo.input]
+          }
+        }
+
+        // Fan-out 1: Session-API (HTTP — for session reconstruction)
+        otelcol.exporter.otlphttp "session_api" {
+          client {
+            endpoint = "http://omnia-session-api.omnia-system.svc.cluster.local:4318"
+            tls {
+              insecure = true
+            }
+          }
+        }
+
+        // Fan-out 2: Tempo (gRPC — distributed tracing backend)
+        otelcol.exporter.otlp "tempo" {
+          client {
+            endpoint = "omnia-tempo:4317"
+            tls {
+              insecure = true
+            }
           }
         }
 

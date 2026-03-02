@@ -119,6 +119,11 @@ func (r *AgentRuntimeReconciler) reconcileRole(
 				Verbs:     []string{"get"},
 			},
 			{
+				APIGroups: []string{"omnia.altairalabs.ai"},
+				Resources: []string{"agentruntimes/status"},
+				Verbs:     []string{"get", "patch"},
+			},
+			{
 				APIGroups: []string{""},
 				Resources: []string{"secrets"},
 				Verbs:     []string{"get"},

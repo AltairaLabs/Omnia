@@ -38,6 +38,21 @@ const (
 	TracerName = "omnia-runtime"
 )
 
+// GenAI semantic convention attribute keys.
+// See: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+const (
+	AttrGenAISystem            = "gen_ai.system"
+	AttrGenAIOperationName     = "gen_ai.operation.name"
+	AttrGenAIRequestModel      = "gen_ai.request.model"
+	AttrGenAIResponseModel     = "gen_ai.response.model"
+	AttrGenAIResponseFinish    = "gen_ai.response.finish_reasons"
+	AttrGenAIUsageInputTokens  = "gen_ai.usage.input_tokens"
+	AttrGenAIUsageOutputTokens = "gen_ai.usage.output_tokens"
+	AttrGenAIUsageCost         = "gen_ai.usage.cost"
+	AttrGenAIPromptLength      = "gen_ai.prompt.length"
+	AttrGenAIResponseLength    = "gen_ai.response.length"
+)
+
 // Config holds tracing configuration.
 type Config struct {
 	// Enabled enables tracing.
@@ -140,6 +155,15 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 	}, nil
 }
 
+// NewTestProvider creates a Provider from a pre-configured TracerProvider.
+// This is intended for tests that supply an in-memory exporter.
+func NewTestProvider(tp *sdktrace.TracerProvider) *Provider {
+	return &Provider{
+		tp:     tp,
+		tracer: tp.Tracer(TracerName),
+	}
+}
+
 // Tracer returns the tracer for creating spans.
 func (p *Provider) Tracer() trace.Tracer {
 	return p.tracer
@@ -173,12 +197,15 @@ func (p *Provider) StartConversationSpan(ctx context.Context, sessionID string) 
 	return ctx, span
 }
 
-// StartLLMSpan starts a new span for an LLM call.
-func (p *Provider) StartLLMSpan(ctx context.Context, model string) (context.Context, trace.Span) {
-	ctx, span := p.tracer.Start(ctx, "llm.call",
+// StartLLMSpan starts a new span for an LLM call following GenAI semantic conventions.
+func (p *Provider) StartLLMSpan(ctx context.Context, model string, system string) (context.Context, trace.Span) {
+	spanName := fmt.Sprintf("chat %s", model)
+	ctx, span := p.tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String("gen_ai.request.model", model),
+			attribute.String(AttrGenAISystem, system),
+			attribute.String(AttrGenAIOperationName, "chat"),
+			attribute.String(AttrGenAIRequestModel, model),
 		),
 	)
 	return ctx, span
@@ -208,12 +235,26 @@ func SetSuccess(span trace.Span) {
 	span.SetStatus(codes.Ok, "success")
 }
 
-// AddLLMMetrics adds LLM-specific metrics to a span.
+// AddLLMMetrics adds GenAI usage metrics to a span.
 func AddLLMMetrics(span trace.Span, inputTokens, outputTokens int, costUSD float64) {
 	span.SetAttributes(
-		attribute.Int("gen_ai.usage.input_tokens", inputTokens),
-		attribute.Int("gen_ai.usage.output_tokens", outputTokens),
-		attribute.Float64("gen_ai.usage.cost", costUSD),
+		attribute.Int(AttrGenAIUsageInputTokens, inputTokens),
+		attribute.Int(AttrGenAIUsageOutputTokens, outputTokens),
+		attribute.Float64(AttrGenAIUsageCost, costUSD),
+	)
+}
+
+// AddResponseModel sets the response model on a span (may differ from request model).
+func AddResponseModel(span trace.Span, model string) {
+	span.SetAttributes(
+		attribute.String(AttrGenAIResponseModel, model),
+	)
+}
+
+// AddFinishReason sets the finish reason on a span.
+func AddFinishReason(span trace.Span, reason string) {
+	span.SetAttributes(
+		attribute.StringSlice(AttrGenAIResponseFinish, []string{reason}),
 	)
 }
 
@@ -230,7 +271,7 @@ func AddToolResult(span trace.Span, isError bool, durationMs int) {
 // AddConversationMetrics adds conversation metrics to a span.
 func AddConversationMetrics(span trace.Span, messageLength int, responseLength int) {
 	span.SetAttributes(
-		attribute.Int("gen_ai.prompt.length", messageLength),
-		attribute.Int("gen_ai.response.length", responseLength),
+		attribute.Int(AttrGenAIPromptLength, messageLength),
+		attribute.Int(AttrGenAIResponseLength, responseLength),
 	)
 }
