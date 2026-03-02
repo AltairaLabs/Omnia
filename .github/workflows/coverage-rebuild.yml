@@ -37,7 +37,7 @@ jobs:
         echo "Coverage report generated"
 
     - name: Upload coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: go-unit-coverage
         path: coverage.out
@@ -65,7 +65,7 @@ jobs:
         go test -v ./internal/... -coverprofile=internal-coverage.out
 
     - name: Upload coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: go-internal-coverage
         path: internal-coverage.out
@@ -99,7 +99,7 @@ jobs:
         echo "Fixed lcov.info paths"
 
     - name: Upload coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: dashboard-unit-coverage
         path: dashboard/coverage/lcov.info
@@ -151,7 +151,7 @@ jobs:
         fi
 
     - name: Upload E2E coverage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       if: success()
       with:
         name: dashboard-e2e-coverage

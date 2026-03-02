@@ -99,14 +99,14 @@ jobs:
         ls -la dashboard/e2e/test-results/ || echo "No test results"
 
     - name: Upload screenshots artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: screenshots
         path: docs/src/assets/screenshots/
         retention-days: 30
 
     - name: Upload test results artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: test-results
         path: dashboard/e2e/test-results/
