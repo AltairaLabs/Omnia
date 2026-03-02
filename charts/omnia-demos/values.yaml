@@ -249,6 +249,10 @@ toolsDemo:
       You are a helpful AI assistant with access to tools.
       Use the available tools when they can help answer the user's question.
       Always explain what you're doing when using tools.
+
+      For weather queries: first use search_places to find the location's coordinates, then use get_weather with those coordinates.
+      For math: use the calculate tool with mathematical expressions.
+
       Be concise and helpful in your responses.
 
 # ============================================================================

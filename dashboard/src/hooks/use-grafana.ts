@@ -296,3 +296,78 @@ export function buildTempoExploreUrl(
   const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
   return `${base}${path}/explore?${params.toString()}`;
 }
+
+/**
+ * Converts a UUID session ID to an OpenTelemetry trace ID.
+ * Mirrors the Go function sessionIDToTraceID in internal/facade/session.go:
+ * a UUID is 128 bits (same as a trace ID), so strip the dashes.
+ */
+export function sessionIdToTraceId(sessionId: string): string {
+  return sessionId.replaceAll("-", "");
+}
+
+/**
+ * Builds a Grafana Explore URL for Loki logs filtered by session trace ID.
+ *
+ * @param config - Grafana configuration
+ * @param sessionId - UUID session ID (converted to trace ID by stripping dashes)
+ * @param agentName - Agent name for the stream selector (Loki requires at least one label matcher)
+ * @param options - Optional time range
+ */
+export function buildSessionLogsUrl(
+  config: GrafanaConfig,
+  sessionId: string,
+  agentName: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-6h", to = "now" } = options;
+  const traceId = sessionIdToTraceId(sessionId);
+
+  // LogQL: stream selector with agent label + trace_id structured metadata filter.
+  // Loki requires at least one non-empty label matcher in the stream selector.
+  const query = `{agent="${agentName}"} | trace_id = \`${traceId}\``;
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("left", JSON.stringify({
+    datasource: "loki",
+    queries: [{ refId: "A", expr: query }],
+    range: { from, to },
+  }));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/explore?${params.toString()}`;
+}
+
+/**
+ * Builds a Grafana Explore URL for Tempo traces filtered by session trace ID.
+ */
+export function buildSessionTracesUrl(
+  config: GrafanaConfig,
+  sessionId: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-6h", to = "now" } = options;
+  const traceId = sessionIdToTraceId(sessionId);
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("left", JSON.stringify({
+    datasource: "tempo",
+    queries: [{ refId: "A", query: traceId, queryType: "traceql" }],
+    range: { from, to },
+  }));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/explore?${params.toString()}`;
+}

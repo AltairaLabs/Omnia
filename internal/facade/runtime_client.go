@@ -23,9 +23,11 @@ import (
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/stats"
 
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
@@ -50,6 +52,8 @@ type RuntimeClientConfig struct {
 	MaxMessageSize int
 	// Log is an optional logger. If zero-value, a discard logger is used.
 	Log logr.Logger
+	// TracerProvider is an optional tracer provider for distributed tracing.
+	TracerProvider trace.TracerProvider
 }
 
 // NewRuntimeClient creates a new RuntimeClient connected to the runtime sidecar.
@@ -62,16 +66,23 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 
 	// Use insecure credentials for localhost sidecar communication.
 	// In production, mTLS could be added for enhanced security.
-	conn, err := grpc.NewClient(cfg.Address,
+	var dialOpts []grpc.DialOption
+	dialOpts = append(dialOpts,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxMsgSize),
 			grpc.MaxCallSendMsgSize(maxMsgSize),
 		),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithUnaryInterceptor(policyUnaryClientInterceptor()),
 		grpc.WithStreamInterceptor(policyStreamClientInterceptor()),
 	)
+	if cfg.TracerProvider != nil {
+		dialOpts = append(dialOpts, grpc.WithStatsHandler(otelgrpc.NewClientHandler(
+			otelgrpc.WithTracerProvider(cfg.TracerProvider),
+			otelgrpc.WithFilter(isNotHealthCheckRPC),
+		)))
+	}
+	conn, err := grpc.NewClient(cfg.Address, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client for %s: %w", cfg.Address, err)
 	}
@@ -170,4 +181,9 @@ func injectPolicyMetadata(ctx context.Context) context.Context {
 		pairs = append(pairs, k, v)
 	}
 	return metadata.AppendToOutgoingContext(ctx, pairs...)
+}
+
+// isNotHealthCheckRPC filters out gRPC health check RPCs from tracing.
+func isNotHealthCheckRPC(info *stats.RPCTagInfo) bool {
+	return info.FullMethodName != "/omnia.runtime.v1.RuntimeService/Health"
 }

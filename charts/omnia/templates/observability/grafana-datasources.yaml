@@ -43,6 +43,9 @@ data:
             datasourceUid: loki
             filterByTraceID: true
             filterBySpanID: true
+            tags:
+              - key: "service.name"
+                value: "service_name"
           serviceMap:
             datasourceUid: prometheus
           nodeGraph:

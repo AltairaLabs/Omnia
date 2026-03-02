@@ -30,7 +30,7 @@ func TestIsNotHealthCheck(t *testing.T) {
 	}{
 		{
 			name:       "health check is filtered",
-			method:     "/grpc.health.v1.Health/Check",
+			method:     "/omnia.runtime.v1.RuntimeService/Health",
 			wantResult: false,
 		},
 		{

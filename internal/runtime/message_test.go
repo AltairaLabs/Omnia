@@ -108,13 +108,13 @@ func TestConverse_EmitsConversationSpan(t *testing.T) {
 	spans := exporter.GetSpans()
 
 	// Verify conversation.turn span
-	convSpan := findSpanByName(spans, "conversation.turn")
+	convSpan := findSpanByName(spans, "omnia.runtime.conversation.turn")
 	if convSpan == nil {
-		t.Fatal("expected 'conversation.turn' span to be recorded")
+		t.Fatal("expected 'omnia.runtime.conversation.turn' span to be recorded")
 	}
 
-	if convSpan.SpanKind != trace.SpanKindServer {
-		t.Errorf("expected SpanKindServer, got %v", convSpan.SpanKind)
+	if convSpan.SpanKind != trace.SpanKindInternal {
+		t.Errorf("expected SpanKindInternal, got %v", convSpan.SpanKind)
 	}
 
 	val, ok := findSpanAttr(*convSpan, "session.id")
@@ -168,9 +168,9 @@ func TestConverse_EmitsLLMSpanWithGenAIAttributes(t *testing.T) {
 	spans := exporter.GetSpans()
 
 	// Find LLM span
-	llmSpan := findSpanByName(spans, "chat llama3")
+	llmSpan := findSpanByName(spans, "genai.chat")
 	if llmSpan == nil {
-		t.Fatal("expected 'chat llama3' span to be recorded")
+		t.Fatal("expected 'genai.chat' span to be recorded")
 	}
 
 	if llmSpan.SpanKind != trace.SpanKindClient {

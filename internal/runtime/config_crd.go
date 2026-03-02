@@ -53,6 +53,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// PromptPack info from CRD
 	cfg.PromptPackName = ar.Spec.PromptPackRef.Name
 	cfg.PromptPackNamespace = namespace
+	if ar.Spec.PromptPackRef.Version != nil {
+		cfg.PromptPackVersion = *ar.Spec.PromptPackRef.Version
+	}
 
 	// Session config from CRD
 	loadRuntimeSessionFromCRD(cfg, ar)
@@ -80,8 +83,12 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		cfg.MockProvider = true
 	}
 
-	// Tools config path from env (mount-path based)
-	cfg.ToolsConfigPath = getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath)
+	// Tools config: if the CRD has a toolRegistryRef, the operator mounts the
+	// tools ConfigMap at a well-known path. Derive it from the CRD rather than
+	// relying on an env var.
+	if ar.Spec.ToolRegistryRef != nil {
+		cfg.ToolsConfigPath = defaultToolsMountPath + "/" + defaultToolsConfigFile
+	}
 
 	// Tracing config from env (injected by operator from Helm values)
 	cfg.TracingEnabled = os.Getenv(envTracingEnabled) == "true"

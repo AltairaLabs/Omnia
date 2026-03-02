@@ -138,21 +138,19 @@ func loadTracingConfigFromEnv(cfg *Config) error {
 	return nil
 }
 
-// LoadConfig loads configuration, preferring CRD reading and falling back to env vars.
+// LoadConfig loads configuration from the AgentRuntime CRD.
+// OMNIA_AGENT_NAME and OMNIA_NAMESPACE must be set via the Downward API.
 func LoadConfig(ctx context.Context) (*Config, error) {
 	name := os.Getenv(EnvAgentName)
 	namespace := os.Getenv(EnvNamespace)
-
-	if name != "" && namespace != "" {
-		c, err := k8s.NewClient()
-		if err == nil {
-			cfg, crdErr := LoadFromCRD(ctx, c, name, namespace)
-			if crdErr == nil {
-				return cfg, nil
-			}
-			// Fall through to env-based loading
-		}
+	if name == "" || namespace == "" {
+		return nil, fmt.Errorf("OMNIA_AGENT_NAME and OMNIA_NAMESPACE are required (set via Downward API)")
 	}
 
-	return LoadFromEnv()
+	c, err := k8s.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("create k8s client: %w", err)
+	}
+
+	return LoadFromCRD(ctx, c, name, namespace)
 }

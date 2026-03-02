@@ -564,6 +564,47 @@ func TestLoadFromCRD_TracingDisabledByDefault(t *testing.T) {
 	assert.InDelta(t, 1.0, cfg.TracingSampleRate, 0.001, "default sample rate should be 1.0")
 }
 
+func TestLoadFromCRD_ToolRegistryRef(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			ToolRegistryRef: &v1alpha1.ToolRegistryRef{
+				Name: "demo-tools",
+			},
+		},
+	}
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/etc/omnia/tools/tools.yaml", cfg.ToolsConfigPath)
+}
+
+func TestLoadFromCRD_NoToolRegistryRef(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.Empty(t, cfg.ToolsConfigPath)
+}
+
 func strPtr(s string) *string {
 	return &s
 }

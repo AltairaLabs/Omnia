@@ -18,6 +18,8 @@ package facade
 
 import (
 	"context"
+	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -27,28 +29,32 @@ import (
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/otlp"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
 // processMessage handles processing of an incoming client message.
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
-	var msgSpan trace.Span
-	ctx, msgSpan = s.startMessageSpan(ctx)
-	defer msgSpan.End()
-
-	// Get or create session
+	// Get or create session first — the session ID determines the trace ID.
 	sessionID, err := s.ensureSession(ctx, c, msg.SessionID, log)
 	if err != nil {
 		s.sendError(c, msg.SessionID, ErrorCodeInternalError, "failed to create session")
 		return err
 	}
 
-	// Enrich context with session ID and namespace
+	// Start the message span using the session ID as the trace ID.
+	// This makes every message in a session part of the same trace,
+	// and allows direct trace lookup by session ID without indexing.
+	var msgSpan trace.Span
+	ctx, msgSpan = s.startMessageSpan(ctx, c, sessionID)
+	defer msgSpan.End()
+
+	// Enrich context with session ID, namespace, and trace ID for log↔trace correlation
 	ctx = logctx.WithSessionID(ctx, sessionID)
 	ctx = logctx.WithNamespace(ctx, c.namespace)
+	ctx = logctx.WithTraceID(ctx, msgSpan.SpanContext().TraceID().String())
 	log = logctx.LoggerWithContext(s.log, ctx)
-
-	s.setSessionTraceAttributes(ctx, c, sessionID)
 
 	// Update connection's session ID
 	c.mu.Lock()
@@ -70,34 +76,59 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	}
 
 	// Handle upload_request messages separately
+	var processErr error
 	if msg.Type == MessageTypeUploadRequest {
-		return s.handleUploadRequest(ctx, sessionID, msg, writer, log)
+		processErr = s.handleUploadRequest(ctx, sessionID, msg, writer, log)
+	} else {
+		processErr = s.processRegularMessage(ctx, c, sessionID, msg, writer, log)
 	}
 
-	return s.processRegularMessage(ctx, c, sessionID, msg, writer, log)
+	if processErr != nil {
+		tracing.RecordError(msgSpan, processErr)
+	} else {
+		tracing.SetSuccess(msgSpan)
+	}
+	return processErr
 }
 
 // startMessageSpan starts a tracing span for the message if tracing is enabled.
-// The caller must defer span.End() to ensure the span covers the full message lifecycle.
-func (s *Server) startMessageSpan(ctx context.Context) (context.Context, trace.Span) {
+// It derives the trace ID from the session ID (UUID → 128-bit trace ID) so that
+// all messages in a session share the same trace, enabling direct Tempo lookup
+// by session ID without search indexing.
+func (s *Server) startMessageSpan(ctx context.Context, c *Connection, sessionID string) (context.Context, trace.Span) {
 	if s.tracingProvider == nil {
 		return ctx, trace.SpanFromContext(ctx)
 	}
-	return s.tracingProvider.Tracer().Start(ctx, "facade.message",
+
+	// Inject session-derived trace ID as a remote span context so the new
+	// span inherits it. All messages in the same session share a trace.
+	traceID := sessionIDToTraceID(sessionID)
+	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
+
+	return s.tracingProvider.Tracer().Start(ctx, "omnia.facade.message",
 		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(
+			attribute.String("session.id", sessionID),
+			attribute.String(otlp.AttrOmniaAgentName, c.agentName),
+			attribute.String(otlp.AttrOmniaAgentNamespace, c.namespace),
+			attribute.String(otlp.AttrOmniaPromptPackName, s.config.PromptPackName),
+			attribute.String(otlp.AttrOmniaPromptPackVersion, s.config.PromptPackVersion),
+			attribute.String(otlp.AttrOmniaPromptPackNamespace, c.namespace),
+		),
 	)
 }
 
-// setSessionTraceAttributes sets the session ID on tracing spans.
-func (s *Server) setSessionTraceAttributes(ctx context.Context, c *Connection, sessionID string) {
-	if s.tracingProvider == nil {
-		return
-	}
-	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(attribute.String("session.id", sessionID))
-	if c.sessionSpan != nil {
-		c.sessionSpan.SetAttributes(attribute.String("session.id", sessionID))
-	}
+// sessionIDToTraceID converts a UUID session ID to an OpenTelemetry trace ID.
+// A UUID is 128 bits — the same size as a trace ID — so the mapping is lossless.
+func sessionIDToTraceID(sessionID string) trace.TraceID {
+	cleaned := strings.ReplaceAll(sessionID, "-", "")
+	var tid trace.TraceID
+	_, _ = hex.Decode(tid[:], []byte(cleaned))
+	return tid
 }
 
 // processRegularMessage stores the user message and dispatches to the handler.

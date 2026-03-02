@@ -436,30 +436,33 @@ func TestLoadFromCRD_HandlerModeFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_FallbackToEnv(t *testing.T) {
-	// When OMNIA_AGENT_NAME and OMNIA_NAMESPACE are not set, LoadConfig falls back to LoadFromEnv
-	t.Setenv(EnvAgentName, "env-agent")
-	t.Setenv(EnvNamespace, "env-ns")
-	t.Setenv(EnvPromptPackName, "env-pack")
-
-	cfg, err := LoadConfig(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestLoadConfig_MissingEnvVars(t *testing.T) {
+	// When OMNIA_AGENT_NAME and OMNIA_NAMESPACE are not set, LoadConfig returns an error
+	_, err := LoadConfig(context.Background())
+	if err == nil {
+		t.Fatal("expected error when env vars are missing")
 	}
-	// Since k8s.NewClient() will fail outside a cluster, it falls back to LoadFromEnv
-	if cfg.AgentName != "env-agent" {
-		t.Errorf("AgentName = %q, want %q", cfg.AgentName, "env-agent")
+	if got := err.Error(); got != "OMNIA_AGENT_NAME and OMNIA_NAMESPACE are required (set via Downward API)" {
+		t.Errorf("error = %q, want required env vars message", got)
 	}
 }
 
-func TestLoadConfig_EmptyEnv(t *testing.T) {
-	// When both env vars are empty, falls back to LoadFromEnv immediately
-	cfg, err := LoadConfig(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestLoadConfig_MissingNamespaceOnly(t *testing.T) {
+	t.Setenv(EnvAgentName, "my-agent")
+	// OMNIA_NAMESPACE not set
+
+	_, err := LoadConfig(context.Background())
+	if err == nil {
+		t.Fatal("expected error when namespace is missing")
 	}
-	// LoadFromEnv succeeds with all defaults (empty name/namespace)
-	if cfg == nil {
-		t.Fatal("expected non-nil config")
+}
+
+func TestLoadConfig_MissingAgentNameOnly(t *testing.T) {
+	t.Setenv(EnvNamespace, "my-ns")
+	// OMNIA_AGENT_NAME not set
+
+	_, err := LoadConfig(context.Background())
+	if err == nil {
+		t.Fatal("expected error when agent name is missing")
 	}
 }

@@ -30,6 +30,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+
 	// Register all providers via blank imports
 	// TODO: PromptKit should provide a "providers/all" package for convenience
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
@@ -49,18 +50,21 @@ import (
 type Server struct {
 	runtimev1.UnimplementedRuntimeServiceServer
 
-	log            logr.Logger
-	sdkLogger      *slog.Logger
-	packPath       string
-	promptName     string
-	stateStore     statestore.Store
-	mockProvider   bool
-	mockConfigPath string
-	sdkOptions     []sdk.Option
-	conversations  map[string]*sdk.Conversation
-	conversationMu sync.RWMutex
-	healthy        bool
-	mu             sync.RWMutex
+	log               logr.Logger
+	sdkLogger         *slog.Logger
+	packPath          string
+	promptPackName    string
+	promptPackVersion string
+	promptName        string
+	stateStore        statestore.Store
+	mockProvider      bool
+	mockConfigPath    string
+	sdkOptions        []sdk.Option
+	conversations     map[string]*sdk.Conversation
+	turnIndices       map[string]int // Track turn count per session
+	conversationMu    sync.RWMutex
+	healthy           bool
+	mu                sync.RWMutex
 
 	// Tool management
 	toolManager      *tools.Manager
@@ -118,6 +122,20 @@ func WithPackPath(path string) ServerOption {
 func WithPromptName(name string) ServerOption {
 	return func(s *Server) {
 		s.promptName = name
+	}
+}
+
+// WithPromptPackName sets the PromptPack CRD name for tracing.
+func WithPromptPackName(name string) ServerOption {
+	return func(s *Server) {
+		s.promptPackName = name
+	}
+}
+
+// WithPromptPackVersion sets the PromptPack version for tracing.
+func WithPromptPackVersion(version string) ServerOption {
+	return func(s *Server) {
+		s.promptPackVersion = version
 	}
 }
 
@@ -259,6 +277,7 @@ func WithTruncationStrategy(strategy string) ServerOption {
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{
 		conversations: make(map[string]*sdk.Conversation),
+		turnIndices:   make(map[string]int),
 		healthy:       true,
 	}
 

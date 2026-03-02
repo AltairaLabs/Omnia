@@ -149,7 +149,7 @@ func (h *DemoHandler) HandleMessage(
 	// Start conversation span
 	if h.tracer != nil {
 		var convSpan trace.Span
-		ctx, convSpan = h.tracer.StartConversationSpan(ctx, sessionID)
+		ctx, convSpan = h.tracer.StartConversationSpan(ctx, sessionID, "", "", 0)
 		defer convSpan.End()
 	}
 

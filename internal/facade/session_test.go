@@ -137,7 +137,7 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 	spans := exporter.GetSpans()
 
 	// Find facade.message span
-	msgSpan := findSpanByName(spans, "facade.message")
+	msgSpan := findSpanByName(spans, "omnia.facade.message")
 	if msgSpan == nil {
 		t.Fatal("expected 'facade.message' span to be recorded")
 	}
@@ -151,8 +151,16 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 	if !ok {
 		t.Fatal("missing attribute 'session.id' on facade.message span")
 	}
-	if val.AsString() == "" {
-		t.Error("session.id attribute should not be empty")
+	sessionID := val.AsString()
+	if sessionID == "" {
+		t.Fatal("session.id attribute should not be empty")
+	}
+
+	// Verify trace ID is derived from session ID (UUID without dashes)
+	expectedTraceID := sessionIDToTraceID(sessionID)
+	if msgSpan.SpanContext.TraceID() != expectedTraceID {
+		t.Errorf("trace ID = %s, want %s (derived from session %s)",
+			msgSpan.SpanContext.TraceID(), expectedTraceID, sessionID)
 	}
 
 	// Verify span has a non-zero duration (it wasn't ended immediately)
@@ -160,10 +168,19 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 		t.Error("expected span to have non-zero duration")
 	}
 
-	// Find facade.session span (ended when WebSocket was closed)
+	// Verify agent attributes are set on the message span (moved from session span)
+	agentVal, ok := findSpanAttr(*msgSpan, "omnia.agent.name")
+	if !ok {
+		t.Fatal("missing attribute 'omnia.agent.name' on facade.message span")
+	}
+	if agentVal.AsString() != "test-agent" {
+		t.Errorf("omnia.agent.name = %q, want %q", agentVal.AsString(), "test-agent")
+	}
+
+	// Verify no facade.session span exists (removed to fix trace visualization)
 	sessionSpan := findSpanByName(spans, "facade.session")
-	if sessionSpan == nil {
-		t.Fatal("expected 'facade.session' span to be recorded")
+	if sessionSpan != nil {
+		t.Error("facade.session span should no longer be created")
 	}
 }
 

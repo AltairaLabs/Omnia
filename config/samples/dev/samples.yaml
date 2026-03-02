@@ -143,8 +143,8 @@ data:
           "name": "General Assistant",
           "description": "Friendly general-purpose assistant with tool access.",
           "version": "2.0.0",
-          "system_template": "You are a helpful AI assistant for demo purposes. Be concise and friendly in your responses. You can use tools to look up weather and perform calculations.",
-          "tools": ["get_weather", "calculate"],
+          "system_template": "You are a helpful AI assistant for demo purposes. Be concise and friendly in your responses. You can use tools to look up weather and perform calculations.\n\nFor weather queries: first use search_places to find the location's coordinates, then use get_weather with those coordinates.\nFor math: use the calculate tool with mathematical expressions.",
+          "tools": ["search_places", "get_weather", "calculate"],
           "tool_policy": {
             "tool_choice": "auto",
             "max_rounds": 3
@@ -197,32 +197,54 @@ data:
         }
       },
       "tools": {
-        "get_weather": {
-          "name": "get_weather",
-          "description": "Get current weather for a location",
+        "search_places": {
+          "name": "search_places",
+          "description": "Search for a place by name to get its coordinates. Returns latitude, longitude, country, and timezone.",
           "parameters": {
             "type": "object",
             "properties": {
-              "location": {
+              "name": {
                 "type": "string",
-                "description": "City name or coordinates"
+                "description": "City or place name to search for"
               }
             },
-            "required": ["location"]
+            "required": ["name"]
+          }
+        },
+        "get_weather": {
+          "name": "get_weather",
+          "description": "Get current weather for given coordinates. Requires latitude and longitude (use search_places first to get coordinates).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "description": "Latitude of the location"
+              },
+              "longitude": {
+                "type": "number",
+                "description": "Longitude of the location"
+              },
+              "current": {
+                "type": "string",
+                "description": "Comma-separated weather variables: temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
+              }
+            },
+            "required": ["latitude", "longitude"]
           }
         },
         "calculate": {
           "name": "calculate",
-          "description": "Perform mathematical calculations",
+          "description": "Evaluate a mathematical expression (e.g. \"2 * (3 + 4)\", \"sqrt(16)\", \"sin(pi/2)\")",
           "parameters": {
             "type": "object",
             "properties": {
-              "expression": {
+              "expr": {
                 "type": "string",
                 "description": "Mathematical expression to evaluate"
               }
             },
-            "required": ["expression"]
+            "required": ["expr"]
           }
         }
       },
@@ -279,37 +301,59 @@ metadata:
   namespace: dev-agents
 spec:
   handlers:
-  - name: weather
+  - name: search-places
     type: http
     httpConfig:
-      endpoint: "https://api.weather.example.com/v1/current"
+      endpoint: "https://geocoding-api.open-meteo.com/v1/search"
       method: GET
     tool:
-      name: get_weather
-      description: Get current weather for a location
+      name: search_places
+      description: Search for a place by name to get its coordinates. Returns latitude, longitude, country, and timezone.
       inputSchema:
         type: object
         properties:
-          location:
+          name:
             type: string
-            description: City name or coordinates
-        required: [location]
+            description: City or place name to search for
+        required: [name]
+    timeout: "10s"
+  - name: weather
+    type: http
+    httpConfig:
+      endpoint: "https://api.open-meteo.com/v1/forecast"
+      method: GET
+    tool:
+      name: get_weather
+      description: Get current weather for given coordinates. Requires latitude and longitude (use search_places first to get coordinates).
+      inputSchema:
+        type: object
+        properties:
+          latitude:
+            type: number
+            description: Latitude of the location
+          longitude:
+            type: number
+            description: Longitude of the location
+          current:
+            type: string
+            description: "Comma-separated weather variables: temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
+        required: [latitude, longitude]
     timeout: "10s"
   - name: calculator
     type: http
     httpConfig:
-      endpoint: "https://api.calculator.example.com/v1/compute"
-      method: POST
+      endpoint: "https://api.mathjs.org/v4/"
+      method: GET
     tool:
       name: calculate
-      description: Perform mathematical calculations
+      description: "Evaluate a mathematical expression (e.g. \"2 * (3 + 4)\", \"sqrt(16)\", \"sin(pi/2)\")"
       inputSchema:
         type: object
         properties:
-          expression:
+          expr:
             type: string
             description: Mathematical expression to evaluate
-        required: [expression]
+        required: [expr]
     timeout: "5s"
 ---
 # =============================================================================

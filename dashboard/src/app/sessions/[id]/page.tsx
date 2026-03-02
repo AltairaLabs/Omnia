@@ -28,12 +28,18 @@ import {
   Copy,
   MessageSquare,
   AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 import { useSessionDetail, useSessionEvalResults } from "@/hooks";
 import type { Message, ToolCall, Session, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import {
+  useGrafana,
+  buildSessionLogsUrl,
+  buildSessionTracesUrl,
+} from "@/hooks/use-grafana";
 
 function getStatusBadge(status: Session["status"]) {
   const variants: Record<Session["status"], { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
@@ -286,6 +292,11 @@ export default function SessionDetailPage({
   const router = useRouter();
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
+  const grafana = useGrafana();
+  const sessionLogsUrl = grafana.enabled && session
+    ? buildSessionLogsUrl(grafana, id, session.agentName)
+    : null;
+  const sessionTracesUrl = grafana.enabled ? buildSessionTracesUrl(grafana, id) : null;
 
   if (isLoading) {
     return <DetailSkeleton />;
@@ -431,6 +442,22 @@ export default function SessionDetailPage({
         }
       >
         <div className="flex items-center gap-2">
+          {sessionLogsUrl && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={sessionLogsUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Logs
+              </a>
+            </Button>
+          )}
+          {sessionTracesUrl && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={sessionTracesUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Traces
+              </a>
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => handleExport("markdown")}>
             <Download className="h-4 w-4 mr-2" />
             Export MD

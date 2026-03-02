@@ -326,7 +326,7 @@ data:
           "name": "Tools Assistant",
           "version": "1.1.0",
           "system_template": {{ .Values.toolsDemo.promptPack.systemPrompt | toJson }},
-          "tools": ["get_weather", "calculate"],
+          "tools": ["search_places", "get_weather", "calculate"],
           "parameters": {
             "temperature": 0.7
           },
@@ -387,32 +387,54 @@ data:
       },
 
       "tools": {
-        "get_weather": {
-          "name": "get_weather",
-          "description": "Get current weather for a given location",
+        "search_places": {
+          "name": "search_places",
+          "description": "Search for a place by name to get its coordinates. Returns latitude, longitude, country, and timezone.",
           "parameters": {
             "type": "object",
             "properties": {
-              "location": {
+              "name": {
                 "type": "string",
-                "description": "City name or coordinates"
+                "description": "City or place name to search for"
               }
             },
-            "required": ["location"]
+            "required": ["name"]
+          }
+        },
+        "get_weather": {
+          "name": "get_weather",
+          "description": "Get current weather for given coordinates. Requires latitude and longitude (use search_places first to get coordinates).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "description": "Latitude of the location"
+              },
+              "longitude": {
+                "type": "number",
+                "description": "Longitude of the location"
+              },
+              "current": {
+                "type": "string",
+                "description": "Comma-separated weather variables: temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
+              }
+            },
+            "required": ["latitude", "longitude"]
           }
         },
         "calculate": {
           "name": "calculate",
-          "description": "Evaluate a mathematical expression",
+          "description": "Evaluate a mathematical expression (e.g. \"2 * (3 + 4)\", \"sqrt(16)\", \"sin(pi/2)\")",
           "parameters": {
             "type": "object",
             "properties": {
-              "expression": {
+              "expr": {
                 "type": "string",
                 "description": "Mathematical expression to evaluate"
               }
             },
-            "required": ["expression"]
+            "required": ["expr"]
           }
         }
       },
@@ -466,42 +488,64 @@ metadata:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   handlers:
+    - name: search-places
+      type: http
+      timeout: 10s
+      httpConfig:
+        endpoint: https://geocoding-api.open-meteo.com/v1/search
+        method: GET
+      tool:
+        name: search_places
+        description: Search for a place by name to get its coordinates. Returns latitude, longitude, country, and timezone.
+        inputSchema:
+          type: object
+          properties:
+            name:
+              type: string
+              description: City or place name to search for
+          required:
+            - name
     - name: weather
       type: http
       timeout: 10s
       httpConfig:
-        endpoint: https://api.weather.example.com/v1/current
+        endpoint: https://api.open-meteo.com/v1/forecast
         method: GET
-        contentType: application/json
       tool:
         name: get_weather
-        description: Get current weather for a location
+        description: Get current weather for given coordinates. Requires latitude and longitude (use search_places first to get coordinates).
         inputSchema:
           type: object
           properties:
-            location:
+            latitude:
+              type: number
+              description: Latitude of the location
+            longitude:
+              type: number
+              description: Longitude of the location
+            current:
               type: string
-              description: City name or coordinates
+              description: "Comma-separated weather variables: temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
           required:
-            - location
+            - latitude
+            - longitude
     - name: calculator
       type: http
       timeout: 5s
       httpConfig:
-        endpoint: https://api.calculator.example.com/v1/compute
-        method: POST
-        contentType: application/json
+        endpoint: https://api.mathjs.org/v4/
+        method: GET
       tool:
         name: calculate
-        description: Perform mathematical calculations
+        description: Evaluate a mathematical expression (e.g. "2 * (3 + 4)", "sqrt(16)", "sin(pi/2)")
         inputSchema:
           type: object
           properties:
-            expression:
+            expr:
               type: string
               description: Mathematical expression to evaluate
           required:
-            - expression
+            - expr
 ---
 # Tools Demo AgentRuntime using llama3.2 with tool capabilities
 apiVersion: omnia.altairalabs.ai/v1alpha1

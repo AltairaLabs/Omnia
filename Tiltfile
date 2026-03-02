@@ -970,8 +970,8 @@ if USE_LOCAL_PROMPTKIT:
 _rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
 
 _restart_cmd = '''
-    kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
-    kubectl rollout restart deployment -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+    kubectl delete po -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+    kubectl delete po -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
 '''
 
 # Manual buttons to rebuild individual images and restart pods

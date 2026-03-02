@@ -31,6 +31,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -50,6 +52,13 @@ import (
 )
 
 func main() {
+	// Initialize global OpenTelemetry text map propagator for trace context propagation.
+	// This must be set before any gRPC operations to ensure trace context flows through gRPC calls.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
 	// Initialize logger (respects LOG_LEVEL env var).
 	// Create the Zap logger directly so we can derive both logr (for Omnia)
 	// and slog (for PromptKit SDK) from the same Zap core without a lossy bridge.
@@ -181,6 +190,10 @@ func main() {
 			log.Error(err, "failed to initialize tracing")
 			// Continue without tracing - it's optional
 		} else {
+			tracingProvider = tracingProvider.WithLogger(log)
+			// Set as global provider so PromptKit SDK can use it.
+			// This is safe because runtime is isolated in its own container.
+			otel.SetTracerProvider(tracingProvider.TracerProvider())
 			log.Info("tracing initialized",
 				"endpoint", cfg.TracingEndpoint,
 				"sampleRate", cfg.TracingSampleRate)
@@ -220,6 +233,7 @@ func main() {
 		pkruntime.WithSlogLogger(sdkLogger),
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
+		pkruntime.WithPromptPackName(cfg.PromptPackName),
 		pkruntime.WithStateStore(store),
 		pkruntime.WithModel(cfg.Model),
 		pkruntime.WithMockProvider(cfg.MockProvider),
@@ -234,6 +248,9 @@ func main() {
 	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
+	}
+	if cfg.PromptPackVersion != "" {
+		serverOpts = append(serverOpts, pkruntime.WithPromptPackVersion(cfg.PromptPackVersion))
 	}
 	if evalCollector != nil {
 		evalM := pkmetrics.NewEvalMetrics(pkmetrics.EvalMetricsConfig{
@@ -266,13 +283,18 @@ func main() {
 
 	// Create gRPC server with increased message size for multimodal content
 	const maxMsgSize = 16 * 1024 * 1024 // 16MB to support base64-encoded images
-	grpcServer := grpc.NewServer(
+	var grpcOpts []grpc.ServerOption
+	grpcOpts = append(grpcOpts,
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
-		grpc.StatsHandler(otelgrpc.NewServerHandler(
-			otelgrpc.WithFilter(isNotHealthCheck),
-		)),
 	)
+	if tracingProvider != nil {
+		grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithTracerProvider(tracingProvider.TracerProvider()),
+			otelgrpc.WithFilter(isNotHealthCheck),
+		)))
+	}
+	grpcServer := grpc.NewServer(grpcOpts...)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 
 	// Register health service
@@ -359,5 +381,5 @@ func main() {
 
 // isNotHealthCheck filters out gRPC health check RPCs from tracing.
 func isNotHealthCheck(info *stats.RPCTagInfo) bool {
-	return info.FullMethodName != "/grpc.health.v1.Health/Check"
+	return info.FullMethodName != "/omnia.runtime.v1.RuntimeService/Health"
 }

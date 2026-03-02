@@ -23,7 +23,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
@@ -36,7 +35,6 @@ type Connection struct {
 	agentName     string
 	namespace     string
 	binaryCapable bool // Client supports binary WebSocket frames
-	sessionSpan   trace.Span
 	mu            sync.Mutex
 	closed        bool
 
@@ -80,11 +78,6 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	c.mu.Lock()
 	c.closed = true
 	c.mu.Unlock()
-
-	// End session span if tracing was enabled
-	if c.sessionSpan != nil {
-		c.sessionSpan.End()
-	}
 
 	s.metrics.ConnectionClosed()
 

@@ -71,7 +71,10 @@ func SlogFromLogr(l logr.Logger) *slog.Logger {
 
 func newZapLogger(level string) (*zap.Logger, error) {
 	if level == "debug" || level == "trace" {
-		cfg := zap.NewDevelopmentConfig()
+		// Use production JSON encoding even in debug mode so that
+		// structured fields (trace_id, session_id, etc.) are parseable
+		// by Alloy/Loki for log↔trace correlation.
+		cfg := zap.NewProductionConfig()
 		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 		return cfg.Build()
 	}

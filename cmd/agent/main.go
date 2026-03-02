@@ -27,6 +27,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
@@ -45,6 +47,13 @@ const (
 )
 
 func main() {
+	// Initialize global OpenTelemetry text map propagator for trace context propagation.
+	// This must be set before any gRPC operations to ensure trace context flows through gRPC calls.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
 	// Initialize logger
 	log, syncLog, err := logging.NewLogger()
 	if err != nil {
@@ -96,6 +105,7 @@ func main() {
 			log.Error(tracingErr, "failed to initialize tracing")
 			// Continue without tracing - it's optional
 		} else {
+			tracingProvider = tracingProvider.WithLogger(log)
 			defer func() {
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer shutdownCancel()
@@ -330,12 +340,18 @@ func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (fa
 		maxRetries := 10
 		backoff := 500 * time.Millisecond
 
+		// Build RuntimeClient config with optional tracing
+		runtimeCfg := facade.RuntimeClientConfig{
+			Address:     cfg.RuntimeAddress,
+			DialTimeout: 5 * time.Second,
+			Log:         log,
+		}
+		if tp != nil {
+			runtimeCfg.TracerProvider = tp.TracerProvider()
+		}
+
 		for i := 0; i < maxRetries; i++ {
-			client, err = facade.NewRuntimeClient(facade.RuntimeClientConfig{
-				Address:     cfg.RuntimeAddress,
-				DialTimeout: 5 * time.Second,
-				Log:         log,
-			})
+			client, err = facade.NewRuntimeClient(runtimeCfg)
 			if err == nil {
 				log.Info("connected to runtime", "address", cfg.RuntimeAddress, "attempt", i+1)
 				break

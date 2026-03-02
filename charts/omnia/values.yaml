@@ -975,8 +975,10 @@ tracing:
   # -- Enable distributed tracing for agent runtime containers
   enabled: false
   # -- OTLP gRPC endpoint for traces
-  # When tempo.enabled=true, defaults to the in-cluster Tempo service
-  # Example: omnia-tempo.omnia-system.svc.cluster.local:4317
+  # Resolution order when empty:
+  #   1) <release>-alloy:4317 (if alloy.enabled=true)
+  #   2) <release>-tempo:4317 (if tempo.enabled=true)
+  # Example explicit override: omnia-alloy.omnia-system.svc.cluster.local:4317
   endpoint: ""
 
   # Grafana Alloy OTLP fan-out configuration
@@ -1279,6 +1281,29 @@ alloy:
             target_label  = "app_name"
           }
 
+          // Set agent name from app.kubernetes.io/instance (e.g. "tools-demo")
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+            target_label  = "agent"
+          }
+
+          // Set component from omnia.altairalabs.ai/component (e.g. "agent")
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_omnia_altairalabs_ai_component"]
+            target_label  = "component"
+          }
+
+          // Build service_name to match Tempo's OTEL service.name: omnia-{container}-{agent}
+          // This enables Grafana to correlate Loki logs with Tempo traces by service.
+          // Only sets the label when both container and agent are present (Omnia pods).
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name", "__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+            separator     = "/"
+            regex         = "(.+)/(.+)"
+            replacement   = "omnia-$1-$2"
+            target_label  = "service_name"
+          }
+
           // Build log file path
           rule {
             source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
@@ -1307,14 +1332,17 @@ alloy:
             drop_counter_reason = "health_metrics_filter"
           }
 
-          // Try to parse JSON logs and extract timestamp
+          // Try to parse JSON logs and extract fields
           stage.json {
             expressions = {
-              level     = "level",
-              msg       = "msg",
-              caller    = "caller",
-              timestamp = "time",
-              ts        = "ts",
+              level      = "level",
+              msg        = "msg",
+              caller     = "caller",
+              timestamp  = "time",
+              ts         = "ts",
+              agent      = "agent",
+              session_id = "session_id",
+              trace_id   = "trace_id",
             }
           }
 
@@ -1332,10 +1360,11 @@ alloy:
             fallback_formats = ["RFC3339Nano", "Unix", "UnixMs", "UnixUs", "UnixNs"]
           }
 
-          // Add level as label if extracted
+          // Promote key fields to indexed labels for filtering
           stage.labels {
             values = {
               level = "",
+              agent = "",
             }
           }
 
@@ -1343,15 +1372,15 @@ alloy:
           // Requires Loki 3.0+ with structured metadata enabled
           stage.structured_metadata {
             values = {
-              msg    = "",
-              caller = "",
+              msg        = "",
+              caller     = "",
+              session_id = "",
+              trace_id   = "",
             }
           }
 
-          // Output a clean log line (just the message if available)
-          stage.output {
-            source = "msg"
-          }
+          // Keep the full JSON log line so all structured fields are preserved
+          // and queryable in Grafana. Labels and metadata above handle indexing.
         }
 
         // Write logs to Loki

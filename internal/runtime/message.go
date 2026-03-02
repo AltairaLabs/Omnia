@@ -36,11 +36,24 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	content := msg.GetContent()
 	metadata := msg.GetMetadata()
 
+	// Check if trace context exists in incoming gRPC context
+	incomingSpan := trace.SpanFromContext(ctx)
+	if incomingSpan.SpanContext().IsValid() {
+		s.log.V(1).Info("received context with trace",
+			"traceID", incomingSpan.SpanContext().TraceID(),
+			"spanID", incomingSpan.SpanContext().SpanID())
+	} else {
+		s.log.V(1).Info("received context WITHOUT trace - spans will be orphaned")
+	}
+
 	// Enrich context with session ID and start tracing span
 	ctx = logctx.WithSessionID(ctx, sessionID)
-	log := logctx.LoggerWithContext(s.log, ctx)
 	ctx, span := s.startTracingSpan(ctx, sessionID)
 	defer span.End()
+
+	// Add trace ID to log context for log↔trace correlation in Grafana
+	ctx = logctx.WithTraceID(ctx, span.SpanContext().TraceID().String())
+	log := logctx.LoggerWithContext(s.log, ctx)
 
 	// Extract mock scenario and prepare message content
 	scenario := s.extractScenario(metadata, content, log)
@@ -53,7 +66,9 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	// Get or create conversation for this session
 	conv, err := s.getOrCreateConversation(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to get conversation: %w", err)
+		err = fmt.Errorf("failed to get conversation: %w", err)
+		tracing.RecordError(span, err)
+		return err
 	}
 
 	// Prepare message content with scenario if needed
@@ -65,17 +80,30 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	// Stream response and collect results
 	finalResponse, accumulatedContent, err := s.streamResponse(ctx, stream, conv, messageContent, sendOpts)
 	if err != nil {
+		tracing.RecordError(span, err)
 		return err
 	}
 
 	// Build and send the done message
-	return s.sendDoneMessage(ctx, stream, log, finalResponse, accumulatedContent, content)
+	if err := s.sendDoneMessage(ctx, stream, log, finalResponse, accumulatedContent, content); err != nil {
+		tracing.RecordError(span, err)
+		return err
+	}
+
+	tracing.SetSuccess(span)
+	return nil
 }
 
 // startTracingSpan starts a conversation span if tracing is enabled, returning the enriched context and span.
 func (s *Server) startTracingSpan(ctx context.Context, sessionID string) (context.Context, trace.Span) {
 	if s.tracingProvider != nil {
-		return s.tracingProvider.StartConversationSpan(ctx, sessionID)
+		// Get and increment turn index for this session
+		s.conversationMu.Lock()
+		turnIndex := s.turnIndices[sessionID]
+		s.turnIndices[sessionID] = turnIndex + 1
+		s.conversationMu.Unlock()
+
+		return s.tracingProvider.StartConversationSpan(ctx, sessionID, s.promptPackName, s.promptPackVersion, turnIndex)
 	}
 	// Return a no-op span from the context (may have been set by otelgrpc server handler)
 	return ctx, trace.SpanFromContext(ctx)
@@ -112,8 +140,16 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 	if s.tracingProvider != nil {
 		ctx, llmSpan = s.tracingProvider.StartLLMSpan(ctx, s.model, s.providerType)
 		defer llmSpan.End()
+		log.V(1).Info("created LLM span",
+			"traceID", llmSpan.SpanContext().TraceID(),
+			"spanID", llmSpan.SpanContext().SpanID(),
+			"hasParent", llmSpan.SpanContext().HasTraceID())
 	}
 
+	log.V(1).Info("calling PromptKit SDK with context",
+		"hasTraceContext", trace.SpanFromContext(ctx).SpanContext().IsValid(),
+		"traceID", trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
+		"spanID", trace.SpanFromContext(ctx).SpanContext().SpanID().String())
 	streamCh := conv.Stream(ctx, content, opts...)
 	var finalResponse *sdk.Response
 	var accumulatedContent strings.Builder
@@ -213,7 +249,6 @@ func (s *Server) buildUsageInfo(ctx context.Context, finalResponse *sdk.Response
 		span := trace.SpanFromContext(ctx)
 		tracing.AddLLMMetrics(span, inputTokens, outputTokens, costUSD)
 		tracing.AddConversationMetrics(span, len(originalContent), len(responseText))
-		tracing.SetSuccess(span)
 	}
 
 	return responseText, usage
