@@ -32,13 +32,16 @@ import (
 
 // Sentinel errors returned by the session service.
 var (
-	ErrWarmStoreRequired = errors.New("warm store is required for this operation")
-	ErrMissingWorkspace  = errors.New("workspace parameter is required")
-	ErrMissingQuery      = errors.New("search query parameter is required")
-	ErrMissingSessionID  = errors.New("session ID is required")
-	ErrMissingBody       = errors.New("request body is required")
-	ErrMissingNamespace  = errors.New("namespace parameter is required")
-	ErrBodyTooLarge      = errors.New("request body too large")
+	ErrWarmStoreRequired  = errors.New("warm store is required for this operation")
+	ErrMissingWorkspace   = errors.New("workspace parameter is required")
+	ErrMissingQuery       = errors.New("search query parameter is required")
+	ErrMissingSessionID   = errors.New("session ID is required")
+	ErrInvalidSessionID   = errors.New("session ID must be a valid UUID")
+	ErrMissingBody        = errors.New("request body is required")
+	ErrMissingNamespace   = errors.New("namespace parameter is required")
+	ErrBodyTooLarge       = errors.New("request body too large")
+	ErrInvalidStatus      = errors.New("invalid session status")
+	ErrSearchQueryTooLong = errors.New("search query too long")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.
@@ -93,6 +96,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try hot cache first.
 	sess, err := s.getFromHot(ctx, sessionID)
 	if err == nil {
+		s.log.V(1).Info("session retrieved", "sessionID", sessionID, "tier", "hot")
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
@@ -100,6 +104,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try warm store.
 	sess, err = s.getFromWarm(ctx, sessionID)
 	if err == nil {
+		s.log.V(1).Info("session retrieved", "sessionID", sessionID, "tier", "warm")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -108,6 +113,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try cold archive.
 	sess, err = s.getFromCold(ctx, sessionID)
 	if err == nil {
+		s.log.V(1).Info("session retrieved", "sessionID", sessionID, "tier", "cold")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -335,7 +341,9 @@ func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Ses
 	}
 	if err := hot.SetSession(ctx, sess, s.cacheTTL); err != nil {
 		s.log.Error(err, "failed to populate hot cache", "sessionID", sess.ID)
+		return
 	}
+	s.log.V(1).Info("hot cache populated", "sessionID", sess.ID)
 }
 
 // isHotEligible returns true if the query can be served from the hot cache.

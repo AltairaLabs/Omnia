@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -48,6 +50,7 @@ type Server struct {
 	runtimev1.UnimplementedRuntimeServiceServer
 
 	log            logr.Logger
+	sdkLogger      *slog.Logger
 	packPath       string
 	promptName     string
 	stateStore     statestore.Store
@@ -71,6 +74,7 @@ type Server struct {
 	// Evals
 	evalCollector *evals.MetricCollector
 	evalDefs      []evals.EvalDef
+	evalMetrics   metrics.EvalMetricsRecorder
 
 	// Metrics
 	metrics        *Metrics
@@ -86,10 +90,20 @@ type Server struct {
 // ServerOption configures the server.
 type ServerOption func(*Server)
 
-// WithLogger sets the logger for the server.
+// WithLogger sets the logr.Logger for the server's own structured logging.
+// To also set the slog.Logger passed to the PromptKit SDK, use WithSlogLogger.
 func WithLogger(log logr.Logger) ServerOption {
 	return func(s *Server) {
 		s.log = log
+	}
+}
+
+// WithSlogLogger sets the *slog.Logger passed to the PromptKit SDK.
+// Create this via logging.SlogFromZap so it writes directly to the Zap core,
+// producing output identical to the logr logger set via WithLogger.
+func WithSlogLogger(l *slog.Logger) ServerOption {
+	return func(s *Server) {
+		s.sdkLogger = l
 	}
 }
 
@@ -200,6 +214,13 @@ func WithEvalCollector(c *evals.MetricCollector) ServerOption {
 func WithEvalDefs(defs []evals.EvalDef) ServerOption {
 	return func(s *Server) {
 		s.evalDefs = defs
+	}
+}
+
+// WithEvalMetrics sets the eval Prometheus metrics recorder for the server.
+func WithEvalMetrics(m metrics.EvalMetricsRecorder) ServerOption {
+	return func(s *Server) {
+		s.evalMetrics = m
 	}
 }
 

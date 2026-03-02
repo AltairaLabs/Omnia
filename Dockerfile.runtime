@@ -19,12 +19,13 @@ COPY promptkit-local* /workspace/promptkit-local/
 
 # Set up go.work for local PromptKit if enabled
 RUN if [ "$USE_LOCAL_PROMPTKIT" = "true" ] && [ -d "/workspace/promptkit-local/runtime" ]; then \
-        echo "go 1.25.1" > go.work && \
+        echo "go 1.25.6" > go.work && \
         echo "" >> go.work && \
         echo "use (" >> go.work && \
         echo "    ." >> go.work && \
         echo "    ./promptkit-local/runtime" >> go.work && \
         echo "    ./promptkit-local/sdk" >> go.work && \
+        echo "    ./promptkit-local/server/a2a" >> go.work && \
         echo ")" >> go.work && \
         cat go.work; \
     fi

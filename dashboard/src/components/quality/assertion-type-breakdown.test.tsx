@@ -20,6 +20,7 @@ vi.mock("@/hooks", () => ({
 import {
   AssertionTypeBreakdown,
   formatMetricName,
+  formatMetricValue,
   getMetricVariant,
   getMetricColor,
 } from "./assertion-type-breakdown";
@@ -49,21 +50,30 @@ describe("formatMetricName", () => {
 });
 
 describe("getMetricVariant", () => {
-  it("returns default for high values (>= 0.9)", () => {
+  it("returns default for high gauge values (>= 0.9)", () => {
     expect(getMetricVariant(0.95)).toBe("default");
     expect(getMetricVariant(0.9)).toBe("default");
     expect(getMetricVariant(1.0)).toBe("default");
   });
 
-  it("returns secondary for medium values (>= 0.7)", () => {
+  it("returns secondary for medium gauge values (>= 0.7)", () => {
     expect(getMetricVariant(0.7)).toBe("secondary");
     expect(getMetricVariant(0.85)).toBe("secondary");
   });
 
-  it("returns destructive for low values (< 0.7)", () => {
+  it("returns destructive for low gauge values (< 0.7)", () => {
     expect(getMetricVariant(0.69)).toBe("destructive");
     expect(getMetricVariant(0)).toBe("destructive");
     expect(getMetricVariant(0.5)).toBe("destructive");
+  });
+
+  it("returns outline for counter metrics regardless of value", () => {
+    expect(getMetricVariant(47, "counter")).toBe("outline");
+    expect(getMetricVariant(0, "counter")).toBe("outline");
+  });
+
+  it("returns outline for histogram metrics regardless of value", () => {
+    expect(getMetricVariant(1.5, "histogram")).toBe("outline");
   });
 });
 
@@ -78,6 +88,24 @@ describe("getMetricColor", () => {
 
   it("returns red class for low values (< 0.7)", () => {
     expect(getMetricColor(0.5)).toContain("text-red");
+  });
+
+  it("returns muted color for counter metrics", () => {
+    expect(getMetricColor(47, "counter")).toContain("text-muted");
+  });
+});
+
+describe("formatMetricValue", () => {
+  it("formats gauge values as decimal", () => {
+    expect(formatMetricValue(0.95, "gauge")).toBe("0.950");
+  });
+
+  it("formats counter values as rounded integers", () => {
+    expect(formatMetricValue(47, "counter")).toBe("47");
+  });
+
+  it("formats histogram values with seconds suffix", () => {
+    expect(formatMetricValue(1.5, "histogram")).toBe("1.500s");
   });
 });
 
@@ -141,8 +169,8 @@ describe("AssertionTypeBreakdown", () => {
   it("renders metric rows with name, value, badge", () => {
     mockUseEvalMetrics.mockReturnValue({
       data: [
-        { name: "omnia_eval_tone", value: 0.95 },
-        { name: "omnia_eval_safety", value: 0.65 },
+        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge" },
+        { name: "omnia_eval_safety", value: 0.65, metricType: "gauge" },
       ],
       isLoading: false,
       error: null,
@@ -168,7 +196,7 @@ describe("AssertionTypeBreakdown", () => {
 
   it("renders Warning badge for medium values", () => {
     mockUseEvalMetrics.mockReturnValue({
-      data: [{ name: "omnia_eval_relevance", value: 0.75 }],
+      data: [{ name: "omnia_eval_relevance", value: 0.75, metricType: "gauge" }],
       isLoading: false,
       error: null,
     });
@@ -183,10 +211,28 @@ describe("AssertionTypeBreakdown", () => {
     expect(screen.getByText("Warning")).toBeInTheDocument();
   });
 
+  it("renders counter metric with type label instead of pass/fail", () => {
+    mockUseEvalMetrics.mockReturnValue({
+      data: [{ name: "omnia_eval_executed_total", value: 47, metricType: "counter" }],
+      isLoading: false,
+      error: null,
+    });
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <AssertionTypeBreakdown />
+      </Wrapper>
+    );
+
+    expect(screen.getByText("47")).toBeInTheDocument();
+    expect(screen.getByText("counter")).toBeInTheDocument();
+  });
+
   it("calls onSelectMetric when row is clicked", () => {
     const onSelectMetric = vi.fn();
     mockUseEvalMetrics.mockReturnValue({
-      data: [{ name: "omnia_eval_tone", value: 0.95 }],
+      data: [{ name: "omnia_eval_tone", value: 0.95, metricType: "gauge" }],
       isLoading: false,
       error: null,
     });
@@ -205,8 +251,8 @@ describe("AssertionTypeBreakdown", () => {
   it("highlights active metric row", () => {
     mockUseEvalMetrics.mockReturnValue({
       data: [
-        { name: "omnia_eval_tone", value: 0.95 },
-        { name: "omnia_eval_safety", value: 0.8 },
+        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge" },
+        { name: "omnia_eval_safety", value: 0.8, metricType: "gauge" },
       ],
       isLoading: false,
       error: null,
@@ -230,35 +276,23 @@ describe("AssertionTypeBreakdown", () => {
     expect(safetyClasses).not.toContain("bg-muted");
   });
 
-  it("shows alert indicator when metric is below threshold", () => {
+  it("passes filter to useEvalMetrics", () => {
     mockUseEvalMetrics.mockReturnValue({
-      data: [
-        { name: "omnia_eval_tone", value: 0.7 },
-        { name: "omnia_eval_safety", value: 0.95 },
-      ],
+      data: [],
       isLoading: false,
       error: null,
     });
 
-    const thresholds = new Map([
-      ["omnia_eval_tone", 0.8],
-      ["omnia_eval_safety", 0.9],
-    ]);
+    const filter = { agent: "chatbot" };
 
     const Wrapper = createWrapper();
-    const { container } = render(
+    render(
       <Wrapper>
-        <AssertionTypeBreakdown alertThresholds={thresholds} />
+        <AssertionTypeBreakdown filter={filter} />
       </Wrapper>
     );
 
-    // tone (0.7) is below threshold (0.8) - should show red dot
-    const alertDots = container.querySelectorAll(".bg-red-500");
-    expect(alertDots).toHaveLength(1);
-
-    // safety (0.95) is above threshold (0.9) - no dot
-    const safetyRow = screen.getByText("safety").closest("tr");
-    expect(safetyRow?.querySelector(".bg-red-500")).toBeNull();
+    expect(mockUseEvalMetrics).toHaveBeenCalledWith(filter);
   });
 
   it("renders card header with title", () => {

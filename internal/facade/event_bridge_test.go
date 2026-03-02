@@ -22,11 +22,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"log/slog"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -76,8 +76,8 @@ func (m *mockSessionClient) getStatsUpdates() []session.SessionStatsUpdate {
 	return result
 }
 
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+func newTestLogger() logr.Logger {
+	return logr.Discard()
 }
 
 func TestNewEventBridge(t *testing.T) {

@@ -50,10 +50,11 @@ LANGCHAIN_RUNTIME_PATH = os.getenv('LANGCHAIN_RUNTIME_PATH', '../omnia-langchain
 # Set to True to build runtime with local PromptKit source for debugging
 # Can be set via environment: USE_LOCAL_PROMPTKIT=true PROMPTKIT_PATH=/path/to/PromptKit tilt up
 # This allows rapid iteration on PromptKit changes without publishing releases
-# Auto-enables if promptkit-local/tools exists (arena worker needs promptarena)
-_promptkit_local_exists = os.path.exists('./promptkit-local/tools/arena/cmd/promptarena/main.go')
-USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or _promptkit_local_exists
+# Auto-enables if promptkit-local/ has content (from rsync) or PROMPTKIT_PATH source exists
 PROMPTKIT_PATH = os.getenv('PROMPTKIT_PATH', '../PromptKit')
+_promptkit_local_exists = os.path.exists('./promptkit-local/tools/arena/cmd/promptarena/main.go')
+_promptkit_source_exists = os.path.exists(PROMPTKIT_PATH + '/runtime')
+USE_LOCAL_PROMPTKIT = os.getenv('USE_LOCAL_PROMPTKIT', '').lower() in ('true', '1', 'yes') or _promptkit_local_exists or _promptkit_source_exists
 
 # Set to True to enable full production-like stack
 # Includes: Istio service mesh, Tempo (tracing), Loki (logging), Alloy (collector),
@@ -185,6 +186,7 @@ operator_only = [
     './api',
     './internal',
     './pkg',
+    './ee',
     './go.mod',
     './go.sum',
     # Embedded files for go:embed directives
@@ -211,7 +213,7 @@ docker_build(
     dockerfile='./Dockerfile.session-api',
     only=[
         './cmd/session-api',
-        './internal/session',
+        './internal',
         './ee/pkg',
         './ee/internal',
         './pkg',
@@ -219,6 +221,36 @@ docker_build(
         './go.sum',
     ],
 )
+
+# ============================================================================
+# Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
+# ============================================================================
+# Docker COPY does not follow symlinks, so we rsync the actual PromptKit source
+# into a real directory. This runs automatically when PromptKit source changes.
+
+if USE_LOCAL_PROMPTKIT:
+    local_resource(
+        'sync-promptkit',
+        cmd='rsync -a --delete ' +
+            '--include="runtime/***" ' +
+            '--include="sdk/***" ' +
+            '--include="server/***" ' +
+            '--include="pkg/***" ' +
+            '--include="tools/***" ' +
+            '--include="go.work" ' +
+            '--include="go.work.sum" ' +
+            '--exclude="*" ' +
+            PROMPTKIT_PATH + '/ ./promptkit-local/',
+        deps=[
+            PROMPTKIT_PATH + '/runtime',
+            PROMPTKIT_PATH + '/sdk',
+            PROMPTKIT_PATH + '/server',
+            PROMPTKIT_PATH + '/pkg',
+            PROMPTKIT_PATH + '/tools',
+            PROMPTKIT_PATH + '/go.work',
+        ],
+        labels=['build'],
+    )
 
 # ============================================================================
 # Agent Images - Facade and Runtime containers for AgentRuntime pods
@@ -231,6 +263,7 @@ docker_build(
     dockerfile='./Dockerfile.agent',
     only=[
         './cmd/agent',
+        './api',
         './internal/agent',
         './internal/facade',
         './internal/session',
@@ -258,27 +291,6 @@ runtime_build_args = {}
 if USE_LOCAL_PROMPTKIT:
     runtime_only.append('./promptkit-local')
     runtime_build_args['USE_LOCAL_PROMPTKIT'] = 'true'
-
-if USE_LOCAL_PROMPTKIT:
-    # Sync local PromptKit source for development builds
-    # This copies all subdirectories needed by go.mod replace directives:
-    # - pkg: config types used by discovery.go
-    # - runtime: agent runtime components
-    # - sdk: SDK types
-    # - tools/arena: promptarena CLI and engine
-    local_resource(
-        'sync-promptkit',
-        cmd='''
-            mkdir -p promptkit-local/tools
-            rsync -av --delete "%s/pkg/" promptkit-local/pkg/
-            rsync -av --delete "%s/runtime/" promptkit-local/runtime/
-            rsync -av --delete "%s/sdk/" promptkit-local/sdk/
-            rsync -av --delete "%s/tools/arena/" promptkit-local/tools/arena/
-            echo "Synced PromptKit from %s"
-        ''' % (PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH, PROMPTKIT_PATH),
-        deps=[PROMPTKIT_PATH + '/pkg', PROMPTKIT_PATH + '/runtime', PROMPTKIT_PATH + '/sdk', PROMPTKIT_PATH + '/tools/arena'],
-        labels=['dev'],
-    )
 
 docker_build(
     'omnia-runtime-dev',
@@ -443,6 +455,8 @@ helm_set = [
     'sessionApi.replicaCount=1',  # Single replica for dev
     'sessionApi.podDisruptionBudget.enabled=false',  # No PDB for dev
     'sessionApi.postgres.dev.enabled=true',  # Deploy dev Postgres
+    'sessionApi.extraEnv[0].name=LOG_LEVEL',
+    'sessionApi.extraEnv[0].value=debug',
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -498,6 +512,8 @@ if ENABLE_ENTERPRISE:
         'enterprise.evalWorker.image.repository=omnia-eval-worker-dev',
         'enterprise.evalWorker.image.tag=latest',
         'enterprise.evalWorker.image.pullPolicy=Never',
+        # Watch all dev namespaces for eval events (not just omnia-system)
+        'enterprise.evalWorker.namespaces={dev-agents,omnia-demo}',
         # Wire session-api to Redis so it publishes eval events to streams
         'sessionApi.redis.addrs=omnia-redis-master:6379',
     ])
@@ -529,10 +545,15 @@ if ENABLE_OBSERVABILITY:
         'dashboard.prometheus.url=http://omnia-prometheus-server:80/prometheus',
         # Use localhost URL for browser access to Grafana iframes
         'dashboard.grafana.url=http://localhost:3001',
-        # Disable Loki/Alloy/Tempo for simpler setup (use ENABLE_FULL_STACK for full observability)
-        'loki.enabled=false',
-        'alloy.enabled=false',
-        'tempo.enabled=false',
+        # Enable Loki + Alloy + Tempo for logs and traces (queryable in Grafana)
+        'loki.enabled=true',
+        'alloy.enabled=true',
+        'tempo.enabled=true',
+        # Enable tracing: facade/runtime → Alloy (OTLP) → Tempo + session-api
+        'tracing.enabled=true',
+        'tracing.endpoint=omnia-alloy.omnia-system.svc.cluster.local:4317',
+        # Enable OTLP ingestion on session-api so Alloy can forward traces
+        'sessionApi.otlp.enabled=true',
     ])
 else:
     helm_set.extend([
@@ -559,17 +580,8 @@ if ENABLE_FULL_STACK:
         'gateway.className=istio',
         'internalGateway.enabled=true',
         'internalGateway.className=istio',
-        # Enable distributed tracing for agent runtimes
-        'tracing.enabled=true',
-        'tracing.endpoint=omnia-tempo.omnia-system.svc.cluster.local:4317',
-        # Enable Tempo for distributed tracing
-        # Uses chart defaults for persistence
-        'tempo.enabled=true',
-        # Enable Loki for log aggregation
-        # Uses chart defaults: SingleBinary mode, persistence enabled, ruler disabled
-        'loki.enabled=true',
-        # Enable Alloy for telemetry collection
-        'alloy.enabled=true',
+        # Tracing goes through Alloy (already set in ENABLE_OBSERVABILITY above)
+        # Alloy fans out to Tempo + session-api
         # Configure dashboard with builtin auth
         'dashboard.auth.mode=builtin',
         'dashboard.auth.sessionSecret=dev-session-secret-do-not-use-in-prod',
@@ -710,17 +722,29 @@ if ENABLE_OBSERVABILITY:
         port_forwards=['3001:3000'],  # Grafana UI (container port 3000, local 3001)
     )
 
-    # Tempo for distributed tracing (only with ENABLE_FULL_STACK)
-    if ENABLE_FULL_STACK:
-        k8s_resource(
-            'omnia-tempo',
-            labels=['observability'],
-            port_forwards=[
-                '3200:3200',   # Tempo HTTP API
-                '4317:4317',   # OTLP gRPC
-                '4318:4318',   # OTLP HTTP
-            ],
-        )
+    # Loki for log aggregation (queryable in Grafana → Explore)
+    k8s_resource(
+        'omnia-loki',
+        labels=['observability'],
+        port_forwards=['3100:3100'],  # Loki HTTP API
+    )
+
+    # Alloy for log collection (collects pod logs and ships to Loki)
+    k8s_resource(
+        'omnia-alloy',
+        labels=['observability'],
+    )
+
+    # Tempo for distributed tracing
+    k8s_resource(
+        'omnia-tempo',
+        labels=['observability'],
+        port_forwards=[
+            '3200:3200',   # Tempo HTTP API
+            '4317:4317',   # OTLP gRPC
+            '4318:4318',   # OTLP HTTP
+        ],
+    )
 
 # ============================================================================
 # Redis for Arena Queue (Enterprise only)
@@ -805,24 +829,11 @@ if ENABLE_ENTERPRISE:
     )
 
 # ============================================================================
-# Full Stack Mode Resources (Istio, Tempo, Loki, Alloy)
+# Full Stack Mode Resources (Istio, Gateway API)
 # ============================================================================
 
 if ENABLE_FULL_STACK:
-    # Note: Tempo resource already defined in ENABLE_OBSERVABILITY above
-
-    # Loki for log aggregation
-    k8s_resource(
-        'omnia-loki',
-        labels=['observability'],
-        port_forwards=['3100:3100'],  # Loki HTTP API
-    )
-
-    # Alloy for telemetry collection
-    k8s_resource(
-        'omnia-alloy',
-        labels=['observability'],
-    )
+    # Note: Loki, Alloy, and Tempo resources are defined in ENABLE_OBSERVABILITY above
 
     # Gateway API and Istio resources that need CRDs installed first
     k8s_resource(
@@ -947,9 +958,42 @@ if ENABLE_ENTERPRISE:
         resource_deps=['omnia-arena-controller', 'sample-resources'],
     )
 
-# Restart agent pods when facade/framework images are rebuilt
+# Rebuild facade/runtime images and restart agent pods.
+# Since these images are passed as CLI args to the operator (not in K8s YAML),
+# Tilt can't track them as k8s_image_json_path resources. Instead, we watch
+# source deps, rebuild images, and restart pods in a single atomic flow.
+
+_rebuild_facade_cmd = 'docker build -f Dockerfile.agent -t omnia-facade-dev:latest .'
+_rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
+if USE_LOCAL_PROMPTKIT:
+    _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
+_rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
+
+_restart_cmd = '''
+    kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+    kubectl rollout restart deployment -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
+'''
+
+# Manual buttons to rebuild individual images and restart pods
+local_resource(
+    'rebuild-facade',
+    cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
+    labels=['agents'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+    'rebuild-runtime',
+    cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
+    labels=['agents'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Auto-rebuild images and restart agent pods when source changes.
 # Since AgentRuntime deployments are created by the operator (not Tilt),
-# we need to manually trigger a rollout when the source changes
+# we rebuild both images and roll out new pods in one step.
 restart_agents_deps = [
     './cmd/agent',
     './internal/agent',
@@ -967,10 +1011,7 @@ if USE_LOCAL_PROMPTKIT:
 
 local_resource(
     'restart-agents',
-    cmd='''
-        kubectl rollout restart deployment -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
-        kubectl rollout restart deployment -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
-    ''',
+    cmd=_rebuild_facade_cmd + ' && ' + _rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=restart_agents_deps,
     labels=['agents'],
     resource_deps=['sample-resources'],
@@ -1009,7 +1050,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'omnia-session-api', 'omnia-arena-controller'],
+    resource_deps=['omnia-controller-manager', 'omnia-session-api'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
 )
 
 # CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).
@@ -1020,4 +1061,14 @@ local_resource(
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
     resource_deps=['omnia-controller-manager', 'omnia-session-api'],
+)
+
+# Policy e2e tests — runs only the "Policy E2E" context (AgentPolicy + ToolPolicy CRDs).
+local_resource(
+    'e2e-tests-policy',
+    cmd=_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -ginkgo.focus="Policy E2E" -timeout 10m',
+    labels=['test'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['omnia-controller-manager'],
 )

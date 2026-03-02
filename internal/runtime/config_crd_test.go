@@ -510,6 +510,60 @@ func TestDetermineSecretKey(t *testing.T) {
 	}
 }
 
+func TestLoadFromCRD_TracingEnvVars(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	t.Setenv("OMNIA_TRACING_ENABLED", "true")
+	t.Setenv("OMNIA_TRACING_ENDPOINT", "alloy:4317")
+	t.Setenv("OMNIA_TRACING_INSECURE", "true")
+	t.Setenv("OMNIA_TRACING_SAMPLE_RATE", "0.5")
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.True(t, cfg.TracingEnabled)
+	assert.Equal(t, "alloy:4317", cfg.TracingEndpoint)
+	assert.True(t, cfg.TracingInsecure)
+	assert.InDelta(t, 0.5, cfg.TracingSampleRate, 0.001)
+}
+
+func TestLoadFromCRD_TracingDisabledByDefault(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		},
+	}
+
+	// Ensure tracing env vars are not set
+	t.Setenv("OMNIA_TRACING_ENABLED", "")
+	t.Setenv("OMNIA_TRACING_ENDPOINT", "")
+	t.Setenv("OMNIA_TRACING_INSECURE", "")
+
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+
+	assert.False(t, cfg.TracingEnabled)
+	assert.Empty(t, cfg.TracingEndpoint)
+	assert.False(t, cfg.TracingInsecure)
+	assert.InDelta(t, 1.0, cfg.TracingSampleRate, 0.001, "default sample rate should be 1.0")
+}
+
 func strPtr(s string) *string {
 	return &s
 }

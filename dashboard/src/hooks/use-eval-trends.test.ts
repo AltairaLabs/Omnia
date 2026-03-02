@@ -13,10 +13,12 @@ import React from "react";
 // Mock dependencies
 const mockQueryPrometheus = vi.fn();
 const mockQueryPrometheusRange = vi.fn();
+const mockQueryPrometheusMetadata = vi.fn();
 
 vi.mock("@/lib/prometheus", () => ({
   queryPrometheus: (...args: unknown[]) => mockQueryPrometheus(...args),
   queryPrometheusRange: (...args: unknown[]) => mockQueryPrometheusRange(...args),
+  queryPrometheusMetadata: (...args: unknown[]) => mockQueryPrometheusMetadata(...args),
 }));
 
 vi.mock("@/lib/prometheus-queries", () => ({
@@ -24,6 +26,7 @@ vi.mock("@/lib/prometheus-queries", () => ({
     discoverMetrics: () => '{__name__=~"omnia_eval_.*"}',
     metricAvgOverTime: (name: string, window: string) =>
       `avg_over_time(${name}[${window}])`,
+    metricValue: (name: string) => name,
   },
 }));
 
@@ -215,7 +218,7 @@ describe("useEvalPassRateTrends", () => {
     expect(mockQueryPrometheusRange).toHaveBeenCalledTimes(1);
   });
 
-  it("filters out _bucket, _sum, _count metrics during discovery", async () => {
+  it("filters out infrastructure suffixes during discovery", async () => {
     mockQueryPrometheus.mockResolvedValue({
       status: "success",
       data: {
@@ -224,6 +227,8 @@ describe("useEvalPassRateTrends", () => {
           { metric: { __name__: "omnia_eval_latency_bucket" }, value: [1000, "1"] },
           { metric: { __name__: "omnia_eval_latency_sum" }, value: [1000, "1"] },
           { metric: { __name__: "omnia_eval_latency_count" }, value: [1000, "1"] },
+          { metric: { __name__: "omnia_eval_executed_total" }, value: [1000, "47"] },
+          { metric: { __name__: "omnia_eval_passed_total" }, value: [1000, "42"] },
         ],
       },
     });
@@ -254,9 +259,18 @@ describe("useEvalPassRateTrends", () => {
 describe("useEvalMetrics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default metadata mock returns gauge for all metrics
+    mockQueryPrometheusMetadata.mockResolvedValue({
+      omnia_eval_safety: "gauge",
+      omnia_eval_tone: "gauge",
+    });
   });
 
-  it("discovers and returns metrics with values", async () => {
+  it("discovers and returns metrics with values and types", async () => {
+    mockQueryPrometheusMetadata.mockResolvedValue({
+      omnia_eval_safety: "gauge",
+      omnia_eval_tone: "counter",
+    });
     // Discovery call returns sorted names: safety, tone
     mockQueryPrometheus
       .mockResolvedValueOnce({
@@ -286,8 +300,8 @@ describe("useEvalMetrics", () => {
 
     const metrics = result.current.data!;
     expect(metrics).toHaveLength(2);
-    expect(metrics[0]).toEqual({ name: "omnia_eval_safety", value: 0.78 });
-    expect(metrics[1]).toEqual({ name: "omnia_eval_tone", value: 0.92 });
+    expect(metrics[0]).toEqual({ name: "omnia_eval_safety", value: 0.78, metricType: "gauge" });
+    expect(metrics[1]).toEqual({ name: "omnia_eval_tone", value: 0.92, metricType: "counter" });
   });
 
   it("returns empty array when no metrics discovered", async () => {
@@ -324,7 +338,7 @@ describe("useEvalMetrics", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0 }]);
+    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0, metricType: "gauge" }]);
   });
 
   it("handles discovery failure gracefully by returning empty", async () => {
@@ -360,6 +374,30 @@ describe("useEvalMetrics", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0 }]);
+    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0, metricType: "gauge" }]);
+  });
+
+  it("defaults to gauge when metadata fetch fails", async () => {
+    mockQueryPrometheusMetadata.mockRejectedValue(new Error("Metadata error"));
+    mockQueryPrometheus
+      .mockResolvedValueOnce({
+        status: "success",
+        data: {
+          result: [
+            { metric: { __name__: "omnia_eval_tone" }, value: [1000, "0.9"] },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "success",
+        data: { result: [{ metric: {}, value: [1000, "0.85"] }] },
+      });
+
+    const { result } = renderHook(() => useEvalMetrics(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0.85, metricType: "gauge" }]);
   });
 });

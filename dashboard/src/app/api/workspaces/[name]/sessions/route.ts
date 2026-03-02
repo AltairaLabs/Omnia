@@ -2,13 +2,14 @@
  * Session list/search proxy route.
  *
  * GET /api/workspaces/{name}/sessions
- *   → SESSION_API_URL/api/v1/sessions?workspace={name}&...
+ *   → SESSION_API_URL/api/v1/sessions?workspace={namespace}&...
  *
  * When `q` param is present, routes to the /search backend endpoint.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
+import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 
@@ -31,9 +32,20 @@ export const GET = withWorkspaceAccess(
       );
     }
 
-    // Forward query params to the backend
+    // Resolve the k8s namespace from the workspace CRD — sessions are stored
+    // by namespace, not by workspace CRD name.
+    const workspace = await getWorkspace(name);
+    if (!workspace) {
+      return NextResponse.json(
+        { error: "Workspace not found", sessions: [], total: 0, hasMore: false },
+        { status: 404 }
+      );
+    }
+    const namespace = workspace.spec.namespace.name;
+
+    // Forward query params to the backend — filter by k8s namespace
     const params = new URLSearchParams();
-    params.set("workspace", name);
+    params.set("namespace", namespace);
 
     const forwardParams = ["agent", "status", "from", "to", "limit", "offset", "q"];
     for (const key of forwardParams) {

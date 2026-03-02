@@ -959,6 +959,66 @@ func TestMemoryStoreUpdateSessionStats_SetStatus(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreUpdateSessionStats_SetEndedAt(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	endedAt := time.Now()
+	err := store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		SetStatus:  SessionStatusCompleted,
+		SetEndedAt: endedAt,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats failed: %v", err)
+	}
+
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.Status != SessionStatusCompleted {
+		t.Errorf("Status = %q, want %q", updated.Status, SessionStatusCompleted)
+	}
+	if !updated.EndedAt.Equal(endedAt) {
+		t.Errorf("EndedAt = %v, want %v", updated.EndedAt, endedAt)
+	}
+}
+
+func TestMemoryStoreUpdateSessionStats_TerminalStatusNotOverwritten(t *testing.T) {
+	store := NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, CreateSessionOptions{
+		AgentName: testAgentName,
+		Namespace: testNamespace,
+	})
+
+	// Set to error first
+	err := store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		SetStatus: SessionStatusError,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats failed: %v", err)
+	}
+
+	// Attempt to overwrite with completed — should be rejected
+	err = store.UpdateSessionStats(ctx, sess.ID, SessionStatsUpdate{
+		SetStatus: SessionStatusCompleted,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionStats failed: %v", err)
+	}
+
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.Status != SessionStatusError {
+		t.Errorf("Status = %q, want %q (should not overwrite terminal status)", updated.Status, SessionStatusError)
+	}
+}
+
 func TestMemoryStoreUpdateSessionStats_NotFound(t *testing.T) {
 	store := NewMemoryStore()
 	defer func() { _ = store.Close() }()

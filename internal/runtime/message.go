@@ -46,6 +46,10 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	scenario := s.extractScenario(metadata, content, log)
 	log.V(1).Info("processing message", "contentLength", len(content), "scenario", scenario)
 
+	log.V(1).Info("message eval config",
+		"hasEvalCollector", s.evalCollector != nil,
+		"evalDefCount", len(s.evalDefs))
+
 	// Get or create conversation for this session
 	conv, err := s.getOrCreateConversation(ctx, sessionID)
 	if err != nil {
@@ -98,12 +102,27 @@ func (s *Server) prepareMessageContent(content string, scenario string, log logr
 
 // streamResponse streams the LLM response and sends chunks to the client.
 func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, content string, opts []sdk.SendOption) (*sdk.Response, string, error) {
+	log := logctx.LoggerWithContext(s.log, ctx)
+	log.V(1).Info("stream starting",
+		"hasEvalCollector", s.evalCollector != nil,
+		"contentLength", len(content))
+
+	// Start LLM span around the streaming call
+	var llmSpan trace.Span
+	if s.tracingProvider != nil {
+		ctx, llmSpan = s.tracingProvider.StartLLMSpan(ctx, s.model, s.providerType)
+		defer llmSpan.End()
+	}
+
 	streamCh := conv.Stream(ctx, content, opts...)
 	var finalResponse *sdk.Response
 	var accumulatedContent strings.Builder
 
 	for chunk := range streamCh {
 		if chunk.Error != nil {
+			if llmSpan != nil {
+				tracing.RecordError(llmSpan, chunk.Error)
+			}
 			return nil, "", fmt.Errorf("failed to send message: provider stream failed: %w", chunk.Error)
 		}
 
@@ -123,6 +142,17 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 			finalResponse = chunk.Message
 		}
 	}
+
+	// Add GenAI metrics to the LLM span before it ends
+	if llmSpan != nil && finalResponse != nil && finalResponse.TokensUsed() > 0 {
+		tracing.AddLLMMetrics(llmSpan, finalResponse.InputTokens(), finalResponse.OutputTokens(), finalResponse.Cost())
+		tracing.AddFinishReason(llmSpan, "stop")
+		tracing.SetSuccess(llmSpan)
+	}
+
+	log.V(1).Info("stream complete",
+		"hasResponse", finalResponse != nil,
+		"responseLength", accumulatedContent.Len())
 
 	return finalResponse, accumulatedContent.String(), nil
 }

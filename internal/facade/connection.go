@@ -25,6 +25,7 @@ import (
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
@@ -86,6 +87,17 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	}
 
 	s.metrics.ConnectionClosed()
+
+	if c.sessionID != "" {
+		go func() {
+			if err := s.sessionStore.UpdateSessionStats(context.Background(), c.sessionID, session.SessionStatsUpdate{
+				SetStatus:  session.SessionStatusCompleted,
+				SetEndedAt: time.Now(),
+			}); err != nil {
+				log.Error(err, "session completion failed", "sessionID", c.sessionID)
+			}
+		}()
+	}
 
 	if err := c.conn.Close(); err != nil {
 		log.Error(err, "error closing connection")

@@ -371,7 +371,7 @@ var _ = Describe("ToolPolicy Controller", func() {
 	})
 
 	Context("When reconciling a ToolPolicy with header injection missing header name", func() {
-		It("should set Error phase", func() {
+		It("should be rejected by CRD validation", func() {
 			policyName := "test-header-inject-no-name"
 			tp := &omniav1alpha1.ToolPolicy{
 				ObjectMeta: metav1.ObjectMeta{
@@ -399,28 +399,10 @@ var _ = Describe("ToolPolicy Controller", func() {
 				},
 			}
 
-			Expect(k8sClient.Create(ctx, tp)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, tp)
-			})
-
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      policyName,
-					Namespace: "default",
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeZero())
-
-			updated := &omniav1alpha1.ToolPolicy{}
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      policyName,
-					Namespace: "default",
-				}, updated)).To(Succeed())
-				g.Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolPolicyPhaseError))
-			}, timeout, interval).Should(Succeed())
+			// CRD MinLength=1 validation on header field rejects empty names at admission
+			err := k8sClient.Create(ctx, tp)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("header"))
 		})
 	})
 

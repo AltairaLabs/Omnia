@@ -3,12 +3,13 @@
 import { useState, useMemo, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { Header } from "@/components/layout";
-import { PromptPackCard } from "@/components/promptpacks";
+import { PromptPackCard, PromptPackDialog } from "@/components/promptpacks";
 import { NamespaceFilter } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePromptPacks } from "@/hooks";
+import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { PromptPackPhase } from "@/types";
 
@@ -17,6 +18,8 @@ type FilterPhase = "all" | PromptPackPhase;
 export default function PromptPacksPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const { isLoading: isWorkspaceLoading } = useWorkspace();
   const { data: promptPacks, isLoading: isPacksLoading } = usePromptPacks();
@@ -105,7 +108,7 @@ export default function PromptPacksPage() {
             />
           </div>
 
-          <Button size="sm">
+          <Button size="sm" onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             New PromptPack
           </Button>
@@ -129,13 +132,19 @@ export default function PromptPacksPage() {
         {!isLoading && filteredPacks?.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-muted-foreground">No PromptPacks found</p>
-            <Button variant="outline" className="mt-4">
+            <Button variant="outline" className="mt-4" onClick={() => setDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Create your first PromptPack
             </Button>
           </div>
         )}
       </div>
+
+      <PromptPackDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["promptPacks"] })}
+      />
     </div>
   );
 }

@@ -26,11 +26,9 @@ vi.mock("@/components/layout", () => ({
   },
 }));
 
-// Mock next/link
-vi.mock("next/link", () => ({
-  default: function MockLink({ children, href }: { children: React.ReactNode; href: string }) {
-    return <a href={href}>{children}</a>;
-  },
+// Mock next/navigation
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 const mockSessions = [

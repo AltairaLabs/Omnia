@@ -66,6 +66,11 @@ func (s *Server) createConversation(ctx context.Context, sessionID string) (*sdk
 		return nil, err
 	}
 
+	log.V(1).Info("conversation creating",
+		"sdkOptionsCount", len(opts),
+		"hasEvalCollector", s.evalCollector != nil,
+		"evalDefCount", len(s.evalDefs))
+
 	// Try to resume existing conversation first, or create new
 	conv, err := s.resumeOrOpenConversation(sessionID, opts, log)
 	if err != nil {
@@ -94,6 +99,11 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		sdk.WithConversationID(sessionID),
 	}, s.sdkOptions...)
 
+	// Pass Omnia's logger to the SDK so all output flows through the same Zap backend.
+	if s.sdkLogger != nil {
+		opts = append(opts, sdk.WithLogger(s.sdkLogger))
+	}
+
 	// Add provider based on configuration
 	if s.mockProvider {
 		log.Info("using mock provider for conversation")
@@ -101,22 +111,27 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		if err != nil {
 			return nil, err
 		}
-		return append(opts, sdk.WithProvider(provider)), nil
-	}
-
-	// Try to create an explicit provider from config
-	provider, err := s.createProviderFromConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create provider from config: %w", err)
-	}
-	if provider != nil {
-		log.Info("using explicit provider from config", "type", s.providerType)
 		opts = append(opts, sdk.WithProvider(provider))
+	} else {
+		// Try to create an explicit provider from config
+		provider, err := s.createProviderFromConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create provider from config: %w", err)
+		}
+		if provider != nil {
+			log.Info("using explicit provider from config", "type", s.providerType)
+			opts = append(opts, sdk.WithProvider(provider))
+		}
+		// If provider is nil, PromptKit will auto-detect from environment
 	}
-	// If provider is nil, PromptKit will auto-detect from environment
 
 	// Wire eval middleware when collector is configured
-	opts = append(opts, s.buildEvalOptions()...)
+	evalOpts := s.buildEvalOptions()
+	log.V(1).Info("eval options wired",
+		"evalOptionsCount", len(evalOpts),
+		"hasEvalCollector", s.evalCollector != nil,
+		"evalDefCount", len(s.evalDefs))
+	opts = append(opts, evalOpts...)
 
 	// Wire tracing provider into SDK for span propagation
 	if s.tracingProvider != nil {

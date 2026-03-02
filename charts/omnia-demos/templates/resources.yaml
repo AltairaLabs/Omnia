@@ -100,15 +100,23 @@ spec:
     name: demo-vision-prompts
   providerRef:
     name: ollama
+  evals:
+    enabled: true
   facade:
     type: websocket
     port: 8080
     handler: {{ .Values.agent.handler }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "1h"
   runtime:
     replicas: {{ .Values.agent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.agent.resources | nindent 6 }}
   {{- with .Values.agent.console }}
@@ -233,13 +241,11 @@ spec:
     ttl: "1h"
   runtime:
     replicas: {{ .Values.audioDemo.agent.replicas }}
-    resources:
-      {{- toYaml .Values.audioDemo.agent.resources | nindent 6 }}
-    {{- if .Values.audioDemo.agent.logLevel }}
     extraEnv:
       - name: LOG_LEVEL
-        value: {{ .Values.audioDemo.agent.logLevel | quote }}
-    {{- end }}
+        value: debug
+    resources:
+      {{- toYaml .Values.audioDemo.agent.resources | nindent 6 }}
   {{- with .Values.audioDemo.console }}
   console:
     maxFileSize: {{ .maxFileSize | int64 }}
@@ -309,7 +315,7 @@ data:
       "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "demo-tools-prompts",
       "name": "Demo Tools Prompts",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "template_engine": {
         "version": "v1",
         "syntax": "{{"{{variable}}"}}"
@@ -318,13 +324,117 @@ data:
         "default": {
           "id": "default",
           "name": "Tools Assistant",
-          "version": "1.0.0",
+          "version": "1.1.0",
           "system_template": {{ .Values.toolsDemo.promptPack.systemPrompt | toJson }},
+          "tools": ["get_weather", "calculate"],
           "parameters": {
             "temperature": 0.7
+          },
+          "validators": [
+            {
+              "type": "max_length",
+              "enabled": true,
+              "fail_on_violation": false,
+              "params": {
+                "max_characters": 2000
+              }
+            }
+          ],
+          "evals": [
+            {
+              "id": "response-conciseness",
+              "type": "regex",
+              "trigger": "every_turn",
+              "description": "Ensures responses stay concise by flagging excessively long output (over 1000 chars)",
+              "params": {
+                "pattern": "(?s).{1000,}",
+                "expect_match": false
+              },
+              "metric": {
+                "name": "response_conciseness",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "no-hallucinated-urls",
+              "type": "regex",
+              "trigger": "every_turn",
+              "description": "Flags responses containing URLs — the model should not fabricate links",
+              "params": {
+                "pattern": "https?://[a-zA-Z0-9.-]+\\.[a-z]{2,}",
+                "expect_match": false
+              },
+              "metric": {
+                "name": "no_hallucinated_urls",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "tool-explanation",
+              "type": "contains",
+              "trigger": "every_turn",
+              "description": "Checks the assistant explains what it is doing when using tools",
+              "params": {
+                "patterns": ["result", "weather"]
+              },
+              "metric": {
+                "name": "tool_explanation",
+                "type": "boolean"
+              }
+            }
+          ]
+        }
+      },
+
+      "tools": {
+        "get_weather": {
+          "name": "get_weather",
+          "description": "Get current weather for a given location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name or coordinates"
+              }
+            },
+            "required": ["location"]
+          }
+        },
+        "calculate": {
+          "name": "calculate",
+          "description": "Evaluate a mathematical expression",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "expression": {
+                "type": "string",
+                "description": "Mathematical expression to evaluate"
+              }
+            },
+            "required": ["expression"]
           }
         }
-      }
+      },
+
+      "evals": [
+        {
+          "id": "session-helpfulness",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "sample_percentage": 25,
+          "description": "Judges overall session helpfulness and appropriate tool usage",
+          "params": {
+            "judge_prompt": "Review the full conversation. Did the assistant use available tools effectively and provide helpful, accurate responses? Score 1-5.",
+            "passing_score": 3
+          },
+          "metric": {
+            "name": "session_helpfulness",
+            "type": "gauge",
+            "range": { "min": 0, "max": 1 }
+          }
+        }
+      ]
     }
 ---
 # PromptPack for the tools demo agent
@@ -410,15 +520,23 @@ spec:
     name: ollama-tools
   toolRegistryRef:
     name: demo-tools
+  evals:
+    enabled: true
   facade:
     type: websocket
     port: 8080
     handler: {{ .Values.toolsDemo.agent.handler }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "1h"
   runtime:
     replicas: {{ .Values.toolsDemo.agent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.toolsDemo.agent.resources | nindent 6 }}
 {{- end }}
@@ -459,6 +577,9 @@ spec:
     ttl: "1h"
   runtime:
     replicas: {{ .Values.langchainDemo.visionAgent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.langchainDemo.visionAgent.resources | nindent 6 }}
   {{- with .Values.agent.console }}
@@ -515,6 +636,9 @@ spec:
     ttl: "1h"
   runtime:
     replicas: {{ .Values.langchainDemo.toolsAgent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.langchainDemo.toolsAgent.resources | nindent 6 }}
 {{- end }}

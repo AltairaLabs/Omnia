@@ -17,6 +17,7 @@ limitations under the License.
 package otlp
 
 import (
+	"compress/gzip"
 	"io"
 	"net/http"
 
@@ -64,7 +65,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize+1))
+	reader := io.Reader(r.Body)
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		gz, gzErr := gzip.NewReader(r.Body)
+		if gzErr != nil {
+			http.Error(w, "invalid gzip encoding", http.StatusBadRequest)
+			return
+		}
+		defer func() { _ = gz.Close() }()
+		reader = gz
+	}
+
+	body, err := io.ReadAll(io.LimitReader(reader, maxBodySize+1))
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return

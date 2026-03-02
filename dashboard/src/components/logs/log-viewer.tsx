@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useRef, useState, useCallback, useMemo } from "react";
 import { Download, Search, X, RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   useLogs,
@@ -29,6 +34,15 @@ export interface LogEntry {
   level: "info" | "warn" | "error" | "debug";
   message: string;
   container?: string;
+  fields?: Record<string, unknown>;
+  raw?: string;
+}
+
+/** Format a field value for display in the detail popover */
+function formatFieldValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }
 
 interface BaseLogViewerProps {
@@ -117,10 +131,12 @@ function LogContent({
 
   return (
     <>
-      {filteredLogs.map((log) => (
+      {filteredLogs.map((log, index) => (
         <div
-          key={`${log.timestamp.getTime()}-${log.level}-${log.container}-${log.message.slice(0, 32)}`}
+          // eslint-disable-next-line react/no-array-index-key -- log entries have no stable unique ID
+          key={`${index}-${log.timestamp.getTime()}-${log.level}`}
           className="flex gap-2 py-0.5 hover:bg-muted/50 rounded px-1"
+          title={log.raw}
         >
           <span className="text-muted-foreground shrink-0">
             {formatTimestamp(log.timestamp)}
@@ -139,6 +155,25 @@ function LogContent({
             </span>
           )}
           <span className="break-all">{log.message}</span>
+          {log.fields && Object.keys(log.fields).length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="shrink-0 text-muted-foreground hover:text-foreground text-xs px-1 rounded hover:bg-muted">
+                  [&hellip;]
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-80 max-h-64 overflow-auto p-3">
+                <div className="space-y-1 font-mono text-xs">
+                  {Object.entries(log.fields).map(([key, value]) => (
+                    <div key={key} className="flex gap-2">
+                      <span className="text-muted-foreground shrink-0">{key}:</span>
+                      <span className="break-all">{formatFieldValue(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
       ))}
     </>
@@ -195,6 +230,8 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       level: (log.level || "info") as LogEntry["level"],
       message: log.message || "",
       container: log.container,
+      fields: log.fields,
+      raw: log.raw,
     }));
   }, [apiLogs]);
 
@@ -203,20 +240,12 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   const [selectedLevels, setSelectedLevels] = useState<Set<string>>(
     new Set(["info", "warn", "error", "debug"])
   );
-  const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Determine if we should show container selector (hide for single container)
   const showContainerSelector = containers.length > 1;
 
-  // Auto-scroll to bottom when new logs arrive
-  useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [logs, autoScroll]);
-
-  // Filter logs based on user selections
+  // Filter logs based on user selections, newest first
   const filteredLogs = logs.filter((log) => {
     if (showContainerSelector && selectedContainer !== "all" && log.container !== selectedContainer) {
       return false;
@@ -228,7 +257,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       return false;
     }
     return true;
-  });
+  }).toReversed();
 
   const toggleLevel = useCallback((level: string) => {
     setSelectedLevels((prev) => {
@@ -247,7 +276,10 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       .map(
         (log) => {
           const containerPart = log.container ? ` [${log.container}]` : "";
-          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart} ${log.message}`;
+          const fieldsPart = log.fields && Object.keys(log.fields).length > 0
+            ? ` ${JSON.stringify(log.fields)}`
+            : "";
+          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart} ${log.message}${fieldsPart}`;
         }
       )
       .join("\n");
@@ -270,7 +302,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   };
 
   return (
-    <div className={cn("flex flex-col h-[600px] border rounded-lg", className)}>
+    <div className={cn("flex flex-col h-[600px] border rounded-lg overflow-hidden", className)}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b bg-muted/30">
         {/* Refresh button */}
@@ -400,22 +432,10 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
         </div>
       </div>
 
-      {/* Auto-scroll indicator */}
-      {!autoScroll && (
-        <button
-          onClick={() => setAutoScroll(true)}
-          className="px-4 py-1 text-xs text-center bg-muted hover:bg-muted/80 border-b"
-        >
-          Auto-scroll paused. Click to resume.
-        </button>
-      )}
-
       {/* Log entries */}
       <ScrollArea
-        className="flex-1 font-mono text-xs"
+        className="flex-1 min-h-0 font-mono text-xs"
         ref={scrollRef}
-        onMouseEnter={() => setAutoScroll(false)}
-        onMouseLeave={() => setAutoScroll(true)}
       >
         <div className="p-2">
           <LogContent

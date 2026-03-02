@@ -12,13 +12,6 @@
 
 import { useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AreaChart,
@@ -31,6 +24,7 @@ import {
   Legend,
 } from "recharts";
 import { useEvalPassRateTrends, type EvalTrendRange, type EvalTrendPoint } from "@/hooks";
+import type { EvalFilter } from "@/lib/prometheus-queries";
 
 /** Color palette for eval metric lines. */
 const CHART_COLORS = [
@@ -42,30 +36,23 @@ export function getEvalColor(index: number): string {
   return CHART_COLORS[index % CHART_COLORS.length];
 }
 
-const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
-  { label: "Last 1h", value: "1h" },
-  { label: "Last 6h", value: "6h" },
-  { label: "Last 24h", value: "24h" },
-  { label: "Last 7d", value: "7d" },
-  { label: "Last 30d", value: "30d" },
-];
-
 interface PassRateTrendChartProps {
   timeRange: EvalTrendRange;
-  onTimeRangeChange: (range: EvalTrendRange) => void;
   metricNames?: string[];
+  filter?: EvalFilter;
   height?: number;
 }
 
 export function PassRateTrendChart({
   timeRange,
-  onTimeRangeChange,
   metricNames,
+  filter,
   height = 350,
 }: Readonly<PassRateTrendChartProps>) {
   const { data: trends, isLoading } = useEvalPassRateTrends({
     metricNames,
     timeRange,
+    filter,
   });
 
   const { chartData, seriesNames } = useMemo(() => {
@@ -95,24 +82,8 @@ export function PassRateTrendChart({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-base">Eval Metric Trends</CardTitle>
-            <CardDescription>Metric values over time from Prometheus</CardDescription>
-          </div>
-          <Select value={timeRange} onValueChange={(v) => onTimeRangeChange(v as EvalTrendRange)}>
-            <SelectTrigger className="w-[130px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TIME_RANGE_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <CardTitle className="text-base">Eval Metric Trends</CardTitle>
+        <CardDescription>Metric values over time from Prometheus</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading && (

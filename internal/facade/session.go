@@ -32,7 +32,9 @@ import (
 
 // processMessage handles processing of an incoming client message.
 func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) error {
-	ctx = s.startMessageSpan(ctx)
+	var msgSpan trace.Span
+	ctx, msgSpan = s.startMessageSpan(ctx)
+	defer msgSpan.End()
 
 	// Get or create session
 	sessionID, err := s.ensureSession(ctx, c, msg.SessionID, log)
@@ -76,16 +78,14 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 }
 
 // startMessageSpan starts a tracing span for the message if tracing is enabled.
-func (s *Server) startMessageSpan(ctx context.Context) context.Context {
+// The caller must defer span.End() to ensure the span covers the full message lifecycle.
+func (s *Server) startMessageSpan(ctx context.Context) (context.Context, trace.Span) {
 	if s.tracingProvider == nil {
-		return ctx
+		return ctx, trace.SpanFromContext(ctx)
 	}
-	var msgSpan trace.Span
-	ctx, msgSpan = s.tracingProvider.Tracer().Start(ctx, "facade.message",
-		trace.WithSpanKind(trace.SpanKindInternal),
+	return s.tracingProvider.Tracer().Start(ctx, "facade.message",
+		trace.WithSpanKind(trace.SpanKindServer),
 	)
-	defer msgSpan.End()
-	return ctx
 }
 
 // setSessionTraceAttributes sets the session ID on tracing spans.
@@ -152,7 +152,6 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
 		AgentName:         c.agentName,
 		Namespace:         c.namespace,
-		WorkspaceName:     c.namespace,
 		TTL:               s.config.SessionTTL,
 		PromptPackName:    s.config.PromptPackName,
 		PromptPackVersion: s.config.PromptPackVersion,
