@@ -5,10 +5,10 @@ go 1.25.6
 require (
 	cloud.google.com/go/kms v1.25.0
 	cloud.google.com/go/storage v1.60.0
-	github.com/AltairaLabs/PromptKit/pkg v1.3.2
-	github.com/AltairaLabs/PromptKit/runtime v1.3.2
+	github.com/AltairaLabs/PromptKit/pkg v1.3.5
+	github.com/AltairaLabs/PromptKit/runtime v1.3.5
 	github.com/AltairaLabs/PromptKit/sdk v1.3.2
-	github.com/AltairaLabs/PromptKit/tools/arena v1.3.2
+	github.com/AltairaLabs/PromptKit/tools/arena v1.3.5
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
@@ -26,6 +26,7 @@ require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/google/cel-go v0.26.0
 	github.com/google/go-containerregistry v0.21.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -159,7 +160,6 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/btree v1.1.3 // indirect
-	github.com/google/cel-go v0.26.0 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
