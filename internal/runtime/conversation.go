@@ -19,12 +19,18 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
+
+// toolCallExecutionTimeout is the pipeline execution timeout when tools are
+// configured. The PromptKit default (30s) is too short for multi-round
+// tool-calling where each round involves LLM inference + tool execution.
+const toolCallExecutionTimeout = 120 * time.Second
 
 // getOrCreateConversation gets an existing conversation or creates a new one.
 func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) (*sdk.Conversation, error) {
@@ -136,6 +142,14 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	// Wire tracing provider into SDK for span propagation
 	if s.tracingProvider != nil {
 		opts = append(opts, sdk.WithTracerProvider(s.tracingProvider.TracerProvider()))
+	}
+
+	// Increase pipeline execution timeout when tools are configured.
+	// The default 30s is too short for multi-round tool-calling with
+	// slower providers (e.g. Ollama). Each round involves LLM inference
+	// + tool execution, so we allow 120s.
+	if s.toolsInitialized && s.toolExecutor != nil {
+		opts = append(opts, sdk.WithExecutionTimeout(toolCallExecutionTimeout))
 	}
 
 	return opts, nil

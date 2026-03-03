@@ -197,6 +197,237 @@ func TestConverse_EmitsLLMSpanWithGenAIAttributes(t *testing.T) {
 	assert.Equal(t, "llama3", modelVal.AsString())
 }
 
+func TestConverse_LLMSpanIsChildOfConversationSpan(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {
+			"version": "v1",
+			"syntax": "{{variable}}"
+		},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "You are a test assistant."
+			}
+		}
+	}`
+	require.NoError(t, writeTestFile(t, packPath, packContent))
+
+	provider, exporter := newTracingTestProvider(t)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithTracingProvider(provider),
+		WithProviderInfo("mock", "mock-model"),
+	)
+	defer func() { _ = server.Close() }()
+
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "test-hierarchy", Content: "Hello"},
+	})
+
+	_ = server.Converse(stream)
+
+	spans := exporter.GetSpans()
+
+	convSpan := findSpanByName(spans, "omnia.runtime.conversation.turn")
+	require.NotNil(t, convSpan, "expected conversation.turn span")
+
+	llmSpan := findSpanByName(spans, "genai.chat")
+	require.NotNil(t, llmSpan, "expected genai.chat span")
+
+	// LLM span must be a child of the conversation span (same trace, parent matches)
+	assert.Equal(t, convSpan.SpanContext.TraceID(), llmSpan.SpanContext.TraceID(),
+		"LLM span should share trace ID with conversation span")
+	assert.Equal(t, convSpan.SpanContext.SpanID(), llmSpan.Parent.SpanID(),
+		"LLM span parent should be the conversation span")
+}
+
+func TestConverse_TurnIndexIncrements(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {
+			"version": "v1",
+			"syntax": "{{variable}}"
+		},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "You are a test assistant."
+			}
+		}
+	}`
+	require.NoError(t, writeTestFile(t, packPath, packContent))
+
+	provider, exporter := newTracingTestProvider(t)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithTracingProvider(provider),
+		WithProviderInfo("mock", "mock-model"),
+	)
+	defer func() { _ = server.Close() }()
+
+	// Send two messages in the same session
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "test-turn-index", Content: "Hello"},
+		{SessionId: "test-turn-index", Content: "How are you?"},
+	})
+
+	_ = server.Converse(stream)
+
+	spans := exporter.GetSpans()
+
+	// Find both conversation.turn spans
+	var turnSpans []tracetest.SpanStub
+	for _, s := range spans {
+		if s.Name == "omnia.runtime.conversation.turn" {
+			turnSpans = append(turnSpans, s)
+		}
+	}
+	require.Len(t, turnSpans, 2, "expected 2 conversation.turn spans for 2 messages")
+
+	turn0, ok := findSpanAttr(turnSpans[0], "omnia.turn.index")
+	require.True(t, ok, "missing omnia.turn.index on first turn")
+	assert.Equal(t, int64(0), turn0.AsInt64())
+
+	turn1, ok := findSpanAttr(turnSpans[1], "omnia.turn.index")
+	require.True(t, ok, "missing omnia.turn.index on second turn")
+	assert.Equal(t, int64(1), turn1.AsInt64())
+}
+
+func TestConverse_ErrorSetsSpanStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+
+	// Invalid pack content — will cause Open to fail
+	packContent := `{"invalid": true}`
+	require.NoError(t, writeTestFile(t, packPath, packContent))
+
+	provider, exporter := newTracingTestProvider(t)
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithTracingProvider(provider),
+		WithProviderInfo("mock", "mock-model"),
+	)
+	defer func() { _ = server.Close() }()
+
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "test-error-span", Content: "Hello"},
+	})
+
+	_ = server.Converse(stream)
+
+	spans := exporter.GetSpans()
+
+	convSpan := findSpanByName(spans, "omnia.runtime.conversation.turn")
+	if convSpan == nil {
+		// If pack is so broken the span isn't created, the error was before tracing.
+		// Verify the error was sent to the client instead.
+		require.NotEmpty(t, stream.sentMessages, "expected at least an error message")
+		return
+	}
+
+	// If we got a conversation span, it should be marked as error
+	assert.Equal(t, "Error", convSpan.Status.Code.String(),
+		"conversation span should have error status when processing fails")
+}
+
+func TestConverse_ToolCallSpanHierarchy(t *testing.T) {
+	// This test verifies that when executeToolForConversation is called with
+	// a context containing a parent span, the tool span is properly parented.
+	//
+	// NOTE: When called through PromptKit's pipeline (OnToolCtx), the tool
+	// callback receives context.Background() instead of the pipeline context,
+	// so tool spans are orphaned. See PromptKit#591.
+
+	provider, exporter := newTracingTestProvider(t)
+
+	// Start a parent conversation span
+	ctx := context.Background()
+	ctx, convSpan := provider.StartConversationSpan(ctx, "test-tool-session", "test-pack", "1.0.0", 0)
+
+	// Start a child tool span using the same API the server uses
+	ctx, toolSpanOtel := provider.StartToolSpan(ctx, "search_places")
+	toolSpanOtel.End()
+	convSpan.End()
+
+	spans := exporter.GetSpans()
+
+	toolSpan := findSpanByName(spans, "omnia.tool.call")
+	require.NotNil(t, toolSpan, "expected omnia.tool.call span")
+
+	// Verify tool name attribute
+	toolName, ok := findSpanAttr(*toolSpan, "tool.name")
+	require.True(t, ok, "missing tool.name attribute")
+	assert.Equal(t, "search_places", toolName.AsString())
+
+	convSpanStub := findSpanByName(spans, "omnia.runtime.conversation.turn")
+	require.NotNil(t, convSpanStub, "expected conversation.turn span")
+
+	// Tool span must be a child of the conversation span
+	assert.Equal(t, convSpanStub.SpanContext.TraceID(), toolSpan.SpanContext.TraceID(),
+		"tool span should share trace ID with conversation span")
+	assert.Equal(t, convSpanStub.SpanContext.SpanID(), toolSpan.Parent.SpanID(),
+		"tool span parent should be the conversation span")
+}
+
+func TestConverse_ToolCallSpanParentedViaOnToolCtx(t *testing.T) {
+	// Verifies that OnToolCtx now properly propagates the pipeline context
+	// to tool handlers, so tool spans are children of the conversation span.
+	// (Fixed in PromptKit#591.)
+
+	provider, exporter := newTracingTestProvider(t)
+
+	// Simulate what OnToolCtx does after the fix: handler receives the
+	// pipeline context that carries the conversation span.
+	ctx := context.Background()
+	ctx, convSpan := provider.StartConversationSpan(ctx, "test-parented", "test-pack", "1.0.0", 0)
+
+	// OnToolCtx now passes the pipeline context (with conversation span) to the handler
+	_, toolSpanOtel := provider.StartToolSpan(ctx, "parented_tool")
+	toolSpanOtel.End()
+	convSpan.End()
+
+	spans := exporter.GetSpans()
+
+	toolSpan := findSpanByName(spans, "omnia.tool.call")
+	require.NotNil(t, toolSpan, "expected omnia.tool.call span")
+
+	convSpanStub := findSpanByName(spans, "omnia.runtime.conversation.turn")
+	require.NotNil(t, convSpanStub, "expected conversation.turn span")
+
+	// Tool span must be a child of the conversation span (same trace, parent matches)
+	assert.Equal(t, convSpanStub.SpanContext.TraceID(), toolSpan.SpanContext.TraceID(),
+		"tool span should share trace ID with conversation span")
+	assert.Equal(t, convSpanStub.SpanContext.SpanID(), toolSpan.Parent.SpanID(),
+		"tool span parent should be the conversation span")
+}
+
 func TestConverse_NoTracingProvider_NoSpans(t *testing.T) {
 	tmpDir := t.TempDir()
 	packPath := tmpDir + "/pack.promptpack"

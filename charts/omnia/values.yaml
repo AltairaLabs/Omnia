@@ -1438,6 +1438,25 @@ tempo:
     metricsGenerator:
       enabled: true
       remoteWriteUrl: "http://omnia-prometheus-server:80/prometheus/api/v1/write"
+    # -- Storage: vParquet4 enables columnar search indexing for fast TraceQL queries.
+    # Without this, Tempo does brute-force scans of all blocks.
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/traces
+        wal:
+          path: /var/tempo/wal
+        block:
+          version: vParquet4
+    # -- Querier: allow more concurrent queries for dashboard panels
+    querier:
+      max_concurrent_queries: 20
+    # -- Query frontend: increase search concurrency and remove duration cap
+    queryFrontend:
+      search:
+        max_duration: "0"
+        concurrent_jobs: 2000
   # Disable Jaeger query UI (we use Grafana instead)
   tempoQuery:
     enabled: false

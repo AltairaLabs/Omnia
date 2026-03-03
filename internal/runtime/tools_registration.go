@@ -73,6 +73,7 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 	result, err := s.toolManager.Call(ctx, toolName, args)
 	durationMs := int(time.Since(start).Milliseconds())
 	if err != nil {
+		log.Error(err, "tool execution failed", "durationMs", durationMs)
 		if span != nil {
 			tracing.RecordError(span, err)
 		}
@@ -90,8 +91,10 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 	}
 
 	if result.IsError {
+		log.Info("tool returned error", "durationMs", durationMs)
 		return nil, fmt.Errorf("tool error: %v", result.Content)
 	}
 
+	log.V(1).Info("tool execution completed", "durationMs", durationMs)
 	return result.Content, nil
 }

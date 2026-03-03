@@ -387,8 +387,8 @@
       "targets": [
         {
           "limit": 20,
-          "query": "{resource.service.name=\"$agent.$namespace\"}",
-          "queryType": "traceqlSearch",
+          "query": "{resource.service.name=~\"omnia-(facade|runtime)-$agent\"}",
+          "queryType": "traceql",
           "refId": "A",
           "tableType": "traces"
         }

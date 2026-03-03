@@ -156,6 +156,8 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 
 	for chunk := range streamCh {
 		if chunk.Error != nil {
+			log.Error(chunk.Error, "provider stream failed",
+				"accumulatedLength", accumulatedContent.Len())
 			if llmSpan != nil {
 				tracing.RecordError(llmSpan, chunk.Error)
 			}

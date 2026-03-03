@@ -165,13 +165,15 @@ func main() {
 		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
 	}
 
-	// Create facade HTTP server
+	// Create facade HTTP server.
+	// WriteTimeout is intentionally omitted: WebSocket connections are long-lived
+	// and use ping/pong for keepalive. An HTTP WriteTimeout would kill the
+	// connection during slow LLM inference (e.g. Ollama tool-calling).
 	facadeServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.FacadePort),
-		Handler:      mux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		Addr:        fmt.Sprintf(":%d", cfg.FacadePort),
+		Handler:     mux,
+		ReadTimeout: readTimeout,
+		IdleTimeout: idleTimeout,
 	}
 
 	// Create health check server
