@@ -58,6 +58,11 @@ message ServerMessage {
 
     // error indicates an error occurred during processing.
     Error error = 5;
+
+    // media_chunk contains a streaming media chunk (image, audio, video).
+    // Sent during streaming when the LLM produces media content, allowing
+    // the client to begin processing before the entire media is available.
+    MediaChunk media_chunk = 6;
   }
 }
 
@@ -151,6 +156,25 @@ message Error {
 
   // message is a human-readable error description.
   string message = 2;
+}
+
+// MediaChunk contains a streaming media chunk for progressive media delivery.
+// All chunks sharing the same media_id belong to the same media stream.
+message MediaChunk {
+  // media_id is the unique identifier for this media stream.
+  string media_id = 1;
+
+  // sequence is the 0-indexed sequence number for ordering chunks.
+  int32 sequence = 2;
+
+  // is_last indicates this is the final chunk for this media stream.
+  bool is_last = 3;
+
+  // mime_type indicates the media format (e.g., "image/png", "audio/mp3").
+  string mime_type = 4;
+
+  // data contains raw media bytes (avoids base64 overhead in gRPC path).
+  bytes data = 5;
 }
 
 // HealthRequest is an empty message for health checks.

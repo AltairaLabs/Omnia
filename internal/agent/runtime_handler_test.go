@@ -598,6 +598,58 @@ type capturingRuntimeServer struct {
 	onReceive func(*runtimev1.ClientMessage)
 }
 
+func TestRuntimeHandler_HandleMessage_MediaChunk(t *testing.T) {
+	rawData := []byte("fake image data for testing")
+
+	mock := &mockRuntimeServer{
+		responses: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Chunk{Chunk: &runtimev1.Chunk{Content: "Here is an image:"}}},
+			{Message: &runtimev1.ServerMessage_MediaChunk{MediaChunk: &runtimev1.MediaChunk{
+				MediaId:  "media-1",
+				Sequence: 0,
+				IsLast:   true,
+				MimeType: "image/png",
+				Data:     rawData,
+			}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Here is an image:"}}},
+		},
+		healthy: true,
+	}
+
+	addr, cleanup := startMockServer(t, mock)
+	defer cleanup()
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     addr,
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	msg := &facade.ClientMessage{Content: "Show me an image"}
+
+	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	require.NoError(t, err)
+
+	// Verify text chunks were forwarded
+	assert.Equal(t, []string{"Here is an image:"}, writer.chunks)
+
+	// Verify media chunk was forwarded with base64-encoded data
+	require.Len(t, writer.mediaChunks, 1)
+	mc := writer.mediaChunks[0]
+	assert.Equal(t, "media-1", mc.MediaID)
+	assert.Equal(t, 0, mc.Sequence)
+	assert.True(t, mc.IsLast)
+	assert.Equal(t, "image/png", mc.MimeType)
+	assert.NotEmpty(t, mc.Data, "media chunk data should be base64-encoded")
+
+	// Verify done was sent
+	assert.Equal(t, "Here is an image:", writer.doneMsg)
+}
+
 func (s *capturingRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
 	msg, err := stream.Recv()
 	if err != nil {

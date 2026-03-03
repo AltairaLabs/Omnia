@@ -31,6 +31,7 @@ type mockResponseWriter struct {
 	doneParts   []facade.ContentPart
 	toolCalls   []*facade.ToolCallInfo
 	toolResults []*facade.ToolResultInfo
+	mediaChunks []*facade.MediaChunkInfo
 	errors      []struct{ code, message string }
 	err         error
 }
@@ -99,8 +100,12 @@ func (m *mockResponseWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) e
 	return m.err
 }
 
-func (m *mockResponseWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error {
-	return m.err
+func (m *mockResponseWriter) WriteMediaChunk(mc *facade.MediaChunkInfo) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.mediaChunks = append(m.mediaChunks, mc)
+	return nil
 }
 
 func (m *mockResponseWriter) SupportsBinary() bool {
