@@ -64,6 +64,9 @@ type Config struct {
 	// Tools configuration
 	ToolsConfigPath string // Path to tools.yaml configuration file
 
+	// Session recording (Pattern C)
+	SessionAPIURL string // URL of the session-api service for event recording
+
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
 
@@ -101,6 +104,7 @@ const (
 	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
 	envMediaBasePath          = "OMNIA_MEDIA_BASE_PATH"
 	envToolsConfigPath        = "OMNIA_TOOLS_CONFIG"
+	envSessionAPIURL          = "SESSION_API_URL"
 	envEvalEnabled            = "OMNIA_EVAL_ENABLED"
 	envTracingEnabled         = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint        = "OMNIA_TRACING_ENDPOINT"

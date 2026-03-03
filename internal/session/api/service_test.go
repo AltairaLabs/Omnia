@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -629,4 +630,158 @@ func TestAuditSearch_WithLogger(t *testing.T) {
 	assert.Equal(t, "my query", al.entries[0].Query)
 	assert.Equal(t, "ws1", al.entries[0].Workspace)
 	assert.Equal(t, 7, al.entries[0].ResultCount)
+}
+
+// --- trackingHotCache for write-through tests ---
+
+// trackingHotCache wraps mockHotCache and tracks write-through calls with synchronization.
+type trackingHotCache struct {
+	mockHotCache
+	mu              sync.Mutex
+	setCalls        []*session.Session
+	appendCalls     []appendCall
+	invalidateCalls []string
+	refreshCalls    []string
+	done            chan struct{} // closed after first call for sync
+}
+
+type appendCall struct {
+	sessionID string
+	msg       *session.Message
+}
+
+func newTrackingHotCache() *trackingHotCache {
+	return &trackingHotCache{
+		mockHotCache: mockHotCache{sessions: make(map[string]*session.Session)},
+		done:         make(chan struct{}, 4), // buffered for multiple calls
+	}
+}
+
+func (t *trackingHotCache) SetSession(ctx context.Context, s *session.Session, ttl time.Duration) error {
+	t.mu.Lock()
+	t.setCalls = append(t.setCalls, s)
+	t.mu.Unlock()
+	t.done <- struct{}{}
+	return t.mockHotCache.SetSession(ctx, s, ttl)
+}
+
+func (t *trackingHotCache) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
+	t.mu.Lock()
+	t.appendCalls = append(t.appendCalls, appendCall{sessionID, msg})
+	t.mu.Unlock()
+	t.done <- struct{}{}
+	return t.mockHotCache.AppendMessage(ctx, sessionID, msg)
+}
+
+func (t *trackingHotCache) Invalidate(_ context.Context, sessionID string) error {
+	t.mu.Lock()
+	t.invalidateCalls = append(t.invalidateCalls, sessionID)
+	t.mu.Unlock()
+	t.done <- struct{}{}
+	return nil
+}
+
+func (t *trackingHotCache) RefreshTTL(_ context.Context, sessionID string, _ time.Duration) error {
+	t.mu.Lock()
+	t.refreshCalls = append(t.refreshCalls, sessionID)
+	t.mu.Unlock()
+	t.done <- struct{}{}
+	return nil
+}
+
+func (t *trackingHotCache) waitOne() {
+	<-t.done
+}
+
+// --- pushToHotCache / write-through tests ---
+
+func TestPushToHotCache_NoCacheConfigured(t *testing.T) {
+	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
+	called := false
+	svc.pushToHotCache(func(_ providers.HotCacheProvider) {
+		called = true
+	})
+	// Give goroutine a chance to run (it shouldn't)
+	time.Sleep(10 * time.Millisecond)
+	assert.False(t, called, "callback should not be called when no hot cache is configured")
+}
+
+func TestCreateSession_WriteThroughToHotCache(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	sess := &session.Session{ID: "s1", AgentName: "agent"}
+	err := svc.CreateSession(context.Background(), sess)
+	require.NoError(t, err)
+
+	hot.waitOne()
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	require.Len(t, hot.setCalls, 1)
+	assert.Equal(t, "s1", hot.setCalls[0].ID)
+}
+
+func TestDeleteSession_InvalidatesHotCache(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1"}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.DeleteSession(context.Background(), "s1")
+	require.NoError(t, err)
+
+	hot.waitOne()
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	require.Len(t, hot.invalidateCalls, 1)
+	assert.Equal(t, "s1", hot.invalidateCalls[0])
+}
+
+func TestAppendMessage_WriteThroughToHotCache(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1"}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	msg := &session.Message{ID: "m1", Role: session.RoleUser, Content: "hello"}
+	err := svc.AppendMessage(context.Background(), "s1", msg)
+	require.NoError(t, err)
+
+	hot.waitOne()
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	require.Len(t, hot.appendCalls, 1)
+	assert.Equal(t, "s1", hot.appendCalls[0].sessionID)
+	assert.Equal(t, "m1", hot.appendCalls[0].msg.ID)
+}
+
+func TestUpdateSessionStats_RefreshesTTLInHotCache(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1", Status: session.SessionStatusActive}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.UpdateSessionStats(context.Background(), "s1", session.SessionStatsUpdate{
+		AddInputTokens: 10,
+	})
+	require.NoError(t, err)
+
+	hot.waitOne()
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	require.Len(t, hot.refreshCalls, 1)
+	assert.Equal(t, "s1", hot.refreshCalls[0])
 }

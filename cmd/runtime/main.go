@@ -43,6 +43,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
@@ -92,7 +93,8 @@ func main() {
 		"mockProvider", cfg.MockProvider,
 		"toolsConfigPath", cfg.ToolsConfigPath,
 		"tracingEnabled", cfg.TracingEnabled,
-		"evalEnabled", cfg.EvalEnabled)
+		"evalEnabled", cfg.EvalEnabled,
+		"sessionAPIURL", cfg.SessionAPIURL)
 
 	// Load eval definitions and create collector if evals are enabled
 	var evalCollector *evals.MetricCollector
@@ -252,6 +254,13 @@ func main() {
 	if cfg.PromptPackVersion != "" {
 		serverOpts = append(serverOpts, pkruntime.WithPromptPackVersion(cfg.PromptPackVersion))
 	}
+	// Wire session recording via session-api when URL is configured
+	if cfg.SessionAPIURL != "" {
+		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log)
+		serverOpts = append(serverOpts, pkruntime.WithSessionStore(sessionStore))
+		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
+	}
+
 	if evalCollector != nil {
 		evalM := pkmetrics.NewEvalMetrics(pkmetrics.EvalMetricsConfig{
 			AgentName: cfg.AgentName,

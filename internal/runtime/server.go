@@ -41,6 +41,7 @@ import (
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/metrics"
 )
@@ -86,6 +87,9 @@ type Server struct {
 	providerType   string
 	model          string
 	baseURL        string // Custom base URL for provider (e.g., Ollama endpoint)
+
+	// Session recording (Pattern C)
+	sessionStore session.Store
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -239,6 +243,14 @@ func WithEvalDefs(defs []evals.EvalDef) ServerOption {
 func WithEvalMetrics(m metrics.EvalMetricsRecorder) ServerOption {
 	return func(s *Server) {
 		s.evalMetrics = m
+	}
+}
+
+// WithSessionStore sets the session store for recording events to session-api.
+// When set, the runtime bridges PromptKit events to session-api via OmniaEventStore.
+func WithSessionStore(store session.Store) ServerOption {
+	return func(s *Server) {
+		s.sessionStore = store
 	}
 }
 

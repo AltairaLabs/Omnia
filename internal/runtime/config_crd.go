@@ -90,6 +90,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		cfg.ToolsConfigPath = defaultToolsMountPath + "/" + defaultToolsConfigFile
 	}
 
+	// Session-api URL from env (injected by operator for session recording)
+	cfg.SessionAPIURL = os.Getenv(envSessionAPIURL)
+
 	// Tracing config from env (injected by operator from Helm values)
 	cfg.TracingEnabled = os.Getenv(envTracingEnabled) == "true"
 	cfg.TracingEndpoint = os.Getenv(envTracingEndpoint)

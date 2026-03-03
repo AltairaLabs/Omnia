@@ -200,7 +200,7 @@ func (s *SessionService) SearchSessions(ctx context.Context, query string, opts 
 	return page, nil
 }
 
-// CreateSession persists a new session via the warm store.
+// CreateSession persists a new session via the warm store and pushes to hot cache.
 func (s *SessionService) CreateSession(ctx context.Context, sess *session.Session) error {
 	warm, err := s.registry.WarmStore()
 	if err != nil {
@@ -209,11 +209,16 @@ func (s *SessionService) CreateSession(ctx context.Context, sess *session.Sessio
 	if err := warm.CreateSession(ctx, sess); err != nil {
 		return err
 	}
+	s.pushToHotCache(func(hot providers.HotCacheProvider) {
+		if err := hot.SetSession(context.Background(), sess, s.cacheTTL); err != nil {
+			s.log.Error(err, "hot cache write-through failed", "sessionID", sess.ID, "op", "create")
+		}
+	})
 	s.auditSessionCreated(ctx, sess)
 	return nil
 }
 
-// DeleteSession removes a session from the warm store.
+// DeleteSession removes a session from the warm store and hot cache.
 func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) error {
 	if sessionID == "" {
 		return ErrMissingSessionID
@@ -227,11 +232,17 @@ func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) er
 	if err := warm.DeleteSession(ctx, sessionID); err != nil {
 		return err
 	}
+	// Invalidate hot cache so stale data isn't served.
+	s.pushToHotCache(func(hot providers.HotCacheProvider) {
+		if err := hot.Invalidate(context.Background(), sessionID); err != nil {
+			s.log.Error(err, "hot cache invalidation failed", "sessionID", sessionID)
+		}
+	})
 	s.auditSessionDeleted(ctx, sessionID, sess, getErr)
 	return nil
 }
 
-// AppendMessage adds a message to a session via the warm store.
+// AppendMessage adds a message to a session via the warm store and hot cache.
 // For assistant messages, a message.assistant event is published asynchronously.
 func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
 	if sessionID == "" {
@@ -244,6 +255,12 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 	if err := warm.AppendMessage(ctx, sessionID, msg); err != nil {
 		return err
 	}
+	// Write-through to hot cache (fire-and-forget per design doc).
+	s.pushToHotCache(func(hot providers.HotCacheProvider) {
+		if err := hot.AppendMessage(context.Background(), sessionID, msg); err != nil {
+			s.log.V(1).Info("hot cache append skipped", "sessionID", sessionID, "reason", err.Error())
+		}
+	})
 	if msg.Role == session.RoleAssistant {
 		s.publishMessageEvent(ctx, sessionID, msg)
 	}
@@ -274,6 +291,14 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 	if err := warm.UpdateSessionStats(ctx, sessionID, update); err != nil {
 		return err
 	}
+
+	// Refresh hot cache TTL on stats updates to keep active sessions cached.
+	s.pushToHotCache(func(hot providers.HotCacheProvider) {
+		if err := hot.RefreshTTL(context.Background(), sessionID, s.cacheTTL); err != nil {
+			// Session may not be in cache yet — that's fine.
+			s.log.V(1).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
+		}
+	})
 
 	// Only publish completion event when the status actually transitions to completed.
 	if update.SetStatus == session.SessionStatusCompleted && previousStatus != session.SessionStatusCompleted {
@@ -344,6 +369,16 @@ func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Ses
 		return
 	}
 	s.log.V(1).Info("hot cache populated", "sessionID", sess.ID)
+}
+
+// pushToHotCache runs a hot-cache write operation in a fire-and-forget goroutine.
+// If no hot cache is configured the call is a no-op.
+func (s *SessionService) pushToHotCache(fn func(hot providers.HotCacheProvider)) {
+	hot, err := s.registry.HotCache()
+	if err != nil {
+		return // Hot cache not configured — no-op.
+	}
+	go fn(hot)
 }
 
 // isHotEligible returns true if the query can be served from the hot cache.

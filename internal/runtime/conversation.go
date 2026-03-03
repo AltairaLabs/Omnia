@@ -139,6 +139,13 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		"evalDefCount", len(s.evalDefs))
 	opts = append(opts, evalOpts...)
 
+	// Wire event store for session recording (Pattern C)
+	if s.sessionStore != nil {
+		eventStore := NewOmniaEventStore(s.sessionStore, s.log)
+		opts = append(opts, sdk.WithEventStore(eventStore))
+		log.V(1).Info("event store wired for session recording")
+	}
+
 	// Wire tracing provider into SDK for span propagation
 	if s.tracingProvider != nil {
 		opts = append(opts, sdk.WithTracerProvider(s.tracingProvider.TracerProvider()))
