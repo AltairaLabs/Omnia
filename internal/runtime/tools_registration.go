@@ -38,15 +38,23 @@ func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Co
 		return fmt.Errorf("failed to list tools: %w", err)
 	}
 
-	// Register each tool with the conversation using a context-aware handler
+	// Register each tool with the conversation.
+	// WORKAROUND: We use OnTool (not OnToolCtx) because of a PromptKit SDK bug
+	// where ctxHandlers is not pre-initialized in the Conversation constructor.
+	// The pipeline's localExecutor captures the nil ctxHandlers reference during
+	// initSession(), and OnToolCtx later creates a new map that the executor
+	// never sees. OnTool uses the handlers map which IS pre-initialized, so the
+	// pipeline's executor shares the same map reference.
+	// TODO: Remove this workaround after PromptKit initializes ctxHandlers in
+	// the Conversation constructor (add: ctxHandlers: make(map[string]ToolHandlerCtx)).
 	for _, desc := range descriptors {
 		toolName := desc.Name
 		log.V(1).Info("registering tool with conversation", "tool", toolName)
 
-		// Create a closure that captures the executor, descriptor, and context info
-		conv.OnToolCtx(toolName, func(toolCtx context.Context, args map[string]any) (any, error) {
-			// Enrich with tool name
-			toolCtx = logctx.WithTool(toolCtx, toolName)
+		conv.OnTool(toolName, func(args map[string]any) (any, error) {
+			// Use background context since OnTool doesn't receive pipeline context.
+			// Tool tracing and cancellation are limited until PromptKit fix.
+			toolCtx := logctx.WithTool(context.Background(), toolName)
 			return s.executeToolForConversation(toolCtx, toolName, args)
 		})
 	}

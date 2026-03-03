@@ -866,42 +866,46 @@ if ENABLE_FULL_STACK:
 # ============================================================================
 
 if ENABLE_DEMO:
-    # Configure Ollama StatefulSet with port forward and label
-    # Group related demo resources together
-    # Object list differs based on OPA mode (sidecar vs extauthz)
+    # Ollama StatefulSet — keep only non-workload objects here so Tilt
+    # port-forwards to the ollama-0 pod (not an agent Deployment pod).
     ollama_objects = [
         'ollama-models:persistentvolumeclaim',
         'ollama-credentials:secret',
         'ollama:provider',
-        # Include vision-demo CRs (the Deployment is created by operator)
+        'ollama-tools:provider',
+    ]
+
+    k8s_resource(
+        'ollama',
+        labels=['demo'],
+        port_forwards=['11434:11434'],
+        extra_pod_selectors={'app.kubernetes.io/name': 'ollama'},
+        objects=ollama_objects,
+    )
+
+    # Agent CRs are grouped separately so their operator-created Deployments
+    # don't get associated with the ollama resource (which breaks port forwarding).
+    demo_agent_objects = [
         'demo-vision-prompts:configmap',
         'demo-vision-prompts:promptpack',
         'vision-demo:agentruntime',
-        # Include tools-demo CRs
-        'ollama-tools:provider',
         'demo-tools-prompts:configmap',
         'demo-tools-prompts:promptpack',
         'tools-demo:agentruntime',
     ]
 
-    # Add LangChain demo resources when enabled
     if ENABLE_LANGCHAIN:
-        ollama_objects.extend([
-            # LangChain vision demo (uses same PromptPack and Provider)
+        demo_agent_objects.extend([
             'vision-demo-langchain:agentruntime',
-            # LangChain tools demo
             'tools-demo-langchain:agentruntime',
         ])
-    # Build resource_deps
-    ollama_deps = []
 
     k8s_resource(
-        'ollama',
+        workload='',
+        new_name='demo-agents',
         labels=['demo'],
-        port_forwards=['11434:11434'],  # Ollama API (via Envoy when OPA enabled)
-        extra_pod_selectors={'app.kubernetes.io/name': 'ollama'},
-        objects=ollama_objects,
-        resource_deps=ollama_deps,
+        objects=demo_agent_objects,
+        resource_deps=['ollama'],
     )
 
 if ENABLE_AUDIO_DEMO:
