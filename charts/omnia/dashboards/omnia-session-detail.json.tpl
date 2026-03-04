@@ -58,7 +58,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "{agent=~\".+\"} | json | session_id = `$session_id` | line_format `{{.msg}}`",
+          "expr": "{agent=~\".+\"} | json | session_id = `$session_id` | line_format `{{ "{{.msg}}" }}`",
           "refId": "A"
         }
       ],
