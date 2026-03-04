@@ -28,3 +28,14 @@ export {
   type ResultsPanelActions,
   type ResultsPanelTab,
 } from "./results-panel-store";
+
+export {
+  useDebugPanelStore,
+  useDebugPanelOpen,
+  useDebugPanelActiveTab,
+  useDebugPanelSelectedToolCall,
+  type DebugPanelStore,
+  type DebugPanelState,
+  type DebugPanelActions,
+  type DebugPanelTab,
+} from "./debug-panel-store";

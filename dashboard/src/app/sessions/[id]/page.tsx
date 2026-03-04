@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
@@ -13,6 +13,11 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
+import {
   ArrowLeft,
   Bot,
   User,
@@ -20,19 +25,18 @@ import {
   Clock,
   Coins,
   Download,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  ChevronDown,
-  ChevronRight,
   Copy,
   MessageSquare,
   AlertCircle,
   ExternalLink,
+  Bug,
 } from "lucide-react";
 import { useSessionDetail, useSessionEvalResults } from "@/hooks";
 import type { Message, ToolCall, Session, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
+import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
+import { DebugPanel } from "@/components/sessions/debug-panel";
+import { useDebugPanelStore } from "@/stores/debug-panel-store";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -51,77 +55,22 @@ function getStatusBadge(status: Session["status"]) {
   return <Badge variant={variant}>{label}</Badge>;
 }
 
-function ToolCallBadge({ status }: Readonly<{ status: ToolCall["status"] }>) {
-  switch (status) {
-    case "success":
-      return (
-        <Badge variant="secondary" className="gap-1">
-          <CheckCircle2 className="h-3 w-3 text-green-500" />
-          Success
-        </Badge>
-      );
-    case "error":
-      return (
-        <Badge variant="destructive" className="gap-1">
-          <XCircle className="h-3 w-3" />
-          Error
-        </Badge>
-      );
-    case "pending":
-      return (
-        <Badge variant="outline" className="gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Pending
-        </Badge>
-      );
-  }
-}
-
-function ToolCallCard({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
-  const [expanded, setExpanded] = useState(false);
+function CompactToolCallIndicator({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
+  const openToolCall = useDebugPanelStore((s) => s.openToolCall);
 
   return (
-    <div className="border rounded-lg bg-muted/30 p-3 my-2">
-      <button
-        className="flex items-center justify-between w-full text-left"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-2">
-          <Wrench className="h-4 w-4 text-orange-500" />
-          <span className="font-mono text-sm font-medium">{toolCall.name}</span>
-          <ToolCallBadge status={toolCall.status} />
-          {toolCall.duration && (
-            <span className="text-xs text-muted-foreground">
-              {toolCall.duration}ms
-            </span>
-          )}
-        </div>
-        {expanded ? (
-          <ChevronDown className="h-4 w-4" />
-        ) : (
-          <ChevronRight className="h-4 w-4" />
-        )}
-      </button>
-
-      {expanded && (
-        <div className="mt-3 space-y-2">
-          <div>
-            <div className="text-xs text-muted-foreground mb-1">Arguments</div>
-            <pre className="bg-background p-2 rounded text-xs overflow-x-auto">
-              {JSON.stringify(toolCall.arguments, null, 2)}
-            </pre>
-          </div>
-          {toolCall.result !== undefined && (
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Result</div>
-              <pre className="bg-background p-2 rounded text-xs overflow-x-auto">
-                {JSON.stringify(toolCall.result, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
+    <button
+      className="flex items-center gap-2 border rounded-lg bg-muted/30 px-3 py-1.5 my-1 text-left hover:bg-muted/50 transition-colors w-full"
+      onClick={() => openToolCall(toolCall.id)}
+    >
+      <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+      <span className="font-mono text-sm font-medium truncate">{toolCall.name}</span>
+      <ToolCallBadge status={toolCall.status} />
+      {toolCall.duration !== undefined && (
+        <span className="text-xs text-muted-foreground">{toolCall.duration}ms</span>
       )}
-    </div>
+      <span className="text-xs text-muted-foreground ml-auto shrink-0">View details &gt;</span>
+    </button>
   );
 }
 
@@ -185,7 +134,7 @@ function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ messa
 
         {/* Tool calls */}
         {message.toolCalls?.map((tc) => (
-          <ToolCallCard key={tc.id} toolCall={tc} />
+          <CompactToolCallIndicator key={tc.id} toolCall={tc} />
         ))}
 
         {/* Eval results */}
@@ -250,6 +199,22 @@ function groupEvalResultsByMessageId(results: EvalResult[]): Map<string, EvalRes
     }
   }
   return grouped;
+}
+
+function DebugToggleButton() {
+  const debugPanelOpen = useDebugPanelStore((s) => s.isOpen);
+  const toggle = useDebugPanelStore((s) => s.toggle);
+
+  return (
+    <Button
+      variant={debugPanelOpen ? "secondary" : "outline"}
+      size="sm"
+      onClick={toggle}
+    >
+      <Bug className="h-4 w-4 mr-2" />
+      Debug
+    </Button>
+  );
 }
 
 function DetailSkeleton() {
@@ -446,6 +411,7 @@ export default function SessionDetailPage({
               </a>
             </Button>
           )}
+          <DebugToggleButton />
           <Button variant="outline" size="sm" onClick={() => handleExport("markdown")}>
             <Download className="h-4 w-4 mr-2" />
             Export MD
@@ -457,23 +423,16 @@ export default function SessionDetailPage({
         </div>
       </Header>
 
-      <div className="flex-1 p-6">
-        <Tabs defaultValue="conversation" className="h-full flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0 p-6">
+        <Tabs defaultValue="conversation" className="flex-1 flex flex-col min-h-0">
           <TabsList>
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
             <TabsTrigger value="metadata">Metadata</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="conversation" className="flex-1 mt-4">
-            <Card className="h-[calc(100vh-300px)]">
-              <ScrollArea className="h-full p-6">
-                <ConversationMessages
-                  messages={session.messages}
-                  evalResults={evalResults || []}
-                />
-              </ScrollArea>
-            </Card>
+          <TabsContent value="conversation" className="flex-1 min-h-0 mt-4">
+            <ConversationWithDebugPanel session={session} evalResults={evalResults || []} />
           </TabsContent>
 
           <TabsContent value="metrics" className="mt-4">
@@ -619,5 +578,47 @@ export default function SessionDetailPage({
         </Tabs>
       </div>
     </div>
+  );
+}
+
+function ConversationWithDebugPanel({
+  session,
+  evalResults,
+}: Readonly<{ session: Session; evalResults: EvalResult[] }>) {
+  const debugOpen = useDebugPanelStore((s) => s.isOpen);
+
+  if (!debugOpen) {
+    return (
+      <div className="flex flex-col h-full">
+        <Card className="flex-1 min-h-0">
+          <ScrollArea className="h-full p-6">
+            <ConversationMessages
+              messages={session.messages}
+              evalResults={evalResults}
+            />
+          </ScrollArea>
+        </Card>
+        <DebugPanel messages={session.messages} session={session} />
+      </div>
+    );
+  }
+
+  return (
+    <ResizablePanelGroup orientation="vertical" className="h-full">
+      <ResizablePanel defaultSize={70} minSize={30}>
+        <Card className="h-full">
+          <ScrollArea className="h-full p-6">
+            <ConversationMessages
+              messages={session.messages}
+              evalResults={evalResults}
+            />
+          </ScrollArea>
+        </Card>
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={30} minSize={15}>
+        <DebugPanel messages={session.messages} session={session} />
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

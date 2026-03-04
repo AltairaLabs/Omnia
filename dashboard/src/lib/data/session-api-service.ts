@@ -92,6 +92,7 @@ function transformApiMessage(api: ApiMessage): Message {
     content: api.content,
     timestamp: api.timestamp,
     toolCallId: api.toolCallId,
+    metadata: api.metadata,
     tokens:
       api.inputTokens || api.outputTokens
         ? { input: api.inputTokens, output: api.outputTokens }
@@ -155,12 +156,16 @@ function buildToolCall(
     status = result.isError ? "error" : "success";
   }
 
+  const durationStr = api.metadata?.duration_ms;
+  const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
+
   return {
     id: api.toolCallId!,
     name,
     arguments: args,
     result: result ? parsedResult : undefined,
     status,
+    duration: duration && !Number.isNaN(duration) ? duration : undefined,
   };
 }
 
