@@ -5,6 +5,9 @@ export type TimelineEventKind =
   | "assistant_message"
   | "system_message"
   | "tool_call"
+  | "pipeline_event"
+  | "stage_event"
+  | "provider_call"
   | "workflow_transition"
   | "workflow_completed"
   | "error";
@@ -34,6 +37,9 @@ function resolveMessageKind(message: Message): TimelineEventKind {
   if (metadataType === "workflow_transition") return "workflow_transition";
   if (metadataType === "workflow_completed") return "workflow_completed";
   if (metadataType === "error") return "error";
+  if (metadataType === "pipeline.started" || metadataType === "pipeline.completed") return "pipeline_event";
+  if (metadataType === "stage.started" || metadataType === "stage.completed") return "stage_event";
+  if (metadataType === "provider_call") return "provider_call";
 
   switch (message.role) {
     case "user":
@@ -47,6 +53,16 @@ function resolveMessageKind(message: Message): TimelineEventKind {
   }
 }
 
+/** Try to extract a stage/pipeline name from JSON content. */
+function parseStageName(content: string): string | undefined {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed.Name || parsed.name;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildLabel(kind: TimelineEventKind, message: Message): string {
   switch (kind) {
     case "user_message":
@@ -55,6 +71,17 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
       return "Assistant response";
     case "system_message":
       return "System message";
+    case "pipeline_event": {
+      const action = message.metadata?.type === "pipeline.started" ? "started" : "completed";
+      return `Pipeline ${action}`;
+    }
+    case "stage_event": {
+      const name = parseStageName(message.content);
+      const action = message.metadata?.type === "stage.started" ? "started" : "completed";
+      return name ? `Stage: ${name} ${action}` : `Stage ${action}`;
+    }
+    case "provider_call":
+      return "Provider call";
     case "workflow_transition": {
       const from = message.metadata?.from;
       const to = message.metadata?.to;

@@ -98,6 +98,20 @@ describe("extractTimelineEvents", () => {
     expect(events[0].metadata?.from).toBe("idle");
   });
 
+  it("handles workflow transition without from/to metadata", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: "Transitioning",
+        metadata: { type: "workflow_transition" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].label).toBe("Workflow transition");
+  });
+
   it("handles workflow completed events", () => {
     const messages = [
       makeMessage({
@@ -155,6 +169,96 @@ describe("extractTimelineEvents", () => {
     const events = extractTimelineEvents(messages);
 
     expect(events[0].detail).toBeUndefined();
+  });
+
+  it("handles pipeline.started events", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: '{"MiddlewareCount":6}',
+        metadata: { source: "runtime", type: "pipeline.started" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].kind).toBe("pipeline_event");
+    expect(events[0].label).toBe("Pipeline started");
+  });
+
+  it("handles pipeline.completed events", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: '{"Duration":30020821144}',
+        metadata: { source: "runtime", type: "pipeline.completed" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].kind).toBe("pipeline_event");
+    expect(events[0].label).toBe("Pipeline completed");
+  });
+
+  it("handles stage events with name from JSON content", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: '{"Name":"context_builder","Index":0,"StageType":"accumulate","Duration":0,"Error":null}',
+        metadata: { source: "runtime", type: "stage.started" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].kind).toBe("stage_event");
+    expect(events[0].label).toBe("Stage: context_builder started");
+  });
+
+  it("handles stage.completed events", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: '{"Name":"provider","Index":0,"StageType":"","Duration":30013473945,"Error":null}',
+        metadata: { source: "runtime", type: "stage.completed" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].kind).toBe("stage_event");
+    expect(events[0].label).toBe("Stage: provider completed");
+  });
+
+  it("handles stage events with invalid JSON content", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: "not json",
+        metadata: { source: "runtime", type: "stage.started" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].kind).toBe("stage_event");
+    expect(events[0].label).toBe("Stage started");
+  });
+
+  it("handles provider_call events", () => {
+    const messages = [
+      makeMessage({
+        id: "m1",
+        role: "system",
+        content: '{"cachedTokens":0,"cost":0,"durationMs":6542,"provider":"ollama"}',
+        metadata: { source: "runtime", type: "provider_call" },
+      }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events[0].kind).toBe("provider_call");
+    expect(events[0].label).toBe("Provider call");
   });
 
   it("handles mixed message types in chronological order", () => {

@@ -160,6 +160,19 @@ function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ messa
 }
 
 /**
+ * Returns true if a message is a user-facing conversation message.
+ *
+ * Any message with a `metadata.type` is an internal runtime event
+ * (pipeline stages, provider calls, tool calls, workflow transitions, etc.)
+ * and belongs in the Debug panel, not the conversation view.
+ */
+function isConversationMessage(m: Message): boolean {
+  if (m.role === "tool") return false;
+  if (m.metadata?.type) return false;
+  return true;
+}
+
+/**
  * Renders the conversation message list with eval results grouped by message.
  */
 function ConversationMessages({
@@ -171,7 +184,7 @@ function ConversationMessages({
   return (
     <div className="space-y-6">
       {messages
-        .filter((m) => m.role !== "tool")
+        .filter(isConversationMessage)
         .map((message) => (
           <MessageBubble
             key={message.id}

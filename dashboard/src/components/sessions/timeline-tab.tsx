@@ -12,6 +12,9 @@ import {
   GitBranch,
   CheckCircle2,
   AlertCircle,
+  Layers,
+  Cpu,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types/session";
@@ -39,6 +42,18 @@ const KIND_CONFIG: Record<TimelineEventKind, {
   tool_call: {
     icon: <Wrench className="h-3.5 w-3.5" />,
     color: "text-orange-500",
+  },
+  pipeline_event: {
+    icon: <Layers className="h-3.5 w-3.5" />,
+    color: "text-indigo-500",
+  },
+  stage_event: {
+    icon: <Cpu className="h-3.5 w-3.5" />,
+    color: "text-cyan-500",
+  },
+  provider_call: {
+    icon: <Zap className="h-3.5 w-3.5" />,
+    color: "text-yellow-500",
   },
   workflow_transition: {
     icon: <GitBranch className="h-3.5 w-3.5" />,
