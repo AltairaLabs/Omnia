@@ -9,6 +9,7 @@ Functional Source License. See ee/LICENSE for details.
 package policy
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -98,20 +99,23 @@ func extractHeaders(r *http.Request) map[string]string {
 	return headers
 }
 
-// parseBody attempts to parse the request body as JSON.
-// Returns nil if the body cannot be parsed.
+// parseBody reads the request body, parses it as JSON, and restores the body
+// so the reverse proxy can forward it to the upstream service.
+// Returns nil if the body is empty or cannot be parsed.
 func parseBody(r *http.Request, logger *slog.Logger) map[string]interface{} {
 	if r.Body == nil {
 		return nil
 	}
 
-	defer func() { _ = r.Body.Close() }()
-
 	data, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
 	if err != nil {
 		logger.Debug("failed to read request body", "error", err.Error())
 		return nil
 	}
+
+	// Restore the body so the reverse proxy can forward it upstream.
+	r.Body = io.NopCloser(bytes.NewReader(data))
 
 	var body map[string]interface{}
 	if err := json.Unmarshal(data, &body); err != nil {
