@@ -186,16 +186,6 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 	return &m, nil
 }
 
-// --- helper: begin transaction ----------------------------------------------
-
-func (p *Provider) beginTx(ctx context.Context) (pgx.Tx, error) {
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("postgres: begin tx: %w", err)
-	}
-	return tx, nil
-}
-
 // --- helper: session exists check -------------------------------------------
 
 func (p *Provider) sessionExists(ctx context.Context, sessionID string) error {
@@ -345,7 +335,7 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 }
 
 func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
-	tx, err := p.beginTx(ctx)
+	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -678,7 +668,7 @@ func (p *Provider) DropPartition(ctx context.Context, date time.Time) error {
 	isoYear, isoWeek := date.ISOWeek()
 	suffix := fmt.Sprintf("w%04d_%02d", isoYear, isoWeek)
 
-	tx, err := p.beginTx(ctx)
+	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -807,7 +797,7 @@ func (p *Provider) DeleteSessionsBatch(ctx context.Context, sessionIDs []string)
 		return nil
 	}
 
-	tx, err := p.beginTx(ctx)
+	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
