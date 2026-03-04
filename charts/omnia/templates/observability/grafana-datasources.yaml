@@ -36,7 +36,7 @@ data:
       - name: Tempo
         type: tempo
         uid: tempo
-        url: http://{{ .Release.Name }}-tempo.{{ .Release.Namespace }}:3100
+        url: http://{{ .Release.Name }}-tempo.{{ .Release.Namespace }}:3200
         editable: false
         jsonData:
           tracesToLogsV2:
