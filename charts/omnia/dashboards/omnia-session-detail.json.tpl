@@ -50,7 +50,7 @@
         "enableLogDetails": true,
         "prettifyLogMessage": true,
         "showCommonLabels": false,
-        "showLabels": true,
+        "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
         "wrapLogMessage": true
@@ -58,7 +58,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "{agent=~\".+\"} | session_id = `$session_id`",
+          "expr": "{agent=~\".+\"} | json | session_id = `$session_id` | line_format `{{.msg}}`",
           "refId": "A"
         }
       ],
