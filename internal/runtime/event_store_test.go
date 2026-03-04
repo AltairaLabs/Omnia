@@ -124,6 +124,27 @@ func (m *mockSessionStore) waitForMessages(t *testing.T, count int) {
 	}
 }
 
+// waitForStats waits until the expected number of stats updates is recorded.
+// UpdateSessionStats is called after AppendMessage in the same goroutine,
+// so waitForMessages alone is not sufficient to guarantee stats are available.
+func (m *mockSessionStore) waitForStats(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		m.mu.Lock()
+		n := len(m.stats)
+		m.mu.Unlock()
+		if n >= count {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d stats updates, got %d", count, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 // --- Tool call events ---
 
 func TestOmniaEventStore_AppendToolCallStarted(t *testing.T) {
@@ -169,10 +190,8 @@ func TestOmniaEventStore_AppendToolCallStarted(t *testing.T) {
 		t.Errorf("expected tool name weather, got %v", content["name"])
 	}
 
+	store.waitForStats(t, 1)
 	stats := store.getStats()
-	if len(stats) == 0 {
-		t.Fatal("expected stats update")
-	}
 	if stats[0].AddToolCalls != 1 {
 		t.Errorf("expected AddToolCalls=1, got %d", stats[0].AddToolCalls)
 	}
@@ -356,6 +375,7 @@ func TestOmniaEventStore_AppendProviderCallCompleted(t *testing.T) {
 		t.Errorf("expected outputTokens=200, got %d", msg.OutputTokens)
 	}
 
+	store.waitForStats(t, 1)
 	stats := store.getStats()
 	if stats[0].AddInputTokens != 100 {
 		t.Errorf("expected AddInputTokens=100, got %d", stats[0].AddInputTokens)
@@ -507,6 +527,7 @@ func TestOmniaEventStore_AppendMessageCreated_WithToolCalls(t *testing.T) {
 	}
 
 	// Stats should count both tool calls
+	store.waitForStats(t, 1)
 	stats := store.getStats()
 	if stats[0].AddToolCalls != 2 {
 		t.Errorf("expected AddToolCalls=2, got %d", stats[0].AddToolCalls)
@@ -625,6 +646,7 @@ func TestOmniaEventStore_AppendMessageUpdated(t *testing.T) {
 		t.Errorf("expected outputTokens=200, got %d", msg.OutputTokens)
 	}
 
+	store.waitForStats(t, 1)
 	stats := store.getStats()
 	if stats[0].AddInputTokens != 100 {
 		t.Errorf("expected AddInputTokens=100, got %d", stats[0].AddInputTokens)
