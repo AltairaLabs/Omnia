@@ -36,8 +36,6 @@ const (
 	EnvHandlerMode         = "OMNIA_HANDLER_MODE"
 	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
 	EnvProviderAPIKey      = "OMNIA_PROVIDER_API_KEY"
-	EnvToolRegistryName    = "OMNIA_TOOLREGISTRY_NAME"
-	EnvToolRegistryNS      = "OMNIA_TOOLREGISTRY_NAMESPACE"
 	EnvSessionType         = "OMNIA_SESSION_TYPE"
 	EnvSessionTTL          = "OMNIA_SESSION_TTL"
 	EnvSessionStoreURL     = "OMNIA_SESSION_STORE_URL"

@@ -433,6 +433,77 @@ func TestRuntimeMetrics_RecordValidation_Error(t *testing.T) {
 	}
 }
 
+func TestRuntimeMetrics_RecordToolCall_WithRegistryLabels(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	cfg := RuntimeMetricsConfig{
+		AgentName: "test-agent",
+		Namespace: "test-ns",
+	}
+
+	m := newRuntimeMetricsWithRegistry(cfg, reg)
+
+	tc := ToolCallMetrics{
+		ToolName:        "search",
+		HandlerType:     "mcp",
+		HandlerName:     "my-handler",
+		RegistryName:    "my-tools",
+		DurationSeconds: 0.25,
+		Success:         true,
+	}
+
+	m.RecordToolCall(tc)
+
+	gathered, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	// Verify counter labels
+	for _, mf := range gathered {
+		if mf.GetName() == "omnia_runtime_tool_calls_total" {
+			if len(mf.GetMetric()) == 0 {
+				t.Fatal("No metrics in tool_calls_total")
+			}
+			labelMap := make(map[string]string)
+			for _, lp := range mf.GetMetric()[0].GetLabel() {
+				labelMap[lp.GetName()] = lp.GetValue()
+			}
+			expectations := map[string]string{
+				"tool":          "search",
+				"status":        "success",
+				"handler_type":  "mcp",
+				"handler_name":  "my-handler",
+				"registry_name": "my-tools",
+			}
+			for k, want := range expectations {
+				if got := labelMap[k]; got != want {
+					t.Errorf("label %q = %q, want %q", k, got, want)
+				}
+			}
+		}
+		if mf.GetName() == "omnia_runtime_tool_call_duration_seconds" {
+			if len(mf.GetMetric()) == 0 {
+				t.Fatal("No metrics in tool_call_duration_seconds")
+			}
+			labelMap := make(map[string]string)
+			for _, lp := range mf.GetMetric()[0].GetLabel() {
+				labelMap[lp.GetName()] = lp.GetValue()
+			}
+			expectations := map[string]string{
+				"tool":          "search",
+				"handler_type":  "mcp",
+				"handler_name":  "my-handler",
+				"registry_name": "my-tools",
+			}
+			for k, want := range expectations {
+				if got := labelMap[k]; got != want {
+					t.Errorf("label %q = %q, want %q", k, got, want)
+				}
+			}
+		}
+	}
+}
+
 func TestNoOpRuntimeMetrics(t *testing.T) {
 	m := &NoOpRuntimeMetrics{}
 
@@ -542,14 +613,14 @@ func newRuntimeMetricsWithRegistry(cfg RuntimeMetricsConfig, reg *prometheus.Reg
 		Name:        "omnia_runtime_tool_calls_total",
 		Help:        "Total number of tool calls",
 		ConstLabels: labels,
-	}, []string{"tool", "status"})
+	}, []string{"tool", "status", "handler_type", "handler_name", "registry_name"})
 
 	toolCallDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:        "omnia_runtime_tool_call_duration_seconds",
 		Help:        "Tool call duration in seconds",
 		ConstLabels: labels,
 		Buckets:     toolBuckets,
-	}, []string{"tool"})
+	}, []string{"tool", "handler_type", "handler_name", "registry_name"})
 
 	// Pipeline metrics
 	pipelinesActive := prometheus.NewGaugeVec(prometheus.GaugeOpts{

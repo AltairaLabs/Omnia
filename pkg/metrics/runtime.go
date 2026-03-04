@@ -112,14 +112,14 @@ func NewRuntimeMetrics(cfg RuntimeMetricsConfig) *RuntimeMetrics {
 			Name:        "omnia_runtime_tool_calls_total",
 			Help:        "Total number of tool calls",
 			ConstLabels: labels,
-		}, []string{"tool", "status"}),
+		}, []string{"tool", "status", "handler_type", "handler_name", "registry_name"}),
 
 		ToolCallDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:        "omnia_runtime_tool_call_duration_seconds",
 			Help:        "Tool call duration in seconds",
 			ConstLabels: labels,
 			Buckets:     toolBuckets,
-		}, []string{"tool"}),
+		}, []string{"tool", "handler_type", "handler_name", "registry_name"}),
 
 		// Pipeline metrics
 		PipelinesActive: promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -180,6 +180,9 @@ func (m *RuntimeMetrics) Initialize() {
 // ToolCallMetrics contains the metrics for a single tool call.
 type ToolCallMetrics struct {
 	ToolName        string
+	HandlerType     string // http, grpc, mcp, openapi
+	HandlerName     string
+	RegistryName    string
 	DurationSeconds float64
 	Success         bool
 }
@@ -191,8 +194,12 @@ func (m *RuntimeMetrics) RecordToolCall(tc ToolCallMetrics) {
 		status = StatusError
 	}
 
-	m.ToolCallsTotal.WithLabelValues(tc.ToolName, status).Inc()
-	m.ToolCallDuration.WithLabelValues(tc.ToolName).Observe(tc.DurationSeconds)
+	m.ToolCallsTotal.WithLabelValues(
+		tc.ToolName, status, tc.HandlerType, tc.HandlerName, tc.RegistryName,
+	).Inc()
+	m.ToolCallDuration.WithLabelValues(
+		tc.ToolName, tc.HandlerType, tc.HandlerName, tc.RegistryName,
+	).Observe(tc.DurationSeconds)
 }
 
 // PipelineMetrics contains the metrics for a pipeline execution.

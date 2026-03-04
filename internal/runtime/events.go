@@ -221,11 +221,19 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 		// Record tool call metrics
 		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordToolCall(metrics.ToolCallMetrics{
+			tc := metrics.ToolCallMetrics{
 				ToolName:        data.ToolName,
 				DurationSeconds: data.Duration.Seconds(),
 				Success:         data.Status == "success",
-			})
+			}
+			if s.toolManager != nil {
+				if meta, ok := s.toolManager.GetToolMeta(data.ToolName); ok {
+					tc.HandlerType = meta.HandlerType
+					tc.HandlerName = meta.HandlerName
+					tc.RegistryName = meta.RegistryName
+				}
+			}
+			s.runtimeMetrics.RecordToolCall(tc)
 		}
 
 		s.log.V(1).Info("event: tool call completed",
@@ -246,11 +254,19 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 		// Record tool call failure metrics
 		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordToolCall(metrics.ToolCallMetrics{
+			tc := metrics.ToolCallMetrics{
 				ToolName:        data.ToolName,
 				DurationSeconds: data.Duration.Seconds(),
 				Success:         false,
-			})
+			}
+			if s.toolManager != nil {
+				if meta, ok := s.toolManager.GetToolMeta(data.ToolName); ok {
+					tc.HandlerType = meta.HandlerType
+					tc.HandlerName = meta.HandlerName
+					tc.RegistryName = meta.RegistryName
+				}
+			}
+			s.runtimeMetrics.RecordToolCall(tc)
 		}
 
 		s.log.V(1).Info("event: tool call failed",
