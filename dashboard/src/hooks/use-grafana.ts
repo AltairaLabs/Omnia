@@ -52,6 +52,8 @@ export const GRAFANA_DASHBOARDS = {
   LOGS: "omnia-logs",
   /** Eval quality metrics */
   QUALITY: "omnia-quality",
+  /** Session detail: traces + logs filtered by session ID */
+  SESSION_DETAIL: "omnia-session-detail",
 } as const;
 
 // Panel IDs within the Overview dashboard
@@ -370,4 +372,36 @@ export function buildSessionTracesUrl(
   const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
   const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
   return `${base}${path}/explore?${params.toString()}`;
+}
+
+/**
+ * Builds a Grafana dashboard URL for the session detail dashboard.
+ * Opens the omnia-session-detail dashboard with session_id pre-filled.
+ *
+ * @param config - Grafana configuration
+ * @param sessionId - UUID session ID
+ * @param options - Optional time range
+ * @returns The dashboard URL or null if Grafana is not enabled
+ */
+export function buildSessionDashboardUrl(
+  config: GrafanaConfig,
+  sessionId: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-6h", to = "now" } = options;
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("from", from);
+  params.set("to", to);
+  params.set("var-session_id", sessionId);
+  params.set("var-trace_id", sessionIdToTraceId(sessionId));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/d/${GRAFANA_DASHBOARDS.SESSION_DETAIL}/_?${params.toString()}`;
 }

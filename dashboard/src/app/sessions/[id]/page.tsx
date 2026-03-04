@@ -37,8 +37,7 @@ import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
   useGrafana,
-  buildSessionLogsUrl,
-  buildSessionTracesUrl,
+  buildSessionDashboardUrl,
 } from "@/hooks/use-grafana";
 
 function getStatusBadge(status: Session["status"]) {
@@ -293,10 +292,7 @@ export default function SessionDetailPage({
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
   const grafana = useGrafana();
-  const sessionLogsUrl = grafana.enabled && session
-    ? buildSessionLogsUrl(grafana, id, session.agentName)
-    : null;
-  const sessionTracesUrl = grafana.enabled ? buildSessionTracesUrl(grafana, id) : null;
+  const sessionDashboardUrl = grafana.enabled ? buildSessionDashboardUrl(grafana, id) : null;
 
   if (isLoading) {
     return <DetailSkeleton />;
@@ -442,19 +438,11 @@ export default function SessionDetailPage({
         }
       >
         <div className="flex items-center gap-2">
-          {sessionLogsUrl && (
+          {sessionDashboardUrl && (
             <Button variant="outline" size="sm" asChild>
-              <a href={sessionLogsUrl} target="_blank" rel="noopener noreferrer">
+              <a href={sessionDashboardUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="h-4 w-4 mr-2" />
-                Logs
-              </a>
-            </Button>
-          )}
-          {sessionTracesUrl && (
-            <Button variant="outline" size="sm" asChild>
-              <a href={sessionTracesUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Traces
+                Observe
               </a>
             </Button>
           )}
