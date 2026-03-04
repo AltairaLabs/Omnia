@@ -42,6 +42,18 @@ const (
 	metaValueSource = "runtime"
 )
 
+// asPtr extracts event data as a pointer, handling both value and pointer types.
+// The PromptKit emitter may pass either T or *T depending on the event method.
+func asPtr[T any](data any) (*T, bool) {
+	if p, ok := data.(*T); ok {
+		return p, true
+	}
+	if v, ok := data.(T); ok {
+		return &v, true
+	}
+	return nil, false
+}
+
 // OmniaEventStore implements PromptKit's events.EventStore interface by
 // bridging events to Omnia's session-api via session.Store.AppendMessage().
 // This is the Pattern C integration point: the SDK's EventBus publishes
@@ -177,7 +189,7 @@ func (s *OmniaEventStore) convertEvent(event *events.Event) (session.Message, se
 // Records ALL roles (user, assistant, tool, system) with full content
 // including embedded tool calls and tool results.
 func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.MessageCreatedData)
+	data, ok := asPtr[events.MessageCreatedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -294,7 +306,7 @@ func extractPartsMetadata(parts []types.ContentPart) []partMetadata {
 
 // convertMessageUpdated records token/cost/latency updates for a message.
 func (s *OmniaEventStore) convertMessageUpdated(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.MessageUpdatedData)
+	data, ok := asPtr[events.MessageUpdatedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -329,7 +341,7 @@ func (s *OmniaEventStore) convertMessageUpdated(event *events.Event) (session.Me
 
 // convertConversationStarted records the system prompt.
 func (s *OmniaEventStore) convertConversationStarted(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ConversationStartedData)
+	data, ok := asPtr[events.ConversationStartedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -347,7 +359,7 @@ func (s *OmniaEventStore) convertConversationStarted(event *events.Event) (sessi
 
 // convertToolCallStarted creates a tool_call message matching the facade format.
 func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ToolCallStartedData)
+	data, ok := asPtr[events.ToolCallStartedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -372,7 +384,7 @@ func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (session.M
 
 // convertToolCallCompleted creates a tool_result status message.
 func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ToolCallCompletedData)
+	data, ok := asPtr[events.ToolCallCompletedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -398,7 +410,7 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (session
 
 // convertToolCallFailed creates a tool_result message with is_error metadata.
 func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ToolCallFailedData)
+	data, ok := asPtr[events.ToolCallFailedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -424,7 +436,7 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (session.Me
 
 // convertProviderCallStarted records the start of a provider call.
 func (s *OmniaEventStore) convertProviderCallStarted(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ProviderCallStartedData)
+	data, ok := asPtr[events.ProviderCallStartedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -448,7 +460,7 @@ func (s *OmniaEventStore) convertProviderCallStarted(event *events.Event) (sessi
 
 // convertProviderCallCompleted records provider call completion with tokens/cost.
 func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ProviderCallCompletedData)
+	data, ok := asPtr[events.ProviderCallCompletedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
@@ -487,7 +499,7 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (ses
 
 // convertProviderCallFailed records a provider call failure.
 func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
-	data, ok := event.Data.(*events.ProviderCallFailedData)
+	data, ok := asPtr[events.ProviderCallFailedData](event.Data)
 	if !ok {
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}

@@ -1219,3 +1219,130 @@ func TestOmniaEventStore_PreservesTimestamp(t *testing.T) {
 		t.Errorf("expected timestamp %v, got %v", ts, store.getMessages()[0].Timestamp)
 	}
 }
+
+// --- Value type assertions (emitter passes values, not pointers) ---
+
+// TestOmniaEventStore_ValueTypeToolCall verifies that tool call events passed as
+// struct values (as the PromptKit emitter does) are correctly handled by asPtr.
+func TestOmniaEventStore_ValueTypeToolCall(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	// Emitter passes value types, not pointers
+	event := &events.Event{
+		Type:      events.EventToolCallStarted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: events.ToolCallStartedData{
+			ToolName: "get_weather",
+			CallID:   "call-val-1",
+			Args:     map[string]interface{}{"city": "London"},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if msg.Metadata["type"] != "tool_call" {
+		t.Errorf("expected type=tool_call, got %s", msg.Metadata["type"])
+	}
+	if msg.ToolCallID != "call-val-1" {
+		t.Errorf("expected ToolCallID=call-val-1, got %s", msg.ToolCallID)
+	}
+}
+
+// TestOmniaEventStore_ValueTypeToolCallCompleted verifies completed events
+// passed as values are handled.
+func TestOmniaEventStore_ValueTypeToolCallCompleted(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventToolCallCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: events.ToolCallCompletedData{
+			ToolName: "get_weather",
+			CallID:   "call-val-2",
+			Duration: 500 * time.Millisecond,
+			Status:   "success",
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if msg.Metadata["type"] != "tool_call_completed" {
+		t.Errorf("expected type=tool_call_completed, got %s", msg.Metadata["type"])
+	}
+	if msg.Metadata["duration_ms"] != "500" {
+		t.Errorf("expected duration_ms=500, got %s", msg.Metadata["duration_ms"])
+	}
+}
+
+// TestOmniaEventStore_ValueTypeProviderCallStarted verifies provider call
+// started events passed as values are handled.
+func TestOmniaEventStore_ValueTypeProviderCallStarted(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventProviderCallStarted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: events.ProviderCallStartedData{
+			Provider:     "ollama",
+			Model:        "llama3",
+			MessageCount: 3,
+			ToolCount:    2,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if msg.Metadata["type"] != "provider_call_started" {
+		t.Errorf("expected type=provider_call_started, got %s", msg.Metadata["type"])
+	}
+}
+
+// TestOmniaEventStore_ValueTypeProviderCallFailed verifies provider call
+// failed events passed as values are handled.
+func TestOmniaEventStore_ValueTypeProviderCallFailed(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventProviderCallFailed,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: events.ProviderCallFailedData{
+			Provider: "ollama",
+			Error:    errors.New("timeout"),
+			Duration: 30 * time.Second,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if msg.Metadata["type"] != "provider_call_failed" {
+		t.Errorf("expected type=provider_call_failed, got %s", msg.Metadata["type"])
+	}
+}

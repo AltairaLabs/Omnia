@@ -40,7 +40,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to provider call completed events to record Prometheus metrics
 	eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {
-		data, ok := e.Data.(*events.ProviderCallCompletedData)
+		data, ok := asPtr[events.ProviderCallCompletedData](e.Data)
 		if !ok {
 			return
 		}
@@ -74,7 +74,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to provider call failed events to record failures
 	eventBus.Subscribe(events.EventProviderCallFailed, func(e *events.Event) {
-		data, ok := e.Data.(*events.ProviderCallFailedData)
+		data, ok := asPtr[events.ProviderCallFailedData](e.Data)
 		if !ok {
 			return
 		}
@@ -112,7 +112,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to pipeline completed events for overall visibility
 	eventBus.Subscribe(events.EventPipelineCompleted, func(e *events.Event) {
-		data, ok := e.Data.(*events.PipelineCompletedData)
+		data, ok := asPtr[events.PipelineCompletedData](e.Data)
 		if !ok {
 			return
 		}
@@ -139,7 +139,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to pipeline failed events
 	eventBus.Subscribe(events.EventPipelineFailed, func(e *events.Event) {
-		data, ok := e.Data.(*events.PipelineFailedData)
+		data, ok := asPtr[events.PipelineFailedData](e.Data)
 		if !ok {
 			return
 		}
@@ -161,7 +161,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to stage completed events
 	eventBus.Subscribe(events.EventStageCompleted, func(e *events.Event) {
-		data, ok := e.Data.(*events.StageCompletedData)
+		data, ok := asPtr[events.StageCompletedData](e.Data)
 		if !ok {
 			return
 		}
@@ -187,7 +187,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to stage failed events
 	eventBus.Subscribe(events.EventStageFailed, func(e *events.Event) {
-		data, ok := e.Data.(*events.StageFailedData)
+		data, ok := asPtr[events.StageFailedData](e.Data)
 		if !ok {
 			return
 		}
@@ -214,7 +214,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to tool call completed events (tool metrics)
 	eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
-		data, ok := e.Data.(*events.ToolCallCompletedData)
+		data, ok := asPtr[events.ToolCallCompletedData](e.Data)
 		if !ok {
 			return
 		}
@@ -239,7 +239,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to tool call failed events
 	eventBus.Subscribe(events.EventToolCallFailed, func(e *events.Event) {
-		data, ok := e.Data.(*events.ToolCallFailedData)
+		data, ok := asPtr[events.ToolCallFailedData](e.Data)
 		if !ok {
 			return
 		}
@@ -264,7 +264,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to validation passed events
 	eventBus.Subscribe(events.EventValidationPassed, func(e *events.Event) {
-		data, ok := e.Data.(*events.ValidationPassedData)
+		data, ok := asPtr[events.ValidationPassedData](e.Data)
 		if !ok {
 			return
 		}
@@ -289,7 +289,7 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 
 	// Subscribe to validation failed events
 	eventBus.Subscribe(events.EventValidationFailed, func(e *events.Event) {
-		data, ok := e.Data.(*events.ValidationFailedData)
+		data, ok := asPtr[events.ValidationFailedData](e.Data)
 		if !ok {
 			return
 		}
