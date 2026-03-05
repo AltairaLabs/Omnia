@@ -263,6 +263,7 @@ const (
 	ErrorCodeToolFailed       = "TOOL_FAILED"
 	ErrorCodeUploadFailed     = "UPLOAD_FAILED"
 	ErrorCodeMediaNotEnabled  = "MEDIA_NOT_ENABLED"
+	ErrorCodeRateLimited      = "RATE_LIMITED"
 )
 
 // NewChunkMessage creates a new chunk message.

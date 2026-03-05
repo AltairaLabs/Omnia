@@ -42,6 +42,7 @@ var (
 	ErrBodyTooLarge       = errors.New("request body too large")
 	ErrInvalidStatus      = errors.New("invalid session status")
 	ErrSearchQueryTooLong = errors.New("search query too long")
+	ErrRateLimitExceeded  = errors.New("rate limit exceeded")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.

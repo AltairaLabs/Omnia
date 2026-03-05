@@ -74,12 +74,13 @@ type GRPCAdapterConfig struct {
 
 // GRPCAdapter implements ToolAdapter for gRPC tool services.
 type GRPCAdapter struct {
-	config GRPCAdapterConfig
-	log    logr.Logger
-	conn   *grpc.ClientConn
-	client toolsv1.ToolServiceClient
-	tools  map[string]*toolsv1.ToolInfo
-	mu     sync.RWMutex
+	config   GRPCAdapterConfig
+	log      logr.Logger
+	conn     *grpc.ClientConn
+	client   toolsv1.ToolServiceClient
+	tools    map[string]*toolsv1.ToolInfo
+	mu       sync.RWMutex
+	breakers *ToolCircuitBreakers
 }
 
 // NewGRPCAdapter creates a new gRPC adapter.
@@ -88,9 +89,10 @@ func NewGRPCAdapter(config GRPCAdapterConfig, log logr.Logger) *GRPCAdapter {
 		config.Timeout = 30 * time.Second
 	}
 	return &GRPCAdapter{
-		config: config,
-		log:    log.WithValues("adapter", config.Name, "endpoint", config.Endpoint),
-		tools:  make(map[string]*toolsv1.ToolInfo),
+		config:   config,
+		log:      log.WithValues("adapter", config.Name, "endpoint", config.Endpoint),
+		tools:    make(map[string]*toolsv1.ToolInfo),
+		breakers: NewToolCircuitBreakers(),
 	}
 }
 
@@ -268,34 +270,42 @@ func (a *GRPCAdapter) Call(ctx context.Context, name string, args map[string]any
 		ctx = metadata.AppendToOutgoingContext(ctx, pairs...)
 	}
 
-	resp, err := client.Execute(ctx, &toolsv1.ToolRequest{
-		ToolName:      name,
-		ArgumentsJson: string(argsJSON),
+	var resp *toolsv1.ToolResponse
+	_, err = a.breakers.Execute(name, func() ([]byte, error) {
+		var execErr error
+		resp, execErr = client.Execute(ctx, &toolsv1.ToolRequest{
+			ToolName:      name,
+			ArgumentsJson: string(argsJSON),
+		})
+		return nil, execErr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tool execution failed: %w", err)
 	}
 
-	// Parse result
-	var content any
-	if resp.ResultJson != "" {
-		if json.Unmarshal([]byte(resp.ResultJson), &content) != nil {
-			// If not valid JSON, use as string
-			content = resp.ResultJson
-		}
-	}
+	return parseGRPCResponse(resp), nil
+}
 
+// parseGRPCResponse converts a toolsv1.ToolResponse into a ToolResult.
+func parseGRPCResponse(resp *toolsv1.ToolResponse) *ToolResult {
 	if resp.IsError {
 		return &ToolResult{
 			Content: resp.ErrorMessage,
 			IsError: true,
-		}, nil
+		}
+	}
+
+	var content any
+	if resp.ResultJson != "" {
+		if json.Unmarshal([]byte(resp.ResultJson), &content) != nil {
+			content = resp.ResultJson
+		}
 	}
 
 	return &ToolResult{
 		Content: content,
 		IsError: false,
-	}, nil
+	}
 }
 
 // Close closes the connection.

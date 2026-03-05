@@ -36,6 +36,13 @@ func (s *Server) readMessageLoop(ctx context.Context, c *Connection, log logr.Lo
 
 		s.metrics.MessageReceived()
 
+		// Enforce per-connection rate limit
+		if c.rateLimiter != nil && !c.rateLimiter.Allow() {
+			log.V(1).Info("message rate limited")
+			s.sendError(c, "", ErrorCodeRateLimited, "rate limit exceeded")
+			continue
+		}
+
 		// Handle based on WebSocket message type
 		if messageType == websocket.BinaryMessage {
 			s.handleBinaryMessage(ctx, c, message, log)

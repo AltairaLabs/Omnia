@@ -371,7 +371,18 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
-	return api.MetricsMiddleware(httpMetrics, mux), cleanup
+
+	// Rate limiting middleware (per-client-IP token bucket).
+	rlCfg := api.RateLimitConfigFromEnv()
+	rlMiddleware, rlStop := api.NewRateLimitMiddleware(rlCfg)
+	origCleanup := cleanup
+	cleanup = func() {
+		rlStop()
+		origCleanup()
+	}
+	log.V(1).Info("rate limiter initialized", "rps", rlCfg.RPS, "burst", rlCfg.Burst)
+
+	return rlMiddleware(api.MetricsMiddleware(httpMetrics, mux)), cleanup
 }
 
 // registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when

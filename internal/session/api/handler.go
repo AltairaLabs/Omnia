@@ -608,6 +608,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrSearchQueryTooLong):
 		status = http.StatusBadRequest
 		msg = ErrSearchQueryTooLong.Error()
+	case errors.Is(err, ErrRateLimitExceeded):
+		status = http.StatusTooManyRequests
+		msg = ErrRateLimitExceeded.Error()
 	case errors.Is(err, ErrBodyTooLarge) || isMaxBytesError(err):
 		status = http.StatusRequestEntityTooLarge
 		msg = ErrBodyTooLarge.Error()

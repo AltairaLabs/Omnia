@@ -28,6 +28,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
@@ -62,19 +63,26 @@ type ServerConfig struct {
 	PromptPackName string
 	// PromptPackVersion is the PromptPack version (from env).
 	PromptPackVersion string
+	// MessageRateLimit is the maximum sustained messages per second per connection.
+	// 0 disables rate limiting.
+	MessageRateLimit float64
+	// MessageRateBurst is the maximum burst size for per-connection rate limiting.
+	MessageRateBurst int
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		ReadBufferSize:  64 * 1024, // 64KB to reduce reallocation for larger messages
-		WriteBufferSize: 64 * 1024, // 64KB to reduce reallocation for larger messages
-		PingInterval:    30 * time.Second,
-		PongTimeout:     60 * time.Second,
-		WriteTimeout:    10 * time.Second,
-		MaxMessageSize:  16 * 1024 * 1024, // 16MB to support base64-encoded images
-		MaxConnections:  500,
-		SessionTTL:      24 * time.Hour,
+		ReadBufferSize:   64 * 1024, // 64KB to reduce reallocation for larger messages
+		WriteBufferSize:  64 * 1024, // 64KB to reduce reallocation for larger messages
+		PingInterval:     30 * time.Second,
+		PongTimeout:      60 * time.Second,
+		WriteTimeout:     10 * time.Second,
+		MaxMessageSize:   16 * 1024 * 1024, // 16MB to support base64-encoded images
+		MaxConnections:   500,
+		SessionTTL:       24 * time.Hour,
+		MessageRateLimit: 50,
+		MessageRateBurst: 100,
 	}
 }
 
@@ -328,6 +336,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userRoles:     userRoles,
 		userEmail:     userEmail,
 		authorization: authorization,
+	}
+	if s.config.MessageRateLimit > 0 {
+		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)
 	}
 
 	s.mu.Lock()
