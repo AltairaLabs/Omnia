@@ -34,6 +34,7 @@ function truncate(text: string, maxLength: number): string {
 function resolveMessageKind(message: Message): TimelineEventKind {
   const metadataType = message.metadata?.type;
 
+  if (metadataType === "tool_call") return "tool_call";
   if (metadataType === "workflow_transition") return "workflow_transition";
   if (metadataType === "workflow_completed") return "workflow_completed";
   if (metadataType === "error") return "error";
@@ -50,6 +51,16 @@ function resolveMessageKind(message: Message): TimelineEventKind {
       return "system_message";
     default:
       return "system_message";
+  }
+}
+
+/** Try to extract a tool name from JSON content. */
+function parseToolName(content: string): string | undefined {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed.name;
+  } catch {
+    return undefined;
   }
 }
 
@@ -82,6 +93,10 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
     }
     case "provider_call":
       return "Provider call";
+    case "tool_call": {
+      const tcName = parseToolName(message.content);
+      return tcName ? `Tool: ${tcName}` : "Tool call";
+    }
     case "workflow_transition": {
       const from = message.metadata?.from;
       const to = message.metadata?.to;
@@ -95,6 +110,13 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
     default:
       return "Event";
   }
+}
+
+function resolveEventStatus(kind: TimelineEventKind, message: Message): TimelineEvent["status"] {
+  if (kind === "error") return "error";
+  const status = message.metadata?.status;
+  if (status === "success" || status === "error") return status;
+  return undefined;
 }
 
 /**
@@ -112,31 +134,20 @@ export function extractTimelineEvents(messages: Message[]): TimelineEvent[] {
 
     const kind = resolveMessageKind(message);
 
-    // Emit the message-level event
+    const durationStr = message.metadata?.duration_ms;
+    const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
+
     events.push({
       id: message.id,
       timestamp: message.timestamp,
       kind,
       label: buildLabel(kind, message),
       detail: message.content ? truncate(message.content, MAX_DETAIL_LENGTH) : undefined,
+      toolCallId: kind === "tool_call" ? message.toolCallId : undefined,
+      duration: duration && !Number.isNaN(duration) ? duration : undefined,
       metadata: message.metadata,
-      status: kind === "error" ? "error" : undefined,
+      status: resolveEventStatus(kind, message),
     });
-
-    // Emit individual tool call events
-    if (message.toolCalls) {
-      for (const tc of message.toolCalls) {
-        events.push({
-          id: `${message.id}-tc-${tc.id}`,
-          timestamp: message.timestamp,
-          kind: "tool_call",
-          label: tc.name,
-          toolCallId: tc.id,
-          duration: tc.duration,
-          status: tc.status,
-        });
-      }
-    }
   }
 
   // Sort by timestamp (stable sort preserves insertion order for equal timestamps)

@@ -117,31 +117,7 @@ describe("SessionApiService", () => {
       const result = await service.getSessionById("ws", "missing");
       expect(result).toBeUndefined();
     });
-  });
 
-  describe("searchSessions", () => {
-    it("sends search query to the proxy route", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ sessions: [], total: 0, hasMore: false }),
-      });
-
-      await service.searchSessions("ws", { q: "hello world", limit: 5 });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("q=hello+world");
-      expect(url).toContain("limit=5");
-    });
-
-    it("returns empty on 404", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
-
-      const result = await service.searchSessions("ws", { q: "test" });
-      expect(result).toEqual({ sessions: [], total: 0, hasMore: false });
-    });
-  });
-
-  describe("getSessionById", () => {
     it("handles unwrapped session response (no envelope)", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -168,6 +144,26 @@ describe("SessionApiService", () => {
   });
 
   describe("searchSessions", () => {
+    it("sends search query to the proxy route", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ sessions: [], total: 0, hasMore: false }),
+      });
+
+      await service.searchSessions("ws", { q: "hello world", limit: 5 });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("q=hello+world");
+      expect(url).toContain("limit=5");
+    });
+
+    it("returns empty on 404", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
+
+      const result = await service.searchSessions("ws", { q: "test" });
+      expect(result).toEqual({ sessions: [], total: 0, hasMore: false });
+    });
+
     it("passes all filter options", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -215,35 +211,7 @@ describe("SessionApiService", () => {
       expect(url).toContain("limit=2");
     });
 
-    it("passes before/after params", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ messages: [], hasMore: false }),
-      });
-
-      await service.getSessionMessages("ws", "s1", { before: 10, after: 5 });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("before=10");
-      expect(url).toContain("after=5");
-    });
-
-    it("returns empty on 404", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
-
-      const result = await service.getSessionMessages("ws", "missing");
-      expect(result).toEqual({ messages: [], hasMore: false });
-    });
-
-    it("throws on server error", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
-
-      await expect(service.getSessionMessages("ws", "s1")).rejects.toThrow("Failed to fetch session messages");
-    });
-  });
-
-  describe("tool call pairing (transformAndPairMessages)", () => {
-    it("pairs tool_call and tool_result messages and attaches to assistant done message", async () => {
+    it("preserves all messages including tool_call and tool_result types", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -251,7 +219,8 @@ describe("SessionApiService", () => {
             { id: "m1", role: "user", content: "Search for cats", timestamp: "2024-01-01T00:00:00Z" },
             { id: "m2", role: "assistant", content: '{"name":"search","arguments":{"q":"cats"}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
             { id: "m3", role: "system", content: '{"results":["cat1","cat2"]}', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_result" }, toolCallId: "tc1" },
-            { id: "m4", role: "assistant", content: "I found 2 cats!", timestamp: "2024-01-01T00:00:03Z" },
+            { id: "m4", role: "system", content: "", timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_call_completed", duration_ms: "245", status: "success" }, toolCallId: "tc1" },
+            { id: "m5", role: "assistant", content: "I found 2 cats!", timestamp: "2024-01-01T00:00:03Z" },
           ],
           hasMore: false,
         }),
@@ -259,138 +228,17 @@ describe("SessionApiService", () => {
 
       const result = await service.getSessionMessages("ws", "s1");
 
-      // tool_call and tool_result messages should be filtered out
-      expect(result.messages).toHaveLength(2);
+      // All messages pass through — no pairing or filtering
+      expect(result.messages).toHaveLength(5);
       expect(result.messages[0].role).toBe("user");
-      expect(result.messages[1].role).toBe("assistant");
-      expect(result.messages[1].content).toBe("I found 2 cats!");
-
-      // ToolCalls should be attached to the assistant done message
-      expect(result.messages[1].toolCalls).toHaveLength(1);
-      expect(result.messages[1].toolCalls![0].name).toBe("search");
-      expect(result.messages[1].toolCalls![0].arguments).toEqual({ q: "cats" });
-      expect(result.messages[1].toolCalls![0].result).toEqual({ results: ["cat1", "cat2"] });
-      expect(result.messages[1].toolCalls![0].status).toBe("success");
+      expect(result.messages[1].metadata?.type).toBe("tool_call");
+      expect(result.messages[1].toolCallId).toBe("tc1");
+      expect(result.messages[2].metadata?.type).toBe("tool_result");
+      expect(result.messages[3].metadata?.type).toBe("tool_call_completed");
+      expect(result.messages[3].metadata?.duration_ms).toBe("245");
+      expect(result.messages[4].content).toBe("I found 2 cats!");
     });
 
-    it("handles tool_call with invalid JSON content", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "assistant", content: "not valid json", timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
-            { id: "m2", role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:02Z" },
-          ],
-          hasMore: false,
-        }),
-      });
-
-      const result = await service.getSessionMessages("ws", "s1");
-
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].toolCalls).toHaveLength(1);
-      expect(result.messages[0].toolCalls![0].name).toBe("unknown");
-      expect(result.messages[0].toolCalls![0].arguments).toEqual({});
-      expect(result.messages[0].toolCalls![0].status).toBe("pending");
-    });
-
-    it("handles tool_result with non-JSON content", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "assistant", content: '{"name":"run","arguments":{}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
-            { id: "m2", role: "system", content: "plain text result", timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_result" }, toolCallId: "tc1" },
-            { id: "m3", role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:03Z" },
-          ],
-          hasMore: false,
-        }),
-      });
-
-      const result = await service.getSessionMessages("ws", "s1");
-
-      expect(result.messages[0].toolCalls![0].result).toBe("plain text result");
-      expect(result.messages[0].toolCalls![0].status).toBe("success");
-    });
-
-    it("handles error tool results", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "assistant", content: '{"name":"cmd","arguments":{}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
-            { id: "m2", role: "system", content: '"error: command failed"', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_result", is_error: "true" }, toolCallId: "tc1" },
-            { id: "m3", role: "assistant", content: "The command failed.", timestamp: "2024-01-01T00:00:03Z" },
-          ],
-          hasMore: false,
-        }),
-      });
-
-      const result = await service.getSessionMessages("ws", "s1");
-
-      expect(result.messages[0].toolCalls![0].status).toBe("error");
-    });
-
-    it("attaches leftover tool calls to last assistant message", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "assistant", content: "Starting...", timestamp: "2024-01-01T00:00:01Z" },
-            { id: "m2", role: "assistant", content: '{"name":"search","arguments":{}}', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
-            // No subsequent assistant message after tool call
-          ],
-          hasMore: false,
-        }),
-      });
-
-      const result = await service.getSessionMessages("ws", "s1");
-
-      // The tool call should be attached to the last assistant message
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].content).toBe("Starting...");
-      expect(result.messages[0].toolCalls).toHaveLength(1);
-    });
-
-    it("attaches leftover tool calls to last message when no assistant message exists", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "user", content: "Hello", timestamp: "2024-01-01T00:00:01Z" },
-            { id: "m2", role: "assistant", content: '{"name":"search","arguments":{}}', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
-            // Only a user message remains after filtering
-          ],
-          hasMore: false,
-        }),
-      });
-
-      const result = await service.getSessionMessages("ws", "s1");
-
-      // Falls back to the last message (user)
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].role).toBe("user");
-      expect(result.messages[0].toolCalls).toHaveLength(1);
-    });
-
-    it("handles messages with no tokens", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" },
-          ],
-          hasMore: false,
-        }),
-      });
-
-      const result = await service.getSessionMessages("ws", "s1");
-
-      expect(result.messages[0].tokens).toBeUndefined();
-    });
-  });
-
-  describe("metadata preservation", () => {
     it("preserves metadata on transformed messages", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -425,14 +273,12 @@ describe("SessionApiService", () => {
       expect(result.messages[0].metadata).toBeUndefined();
     });
 
-    it("parses duration_ms from metadata into ToolCall.duration", async () => {
+    it("handles messages with no tokens", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
           messages: [
-            { id: "m1", role: "assistant", content: '{"name":"search","arguments":{"q":"test"}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call", duration_ms: "150" }, toolCallId: "tc1" },
-            { id: "m2", role: "system", content: '"ok"', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_result" }, toolCallId: "tc1" },
-            { id: "m3", role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:03Z" },
+            { id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" },
           ],
           hasMore: false,
         }),
@@ -440,46 +286,33 @@ describe("SessionApiService", () => {
 
       const result = await service.getSessionMessages("ws", "s1");
 
-      expect(result.messages[0].toolCalls![0].duration).toBe(150);
+      expect(result.messages[0].tokens).toBeUndefined();
     });
 
-    it("leaves duration undefined when duration_ms is absent", async () => {
+    it("passes before/after params", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "assistant", content: '{"name":"run","arguments":{}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
-            { id: "m2", role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:02Z" },
-          ],
-          hasMore: false,
-        }),
+        json: () => Promise.resolve({ messages: [], hasMore: false }),
       });
 
-      const result = await service.getSessionMessages("ws", "s1");
+      await service.getSessionMessages("ws", "s1", { before: 10, after: 5 });
 
-      expect(result.messages[0].toolCalls![0].duration).toBeUndefined();
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("before=10");
+      expect(url).toContain("after=5");
     });
 
-    it("passes workflow event messages through with metadata", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          messages: [
-            { id: "m1", role: "user", content: "start", timestamp: "2024-01-01T00:00:00Z" },
-            { id: "m2", role: "system", content: "Workflow started", timestamp: "2024-01-01T00:00:01Z", metadata: { type: "workflow_transition", from: "idle", to: "running" } },
-            { id: "m3", role: "assistant", content: "Working", timestamp: "2024-01-01T00:00:02Z" },
-          ],
-          hasMore: false,
-        }),
-      });
+    it("returns empty on 404", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
 
-      const result = await service.getSessionMessages("ws", "s1");
+      const result = await service.getSessionMessages("ws", "missing");
+      expect(result).toEqual({ messages: [], hasMore: false });
+    });
 
-      // Workflow event message should appear (it's not a tool_call or tool_result)
-      const workflowMsg = result.messages.find(m => m.metadata?.type === "workflow_transition");
-      expect(workflowMsg).toBeDefined();
-      expect(workflowMsg!.metadata!.from).toBe("idle");
-      expect(workflowMsg!.metadata!.to).toBe("running");
+    it("throws on server error", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
+
+      await expect(service.getSessionMessages("ws", "s1")).rejects.toThrow("Failed to fetch session messages");
     });
   });
 

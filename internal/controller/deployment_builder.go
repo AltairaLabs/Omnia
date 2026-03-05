@@ -506,17 +506,8 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		},
 	}
 
-	// Add tool registry info if present
+	// Add tools config path if tool registry is present
 	if toolRegistry != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_TOOLREGISTRY_NAME",
-			Value: toolRegistry.Name,
-		})
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_TOOLREGISTRY_NAMESPACE",
-			Value: toolRegistry.Namespace,
-		})
-		// Tools config path
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_TOOLS_CONFIG_PATH",
 			Value: ToolsMountPath + "/" + ToolsConfigFileName,

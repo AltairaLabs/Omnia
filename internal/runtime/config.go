@@ -62,7 +62,9 @@ type Config struct {
 	MediaBasePath  string // Base path for resolving mock:// URLs to media files
 
 	// Tools configuration
-	ToolsConfigPath string // Path to tools.yaml configuration file
+	ToolsConfigPath       string // Path to tools.yaml configuration file
+	ToolRegistryName      string // Name of the ToolRegistry CRD (for metadata enrichment)
+	ToolRegistryNamespace string // Namespace of the ToolRegistry CRD
 
 	// Session recording (Pattern C)
 	SessionAPIURL string // URL of the session-api service for event recording

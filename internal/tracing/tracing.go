@@ -244,13 +244,31 @@ func (p *Provider) StartLLMSpan(ctx context.Context, model string, system string
 	return ctx, span
 }
 
+// ToolSpanMeta holds optional registry/handler metadata for tool spans.
+type ToolSpanMeta struct {
+	RegistryName      string
+	RegistryNamespace string
+	HandlerName       string
+	HandlerType       string
+}
+
 // StartToolSpan starts a new span for a tool execution.
-func (p *Provider) StartToolSpan(ctx context.Context, toolName string) (context.Context, trace.Span) {
+func (p *Provider) StartToolSpan(ctx context.Context, toolName string, meta ToolSpanMeta) (context.Context, trace.Span) {
+	attrs := []attribute.KeyValue{
+		attribute.String("tool.name", toolName),
+	}
+	if meta.RegistryName != "" {
+		attrs = append(attrs,
+			attribute.String("tool.registry.name", meta.RegistryName),
+			attribute.String("tool.registry.namespace", meta.RegistryNamespace),
+			attribute.String("tool.handler.name", meta.HandlerName),
+			attribute.String("tool.handler.type", meta.HandlerType),
+		)
+	}
+
 	ctx, span := p.tracer.Start(ctx, "omnia.tool.call",
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			attribute.String("tool.name", toolName),
-		),
+		trace.WithAttributes(attrs...),
 	)
 	p.log.V(1).Info("span started",
 		"spanName", "omnia.tool.call",

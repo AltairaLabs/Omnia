@@ -24,11 +24,7 @@ export function DebugPanel({ messages, session, className }: DebugPanelProps) {
   const close = useDebugPanelStore((s) => s.close);
 
   const toolCallCount = useMemo(() => {
-    let count = 0;
-    for (const msg of messages) {
-      if (msg.toolCalls) count += msg.toolCalls.length;
-    }
-    return count;
+    return messages.filter((m) => m.metadata?.type === "tool_call").length;
   }, [messages]);
 
   if (!isOpen) {

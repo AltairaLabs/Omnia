@@ -57,6 +57,18 @@ func GetProvider(
 	return p, nil
 }
 
+// GetToolRegistry fetches a ToolRegistry CRD by name and namespace.
+func GetToolRegistry(
+	ctx context.Context, c client.Client, name, namespace string,
+) (*omniav1alpha1.ToolRegistry, error) {
+	tr := &omniav1alpha1.ToolRegistry{}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
+	if err := c.Get(ctx, key, tr); err != nil {
+		return nil, fmt.Errorf("get ToolRegistry %s: %w", key, err)
+	}
+	return tr, nil
+}
+
 // GetProviderSecret fetches the Secret referenced by a Provider's SecretRef.
 func GetProviderSecret(ctx context.Context, c client.Client, provider *omniav1alpha1.Provider) (*corev1.Secret, error) {
 	if provider.Spec.SecretRef == nil {

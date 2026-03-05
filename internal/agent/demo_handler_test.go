@@ -86,18 +86,12 @@ func TestDemoHandler_HandleMessage_PasswordReset(t *testing.T) {
 		t.Error("HandleMessage() produced no chunks")
 	}
 
-	// Should have a tool call
-	if len(writer.toolCalls) != 1 {
-		t.Errorf("HandleMessage() produced %d tool calls, want 1", len(writer.toolCalls))
-	} else {
-		if writer.toolCalls[0].Name != "lookup-user" {
-			t.Errorf("HandleMessage() tool call name = %q, want %q", writer.toolCalls[0].Name, "lookup-user")
-		}
+	// Should NOT have tool calls or results (kept internal)
+	if len(writer.toolCalls) != 0 {
+		t.Errorf("HandleMessage() produced %d tool calls, want 0", len(writer.toolCalls))
 	}
-
-	// Should have a tool result
-	if len(writer.toolResults) != 1 {
-		t.Errorf("HandleMessage() produced %d tool results, want 1", len(writer.toolResults))
+	if len(writer.toolResults) != 0 {
+		t.Errorf("HandleMessage() produced %d tool results, want 0", len(writer.toolResults))
 	}
 
 	// Should have done message with instructions
@@ -122,18 +116,12 @@ func TestDemoHandler_HandleMessage_Weather(t *testing.T) {
 		t.Error("HandleMessage() produced no chunks")
 	}
 
-	// Should have a tool call for weather
-	if len(writer.toolCalls) != 1 {
-		t.Errorf("HandleMessage() produced %d tool calls, want 1", len(writer.toolCalls))
-	} else {
-		if writer.toolCalls[0].Name != "weather" {
-			t.Errorf("HandleMessage() tool call name = %q, want %q", writer.toolCalls[0].Name, "weather")
-		}
+	// Should NOT have tool calls or results (kept internal)
+	if len(writer.toolCalls) != 0 {
+		t.Errorf("HandleMessage() produced %d tool calls, want 0", len(writer.toolCalls))
 	}
-
-	// Should have a tool result
-	if len(writer.toolResults) != 1 {
-		t.Errorf("HandleMessage() produced %d tool results, want 1", len(writer.toolResults))
+	if len(writer.toolResults) != 0 {
+		t.Errorf("HandleMessage() produced %d tool results, want 0", len(writer.toolResults))
 	}
 
 	// Should have done message with weather info

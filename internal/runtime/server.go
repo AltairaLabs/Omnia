@@ -342,6 +342,15 @@ func (s *Server) InitializeTools(ctx context.Context) error {
 	return nil
 }
 
+// SetToolRegistryInfo populates registry/handler metadata on the tool manager.
+// This must be called after InitializeTools and before handling conversations.
+func (s *Server) SetToolRegistryInfo(registryName, registryNamespace string, handlers []tools.HandlerEntry) {
+	if s.toolManager == nil {
+		return
+	}
+	s.toolManager.SetRegistryInfo(registryName, registryNamespace, handlers)
+}
+
 // SetHealthy sets the server health status.
 func (s *Server) SetHealthy(healthy bool) {
 	s.mu.Lock()

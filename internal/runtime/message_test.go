@@ -372,7 +372,7 @@ func TestConverse_ToolCallSpanHierarchy(t *testing.T) {
 	ctx, convSpan := provider.StartConversationSpan(ctx, "test-tool-session", "test-pack", "1.0.0", 0)
 
 	// Start a child tool span using the same API the server uses
-	ctx, toolSpanOtel := provider.StartToolSpan(ctx, "search_places")
+	ctx, toolSpanOtel := provider.StartToolSpan(ctx, "search_places", tracing.ToolSpanMeta{})
 	toolSpanOtel.End()
 	convSpan.End()
 
@@ -409,7 +409,7 @@ func TestConverse_ToolCallSpanParentedViaOnToolCtx(t *testing.T) {
 	ctx, convSpan := provider.StartConversationSpan(ctx, "test-parented", "test-pack", "1.0.0", 0)
 
 	// OnToolCtx now passes the pipeline context (with conversation span) to the handler
-	_, toolSpanOtel := provider.StartToolSpan(ctx, "parented_tool")
+	_, toolSpanOtel := provider.StartToolSpan(ctx, "parented_tool", tracing.ToolSpanMeta{})
 	toolSpanOtel.End()
 	convSpan.End()
 

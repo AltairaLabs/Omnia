@@ -60,7 +60,13 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 	// Start tool span if tracing is enabled
 	var span trace.Span
 	if s.tracingProvider != nil {
-		ctx, span = s.tracingProvider.StartToolSpan(ctx, toolName)
+		meta, _ := s.toolManager.GetToolMeta(toolName)
+		ctx, span = s.tracingProvider.StartToolSpan(ctx, toolName, tracing.ToolSpanMeta{
+			RegistryName:      meta.RegistryName,
+			RegistryNamespace: meta.RegistryNamespace,
+			HandlerName:       meta.HandlerName,
+			HandlerType:       meta.HandlerType,
+		})
 		defer span.End()
 	}
 

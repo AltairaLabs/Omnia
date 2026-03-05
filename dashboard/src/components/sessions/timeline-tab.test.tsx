@@ -36,17 +36,16 @@ describe("TimelineTab", () => {
       {
         id: "m1",
         role: "assistant",
-        content: "Searching",
+        content: '{"name":"search","arguments":{"q":"test"}}',
         timestamp: "2024-01-01T00:00:01Z",
-        toolCalls: [
-          { id: "tc1", name: "search", arguments: { q: "test" }, status: "success", duration: 200 },
-        ],
+        metadata: { type: "tool_call", duration_ms: "200", status: "success" },
+        toolCallId: "tc1",
       },
     ];
 
     render(<TimelineTab messages={messages} />);
 
-    expect(screen.getByText("search")).toBeInTheDocument();
+    expect(screen.getByText("Tool: search")).toBeInTheDocument();
     expect(screen.getByText("200ms")).toBeInTheDocument();
     expect(screen.getByText("OK")).toBeInTheDocument();
   });
@@ -56,17 +55,16 @@ describe("TimelineTab", () => {
       {
         id: "m1",
         role: "assistant",
-        content: "Working",
+        content: '{"name":"search","arguments":{}}',
         timestamp: "2024-01-01T00:00:01Z",
-        toolCalls: [
-          { id: "tc1", name: "search", arguments: {}, status: "success" },
-        ],
+        metadata: { type: "tool_call", status: "success" },
+        toolCallId: "tc1",
       },
     ];
 
     render(<TimelineTab messages={messages} />);
 
-    fireEvent.click(screen.getByTestId("timeline-event-m1-tc-tc1"));
+    fireEvent.click(screen.getByTestId("timeline-event-m1"));
 
     const state = useDebugPanelStore.getState();
     expect(state.activeTab).toBe("toolcalls");
@@ -78,11 +76,10 @@ describe("TimelineTab", () => {
       {
         id: "m1",
         role: "assistant",
-        content: "Failed",
+        content: '{"name":"cmd","arguments":{}}',
         timestamp: "2024-01-01T00:00:01Z",
-        toolCalls: [
-          { id: "tc1", name: "cmd", arguments: {}, status: "error" },
-        ],
+        metadata: { type: "tool_call", status: "error" },
+        toolCallId: "tc1",
       },
     ];
 
@@ -112,5 +109,37 @@ describe("TimelineTab", () => {
 
     render(<TimelineTab messages={messages} />);
     expect(screen.getByText("14:30:45.123")).toBeInTheDocument();
+  });
+
+  it("shows handler type badge for tool calls with metadata", () => {
+    const messages: Message[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: '{"name":"search","arguments":{}}',
+        timestamp: "2024-01-01T00:00:01Z",
+        metadata: { type: "tool_call", handler_type: "mcp", status: "success" },
+        toolCallId: "tc1",
+      },
+    ];
+
+    render(<TimelineTab messages={messages} />);
+    expect(screen.getByText("mcp")).toBeInTheDocument();
+  });
+
+  it("does not show handler type badge when absent", () => {
+    const messages: Message[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: '{"name":"search","arguments":{}}',
+        timestamp: "2024-01-01T00:00:01Z",
+        metadata: { type: "tool_call", status: "success" },
+        toolCallId: "tc1",
+      },
+    ];
+
+    render(<TimelineTab messages={messages} />);
+    expect(screen.queryByText("mcp")).not.toBeInTheDocument();
   });
 });

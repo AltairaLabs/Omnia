@@ -84,6 +84,14 @@ const (
 	AttrToolDurationMs = "tool.duration_ms"
 )
 
+// Tool registry/handler attribute keys (set by Omnia runtime).
+const (
+	AttrToolRegistryName      = "tool.registry.name"
+	AttrToolRegistryNamespace = "tool.registry.namespace"
+	AttrToolHandlerName       = "tool.handler.name"
+	AttrToolHandlerType       = "tool.handler.type"
+)
+
 // PromptKit workflow span attribute keys.
 const (
 	AttrWorkflowFromState       = "workflow.from_state"
