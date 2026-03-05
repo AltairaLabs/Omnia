@@ -139,27 +139,6 @@ func scanSession(row pgx.Row) (*session.Session, error) {
 	return &s, nil
 }
 
-func scanSessionWithCount(row pgx.Row) (*session.Session, int64, error) {
-	var s session.Session
-	var n nullableSessionFields
-	var totalCount int64
-
-	err := row.Scan(
-		&s.ID, &s.AgentName, &s.Namespace, &n.workspaceName, &s.Status,
-		&s.CreatedAt, &s.UpdatedAt, &n.expiresAt, &n.endedAt,
-		&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
-		&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
-		&n.promptPackName, &n.promptPackVersion,
-		&totalCount,
-	)
-	if err != nil {
-		return nil, 0, fmt.Errorf("postgres: scan session: %w", err)
-	}
-
-	populateSession(&s, n)
-	return &s, totalCount, nil
-}
-
 func scanMessage(row pgx.Row) (*session.Message, error) {
 	var m session.Message
 	var toolCallID *string
@@ -202,18 +181,16 @@ func (p *Provider) sessionExists(ctx context.Context, sessionID string) error {
 
 // --- helper: collect session page -------------------------------------------
 
-func collectSessionPage(rows pgx.Rows, offset int) (*providers.SessionPage, error) {
+func collectSessionPage(rows pgx.Rows, totalCount int64, offset int) (*providers.SessionPage, error) {
 	defer rows.Close()
 
 	var sessions []*session.Session
-	var totalCount int64
 
 	for rows.Next() {
-		s, cnt, err := scanSessionWithCount(rows)
+		s, err := scanSession(rows)
 		if err != nil {
 			return nil, err
 		}
-		totalCount = cnt
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -429,20 +406,28 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 	qb := &pgutil.QueryBuilder{}
 	p.applySessionFilters(qb, opts)
 
+	// Separate count query avoids COUNT(*) OVER() window function which forces
+	// a full scan before returning any rows.
+	countQuery := `SELECT count(*) FROM sessions WHERE 1=1` + qb.Where()
+	var totalCount int64
+	if err := p.pool.QueryRow(ctx, countQuery, qb.Args()...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("postgres: count sessions: %w", err)
+	}
+
 	sort := "DESC"
 	if opts.SortOrder == providers.SortAsc {
 		sort = "ASC"
 	}
 
-	query := `SELECT ` + sessionColumns + `, count(*) OVER() FROM sessions WHERE 1=1` + qb.Where() +
+	dataQuery := `SELECT ` + sessionColumns + ` FROM sessions WHERE 1=1` + qb.Where() +
 		` ORDER BY created_at ` + sort
-	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
+	dataQuery = qb.AppendPagination(dataQuery, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, query, qb.Args()...)
+	rows, err := p.pool.Query(ctx, dataQuery, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list sessions: %w", err)
 	}
-	return collectSessionPage(rows, opts.Offset)
+	return collectSessionPage(rows, totalCount, opts.Offset)
 }
 
 func (p *Provider) SearchSessions(ctx context.Context, query string, opts providers.SessionListOpts) (*providers.SessionPage, error) {
@@ -457,24 +442,35 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 	sessionQB.SetArgs(qb.Args())
 	p.applySessionFilters(sessionQB, opts)
 
+	// Separate count query avoids COUNT(*) OVER() window function.
+	countSQL := `WITH matching AS (
+		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
+	) SELECT count(*)
+	FROM sessions s JOIN matching ms ON ms.session_id = s.id
+	WHERE 1=1` + sessionQB.Where()
+	var totalCount int64
+	if err := p.pool.QueryRow(ctx, countSQL, sessionQB.Args()...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("postgres: count search sessions: %w", err)
+	}
+
 	sort := "DESC"
 	if opts.SortOrder == providers.SortAsc {
 		sort = "ASC"
 	}
 
-	sql := `WITH matching AS (
+	dataSQL := `WITH matching AS (
 		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
-	) SELECT ` + sessionColumns + `, count(*) OVER()
+	) SELECT ` + sessionColumns + `
 	FROM sessions s JOIN matching ms ON ms.session_id = s.id
 	WHERE 1=1` + sessionQB.Where() +
 		` ORDER BY s.created_at ` + sort
-	sql = sessionQB.AppendPagination(sql, opts.Limit, opts.Offset)
+	dataSQL = sessionQB.AppendPagination(dataSQL, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, sql, sessionQB.Args()...)
+	rows, err := p.pool.Query(ctx, dataSQL, sessionQB.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: search sessions: %w", err)
 	}
-	return collectSessionPage(rows, opts.Offset)
+	return collectSessionPage(rows, totalCount, opts.Offset)
 }
 
 func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.SessionListOpts) {

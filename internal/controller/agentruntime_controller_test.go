@@ -1700,9 +1700,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
 			}, timeout, interval).Should(Succeed())
 
-			// Defaults: minReplicas=1, maxReplicas=10
+			// Defaults: minReplicas=1, maxReplicas=100
 			Expect(*hpa.Spec.MinReplicas).To(Equal(int32(1)))
-			Expect(hpa.Spec.MaxReplicas).To(Equal(int32(10)))
+			Expect(hpa.Spec.MaxReplicas).To(Equal(int32(100)))
 
 			// Default scaleDown stabilization = 300 seconds
 			Expect(*hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds).To(Equal(int32(300)))

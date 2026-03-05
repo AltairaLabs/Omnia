@@ -30,6 +30,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"github.com/sony/gobreaker/v2"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -44,6 +45,15 @@ const DefaultHTTPTimeout = 30 * time.Second
 const (
 	maxRetries    = 3
 	retryBaseWait = 100 * time.Millisecond
+)
+
+// Circuit breaker defaults.
+const (
+	cbMaxRequests = 5                // requests allowed in half-open state
+	cbInterval    = 30 * time.Second // counters reset interval in closed state
+	cbTimeout     = 10 * time.Second // time to wait before probing after open
+	cbMinRequests = 10               // minimum requests before tripping
+	cbFailRatio   = 0.6              // failure ratio to trip the breaker
 )
 
 // StoreOption is a functional option for configuring the HTTP session store.
@@ -68,6 +78,7 @@ func WithHTTPClient(c *http.Client) StoreOption {
 type Store struct {
 	baseURL    string
 	httpClient *http.Client
+	cb         *gobreaker.CircuitBreaker[*http.Response]
 	log        logr.Logger
 }
 
@@ -83,6 +94,20 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.cb = gobreaker.NewCircuitBreaker[*http.Response](gobreaker.Settings{
+		Name:        "session-api",
+		MaxRequests: cbMaxRequests,
+		Interval:    cbInterval,
+		Timeout:     cbTimeout,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.Requests >= cbMinRequests &&
+				float64(counts.TotalFailures)/float64(counts.Requests) >= cbFailRatio
+		},
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			s.log.Info("circuit breaker state change",
+				"name", name, "from", from.String(), "to", to.String())
+		},
+	})
 	return s
 }
 
@@ -248,9 +273,17 @@ func (s *Store) doJSON(ctx context.Context, method, path string, body any) (*htt
 	return s.doWithRetry(ctx, method, path, data)
 }
 
-// doWithRetry executes an HTTP request with retry for transient failures.
-// It creates a fresh bytes.Reader per attempt so the body is re-readable.
+// doWithRetry executes an HTTP request with retry for transient failures,
+// wrapped in a circuit breaker. When the breaker is open, requests fail
+// immediately without hitting session-api.
 func (s *Store) doWithRetry(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	return s.cb.Execute(func() (*http.Response, error) {
+		return s.doWithRetryInner(ctx, method, path, body)
+	})
+}
+
+// doWithRetryInner contains the retry loop. Called within the circuit breaker.
+func (s *Store) doWithRetryInner(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	var lastErr error
 	for attempt := range maxRetries {
 		if attempt > 0 {
@@ -297,7 +330,7 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	s.log.V(1).Info("session-api request",
+	s.log.V(2).Info("session-api request",
 		"method", method, "path", path)
 
 	resp, err := s.httpClient.Do(req)
@@ -307,7 +340,7 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 		return nil, err
 	}
 
-	s.log.V(1).Info("session-api response",
+	s.log.V(2).Info("session-api response",
 		"method", method, "path", path, "status", resp.StatusCode)
 	return resp, nil
 }

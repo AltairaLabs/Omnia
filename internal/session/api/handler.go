@@ -408,7 +408,7 @@ func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.V(1).Info("message appended", "sessionID", sessionID, "role", msg.Role)
+	h.log.V(2).Info("message appended", "sessionID", sessionID, "role", msg.Role)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -439,7 +439,7 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.V(1).Info("session stats updated", "sessionID", sessionID)
+	h.log.V(2).Info("session stats updated", "sessionID", sessionID)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -471,7 +471,7 @@ func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.V(1).Info("session TTL refreshed", "sessionID", sessionID, "ttlSeconds", req.TTLSeconds)
+	h.log.V(2).Info("session TTL refreshed", "sessionID", sessionID, "ttlSeconds", req.TTLSeconds)
 	w.WriteHeader(http.StatusOK)
 }
 

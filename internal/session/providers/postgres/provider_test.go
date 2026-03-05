@@ -1040,8 +1040,8 @@ func TestNew_ConnectionError(t *testing.T) {
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	assert.Equal(t, int32(10), cfg.MaxConns)
-	assert.Equal(t, int32(2), cfg.MinConns)
+	assert.Equal(t, int32(25), cfg.MaxConns)
+	assert.Equal(t, int32(5), cfg.MinConns)
 	assert.Equal(t, time.Hour, cfg.MaxConnLifetime)
 	assert.Equal(t, 30*time.Minute, cfg.MaxConnIdleTime)
 	assert.Equal(t, time.Minute, cfg.HealthCheckPeriod)

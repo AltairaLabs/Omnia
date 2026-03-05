@@ -1704,7 +1704,7 @@ spec:
                             type: array
                         type: object
                       maxReplicas:
-                        default: 10
+                        default: 100
                         description: maxReplicas is the maximum number of replicas.
                         format: int32
                         minimum: 1

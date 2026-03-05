@@ -96,7 +96,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try hot cache first.
 	sess, err := s.getFromHot(ctx, sessionID)
 	if err == nil {
-		s.log.V(1).Info("session retrieved", "sessionID", sessionID, "tier", "hot")
+		s.log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "hot")
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
@@ -104,7 +104,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try warm store.
 	sess, err = s.getFromWarm(ctx, sessionID)
 	if err == nil {
-		s.log.V(1).Info("session retrieved", "sessionID", sessionID, "tier", "warm")
+		s.log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "warm")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -113,7 +113,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try cold archive.
 	sess, err = s.getFromCold(ctx, sessionID)
 	if err == nil {
-		s.log.V(1).Info("session retrieved", "sessionID", sessionID, "tier", "cold")
+		s.log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "cold")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -258,7 +258,7 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 	// Write-through to hot cache (fire-and-forget per design doc).
 	s.pushToHotCache(func(hot providers.HotCacheProvider) {
 		if err := hot.AppendMessage(context.Background(), sessionID, msg); err != nil {
-			s.log.V(1).Info("hot cache append skipped", "sessionID", sessionID, "reason", err.Error())
+			s.log.V(2).Info("hot cache append skipped", "sessionID", sessionID, "reason", err.Error())
 		}
 	})
 	if msg.Role == session.RoleAssistant {
@@ -296,7 +296,7 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 	s.pushToHotCache(func(hot providers.HotCacheProvider) {
 		if err := hot.RefreshTTL(context.Background(), sessionID, s.cacheTTL); err != nil {
 			// Session may not be in cache yet — that's fine.
-			s.log.V(1).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
+			s.log.V(2).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
 		}
 	})
 
@@ -368,7 +368,7 @@ func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Ses
 		s.log.Error(err, "failed to populate hot cache", "sessionID", sess.ID)
 		return
 	}
-	s.log.V(1).Info("hot cache populated", "sessionID", sess.ID)
+	s.log.V(2).Info("hot cache populated", "sessionID", sess.ID)
 }
 
 // pushToHotCache runs a hot-cache write operation in a fire-and-forget goroutine.

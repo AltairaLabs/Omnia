@@ -210,7 +210,7 @@ type AutoscalingConfig struct {
 
 	// maxReplicas is the maximum number of replicas.
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:default=10
+	// +kubebuilder:default=100
 	// +optional
 	MaxReplicas *int32 `json:"maxReplicas,omitempty"`
 

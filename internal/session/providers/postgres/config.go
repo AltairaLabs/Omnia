@@ -43,8 +43,8 @@ type Config struct {
 // still set ConnString.
 func DefaultConfig() Config {
 	return Config{
-		MaxConns:          10,
-		MinConns:          2,
+		MaxConns:          25,
+		MinConns:          5,
 		MaxConnLifetime:   time.Hour,
 		MaxConnIdleTime:   30 * time.Minute,
 		HealthCheckPeriod: time.Minute,
