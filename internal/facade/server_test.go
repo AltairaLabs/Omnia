@@ -432,6 +432,42 @@ func TestServerRejectsAfterShutdown(t *testing.T) {
 	}
 }
 
+func TestServerRejectsWhenConnectionLimitReached(t *testing.T) {
+	store := session.NewMemoryStore()
+	cfg := DefaultServerConfig()
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PongTimeout = 200 * time.Millisecond
+	cfg.MaxConnections = 1
+
+	log := logr.Discard()
+	server := NewServer(cfg, store, nil, log)
+
+	ts := httptest.NewServer(server)
+	t.Cleanup(func() {
+		ts.Close()
+		_ = store.Close()
+	})
+
+	// First connection should succeed
+	ws1, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("First connection should succeed: %v", err)
+	}
+	defer func() { _ = ws1.Close() }()
+
+	// Wait for the connection to be registered
+	time.Sleep(50 * time.Millisecond)
+
+	// Second connection should be rejected
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err == nil {
+		t.Fatal("Expected error when connection limit reached")
+	}
+	if resp != nil && resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("Expected status 503, got %v", resp.StatusCode)
+	}
+}
+
 func TestServerDefaultHandler(t *testing.T) {
 	// Create server with nil handler
 	_, ts := newTestServer(t, nil)

@@ -43,11 +43,12 @@ type UsageReporter interface {
 
 // recordingResponseWriter wraps a ResponseWriter and asynchronously records
 // messages to the session store. It delegates all calls to the inner writer
-// first (so client latency is unaffected), then fires off goroutines to
-// persist data. Store errors are logged but never propagated.
+// first (so client latency is unaffected), then submits recording tasks to
+// a bounded worker pool. Store errors are logged but never propagated.
 type recordingResponseWriter struct {
 	inner     ResponseWriter
 	store     session.Store
+	pool      *RecordingPool
 	sessionID string
 	log       logr.Logger
 	startTime time.Time
@@ -55,13 +56,24 @@ type recordingResponseWriter struct {
 }
 
 // newRecordingWriter creates a recordingResponseWriter that wraps inner.
-func newRecordingWriter(inner ResponseWriter, store session.Store, sessionID string, log logr.Logger) *recordingResponseWriter {
+// If pool is nil, recording tasks are run inline (test/fallback mode).
+func newRecordingWriter(inner ResponseWriter, store session.Store, sessionID string, log logr.Logger, pool *RecordingPool) *recordingResponseWriter {
 	return &recordingResponseWriter{
 		inner:     inner,
 		store:     store,
+		pool:      pool,
 		sessionID: sessionID,
 		log:       log.WithName("recording-writer"),
 		startTime: time.Now(),
+	}
+}
+
+// submit sends a recording task to the pool, or runs it inline if no pool.
+func (w *recordingResponseWriter) submit(task func()) {
+	if w.pool != nil {
+		w.pool.Submit(task)
+	} else {
+		go task()
 	}
 }
 
@@ -100,7 +112,7 @@ func (w *recordingResponseWriter) WriteDoneWithParts(parts []ContentPart) error 
 func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 	err := w.inner.WriteToolCall(toolCall)
 
-	go func() {
+	w.submit(func() {
 		content, marshalErr := json.Marshal(map[string]interface{}{
 			"name":      toolCall.Name,
 			"arguments": toolCall.Arguments,
@@ -130,7 +142,7 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for tool call")
 		}
-	}()
+	})
 
 	return err
 }
@@ -139,7 +151,7 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error {
 	err := w.inner.WriteToolResult(result)
 
-	go func() {
+	w.submit(func() {
 		var content string
 		if result.Error != "" {
 			content = result.Error
@@ -177,7 +189,7 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for tool result")
 		}
-	}()
+	})
 
 	return err
 }
@@ -186,7 +198,7 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 func (w *recordingResponseWriter) WriteError(code, message string) error {
 	err := w.inner.WriteError(code, message)
 
-	go func() {
+	w.submit(func() {
 		msg := session.Message{
 			ID:        uuid.New().String(),
 			Role:      session.RoleSystem,
@@ -207,7 +219,7 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for error")
 		}
-	}()
+	})
 
 	return err
 }
@@ -243,7 +255,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 	usage := w.usage
 	latencyMs := time.Since(w.startTime).Milliseconds()
 
-	go func() {
+	w.submit(func() {
 		metadata := map[string]string{
 			"latency_ms": strconv.FormatInt(latencyMs, 10),
 		}
@@ -279,7 +291,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 		if storeErr := w.store.UpdateSessionStats(context.Background(), w.sessionID, statsUpdate); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for done")
 		}
-	}()
+	})
 }
 
 // extractTextFromParts extracts text content from ContentParts.
