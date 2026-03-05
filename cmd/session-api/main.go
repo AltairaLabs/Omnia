@@ -273,7 +273,7 @@ func shutdownServers(log logr.Logger, apiSrv, healthSrv, metricsSrv *http.Server
 
 // Pool configuration defaults.
 const (
-	defaultMaxConns        = 25
+	defaultMaxConns        = 50
 	defaultMinConns        = 5
 	defaultMaxConnLifetime = time.Hour
 	defaultMaxConnIdleTime = 30 * time.Minute

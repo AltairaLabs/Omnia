@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/sony/gobreaker/v2"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -702,6 +703,75 @@ func TestRetry_ConnectionErrorThenSuccess(t *testing.T) {
 	// All retries should have been attempted.
 	// Note: attempts stays 0 since server is down, but the store should have
 	// tried maxRetries times internally (connection refused each time).
+}
+
+// --- Circuit breaker tests ---
+
+func TestCircuitBreaker_OpensAfterRepeatedFailures(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		// Use a retryable status so doWithRetryInner returns an error
+		// (non-retryable statuses like 500 return (resp, nil) which gobreaker counts as success).
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	store := newStoreWithLowCBThreshold(srv.URL)
+
+	// Each GetSession call retries maxRetries times internally.
+	// With test config: minRequests=3, failRatio=0.6 → trips after 3 failed Execute() calls.
+	for range 3 {
+		_, _ = store.GetSession(context.Background(), "x")
+	}
+
+	attemptsBeforeOpen := attempts.Load()
+
+	// Next request should fail immediately without hitting the server.
+	_, err := store.GetSession(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected error when circuit is open")
+	}
+	if attempts.Load() != attemptsBeforeOpen {
+		t.Fatalf("expected no new server attempts when circuit is open, got %d (was %d)",
+			attempts.Load(), attemptsBeforeOpen)
+	}
+}
+
+func TestCircuitBreaker_NormalOperationDoesNotTrip(t *testing.T) {
+	srv := mockSessionAPI(t)
+	defer srv.Close()
+
+	store := newStoreWithLowCBThreshold(srv.URL)
+
+	// Successful requests should not trip the breaker.
+	for i := range 5 {
+		_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+			AgentName: "a",
+			Namespace: "ns",
+		})
+		if err != nil {
+			t.Fatalf("iteration %d: unexpected error: %v", i, err)
+		}
+	}
+}
+
+// newStoreWithLowCBThreshold creates a store with a circuit breaker that trips
+// quickly for testing (minRequests=3 instead of 10).
+func newStoreWithLowCBThreshold(baseURL string) *Store {
+	s := NewStore(baseURL, logr.Discard())
+	// Replace the circuit breaker with one that trips faster.
+	s.cb = gobreaker.NewCircuitBreaker[*http.Response](gobreaker.Settings{
+		Name:        "test-session-api",
+		MaxRequests: 1,
+		Interval:    0, // never reset counters in closed state
+		Timeout:     100 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.Requests >= 3 &&
+				float64(counts.TotalFailures)/float64(counts.Requests) >= 0.6
+		},
+	})
+	return s
 }
 
 func TestRetry_CancelledContextStopsRetry(t *testing.T) {

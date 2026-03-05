@@ -106,7 +106,7 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		cfg.ServiceName = "omnia-runtime"
 	}
 	if cfg.SampleRate == 0 {
-		cfg.SampleRate = 1.0
+		cfg.SampleRate = 0.1
 	}
 
 	// Create OTLP exporter

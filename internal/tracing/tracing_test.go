@@ -501,7 +501,7 @@ func TestNewProvider_Enabled_Defaults(t *testing.T) {
 	cfg := Config{
 		Enabled:    true,
 		Endpoint:   "127.0.0.1:0",
-		SampleRate: 0, // Should default to 1.0
+		SampleRate: 0, // Should default to 0.1
 		Insecure:   true,
 	}
 
