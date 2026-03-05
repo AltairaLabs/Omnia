@@ -6,7 +6,9 @@ metadata:
   labels:
     {{- include "omnia.sessionApi.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.sessionApi.autoscaling.enabled }}
   replicas: {{ .Values.sessionApi.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "omnia.sessionApi.selectorLabels" . | nindent 6 }}
