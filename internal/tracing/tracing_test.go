@@ -151,7 +151,7 @@ func TestProvider_StartLLMSpan(t *testing.T) {
 func TestProvider_StartToolSpan(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartToolSpan(context.Background(), "get_weather")
+	_, span := provider.StartToolSpan(context.Background(), "get_weather", ToolSpanMeta{})
 	span.End()
 
 	spans := exporter.GetSpans()
@@ -173,6 +173,87 @@ func TestProvider_StartToolSpan(t *testing.T) {
 	}
 	if val.AsString() != "get_weather" {
 		t.Errorf("expected tool.name='get_weather', got %q", val.AsString())
+	}
+}
+
+func TestProvider_StartToolSpan_WithMeta(t *testing.T) {
+	provider, exporter := newTestProvider(t)
+
+	meta := ToolSpanMeta{
+		RegistryName:      "my-registry",
+		RegistryNamespace: "my-ns",
+		HandlerName:       "http-handler",
+		HandlerType:       "http",
+	}
+	_, span := provider.StartToolSpan(context.Background(), "get_weather", meta)
+	span.End()
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+
+	s := spans[0]
+
+	// Verify tool.name
+	val, ok := findAttr(s, "tool.name")
+	if !ok {
+		t.Fatal("missing attribute 'tool.name'")
+	}
+	if val.AsString() != "get_weather" {
+		t.Errorf("expected tool.name='get_weather', got %q", val.AsString())
+	}
+
+	// Verify registry attributes
+	val, ok = findAttr(s, "tool.registry.name")
+	if !ok {
+		t.Fatal("missing attribute 'tool.registry.name'")
+	}
+	if val.AsString() != "my-registry" {
+		t.Errorf("expected tool.registry.name='my-registry', got %q", val.AsString())
+	}
+
+	val, ok = findAttr(s, "tool.registry.namespace")
+	if !ok {
+		t.Fatal("missing attribute 'tool.registry.namespace'")
+	}
+	if val.AsString() != "my-ns" {
+		t.Errorf("expected tool.registry.namespace='my-ns', got %q", val.AsString())
+	}
+
+	val, ok = findAttr(s, "tool.handler.name")
+	if !ok {
+		t.Fatal("missing attribute 'tool.handler.name'")
+	}
+	if val.AsString() != "http-handler" {
+		t.Errorf("expected tool.handler.name='http-handler', got %q", val.AsString())
+	}
+
+	val, ok = findAttr(s, "tool.handler.type")
+	if !ok {
+		t.Fatal("missing attribute 'tool.handler.type'")
+	}
+	if val.AsString() != "http" {
+		t.Errorf("expected tool.handler.type='http', got %q", val.AsString())
+	}
+}
+
+func TestProvider_StartToolSpan_EmptyMeta(t *testing.T) {
+	provider, exporter := newTestProvider(t)
+
+	_, span := provider.StartToolSpan(context.Background(), "get_weather", ToolSpanMeta{})
+	span.End()
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+
+	s := spans[0]
+
+	// Registry attributes should NOT be present when meta is empty
+	if _, ok := findAttr(s, "tool.registry.name"); ok {
+		t.Error("unexpected attribute 'tool.registry.name' when meta is empty")
 	}
 }
 
@@ -254,7 +335,7 @@ func TestAddToolResult(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		exporter.Reset()
-		_, span := provider.StartToolSpan(context.Background(), "test-tool")
+		_, span := provider.StartToolSpan(context.Background(), "test-tool", ToolSpanMeta{})
 		AddToolResult(span, false, 150)
 		span.End()
 
@@ -279,7 +360,7 @@ func TestAddToolResult(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		exporter.Reset()
-		_, span := provider.StartToolSpan(context.Background(), "test-tool")
+		_, span := provider.StartToolSpan(context.Background(), "test-tool", ToolSpanMeta{})
 		AddToolResult(span, true, 50)
 		span.End()
 

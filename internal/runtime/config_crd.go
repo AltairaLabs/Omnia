@@ -88,6 +88,12 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// relying on an env var.
 	if ar.Spec.ToolRegistryRef != nil {
 		cfg.ToolsConfigPath = defaultToolsMountPath + "/" + defaultToolsConfigFile
+		cfg.ToolRegistryName = ar.Spec.ToolRegistryRef.Name
+		if ar.Spec.ToolRegistryRef.Namespace != nil {
+			cfg.ToolRegistryNamespace = *ar.Spec.ToolRegistryRef.Namespace
+		} else {
+			cfg.ToolRegistryNamespace = namespace
+		}
 	}
 
 	// Session-api URL from env (injected by operator for session recording)

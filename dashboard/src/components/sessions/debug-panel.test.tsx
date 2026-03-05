@@ -6,15 +6,8 @@ import type { Session, Message } from "@/types/session";
 
 const mockMessages: Message[] = [
   { id: "m1", role: "user", content: "Hello", timestamp: "2024-01-01T00:00:01Z" },
-  {
-    id: "m2",
-    role: "assistant",
-    content: "Hi!",
-    timestamp: "2024-01-01T00:00:02Z",
-    toolCalls: [
-      { id: "tc1", name: "search", arguments: { q: "test" }, status: "success", duration: 100 },
-    ],
-  },
+  { id: "m2", role: "assistant", content: '{"name":"search","arguments":{"q":"test"}}', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_call", duration_ms: "100", status: "success" }, toolCallId: "tc1" },
+  { id: "m3", role: "assistant", content: "Hi!", timestamp: "2024-01-01T00:00:03Z" },
 ];
 
 const mockSession: Session = {

@@ -115,7 +115,7 @@ func (r *AgentRuntimeReconciler) reconcileRole(
 		role.Rules = []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{"omnia.altairalabs.ai"},
-				Resources: []string{"agentruntimes", "providers"},
+				Resources: []string{"agentruntimes", "providers", "toolregistries"},
 				Verbs:     []string{"get"},
 			},
 			{

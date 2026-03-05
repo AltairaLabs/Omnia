@@ -42,14 +42,17 @@ import (
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register default eval type handlers
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
+
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
+	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 	pkmetrics "github.com/altairalabs/omnia/pkg/metrics"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
-	"github.com/go-logr/zapr"
 )
 
 func main() {
@@ -285,6 +288,11 @@ func main() {
 		} else {
 			initCancel()
 			log.Info("tools initialized", "configPath", cfg.ToolsConfigPath)
+
+			// Enrich tool metadata from the ToolRegistry CRD (best-effort)
+			if cfg.ToolRegistryName != "" {
+				enrichToolRegistryMeta(cfg, runtimeServer, log)
+			}
 		}
 	} else {
 		log.V(1).Info("tools disabled (no config path specified)")
@@ -386,6 +394,37 @@ func main() {
 	grpcServer.GracefulStop()
 
 	log.Info("shutdown complete")
+}
+
+// enrichToolRegistryMeta reads the ToolRegistry CRD and sets handler metadata on the tool manager.
+// This is best-effort — if the CRD read fails, tools still work without provenance metadata.
+func enrichToolRegistryMeta(cfg *pkruntime.Config, server *pkruntime.Server, log logr.Logger) {
+	trCtx, trCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer trCancel()
+
+	k8sClient, err := k8s.NewClient()
+	if err != nil {
+		log.Error(err, "failed to create k8s client for ToolRegistry metadata")
+		return
+	}
+
+	tr, err := k8s.GetToolRegistry(trCtx, k8sClient, cfg.ToolRegistryName, cfg.ToolRegistryNamespace)
+	if err != nil {
+		log.Error(err, "failed to read ToolRegistry, continuing without registry metadata",
+			"name", cfg.ToolRegistryName, "namespace", cfg.ToolRegistryNamespace)
+		return
+	}
+
+	// Load the tools config to get handler entries for metadata mapping
+	toolsCfg, err := tools.LoadConfig(cfg.ToolsConfigPath)
+	if err != nil {
+		log.Error(err, "failed to reload tools config for metadata mapping")
+		return
+	}
+
+	server.SetToolRegistryInfo(tr.Name, tr.Namespace, toolsCfg.Handlers)
+	log.Info("tool registry metadata enriched",
+		"registryName", tr.Name, "registryNamespace", tr.Namespace)
 }
 
 // isNotHealthCheck filters out gRPC health check RPCs from tracing.

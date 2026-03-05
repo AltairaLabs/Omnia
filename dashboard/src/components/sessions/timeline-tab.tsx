@@ -127,6 +127,9 @@ export function TimelineTab({ messages }: TimelineTabProps) {
                 </span>
               )}
               <span className="flex items-center gap-1.5 shrink-0 ml-auto">
+                {event.kind === "tool_call" && event.metadata?.handler_type && (
+                  <Badge variant="outline" className="text-xs px-1 py-0 font-mono">{event.metadata.handler_type}</Badge>
+                )}
                 {event.duration !== undefined && (
                   <span className="text-xs text-muted-foreground">{event.duration}ms</span>
                 )}

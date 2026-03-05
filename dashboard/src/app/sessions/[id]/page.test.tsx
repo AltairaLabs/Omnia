@@ -59,25 +59,17 @@ const mockSession = {
     {
       id: "m2",
       role: "assistant" as const,
-      content: "How can I help you?",
+      content: '{"name":"search_docs","arguments":{"query":"help"}}',
       timestamp: new Date(Date.now() - 59 * 60 * 1000).toISOString(),
-      tokens: { output: 20 },
-      toolCalls: [
-        {
-          id: "tc1",
-          name: "search_docs",
-          arguments: { query: "help" },
-          result: { found: true },
-          status: "success" as const,
-          duration: 250,
-        },
-      ],
+      metadata: { type: "tool_call", duration_ms: "250", status: "success" },
+      toolCallId: "tc1",
     },
     {
       id: "m3",
-      role: "tool" as const,
-      content: "Tool result",
+      role: "assistant" as const,
+      content: "How can I help you?",
       timestamp: new Date(Date.now() - 58 * 60 * 1000).toISOString(),
+      tokens: { output: 20 },
     },
   ],
   metrics: {
@@ -250,6 +242,30 @@ describe("SessionDetailPage", () => {
     expect(screen.getByText(/sess-123/)).toBeInTheDocument();
   });
 
+  it("filters out duplicate EventBus messages with source=runtime", async () => {
+    const { useSessionDetail } = await import("@/hooks");
+    const sessionWithDuplicates = {
+      ...mockSession,
+      messages: [
+        { id: "m1", role: "user" as const, content: "Hello", timestamp: new Date().toISOString() },
+        { id: "m1-dup", role: "user" as const, content: "Hello", timestamp: new Date().toISOString(), metadata: { source: "runtime", index: "0" } },
+        { id: "m2", role: "assistant" as const, content: "Hi there!", timestamp: new Date().toISOString() },
+        { id: "m2-dup", role: "assistant" as const, content: "Hi there!", timestamp: new Date().toISOString(), metadata: { source: "runtime", index: "1" } },
+      ],
+    };
+    vi.mocked(useSessionDetail).mockReturnValue({
+      data: sessionWithDuplicates,
+      isLoading: false,
+      error: null,
+    } as any);
+
+    await renderPage();
+
+    // Each message should appear once, not twice
+    expect(screen.getAllByText("Hello")).toHaveLength(1);
+    expect(screen.getAllByText("Hi there!")).toHaveLength(1);
+  });
+
   it("renders eval results badge next to evaluated messages", async () => {
     const { useSessionDetail, useSessionEvalResults } = await import("@/hooks");
     vi.mocked(useSessionDetail).mockReturnValue({
@@ -262,7 +278,7 @@ describe("SessionDetailPage", () => {
         {
           id: "e1",
           sessionId: "sess-123",
-          messageId: "m2",
+          messageId: "m3",
           agentName: "support-agent",
           namespace: "default",
           promptpackName: "pp-1",

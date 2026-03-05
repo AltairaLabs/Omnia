@@ -32,7 +32,7 @@ import {
   Bug,
 } from "lucide-react";
 import { useSessionDetail, useSessionEvalResults } from "@/hooks";
-import type { Message, ToolCall, Session, EvalResult } from "@/types";
+import type { Message, Session, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
 import { DebugPanel } from "@/components/sessions/debug-panel";
@@ -55,22 +55,42 @@ function getStatusBadge(status: Session["status"]) {
   return <Badge variant={variant}>{label}</Badge>;
 }
 
-function CompactToolCallIndicator({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
+/**
+ * Parse a tool_call message's content to extract name and arguments.
+ */
+function parseToolCallContent(content: string): { name: string; arguments: Record<string, unknown> } {
+  try {
+    const parsed = JSON.parse(content);
+    return { name: parsed.name || "unknown", arguments: parsed.arguments || {} };
+  } catch {
+    return { name: "unknown", arguments: {} };
+  }
+}
+
+function ToolCallMessage({ message }: Readonly<{ message: Message }>) {
   const openToolCall = useDebugPanelStore((s) => s.openToolCall);
+  const { name } = parseToolCallContent(message.content);
+  const durationStr = message.metadata?.duration_ms;
+  const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
+  const status = message.metadata?.status as "success" | "error" | undefined;
 
   return (
-    <button
-      className="flex items-center gap-2 border rounded-lg bg-muted/30 px-3 py-1.5 my-1 text-left hover:bg-muted/50 transition-colors w-full"
-      onClick={() => openToolCall(toolCall.id)}
-    >
-      <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-      <span className="font-mono text-sm font-medium truncate">{toolCall.name}</span>
-      <ToolCallBadge status={toolCall.status} />
-      {toolCall.duration !== undefined && (
-        <span className="text-xs text-muted-foreground">{toolCall.duration}ms</span>
-      )}
-      <span className="text-xs text-muted-foreground ml-auto shrink-0">View details &gt;</span>
-    </button>
+    <div className="flex gap-3">
+      <div className="flex items-center justify-center h-8 w-8 rounded-full shrink-0 bg-orange-500/10">
+        <Wrench className="h-4 w-4 text-orange-500" />
+      </div>
+      <button
+        className="flex items-center gap-2 border rounded-lg bg-muted/30 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
+        onClick={() => message.toolCallId && openToolCall(message.toolCallId)}
+      >
+        <span className="font-mono text-sm font-medium truncate">{name}</span>
+        {status && <ToolCallBadge status={status} />}
+        {duration !== undefined && !Number.isNaN(duration) && (
+          <span className="text-xs text-muted-foreground">{duration}ms</span>
+        )}
+        <span className="text-xs text-muted-foreground ml-auto shrink-0">View details &gt;</span>
+      </button>
+    </div>
   );
 }
 
@@ -104,11 +124,11 @@ function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
 function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[] }>) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
-  const isTool = message.role === "tool";
   const isSystem = message.role === "system";
 
-  if (isTool) {
-    return null; // Tool results are shown inline with tool calls
+  // Tool call messages get their own compact rendering
+  if (message.metadata?.type === "tool_call") {
+    return <ToolCallMessage message={message} />;
   }
 
   return (
@@ -131,11 +151,6 @@ function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ messa
         >
           <div className="whitespace-pre-wrap text-sm">{message.content}</div>
         </div>
-
-        {/* Tool calls */}
-        {message.toolCalls?.map((tc) => (
-          <CompactToolCallIndicator key={tc.id} toolCall={tc} />
-        ))}
 
         {/* Eval results */}
         {evalResults && evalResults.length > 0 && (
@@ -160,15 +175,17 @@ function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ messa
 }
 
 /**
- * Returns true if a message is a user-facing conversation message.
+ * Returns true if a message belongs in the conversation view.
  *
- * Any message with a `metadata.type` is an internal runtime event
- * (pipeline stages, provider calls, tool calls, workflow transitions, etc.)
- * and belongs in the Debug panel, not the conversation view.
+ * Conversation messages are: user/assistant messages without a metadata.type,
+ * plus tool_call messages (rendered as compact indicators).
+ * Everything else (pipeline events, provider calls, etc.) goes to the Debug panel.
  */
 function isConversationMessage(m: Message): boolean {
   if (m.role === "tool") return false;
+  if (m.metadata?.type === "tool_call") return true;
   if (m.metadata?.type) return false;
+  if (m.metadata?.source === "runtime") return false;
   return true;
 }
 
@@ -181,10 +198,13 @@ function ConversationMessages({
 }: Readonly<{ messages: Message[]; evalResults: EvalResult[] }>) {
   const evalsByMessage = groupEvalResultsByMessageId(evalResults);
 
+  const sorted = messages
+    .filter(isConversationMessage)
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
   return (
     <div className="space-y-6">
-      {messages
-        .filter(isConversationMessage)
+      {sorted
         .map((message) => (
           <MessageBubble
             key={message.id}
@@ -339,31 +359,24 @@ export default function SessionDetailPage({
         "",
       ];
 
-      session.messages.forEach((msg) => {
-        if (msg.role === "tool") return;
-        const roleLabel = msg.role.charAt(0).toUpperCase() + msg.role.slice(1);
-        lines.push(`### ${roleLabel}`, "", msg.content, "");
-
-        if (msg.toolCalls) {
-          msg.toolCalls.forEach((tc) => {
+      session.messages
+        .filter(isConversationMessage)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .forEach((msg) => {
+          if (msg.metadata?.type === "tool_call") {
+            const { name, arguments: args } = parseToolCallContent(msg.content);
             lines.push(
-              `**Tool Call:** \`${tc.name}\``,
+              `**Tool Call:** \`${name}\``,
               "```json",
-              JSON.stringify(tc.arguments, null, 2),
-              "```"
+              JSON.stringify(args, null, 2),
+              "```",
+              ""
             );
-            if (tc.result) {
-              lines.push(
-                "**Result:**",
-                "```json",
-                JSON.stringify(tc.result, null, 2),
-                "```"
-              );
-            }
-            lines.push("");
-          });
-        }
-      });
+          } else {
+            const roleLabel = msg.role.charAt(0).toUpperCase() + msg.role.slice(1);
+            lines.push(`### ${roleLabel}`, "", msg.content, "");
+          }
+        });
 
       content = lines.join("\n");
       filename = `session-${session.id}.md`;

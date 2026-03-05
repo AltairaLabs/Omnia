@@ -149,6 +149,36 @@ func TestGetProvider_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetToolRegistry_Found(t *testing.T) {
+	s := Scheme()
+	tr := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-tools",
+			Namespace: "default",
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(tr).Build()
+
+	got, err := GetToolRegistry(context.Background(), c, "my-tools", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Name != "my-tools" {
+		t.Errorf("expected name my-tools, got %s", got.Name)
+	}
+}
+
+func TestGetToolRegistry_NotFound(t *testing.T) {
+	s := Scheme()
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+
+	_, err := GetToolRegistry(context.Background(), c, "nonexistent", "default")
+	if err == nil {
+		t.Fatal("expected error for not found")
+	}
+}
+
 func TestGetProviderSecret_Found(t *testing.T) {
 	s := Scheme()
 	secret := &corev1.Secret{

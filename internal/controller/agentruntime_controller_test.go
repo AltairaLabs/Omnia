@@ -1272,8 +1272,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 				envMap[env.Name] = env
 			}
 
-			Expect(envMap["OMNIA_TOOLREGISTRY_NAME"].Value).To(Equal(toolRegistryKey.Name))
-			Expect(envMap["OMNIA_TOOLREGISTRY_NAMESPACE"].Value).To(Equal(toolRegistryKey.Namespace))
+			// OMNIA_TOOLREGISTRY_NAME/NAMESPACE env vars removed — runtime reads CRD directly
+			Expect(envMap).NotTo(HaveKey("OMNIA_TOOLREGISTRY_NAME"))
+			Expect(envMap).NotTo(HaveKey("OMNIA_TOOLREGISTRY_NAMESPACE"))
+			Expect(envMap).To(HaveKey("OMNIA_TOOLS_CONFIG_PATH"))
 
 			By("verifying ToolRegistryReady condition")
 			updated := &omniav1alpha1.AgentRuntime{}

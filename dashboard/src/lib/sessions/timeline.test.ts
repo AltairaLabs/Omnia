@@ -54,32 +54,35 @@ describe("extractTimelineEvents", () => {
     expect(events.every(e => e.kind !== "system_message" || e.id !== "m2")).toBe(true);
   });
 
-  it("emits tool_call events from toolCalls array", () => {
+  it("emits tool_call events from tool_call messages", () => {
     const messages: Message[] = [
       {
         id: "m1",
         role: "assistant",
-        content: "Let me search",
+        content: '{"name":"search","arguments":{"q":"test"}}',
         timestamp: "2024-01-01T00:00:01Z",
-        toolCalls: [
-          { id: "tc1", name: "search", arguments: { q: "test" }, status: "success", duration: 250 },
-          { id: "tc2", name: "fetch", arguments: { url: "example.com" }, status: "error" },
-        ],
+        metadata: { type: "tool_call", duration_ms: "250", status: "success" },
+        toolCallId: "tc1",
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        content: '{"name":"fetch","arguments":{"url":"example.com"}}',
+        timestamp: "2024-01-01T00:00:02Z",
+        metadata: { type: "tool_call", status: "error" },
+        toolCallId: "tc2",
       },
     ];
     const events = extractTimelineEvents(messages);
 
-    // 1 assistant_message + 2 tool_call events
-    expect(events).toHaveLength(3);
-
-    const tcEvents = events.filter(e => e.kind === "tool_call");
-    expect(tcEvents).toHaveLength(2);
-    expect(tcEvents[0].label).toBe("search");
-    expect(tcEvents[0].toolCallId).toBe("tc1");
-    expect(tcEvents[0].duration).toBe(250);
-    expect(tcEvents[0].status).toBe("success");
-    expect(tcEvents[1].label).toBe("fetch");
-    expect(tcEvents[1].status).toBe("error");
+    expect(events).toHaveLength(2);
+    expect(events[0].kind).toBe("tool_call");
+    expect(events[0].label).toBe("Tool: search");
+    expect(events[0].toolCallId).toBe("tc1");
+    expect(events[0].duration).toBe(250);
+    expect(events[0].status).toBe("success");
+    expect(events[1].label).toBe("Tool: fetch");
+    expect(events[1].status).toBe("error");
   });
 
   it("handles workflow transition events", () => {
@@ -265,20 +268,16 @@ describe("extractTimelineEvents", () => {
     const messages: Message[] = [
       { id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" },
       { id: "m2", role: "system", content: "Workflow started", timestamp: "2024-01-01T00:00:01Z", metadata: { type: "workflow_transition", from: "idle", to: "active" } },
-      {
-        id: "m3", role: "assistant", content: "Searching...", timestamp: "2024-01-01T00:00:02Z",
-        toolCalls: [{ id: "tc1", name: "search", arguments: {}, status: "success", duration: 100 }],
-      },
+      { id: "m3", role: "assistant", content: '{"name":"search","arguments":{}}', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_call", duration_ms: "100", status: "success" }, toolCallId: "tc1" },
       { id: "m4", role: "assistant", content: "Found results!", timestamp: "2024-01-01T00:00:03Z" },
     ];
 
     const events = extractTimelineEvents(messages);
 
-    expect(events).toHaveLength(5); // user + workflow + assistant + tool_call + assistant
+    expect(events).toHaveLength(4);
     expect(events.map(e => e.kind)).toEqual([
       "user_message",
       "workflow_transition",
-      "assistant_message",
       "tool_call",
       "assistant_message",
     ]);
