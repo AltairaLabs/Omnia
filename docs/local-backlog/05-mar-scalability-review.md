@@ -676,3 +676,20 @@ processing), not memory.
 | S-K8S-4: No cache headers on dashboard static assets | Added `Cache-Control: public, max-age=31536000, immutable` for `/_next/static/` |
 | S-CONV-3: Dashboard renders all messages at once | Windowed rendering in `ConversationMessages`: shows last 50 messages with "Show earlier messages" button |
 | S-CONV-5: Session existence check scans all partitions | Added migration 000014: `CREATE INDEX idx_sessions_id ON sessions(id)` |
+
+---
+
+## 11. Status Summary
+
+All **text-chat scalability issues** from the original review are resolved across PRs #578–#581.
+
+The remaining open items (#1, #4, #5, #11) are all **audio/duplex-specific** — they require the inbound audio path, gRPC proto changes, buffer pooling, and write-path batching that are prerequisites for duplex audio support. These are blocked until the duplex audio infrastructure work begins.
+
+### Remaining open items
+
+| # | Issue | Severity | Category | Blocker |
+|---|-------|----------|----------|---------|
+| 1 | S-AUD-1: Inbound audio path is a stub | **Critical** | Audio | Duplex audio infra |
+| 4 | S-AUD-3: 1.8 GB/s heap allocation (no buffer pool) | **Critical** | Audio | Duplex audio infra |
+| 5 | S-AUD-5: Session-API cannot absorb 200K writes/s | **Critical** | Audio / DB | Duplex audio infra |
+| 11 | S-AUD-6: WebSocket write mutex contention | **High** | Audio | Duplex audio infra |
