@@ -571,6 +571,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MaxRetries != defaultMaxRetries {
 		t.Errorf("MaxRetries = %d, want %d", cfg.MaxRetries, defaultMaxRetries)
 	}
+	if cfg.MaxMessagesPerSession != defaultMaxMessagesPerSession {
+		t.Errorf("MaxMessagesPerSession = %d, want %d", cfg.MaxMessagesPerSession, defaultMaxMessagesPerSession)
+	}
 }
 
 func TestDefaultOptions(t *testing.T) {
@@ -578,8 +581,8 @@ func TestDefaultOptions(t *testing.T) {
 	if opts.KeyPrefix != defaultKeyPrefix {
 		t.Errorf("KeyPrefix = %q, want %q", opts.KeyPrefix, defaultKeyPrefix)
 	}
-	if opts.MaxMessagesPerSession != 0 {
-		t.Errorf("MaxMessagesPerSession = %d, want 0", opts.MaxMessagesPerSession)
+	if opts.MaxMessagesPerSession != defaultMaxMessagesPerSession {
+		t.Errorf("MaxMessagesPerSession = %d, want %d", opts.MaxMessagesPerSession, defaultMaxMessagesPerSession)
 	}
 }
 

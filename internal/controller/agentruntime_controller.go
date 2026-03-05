@@ -69,6 +69,7 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
 
 // reconcileReferences fetches and validates all referenced resources.
@@ -224,6 +225,11 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	}
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeServiceReady, metav1.ConditionTrue,
 		"ServiceCreated", "Service created/updated successfully")
+
+	// Reconcile PDB (only meaningful when replicas > 1)
+	if err := r.reconcilePDB(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile PDB")
+	}
 
 	return deployment, nil
 }

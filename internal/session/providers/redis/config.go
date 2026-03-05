@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	defaultKeyPrefix  = "hot:"
-	defaultMaxRetries = 3
+	defaultKeyPrefix             = "hot:"
+	defaultMaxRetries            = 3
+	defaultMaxMessagesPerSession = 1000
 )
 
 // Config holds connection and behaviour settings for the Redis hot cache provider.
@@ -60,8 +61,9 @@ type Config struct {
 // set at least one address in Addrs.
 func DefaultConfig() Config {
 	return Config{
-		KeyPrefix:  defaultKeyPrefix,
-		MaxRetries: defaultMaxRetries,
+		KeyPrefix:             defaultKeyPrefix,
+		MaxRetries:            defaultMaxRetries,
+		MaxMessagesPerSession: defaultMaxMessagesPerSession,
 	}
 }
 
@@ -76,6 +78,7 @@ type Options struct {
 // DefaultOptions returns Options with sensible defaults.
 func DefaultOptions() Options {
 	return Options{
-		KeyPrefix: defaultKeyPrefix,
+		KeyPrefix:             defaultKeyPrefix,
+		MaxMessagesPerSession: defaultMaxMessagesPerSession,
 	}
 }
