@@ -127,7 +127,7 @@ and allow session-api to recover.
 The `Converse` bidirectional stream inherits the caller's context. If the LLM provider
 stalls mid-response, the stream hangs indefinitely — there is no inactivity timeout.
 
-**S-RES-3: Tool call failures stall the entire LLM pipeline.**
+**S-RES-3: Tool call failures stall the entire LLM pipeline.** *(Fixed)*
 A 30-second tool timeout means the user waits 30 s with no feedback. If the tool is called
 multiple times in a multi-step pipeline, latency compounds. No tool-level circuit breaker
 prevents repeated calls to a dead endpoint.
@@ -146,7 +146,7 @@ cause a conflict error. Need idempotency key or upsert semantics.
 `internal/facade/connection.go:85` — if session-api is down, the goroutine hangs
 indefinitely with no timeout. Under load, these zombie goroutines accumulate.
 
-**S-RES-7: No rate limiting on any API.**
+**S-RES-7: No rate limiting on any API.** *(Fixed)*
 No rate limits on WebSocket message ingestion, session-api endpoints, or tool execution.
 A runaway client can saturate a pod.
 
@@ -182,7 +182,7 @@ A single conversation with 500 chunks spawns 500 goroutines. With 1,000 concurre
 sessions, that's 500 K goroutines just for recording — each holding an HTTP request to
 session-api.
 
-**S-STR-2: No backpressure between LLM stream and client.**
+**S-STR-2: No backpressure between LLM stream and client.** *(Fixed)*
 If the WebSocket client is slow (mobile network, browser tab in background), `stream.Send()`
 blocks, which blocks the gRPC stream from the runtime, which blocks the PromptKit SDK from
 consuming the next provider chunk. This is correct flow control but means one slow client
@@ -193,7 +193,7 @@ ties up an entire runtime conversation slot.
 never caps the count. File descriptor exhaustion (default ulimit 1024) will crash the pod
 before any application-level limit kicks in.
 
-**S-STR-4: Single-chunk media transfer.**
+**S-STR-4: Single-chunk media transfer.** *(Fixed)*
 Media is sent as one gRPC message (`message.go:226`, `IsLast: true`). A 15 MB image
 (within the 16 MB limit) is held entirely in memory on both facade and runtime simultaneously.
 No streaming of large blobs.
@@ -687,12 +687,17 @@ processing), not memory.
 | S-DB-4: Multi-statement `DeleteSession` | `BEFORE DELETE` trigger (migration 000015) cascades child row deletes |
 | S-DB-6: Single-node Redis | `architecture: replication` + Sentinel HA with 3 replicas |
 | S-RES-5: `CreateSession` not idempotent on retry | Postgres returns nil on duplicate; httpclient treats 409 as success |
+| S-STR-2: No backpressure for slow WebSocket clients | Write deadline (10s) on WebSocket; connection closed if client too slow |
+| S-STR-4: Single-chunk media transfer | Chunked media streaming: payloads > 1 MB split into 64 KB OMNI frames |
+| S-RES-3: Tool call failures stall LLM pipeline | Per-tool circuit breaker (`gobreaker`): opens after 5 failures, 30s recovery |
+| S-RES-7: No rate limiting on any API | `KeyedLimiter` package; session-api 100 rps/IP; facade 50 msg/s per connection |
+| S-K8S-2: No HPA for session-api | HPA with CPU 70% / memory 80%, min 2, max 10, scale-down stabilisation 300s |
 
 ---
 
 ## 11. Status Summary
 
-All **text-chat and infrastructure scalability issues** from the original review are resolved across PRs #578–#582.
+All **text-chat, infrastructure, and resilience scalability issues** from the original review are resolved across PRs #578–#582.
 
 The remaining open items (#1, #4, #5, #11) are all **audio/duplex-specific** — they require the inbound audio path, gRPC proto changes, and audio-specific write-path batching. These are blocked until the duplex audio infrastructure work begins.
 
@@ -712,12 +717,7 @@ Note: S-STR-5 (buffer pooling) is partially resolved for text streaming. The aud
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | S-MSG-2: Base64 encoding inflates media by 33% | Medium | Requires blob storage or chunked binary streaming |
-| S-STR-2: No backpressure between LLM stream and client | Medium | Correct flow control but ties up runtime slot |
-| S-STR-4: Single-chunk media transfer | Medium | Needs chunked gRPC streaming for payloads > 1 MB |
 | S-DB-3: No explicit VACUUM/ANALYZE schedule | Low | Ops concern — document recommended PG maintenance |
-| S-RES-3: Tool call failures stall LLM pipeline | Medium | Tool-level circuit breaker / health probing |
-| S-RES-7: No rate limiting on any API | Medium | Needs design decision on limiter placement |
-| S-K8S-2: No HPA for session-api | Medium | Add HPA resource to Helm chart |
 | S-K8S-11: Gateway/ingress WebSocket idle timeout | Low | Documentation — cloud-specific LB annotations |
 | S-K8S-12: No connection-aware load balancing | Low | Requires Envoy/Istio with least-connections |
 | S-STR-6: Prometheus eval_id label is high-cardinality | Low | Move eval_id to trace attribute |
