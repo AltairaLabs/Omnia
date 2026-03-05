@@ -39,8 +39,8 @@
 #
 # =============================================================================
 
-# -- Number of operator replicas
-replicaCount: 1
+# -- Number of operator replicas (use 3+ for HA with leader election)
+replicaCount: 3
 
 # -- Enable development mode with full-featured license. DO NOT USE IN PRODUCTION.
 devMode: false
@@ -1604,12 +1604,18 @@ redis:
 
   # -- Subchart values for Bitnami Redis
   # See: https://github.com/bitnami/charts/tree/main/bitnami/redis
-  # Architecture: standalone (1 master) or replication (master + replicas)
-  architecture: standalone
+  # Architecture: standalone (1 master) or replication (master + replicas + sentinel)
+  architecture: replication
 
   auth:
     # -- Disable auth for development (enable and set password for production)
     enabled: false
+
+  sentinel:
+    # -- Enable Redis Sentinel for automatic failover
+    enabled: true
+    # -- Sentinel master set name
+    masterSet: omnia-master
 
   master:
     persistence:
@@ -1631,8 +1637,8 @@ redis:
         memory: 64Mi
 
   replica:
-    # -- Number of replicas (only used when architecture: replication)
-    replicaCount: 0
+    # -- Number of replicas for Redis HA
+    replicaCount: 3
 
 # ============================================================================
 # Demo Mode (Separate Chart)
