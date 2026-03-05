@@ -698,7 +698,7 @@ func (t *trackingHotCache) waitOne() {
 func TestPushToHotCache_NoCacheConfigured(t *testing.T) {
 	svc := newServiceWithRegistry(providers.NewRegistry(), nil)
 	called := false
-	svc.pushToHotCache(func(_ providers.HotCacheProvider) {
+	svc.pushToHotCache(func(_ context.Context, _ providers.HotCacheProvider) {
 		called = true
 	})
 	// Give goroutine a chance to run (it shouldn't)

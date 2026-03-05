@@ -146,9 +146,11 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForSecret(ctx context.Context,
 		}
 	}
 
-	// Now find all AgentRuntimes that reference these providers or use the secret directly
+	// Find AgentRuntimes in the same namespace that reference these providers or use the secret directly.
+	// Cross-namespace provider references exist but secrets are namespace-scoped, so agents
+	// in other namespaces will be reconciled when their own Provider watch fires.
 	var agentRuntimes omniav1alpha1.AgentRuntimeList
-	if err := r.List(ctx, &agentRuntimes); err != nil {
+	if err := r.List(ctx, &agentRuntimes, client.InNamespace(secret.Namespace)); err != nil {
 		log.Error(err, "failed to list AgentRuntimes for Secret watch")
 		return nil
 	}

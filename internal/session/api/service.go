@@ -64,6 +64,12 @@ type ServiceConfig struct {
 	EventPublisher EventPublisher
 }
 
+// maxHotCacheGoroutines is the maximum number of concurrent hot cache push operations.
+const maxHotCacheGoroutines = 50
+
+// hotCacheTimeout is the maximum duration for a single hot cache push.
+const hotCacheTimeout = 5 * time.Second
+
 // SessionService provides tiered session retrieval with hot→warm→cold fallback.
 type SessionService struct {
 	registry       *providers.Registry
@@ -71,6 +77,7 @@ type SessionService struct {
 	auditLogger    AuditLogger
 	eventPublisher EventPublisher
 	log            logr.Logger
+	hotCacheSem    chan struct{}
 }
 
 // NewSessionService creates a new SessionService with the given registry and config.
@@ -85,6 +92,7 @@ func NewSessionService(registry *providers.Registry, cfg ServiceConfig, log logr
 		auditLogger:    cfg.AuditLogger,
 		eventPublisher: cfg.EventPublisher,
 		log:            log.WithName("session-service"),
+		hotCacheSem:    make(chan struct{}, maxHotCacheGoroutines),
 	}
 }
 
@@ -210,8 +218,8 @@ func (s *SessionService) CreateSession(ctx context.Context, sess *session.Sessio
 	if err := warm.CreateSession(ctx, sess); err != nil {
 		return err
 	}
-	s.pushToHotCache(func(hot providers.HotCacheProvider) {
-		if err := hot.SetSession(context.Background(), sess, s.cacheTTL); err != nil {
+	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
+		if err := hot.SetSession(ctx, sess, s.cacheTTL); err != nil {
 			s.log.Error(err, "hot cache write-through failed", "sessionID", sess.ID, "op", "create")
 		}
 	})
@@ -234,8 +242,8 @@ func (s *SessionService) DeleteSession(ctx context.Context, sessionID string) er
 		return err
 	}
 	// Invalidate hot cache so stale data isn't served.
-	s.pushToHotCache(func(hot providers.HotCacheProvider) {
-		if err := hot.Invalidate(context.Background(), sessionID); err != nil {
+	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
+		if err := hot.Invalidate(ctx, sessionID); err != nil {
 			s.log.Error(err, "hot cache invalidation failed", "sessionID", sessionID)
 		}
 	})
@@ -257,8 +265,8 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 		return err
 	}
 	// Write-through to hot cache (fire-and-forget per design doc).
-	s.pushToHotCache(func(hot providers.HotCacheProvider) {
-		if err := hot.AppendMessage(context.Background(), sessionID, msg); err != nil {
+	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
+		if err := hot.AppendMessage(ctx, sessionID, msg); err != nil {
 			s.log.V(2).Info("hot cache append skipped", "sessionID", sessionID, "reason", err.Error())
 		}
 	})
@@ -294,8 +302,8 @@ func (s *SessionService) UpdateSessionStats(ctx context.Context, sessionID strin
 	}
 
 	// Refresh hot cache TTL on stats updates to keep active sessions cached.
-	s.pushToHotCache(func(hot providers.HotCacheProvider) {
-		if err := hot.RefreshTTL(context.Background(), sessionID, s.cacheTTL); err != nil {
+	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
+		if err := hot.RefreshTTL(ctx, sessionID, s.cacheTTL); err != nil {
 			// Session may not be in cache yet — that's fine.
 			s.log.V(2).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
 		}
@@ -372,14 +380,24 @@ func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Ses
 	s.log.V(2).Info("hot cache populated", "sessionID", sess.ID)
 }
 
-// pushToHotCache runs a hot-cache write operation in a fire-and-forget goroutine.
-// If no hot cache is configured the call is a no-op.
-func (s *SessionService) pushToHotCache(fn func(hot providers.HotCacheProvider)) {
+// pushToHotCache runs a hot-cache write operation in a bounded goroutine.
+// If no hot cache is configured or the concurrency limit is reached, the call is dropped.
+func (s *SessionService) pushToHotCache(fn func(ctx context.Context, hot providers.HotCacheProvider)) {
 	hot, err := s.registry.HotCache()
 	if err != nil {
 		return // Hot cache not configured — no-op.
 	}
-	go fn(hot)
+	select {
+	case s.hotCacheSem <- struct{}{}:
+		go func() {
+			defer func() { <-s.hotCacheSem }()
+			ctx, cancel := context.WithTimeout(context.Background(), hotCacheTimeout)
+			defer cancel()
+			fn(ctx, hot)
+		}()
+	default:
+		s.log.V(1).Info("hot cache push dropped", "reason", "backpressure")
+	}
 }
 
 // isHotEligible returns true if the query can be served from the hot cache.

@@ -179,8 +179,8 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		pipe.LTrim(ctx, msgsKey, int64(-p.maxMsgs), -1)
 	}
 
-	// Sync messages key TTL with session key TTL.
-	ttlCmd := p.client.TTL(ctx, sessionKey)
+	// Sync messages key TTL with session key TTL (atomic within the pipeline).
+	ttlCmd := pipe.TTL(ctx, sessionKey)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("redis: append message: %w", err)
 	}

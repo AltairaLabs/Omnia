@@ -544,11 +544,12 @@ func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*sessi
 }
 
 func (p *Provider) GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error) {
+	const maxSessionArtifacts = 1000
 	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
 		size_bytes, filename, checksum_sha256, metadata, created_at
-		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC`
+		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2`
 
-	rows, err := p.pool.Query(ctx, query, sessionID)
+	rows, err := p.pool.Query(ctx, query, sessionID, maxSessionArtifacts)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get session artifacts: %w", err)
 	}

@@ -139,9 +139,10 @@ type Server struct {
 	allowedOrigins  []string
 	log             logr.Logger
 
-	mu          sync.RWMutex
-	connections map[*websocket.Conn]*Connection
-	shutdown    bool
+	mu           sync.RWMutex
+	connections  map[*websocket.Conn]*Connection
+	shutdown     bool
+	completionWg sync.WaitGroup
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -215,6 +216,20 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 	}
 
 	return s
+}
+
+// submitCompletion runs a task through the recording pool if available,
+// otherwise as a tracked goroutine. All tasks are waited on during Shutdown.
+func (s *Server) submitCompletion(task func()) {
+	if s.recordingPool != nil {
+		s.recordingPool.Submit(task)
+		return
+	}
+	s.completionWg.Add(1)
+	go func() {
+		defer s.completionWg.Done()
+		task()
+	}()
 }
 
 // checkOrigin validates the Origin header against the allowed origins list.
@@ -342,6 +357,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	if s.shutdown {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	s.connections[conn] = c
 	s.mu.Unlock()
 
@@ -399,6 +419,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.recordingPool != nil {
 		s.recordingPool.Close()
 	}
+
+	// Wait for completion goroutines not routed through the pool
+	s.completionWg.Wait()
 
 	return nil
 }

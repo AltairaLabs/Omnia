@@ -38,6 +38,7 @@ const (
 	defaultListLimit    = 20
 	maxListLimit        = 100
 	defaultMessageLimit = 50
+	maxMessageLimit     = 500
 	maxStringParamLen   = 253 // K8s name limit
 	maxSearchQueryLen   = 500
 	maxOffsetLimit      = 10000
@@ -296,7 +297,7 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := parseIntParam(r, "limit", defaultMessageLimit)
+	limit := min(parseIntParam(r, "limit", defaultMessageLimit), maxMessageLimit)
 	before := int32(parseIntParam(r, "before", 0))
 	after := int32(parseIntParam(r, "after", 0))
 
