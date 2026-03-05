@@ -66,18 +66,25 @@ func asPtr[T any](data any) (*T, bool) {
 //
 // Every event the SDK emits is recorded — matching the fidelity of
 // PromptKit's FileEventStore.
+
+// defaultWriteConcurrency is the maximum number of concurrent event store writes.
+const defaultWriteConcurrency = 100
+
 type OmniaEventStore struct {
 	sessionStore session.Store
 	log          logr.Logger
 	toolMetaFn   func(string) (tools.ToolMeta, bool)
 	evalMetrics  metrics.EvalMetricsRecorder
+	sem          chan struct{} // bounded concurrency for async writes
 }
 
 // NewOmniaEventStore creates a new event store that bridges to session-api.
+// Write concurrency is bounded by a semaphore to prevent unbounded goroutine spawning.
 func NewOmniaEventStore(store session.Store, log logr.Logger) *OmniaEventStore {
 	return &OmniaEventStore{
 		sessionStore: store,
 		log:          log.WithName("event-store"),
+		sem:          make(chan struct{}, defaultWriteConcurrency),
 	}
 }
 
@@ -113,7 +120,11 @@ func (s *OmniaEventStore) Append(_ context.Context, event *events.Event) error {
 		return nil
 	}
 
-	go s.writeMessage(event.SessionID, msg, stats)
+	s.sem <- struct{}{}
+	go func() {
+		defer func() { <-s.sem }()
+		s.writeMessage(event.SessionID, msg, stats)
+	}()
 	return nil
 }
 

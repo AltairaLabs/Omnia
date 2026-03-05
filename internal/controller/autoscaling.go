@@ -235,13 +235,18 @@ func (r *AgentRuntimeReconciler) buildKEDATriggers(agentRuntime *omniav1alpha1.A
 	// Default: Prometheus trigger for active connections
 	// This assumes Prometheus is configured via the Omnia Helm chart with default settings
 	// Users with custom Prometheus setups should specify triggers explicitly
+	threshold := int32(DefaultKEDAConnectionThreshold)
+	if autoscaling.KEDA != nil && autoscaling.KEDA.ConnectionThreshold != nil {
+		threshold = *autoscaling.KEDA.ConnectionThreshold
+	}
+
 	return []interface{}{
 		map[string]interface{}{
 			"type": "prometheus",
 			"metadata": map[string]interface{}{
 				"serverAddress": "http://omnia-prometheus-server.omnia-system.svc.cluster.local/prometheus",
 				"query":         fmt.Sprintf(`sum(omnia_agent_connections_active{agent="%s",namespace="%s"}) or vector(0)`, agentRuntime.Name, agentRuntime.Namespace),
-				"threshold":     "10", // Scale when avg connections per pod > 10
+				"threshold":     fmt.Sprintf("%d", threshold),
 			},
 		},
 	}

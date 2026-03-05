@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,18 @@ import (
 
 	"github.com/go-logr/logr"
 )
+
+// httpServerError is returned by the circuit breaker function for 5xx responses.
+// It allows the circuit breaker to count the failure while the caller can still
+// extract the status code and body to build a ToolResult.
+type httpServerError struct {
+	statusCode int
+	body       []byte
+}
+
+func (e *httpServerError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.statusCode, string(e.body))
+}
 
 // HTTPAdapterConfig contains configuration for the HTTP adapter.
 type HTTPAdapterConfig struct {
@@ -80,6 +93,7 @@ type HTTPAdapter struct {
 	tools     map[string]ToolInfo
 	mu        sync.RWMutex
 	connected bool
+	breakers  *ToolCircuitBreakers
 }
 
 // NewHTTPAdapter creates a new HTTP adapter.
@@ -94,9 +108,10 @@ func NewHTTPAdapter(config HTTPAdapterConfig, log logr.Logger) *HTTPAdapter {
 		config.ContentType = "application/json"
 	}
 	return &HTTPAdapter{
-		config: config,
-		log:    log.WithValues("adapter", config.Name, "endpoint", config.Endpoint),
-		tools:  make(map[string]ToolInfo),
+		config:   config,
+		log:      log.WithValues("adapter", config.Name, "endpoint", config.Endpoint),
+		tools:    make(map[string]ToolInfo),
+		breakers: NewToolCircuitBreakers(),
 	}
 }
 
@@ -185,23 +200,46 @@ func (a *HTTPAdapter) Call(ctx context.Context, name string, args map[string]any
 	// Set policy propagation, tool, and parameter headers
 	SetAllOutboundHeaders(ctx, req, name, a.config.Name, args)
 
-	// Execute request
-	resp, err := client.Do(req)
+	// Execute request through circuit breaker
+	var statusCode int
+	body, err := a.breakers.Execute(name, func() ([]byte, error) {
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			return nil, doErr
+		}
+		defer resp.Body.Close()
+
+		data, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read response: %w", readErr)
+		}
+
+		statusCode = resp.StatusCode
+		// Treat server errors (5xx) as failures for the circuit breaker,
+		// but still return the body so the caller can build a ToolResult.
+		if resp.StatusCode >= 500 {
+			return data, &httpServerError{statusCode: resp.StatusCode, body: data}
+		}
+		return data, nil
+	})
+
+	// If the error is a server error, convert to a ToolResult rather than
+	// propagating as a hard failure. The circuit breaker still counts it.
+	var serverErr *httpServerError
+	if errors.As(err, &serverErr) {
+		return &ToolResult{
+			Content: fmt.Sprintf("HTTP %d: %s", serverErr.statusCode, string(serverErr.body)),
+			IsError: true,
+		}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Check for HTTP errors
-	if resp.StatusCode >= 400 {
+	// Check for client errors (4xx) — not circuit breaker failures
+	if statusCode >= 400 {
 		return &ToolResult{
-			Content: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
+			Content: fmt.Sprintf("HTTP %d: %s", statusCode, string(body)),
 			IsError: true,
 		}, nil
 	}

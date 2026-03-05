@@ -38,6 +38,10 @@ const (
 // KEDA API group constant.
 const kedaAPIGroup = "keda.sh"
 
+// DefaultKEDAConnectionThreshold is the default target connections per pod for KEDA scaling.
+// Set to 200 which is appropriate for text chat workloads. Audio workloads should use ~20.
+const DefaultKEDAConnectionThreshold = 200
+
 const (
 	// FacadeContainerName is the name of the facade container in the pod.
 	FacadeContainerName = "facade"

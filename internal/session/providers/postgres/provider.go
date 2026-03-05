@@ -229,20 +229,6 @@ func collectSessions(rows pgx.Rows) ([]*session.Session, error) {
 	return sessions, nil
 }
 
-// --- helper: delete child rows in transaction -------------------------------
-
-// childTables lists tables with session_id FK in reverse dependency order.
-var childTables = []string{"message_artifacts", "tool_calls", "messages"}
-
-func deleteChildRows(ctx context.Context, tx pgx.Tx, sessionIDClause string, args ...any) error {
-	for _, table := range childTables {
-		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE "+sessionIDClause, args...); err != nil {
-			return fmt.Errorf("postgres: delete %s: %w", table, err)
-		}
-	}
-	return nil
-}
-
 // --- WarmStoreProvider implementation ---------------------------------------
 
 func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error {
@@ -260,7 +246,7 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 		tags = []string{}
 	}
 
-	res, err := p.pool.Exec(ctx, query,
+	_, err := p.pool.Exec(ctx, query,
 		s.ID, s.AgentName, s.Namespace, pgutil.NullString(s.WorkspaceName), s.Status,
 		s.CreatedAt, s.UpdatedAt, pgutil.NullTime(s.ExpiresAt), pgutil.NullTime(s.EndedAt),
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
@@ -270,9 +256,8 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 	if err != nil {
 		return fmt.Errorf("postgres: create session: %w", err)
 	}
-	if res.RowsAffected() == 0 {
-		return fmt.Errorf("postgres: create session: duplicate session ID %s", s.ID)
-	}
+	// RowsAffected() == 0 means the session already exists (WHERE NOT EXISTS).
+	// This is intentionally idempotent — retries after network errors are safe.
 	return nil
 }
 
@@ -312,25 +297,17 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 }
 
 func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := deleteChildRows(ctx, tx, "session_id=$1", sessionID); err != nil {
-		return err
-	}
-
-	res, err := tx.Exec(ctx, "DELETE FROM sessions WHERE id=$1", sessionID)
+	// Child rows (messages, tool_calls, message_artifacts, eval_results) are
+	// removed automatically by the trg_session_cascade_delete trigger added in
+	// migration 000014.
+	res, err := p.pool.Exec(ctx, "DELETE FROM sessions WHERE id=$1", sessionID)
 	if err != nil {
 		return fmt.Errorf("postgres: delete session: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return session.ErrSessionNotFound
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
@@ -567,11 +544,12 @@ func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*sessi
 }
 
 func (p *Provider) GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error) {
+	const maxSessionArtifacts = 1000
 	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
 		size_bytes, filename, checksum_sha256, metadata, created_at
-		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC`
+		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2`
 
-	rows, err := p.pool.Query(ctx, query, sessionID)
+	rows, err := p.pool.Query(ctx, query, sessionID, maxSessionArtifacts)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get session artifacts: %w", err)
 	}
@@ -792,22 +770,12 @@ func (p *Provider) DeleteSessionsBatch(ctx context.Context, sessionIDs []string)
 	if len(sessionIDs) == 0 {
 		return nil
 	}
-
-	tx, err := p.pool.Begin(ctx)
+	// Child rows are removed by the trg_session_cascade_delete trigger.
+	_, err := p.pool.Exec(ctx, "DELETE FROM sessions WHERE id = ANY($1)", sessionIDs)
 	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := deleteChildRows(ctx, tx, "session_id = ANY($1)", sessionIDs); err != nil {
-		return err
-	}
-
-	if _, err := tx.Exec(ctx, "DELETE FROM sessions WHERE id = ANY($1)", sessionIDs); err != nil {
 		return fmt.Errorf("postgres: delete sessions batch: %w", err)
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // --- Infrastructure ---------------------------------------------------------

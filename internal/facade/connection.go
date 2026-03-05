@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
@@ -43,6 +44,9 @@ type Connection struct {
 	userRoles     string
 	userEmail     string
 	authorization string // Original JWT token for passthrough
+
+	// rateLimiter enforces per-connection message rate limiting. Nil when disabled.
+	rateLimiter *rate.Limiter
 }
 
 // handleConnection manages the lifecycle of a WebSocket connection.
@@ -82,7 +86,7 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	s.metrics.ConnectionClosed()
 
 	if c.sessionID != "" {
-		go func() {
+		s.submitCompletion(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := s.sessionStore.UpdateSessionStats(ctx, c.sessionID, session.SessionStatsUpdate{
@@ -91,7 +95,7 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 			}); err != nil {
 				log.Error(err, "session completion failed", "sessionID", c.sessionID)
 			}
-		}()
+		})
 	}
 
 	if err := c.conn.Close(); err != nil {

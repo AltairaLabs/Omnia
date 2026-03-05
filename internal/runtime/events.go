@@ -25,6 +25,8 @@ import (
 
 // subscribeToEventBusMetrics subscribes to PromptKit event bus events to capture metrics.
 // This allows us to observe fine-grained metrics emitted during conversation execution.
+// Unsubscribe functions are stored in s.unsubscribeFns[sessionID] and called when the
+// conversation is removed, preventing leaked subscriptions.
 func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversation) {
 	eventBus := conv.EventBus()
 	if eventBus == nil {
@@ -38,8 +40,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		"hasMetrics", s.metrics != nil,
 		"hasRuntimeMetrics", s.runtimeMetrics != nil)
 
+	var unsubs []func()
+
 	// Subscribe to provider call completed events to record Prometheus metrics
-	eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.ProviderCallCompletedData](e.Data)
 		if !ok {
 			return
@@ -70,10 +74,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"finishReason", data.FinishReason,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to provider call failed events to record failures
-	eventBus.Subscribe(events.EventProviderCallFailed, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventProviderCallFailed, func(e *events.Event) {
 		data, ok := asPtr[events.ProviderCallFailedData](e.Data)
 		if !ok {
 			return
@@ -96,10 +100,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"error", data.Error,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to pipeline started events
-	eventBus.Subscribe(events.EventPipelineStarted, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineStarted, func(e *events.Event) {
 		// Record pipeline start for active pipeline gauge
 		if s.runtimeMetrics != nil {
 			s.runtimeMetrics.RecordPipelineStart()
@@ -108,10 +112,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		s.log.V(1).Info("event: pipeline started",
 			"sessionID", sessionID,
 		)
-	})
+	}))
 
 	// Subscribe to pipeline completed events for overall visibility
-	eventBus.Subscribe(events.EventPipelineCompleted, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.PipelineCompletedData](e.Data)
 		if !ok {
 			return
@@ -135,10 +139,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"messageCount", data.MessageCount,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to pipeline failed events
-	eventBus.Subscribe(events.EventPipelineFailed, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineFailed, func(e *events.Event) {
 		data, ok := asPtr[events.PipelineFailedData](e.Data)
 		if !ok {
 			return
@@ -157,10 +161,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"error", data.Error,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to stage completed events
-	eventBus.Subscribe(events.EventStageCompleted, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventStageCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.StageCompletedData](e.Data)
 		if !ok {
 			return
@@ -183,10 +187,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"index", data.Index,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to stage failed events
-	eventBus.Subscribe(events.EventStageFailed, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventStageFailed, func(e *events.Event) {
 		data, ok := asPtr[events.StageFailedData](e.Data)
 		if !ok {
 			return
@@ -210,10 +214,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"error", data.Error,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to tool call completed events (tool metrics)
-	eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.ToolCallCompletedData](e.Data)
 		if !ok {
 			return
@@ -243,10 +247,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"status", data.Status,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to tool call failed events
-	eventBus.Subscribe(events.EventToolCallFailed, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventToolCallFailed, func(e *events.Event) {
 		data, ok := asPtr[events.ToolCallFailedData](e.Data)
 		if !ok {
 			return
@@ -276,10 +280,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"error", data.Error,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to validation passed events
-	eventBus.Subscribe(events.EventValidationPassed, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventValidationPassed, func(e *events.Event) {
 		data, ok := asPtr[events.ValidationPassedData](e.Data)
 		if !ok {
 			return
@@ -301,10 +305,10 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"validatorType", data.ValidatorType,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
 
 	// Subscribe to validation failed events
-	eventBus.Subscribe(events.EventValidationFailed, func(e *events.Event) {
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventValidationFailed, func(e *events.Event) {
 		data, ok := asPtr[events.ValidationFailedData](e.Data)
 		if !ok {
 			return
@@ -327,5 +331,9 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 			"error", data.Error,
 			"durationMs", data.Duration.Milliseconds(),
 		)
-	})
+	}))
+
+	// Store unsubscribe functions for cleanup when the conversation ends.
+	// NOTE: caller (getOrCreateConversation) already holds conversationMu write lock.
+	s.unsubscribeFns[sessionID] = unsubs
 }

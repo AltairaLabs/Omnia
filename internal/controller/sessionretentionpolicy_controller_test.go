@@ -1104,6 +1104,56 @@ var _ = Describe("SessionRetentionPolicy Controller", func() {
 			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
 			Expect(requests).To(BeNil())
 		})
+
+		It("should use indexed lookup when field index is available", func() {
+			ctx := context.Background()
+			scheme := k8sClient.Scheme()
+
+			matchingPolicy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "indexed-match"},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
+					},
+					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
+						"target-ws": {WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 30}},
+					},
+				},
+			}
+			otherPolicy := &omniav1alpha1.SessionRetentionPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "indexed-other"},
+				Spec: omniav1alpha1.SessionRetentionPolicySpec{
+					Default: omniav1alpha1.RetentionTierConfig{
+						WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 7},
+					},
+					PerWorkspace: map[string]omniav1alpha1.WorkspaceRetentionOverride{
+						"other-ws": {WarmStore: &omniav1alpha1.WarmStoreConfig{RetentionDays: 14}},
+					},
+				},
+			}
+
+			indexedClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(matchingPolicy, otherPolicy).
+				WithIndex(&omniav1alpha1.SessionRetentionPolicy{}, IndexRetentionPolicyByWorkspace,
+					func(obj client.Object) []string {
+						return extractWorkspaceNames(obj.(*omniav1alpha1.SessionRetentionPolicy))
+					}).
+				Build()
+
+			reconciler := &SessionRetentionPolicyReconciler{
+				Client: indexedClient,
+				Scheme: scheme,
+			}
+
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "target-ws"},
+			}
+
+			requests := reconciler.findPoliciesForWorkspace(ctx, workspace)
+			Expect(requests).To(HaveLen(1))
+			Expect(requests[0].Name).To(Equal("indexed-match"))
+		})
 	})
 
 	Context("validatePolicy direct", func() {

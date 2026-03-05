@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 const (
@@ -32,6 +33,10 @@ const (
 	BinaryHeaderSize = 32
 	// MediaIDSize is the size of the media ID field in bytes.
 	MediaIDSize = 12
+	// MaxChunkSize is the maximum size of a single chunk in a chunked transfer (64 KB).
+	MaxChunkSize = 64 * 1024
+	// ChunkThreshold is the payload size above which chunked transfer is used (1 MB).
+	ChunkThreshold = 1024 * 1024
 )
 
 // Binary frame errors.
@@ -42,6 +47,34 @@ var (
 	ErrMetadataOverflow   = errors.New("metadata length exceeds frame size")
 	ErrPayloadOverflow    = errors.New("payload length exceeds frame size")
 )
+
+// bufPool is a sync.Pool for reusable []byte buffers used in the streaming
+// binary frame encoding path. This reduces GC pressure during high-throughput
+// media streaming by reusing allocations across frames.
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 4096)
+		return &b
+	},
+}
+
+// GetPooledBuf retrieves a []byte buffer from the pool and grows it to the
+// requested size. The caller must call PutPooledBuf when done.
+func GetPooledBuf(size int) *[]byte {
+	bp := bufPool.Get().(*[]byte)
+	if cap(*bp) < size {
+		*bp = make([]byte, size)
+	} else {
+		*bp = (*bp)[:size]
+	}
+	return bp
+}
+
+// PutPooledBuf returns a []byte buffer to the pool after resetting its length.
+func PutPooledBuf(bp *[]byte) {
+	*bp = (*bp)[:0]
+	bufPool.Put(bp)
+}
 
 // BinaryFlags represents the flags byte in binary frame headers.
 type BinaryFlags uint8
@@ -162,8 +195,9 @@ type BinaryFrame struct {
 
 // BinaryMediaChunkMetadata is the JSON metadata for media chunk binary frames.
 type BinaryMediaChunkMetadata struct {
-	SessionID string `json:"session_id"`
-	MimeType  string `json:"mime_type"`
+	SessionID   string `json:"session_id"`
+	MimeType    string `json:"mime_type"`
+	TotalChunks uint32 `json:"total_chunks,omitempty"`
 }
 
 // Encode serializes a BinaryFrame to bytes.
@@ -191,6 +225,29 @@ func (f *BinaryFrame) Encode() ([]byte, error) {
 	}
 
 	return buf, nil
+}
+
+// EncodePooled serializes a BinaryFrame into a pooled []byte buffer.
+// The caller MUST call PutPooledBuf(bp) when the buffer is no longer needed.
+func (f *BinaryFrame) EncodePooled() (*[]byte, error) {
+	f.Header.MetadataLen = uint32(len(f.Metadata))
+	f.Header.PayloadLen = uint32(len(f.Payload))
+
+	totalSize := BinaryHeaderSize + len(f.Metadata) + len(f.Payload)
+	bp := GetPooledBuf(totalSize)
+	buf := *bp
+
+	headerBytes := f.Header.Encode()
+	copy(buf[0:BinaryHeaderSize], headerBytes)
+
+	if len(f.Metadata) > 0 {
+		copy(buf[BinaryHeaderSize:BinaryHeaderSize+len(f.Metadata)], f.Metadata)
+	}
+	if len(f.Payload) > 0 {
+		copy(buf[BinaryHeaderSize+len(f.Metadata):], f.Payload)
+	}
+
+	return bp, nil
 }
 
 // DecodeBinaryFrame parses bytes into a BinaryFrame.
@@ -261,6 +318,40 @@ func NewMediaChunkFrame(sessionID string, mediaID [MediaIDSize]byte, sequence ui
 			MetadataLen: uint32(len(metadataBytes)),
 			PayloadLen:  uint32(len(payload)),
 			Sequence:    sequence,
+			MediaID:     mediaID,
+		},
+		Metadata: metadataBytes,
+		Payload:  payload,
+	}, nil
+}
+
+// NewChunkedMediaFrame creates a binary frame for one chunk of a chunked media transfer.
+// The chunkIndex is zero-based and totalChunks is the total number of chunks.
+func NewChunkedMediaFrame(sessionID string, mediaID [MediaIDSize]byte, chunkIndex, totalChunks uint32, isLast bool, mimeType string, payload []byte) (*BinaryFrame, error) {
+	metadata := BinaryMediaChunkMetadata{
+		SessionID:   sessionID,
+		MimeType:    mimeType,
+		TotalChunks: totalChunks,
+	}
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	flags := FlagChunked
+	if isLast {
+		flags |= FlagIsLast
+	}
+
+	return &BinaryFrame{
+		Header: BinaryHeader{
+			Magic:       [4]byte{'O', 'M', 'N', 'I'},
+			Version:     BinaryVersion,
+			Flags:       flags,
+			MessageType: BinaryMessageTypeMediaChunk,
+			MetadataLen: uint32(len(metadataBytes)),
+			PayloadLen:  uint32(len(payload)),
+			Sequence:    chunkIndex,
 			MediaID:     mediaID,
 		},
 		Metadata: metadataBytes,

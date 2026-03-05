@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,64 +31,59 @@ import (
 
 // findAgentRuntimesForProvider returns reconcile requests for all AgentRuntimes
 // that reference the given Provider.
+//
+// When a field index is available (production, via SetupIndexers), the list is
+// scoped by index. Otherwise falls back to list-all + local filter (envtest).
 func (r *AgentRuntimeReconciler) findAgentRuntimesForProvider(ctx context.Context, obj client.Object) []reconcile.Request {
 	provider := obj.(*omniav1alpha1.Provider)
 	log := logf.FromContext(ctx).WithValues("provider", provider.Name, "namespace", provider.Namespace)
 
-	// List all AgentRuntimes
+	key := provider.Namespace + "/" + provider.Name
+
+	// Try indexed list first; fall back to unscoped list if no index is registered.
 	var agentRuntimes omniav1alpha1.AgentRuntimeList
-	if err := r.List(ctx, &agentRuntimes); err != nil {
-		log.Error(err, "failed to list AgentRuntimes for Provider watch")
-		return nil
+	if err := r.List(ctx, &agentRuntimes, client.MatchingFields{IndexAgentRuntimeByProvider: key}); err != nil {
+		// MatchingFields fails with a raw client (no index). Fall back to list+filter.
+		if err2 := r.List(ctx, &agentRuntimes); err2 != nil {
+			log.Error(err2, "failed to list AgentRuntimes for Provider watch")
+			return nil
+		}
+		return r.filterAgentRuntimesByProvider(&agentRuntimes, key, log)
 	}
 
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(agentRuntimes.Items))
 	for _, ar := range agentRuntimes.Items {
-		if r.agentReferencesProvider(&ar, provider) {
-			log.Info("enqueueing AgentRuntime for Provider change", "agentruntime", ar.Name)
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      ar.Name,
-					Namespace: ar.Namespace,
-				},
-			})
-		}
+		log.Info("enqueueing AgentRuntime for Provider change", "agentruntime", ar.Name)
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      ar.Name,
+				Namespace: ar.Namespace,
+			},
+		})
 	}
 	return requests
 }
 
-// agentReferencesProvider checks if an AgentRuntime references the given Provider
-// via spec.providers, spec.providerRef, or legacy paths.
-func (r *AgentRuntimeReconciler) agentReferencesProvider(ar *omniav1alpha1.AgentRuntime, provider *omniav1alpha1.Provider) bool {
-	// Check spec.providers list
-	for _, np := range ar.Spec.Providers {
-		if r.providerRefMatchesProvider(np.ProviderRef, ar.Namespace, provider) {
-			return true
+// filterAgentRuntimesByProvider filters a list of AgentRuntimes to those that
+// reference the given provider key ("namespace/name").
+func (r *AgentRuntimeReconciler) filterAgentRuntimesByProvider(list *omniav1alpha1.AgentRuntimeList, key string, log logr.Logger) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, ar := range list.Items {
+		refs := extractProviderRefs(&ar)
+		for _, ref := range refs {
+			if ref == key {
+				log.Info("enqueueing AgentRuntime for Provider change", "agentruntime", ar.Name)
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      ar.Name,
+						Namespace: ar.Namespace,
+					},
+				})
+				break
+			}
 		}
 	}
-
-	// Check legacy spec.providerRef
-	if ar.Spec.ProviderRef != nil {
-		return r.providerRefMatchesProvider(*ar.Spec.ProviderRef, ar.Namespace, provider)
-	}
-
-	return false
-}
-
-// providerRefMatchesProvider checks if a ProviderRef matches the given Provider.
-func (r *AgentRuntimeReconciler) providerRefMatchesProvider(
-	ref omniav1alpha1.ProviderRef,
-	defaultNS string,
-	provider *omniav1alpha1.Provider,
-) bool {
-	if ref.Name != provider.Name {
-		return false
-	}
-	refNS := defaultNS
-	if ref.Namespace != nil {
-		refNS = *ref.Namespace
-	}
-	return refNS == provider.Namespace
+	return requests
 }
 
 // findAgentRuntimesForPromptPack returns reconcile requests for all AgentRuntimes
@@ -146,9 +142,11 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForSecret(ctx context.Context,
 		}
 	}
 
-	// Now find all AgentRuntimes that reference these providers or use the secret directly
+	// Find AgentRuntimes in the same namespace that reference these providers or use the secret directly.
+	// Cross-namespace provider references exist but secrets are namespace-scoped, so agents
+	// in other namespaces will be reconciled when their own Provider watch fires.
 	var agentRuntimes omniav1alpha1.AgentRuntimeList
-	if err := r.List(ctx, &agentRuntimes); err != nil {
+	if err := r.List(ctx, &agentRuntimes, client.InNamespace(secret.Namespace)); err != nil {
 		log.Error(err, "failed to list AgentRuntimes for Secret watch")
 		return nil
 	}

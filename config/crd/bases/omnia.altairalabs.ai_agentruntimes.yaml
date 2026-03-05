@@ -1663,6 +1663,14 @@ spec:
                         description: keda contains KEDA-specific configuration. Only
                           used when type is "keda".
                         properties:
+                          connectionThreshold:
+                            description: |-
+                              connectionThreshold is the target number of active connections per pod
+                              for the default KEDA Prometheus trigger. Only used when triggers is empty.
+                              Defaults to 200 for text workloads. Set lower (e.g., 20) for audio/media workloads.
+                            format: int32
+                            minimum: 1
+                            type: integer
                           cooldownPeriod:
                             default: 300
                             description: cooldownPeriod is the wait period in seconds

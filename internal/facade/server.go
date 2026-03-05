@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2025-2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
@@ -62,19 +63,26 @@ type ServerConfig struct {
 	PromptPackName string
 	// PromptPackVersion is the PromptPack version (from env).
 	PromptPackVersion string
+	// MessageRateLimit is the maximum sustained messages per second per connection.
+	// 0 disables rate limiting.
+	MessageRateLimit float64
+	// MessageRateBurst is the maximum burst size for per-connection rate limiting.
+	MessageRateBurst int
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		ReadBufferSize:  32 * 1024, // 32KB for large message handling
-		WriteBufferSize: 32 * 1024, // 32KB for large message handling
-		PingInterval:    30 * time.Second,
-		PongTimeout:     60 * time.Second,
-		WriteTimeout:    10 * time.Second,
-		MaxMessageSize:  16 * 1024 * 1024, // 16MB to support base64-encoded images
-		MaxConnections:  500,
-		SessionTTL:      24 * time.Hour,
+		ReadBufferSize:   64 * 1024, // 64KB to reduce reallocation for larger messages
+		WriteBufferSize:  64 * 1024, // 64KB to reduce reallocation for larger messages
+		PingInterval:     30 * time.Second,
+		PongTimeout:      60 * time.Second,
+		WriteTimeout:     10 * time.Second,
+		MaxMessageSize:   16 * 1024 * 1024, // 16MB to support base64-encoded images
+		MaxConnections:   500,
+		SessionTTL:       24 * time.Hour,
+		MessageRateLimit: 50,
+		MessageRateBurst: 100,
 	}
 }
 
@@ -131,9 +139,10 @@ type Server struct {
 	allowedOrigins  []string
 	log             logr.Logger
 
-	mu          sync.RWMutex
-	connections map[*websocket.Conn]*Connection
-	shutdown    bool
+	mu           sync.RWMutex
+	connections  map[*websocket.Conn]*Connection
+	shutdown     bool
+	completionWg sync.WaitGroup
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -207,6 +216,20 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 	}
 
 	return s
+}
+
+// submitCompletion runs a task through the recording pool if available,
+// otherwise as a tracked goroutine. All tasks are waited on during Shutdown.
+func (s *Server) submitCompletion(task func()) {
+	if s.recordingPool != nil {
+		s.recordingPool.Submit(task)
+		return
+	}
+	s.completionWg.Add(1)
+	go func() {
+		defer s.completionWg.Done()
+		task()
+	}()
 }
 
 // checkOrigin validates the Origin header against the allowed origins list.
@@ -329,8 +352,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userEmail:     userEmail,
 		authorization: authorization,
 	}
+	if s.config.MessageRateLimit > 0 {
+		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)
+	}
 
 	s.mu.Lock()
+	if s.shutdown {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	s.connections[conn] = c
 	s.mu.Unlock()
 
@@ -388,6 +419,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.recordingPool != nil {
 		s.recordingPool.Close()
 	}
+
+	// Wait for completion goroutines not routed through the pool
+	s.completionWg.Wait()
 
 	return nil
 }

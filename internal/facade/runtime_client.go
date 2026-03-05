@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip" // Register gzip compressor and provide gzip.Name
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
@@ -72,6 +73,7 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxMsgSize),
 			grpc.MaxCallSendMsgSize(maxMsgSize),
+			grpc.UseCompressor(gzip.Name),
 		),
 		grpc.WithUnaryInterceptor(policyUnaryClientInterceptor()),
 		grpc.WithStreamInterceptor(policyStreamClientInterceptor()),

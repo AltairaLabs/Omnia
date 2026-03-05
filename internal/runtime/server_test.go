@@ -825,8 +825,8 @@ func TestServer_Converse_MultipleSessions(t *testing.T) {
 		assert.NotEmpty(t, stream.sentMessages)
 	}
 
-	// Verify all sessions are tracked
-	assert.Len(t, server.conversations, 3)
+	// Conversations are cleaned up when streams end
+	assert.Len(t, server.conversations, 0)
 }
 
 func TestServer_Converse_ResumeSession(t *testing.T) {
@@ -875,8 +875,8 @@ func TestServer_Converse_ResumeSession(t *testing.T) {
 	})
 	_ = server.Converse(stream2)
 
-	// Should still only have one conversation for this session
-	assert.Len(t, server.conversations, 1)
+	// Conversation is cleaned up when the stream ends
+	assert.Len(t, server.conversations, 0)
 }
 
 // Tests for scenario detection functions

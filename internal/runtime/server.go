@@ -62,7 +62,8 @@ type Server struct {
 	mockConfigPath    string
 	sdkOptions        []sdk.Option
 	conversations     map[string]*sdk.Conversation
-	turnIndices       map[string]int // Track turn count per session
+	turnIndices       map[string]int      // Track turn count per session
+	unsubscribeFns    map[string][]func() // Event bus unsubscribe functions per session
 	conversationMu    sync.RWMutex
 	healthy           bool
 	mu                sync.RWMutex
@@ -288,9 +289,10 @@ func WithTruncationStrategy(strategy string) ServerOption {
 // NewServer creates a new runtime server.
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{
-		conversations: make(map[string]*sdk.Conversation),
-		turnIndices:   make(map[string]int),
-		healthy:       true,
+		conversations:  make(map[string]*sdk.Conversation),
+		turnIndices:    make(map[string]int),
+		unsubscribeFns: make(map[string][]func()),
+		healthy:        true,
 	}
 
 	for _, opt := range opts {
@@ -377,6 +379,14 @@ func (s *Server) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtime
 // Converse implements the bidirectional streaming conversation RPC.
 func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
 	ctx := stream.Context()
+	var lastSessionID string
+
+	defer func() {
+		// Remove conversation when stream ends to prevent unbounded map growth.
+		if lastSessionID != "" {
+			s.removeConversation(lastSessionID)
+		}
+	}()
 
 	for {
 		// Receive client message
@@ -387,6 +397,8 @@ func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error 
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to receive message: %v", err)
 		}
+
+		lastSessionID = msg.GetSessionId()
 
 		// Process the message
 		if err := s.processMessage(ctx, stream, msg); err != nil {
@@ -406,17 +418,48 @@ func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error 
 	}
 }
 
+// removeConversation removes a completed conversation and cleans up associated resources.
+// This prevents the conversations and turnIndices maps from growing unboundedly.
+func (s *Server) removeConversation(sessionID string) {
+	s.conversationMu.Lock()
+	defer s.conversationMu.Unlock()
+
+	conv, exists := s.conversations[sessionID]
+	if !exists {
+		return
+	}
+
+	// Unsubscribe event bus listeners
+	for _, unsub := range s.unsubscribeFns[sessionID] {
+		unsub()
+	}
+	delete(s.unsubscribeFns, sessionID)
+
+	if err := conv.Close(); err != nil {
+		s.log.Error(err, "failed to close conversation", "sessionID", sessionID)
+	}
+	delete(s.conversations, sessionID)
+	delete(s.turnIndices, sessionID)
+
+	s.log.V(1).Info("conversation removed", "sessionID", sessionID)
+}
+
 // Close closes all open conversations, the tool manager, and the tracing provider.
 func (s *Server) Close() error {
 	s.conversationMu.Lock()
 	defer s.conversationMu.Unlock()
 
 	for id, conv := range s.conversations {
+		for _, unsub := range s.unsubscribeFns[id] {
+			unsub()
+		}
 		if err := conv.Close(); err != nil {
 			s.log.Error(err, "failed to close conversation", "sessionID", id)
 		}
 	}
 	s.conversations = make(map[string]*sdk.Conversation)
+	s.turnIndices = make(map[string]int)
+	s.unsubscribeFns = make(map[string][]func())
 
 	// Close tool manager
 	if s.toolManager != nil {

@@ -800,3 +800,37 @@ func TestRetry_CancelledContextStopsRetry(t *testing.T) {
 		t.Fatalf("expected fewer than %d attempts due to cancellation, got %d", maxRetries, attempts.Load())
 	}
 }
+
+func TestCreateSession_409ConflictReturnsExisting(t *testing.T) {
+	// Server returns 409 on POST (duplicate) and 200 on GET.
+	existingSession := &session.Session{
+		ID:        "existing-id",
+		AgentName: "test-agent",
+		Namespace: "default",
+		Status:    session.SessionStatusActive,
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(errorResponse{Error: "conflict"})
+	})
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sessionResponse{Session: existingSession})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		AgentName: "test-agent",
+		Namespace: "default",
+	})
+	if err != nil {
+		t.Fatalf("expected success on 409 conflict, got: %v", err)
+	}
+	if sess.ID != "existing-id" {
+		t.Fatalf("expected existing session ID, got %s", sess.ID)
+	}
+}

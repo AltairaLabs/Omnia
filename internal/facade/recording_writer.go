@@ -29,6 +29,9 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 )
 
+// storeTimeout is the maximum duration for recording store operations.
+const storeTimeout = 30 * time.Second
+
 // UsageInfo carries token/cost data from the runtime Done message.
 type UsageInfo struct {
 	InputTokens  int32
@@ -132,11 +135,13 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 				"type": "tool_call",
 			},
 		}
-		if storeErr := w.store.AppendMessage(context.Background(), w.sessionID, msg); storeErr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		defer cancel()
+		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record tool call")
 		}
 
-		if storeErr := w.store.UpdateSessionStats(context.Background(), w.sessionID, session.SessionStatsUpdate{
+		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
 			AddToolCalls: 1,
 			AddMessages:  1,
 		}); storeErr != nil {
@@ -180,11 +185,13 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 			Timestamp:  time.Now(),
 			Metadata:   metadata,
 		}
-		if storeErr := w.store.AppendMessage(context.Background(), w.sessionID, msg); storeErr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		defer cancel()
+		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record tool result")
 		}
 
-		if storeErr := w.store.UpdateSessionStats(context.Background(), w.sessionID, session.SessionStatsUpdate{
+		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
 			AddMessages: 1,
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for tool result")
@@ -208,11 +215,13 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 				"type": "error",
 			},
 		}
-		if storeErr := w.store.AppendMessage(context.Background(), w.sessionID, msg); storeErr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		defer cancel()
+		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record error message")
 		}
 
-		if storeErr := w.store.UpdateSessionStats(context.Background(), w.sessionID, session.SessionStatsUpdate{
+		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
 			AddMessages: 1,
 			SetStatus:   session.SessionStatusError,
 			SetEndedAt:  time.Now(),
@@ -276,7 +285,9 @@ func (w *recordingResponseWriter) recordDone(content string) {
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
 		}
-		if storeErr := w.store.AppendMessage(context.Background(), w.sessionID, msg); storeErr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		defer cancel()
+		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record assistant message")
 		}
 
@@ -288,7 +299,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 			statsUpdate.AddOutputTokens = usage.OutputTokens
 			statsUpdate.AddCostUSD = usage.CostUSD
 		}
-		if storeErr := w.store.UpdateSessionStats(context.Background(), w.sessionID, statsUpdate); storeErr != nil {
+		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, statsUpdate); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for done")
 		}
 	})

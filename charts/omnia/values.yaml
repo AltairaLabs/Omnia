@@ -39,8 +39,8 @@
 #
 # =============================================================================
 
-# -- Number of operator replicas
-replicaCount: 1
+# -- Number of operator replicas (use 3+ for HA with leader election)
+replicaCount: 3
 
 # -- Enable development mode with full-featured license. DO NOT USE IN PRODUCTION.
 devMode: false
@@ -255,11 +255,11 @@ securityContext:
 # -- Resource limits and requests
 resources:
   limits:
-    cpu: 500m
-    memory: 256Mi
+    cpu: "1"
+    memory: 512Mi
   requests:
-    cpu: 10m
-    memory: 128Mi
+    cpu: 100m
+    memory: 256Mi
 
 # Pod Disruption Budget for HA deployments
 podDisruptionBudget:
@@ -276,8 +276,23 @@ nodeSelector: {}
 # -- Tolerations
 tolerations: []
 
-# -- Affinity rules
-affinity: {}
+# -- Affinity rules (default: prefer spreading operator pods across nodes)
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - omnia
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - operator
+          topologyKey: kubernetes.io/hostname
 
 # Leader election configuration
 leaderElection:
@@ -293,11 +308,19 @@ probes:
     initialDelaySeconds: 15
     # -- Period for liveness probe
     periodSeconds: 20
+    # -- Timeout for liveness probe
+    timeoutSeconds: 5
+    # -- Failure threshold before restarting
+    failureThreshold: 3
   readiness:
     # -- Initial delay for readiness probe
     initialDelaySeconds: 5
     # -- Period for readiness probe
     periodSeconds: 10
+    # -- Timeout for readiness probe
+    timeoutSeconds: 5
+    # -- Failure threshold before marking unready
+    failureThreshold: 3
 
 # Metrics configuration
 metrics:
@@ -377,10 +400,10 @@ dashboard:
   resources:
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 512Mi
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
 
   # Pod Disruption Budget for HA deployments
   podDisruptionBudget:
@@ -727,7 +750,7 @@ sessionApi:
   resources:
     limits:
       cpu: "1"
-      memory: 512Mi
+      memory: 1Gi
     requests:
       cpu: 250m
       memory: 256Mi
@@ -744,7 +767,14 @@ sessionApi:
   # -- Affinity rules for pod scheduling
   affinity: {}
   # -- Topology spread constraints for distributing pods across failure domains
-  topologySpreadConstraints: []
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: omnia
+          app.kubernetes.io/component: session-api
   # OTLP ingestion endpoint for external agent frameworks
   otlp:
     # -- Enable OTLP trace ingestion (gRPC + HTTP)
@@ -753,6 +783,18 @@ sessionApi:
     grpcPort: 4317
     # -- HTTP listen port (standard OTLP port)
     httpPort: 4318
+  # -- Autoscaling configuration for the session-api deployment
+  autoscaling:
+    # -- Enable HorizontalPodAutoscaler (disables static replicaCount)
+    enabled: true
+    # -- Minimum number of replicas
+    minReplicas: 2
+    # -- Maximum number of replicas
+    maxReplicas: 10
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
   # -- Additional environment variables for the session-api container
   extraEnv: []
 
@@ -1604,17 +1646,31 @@ redis:
 
   # -- Subchart values for Bitnami Redis
   # See: https://github.com/bitnami/charts/tree/main/bitnami/redis
-  # Architecture: standalone (1 master) or replication (master + replicas)
+  # Architecture: standalone (1 master) or replication (master + replicas + sentinel).
+  # For production HA, set to "replication" and enable sentinel below.
   architecture: standalone
 
   auth:
     # -- Disable auth for development (enable and set password for production)
     enabled: false
 
+  sentinel:
+    # -- Enable Redis Sentinel for automatic failover (requires architecture: replication)
+    enabled: false
+    # -- Sentinel master set name
+    masterSet: omnia-master
+
   master:
     persistence:
       # -- Disable persistence for development
       enabled: false
+    # -- Extra Redis server flags for memory management
+    # Production deployments should adjust maxmemory based on workload.
+    extraFlags:
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
     resources:
       limits:
         cpu: 200m
@@ -1624,8 +1680,8 @@ redis:
         memory: 64Mi
 
   replica:
-    # -- Number of replicas (only used when architecture: replication)
-    replicaCount: 0
+    # -- Number of replicas for Redis HA
+    replicaCount: 3
 
 # ============================================================================
 # Demo Mode (Separate Chart)

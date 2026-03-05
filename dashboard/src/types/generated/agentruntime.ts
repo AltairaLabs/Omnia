@@ -776,6 +776,10 @@ export interface AgentRuntimeSpec {
       enabled?: boolean;
       /** keda contains KEDA-specific configuration. Only used when type is "keda". */
       keda?: {
+        /** connectionThreshold is the target number of active connections per pod
+         * for the default KEDA Prometheus trigger. Only used when triggers is empty.
+         * Defaults to 200 for text workloads. Set lower (e.g., 20) for audio/media workloads. */
+        connectionThreshold?: number;
         /** cooldownPeriod is the wait period in seconds after last trigger before scaling down. Defaults to 300. */
         cooldownPeriod?: number;
         /** pollingInterval is the interval in seconds to check triggers. Defaults to 30. */
