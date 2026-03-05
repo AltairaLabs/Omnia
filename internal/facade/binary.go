@@ -33,6 +33,10 @@ const (
 	BinaryHeaderSize = 32
 	// MediaIDSize is the size of the media ID field in bytes.
 	MediaIDSize = 12
+	// MaxChunkSize is the maximum size of a single chunk in a chunked transfer (64 KB).
+	MaxChunkSize = 64 * 1024
+	// ChunkThreshold is the payload size above which chunked transfer is used (1 MB).
+	ChunkThreshold = 1024 * 1024
 )
 
 // Binary frame errors.
@@ -191,8 +195,9 @@ type BinaryFrame struct {
 
 // BinaryMediaChunkMetadata is the JSON metadata for media chunk binary frames.
 type BinaryMediaChunkMetadata struct {
-	SessionID string `json:"session_id"`
-	MimeType  string `json:"mime_type"`
+	SessionID   string `json:"session_id"`
+	MimeType    string `json:"mime_type"`
+	TotalChunks uint32 `json:"total_chunks,omitempty"`
 }
 
 // Encode serializes a BinaryFrame to bytes.
@@ -313,6 +318,40 @@ func NewMediaChunkFrame(sessionID string, mediaID [MediaIDSize]byte, sequence ui
 			MetadataLen: uint32(len(metadataBytes)),
 			PayloadLen:  uint32(len(payload)),
 			Sequence:    sequence,
+			MediaID:     mediaID,
+		},
+		Metadata: metadataBytes,
+		Payload:  payload,
+	}, nil
+}
+
+// NewChunkedMediaFrame creates a binary frame for one chunk of a chunked media transfer.
+// The chunkIndex is zero-based and totalChunks is the total number of chunks.
+func NewChunkedMediaFrame(sessionID string, mediaID [MediaIDSize]byte, chunkIndex, totalChunks uint32, isLast bool, mimeType string, payload []byte) (*BinaryFrame, error) {
+	metadata := BinaryMediaChunkMetadata{
+		SessionID:   sessionID,
+		MimeType:    mimeType,
+		TotalChunks: totalChunks,
+	}
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	flags := FlagChunked
+	if isLast {
+		flags |= FlagIsLast
+	}
+
+	return &BinaryFrame{
+		Header: BinaryHeader{
+			Magic:       [4]byte{'O', 'M', 'N', 'I'},
+			Version:     BinaryVersion,
+			Flags:       flags,
+			MessageType: BinaryMessageTypeMediaChunk,
+			MetadataLen: uint32(len(metadataBytes)),
+			PayloadLen:  uint32(len(payload)),
+			Sequence:    chunkIndex,
 			MediaID:     mediaID,
 		},
 		Metadata: metadataBytes,

@@ -88,9 +88,10 @@ func (w *connResponseWriter) SupportsBinary() bool {
 
 // WriteBinaryMediaChunk sends a streaming media chunk as a binary frame.
 // Falls back to base64 JSON if the client doesn't support binary frames.
+// Payloads exceeding ChunkThreshold (1 MB) are split into MaxChunkSize (64 KB)
+// chunks using the OMNI binary frame chunked transfer protocol.
 func (w *connResponseWriter) WriteBinaryMediaChunk(mediaID [MediaIDSize]byte, sequence uint32, isLast bool, mimeType string, payload []byte) error {
 	if !w.SupportsBinary() {
-		// Fallback to base64 JSON for clients that don't support binary
 		return w.WriteMediaChunk(&MediaChunkInfo{
 			MediaID:  MediaIDToString(mediaID),
 			Sequence: int(sequence),
@@ -100,6 +101,16 @@ func (w *connResponseWriter) WriteBinaryMediaChunk(mediaID [MediaIDSize]byte, se
 		})
 	}
 
+	// Small payloads: send as a single frame (no chunking overhead)
+	if len(payload) <= ChunkThreshold {
+		return w.sendSingleMediaFrame(mediaID, sequence, isLast, mimeType, payload)
+	}
+
+	return w.sendChunkedMediaFrames(mediaID, isLast, mimeType, payload)
+}
+
+// sendSingleMediaFrame sends a media payload as one binary frame.
+func (w *connResponseWriter) sendSingleMediaFrame(mediaID [MediaIDSize]byte, sequence uint32, isLast bool, mimeType string, payload []byte) error {
 	frame, err := NewMediaChunkFrame(w.sessionID, mediaID, sequence, isLast, mimeType, payload)
 	if err != nil {
 		return err
@@ -110,4 +121,31 @@ func (w *connResponseWriter) WriteBinaryMediaChunk(mediaID [MediaIDSize]byte, se
 		w.server.metrics.MediaChunkSent(true, len(payload))
 	}
 	return err
+}
+
+// sendChunkedMediaFrames splits a large payload into MaxChunkSize chunks and
+// sends each as a separate binary frame with the FlagChunked flag set.
+func (w *connResponseWriter) sendChunkedMediaFrames(mediaID [MediaIDSize]byte, isLast bool, mimeType string, payload []byte) error {
+	totalChunks := uint32((len(payload) + MaxChunkSize - 1) / MaxChunkSize)
+
+	for i := uint32(0); i < totalChunks; i++ {
+		start := int(i) * MaxChunkSize
+		end := start + MaxChunkSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		chunk := payload[start:end]
+		lastChunk := i == totalChunks-1
+
+		frame, err := NewChunkedMediaFrame(w.sessionID, mediaID, i, totalChunks, lastChunk && isLast, mimeType, chunk)
+		if err != nil {
+			return err
+		}
+
+		if err := w.server.sendBinaryFrame(w.conn, frame); err != nil {
+			return err
+		}
+		w.server.metrics.MediaChunkSent(true, len(chunk))
+	}
+	return nil
 }

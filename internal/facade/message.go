@@ -134,6 +134,11 @@ func (s *Server) sendBinaryFrame(c *Connection, frame *BinaryFrame) error {
 		return err
 	}
 
+	// Clear the deadline so idle connections aren't killed
+	if err := c.conn.SetWriteDeadline(time.Time{}); err != nil {
+		return err
+	}
+
 	s.metrics.MessageSent()
 	return nil
 }

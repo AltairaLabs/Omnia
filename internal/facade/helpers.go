@@ -37,6 +37,11 @@ func (s *Server) sendMessage(c *Connection, msg *ServerMessage) error {
 		return err
 	}
 
+	// Clear the deadline so idle connections aren't killed
+	if err := c.conn.SetWriteDeadline(time.Time{}); err != nil {
+		return err
+	}
+
 	// Record message sent
 	s.metrics.MessageSent()
 	return nil
