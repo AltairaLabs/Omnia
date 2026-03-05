@@ -191,32 +191,8 @@ export async function deleteCrd(
   });
 }
 
-type LogEntry = { timestamp: string; message: string; container?: string };
-
-/**
- * Parse a single log line into a LogEntry.
- * K8s log lines with timestamps have format: "2024-01-01T10:00:00.123456789Z message"
- */
-function parseLogLine(line: string, containerName: string): LogEntry {
-  // Find the first space after timestamp (timestamp ends at first whitespace)
-  const spaceIndex = line.indexOf(" ");
-  if (spaceIndex > 0) {
-    const possibleTimestamp = line.substring(0, spaceIndex);
-    // Check if it looks like an ISO timestamp (starts with YYYY-MM-DD)
-    if (/^\d{4}-\d{2}-\d{2}T/.test(possibleTimestamp)) {
-      return {
-        timestamp: possibleTimestamp,
-        message: line.substring(spaceIndex + 1),
-        container: containerName,
-      };
-    }
-  }
-  return {
-    timestamp: new Date().toISOString(),
-    message: line,
-    container: containerName,
-  };
-}
+import type { LogEntry } from "@/lib/data/types";
+import { parseLogLine } from "./log-parser";
 
 /**
  * Fetch and parse logs for a single container.

@@ -50,6 +50,10 @@ export const GRAFANA_DASHBOARDS = {
   AGENT_DETAIL: "omnia-agent-detail",
   /** Logs explorer (Loki) */
   LOGS: "omnia-logs",
+  /** Eval quality metrics */
+  QUALITY: "omnia-quality",
+  /** Session detail: traces + logs filtered by session ID */
+  SESSION_DETAIL: "omnia-session-detail",
 } as const;
 
 // Panel IDs within the Overview dashboard
@@ -76,6 +80,19 @@ export const AGENT_DETAIL_PANELS = {
   TOOL_CALLS: 8,
   RECENT_LOGS: 9,
   RECENT_TRACES: 10,
+} as const;
+
+// Panel IDs within the Quality dashboard
+export const QUALITY_PANELS = {
+  OVERALL_PASS_RATE: 1,
+  TOTAL_EVALS_EXECUTED: 2,
+  TOTAL_FAILURES: 3,
+  AVG_EVAL_DURATION: 4,
+  PASS_RATE_BY_EVAL: 5,
+  EVAL_SCORE_OVER_TIME: 6,
+  EVAL_EXECUTIONS_OVER_TIME: 7,
+  PASS_VS_FAIL_BY_EVAL: 8,
+  EVAL_DURATION_P95: 9,
 } as const;
 
 // Panel IDs within the Costs dashboard
@@ -280,4 +297,111 @@ export function buildTempoExploreUrl(
   const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
   const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
   return `${base}${path}/explore?${params.toString()}`;
+}
+
+/**
+ * Converts a UUID session ID to an OpenTelemetry trace ID.
+ * Mirrors the Go function sessionIDToTraceID in internal/facade/session.go:
+ * a UUID is 128 bits (same as a trace ID), so strip the dashes.
+ */
+export function sessionIdToTraceId(sessionId: string): string {
+  return sessionId.replaceAll("-", "");
+}
+
+/**
+ * Builds a Grafana Explore URL for Loki logs filtered by session trace ID.
+ *
+ * @param config - Grafana configuration
+ * @param sessionId - UUID session ID (converted to trace ID by stripping dashes)
+ * @param agentName - Agent name for the stream selector (Loki requires at least one label matcher)
+ * @param options - Optional time range
+ */
+export function buildSessionLogsUrl(
+  config: GrafanaConfig,
+  sessionId: string,
+  agentName: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-6h", to = "now" } = options;
+  const traceId = sessionIdToTraceId(sessionId);
+
+  // LogQL: stream selector with agent label + trace_id structured metadata filter.
+  // Loki requires at least one non-empty label matcher in the stream selector.
+  const query = `{agent="${agentName}"} | trace_id = \`${traceId}\``;
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("left", JSON.stringify({
+    datasource: "loki",
+    queries: [{ refId: "A", expr: query }],
+    range: { from, to },
+  }));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/explore?${params.toString()}`;
+}
+
+/**
+ * Builds a Grafana Explore URL for Tempo traces filtered by session trace ID.
+ */
+export function buildSessionTracesUrl(
+  config: GrafanaConfig,
+  sessionId: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-6h", to = "now" } = options;
+  const traceId = sessionIdToTraceId(sessionId);
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("left", JSON.stringify({
+    datasource: "tempo",
+    queries: [{ refId: "A", query: traceId, queryType: "traceql" }],
+    range: { from, to },
+  }));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/explore?${params.toString()}`;
+}
+
+/**
+ * Builds a Grafana dashboard URL for the session detail dashboard.
+ * Opens the omnia-session-detail dashboard with session_id pre-filled.
+ *
+ * @param config - Grafana configuration
+ * @param sessionId - UUID session ID
+ * @param options - Optional time range
+ * @returns The dashboard URL or null if Grafana is not enabled
+ */
+export function buildSessionDashboardUrl(
+  config: GrafanaConfig,
+  sessionId: string,
+  options: ExploreQueryOptions = {}
+): string | null {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-6h", to = "now" } = options;
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("from", from);
+  params.set("to", to);
+  params.set("var-session_id", sessionId);
+  params.set("var-trace_id", sessionIdToTraceId(sessionId));
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/d/${GRAFANA_DASHBOARDS.SESSION_DETAIL}/_?${params.toString()}`;
 }

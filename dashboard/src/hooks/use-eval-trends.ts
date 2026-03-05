@@ -15,10 +15,12 @@ import { useQuery } from "@tanstack/react-query";
 import {
   queryPrometheusRange,
   queryPrometheus,
+  queryPrometheusMetadata,
   type PrometheusMatrixResult,
   type PrometheusVectorResult,
+  type PrometheusMetricType,
 } from "@/lib/prometheus";
-import { EvalQueries } from "@/lib/prometheus-queries";
+import { EvalQueries, type EvalFilter } from "@/lib/prometheus-queries";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 /** Time range options for trend queries. */
@@ -40,6 +42,7 @@ export interface EvalTrendPoint {
 export interface EvalMetricInfo {
   name: string;
   value: number;
+  metricType: PrometheusMetricType;
 }
 
 /**
@@ -50,23 +53,25 @@ export interface EvalMetricInfo {
 export function useEvalPassRateTrends(params?: {
   metricNames?: string[];
   timeRange?: EvalTrendRange;
+  filter?: EvalFilter;
 }) {
   const timeRange = params?.timeRange ?? "24h";
   const metricNames = params?.metricNames;
+  const filter = params?.filter;
   const rangeConfig = EVAL_TREND_RANGES[timeRange];
 
   return useQuery({
-    queryKey: ["eval-trends", metricNames, timeRange],
+    queryKey: ["eval-trends", metricNames, timeRange, filter],
     queryFn: async (): Promise<EvalTrendPoint[]> => {
       const end = new Date();
       const start = new Date(end.getTime() - rangeConfig.seconds * 1000);
 
-      const names = metricNames ?? (await discoverEvalMetrics());
+      const names = metricNames ?? (await discoverEvalMetrics(filter));
       if (names.length === 0) return [];
 
       const results = await Promise.all(
         names.map(async (name) => {
-          const query = EvalQueries.metricAvgOverTime(name, rangeConfig.step);
+          const query = EvalQueries.metricAvgOverTime(name, rangeConfig.step, filter);
           const resp = await queryPrometheusRange(query, start, end, rangeConfig.step);
           return { name, data: resp };
         })
@@ -80,44 +85,70 @@ export function useEvalPassRateTrends(params?: {
 }
 
 /**
- * Discover available eval metrics from Prometheus.
+ * Discover available eval metrics from Prometheus with type metadata.
  */
-export function useEvalMetrics() {
+export function useEvalMetrics(filter?: EvalFilter) {
   return useQuery({
-    queryKey: ["eval-metrics-discovery"],
+    queryKey: ["eval-metrics-discovery", filter],
     queryFn: async (): Promise<EvalMetricInfo[]> => {
-      const names = await discoverEvalMetrics();
+      const names = await discoverEvalMetrics(filter);
       if (names.length === 0) return [];
 
-      const results = await Promise.all(
-        names.map(async (name) => {
-          const resp = await queryPrometheus(name);
+      const [metadata, ...valueResults] = await Promise.all([
+        fetchMetricTypes(names),
+        ...names.map(async (name) => {
+          const query = EvalQueries.metricValue(name, filter);
+          const resp = await queryPrometheus(query);
           const value =
             resp.status === "success" && resp.data?.result?.[0]?.value
               ? Number.parseFloat(resp.data.result[0].value[1]) || 0
               : 0;
           return { name, value };
-        })
-      );
+        }),
+      ]);
 
-      return results;
+      return valueResults.map((r) => ({
+        ...r,
+        metricType: (metadata as Record<string, PrometheusMetricType>)[r.name] ?? "gauge",
+      }));
     },
     staleTime: DEFAULT_STALE_TIME,
     retry: false,
   });
 }
 
-/** Discover eval metric names from Prometheus. */
-async function discoverEvalMetrics(): Promise<string[]> {
+/** Fetch Prometheus type metadata for a list of metric names. */
+async function fetchMetricTypes(names: string[]): Promise<Record<string, PrometheusMetricType>> {
   try {
-    const query = EvalQueries.discoverMetrics();
+    const metadata = await queryPrometheusMetadata();
+    const result: Record<string, PrometheusMetricType> = {};
+    for (const name of names) {
+      result[name] = metadata[name] ?? "gauge";
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+/** Suffixes for infrastructure/histogram sub-metrics to exclude from discovery. */
+const EXCLUDED_SUFFIXES = ["_bucket", "_sum", "_count", "_total", "_created"];
+
+function isInfrastructureSuffix(name: string): boolean {
+  return EXCLUDED_SUFFIXES.some((s) => name.endsWith(s));
+}
+
+/** Discover eval metric names from Prometheus. */
+async function discoverEvalMetrics(filter?: EvalFilter): Promise<string[]> {
+  try {
+    const query = EvalQueries.discoverMetrics(filter);
     const resp = await queryPrometheus(query);
     if (resp.status !== "success" || !resp.data?.result) return [];
 
     const names = new Set<string>();
     for (const item of resp.data.result as PrometheusVectorResult[]) {
       const name = item.metric.__name__;
-      if (name && !name.endsWith("_bucket") && !name.endsWith("_sum") && !name.endsWith("_count")) {
+      if (name && !isInfrastructureSuffix(name)) {
         names.add(name);
       }
     }

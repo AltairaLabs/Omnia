@@ -16,6 +16,7 @@ export interface Message {
   timestamp: string; // ISO date string
   toolCalls?: ToolCall[];
   toolCallId?: string; // for tool response messages
+  metadata?: Record<string, string>;
   tokens?: {
     input?: number;
     output?: number;

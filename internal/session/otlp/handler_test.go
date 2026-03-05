@@ -18,6 +18,7 @@ package otlp
 
 import (
 	"bytes"
+	"compress/gzip"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -182,6 +183,31 @@ func TestHandler_EmptyJSON(t *testing.T) {
 	handler.ServeHTTP(rec, httpReq)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestHandler_GzipProtobuf(t *testing.T) {
+	handler, writer := newTestHandler()
+
+	req := buildExportRequest("gzip-conv-1")
+	body, err := proto.Marshal(req)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err = gz.Write(body)
+	require.NoError(t, err)
+	require.NoError(t, gz.Close())
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/traces", &buf)
+	httpReq.Header.Set("Content-Type", contentTypeProtobuf)
+	httpReq.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, httpReq)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.NotNil(t, writer.sessions["gzip-conv-1"])
+	assert.Len(t, writer.messages["gzip-conv-1"], 1)
 }
 
 func TestHandler_RegisterRoutes(t *testing.T) {

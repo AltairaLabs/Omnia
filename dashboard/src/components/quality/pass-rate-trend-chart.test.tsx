@@ -76,7 +76,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     const { container } = render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -93,7 +93,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -109,7 +109,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -134,7 +134,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -155,7 +155,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -172,7 +172,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -191,7 +191,6 @@ describe("PassRateTrendChart", () => {
       <Wrapper>
         <PassRateTrendChart
           timeRange="7d"
-          onTimeRangeChange={vi.fn()}
           metricNames={["omnia_eval_tone"]}
         />
       </Wrapper>
@@ -200,24 +199,29 @@ describe("PassRateTrendChart", () => {
     expect(mockUseEvalPassRateTrends).toHaveBeenCalledWith({
       metricNames: ["omnia_eval_tone"],
       timeRange: "7d",
+      filter: undefined,
     });
   });
 
-  it("renders time range selector with current value", () => {
+  it("passes filter to useEvalPassRateTrends", () => {
     mockUseEvalPassRateTrends.mockReturnValue({
       data: [],
       isLoading: false,
     });
 
+    const filter = { agent: "chatbot" };
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" filter={filter} />
       </Wrapper>
     );
 
-    // The select trigger should show the current value
-    expect(screen.getByText("Last 24h")).toBeInTheDocument();
+    expect(mockUseEvalPassRateTrends).toHaveBeenCalledWith({
+      metricNames: undefined,
+      timeRange: "24h",
+      filter,
+    });
   });
 
   it("extracts and sorts unique series names from trend data", () => {
@@ -234,7 +238,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -257,7 +261,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="1h" onTimeRangeChange={vi.fn()} />
+        <PassRateTrendChart timeRange="1h" />
       </Wrapper>
     );
 

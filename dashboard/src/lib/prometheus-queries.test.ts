@@ -5,9 +5,12 @@ import {
   LLM_METRICS,
   LABELS,
   buildFilter,
+  buildEvalSelector,
   AgentQueries,
   LLMQueries,
   SystemQueries,
+  EvalQueries,
+  EVAL_METRIC_PATTERN,
 } from "./prometheus-queries";
 
 describe("prometheus-queries", () => {
@@ -268,6 +271,90 @@ describe("prometheus-queries", () => {
     it("costByProvider respects custom window", () => {
       const query = SystemQueries.costByProvider("6h");
       expect(query).toContain("[6h]");
+    });
+  });
+
+  describe("buildEvalSelector", () => {
+    it("returns empty string for undefined filter", () => {
+      expect(buildEvalSelector()).toBe("");
+    });
+
+    it("returns empty string for empty filter", () => {
+      expect(buildEvalSelector({})).toBe("");
+    });
+
+    it("builds selector with agent", () => {
+      expect(buildEvalSelector({ agent: "my-agent" })).toBe(
+        'agent="my-agent"'
+      );
+    });
+
+    it("builds selector with promptpackName", () => {
+      expect(buildEvalSelector({ promptpackName: "my-pack" })).toBe(
+        'promptpack_name="my-pack"'
+      );
+    });
+
+    it("builds selector with both labels", () => {
+      const sel = buildEvalSelector({
+        agent: "a",
+        promptpackName: "p",
+      });
+      expect(sel).toContain('agent="a"');
+      expect(sel).toContain('promptpack_name="p"');
+    });
+  });
+
+  describe("EvalQueries", () => {
+    it("discoverMetrics returns regex selector", () => {
+      const query = EvalQueries.discoverMetrics();
+      expect(query).toContain(EVAL_METRIC_PATTERN);
+      expect(query).toContain("__name__=~");
+    });
+
+    it("discoverMetrics with filter includes labels", () => {
+      const query = EvalQueries.discoverMetrics({ agent: "test" });
+      expect(query).toContain('agent="test"');
+    });
+
+    it("metricValue returns metric name", () => {
+      expect(EvalQueries.metricValue("omnia_eval_foo")).toBe("omnia_eval_foo");
+    });
+
+    it("metricValue with filter adds labels", () => {
+      const query = EvalQueries.metricValue("omnia_eval_foo", {
+        agent: "a",
+      });
+      expect(query).toBe('omnia_eval_foo{agent="a"}');
+    });
+
+    it("metricSum wraps in sum()", () => {
+      const query = EvalQueries.metricSum("omnia_eval_foo");
+      expect(query).toBe("sum(omnia_eval_foo)");
+    });
+
+    it("metricAvgOverTime uses default window", () => {
+      const query = EvalQueries.metricAvgOverTime("omnia_eval_foo");
+      expect(query).toContain("avg_over_time(");
+      expect(query).toContain("[1h]");
+    });
+
+    it("metricRate uses custom window", () => {
+      const query = EvalQueries.metricRate("omnia_eval_foo", "10m");
+      expect(query).toContain("rate(");
+      expect(query).toContain("[10m]");
+    });
+
+    it("discoverAgents groups by agent", () => {
+      const query = EvalQueries.discoverAgents();
+      expect(query).toContain("group(");
+      expect(query).toContain(`by (${LABELS.AGENT})`);
+    });
+
+    it("discoverPromptPacks groups by promptpack_name", () => {
+      const query = EvalQueries.discoverPromptPacks();
+      expect(query).toContain("group(");
+      expect(query).toContain(`by (${LABELS.PROMPTPACK_NAME})`);
     });
   });
 });

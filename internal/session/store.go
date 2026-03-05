@@ -61,6 +61,12 @@ const (
 	SessionStatusExpired SessionStatus = "expired"
 )
 
+// isTerminalStatus returns true if the status is a terminal state
+// that should not be overwritten by subsequent transitions.
+func isTerminalStatus(s SessionStatus) bool {
+	return s == SessionStatusCompleted || s == SessionStatusError || s == SessionStatusExpired
+}
+
 // Message represents a single message in a conversation.
 type Message struct {
 	// ID is the unique identifier for this message.
@@ -182,6 +188,7 @@ type CreateSessionOptions struct {
 
 // SessionStatsUpdate contains incremental updates to session-level counters.
 // All Add* fields are added to the current values; SetStatus is applied only if non-empty.
+// SetEndedAt, when non-zero, records when the session ended.
 type SessionStatsUpdate struct {
 	AddInputTokens  int32
 	AddOutputTokens int32
@@ -189,6 +196,7 @@ type SessionStatsUpdate struct {
 	AddToolCalls    int32
 	AddMessages     int32
 	SetStatus       SessionStatus // empty means no change
+	SetEndedAt      time.Time     // zero means no change
 }
 
 // Store defines the interface for session storage.

@@ -109,4 +109,5 @@ const (
 	ConditionTypePromptPackReady   = "PromptPackReady"
 	ConditionTypeToolRegistryReady = "ToolRegistryReady"
 	ConditionTypeProviderReady     = "ProviderReady"
+	ConditionTypePackContentValid  = "PackContentValid"
 )

@@ -453,23 +453,27 @@ export class MockAgentConnection implements AgentConnection {
 }
 
 // Mock log message templates
-const MOCK_LOG_TEMPLATES = [
-  { level: "info", message: "Server started on port 8080" },
-  { level: "info", message: "WebSocket connection established" },
-  { level: "info", message: "Session created: sess_{id}" },
+const MOCK_LOG_TEMPLATES: ReadonlyArray<{
+  level: string;
+  message: string;
+  fields?: Record<string, unknown>;
+}> = [
+  { level: "info", message: "Server started on port 8080", fields: { port: 8080, version: "1.2.0" } },
+  { level: "info", message: "WebSocket connection established", fields: { remoteAddr: "10.0.1.42:51234" } },
+  { level: "info", message: "Session created: sess_{id}", fields: { tier: "hot" } },
   { level: "debug", message: "Processing message from client" },
-  { level: "info", message: "LLM request sent to provider" },
+  { level: "info", message: "LLM request sent to provider", fields: { provider: "anthropic", model: "claude-sonnet-4-20250514" } },
   { level: "debug", message: "Tokens used - input: {input}, output: {output}" },
-  { level: "info", message: "Tool call: {tool}({args})" },
+  { level: "info", message: "Tool call: {tool}({args})", fields: { toolID: "tc_abc123" } },
   { level: "info", message: "Tool response received in {ms}ms" },
-  { level: "info", message: "Response streamed to client" },
-  { level: "warn", message: "High latency detected: {ms}ms" },
-  { level: "error", message: "Connection timeout after 30s" },
+  { level: "info", message: "Response streamed to client", fields: { chunks: 24, totalBytes: 3840 } },
+  { level: "warn", message: "High latency detected: {ms}ms", fields: { endpoint: "/v1/chat", p99: 2100 } },
+  { level: "error", message: "Connection timeout after 30s", fields: { sessionID: "sess_timeout1", retries: 3 } },
   { level: "info", message: "Session ended: sess_{id}" },
   { level: "debug", message: "Cleanup completed for session" },
   { level: "info", message: "Health check passed" },
-  { level: "warn", message: "Memory usage at 75%" },
-] as const;
+  { level: "warn", message: "Memory usage at 75%", fields: { heapMB: 384, limitMB: 512 } },
+];
 
 const TOOL_NAMES = ["search_database", "get_user_info", "send_email", "fetch_data"];
 const CONTAINERS = ["facade", "runtime"];
@@ -493,6 +497,7 @@ function generateMockLogs(count: number, containers: string[] = CONTAINERS): Log
       level: template.level,
       message,
       container: containers[Math.floor(Math.random() * containers.length)],
+      fields: template.fields,
     });
   }
 

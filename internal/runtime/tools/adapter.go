@@ -51,6 +51,16 @@ type ToolInfo struct {
 	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }
 
+// ToolMeta holds provenance metadata for a tool, linking it back to the
+// ToolRegistry CRD and handler that provides it.
+type ToolMeta struct {
+	RegistryName      string
+	RegistryNamespace string
+	HandlerName       string
+	HandlerType       string // http, grpc, mcp, openapi
+	Endpoint          string
+}
+
 // ToolResult contains the result of a tool invocation.
 type ToolResult struct {
 	// Content is the result content (can be text, JSON, etc.).

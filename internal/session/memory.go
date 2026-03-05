@@ -316,8 +316,12 @@ func (m *MemoryStore) UpdateSessionStats(ctx context.Context, sessionID string, 
 	session.ToolCallCount += update.AddToolCalls
 	session.MessageCount += update.AddMessages
 
-	if update.SetStatus != "" {
+	if update.SetStatus != "" && !isTerminalStatus(session.Status) {
 		session.Status = update.SetStatus
+	}
+
+	if !update.SetEndedAt.IsZero() {
+		session.EndedAt = update.SetEndedAt
 	}
 
 	session.UpdatedAt = time.Now()

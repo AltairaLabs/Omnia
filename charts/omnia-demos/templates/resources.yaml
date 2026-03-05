@@ -100,15 +100,23 @@ spec:
     name: demo-vision-prompts
   providerRef:
     name: ollama
+  evals:
+    enabled: true
   facade:
     type: websocket
     port: 8080
     handler: {{ .Values.agent.handler }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "1h"
   runtime:
     replicas: {{ .Values.agent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.agent.resources | nindent 6 }}
   {{- with .Values.agent.console }}
@@ -233,13 +241,11 @@ spec:
     ttl: "1h"
   runtime:
     replicas: {{ .Values.audioDemo.agent.replicas }}
-    resources:
-      {{- toYaml .Values.audioDemo.agent.resources | nindent 6 }}
-    {{- if .Values.audioDemo.agent.logLevel }}
     extraEnv:
       - name: LOG_LEVEL
-        value: {{ .Values.audioDemo.agent.logLevel | quote }}
-    {{- end }}
+        value: debug
+    resources:
+      {{- toYaml .Values.audioDemo.agent.resources | nindent 6 }}
   {{- with .Values.audioDemo.console }}
   console:
     maxFileSize: {{ .maxFileSize | int64 }}
@@ -309,7 +315,7 @@ data:
       "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
       "id": "demo-tools-prompts",
       "name": "Demo Tools Prompts",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "template_engine": {
         "version": "v1",
         "syntax": "{{"{{variable}}"}}"
@@ -318,13 +324,139 @@ data:
         "default": {
           "id": "default",
           "name": "Tools Assistant",
-          "version": "1.0.0",
+          "version": "1.1.0",
           "system_template": {{ .Values.toolsDemo.promptPack.systemPrompt | toJson }},
+          "tools": ["search_places", "get_weather", "calculate"],
           "parameters": {
             "temperature": 0.7
+          },
+          "validators": [
+            {
+              "type": "max_length",
+              "enabled": true,
+              "fail_on_violation": false,
+              "params": {
+                "max_characters": 2000
+              }
+            }
+          ],
+          "evals": [
+            {
+              "id": "response-conciseness",
+              "type": "regex",
+              "trigger": "every_turn",
+              "description": "Ensures responses stay concise by flagging excessively long output (over 1000 chars)",
+              "params": {
+                "pattern": "(?s).{1000,}",
+                "expect_match": false
+              },
+              "metric": {
+                "name": "response_conciseness",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "no-hallucinated-urls",
+              "type": "regex",
+              "trigger": "every_turn",
+              "description": "Flags responses containing URLs — the model should not fabricate links",
+              "params": {
+                "pattern": "https?://[a-zA-Z0-9.-]+\\.[a-z]{2,}",
+                "expect_match": false
+              },
+              "metric": {
+                "name": "no_hallucinated_urls",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "tool-explanation",
+              "type": "contains",
+              "trigger": "every_turn",
+              "description": "Checks the assistant explains what it is doing when using tools",
+              "params": {
+                "patterns": ["result", "weather"]
+              },
+              "metric": {
+                "name": "tool_explanation",
+                "type": "boolean"
+              }
+            }
+          ]
+        }
+      },
+
+      "tools": {
+        "search_places": {
+          "name": "search_places",
+          "description": "Search for a place by name to get its coordinates. Returns latitude, longitude, country, and timezone.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "City or place name to search for"
+              }
+            },
+            "required": ["name"]
+          }
+        },
+        "get_weather": {
+          "name": "get_weather",
+          "description": "Get current weather for given coordinates. Requires latitude and longitude (use search_places first to get coordinates).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "description": "Latitude of the location"
+              },
+              "longitude": {
+                "type": "number",
+                "description": "Longitude of the location"
+              },
+              "current": {
+                "type": "string",
+                "description": "Comma-separated weather variables: temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
+              }
+            },
+            "required": ["latitude", "longitude"]
+          }
+        },
+        "calculate": {
+          "name": "calculate",
+          "description": "Evaluate a mathematical expression (e.g. \"2 * (3 + 4)\", \"sqrt(16)\", \"sin(pi/2)\")",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "expr": {
+                "type": "string",
+                "description": "Mathematical expression to evaluate"
+              }
+            },
+            "required": ["expr"]
           }
         }
-      }
+      },
+
+      "evals": [
+        {
+          "id": "session-helpfulness",
+          "type": "llm_judge",
+          "trigger": "on_session_complete",
+          "sample_percentage": 25,
+          "description": "Judges overall session helpfulness and appropriate tool usage",
+          "params": {
+            "judge_prompt": "Review the full conversation. Did the assistant use available tools effectively and provide helpful, accurate responses? Score 1-5.",
+            "passing_score": 3
+          },
+          "metric": {
+            "name": "session_helpfulness",
+            "type": "gauge",
+            "range": { "min": 0, "max": 1 }
+          }
+        }
+      ]
     }
 ---
 # PromptPack for the tools demo agent
@@ -356,42 +488,64 @@ metadata:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   handlers:
+    - name: search-places
+      type: http
+      timeout: 10s
+      httpConfig:
+        endpoint: https://geocoding-api.open-meteo.com/v1/search
+        method: GET
+      tool:
+        name: search_places
+        description: Search for a place by name to get its coordinates. Returns latitude, longitude, country, and timezone.
+        inputSchema:
+          type: object
+          properties:
+            name:
+              type: string
+              description: City or place name to search for
+          required:
+            - name
     - name: weather
       type: http
       timeout: 10s
       httpConfig:
-        endpoint: https://api.weather.example.com/v1/current
+        endpoint: https://api.open-meteo.com/v1/forecast
         method: GET
-        contentType: application/json
       tool:
         name: get_weather
-        description: Get current weather for a location
+        description: Get current weather for given coordinates. Requires latitude and longitude (use search_places first to get coordinates).
         inputSchema:
           type: object
           properties:
-            location:
+            latitude:
+              type: number
+              description: Latitude of the location
+            longitude:
+              type: number
+              description: Longitude of the location
+            current:
               type: string
-              description: City name or coordinates
+              description: "Comma-separated weather variables: temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
           required:
-            - location
+            - latitude
+            - longitude
     - name: calculator
       type: http
       timeout: 5s
       httpConfig:
-        endpoint: https://api.calculator.example.com/v1/compute
-        method: POST
-        contentType: application/json
+        endpoint: https://api.mathjs.org/v4/
+        method: GET
       tool:
         name: calculate
-        description: Perform mathematical calculations
+        description: Evaluate a mathematical expression (e.g. "2 * (3 + 4)", "sqrt(16)", "sin(pi/2)")
         inputSchema:
           type: object
           properties:
-            expression:
+            expr:
               type: string
               description: Mathematical expression to evaluate
           required:
-            - expression
+            - expr
 ---
 # Tools Demo AgentRuntime using llama3.2 with tool capabilities
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -410,15 +564,23 @@ spec:
     name: ollama-tools
   toolRegistryRef:
     name: demo-tools
+  evals:
+    enabled: true
   facade:
     type: websocket
     port: 8080
     handler: {{ .Values.toolsDemo.agent.handler }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
   session:
     type: memory
     ttl: "1h"
   runtime:
     replicas: {{ .Values.toolsDemo.agent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.toolsDemo.agent.resources | nindent 6 }}
 {{- end }}
@@ -459,6 +621,9 @@ spec:
     ttl: "1h"
   runtime:
     replicas: {{ .Values.langchainDemo.visionAgent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.langchainDemo.visionAgent.resources | nindent 6 }}
   {{- with .Values.agent.console }}
@@ -515,6 +680,9 @@ spec:
     ttl: "1h"
   runtime:
     replicas: {{ .Values.langchainDemo.toolsAgent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: debug
     resources:
       {{- toYaml .Values.langchainDemo.toolsAgent.resources | nindent 6 }}
 {{- end }}

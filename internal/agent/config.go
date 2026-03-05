@@ -36,8 +36,6 @@ const (
 	EnvHandlerMode         = "OMNIA_HANDLER_MODE"
 	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
 	EnvProviderAPIKey      = "OMNIA_PROVIDER_API_KEY"
-	EnvToolRegistryName    = "OMNIA_TOOLREGISTRY_NAME"
-	EnvToolRegistryNS      = "OMNIA_TOOLREGISTRY_NAMESPACE"
 	EnvSessionType         = "OMNIA_SESSION_TYPE"
 	EnvSessionTTL          = "OMNIA_SESSION_TTL"
 	EnvSessionStoreURL     = "OMNIA_SESSION_STORE_URL"
@@ -216,103 +214,6 @@ var (
 	ErrMissingAzureContainer  = errors.New("OMNIA_MEDIA_AZURE_CONTAINER is required for azure storage type")
 )
 
-// LoadFromEnv loads configuration from environment variables.
-func LoadFromEnv() (*Config, error) {
-	cfg := &Config{
-		AgentName:             os.Getenv(EnvAgentName),
-		Namespace:             os.Getenv(EnvNamespace),
-		PromptPackName:        os.Getenv(EnvPromptPackName),
-		PromptPackVersion:     os.Getenv(EnvPromptPackVersion),
-		PromptPackPath:        getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath),
-		ProviderAPIKey:        os.Getenv(EnvProviderAPIKey),
-		ToolRegistryName:      os.Getenv(EnvToolRegistryName),
-		ToolRegistryNamespace: os.Getenv(EnvToolRegistryNS),
-		SessionStoreURL:       os.Getenv(EnvSessionStoreURL),
-	}
-
-	// Parse facade type
-	facadeType := getEnvOrDefault(EnvFacadeType, string(FacadeTypeWebSocket))
-	cfg.FacadeType = FacadeType(facadeType)
-
-	// Parse handler mode
-	handlerMode := getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime))
-	cfg.HandlerMode = HandlerMode(handlerMode)
-
-	// Parse runtime address (for runtime handler mode)
-	cfg.RuntimeAddress = getEnvOrDefault(EnvRuntimeAddress, DefaultRuntimeAddress)
-
-	// Parse facade port
-	facadePort, err := getEnvAsInt(EnvFacadePort, DefaultFacadePort)
-	if err != nil {
-		return nil, fmt.Errorf(errFmtInvalidEnv, EnvFacadePort, err)
-	}
-	cfg.FacadePort = facadePort
-
-	// Parse health port
-	healthPort, err := getEnvAsInt(EnvHealthPort, DefaultHealthPort)
-	if err != nil {
-		return nil, fmt.Errorf(errFmtInvalidEnv, EnvHealthPort, err)
-	}
-	cfg.HealthPort = healthPort
-
-	// Parse session type
-	sessionType := getEnvOrDefault(EnvSessionType, string(SessionTypeMemory))
-	cfg.SessionType = SessionType(sessionType)
-
-	// Parse session TTL
-	sessionTTL, err := getEnvAsDuration(EnvSessionTTL, DefaultSessionTTL)
-	if err != nil {
-		return nil, fmt.Errorf(errFmtInvalidEnv, EnvSessionTTL, err)
-	}
-	cfg.SessionTTL = sessionTTL
-
-	// Parse media storage configuration
-	mediaStorageType := getEnvOrDefault(EnvMediaStorageType, string(MediaStorageTypeNone))
-	cfg.MediaStorageType = MediaStorageType(mediaStorageType)
-	cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)
-
-	mediaMaxFileSize, err := getEnvAsInt64(EnvMediaMaxFileSize, DefaultMediaMaxFileSize)
-	if err != nil {
-		return nil, fmt.Errorf(errFmtInvalidEnv, EnvMediaMaxFileSize, err)
-	}
-	cfg.MediaMaxFileSize = mediaMaxFileSize
-
-	mediaDefaultTTL, err := getEnvAsDuration(EnvMediaDefaultTTL, DefaultMediaDefaultTTL)
-	if err != nil {
-		return nil, fmt.Errorf(errFmtInvalidEnv, EnvMediaDefaultTTL, err)
-	}
-	cfg.MediaDefaultTTL = mediaDefaultTTL
-
-	// Parse S3 storage configuration
-	cfg.MediaS3Bucket = os.Getenv(EnvMediaS3Bucket)
-	cfg.MediaS3Region = os.Getenv(EnvMediaS3Region)
-	cfg.MediaS3Prefix = os.Getenv(EnvMediaS3Prefix)
-	cfg.MediaS3Endpoint = os.Getenv(EnvMediaS3Endpoint)
-
-	// Parse GCS storage configuration
-	cfg.MediaGCSBucket = os.Getenv(EnvMediaGCSBucket)
-	cfg.MediaGCSPrefix = os.Getenv(EnvMediaGCSPrefix)
-
-	// Parse Azure storage configuration
-	cfg.MediaAzureAccount = os.Getenv(EnvMediaAzureAccount)
-	cfg.MediaAzureContainer = os.Getenv(EnvMediaAzureContainer)
-	cfg.MediaAzurePrefix = os.Getenv(EnvMediaAzurePrefix)
-	cfg.MediaAzureKey = os.Getenv(EnvMediaAzureKey)
-
-	// Parse tracing configuration
-	cfg.TracingEnabled = os.Getenv(EnvTracingEnabled) == envValueTrue
-	cfg.TracingEndpoint = os.Getenv(EnvTracingEndpoint)
-	cfg.TracingInsecure = os.Getenv(EnvTracingInsecure) == envValueTrue
-
-	tracingSampleRate, err := getEnvAsFloat64(EnvTracingSampleRate, 1.0)
-	if err != nil {
-		return nil, fmt.Errorf(errFmtInvalidEnv, EnvTracingSampleRate, err)
-	}
-	cfg.TracingSampleRate = tracingSampleRate
-
-	return cfg, nil
-}
-
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
 	if c.AgentName == "" {
@@ -397,22 +298,6 @@ func getEnvAsInt(key string, defaultValue int) (int, error) {
 		return defaultValue, nil
 	}
 	return strconv.Atoi(valueStr)
-}
-
-func getEnvAsInt64(key string, defaultValue int64) (int64, error) {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue, nil
-	}
-	return strconv.ParseInt(valueStr, 10, 64)
-}
-
-func getEnvAsDuration(key string, defaultValue time.Duration) (time.Duration, error) {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue, nil
-	}
-	return time.ParseDuration(valueStr)
 }
 
 func getEnvAsFloat64(key string, defaultValue float64) (float64, error) {

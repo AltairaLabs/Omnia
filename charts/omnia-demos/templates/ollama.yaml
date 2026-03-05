@@ -10,6 +10,8 @@ metadata:
   labels:
     app.kubernetes.io/name: ollama
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+  annotations:
+    "helm.sh/resource-policy": keep
 spec:
   accessModes:
     - ReadWriteOnce
@@ -130,6 +132,30 @@ spec:
               {{- else }}
               value: "0.0.0.0:11434"
               {{- end }}
+          # Warm up the primary model on startup so the first real request
+          # doesn't trigger cold model loading (which can exceed HTTP timeouts).
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Wait for Ollama HTTP server
+                    for i in $(seq 1 60); do
+                      if curl -sf http://localhost:{{ if $opaSidecar }}11435{{ else }}11434{{ end }}/ >/dev/null 2>&1; then
+                        break
+                      fi
+                      sleep 1
+                    done
+                    # Send minimal requests to load models into memory
+                    OLLAMA_URL="http://localhost:{{ if $opaSidecar }}11435{{ else }}11434{{ end }}"
+                    for model in "{{ .Values.ollama.model }}" {{- range .Values.ollama.additionalModels }} "{{ . }}" {{- end }}; do
+                      echo "Warming up $model..."
+                      curl -sf "$OLLAMA_URL/api/generate" \
+                        -d "{\"model\":\"$model\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" \
+                        >/dev/null 2>&1 || true
+                    done
           resources:
             {{- toYaml .Values.ollama.resources | nindent 12 }}
           volumeMounts:

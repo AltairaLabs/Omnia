@@ -523,6 +523,14 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		})
 	}
 
+	// Inject session-api URL so the runtime uses OmniaEventStore for session recording
+	if r.SessionAPIURL != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "SESSION_API_URL",
+			Value: r.SessionAPIURL,
+		})
+	}
+
 	// Check for mock provider annotation (for E2E testing)
 	if mockProvider, ok := agentRuntime.Annotations[MockProviderAnnotation]; ok && mockProvider == "true" {
 		envVars = append(envVars, corev1.EnvVar{

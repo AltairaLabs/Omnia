@@ -21,7 +21,7 @@ import type {
   SessionListResponse,
   SessionMessagesResponse,
 } from "@/types/session";
-import type { EvalResult, EvalResultSummary } from "@/types/eval";
+import type { EvalResult } from "@/types/eval";
 
 const SESSION_API_BASE = "/api/workspaces";
 
@@ -92,6 +92,7 @@ function transformApiMessage(api: ApiMessage): Message {
     content: api.content,
     timestamp: api.timestamp,
     toolCallId: api.toolCallId,
+    metadata: api.metadata,
     tokens:
       api.inputTokens || api.outputTokens
         ? { input: api.inputTokens, output: api.outputTokens }
@@ -155,12 +156,16 @@ function buildToolCall(
     status = result.isError ? "error" : "success";
   }
 
+  const durationStr = api.metadata?.duration_ms;
+  const duration = durationStr ? Number.parseInt(durationStr, 10) : undefined;
+
   return {
     id: api.toolCallId!,
     name,
     arguments: args,
     result: result ? parsedResult : undefined,
     status,
+    duration: duration && !Number.isNaN(duration) ? duration : undefined,
   };
 }
 
@@ -394,71 +399,4 @@ export class SessionApiService {
     return data.evalResults || [];
   }
 
-  async getEvalResultsSummary(
-    workspace: string,
-    params?: {
-      agentName?: string;
-      evalType?: string;
-      createdAfter?: string;
-      createdBefore?: string;
-    }
-  ): Promise<EvalResultSummary[]> {
-    const searchParams = new URLSearchParams();
-    if (params?.agentName) searchParams.set("agentName", params.agentName);
-    if (params?.evalType) searchParams.set("evalType", params.evalType);
-    if (params?.createdAfter) searchParams.set("createdAfter", params.createdAfter);
-    if (params?.createdBefore) searchParams.set("createdBefore", params.createdBefore);
-
-    const queryString = searchParams.toString();
-    const suffix = queryString ? `?${queryString}` : "";
-
-    const response = await fetch(
-      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/eval-results/summary${suffix}`
-    );
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403 || response.status === 404) {
-        return [];
-      }
-      throw new Error(`Failed to fetch eval results summary: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.summaries || [];
-  }
-
-  async getEvalResults(
-    workspace: string,
-    params?: {
-      agentName?: string;
-      evalId?: string;
-      evalType?: string;
-      passed?: boolean;
-      limit?: number;
-      offset?: number;
-    }
-  ): Promise<{ evalResults: EvalResult[]; total: number }> {
-    const searchParams = new URLSearchParams();
-    if (params?.agentName) searchParams.set("agentName", params.agentName);
-    if (params?.evalId) searchParams.set("evalId", params.evalId);
-    if (params?.evalType) searchParams.set("evalType", params.evalType);
-    if (params?.passed !== undefined) searchParams.set("passed", String(params.passed));
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-
-    const queryString = searchParams.toString();
-    const suffix = queryString ? `?${queryString}` : "";
-
-    const response = await fetch(
-      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/eval-results${suffix}`
-    );
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403 || response.status === 404) {
-        return { evalResults: [], total: 0 };
-      }
-      throw new Error(`Failed to fetch eval results: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return { evalResults: data.evalResults || [], total: data.total || 0 };
-  }
 }

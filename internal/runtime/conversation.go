@@ -19,12 +19,18 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
+
+// toolCallExecutionTimeout is the pipeline execution timeout when tools are
+// configured. The PromptKit default (30s) is too short for multi-round
+// tool-calling where each round involves LLM inference + tool execution.
+const toolCallExecutionTimeout = 120 * time.Second
 
 // getOrCreateConversation gets an existing conversation or creates a new one.
 func (s *Server) getOrCreateConversation(ctx context.Context, sessionID string) (*sdk.Conversation, error) {
@@ -66,6 +72,11 @@ func (s *Server) createConversation(ctx context.Context, sessionID string) (*sdk
 		return nil, err
 	}
 
+	log.V(1).Info("conversation creating",
+		"sdkOptionsCount", len(opts),
+		"hasEvalCollector", s.evalCollector != nil,
+		"evalDefCount", len(s.evalDefs))
+
 	// Try to resume existing conversation first, or create new
 	conv, err := s.resumeOrOpenConversation(sessionID, opts, log)
 	if err != nil {
@@ -94,6 +105,11 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		sdk.WithConversationID(sessionID),
 	}, s.sdkOptions...)
 
+	// Pass Omnia's logger to the SDK so all output flows through the same Zap backend.
+	if s.sdkLogger != nil {
+		opts = append(opts, sdk.WithLogger(s.sdkLogger))
+	}
+
 	// Add provider based on configuration
 	if s.mockProvider {
 		log.Info("using mock provider for conversation")
@@ -101,26 +117,56 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		if err != nil {
 			return nil, err
 		}
-		return append(opts, sdk.WithProvider(provider)), nil
-	}
-
-	// Try to create an explicit provider from config
-	provider, err := s.createProviderFromConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create provider from config: %w", err)
-	}
-	if provider != nil {
-		log.Info("using explicit provider from config", "type", s.providerType)
 		opts = append(opts, sdk.WithProvider(provider))
+	} else {
+		// Try to create an explicit provider from config
+		provider, err := s.createProviderFromConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create provider from config: %w", err)
+		}
+		if provider != nil {
+			log.Info("using explicit provider from config", "type", s.providerType)
+			opts = append(opts, sdk.WithProvider(provider))
+		}
+		// If provider is nil, PromptKit will auto-detect from environment
 	}
-	// If provider is nil, PromptKit will auto-detect from environment
 
 	// Wire eval middleware when collector is configured
-	opts = append(opts, s.buildEvalOptions()...)
+	evalOpts := s.buildEvalOptions()
+	log.V(1).Info("eval options wired",
+		"evalOptionsCount", len(evalOpts),
+		"hasEvalCollector", s.evalCollector != nil,
+		"evalDefCount", len(s.evalDefs))
+	opts = append(opts, evalOpts...)
+
+	// Wire event store for session recording (Pattern C) and/or eval metrics.
+	// The event store is needed when either session-api recording or eval
+	// Prometheus metrics are enabled.
+	if s.sessionStore != nil || s.evalMetrics != nil {
+		eventStore := NewOmniaEventStore(s.sessionStore, s.log)
+		if s.toolManager != nil {
+			eventStore.SetToolMetaFn(s.toolManager.GetToolMeta)
+		}
+		if s.evalMetrics != nil {
+			eventStore.SetEvalMetrics(s.evalMetrics)
+		}
+		opts = append(opts, sdk.WithEventStore(eventStore))
+		log.V(1).Info("event store wired",
+			"hasSessionStore", s.sessionStore != nil,
+			"hasEvalMetrics", s.evalMetrics != nil)
+	}
 
 	// Wire tracing provider into SDK for span propagation
 	if s.tracingProvider != nil {
 		opts = append(opts, sdk.WithTracerProvider(s.tracingProvider.TracerProvider()))
+	}
+
+	// Increase pipeline execution timeout when tools are configured.
+	// The default 30s is too short for multi-round tool-calling with
+	// slower providers (e.g. Ollama). Each round involves LLM inference
+	// + tool execution, so we allow 120s.
+	if s.toolsInitialized && s.toolExecutor != nil {
+		opts = append(opts, sdk.WithExecutionTimeout(toolCallExecutionTimeout))
 	}
 
 	return opts, nil

@@ -18,6 +18,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -152,6 +153,16 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 			toolResult.Result = nil
 		}
 		return writer.WriteToolResult(toolResult)
+
+	case *runtimev1.ServerMessage_MediaChunk:
+		mc := msg.MediaChunk
+		return writer.WriteMediaChunk(&facade.MediaChunkInfo{
+			MediaID:  mc.MediaId,
+			Sequence: int(mc.Sequence),
+			IsLast:   mc.IsLast,
+			Data:     base64.StdEncoding.EncodeToString(mc.Data),
+			MimeType: mc.MimeType,
+		})
 
 	case *runtimev1.ServerMessage_Error:
 		return writer.WriteError(msg.Error.Code, msg.Error.Message)

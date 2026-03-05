@@ -95,7 +95,7 @@ func TestNewProvider_Defaults(t *testing.T) {
 func TestProvider_StartConversationSpan(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartConversationSpan(context.Background(), "test-session")
+	_, span := provider.StartConversationSpan(context.Background(), "test-session", "test-pack", "v1.0", 0)
 	span.End()
 
 	spans := exporter.GetSpans()
@@ -104,10 +104,10 @@ func TestProvider_StartConversationSpan(t *testing.T) {
 	}
 
 	s := spans[0]
-	if s.Name != "conversation.turn" {
-		t.Errorf("expected span name 'conversation.turn', got %q", s.Name)
+	if s.Name != "omnia.runtime.conversation.turn" {
+		t.Errorf("expected span name 'omnia.runtime.conversation.turn', got %q", s.Name)
 	}
-	if s.SpanKind != trace.SpanKindServer {
+	if s.SpanKind != trace.SpanKindInternal {
 		t.Errorf("expected SpanKindServer, got %v", s.SpanKind)
 	}
 
@@ -123,7 +123,7 @@ func TestProvider_StartConversationSpan(t *testing.T) {
 func TestProvider_StartLLMSpan(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartLLMSpan(context.Background(), "claude-3-opus")
+	_, span := provider.StartLLMSpan(context.Background(), "claude-3-opus", "anthropic")
 	span.End()
 
 	spans := exporter.GetSpans()
@@ -132,8 +132,8 @@ func TestProvider_StartLLMSpan(t *testing.T) {
 	}
 
 	s := spans[0]
-	if s.Name != "llm.call" {
-		t.Errorf("expected span name 'llm.call', got %q", s.Name)
+	if s.Name != "genai.chat" {
+		t.Errorf("expected span name 'genai.chat', got %q", s.Name)
 	}
 	if s.SpanKind != trace.SpanKindClient {
 		t.Errorf("expected SpanKindClient, got %v", s.SpanKind)
@@ -160,8 +160,8 @@ func TestProvider_StartToolSpan(t *testing.T) {
 	}
 
 	s := spans[0]
-	if s.Name != "tool.get_weather" {
-		t.Errorf("expected span name 'tool.get_weather', got %q", s.Name)
+	if s.Name != "omnia.tool.call" {
+		t.Errorf("expected span name 'omnia.tool.call', got %q", s.Name)
 	}
 	if s.SpanKind != trace.SpanKindClient {
 		t.Errorf("expected SpanKindClient, got %v", s.SpanKind)
@@ -182,7 +182,7 @@ func TestRecordError(t *testing.T) {
 	}
 
 	provider, _ := NewProvider(context.Background(), cfg)
-	_, span := provider.StartConversationSpan(context.Background(), "test")
+	_, span := provider.StartConversationSpan(context.Background(), "test", "", "", 0)
 	defer span.End()
 
 	// Should not panic with nil error
@@ -198,7 +198,7 @@ func TestSetSuccess(t *testing.T) {
 	}
 
 	provider, _ := NewProvider(context.Background(), cfg)
-	_, span := provider.StartConversationSpan(context.Background(), "test")
+	_, span := provider.StartConversationSpan(context.Background(), "test", "", "", 0)
 	defer span.End()
 
 	// Should not panic
@@ -208,7 +208,7 @@ func TestSetSuccess(t *testing.T) {
 func TestAddLLMMetrics(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartLLMSpan(context.Background(), "test-model")
+	_, span := provider.StartLLMSpan(context.Background(), "test-model", "openai")
 	AddLLMMetrics(span, 100, 200, 0.05)
 	span.End()
 
@@ -309,7 +309,7 @@ func TestAddToolResult(t *testing.T) {
 func TestAddConversationMetrics(t *testing.T) {
 	provider, exporter := newTestProvider(t)
 
-	_, span := provider.StartConversationSpan(context.Background(), "test")
+	_, span := provider.StartConversationSpan(context.Background(), "test", "", "", 0)
 	AddConversationMetrics(span, 150, 500)
 	span.End()
 

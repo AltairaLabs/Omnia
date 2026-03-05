@@ -43,9 +43,7 @@ func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Co
 		toolName := desc.Name
 		log.V(1).Info("registering tool with conversation", "tool", toolName)
 
-		// Create a closure that captures the executor, descriptor, and context info
 		conv.OnToolCtx(toolName, func(toolCtx context.Context, args map[string]any) (any, error) {
-			// Enrich with tool name
 			toolCtx = logctx.WithTool(toolCtx, toolName)
 			return s.executeToolForConversation(toolCtx, toolName, args)
 		})
@@ -73,6 +71,7 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 	result, err := s.toolManager.Call(ctx, toolName, args)
 	durationMs := int(time.Since(start).Milliseconds())
 	if err != nil {
+		log.Error(err, "tool execution failed", "durationMs", durationMs)
 		if span != nil {
 			tracing.RecordError(span, err)
 		}
@@ -90,8 +89,10 @@ func (s *Server) executeToolForConversation(ctx context.Context, toolName string
 	}
 
 	if result.IsError {
+		log.Info("tool returned error", "durationMs", durationMs)
 		return nil, fmt.Errorf("tool error: %v", result.Content)
 	}
 
+	log.V(1).Info("tool execution completed", "durationMs", durationMs)
 	return result.Content, nil
 }

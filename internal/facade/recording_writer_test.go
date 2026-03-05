@@ -463,6 +463,38 @@ func TestRecordingWriter_WriteError(t *testing.T) {
 	}
 }
 
+func TestRecordingWriter_WriteError_SetsEndedAt(t *testing.T) {
+	store := session.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	sess, _ := store.CreateSession(ctx, session.CreateSessionOptions{
+		AgentName: "test", Namespace: "default",
+	})
+
+	before := time.Now()
+
+	inner := &mockResponseWriter{}
+	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard())
+
+	if err := rw.WriteError("INTERNAL_ERROR", "boom"); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForAsyncWrites()
+
+	updated, _ := store.GetSession(ctx, sess.ID)
+	if updated.Status != session.SessionStatusError {
+		t.Errorf("Status = %q, want %q", updated.Status, session.SessionStatusError)
+	}
+	if updated.EndedAt.IsZero() {
+		t.Error("EndedAt should be set after WriteError")
+	}
+	if updated.EndedAt.Before(before) {
+		t.Errorf("EndedAt = %v, should be after %v", updated.EndedAt, before)
+	}
+}
+
 func TestRecordingWriter_StoreFailure_GracefulDegradation(t *testing.T) {
 	// Use a store that will fail on AppendMessage by closing it
 	store := session.NewMemoryStore()

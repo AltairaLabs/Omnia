@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/altairalabs/omnia/pkg/k8s"
-	"github.com/altairalabs/omnia/pkg/provider"
 )
 
 // Config holds runtime configuration loaded from environment variables.
@@ -38,6 +37,7 @@ type Config struct {
 	PromptPackPath      string // Path to the compiled .pack.json file
 	PromptPackName      string // Name of the PromptPack CRD (for metrics)
 	PromptPackNamespace string // Namespace of the PromptPack CRD (for metrics)
+	PromptPackVersion   string // Version of the PromptPack (for tracing)
 	PromptName          string // Name of the prompt to use from the pack
 
 	// Session configuration
@@ -63,6 +63,9 @@ type Config struct {
 
 	// Tools configuration
 	ToolsConfigPath string // Path to tools.yaml configuration file
+
+	// Session recording (Pattern C)
+	SessionAPIURL string // URL of the session-api service for event recording
 
 	// Eval configuration
 	EvalEnabled bool // Enable real-time evals for PromptKit agents
@@ -101,6 +104,7 @@ const (
 	envProviderMockConfigPath = "OMNIA_PROVIDER_MOCK_CONFIG" // From additionalConfig
 	envMediaBasePath          = "OMNIA_MEDIA_BASE_PATH"
 	envToolsConfigPath        = "OMNIA_TOOLS_CONFIG"
+	envSessionAPIURL          = "SESSION_API_URL"
 	envEvalEnabled            = "OMNIA_EVAL_ENABLED"
 	envTracingEnabled         = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint        = "OMNIA_TRACING_ENDPOINT"
@@ -118,7 +122,9 @@ const (
 	defaultSessionTTL      = 24 * time.Hour
 	defaultProviderType    = "" // Provider type must be explicitly set
 	defaultMediaBasePath   = "/etc/omnia/media"
-	defaultToolsConfigPath = "" // Empty by default; only set when OMNIA_TOOLS_CONFIG_PATH is provided
+	defaultToolsConfigPath = "" // Empty by default; set from CRD toolRegistryRef
+	defaultToolsMountPath  = "/etc/omnia/tools"
+	defaultToolsConfigFile = "tools.yaml"
 	defaultGRPCPort        = 9000
 	defaultHealthPort      = 9001
 )
@@ -133,54 +139,6 @@ const (
 	SessionTypeMemory = "memory"
 	SessionTypeRedis  = "redis"
 )
-
-// LoadConfig loads configuration from environment variables.
-func LoadConfig() (*Config, error) {
-	cfg := &Config{
-		AgentName:            os.Getenv(envAgentName),
-		Namespace:            os.Getenv(envNamespace),
-		PromptPackPath:       getEnvOrDefault(envPromptPackPath, defaultPromptPackPath),
-		PromptPackName:       os.Getenv(envPromptPackName),
-		PromptPackNamespace:  os.Getenv(envPromptPackNamespace),
-		PromptName:           getEnvOrDefault(envPromptName, defaultPromptName),
-		SessionType:          getEnvOrDefault(envSessionType, defaultSessionType),
-		SessionURL:           os.Getenv(envSessionURL),
-		ProviderType:         getEnvOrDefault(envProviderType, defaultProviderType),
-		Model:                os.Getenv(envProviderModel),
-		BaseURL:              os.Getenv(envProviderBaseURL),
-		ProviderRefName:      os.Getenv(envProviderRefName),
-		ProviderRefNamespace: os.Getenv(envProviderRefNamespace),
-		TruncationStrategy:   os.Getenv(envTruncationStrategy),
-		MockProvider:         os.Getenv(envMockProvider) == "true",
-		MockConfigPath:       getEnvOrDefault(envMockConfigPath, os.Getenv(envProviderMockConfigPath)),
-		MediaBasePath:        getEnvOrDefault(envMediaBasePath, defaultMediaBasePath),
-		ToolsConfigPath:      getEnvOrDefault(envToolsConfigPath, defaultToolsConfigPath),
-		EvalEnabled:          os.Getenv(envEvalEnabled) == "true",
-		TracingEnabled:       os.Getenv(envTracingEnabled) == "true",
-		TracingEndpoint:      os.Getenv(envTracingEndpoint),
-		TracingSampleRate:    1.0, // Default to sampling all traces
-		TracingInsecure:      os.Getenv(envTracingInsecure) == "true",
-		GRPCPort:             defaultGRPCPort,
-		HealthPort:           defaultHealthPort,
-		SessionTTL:           defaultSessionTTL,
-	}
-
-	if err := cfg.parseEnvironmentOverrides(); err != nil {
-		return nil, err
-	}
-
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
-	// Auto-enable mock provider when provider type is "mock"
-	// This allows provider.type: mock to work as a first-class selection
-	if cfg.ProviderType == string(provider.TypeMock) {
-		cfg.MockProvider = true
-	}
-
-	return cfg, nil
-}
 
 // parseEnvironmentOverrides parses optional environment variable overrides.
 func (cfg *Config) parseEnvironmentOverrides() error {
@@ -263,71 +221,21 @@ func (cfg *Config) parseSessionTTL() error {
 	return nil
 }
 
-// validate validates the configuration.
-func (cfg *Config) validate() error {
-	if err := cfg.validateRequiredFields(); err != nil {
-		return err
-	}
-	if err := cfg.validateSessionConfig(); err != nil {
-		return err
-	}
-	return cfg.validateProviderType()
-}
-
-// validateRequiredFields checks that required fields are set.
-func (cfg *Config) validateRequiredFields() error {
-	if cfg.AgentName == "" {
-		return fmt.Errorf("%s is required", envAgentName)
-	}
-	if cfg.Namespace == "" {
-		return fmt.Errorf("%s is required", envNamespace)
-	}
-	return nil
-}
-
-// validateSessionConfig validates session configuration.
-func (cfg *Config) validateSessionConfig() error {
-	switch cfg.SessionType {
-	case SessionTypeMemory, SessionTypeRedis:
-		// Valid
-	default:
-		return fmt.Errorf("invalid %s: must be 'memory' or 'redis'", envSessionType)
-	}
-	if cfg.SessionType == SessionTypeRedis && cfg.SessionURL == "" {
-		return fmt.Errorf("%s is required when using Redis sessions", envSessionURL)
-	}
-	return nil
-}
-
-// validateProviderType validates the provider type.
-// Empty provider type is allowed (means no provider configured).
-func (cfg *Config) validateProviderType() error {
-	if cfg.ProviderType == "" {
-		return nil // Empty is valid - no provider configured
-	}
-	if !provider.Type(cfg.ProviderType).IsValid() {
-		return fmt.Errorf("invalid %s: must be one of %v", envProviderType, provider.ValidTypes)
-	}
-	return nil
-}
-
-// LoadConfigWithContext loads configuration, preferring CRD reading and falling back to env vars.
+// LoadConfigWithContext loads configuration from the AgentRuntime CRD.
+// OMNIA_AGENT_NAME and OMNIA_NAMESPACE must be set via the Downward API.
 func LoadConfigWithContext(ctx context.Context) (*Config, error) {
 	name := os.Getenv(envAgentName)
 	namespace := os.Getenv(envNamespace)
-
-	if name != "" && namespace != "" {
-		c, err := k8s.NewClient()
-		if err == nil {
-			cfg, crdErr := LoadFromCRD(ctx, c, name, namespace)
-			if crdErr == nil {
-				return cfg, nil
-			}
-			// Fall through to env-based loading
-		}
+	if name == "" || namespace == "" {
+		return nil, fmt.Errorf("OMNIA_AGENT_NAME and OMNIA_NAMESPACE are required (set via Downward API)")
 	}
 
-	return LoadConfig()
+	c, err := k8s.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("create k8s client: %w", err)
+	}
+
+	return LoadFromCRD(ctx, c, name, namespace)
 }
 
 func getEnvOrDefault(key, defaultValue string) string {

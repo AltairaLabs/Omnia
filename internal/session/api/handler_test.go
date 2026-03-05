@@ -22,8 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +31,12 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
+)
+
+// Test UUID constants for session IDs.
+const (
+	testSessionID      = "00000000-0000-0000-0000-000000000001"
+	testSessionIDOther = "00000000-0000-0000-0000-000000000002"
 )
 
 // --- Mock providers ---
@@ -272,17 +278,17 @@ func testMessages() []*session.Message {
 
 func TestGetSession_HotCacheHit(t *testing.T) {
 	hot := newMockHotCache()
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	sess, err := svc.GetSession(context.Background(), "s1")
+	sess, err := svc.GetSession(context.Background(), testSessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if sess.ID != "s1" {
+	if sess.ID != testSessionID {
 		t.Fatalf("expected session s1, got %s", sess.ID)
 	}
 }
@@ -290,22 +296,22 @@ func TestGetSession_HotCacheHit(t *testing.T) {
 func TestGetSession_WarmHit(t *testing.T) {
 	hot := newMockHotCache()
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
 	reg.SetWarmStore(warm)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	sess, err := svc.GetSession(context.Background(), "s1")
+	sess, err := svc.GetSession(context.Background(), testSessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if sess.ID != "s1" {
+	if sess.ID != testSessionID {
 		t.Fatalf("expected session s1, got %s", sess.ID)
 	}
 	// Verify hot cache was populated.
-	if _, ok := hot.sessions["s1"]; !ok {
+	if _, ok := hot.sessions[testSessionID]; !ok {
 		t.Fatal("expected hot cache to be populated")
 	}
 }
@@ -313,22 +319,22 @@ func TestGetSession_WarmHit(t *testing.T) {
 func TestGetSession_ColdHit(t *testing.T) {
 	hot := newMockHotCache()
 	cold := newMockColdArchive()
-	cold.sessions["s1"] = testSession("s1")
+	cold.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
 	reg.SetColdArchive(cold)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	sess, err := svc.GetSession(context.Background(), "s1")
+	sess, err := svc.GetSession(context.Background(), testSessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if sess.ID != "s1" {
+	if sess.ID != testSessionID {
 		t.Fatalf("expected session s1, got %s", sess.ID)
 	}
 	// Verify hot cache was populated.
-	if _, ok := hot.sessions["s1"]; !ok {
+	if _, ok := hot.sessions[testSessionID]; !ok {
 		t.Fatal("expected hot cache to be populated")
 	}
 }
@@ -353,7 +359,7 @@ func TestGetSession_NotFound(t *testing.T) {
 func TestGetSession_NoProviders(t *testing.T) {
 	reg := providers.NewRegistry()
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	_, err := svc.GetSession(context.Background(), "s1")
+	_, err := svc.GetSession(context.Background(), testSessionID)
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
 	}
@@ -364,18 +370,18 @@ func TestGetSession_HotCachePopulateError(t *testing.T) {
 	hot.setErr = errMockSetFailed
 
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
 	reg.SetWarmStore(warm)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	sess, err := svc.GetSession(context.Background(), "s1")
+	sess, err := svc.GetSession(context.Background(), testSessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if sess.ID != "s1" {
+	if sess.ID != testSessionID {
 		t.Fatalf("expected session s1, got %s", sess.ID)
 	}
 }
@@ -388,13 +394,13 @@ func (e *mockError) Error() string { return e.msg }
 
 func TestGetMessages_HotEligible(t *testing.T) {
 	hot := newMockHotCache()
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	msgs, err := svc.GetMessages(context.Background(), "s1", providers.MessageQueryOpts{Limit: 10})
+	msgs, err := svc.GetMessages(context.Background(), testSessionID, providers.MessageQueryOpts{Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -405,13 +411,13 @@ func TestGetMessages_HotEligible(t *testing.T) {
 
 func TestGetMessages_ComplexQuery(t *testing.T) {
 	warm := newMockWarmStore()
-	warm.messages["s1"] = testMessages()
+	warm.messages[testSessionID] = testMessages()
 
 	reg := providers.NewRegistry()
 	reg.SetWarmStore(warm)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	msgs, err := svc.GetMessages(context.Background(), "s1", providers.MessageQueryOpts{
+	msgs, err := svc.GetMessages(context.Background(), testSessionID, providers.MessageQueryOpts{
 		Limit:     10,
 		BeforeSeq: 3,
 	})
@@ -427,13 +433,13 @@ func TestGetMessages_ComplexQuery(t *testing.T) {
 
 func TestGetMessages_ColdFallback(t *testing.T) {
 	cold := newMockColdArchive()
-	cold.sessions["s1"] = testSession("s1")
+	cold.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetColdArchive(cold)
 
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	msgs, err := svc.GetMessages(context.Background(), "s1", providers.MessageQueryOpts{
+	msgs, err := svc.GetMessages(context.Background(), testSessionID, providers.MessageQueryOpts{
 		Limit:     10,
 		BeforeSeq: 3,
 	})
@@ -466,7 +472,7 @@ func TestGetMessages_NotFound(t *testing.T) {
 func TestListSessions_OK(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.listResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 1,
 		HasMore:    false,
 	}
@@ -499,7 +505,7 @@ func TestListSessions_NoWarmStore(t *testing.T) {
 func TestSearchSessions_OK(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.searchResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 1,
 		HasMore:    false,
 	}
@@ -665,7 +671,7 @@ func TestPopulateHotCache_NoHotConfigured(t *testing.T) {
 	reg := providers.NewRegistry()
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
 	// Should not panic.
-	svc.populateHotCache(context.Background(), testSession("s1"))
+	svc.populateHotCache(context.Background(), testSession(testSessionID))
 }
 
 // --- Handler tests ---
@@ -698,7 +704,7 @@ func decodeJSON[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 func TestHandleListSessions_OK(t *testing.T) {
 	h, _, warm := setupHandler(t)
 	warm.listResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1"), testSession("s2")},
+		Sessions:   []*session.Session{testSession(testSessionID), testSession("s2")},
 		TotalCount: 2,
 		HasMore:    false,
 	}
@@ -738,7 +744,7 @@ func TestHandleListSessions_MissingWorkspace(t *testing.T) {
 func TestHandleListSessions_WithFilters(t *testing.T) {
 	h, _, warm := setupHandler(t)
 	warm.listResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 1,
 	}
 
@@ -755,7 +761,7 @@ func TestHandleListSessions_WithFilters(t *testing.T) {
 func TestHandleListSessions_Pagination(t *testing.T) {
 	h, _, warm := setupHandler(t)
 	warm.listResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 50,
 		HasMore:    true,
 	}
@@ -779,7 +785,7 @@ func TestHandleListSessions_Pagination(t *testing.T) {
 func TestHandleSearchSessions_OK(t *testing.T) {
 	h, _, warm := setupHandler(t)
 	warm.searchResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 1,
 	}
 
@@ -810,12 +816,12 @@ func TestHandleSearchSessions_MissingQ(t *testing.T) {
 
 func TestHandleGetSession_OK(t *testing.T) {
 	h, hot, _ := setupHandler(t)
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+testSessionID, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -823,7 +829,7 @@ func TestHandleGetSession_OK(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 	resp := decodeJSON[SessionResponse](t, rec)
-	if resp.Session.ID != "s1" {
+	if resp.Session.ID != testSessionID {
 		t.Fatalf("expected session ID s1, got %s", resp.Session.ID)
 	}
 	if len(resp.Messages) != 3 {
@@ -837,7 +843,7 @@ func TestHandleGetSession_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/00000000-0000-0000-0000-000000000099", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -848,12 +854,12 @@ func TestHandleGetSession_NotFound(t *testing.T) {
 
 func TestHandleGetMessages_OK(t *testing.T) {
 	h, hot, _ := setupHandler(t)
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s1/messages", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+testSessionID+"/messages", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -871,7 +877,7 @@ func TestHandleGetMessages_OK(t *testing.T) {
 
 func TestHandleGetMessages_WithBefore(t *testing.T) {
 	h, _, warm := setupHandler(t)
-	warm.messages["s1"] = []*session.Message{
+	warm.messages[testSessionID] = []*session.Message{
 		{ID: "m1", SequenceNum: 1},
 		{ID: "m2", SequenceNum: 2},
 	}
@@ -879,7 +885,7 @@ func TestHandleGetMessages_WithBefore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s1/messages?before=3", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+testSessionID+"/messages?before=3", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -894,9 +900,9 @@ func TestHandleGetMessages_WithBefore(t *testing.T) {
 
 func TestHandleRegisterRoutes(t *testing.T) {
 	h, hot, warm := setupHandler(t)
-	hot.sessions["s1"] = testSession("s1")
-	warm.listResult = &providers.SessionPage{Sessions: []*session.Session{testSession("s1")}, TotalCount: 1}
-	warm.searchResult = &providers.SessionPage{Sessions: []*session.Session{testSession("s1")}, TotalCount: 1}
+	hot.sessions[testSessionID] = testSession(testSessionID)
+	warm.listResult = &providers.SessionPage{Sessions: []*session.Session{testSession(testSessionID)}, TotalCount: 1}
+	warm.searchResult = &providers.SessionPage{Sessions: []*session.Session{testSession(testSessionID)}, TotalCount: 1}
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -908,8 +914,8 @@ func TestHandleRegisterRoutes(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/sessions?workspace=ws", http.StatusOK},
 		{http.MethodGet, "/api/v1/sessions/search?workspace=ws&q=test", http.StatusOK},
-		{http.MethodGet, "/api/v1/sessions/s1", http.StatusOK},
-		{http.MethodGet, "/api/v1/sessions/s1/messages", http.StatusOK},
+		{http.MethodGet, "/api/v1/sessions/" + testSessionID, http.StatusOK},
+		{http.MethodGet, "/api/v1/sessions/" + testSessionID + "/messages", http.StatusOK},
 	}
 
 	for _, rt := range routes {
@@ -962,14 +968,13 @@ func TestParseListParams(t *testing.T) {
 	}{
 		{
 			name: "all params",
-			url:  "/api/v1/sessions?workspace=ws&agent=ag&status=active&limit=10&offset=5&namespace=ns",
+			url:  "/api/v1/sessions?workspace=ws&agent=ag&status=active&limit=10&offset=5",
 			want: providers.SessionListOpts{
-				Limit:         10,
-				Offset:        5,
-				WorkspaceName: "ws",
-				AgentName:     "ag",
-				Namespace:     "ns",
-				Status:        session.SessionStatusActive,
+				Limit:     10,
+				Offset:    5,
+				AgentName: "ag",
+				Namespace: "ws",
+				Status:    session.SessionStatusActive,
 			},
 		},
 		{
@@ -1016,9 +1021,6 @@ func TestParseListParams(t *testing.T) {
 			}
 			if got.Offset != tt.want.Offset {
 				t.Errorf("Offset: got %d, want %d", got.Offset, tt.want.Offset)
-			}
-			if got.WorkspaceName != tt.want.WorkspaceName {
-				t.Errorf("WorkspaceName: got %q, want %q", got.WorkspaceName, tt.want.WorkspaceName)
 			}
 			if got.AgentName != tt.want.AgentName {
 				t.Errorf("AgentName: got %q, want %q", got.AgentName, tt.want.AgentName)
@@ -1118,7 +1120,7 @@ func TestHandleGetMessages_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/nonexistent/messages", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/messages", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1131,7 +1133,7 @@ func TestHandleGetMessages_HasMore(t *testing.T) {
 	h, _, warm := setupHandler(t)
 
 	// Return 3 messages; request with limit=2, so handler requests limit+1=3 and sees hasMore.
-	warm.messages["s1"] = []*session.Message{
+	warm.messages[testSessionID] = []*session.Message{
 		{ID: "m1", SequenceNum: 1},
 		{ID: "m2", SequenceNum: 2},
 		{ID: "m3", SequenceNum: 3},
@@ -1140,7 +1142,7 @@ func TestHandleGetMessages_HasMore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s1/messages?limit=2&before=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+testSessionID+"/messages?limit=2&before=5", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1188,7 +1190,7 @@ func TestHandleGetSession_InternalError(t *testing.T) {
 
 	// The Go 1.22+ mux requires a non-empty path value for {sessionID}, so empty ID
 	// will match the list endpoint instead. Test with a real ID that returns 404.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/unknown-id", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/00000000-0000-0000-0000-000000000099", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1288,7 +1290,7 @@ func (m *mockAuditLogger) Close() error {
 
 func TestGetSession_AuditEvent(t *testing.T) {
 	hot := newMockHotCache()
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
@@ -1301,7 +1303,7 @@ func TestGetSession_AuditEvent(t *testing.T) {
 		UserAgent: "TestAgent",
 	})
 
-	_, err := svc.GetSession(ctx, "s1")
+	_, err := svc.GetSession(ctx, testSessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1313,7 +1315,7 @@ func TestGetSession_AuditEvent(t *testing.T) {
 	if entry.EventType != "session_accessed" {
 		t.Fatalf("expected event_type session_accessed, got %s", entry.EventType)
 	}
-	if entry.SessionID != "s1" {
+	if entry.SessionID != testSessionID {
 		t.Fatalf("expected session ID s1, got %s", entry.SessionID)
 	}
 	if entry.IPAddress != "10.0.0.1" {
@@ -1323,7 +1325,7 @@ func TestGetSession_AuditEvent(t *testing.T) {
 
 func TestGetMessages_AuditEvent(t *testing.T) {
 	hot := newMockHotCache()
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
@@ -1331,7 +1333,7 @@ func TestGetMessages_AuditEvent(t *testing.T) {
 	audit := &mockAuditLogger{}
 	svc := NewSessionService(reg, ServiceConfig{AuditLogger: audit}, logr.Discard())
 
-	_, err := svc.GetMessages(context.Background(), "s1", providers.MessageQueryOpts{Limit: 10})
+	_, err := svc.GetMessages(context.Background(), testSessionID, providers.MessageQueryOpts{Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1347,7 +1349,7 @@ func TestGetMessages_AuditEvent(t *testing.T) {
 func TestListSessions_AuditEvent(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.listResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 1,
 	}
 
@@ -1376,7 +1378,7 @@ func TestListSessions_AuditEvent(t *testing.T) {
 func TestSearchSessions_AuditEvent(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.searchResult = &providers.SessionPage{
-		Sessions:   []*session.Session{testSession("s1")},
+		Sessions:   []*session.Session{testSession(testSessionID)},
 		TotalCount: 1,
 	}
 
@@ -1404,14 +1406,14 @@ func TestSearchSessions_AuditEvent(t *testing.T) {
 
 func TestGetSession_NoAuditLogger(t *testing.T) {
 	hot := newMockHotCache()
-	hot.sessions["s1"] = testSession("s1")
+	hot.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetHotCache(hot)
 
 	// No audit logger configured — should not panic.
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
-	_, err := svc.GetSession(context.Background(), "s1")
+	_, err := svc.GetSession(context.Background(), testSessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1425,7 +1427,7 @@ func TestHandleCreateSession_OK(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"new-session","agentName":"test-agent","namespace":"default","ttlSeconds":3600}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","ttlSeconds":3600}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1435,8 +1437,8 @@ func TestHandleCreateSession_OK(t *testing.T) {
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 	resp := decodeJSON[SessionResponse](t, rec)
-	if resp.Session.ID != "new-session" {
-		t.Fatalf("expected session ID new-session, got %s", resp.Session.ID)
+	if resp.Session.ID != testSessionIDOther {
+		t.Fatalf("expected session ID %s, got %s", testSessionIDOther, resp.Session.ID)
 	}
 	if resp.Session.AgentName != "test-agent" {
 		t.Fatalf("expected agent test-agent, got %s", resp.Session.AgentName)
@@ -1469,7 +1471,7 @@ func TestHandleCreateSession_NoWarmStore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"s1","agentName":"a","namespace":"ns"}`
+	body := `{"id":"` + testSessionID + `","agentName":"a","namespace":"ns"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -1481,13 +1483,13 @@ func TestHandleCreateSession_NoWarmStore(t *testing.T) {
 
 func TestHandleAppendMessage_OK(t *testing.T) {
 	h, _, warm := setupHandler(t)
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
 	body := `{"id":"m10","role":"user","content":"new message","sequenceNum":4}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/messages", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+testSessionID+"/messages", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -1495,8 +1497,8 @@ func TestHandleAppendMessage_OK(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
-	if len(warm.appendedMsgs["s1"]) != 1 {
-		t.Fatalf("expected 1 appended message, got %d", len(warm.appendedMsgs["s1"]))
+	if len(warm.appendedMsgs[testSessionID]) != 1 {
+		t.Fatalf("expected 1 appended message, got %d", len(warm.appendedMsgs[testSessionID]))
 	}
 }
 
@@ -1507,7 +1509,7 @@ func TestHandleAppendMessage_NotFound(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"id":"m10","role":"user","content":"msg"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/nonexistent/messages", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/messages", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1522,7 +1524,7 @@ func TestHandleAppendMessage_NoBody(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/messages", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+testSessionID+"/messages", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1533,13 +1535,13 @@ func TestHandleAppendMessage_NoBody(t *testing.T) {
 
 func TestHandleUpdateStats_OK(t *testing.T) {
 	h, _, warm := setupHandler(t)
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
 	body := `{"addInputTokens":100,"addOutputTokens":50,"addMessages":1}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/s1/stats", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1562,7 +1564,7 @@ func TestHandleUpdateStats_NotFound(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"addMessages":1}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/nonexistent/stats", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/stats", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1573,13 +1575,13 @@ func TestHandleUpdateStats_NotFound(t *testing.T) {
 
 func TestHandleRefreshTTL_OK(t *testing.T) {
 	h, _, warm := setupHandler(t)
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
 	body := `{"ttlSeconds":7200}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/ttl", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+testSessionID+"/ttl", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1602,7 +1604,7 @@ func TestHandleRefreshTTL_NotFound(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"ttlSeconds":3600}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/nonexistent/ttl", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/ttl", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1621,19 +1623,19 @@ func TestWriteError_MissingBody(t *testing.T) {
 
 func TestHandleDeleteSession_OK(t *testing.T) {
 	h, _, warm := setupHandler(t)
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", rec.Code)
 	}
-	if _, ok := warm.sessions["s1"]; ok {
+	if _, ok := warm.sessions[testSessionID]; ok {
 		t.Fatal("expected session to be deleted from warm store")
 	}
 }
@@ -1644,7 +1646,7 @@ func TestHandleDeleteSession_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/00000000-0000-0000-0000-000000000099", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1661,7 +1663,7 @@ func TestHandleDeleteSession_NoWarmStore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1672,7 +1674,7 @@ func TestHandleDeleteSession_NoWarmStore(t *testing.T) {
 
 func TestHandleDeleteSession_AuditEvent(t *testing.T) {
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	reg := providers.NewRegistry()
 	reg.SetWarmStore(warm)
@@ -1684,7 +1686,7 @@ func TestHandleDeleteSession_AuditEvent(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
 	req.Header.Set("User-Agent", "TestBrowser/1.0")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -1716,7 +1718,7 @@ func TestHandleCreateSession_AuditEvent(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"new-sess","agentName":"a","namespace":"ns","workspaceName":"ws"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns","workspaceName":"ws"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "TestBrowser/2.0")
@@ -1732,8 +1734,8 @@ func TestHandleCreateSession_AuditEvent(t *testing.T) {
 	if audit.entries[0].EventType != "session_created" {
 		t.Fatalf("expected session_created, got %s", audit.entries[0].EventType)
 	}
-	if audit.entries[0].SessionID != "new-sess" {
-		t.Fatalf("expected session ID new-sess, got %s", audit.entries[0].SessionID)
+	if audit.entries[0].SessionID != testSessionIDOther {
+		t.Fatalf("expected session ID %s, got %s", testSessionIDOther, audit.entries[0].SessionID)
 	}
 	if audit.entries[0].UserAgent != "TestBrowser/2.0" {
 		t.Fatalf("expected UserAgent TestBrowser/2.0, got %s", audit.entries[0].UserAgent)
@@ -1742,7 +1744,7 @@ func TestHandleCreateSession_AuditEvent(t *testing.T) {
 
 func TestHandleRegisterRoutes_WriteEndpoints(t *testing.T) {
 	h, _, warm := setupHandler(t)
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -1753,10 +1755,10 @@ func TestHandleRegisterRoutes_WriteEndpoints(t *testing.T) {
 		body   string
 		want   int
 	}{
-		{http.MethodPost, "/api/v1/sessions", `{"id":"new","agentName":"a","namespace":"ns"}`, http.StatusCreated},
-		{http.MethodPost, "/api/v1/sessions/s1/messages", `{"id":"m","role":"user","content":"hi"}`, http.StatusCreated},
-		{http.MethodPatch, "/api/v1/sessions/s1/stats", `{"addMessages":1}`, http.StatusOK},
-		{http.MethodPost, "/api/v1/sessions/s1/ttl", `{"ttlSeconds":60}`, http.StatusOK},
+		{http.MethodPost, "/api/v1/sessions", `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns"}`, http.StatusCreated},
+		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/messages", `{"id":"m","role":"user","content":"hi"}`, http.StatusCreated},
+		{http.MethodPatch, "/api/v1/sessions/" + testSessionID + "/stats", `{"addMessages":1}`, http.StatusOK},
+		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/ttl", `{"ttlSeconds":60}`, http.StatusOK},
 	}
 
 	for _, rt := range routes {
@@ -1783,7 +1785,7 @@ func TestHandleCreateSession_BodyTooLarge(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// Send a body larger than 50 bytes.
-	largeBody := `{"id":"s1","agentName":"agent","namespace":"ns","workspaceName":"a-very-long-workspace-name-to-exceed-limit"}`
+	largeBody := `{"id":"` + testSessionID + `","agentName":"agent","namespace":"ns","workspaceName":"a-very-long-workspace-name-to-exceed-limit"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(largeBody))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -1843,7 +1845,7 @@ func TestWriteError_MissingNamespace(t *testing.T) {
 
 func TestHandleUpdateStats_BodyTooLarge(t *testing.T) {
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 	reg := providers.NewRegistry()
 	reg.SetWarmStore(warm)
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
@@ -1854,7 +1856,7 @@ func TestHandleUpdateStats_BodyTooLarge(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"addInputTokens":100,"addOutputTokens":50,"addMessages":1}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/s1/stats", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1869,7 +1871,7 @@ func TestHandleUpdateStats_NoBody(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/s1/stats", nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/"+testSessionID+"/stats", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1880,7 +1882,7 @@ func TestHandleUpdateStats_NoBody(t *testing.T) {
 
 func TestHandleRefreshTTL_BodyTooLarge(t *testing.T) {
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 	reg := providers.NewRegistry()
 	reg.SetWarmStore(warm)
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
@@ -1890,7 +1892,7 @@ func TestHandleRefreshTTL_BodyTooLarge(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"ttlSeconds":7200}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/ttl", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+testSessionID+"/ttl", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1905,7 +1907,7 @@ func TestHandleRefreshTTL_NoBody(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/ttl", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+testSessionID+"/ttl", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1923,7 +1925,7 @@ func TestHandleRefreshTTL_NoWarmStore(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"ttlSeconds":3600}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/nonexistent/ttl", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/ttl", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1934,7 +1936,7 @@ func TestHandleRefreshTTL_NoWarmStore(t *testing.T) {
 
 func TestHandleAppendMessage_BodyTooLarge(t *testing.T) {
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = testSession("s1")
+	warm.sessions[testSessionID] = testSession(testSessionID)
 	reg := providers.NewRegistry()
 	reg.SetWarmStore(warm)
 	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
@@ -1944,7 +1946,7 @@ func TestHandleAppendMessage_BodyTooLarge(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"id":"m10","role":"user","content":"a very long message body exceeding the limit"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/messages", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/"+testSessionID+"/messages", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1963,7 +1965,7 @@ func TestHandleDeleteSession_InternalError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/"+testSessionID, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1982,8 +1984,22 @@ func TestIsMaxBytesError(t *testing.T) {
 }
 
 func TestParseListParams_WithNamespace(t *testing.T) {
+	// "workspace" param takes priority over "namespace" for backwards compat
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/sessions?workspace=ws&namespace=test-ns", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Namespace != "ws" {
+		t.Fatalf("expected namespace ws (from workspace param), got %q", opts.Namespace)
+	}
+}
+
+func TestParseListParams_NamespaceFallback(t *testing.T) {
+	// When "workspace" is absent, "namespace" is used
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?namespace=test-ns", nil)
 	opts, err := parseListParams(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2008,13 +2024,12 @@ func TestParseListParams_WithValidTimeRange(t *testing.T) {
 	}
 }
 
-
 func TestHandleGetSession_GetMessagesError(t *testing.T) {
 	// Test the path where GetSession succeeds but GetMessages returns
 	// a non-NotFound error (the log.Error branch).
 	warm := newMockWarmStore()
-	warm.sessions["s1"] = &session.Session{
-		ID:            "s1",
+	warm.sessions[testSessionID] = &session.Session{
+		ID:            testSessionID,
 		AgentName:     "test-agent",
 		Namespace:     "default",
 		WorkspaceName: "ws1",
@@ -2033,7 +2048,7 @@ func TestHandleGetSession_GetMessagesError(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+testSessionID, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -2059,7 +2074,7 @@ func TestHandleUpdateStats_InternalError(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := strings.NewReader(`{"addInputTokens": 10}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/nonexistent/stats", body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/stats", body)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -2097,7 +2112,7 @@ func TestHandleRefreshTTL_InternalError(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := strings.NewReader(`{"ttlSeconds": 3600}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/nonexistent/ttl", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/ttl", body)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -2151,7 +2166,7 @@ func TestHandleAppendMessage_InternalError(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := strings.NewReader(`{"role": "user", "content": "hello"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/nonexistent/messages", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/00000000-0000-0000-0000-000000000099/messages", body)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -2243,6 +2258,210 @@ func TestHandleGetMessages_MissingSessionID(t *testing.T) {
 
 	h.handleGetMessages(rec, req)
 
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// --- Input validation hardening tests ---
+
+func TestHandleGetSession_InvalidUUID(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/not-a-uuid", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrInvalidSessionID.Error() {
+		t.Fatalf("expected error %q, got %q", ErrInvalidSessionID.Error(), resp.Error)
+	}
+}
+
+func TestHandleDeleteSession_InvalidUUID(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/not-a-uuid", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleCreateSession_InvalidUUID(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"not-a-uuid","agentName":"a","namespace":"ns"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrInvalidSessionID.Error() {
+		t.Fatalf("expected error %q, got %q", ErrInvalidSessionID.Error(), resp.Error)
+	}
+}
+
+func TestHandleCreateSession_EmptyID(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Empty ID should be allowed (server may assign one).
+	body := `{"id":"","agentName":"a","namespace":"ns"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+}
+
+func TestParseListParams_InvalidStatus(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?workspace=ws&status=invalid-status", nil)
+	_, err := parseListParams(req)
+	if err == nil {
+		t.Fatal("expected error for invalid status")
+	}
+	if err != ErrInvalidStatus {
+		t.Fatalf("expected ErrInvalidStatus, got %v", err)
+	}
+}
+
+func TestHandleListSessions_InvalidStatus(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?workspace=ws&status=bogus", nil)
+	rec := httptest.NewRecorder()
+	h.handleListSessions(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrInvalidStatus.Error() {
+		t.Fatalf("expected error %q, got %q", ErrInvalidStatus.Error(), resp.Error)
+	}
+}
+
+func TestHandleSearchSessions_QueryTooLong(t *testing.T) {
+	h, _, _ := setupHandler(t)
+
+	longQ := strings.Repeat("a", maxSearchQueryLen+1)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/search?workspace=ws&q="+longQ, nil)
+	rec := httptest.NewRecorder()
+	h.handleSearchSessions(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrSearchQueryTooLong.Error() {
+		t.Fatalf("expected error %q, got %q", ErrSearchQueryTooLong.Error(), resp.Error)
+	}
+}
+
+func TestParseListParams_TruncatesLongParams(t *testing.T) {
+	longVal := strings.Repeat("x", maxStringParamLen+50)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?workspace="+longVal+"&agent="+longVal, nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(opts.Namespace) != maxStringParamLen {
+		t.Errorf("Namespace length: got %d, want %d", len(opts.Namespace), maxStringParamLen)
+	}
+	if len(opts.AgentName) != maxStringParamLen {
+		t.Errorf("AgentName length: got %d, want %d", len(opts.AgentName), maxStringParamLen)
+	}
+}
+
+func TestParseListParams_CapsOffset(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions?offset=999999", nil)
+	opts, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Offset != maxOffsetLimit {
+		t.Errorf("Offset: got %d, want %d", opts.Offset, maxOffsetLimit)
+	}
+}
+
+func TestTruncateParam(t *testing.T) {
+	if got := truncateParam("short", 10); got != "short" {
+		t.Errorf("expected 'short', got %q", got)
+	}
+	if got := truncateParam("toolongvalue", 5); got != "toolo" {
+		t.Errorf("expected 'toolo', got %q", got)
+	}
+	if got := truncateParam("exact", 5); got != "exact" {
+		t.Errorf("expected 'exact', got %q", got)
+	}
+}
+
+func TestValidSessionStatus(t *testing.T) {
+	valid := []session.SessionStatus{
+		session.SessionStatusActive,
+		session.SessionStatusCompleted,
+		session.SessionStatusError,
+		session.SessionStatusExpired,
+	}
+	for _, s := range valid {
+		if !validSessionStatus(s) {
+			t.Errorf("expected %q to be valid", s)
+		}
+	}
+	if validSessionStatus("bogus") {
+		t.Error("expected 'bogus' to be invalid")
+	}
+	if validSessionStatus("") {
+		t.Error("expected empty string to be invalid")
+	}
+}
+
+func TestWriteError_InvalidStatus(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, ErrInvalidStatus)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestWriteError_SearchQueryTooLong(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, ErrSearchQueryTooLong)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestWriteError_InvalidSessionID(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, ErrInvalidSessionID)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}

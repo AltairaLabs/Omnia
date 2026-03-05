@@ -19,8 +19,11 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func TestEnvInt32(t *testing.T) {
@@ -227,6 +230,23 @@ func TestApplyEnvFallbacks_NoOverrideWhenFlagSet(t *testing.T) {
 	// apiAddr was ":9999" which differs from default ":8080", so env should not override
 	if f.apiAddr != ":9999" {
 		t.Errorf("apiAddr = %q, want :9999", f.apiAddr)
+	}
+}
+
+func TestNewMetricsServer(t *testing.T) {
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", promhttp.Handler())
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	metricsMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("metrics: expected 200, got %d", rec.Code)
+	}
+	ct := rec.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/plain") && !strings.Contains(ct, "application/openmetrics-text") {
+		t.Fatalf("metrics: unexpected Content-Type %q", ct)
 	}
 }
 

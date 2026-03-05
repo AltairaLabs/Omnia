@@ -30,11 +30,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/go-logr/zapr"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
@@ -47,6 +45,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/providers/cold"
 	pgprovider "github.com/altairalabs/omnia/internal/session/providers/postgres"
 	"github.com/altairalabs/omnia/internal/session/providers/redis"
+	"github.com/altairalabs/omnia/pkg/logging"
 
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 )
@@ -141,14 +140,11 @@ func run() error {
 	f := parseFlags()
 
 	// --- Logger ---
-	zapCfg := zap.NewProductionConfig()
-	zapCfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	zapLogger, err := zapCfg.Build()
+	log, syncLog, err := logging.NewLogger()
 	if err != nil {
 		return fmt.Errorf("creating logger: %w", err)
 	}
-	defer func() { _ = zapLogger.Sync() }()
-	log := zapr.NewLogger(zapLogger)
+	defer syncLog()
 
 	// --- Validate ---
 	if f.postgresConn == "" {
@@ -167,14 +163,19 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	log.V(1).Info("postgres pool created",
+		"maxConns", envInt32("PG_MAX_CONNS", defaultMaxConns),
+		"minConns", envInt32("PG_MIN_CONNS", defaultMinConns),
+	)
 
 	// --- Migrations ---
 	if err := runMigrations(f.postgresConn, log); err != nil {
 		return err
 	}
+	log.V(1).Info("migrations complete")
 
 	// --- Providers ---
-	registry, providerCleanup, err := initProviders(ctx, f, pool)
+	registry, providerCleanup, err := initProviders(ctx, f, pool, log)
 	if err != nil {
 		return err
 	}
@@ -186,20 +187,12 @@ func run() error {
 
 	// --- Servers ---
 	healthSrv := newHealthServer(f.healthAddr, pool)
+	metricsSrv := newMetricsServer(f.metricsAddr)
 	apiSrv := &http.Server{Addr: f.apiAddr, Handler: apiMux}
 
-	go func() {
-		log.Info("starting health server", "addr", f.healthAddr)
-		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error(err, "health server error")
-		}
-	}()
-	go func() {
-		log.Info("starting session API server", "addr", f.apiAddr)
-		if err := apiSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error(err, "API server error")
-		}
-	}()
+	startHTTPServer(log, "health", f.healthAddr, healthSrv)
+	startHTTPServer(log, "metrics", f.metricsAddr, metricsSrv)
+	startHTTPServer(log, "session API", f.apiAddr, apiSrv)
 
 	// --- OTLP servers (optional) ---
 	var grpcSrv *grpc.Server
@@ -211,6 +204,7 @@ func run() error {
 	log.Info("session-api ready",
 		"api", f.apiAddr,
 		"health", f.healthAddr,
+		"metrics", f.metricsAddr,
 		"enterprise", f.enterprise,
 		"otlp", f.otlpEnabled,
 	)
@@ -219,25 +213,45 @@ func run() error {
 	<-ctx.Done()
 	log.Info("shutting down")
 
+	shutdownServers(log, apiSrv, healthSrv, metricsSrv, grpcSrv, otlpHTTPSrv)
+	return nil
+}
+
+// startHTTPServer starts an HTTP server in a background goroutine.
+func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
+	go func() {
+		log.Info("starting server", "server", name, "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error(err, "server error", "server", name)
+		}
+	}()
+}
+
+// shutdownServers gracefully stops all servers with a 30-second timeout.
+func shutdownServers(log logr.Logger, apiSrv, healthSrv, metricsSrv *http.Server, grpcSrv *grpc.Server, otlpHTTPSrv *http.Server) {
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutCancel()
 
 	if grpcSrv != nil {
 		grpcSrv.GracefulStop()
 	}
-	if otlpHTTPSrv != nil {
-		if err := otlpHTTPSrv.Shutdown(shutCtx); err != nil {
-			log.Error(err, "OTLP HTTP server shutdown error")
+
+	for _, s := range []struct {
+		name string
+		srv  *http.Server
+	}{
+		{"OTLP HTTP", otlpHTTPSrv},
+		{"metrics", metricsSrv},
+		{"API", apiSrv},
+		{"health", healthSrv},
+	} {
+		if s.srv == nil {
+			continue
+		}
+		if err := s.srv.Shutdown(shutCtx); err != nil {
+			log.Error(err, "server shutdown error", "server", s.name)
 		}
 	}
-	if err := apiSrv.Shutdown(shutCtx); err != nil {
-		log.Error(err, "API server shutdown error")
-	}
-	if err := healthSrv.Shutdown(shutCtx); err != nil {
-		log.Error(err, "health server shutdown error")
-	}
-
-	return nil
 }
 
 // Pool configuration defaults.
@@ -339,8 +353,6 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
-	mux.Handle("GET /metrics", promhttp.Handler())
-
 	return api.MetricsMiddleware(httpMetrics, mux), cleanup
 }
 
@@ -366,6 +378,13 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 	}
 }
 
+// newMetricsServer creates a dedicated HTTP server for Prometheus metrics.
+func newMetricsServer(addr string) *http.Server {
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", promhttp.Handler())
+	return &http.Server{Addr: addr, Handler: metricsMux}
+}
+
 // newHealthServer creates an HTTP server for health and readiness probes.
 func newHealthServer(addr string, pool *pgxpool.Pool) *http.Server {
 	healthMux := http.NewServeMux()
@@ -387,7 +406,7 @@ func newHealthServer(addr string, pool *pgxpool.Pool) *http.Server {
 
 // initProviders creates the tiered storage registry (warm/hot/cold) and returns
 // a cleanup function that closes all providers in reverse order.
-func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*providers.Registry, func(), error) {
+func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool, log logr.Logger) (*providers.Registry, func(), error) {
 	registry := providers.NewRegistry()
 	var cleanups []func()
 
@@ -395,6 +414,7 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*provider
 	warmProvider := pgprovider.NewFromPool(pool)
 	registry.SetWarmStore(warmProvider)
 	cleanups = append(cleanups, func() { _ = warmProvider.Close() })
+	log.V(1).Info("warm store initialized")
 
 	// Hot cache (redis, optional).
 	if f.redisAddrs != "" {
@@ -406,6 +426,7 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*provider
 		}
 		registry.SetHotCache(hotProvider)
 		cleanups = append(cleanups, func() { _ = hotProvider.Close() })
+		log.V(1).Info("hot cache initialized", "addrs", redisCfg.Addrs)
 	}
 
 	// Cold archive (optional).
@@ -430,6 +451,7 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*provider
 		}
 		registry.SetColdArchive(coldProvider)
 		cleanups = append(cleanups, func() { _ = coldProvider.Close() })
+		log.V(1).Info("cold archive initialized", "backend", f.coldBackend)
 	}
 
 	cleanup := func() {
@@ -445,13 +467,15 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool) (*provider
 func initEventPublisher(registry *providers.Registry, log logr.Logger, httpMetrics ...*api.HTTPMetrics) api.EventPublisher {
 	hot, err := registry.HotCache()
 	if err != nil {
+		log.V(1).Info("event publisher skipped", "reason", "no hot cache")
 		return nil
 	}
 	rp, ok := hot.(redisClientProvider)
 	if !ok {
+		log.V(1).Info("event publisher skipped", "reason", "hot cache does not expose Redis client")
 		return nil
 	}
-	log.Info("event publisher enabled (Redis Streams)")
+	log.V(1).Info("event publisher initialized")
 	var m *api.HTTPMetrics
 	if len(httpMetrics) > 0 {
 		m = httpMetrics[0]

@@ -61,6 +61,11 @@ const (
 
 	// ContextKeyStage identifies the processing stage.
 	ContextKeyStage contextKey = "stage"
+
+	// ContextKeyTraceID carries the OpenTelemetry trace ID for log↔trace correlation.
+	// The JSON field name "trace_id" matches the Grafana Loki derived-field regex
+	// so that Loki can link log lines to Tempo traces automatically.
+	ContextKeyTraceID contextKey = "trace_id"
 )
 
 // allContextKeys lists all context keys that should be extracted for logging.
@@ -75,6 +80,7 @@ var allContextKeys = []contextKey{
 	ContextKeyHandler,
 	ContextKeyTool,
 	ContextKeyStage,
+	ContextKeyTraceID,
 }
 
 // WithSessionID returns a new context with the session ID set.
@@ -125,6 +131,11 @@ func WithTool(ctx context.Context, tool string) context.Context {
 // WithStage returns a new context with the processing stage set.
 func WithStage(ctx context.Context, stage string) context.Context {
 	return context.WithValue(ctx, ContextKeyStage, stage)
+}
+
+// WithTraceID returns a new context with the trace ID set.
+func WithTraceID(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, ContextKeyTraceID, traceID)
 }
 
 // LoggingFields holds all standard logging context fields.

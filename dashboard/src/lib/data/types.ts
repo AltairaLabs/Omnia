@@ -105,6 +105,9 @@ export interface LogEntry {
   level: string;
   message: string;
   container?: string;
+  fields?: Record<string, unknown>;
+  /** Original unparsed log line from the container */
+  raw?: string;
 }
 
 // Stats response
@@ -141,20 +144,27 @@ export interface PromptPackContent {
     syntax?: string;
   };
   prompts?: Record<string, PromptDefinition>;
-  tools?: ToolDefinition[];
+  tools?: Record<string, ToolDefinition> | ToolDefinition[];
   fragments?: Record<string, string>;
   validators?: ValidatorDefinition[];
+  evals?: EvalDefinition[];
+  workflow?: WorkflowConfig;
+  skills?: InlineSkill[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface PromptDefinition {
   id?: string;
   name?: string;
   version?: string;
+  description?: string;
   system_template?: string;
   variables?: PromptVariable[];
   tools?: string[];
+  tool_policy?: ToolPolicy;
   parameters?: Record<string, unknown>;
-  validators?: string[];
+  validators?: ValidatorDefinition[];
+  evals?: EvalDefinition[];
 }
 
 export interface PromptVariable {
@@ -162,6 +172,8 @@ export interface PromptVariable {
   type: string;
   required?: boolean;
   values?: string[];
+  description?: string;
+  example?: string;
 }
 
 export interface ToolDefinition {
@@ -171,10 +183,55 @@ export interface ToolDefinition {
 }
 
 export interface ValidatorDefinition {
-  id: string;
+  type: string;
+  enabled?: boolean;
+  fail_on_violation?: boolean;
+  params?: Record<string, unknown>;
+  id?: string;
   name?: string;
   description?: string;
   config?: Record<string, unknown>;
+}
+
+export interface EvalDefinition {
+  id: string;
+  type: string;
+  trigger: string;
+  description?: string;
+  params?: Record<string, unknown>;
+  sample_percentage?: number;
+  metric?: MetricDef;
+}
+
+export interface MetricDef {
+  name: string;
+  type: string;
+  range?: { min: number; max: number };
+}
+
+export interface ToolPolicy {
+  tool_choice?: string;
+  max_rounds?: number;
+  max_tool_calls_per_turn?: number;
+}
+
+export interface WorkflowConfig {
+  version?: number;
+  entry: string;
+  states: Record<string, WorkflowState>;
+}
+
+export interface WorkflowState {
+  prompt_task: string;
+  description?: string;
+  persistence?: string;
+  on_event?: Record<string, string>;
+}
+
+export interface InlineSkill {
+  name: string;
+  description?: string;
+  instructions?: string;
 }
 
 /**

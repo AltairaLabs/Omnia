@@ -26,6 +26,9 @@ export interface EvalResult {
   createdAt: string;
 }
 
+/** Prometheus metric type used for type-aware rendering. */
+export type EvalMetricType = "gauge" | "counter" | "histogram" | "boolean";
+
 export interface EvalResultSummary {
   evalId: string;
   evalType: string;
@@ -35,4 +38,5 @@ export interface EvalResultSummary {
   passRate: number;
   avgScore?: number;
   avgDurationMs?: number;
+  metricType?: EvalMetricType;
 }

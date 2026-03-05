@@ -390,6 +390,99 @@ describe("SessionApiService", () => {
     });
   });
 
+  describe("metadata preservation", () => {
+    it("preserves metadata on transformed messages", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          messages: [
+            { id: "m1", role: "user", content: "Hello", timestamp: "2024-01-01T00:00:00Z", metadata: { source: "web", custom_key: "value" } },
+            { id: "m2", role: "assistant", content: "Hi!", timestamp: "2024-01-01T00:00:01Z", metadata: { model: "gpt-4" } },
+          ],
+          hasMore: false,
+        }),
+      });
+
+      const result = await service.getSessionMessages("ws", "s1");
+
+      expect(result.messages[0].metadata).toEqual({ source: "web", custom_key: "value" });
+      expect(result.messages[1].metadata).toEqual({ model: "gpt-4" });
+    });
+
+    it("leaves metadata undefined when not present", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          messages: [
+            { id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" },
+          ],
+          hasMore: false,
+        }),
+      });
+
+      const result = await service.getSessionMessages("ws", "s1");
+
+      expect(result.messages[0].metadata).toBeUndefined();
+    });
+
+    it("parses duration_ms from metadata into ToolCall.duration", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          messages: [
+            { id: "m1", role: "assistant", content: '{"name":"search","arguments":{"q":"test"}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call", duration_ms: "150" }, toolCallId: "tc1" },
+            { id: "m2", role: "system", content: '"ok"', timestamp: "2024-01-01T00:00:02Z", metadata: { type: "tool_result" }, toolCallId: "tc1" },
+            { id: "m3", role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:03Z" },
+          ],
+          hasMore: false,
+        }),
+      });
+
+      const result = await service.getSessionMessages("ws", "s1");
+
+      expect(result.messages[0].toolCalls![0].duration).toBe(150);
+    });
+
+    it("leaves duration undefined when duration_ms is absent", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          messages: [
+            { id: "m1", role: "assistant", content: '{"name":"run","arguments":{}}', timestamp: "2024-01-01T00:00:01Z", metadata: { type: "tool_call" }, toolCallId: "tc1" },
+            { id: "m2", role: "assistant", content: "Done", timestamp: "2024-01-01T00:00:02Z" },
+          ],
+          hasMore: false,
+        }),
+      });
+
+      const result = await service.getSessionMessages("ws", "s1");
+
+      expect(result.messages[0].toolCalls![0].duration).toBeUndefined();
+    });
+
+    it("passes workflow event messages through with metadata", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          messages: [
+            { id: "m1", role: "user", content: "start", timestamp: "2024-01-01T00:00:00Z" },
+            { id: "m2", role: "system", content: "Workflow started", timestamp: "2024-01-01T00:00:01Z", metadata: { type: "workflow_transition", from: "idle", to: "running" } },
+            { id: "m3", role: "assistant", content: "Working", timestamp: "2024-01-01T00:00:02Z" },
+          ],
+          hasMore: false,
+        }),
+      });
+
+      const result = await service.getSessionMessages("ws", "s1");
+
+      // Workflow event message should appear (it's not a tool_call or tool_result)
+      const workflowMsg = result.messages.find(m => m.metadata?.type === "workflow_transition");
+      expect(workflowMsg).toBeDefined();
+      expect(workflowMsg!.metadata!.from).toBe("idle");
+      expect(workflowMsg!.metadata!.to).toBe("running");
+    });
+  });
+
   describe("getSessionEvalResults", () => {
     it("fetches eval results for a session", async () => {
       const evalResults = [
@@ -438,119 +531,4 @@ describe("SessionApiService", () => {
     });
   });
 
-  describe("getEvalResultsSummary", () => {
-    it("fetches summary with no params", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ summaries: [{ evalId: "tone", totalRuns: 10, passedRuns: 8 }] }),
-      });
-
-      const result = await service.getEvalResultsSummary("ws");
-
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/eval-results/summary");
-      expect(result).toHaveLength(1);
-      expect(result[0].evalId).toBe("tone");
-    });
-
-    it("passes filter params", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ summaries: [] }),
-      });
-
-      await service.getEvalResultsSummary("ws", {
-        agentName: "agent-1",
-        createdAfter: "2026-01-01",
-        createdBefore: "2026-02-01",
-      });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("agentName=agent-1");
-      expect(url).toContain("createdAfter=2026-01-01");
-      expect(url).toContain("createdBefore=2026-02-01");
-    });
-
-    it("returns empty on 404", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
-
-      const result = await service.getEvalResultsSummary("ws");
-      expect(result).toEqual([]);
-    });
-
-    it("throws on server error", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
-
-      await expect(service.getEvalResultsSummary("ws")).rejects.toThrow("Failed to fetch eval results summary");
-    });
-
-    it("handles response with no summaries field", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-
-      const result = await service.getEvalResultsSummary("ws");
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe("getEvalResults", () => {
-    it("fetches eval results with no params", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ evalResults: [{ id: "r1", evalId: "tone" }], total: 1 }),
-      });
-
-      const result = await service.getEvalResults("ws");
-
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/eval-results");
-      expect(result.evalResults).toHaveLength(1);
-      expect(result.total).toBe(1);
-    });
-
-    it("passes all filter params", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ evalResults: [], total: 0 }),
-      });
-
-      await service.getEvalResults("ws", {
-        agentName: "a1",
-        evalId: "tone",
-        passed: false,
-        limit: 25,
-        offset: 10,
-      });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("agentName=a1");
-      expect(url).toContain("evalId=tone");
-      expect(url).toContain("passed=false");
-      expect(url).toContain("limit=25");
-      expect(url).toContain("offset=10");
-    });
-
-    it("returns empty on 403", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 403, statusText: "Forbidden" });
-
-      const result = await service.getEvalResults("ws");
-      expect(result).toEqual({ evalResults: [], total: 0 });
-    });
-
-    it("throws on server error", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
-
-      await expect(service.getEvalResults("ws")).rejects.toThrow("Failed to fetch eval results");
-    });
-
-    it("handles response with no evalResults field", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({}),
-      });
-
-      const result = await service.getEvalResults("ws");
-      expect(result).toEqual({ evalResults: [], total: 0 });
-    });
-  });
 });

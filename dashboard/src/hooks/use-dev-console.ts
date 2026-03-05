@@ -7,6 +7,7 @@ import type {
   ServerMessage,
   FileAttachment,
   ContentPart,
+  MediaChunkInfo,
 } from "@/types/websocket";
 import { useConsoleStore, useSession } from "@/stores";
 import { generateId } from "@/lib/utils";
@@ -48,6 +49,58 @@ function extractTextFromParts(parts: ContentPart[]): string {
     .filter((part) => part.type === "text" && part.text)
     .map((part) => part.text!)
     .join("\n");
+}
+
+/**
+ * Assemble completed media chunks into a FileAttachment.
+ * Called when the final chunk (is_last) arrives for a media stream.
+ */
+function assembleMediaAttachment(
+  mediaId: string,
+  mimeType: string,
+  chunks: MediaChunkInfo[]
+): FileAttachment {
+  const sorted = chunks.sort((a, b) => a.sequence - b.sequence);
+  const binaryParts = sorted
+    .map((c) => c.data)
+    .filter(Boolean)
+    .map((b64) => Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)));
+  const blob = new Blob(binaryParts, { type: mimeType });
+  const blobUrl = URL.createObjectURL(blob);
+
+  return {
+    id: mediaId,
+    name: `media-${mediaId}`,
+    type: mimeType,
+    size: blob.size,
+    dataUrl: blobUrl,
+  };
+}
+
+/**
+ * Handle a streaming text chunk message.
+ * Appends to existing assistant message or creates a new one.
+ */
+function handleChunkMessage(
+  message: ServerMessage,
+  currentMessages: ConsoleMessage[],
+  updateLast: (updater: (msg: ConsoleMessage) => ConsoleMessage) => void,
+  addMessage: (msg: ConsoleMessage) => void
+) {
+  const lastMsg = currentMessages[currentMessages.length - 1];
+  const isStreamingAssistant = lastMsg?.isStreaming && lastMsg.role === "assistant";
+  if (isStreamingAssistant) {
+    updateLast((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
+  } else {
+    addMessage({
+      id: generateId(),
+      role: "assistant",
+      content: message.content || "",
+      timestamp: new Date(message.timestamp),
+      isStreaming: true,
+      toolCalls: [],
+    });
+  }
 }
 
 /**
@@ -116,6 +169,7 @@ export function useDevConsole({
 }: UseDevConsoleOptions = {}): UseDevConsoleReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
+  const mediaChunksRef = useRef<Map<string, MediaChunkInfo[]>>(new Map());
 
   // Use persistent store for state
   const tabId = customSessionId || `dev-console-${projectId || "default"}`;
@@ -183,23 +237,9 @@ export function useDevConsole({
         break;
       }
 
-      case "chunk": {
-        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
-        const isStreamingAssistant = lastMsg?.isStreaming && lastMsg.role === "assistant";
-        if (isStreamingAssistant) {
-          updateLastMessageInStore((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
-        } else {
-          addMessageToStore({
-            id: generateId(),
-            role: "assistant",
-            content: message.content || "",
-            timestamp: new Date(message.timestamp),
-            isStreaming: true,
-            toolCalls: [],
-          });
-        }
+      case "chunk":
+        handleChunkMessage(message, messagesRef.current, updateLastMessageInStore, addMessageToStore);
         break;
-      }
 
       case "done": {
         const hasParts = message.parts && message.parts.length > 0;
@@ -242,6 +282,25 @@ export function useDevConsole({
           return { ...msg, toolCalls };
         });
         break;
+
+      case "media_chunk": {
+        if (!message.media_chunk) break;
+        const mc = message.media_chunk;
+        const chunks = mediaChunksRef.current;
+        const existing = chunks.get(mc.media_id) || [];
+        existing.push(mc);
+        chunks.set(mc.media_id, existing);
+
+        if (mc.is_last) {
+          const attachment = assembleMediaAttachment(mc.media_id, mc.mime_type, existing);
+          updateLastMessageInStore((msg) => ({
+            ...msg,
+            attachments: [...(msg.attachments || []), attachment],
+          }));
+          chunks.delete(mc.media_id);
+        }
+        break;
+      }
 
       case "error": {
         const errorMsg = message.error?.message || "Unknown error";

@@ -26,43 +26,52 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/stats"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
+	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register default eval type handlers
+	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
+	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/k8s"
+	"github.com/altairalabs/omnia/pkg/logging"
+	pkmetrics "github.com/altairalabs/omnia/pkg/metrics"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
+	"github.com/go-logr/zapr"
 )
 
 func main() {
-	// Create logger with configurable log level
-	var zapLog *zap.Logger
-	var err error
+	// Initialize global OpenTelemetry text map propagator for trace context propagation.
+	// This must be set before any gRPC operations to ensure trace context flows through gRPC calls.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
-	logLevel := os.Getenv("LOG_LEVEL")
-	if logLevel == "debug" || logLevel == "trace" {
-		cfg := zap.NewDevelopmentConfig()
-		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-		zapLog, err = cfg.Build()
-	} else {
-		zapLog, err = zap.NewProduction()
-	}
+	// Initialize logger (respects LOG_LEVEL env var).
+	// Create the Zap logger directly so we can derive both logr (for Omnia)
+	// and slog (for PromptKit SDK) from the same Zap core without a lossy bridge.
+	zapLog, err := logging.NewZapLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() { _ = zapLog.Sync() }()
 	log := zapr.NewLogger(zapLog)
+	sdkLogger := logging.SlogFromZap(zapLog)
+	logger.SetLogger(sdkLogger) // Set immediately so all PromptKit logging uses the Zap backend
 
 	// Load configuration — prefer CRD reading, fall back to env vars
 	cfg, err := pkruntime.LoadConfigWithContext(context.Background())
@@ -84,19 +93,54 @@ func main() {
 		"mockProvider", cfg.MockProvider,
 		"toolsConfigPath", cfg.ToolsConfigPath,
 		"tracingEnabled", cfg.TracingEnabled,
-		"evalEnabled", cfg.EvalEnabled)
+		"evalEnabled", cfg.EvalEnabled,
+		"sessionAPIURL", cfg.SessionAPIURL)
 
 	// Load eval definitions and create collector if evals are enabled
 	var evalCollector *evals.MetricCollector
 	var evalDefs []evals.EvalDef
 	if cfg.EvalEnabled {
-		defs, err := pkruntime.LoadPackEvalDefs(cfg.PromptPackPath)
+		// Load ALL eval definitions (pack-level + prompt-level) so that
+		// per-turn evals defined inside prompts are also executed.
+		defs, err := pkruntime.LoadAllEvalDefs(cfg.PromptPackPath)
 		if err != nil {
 			log.Error(err, "failed to load eval definitions from pack, continuing without evals")
 		} else {
 			evalDefs = defs
-			evalCollector = evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+			evalCollector = evals.NewMetricCollector(
+				evals.WithNamespace("omnia_eval"),
+				evals.WithLabels(map[string]string{
+					"agent":           cfg.AgentName,
+					"namespace":       cfg.Namespace,
+					"promptpack_name": cfg.PromptPackName,
+				}),
+			)
 			log.Info("evals enabled", "evalCount", len(evalDefs))
+		}
+
+		// Validate all eval types have registered handlers.
+		// This surfaces misconfigured eval types at startup rather than silently
+		// failing when conversations run.
+		if missing := pkruntime.ValidateEvalDefs(evalDefs); len(missing) > 0 {
+			log.Error(fmt.Errorf("unregistered eval types: %v", missing),
+				"some eval types in the pack have no registered handler and will fail at runtime",
+				"missingTypes", missing, "evalCount", len(evalDefs))
+		}
+	}
+
+	// Validate pack content and report to AgentRuntime status.
+	// This runs regardless of whether evals are enabled — it validates
+	// the pack file itself and any eval definitions found.
+	packValidationWarnings := validatePackContent(cfg.PromptPackPath, evalDefs, log)
+	if cfg.AgentName != "" && cfg.Namespace != "" {
+		patchCtx, patchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer patchCancel()
+		k8sClient, k8sErr := k8s.NewClient()
+		if k8sErr != nil {
+			log.Error(k8sErr, "failed to create k8s client for pack validation reporting")
+		} else if patchErr := reportPackValidation(patchCtx, k8sClient,
+			cfg.AgentName, cfg.Namespace, packValidationWarnings); patchErr != nil {
+			log.Error(patchErr, "failed to patch PackContentValid condition")
 		}
 	}
 
@@ -148,6 +192,10 @@ func main() {
 			log.Error(err, "failed to initialize tracing")
 			// Continue without tracing - it's optional
 		} else {
+			tracingProvider = tracingProvider.WithLogger(log)
+			// Set as global provider so PromptKit SDK can use it.
+			// This is safe because runtime is isolated in its own container.
+			otel.SetTracerProvider(tracingProvider.TracerProvider())
 			log.Info("tracing initialized",
 				"endpoint", cfg.TracingEndpoint,
 				"sampleRate", cfg.TracingSampleRate)
@@ -184,8 +232,10 @@ func main() {
 	// Create runtime server
 	serverOpts := []pkruntime.ServerOption{
 		pkruntime.WithLogger(log),
+		pkruntime.WithSlogLogger(sdkLogger),
 		pkruntime.WithPackPath(cfg.PromptPackPath),
 		pkruntime.WithPromptName(cfg.PromptName),
+		pkruntime.WithPromptPackName(cfg.PromptPackName),
 		pkruntime.WithStateStore(store),
 		pkruntime.WithModel(cfg.Model),
 		pkruntime.WithMockProvider(cfg.MockProvider),
@@ -201,10 +251,25 @@ func main() {
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, pkruntime.WithTracingProvider(tracingProvider))
 	}
+	if cfg.PromptPackVersion != "" {
+		serverOpts = append(serverOpts, pkruntime.WithPromptPackVersion(cfg.PromptPackVersion))
+	}
+	// Wire session recording via session-api when URL is configured
+	if cfg.SessionAPIURL != "" {
+		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log)
+		serverOpts = append(serverOpts, pkruntime.WithSessionStore(sessionStore))
+		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
+	}
+
 	if evalCollector != nil {
+		evalM := pkmetrics.NewEvalMetrics(pkmetrics.EvalMetricsConfig{
+			AgentName: cfg.AgentName,
+			Namespace: cfg.Namespace,
+		})
 		serverOpts = append(serverOpts,
 			pkruntime.WithEvalCollector(evalCollector),
 			pkruntime.WithEvalDefs(evalDefs),
+			pkruntime.WithEvalMetrics(evalM),
 		)
 	}
 	runtimeServer := pkruntime.NewServer(serverOpts...)
@@ -227,11 +292,18 @@ func main() {
 
 	// Create gRPC server with increased message size for multimodal content
 	const maxMsgSize = 16 * 1024 * 1024 // 16MB to support base64-encoded images
-	grpcServer := grpc.NewServer(
+	var grpcOpts []grpc.ServerOption
+	grpcOpts = append(grpcOpts,
 		grpc.MaxRecvMsgSize(maxMsgSize),
 		grpc.MaxSendMsgSize(maxMsgSize),
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 	)
+	if tracingProvider != nil {
+		grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithTracerProvider(tracingProvider.TracerProvider()),
+			otelgrpc.WithFilter(isNotHealthCheck),
+		)))
+	}
+	grpcServer := grpc.NewServer(grpcOpts...)
 	runtimev1.RegisterRuntimeServiceServer(grpcServer, runtimeServer)
 
 	// Register health service
@@ -264,10 +336,17 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if evalCollector != nil {
+		// Disable compression so we can safely append SDK eval metrics after
+		// the standard Prometheus output. promhttp.Handler() negotiates gzip
+		// with the client; appending raw bytes after a gzip stream corrupts
+		// the response ("gzip: invalid header").
+		uncompressedHandler := promhttp.HandlerFor(
+			prometheus.DefaultGatherer,
+			promhttp.HandlerOpts{DisableCompression: true},
+		)
 		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-			// Write standard Prometheus metrics first
-			promhttp.Handler().ServeHTTP(w, r)
-			// Append eval metrics
+			uncompressedHandler.ServeHTTP(w, r)
+			// Append SDK-internal eval metrics for backward compatibility
 			_ = evalCollector.WritePrometheus(w)
 		})
 	} else {
@@ -307,4 +386,9 @@ func main() {
 	grpcServer.GracefulStop()
 
 	log.Info("shutdown complete")
+}
+
+// isNotHealthCheck filters out gRPC health check RPCs from tracing.
+func isNotHealthCheck(info *stats.RPCTagInfo) bool {
+	return info.FullMethodName != "/omnia.runtime.v1.RuntimeService/Health"
 }

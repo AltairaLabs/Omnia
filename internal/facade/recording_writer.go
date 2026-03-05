@@ -203,6 +203,7 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 		if storeErr := w.store.UpdateSessionStats(context.Background(), w.sessionID, session.SessionStatsUpdate{
 			AddMessages: 1,
 			SetStatus:   session.SessionStatusError,
+			SetEndedAt:  time.Now(),
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for error")
 		}

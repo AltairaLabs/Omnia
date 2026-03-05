@@ -26,9 +26,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
@@ -36,6 +36,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 const (
@@ -46,14 +47,20 @@ const (
 )
 
 func main() {
+	// Initialize global OpenTelemetry text map propagator for trace context propagation.
+	// This must be set before any gRPC operations to ensure trace context flows through gRPC calls.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
 	// Initialize logger
-	zapLog, err := zap.NewProduction()
+	log, syncLog, err := logging.NewLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() { _ = zapLog.Sync() }()
-	log := zapr.NewLogger(zapLog)
+	defer syncLog()
 
 	// Load configuration — prefers CRD reading, falls back to env vars
 	cfg, err := agent.LoadConfig(context.Background())
@@ -98,6 +105,7 @@ func main() {
 			log.Error(tracingErr, "failed to initialize tracing")
 			// Continue without tracing - it's optional
 		} else {
+			tracingProvider = tracingProvider.WithLogger(log)
 			defer func() {
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer shutdownCancel()
@@ -120,7 +128,7 @@ func main() {
 	defer closeStore(store, log)
 
 	// Create message handler based on mode
-	handler, handlerCleanup := createHandler(cfg, log)
+	handler, handlerCleanup := createHandler(cfg, log, tracingProvider)
 	if handlerCleanup != nil {
 		defer handlerCleanup()
 	}
@@ -157,13 +165,15 @@ func main() {
 		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
 	}
 
-	// Create facade HTTP server
+	// Create facade HTTP server.
+	// WriteTimeout is intentionally omitted: WebSocket connections are long-lived
+	// and use ping/pong for keepalive. An HTTP WriteTimeout would kill the
+	// connection during slow LLM inference (e.g. Ollama tool-calling).
 	facadeServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.FacadePort),
-		Handler:      mux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		Addr:        fmt.Sprintf(":%d", cfg.FacadePort),
+		Handler:     mux,
+		ReadTimeout: readTimeout,
+		IdleTimeout: idleTimeout,
 	}
 
 	// Create health check server
@@ -250,7 +260,7 @@ func initSessionStore(cfg *agent.Config, log logr.Logger) (session.Store, error)
 	}
 }
 
-func closeStore(store session.Store, log interface{ Error(error, string, ...any) }) {
+func closeStore(store session.Store, log logr.Logger) {
 	if closer, ok := store.(interface{ Close() error }); ok {
 		if err := closer.Close(); err != nil {
 			log.Error(err, "error closing session store")
@@ -308,21 +318,21 @@ func redactURL(url string) string {
 
 // createHandler creates the appropriate message handler based on configuration.
 // Returns the handler and an optional cleanup function.
-func createHandler(cfg *agent.Config, log interface {
-	Info(string, ...any)
-	Error(error, string, ...any)
-}) (facade.MessageHandler, func()) {
+func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (facade.MessageHandler, func()) {
 	switch cfg.HandlerMode {
 	case agent.HandlerModeEcho:
 		log.Info("using echo handler mode")
 		return agent.NewEchoHandler(), nil
 	case agent.HandlerModeDemo:
 		log.Info("using demo handler mode with LLM metrics")
+		var demoOpts []agent.DemoHandlerOption
+		if tp != nil {
+			demoOpts = append(demoOpts, agent.WithDemoTracing(tp))
+		}
 		return agent.NewDemoHandlerWithMetrics(agent.DemoMetricsConfig{
 			AgentName: cfg.AgentName,
 			Namespace: cfg.Namespace,
-			// PromptPack and Provider ref fields can be set when agent config supports them
-		}), nil
+		}, demoOpts...), nil
 	case agent.HandlerModeRuntime:
 		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
 
@@ -332,11 +342,18 @@ func createHandler(cfg *agent.Config, log interface {
 		maxRetries := 10
 		backoff := 500 * time.Millisecond
 
+		// Build RuntimeClient config with optional tracing
+		runtimeCfg := facade.RuntimeClientConfig{
+			Address:     cfg.RuntimeAddress,
+			DialTimeout: 5 * time.Second,
+			Log:         log,
+		}
+		if tp != nil {
+			runtimeCfg.TracerProvider = tp.TracerProvider()
+		}
+
 		for i := 0; i < maxRetries; i++ {
-			client, err = facade.NewRuntimeClient(facade.RuntimeClientConfig{
-				Address:     cfg.RuntimeAddress,
-				DialTimeout: 5 * time.Second,
-			})
+			client, err = facade.NewRuntimeClient(runtimeCfg)
 			if err == nil {
 				log.Info("connected to runtime", "address", cfg.RuntimeAddress, "attempt", i+1)
 				break
@@ -367,10 +384,9 @@ func createHandler(cfg *agent.Config, log interface {
 
 // initMediaStorage creates the appropriate media storage backend based on configuration.
 // Returns the storage and an optional cleanup function.
-func initMediaStorage(cfg *agent.Config, log interface {
-	Info(string, ...any)
-	Error(error, string, ...any)
-}) (media.Storage, func()) {
+//
+//nolint:gocognit // switch over storage backends
+func initMediaStorage(cfg *agent.Config, log logr.Logger) (media.Storage, func()) {
 	ctx := context.Background()
 
 	switch cfg.MediaStorageType {

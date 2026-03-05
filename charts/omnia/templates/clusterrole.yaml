@@ -116,6 +116,7 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies
       - agentruntimes
       - promptpacks
       - providers
@@ -132,6 +133,7 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies/finalizers
       - agentruntimes/finalizers
       - promptpacks/finalizers
       - providers/finalizers
@@ -142,6 +144,7 @@ rules:
   - apiGroups:
       - omnia.altairalabs.ai
     resources:
+      - agentpolicies/status
       - agentruntimes/status
       - promptpacks/status
       - providers/status

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+
 	// Register all providers via blank imports
 	// TODO: PromptKit should provide a "providers/all" package for convenience
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
@@ -39,7 +41,9 @@ import (
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -47,17 +51,21 @@ import (
 type Server struct {
 	runtimev1.UnimplementedRuntimeServiceServer
 
-	log            logr.Logger
-	packPath       string
-	promptName     string
-	stateStore     statestore.Store
-	mockProvider   bool
-	mockConfigPath string
-	sdkOptions     []sdk.Option
-	conversations  map[string]*sdk.Conversation
-	conversationMu sync.RWMutex
-	healthy        bool
-	mu             sync.RWMutex
+	log               logr.Logger
+	sdkLogger         *slog.Logger
+	packPath          string
+	promptPackName    string
+	promptPackVersion string
+	promptName        string
+	stateStore        statestore.Store
+	mockProvider      bool
+	mockConfigPath    string
+	sdkOptions        []sdk.Option
+	conversations     map[string]*sdk.Conversation
+	turnIndices       map[string]int // Track turn count per session
+	conversationMu    sync.RWMutex
+	healthy           bool
+	mu                sync.RWMutex
 
 	// Tool management
 	toolManager      *tools.Manager
@@ -71,6 +79,7 @@ type Server struct {
 	// Evals
 	evalCollector *evals.MetricCollector
 	evalDefs      []evals.EvalDef
+	evalMetrics   metrics.EvalMetricsRecorder
 
 	// Metrics
 	metrics        *Metrics
@@ -79,6 +88,9 @@ type Server struct {
 	model          string
 	baseURL        string // Custom base URL for provider (e.g., Ollama endpoint)
 
+	// Session recording (Pattern C)
+	sessionStore session.Store
+
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
 }
@@ -86,10 +98,20 @@ type Server struct {
 // ServerOption configures the server.
 type ServerOption func(*Server)
 
-// WithLogger sets the logger for the server.
+// WithLogger sets the logr.Logger for the server's own structured logging.
+// To also set the slog.Logger passed to the PromptKit SDK, use WithSlogLogger.
 func WithLogger(log logr.Logger) ServerOption {
 	return func(s *Server) {
 		s.log = log
+	}
+}
+
+// WithSlogLogger sets the *slog.Logger passed to the PromptKit SDK.
+// Create this via logging.SlogFromZap so it writes directly to the Zap core,
+// producing output identical to the logr logger set via WithLogger.
+func WithSlogLogger(l *slog.Logger) ServerOption {
+	return func(s *Server) {
+		s.sdkLogger = l
 	}
 }
 
@@ -104,6 +126,20 @@ func WithPackPath(path string) ServerOption {
 func WithPromptName(name string) ServerOption {
 	return func(s *Server) {
 		s.promptName = name
+	}
+}
+
+// WithPromptPackName sets the PromptPack CRD name for tracing.
+func WithPromptPackName(name string) ServerOption {
+	return func(s *Server) {
+		s.promptPackName = name
+	}
+}
+
+// WithPromptPackVersion sets the PromptPack version for tracing.
+func WithPromptPackVersion(version string) ServerOption {
+	return func(s *Server) {
+		s.promptPackVersion = version
 	}
 }
 
@@ -203,6 +239,21 @@ func WithEvalDefs(defs []evals.EvalDef) ServerOption {
 	}
 }
 
+// WithEvalMetrics sets the eval Prometheus metrics recorder for the server.
+func WithEvalMetrics(m metrics.EvalMetricsRecorder) ServerOption {
+	return func(s *Server) {
+		s.evalMetrics = m
+	}
+}
+
+// WithSessionStore sets the session store for recording events to session-api.
+// When set, the runtime bridges PromptKit events to session-api via OmniaEventStore.
+func WithSessionStore(store session.Store) ServerOption {
+	return func(s *Server) {
+		s.sessionStore = store
+	}
+}
+
 // WithMediaBasePath sets the base path for resolving mock:// URLs.
 func WithMediaBasePath(path string) ServerOption {
 	return func(s *Server) {
@@ -238,6 +289,7 @@ func WithTruncationStrategy(strategy string) ServerOption {
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{
 		conversations: make(map[string]*sdk.Conversation),
+		turnIndices:   make(map[string]int),
 		healthy:       true,
 	}
 

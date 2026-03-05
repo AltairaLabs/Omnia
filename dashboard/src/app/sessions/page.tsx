@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,6 @@ import {
   Search,
   Coins,
   Bot,
-  ExternalLink,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
@@ -99,12 +98,12 @@ function TableRowSkeleton() {
       <TableCell className="text-right"><Skeleton className="h-4 w-8 ml-auto" /></TableCell>
       <TableCell className="text-right"><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
       <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-      <TableCell><Skeleton className="h-8 w-8" /></TableCell>
     </TableRow>
   );
 }
 
 export default function SessionsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
@@ -293,7 +292,6 @@ export default function SessionsPage() {
                 <TableHead className="text-right">Tools</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
                 <TableHead>Last Message</TableHead>
-                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -308,13 +306,17 @@ export default function SessionsPage() {
               )}
               {!isLoading && sessions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     No sessions found
                   </TableCell>
                 </TableRow>
               )}
               {!isLoading && sessions.map((session) => (
-                <TableRow key={session.id}>
+                <TableRow
+                  key={session.id}
+                  className="cursor-pointer"
+                  onClick={() => router.push(`/sessions/${session.id}`)}
+                >
                   <TableCell className="font-mono text-sm">{session.id}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -331,13 +333,6 @@ export default function SessionsPage() {
                   <TableCell className="text-right">{session.totalTokens.toLocaleString()}</TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground text-sm">
                     {session.lastMessage}
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/sessions/${session.id}`}>
-                        <ExternalLink className="h-4 w-4" />
-                      </Link>
-                    </Button>
                   </TableCell>
                 </TableRow>
               ))}

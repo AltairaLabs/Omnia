@@ -3,7 +3,11 @@
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Bot, GitBranch, Clock, FileCode, Wrench, MessageSquare, FileText, Shield, Variable } from "lucide-react";
+import {
+  ArrowLeft, Bot, GitBranch, Clock, FileCode, Wrench,
+  MessageSquare, FileText, Shield, Variable, Activity,
+  Workflow, Sparkles, ArrowRight,
+} from "lucide-react";
 import { Header } from "@/components/layout";
 import { StatusBadge } from "@/components/agents";
 import { Button } from "@/components/ui/button";
@@ -22,7 +26,13 @@ import {
 } from "@/components/ui/accordion";
 import { usePromptPack, usePromptPackContent, useAgents } from "@/hooks";
 import { useWorkspaces } from "@/hooks/use-workspaces";
-import type { PromptDefinition } from "@/lib/data/types";
+import type {
+  PromptDefinition,
+  ToolDefinition,
+  ValidatorDefinition,
+  EvalDefinition,
+  ToolPolicy,
+} from "@/lib/data/types";
 
 interface PromptPackDetailPageProps {
   params: Promise<{ name: string }>;
@@ -34,17 +44,145 @@ function formatDate(timestamp?: string): string {
 }
 
 // Helper to convert prompts Record to array for iteration
-function promptsToArray(prompts?: Record<string, PromptDefinition>): Array<PromptDefinition & { id: string }> {
+function promptsToArray(
+  prompts?: Record<string, PromptDefinition>
+): Array<PromptDefinition & { id: string }> {
   if (!prompts) return [];
   return Object.entries(prompts).map(([id, prompt]) => ({ ...prompt, id }));
 }
+
+// Helper to normalize tools (Record or array) to array
+function toolsToArray(
+  tools?: Record<string, ToolDefinition> | ToolDefinition[]
+): ToolDefinition[] {
+  if (!tools) return [];
+  if (Array.isArray(tools)) return tools;
+  return Object.values(tools);
+}
+
+// --- Sub-components for Content tab sections ---
+
+function EvalsList({ evals, title }: { evals: EvalDefinition[]; title: string }) {
+  return (
+    <div>
+      <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+        <Activity className="h-4 w-4" />
+        {title} ({evals.length})
+      </p>
+      <div className="space-y-2">
+        {evals.map((ev) => (
+          <div key={ev.id} className="border rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-medium text-sm">{ev.id}</span>
+              <Badge variant="secondary" className="text-xs">{ev.type}</Badge>
+              <Badge variant="outline" className="text-xs">{ev.trigger}</Badge>
+              {ev.sample_percentage != null && (
+                <span className="text-xs text-muted-foreground">
+                  {ev.sample_percentage}% sample
+                </span>
+              )}
+            </div>
+            {ev.description && (
+              <p className="text-xs text-muted-foreground mb-1">{ev.description}</p>
+            )}
+            {ev.metric && (
+              <div className="text-xs text-muted-foreground">
+                Metric: <code className="bg-muted px-1 rounded">{ev.metric.name}</code>
+                {" "}({ev.metric.type})
+                {ev.metric.range && ` [${ev.metric.range.min}-${ev.metric.range.max}]`}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ToolPolicySection({ policy }: { policy: ToolPolicy }) {
+  return (
+    <div>
+      <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+        <Shield className="h-4 w-4" />
+        Tool Policy
+      </p>
+      <div className="text-xs space-y-1 bg-muted/50 rounded px-3 py-2">
+        {policy.tool_choice && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Tool Choice</span>
+            <span className="font-mono">{policy.tool_choice}</span>
+          </div>
+        )}
+        {policy.max_rounds != null && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Max Rounds</span>
+            <span className="font-mono">{policy.max_rounds}</span>
+          </div>
+        )}
+        {policy.max_tool_calls_per_turn != null && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Max Calls/Turn</span>
+            <span className="font-mono">{policy.max_tool_calls_per_turn}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ValidatorsList({ validators }: { validators: ValidatorDefinition[] }) {
+  return (
+    <div>
+      <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+        <Shield className="h-4 w-4" />
+        Validators ({validators.length})
+      </p>
+      <div className="space-y-2">
+        {validators.map((v, idx) => (
+          <div key={v.id || v.type || idx} className="border rounded-lg p-2.5">
+            <div className="flex items-center gap-2 mb-1">
+              <Badge variant="secondary" className="text-xs">{v.type || v.id}</Badge>
+              {v.enabled !== undefined && (
+                <Badge
+                  variant="outline"
+                  className={`text-xs ${v.enabled ? "border-green-500/30 text-green-600" : "border-red-500/30 text-red-600"}`}
+                >
+                  {v.enabled ? "enabled" : "disabled"}
+                </Badge>
+              )}
+              {v.fail_on_violation && (
+                <Badge variant="outline" className="text-xs border-orange-500/30 text-orange-600">
+                  fail on violation
+                </Badge>
+              )}
+            </div>
+            {v.description && (
+              <p className="text-xs text-muted-foreground">{v.description}</p>
+            )}
+            {v.params && Object.keys(v.params).length > 0 && (
+              <div className="text-xs mt-1 space-y-0.5">
+                {Object.entries(v.params).map(([key, val]) => (
+                  <div key={key} className="flex justify-between">
+                    <span className="text-muted-foreground">{key}</span>
+                    <span className="font-mono">{JSON.stringify(val)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- Main page component ---
 
 export default function PromptPackDetailPage({ params }: Readonly<PromptPackDetailPageProps>) {
   const { name } = use(params);
   const searchParams = useSearchParams();
   const namespaceParam = searchParams.get("namespace") || "production";
 
-  // Find workspace by namespace - workspace.namespace is the K8s namespace
   const { data: workspaces } = useWorkspaces();
   const workspace = workspaces?.find(w => w.namespace === namespaceParam);
   const workspaceName = workspace?.name || namespaceParam;
@@ -54,14 +192,15 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
   const { data: packContent, isLoading: isContentLoading } = usePromptPackContent(name, workspaceName);
   const { data: allAgents } = useAgents();
 
-  // Convert prompts Record to array for iteration
   const promptsArray = promptsToArray(packContent?.prompts);
-  const toolsArray = packContent?.tools || [];
+  const toolsArray = toolsToArray(packContent?.tools);
   const fragmentsEntries = Object.entries(packContent?.fragments || {});
   const validatorsArray = packContent?.validators || [];
+  const packEvals = packContent?.evals || [];
+  const workflowConfig = packContent?.workflow;
+  const skillsArray = packContent?.skills || [];
+  const workflowStatesCount = workflowConfig ? Object.keys(workflowConfig.states).length : 0;
 
-  // Find agents that reference this PromptPack
-  // LocalObjectReference only contains name, so agents reference promptpacks in their own namespace
   const usingAgents = allAgents?.filter(
     (agent) =>
       agent.spec.promptPackRef?.name === name &&
@@ -282,9 +421,142 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                         <p className="text-muted-foreground">Tools</p>
                         <span className="font-medium">{toolsArray.length}</span>
                       </div>
+                      {packEvals.length > 0 && (
+                        <div>
+                          <p className="text-muted-foreground">Pack Evals</p>
+                          <span className="font-medium">{packEvals.length}</span>
+                        </div>
+                      )}
+                      {skillsArray.length > 0 && (
+                        <div>
+                          <p className="text-muted-foreground">Skills</p>
+                          <span className="font-medium">{skillsArray.length}</span>
+                        </div>
+                      )}
+                      {workflowStatesCount > 0 && (
+                        <div>
+                          <p className="text-muted-foreground">Workflow States</p>
+                          <span className="font-medium">{workflowStatesCount}</span>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Pack-level Evals */}
+                {packEvals.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center gap-2">
+                        <Activity className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle className="text-base">Pack Evals ({packEvals.length})</CardTitle>
+                      </div>
+                      <CardDescription>Pack-level evaluation definitions applied across all prompts</CardDescription>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <EvalsList evals={packEvals} title="Evaluations" />
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Workflow Card */}
+                {workflowConfig && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center gap-2">
+                        <Workflow className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle className="text-base">Workflow</CardTitle>
+                        {workflowConfig.version && (
+                          <Badge variant="outline" className="text-xs">v{workflowConfig.version}</Badge>
+                        )}
+                      </div>
+                      <CardDescription>
+                        State machine with {workflowStatesCount} states, entry point:{" "}
+                        <code className="bg-muted px-1 rounded">{workflowConfig.entry}</code>
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="space-y-3">
+                        {Object.entries(workflowConfig.states).map(([stateId, state]) => {
+                          const isEntry = stateId === workflowConfig.entry;
+                          return (
+                            <div
+                              key={stateId}
+                              className={`border rounded-lg p-3 ${isEntry ? "border-primary/50 bg-primary/5" : ""}`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-medium text-sm">{stateId}</span>
+                                {isEntry && (
+                                  <Badge className="text-xs bg-primary/15 text-primary border-primary/20">
+                                    entry
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className="text-xs">
+                                  {state.prompt_task}
+                                </Badge>
+                                {state.persistence && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {state.persistence}
+                                  </Badge>
+                                )}
+                              </div>
+                              {state.description && (
+                                <p className="text-xs text-muted-foreground mb-2">{state.description}</p>
+                              )}
+                              {state.on_event && Object.keys(state.on_event).length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                  {Object.entries(state.on_event).map(([event, target]) => (
+                                    <div key={event} className="flex items-center gap-1 text-xs">
+                                      <Badge variant="outline" className="text-xs">{event}</Badge>
+                                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                      <code className="bg-muted px-1 rounded">{target}</code>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Skills Card */}
+                {skillsArray.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle className="text-base">Skills ({skillsArray.length})</CardTitle>
+                      </div>
+                      <CardDescription>Inline skill definitions available to agents</CardDescription>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <Accordion type="multiple" className="w-full">
+                        {skillsArray.map((skill) => (
+                          <AccordionItem key={skill.name} value={skill.name}>
+                            <AccordionTrigger className="hover:no-underline">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{skill.name}</span>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-2">
+                              {skill.description && (
+                                <p className="text-sm text-muted-foreground">{skill.description}</p>
+                              )}
+                              {skill.instructions && (
+                                <div className="bg-muted rounded-lg p-3 font-mono text-xs whitespace-pre-wrap max-h-[200px] overflow-auto">
+                                  {skill.instructions}
+                                </div>
+                              )}
+                            </AccordionContent>
+                          </AccordionItem>
+                        ))}
+                      </Accordion>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Prompts Section */}
                 {promptsArray.length > 0 && (
@@ -304,6 +576,9 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                               <div className="flex items-center gap-3">
                                 <span className="font-medium">{prompt.name || prompt.id}</span>
                                 {prompt.version && <Badge variant="secondary" className="text-xs">v{prompt.version}</Badge>}
+                                {prompt.description && (
+                                  <span className="text-xs text-muted-foreground hidden md:inline">{prompt.description}</span>
+                                )}
                               </div>
                             </AccordionTrigger>
                             <AccordionContent className="space-y-4">
@@ -334,6 +609,9 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                                           <span className="text-muted-foreground">
                                             [{v.values.join(", ")}]
                                           </span>
+                                        )}
+                                        {v.description && (
+                                          <span className="text-muted-foreground">{v.description}</span>
                                         )}
                                       </div>
                                     ))}
@@ -371,19 +649,19 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                                 )}
                               </div>
 
-                              {/* Validators */}
+                              {/* Tool Policy */}
+                              {prompt.tool_policy && (
+                                <ToolPolicySection policy={prompt.tool_policy} />
+                              )}
+
+                              {/* Prompt-level Validators */}
                               {prompt.validators && prompt.validators.length > 0 && (
-                                <div>
-                                  <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
-                                    <Shield className="h-4 w-4" />
-                                    Validators ({prompt.validators.length})
-                                  </p>
-                                  <div className="flex flex-wrap gap-1">
-                                    {prompt.validators.map((v) => (
-                                      <Badge key={v} variant="outline" className="text-xs border-green-500/30 text-green-600 dark:text-green-400">{v}</Badge>
-                                    ))}
-                                  </div>
-                                </div>
+                                <ValidatorsList validators={prompt.validators} />
+                              )}
+
+                              {/* Prompt-level Evals */}
+                              {prompt.evals && prompt.evals.length > 0 && (
+                                <EvalsList evals={prompt.evals} title="Evals" />
                               )}
                             </AccordionContent>
                           </AccordionItem>
@@ -461,7 +739,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                   </Card>
                 )}
 
-                {/* Validators Section */}
+                {/* Validators Section (pack-level) */}
                 {validatorsArray.length > 0 && (
                   <Card>
                     <CardHeader className="pb-3">
@@ -472,36 +750,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                       <CardDescription>Safety guardrails and content filters</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-3">
-                        {validatorsArray.map((validator) => (
-                          <div key={validator.id} className="border rounded-lg p-3">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{validator.name || validator.id}</span>
-                                <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{validator.id}</code>
-                              </div>
-                              {validator.config?.action ? (
-                                <Badge variant="outline" className="text-xs">{String(validator.config.action)}</Badge>
-                              ) : null}
-                            </div>
-                            {validator.description && (
-                              <p className="text-sm text-muted-foreground mb-2">{validator.description}</p>
-                            )}
-                            {validator.config?.detect && Array.isArray(validator.config.detect) ? (
-                              <div className="flex flex-wrap gap-1">
-                                {(validator.config.detect as string[]).map((item) => (
-                                  <Badge key={item} variant="secondary" className="text-xs">{item}</Badge>
-                                ))}
-                              </div>
-                            ) : null}
-                            {validator.config?.severity ? (
-                              <div className="text-xs text-muted-foreground">
-                                Severity: <span className="font-medium">{String(validator.config.severity)}</span>
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
+                      <ValidatorsList validators={validatorsArray} />
                     </CardContent>
                   </Card>
                 )}

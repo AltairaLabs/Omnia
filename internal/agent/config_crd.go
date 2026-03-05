@@ -138,21 +138,69 @@ func loadTracingConfigFromEnv(cfg *Config) error {
 	return nil
 }
 
-// LoadConfig loads configuration, preferring CRD reading and falling back to env vars.
+// LoadConfig loads configuration from the AgentRuntime CRD.
+// OMNIA_AGENT_NAME and OMNIA_NAMESPACE must be set via the Downward API.
+// When running outside a Kubernetes cluster (e.g. demo mode, E2E tests),
+// the function falls back to a minimal env-based configuration.
 func LoadConfig(ctx context.Context) (*Config, error) {
 	name := os.Getenv(EnvAgentName)
 	namespace := os.Getenv(EnvNamespace)
-
-	if name != "" && namespace != "" {
-		c, err := k8s.NewClient()
-		if err == nil {
-			cfg, crdErr := LoadFromCRD(ctx, c, name, namespace)
-			if crdErr == nil {
-				return cfg, nil
-			}
-			// Fall through to env-based loading
-		}
+	if name == "" || namespace == "" {
+		return nil, fmt.Errorf("OMNIA_AGENT_NAME and OMNIA_NAMESPACE are required (set via Downward API)")
 	}
 
-	return LoadFromEnv()
+	c, err := k8s.NewClient()
+	if err != nil {
+		// No K8s cluster available — fall back to env-based config (demo/test mode)
+		return loadFromEnvFallback(name, namespace)
+	}
+
+	cfg, err := LoadFromCRD(ctx, c, name, namespace)
+	if err != nil {
+		// CRD unavailable — fall back to env-based config (demo/test mode)
+		return loadFromEnvFallback(name, namespace)
+	}
+	return cfg, nil
+}
+
+// loadFromEnvFallback builds a minimal Config from environment variables.
+// Used when running outside a Kubernetes cluster (demo mode, E2E tests).
+func loadFromEnvFallback(name, namespace string) (*Config, error) {
+	cfg := &Config{
+		AgentName:       name,
+		Namespace:       namespace,
+		PromptPackName:  os.Getenv(EnvPromptPackName),
+		PromptPackPath:  getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath),
+		FacadeType:      FacadeType(getEnvOrDefault(EnvFacadeType, string(FacadeTypeWebSocket))),
+		HandlerMode:     HandlerMode(getEnvOrDefault(EnvHandlerMode, string(HandlerModeRuntime))),
+		RuntimeAddress:  getEnvOrDefault(EnvRuntimeAddress, DefaultRuntimeAddress),
+		SessionStoreURL: os.Getenv(EnvSessionStoreURL),
+	}
+
+	facadePort, err := getEnvAsInt(EnvFacadePort, DefaultFacadePort)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvFacadePort, err)
+	}
+	cfg.FacadePort = facadePort
+
+	healthPort, err := getEnvAsInt(EnvHealthPort, DefaultHealthPort)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtInvalidEnv, EnvHealthPort, err)
+	}
+	cfg.HealthPort = healthPort
+
+	sessionType := getEnvOrDefault(EnvSessionType, string(SessionTypeMemory))
+	cfg.SessionType = SessionType(sessionType)
+	cfg.SessionTTL = DefaultSessionTTL
+
+	cfg.MediaStorageType = MediaStorageType(getEnvOrDefault(EnvMediaStorageType, string(MediaStorageTypeNone)))
+	cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)
+	cfg.MediaMaxFileSize = DefaultMediaMaxFileSize
+	cfg.MediaDefaultTTL = DefaultMediaDefaultTTL
+
+	if err := loadTracingConfigFromEnv(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }

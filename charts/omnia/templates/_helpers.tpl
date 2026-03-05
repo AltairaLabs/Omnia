@@ -196,3 +196,23 @@ Eval Worker image
 {{- $tag := default .Chart.AppVersion .Values.enterprise.evalWorker.image.tag }}
 {{- printf "%s:%s" .Values.enterprise.evalWorker.image.repository $tag }}
 {{- end }}
+
+{{/*
+Resolve OTLP tracing endpoint for runtime/facade containers.
+Priority:
+1. .Values.tracing.endpoint (explicit override)
+2. Alloy service (when alloy.enabled=true)
+3. Tempo service (when tempo.enabled=true)
+Returns empty string when no endpoint can be resolved.
+*/}}
+{{- define "omnia.tracing.endpoint" -}}
+{{- if .Values.tracing.endpoint -}}
+{{- .Values.tracing.endpoint -}}
+{{- else if .Values.alloy.enabled -}}
+{{- printf "%s-alloy:4317" .Release.Name -}}
+{{- else if .Values.tempo.enabled -}}
+{{- printf "%s-tempo:4317" .Release.Name -}}
+{{- else -}}
+{{- "" -}}
+{{- end -}}
+{{- end }}

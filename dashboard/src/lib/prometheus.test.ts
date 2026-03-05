@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   queryPrometheus,
   queryPrometheusRange,
+  queryPrometheusMetadata,
   isPrometheusAvailable,
   matrixToTimeSeries,
   type PrometheusResponse,
@@ -137,6 +138,89 @@ describe("prometheus utilities", () => {
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("step=1h")
       );
+    });
+  });
+
+  describe("queryPrometheusMetadata", () => {
+    it("should fetch metadata and return type map", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            status: "success",
+            data: {
+              omnia_eval_tone: [{ type: "gauge", help: "", unit: "" }],
+              omnia_eval_executed_total: [{ type: "counter", help: "", unit: "" }],
+            },
+          }),
+      });
+
+      const result = await queryPrometheusMetadata();
+      expect(result).toEqual({
+        omnia_eval_tone: "gauge",
+        omnia_eval_executed_total: "counter",
+      });
+      expect(mockFetch).toHaveBeenCalledWith("/api/prometheus/metadata");
+    });
+
+    it("should pass metric filter param when provided", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            status: "success",
+            data: {
+              omnia_eval_tone: [{ type: "gauge", help: "", unit: "" }],
+            },
+          }),
+      });
+
+      await queryPrometheusMetadata("omnia_eval_tone");
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("metric=omnia_eval_tone"),
+      );
+    });
+
+    it("should return empty object on error response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({ status: "error", error: "not found" }),
+      });
+
+      const result = await queryPrometheusMetadata();
+      expect(result).toEqual({});
+    });
+
+    it("should map unknown types to 'unknown'", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            status: "success",
+            data: {
+              some_metric: [{ type: "untyped", help: "", unit: "" }],
+            },
+          }),
+      });
+
+      const result = await queryPrometheusMetadata();
+      expect(result).toEqual({ some_metric: "unknown" });
+    });
+
+    it("should handle histogram and summary types", async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            status: "success",
+            data: {
+              omnia_eval_duration: [{ type: "histogram", help: "", unit: "" }],
+              omnia_eval_latency: [{ type: "summary", help: "", unit: "" }],
+            },
+          }),
+      });
+
+      const result = await queryPrometheusMetadata();
+      expect(result).toEqual({
+        omnia_eval_duration: "histogram",
+        omnia_eval_latency: "summary",
+      });
     });
   });
 

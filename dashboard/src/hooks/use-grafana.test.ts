@@ -6,6 +6,10 @@ import {
   buildDashboardUrl,
   buildLokiExploreUrl,
   buildTempoExploreUrl,
+  sessionIdToTraceId,
+  buildSessionLogsUrl,
+  buildSessionTracesUrl,
+  buildSessionDashboardUrl,
   GRAFANA_DASHBOARDS,
   OVERVIEW_PANELS,
   type GrafanaConfig,
@@ -235,6 +239,7 @@ describe("GRAFANA_DASHBOARDS", () => {
     expect(GRAFANA_DASHBOARDS.COSTS).toBe("omnia-costs");
     expect(GRAFANA_DASHBOARDS.AGENT_DETAIL).toBe("omnia-agent-detail");
     expect(GRAFANA_DASHBOARDS.LOGS).toBe("omnia-logs");
+    expect(GRAFANA_DASHBOARDS.SESSION_DETAIL).toBe("omnia-session-detail");
   });
 });
 
@@ -394,6 +399,180 @@ describe("buildTempoExploreUrl", () => {
 
     expect(url).not.toBeNull();
     expect(url).toContain("https://grafana.example.com/grafana/explore");
+    expect(url).not.toContain("//grafana/");
+  });
+});
+
+describe("sessionIdToTraceId", () => {
+  it("should strip dashes from UUID to produce trace ID", () => {
+    const traceId = sessionIdToTraceId("6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    expect(traceId).toBe("6378abc1cda74f3291b5b311db3c7dac");
+  });
+
+  it("should handle UUID without dashes (no-op)", () => {
+    const traceId = sessionIdToTraceId("6378abc1cda74f3291b5b311db3c7dac");
+    expect(traceId).toBe("6378abc1cda74f3291b5b311db3c7dac");
+  });
+});
+
+describe("buildSessionLogsUrl", () => {
+  const enabledConfig: GrafanaConfig = {
+    enabled: true,
+    baseUrl: "https://grafana.example.com", // NOSONAR - test URL
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  const disabledConfig: GrafanaConfig = {
+    enabled: false,
+    baseUrl: null,
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  it("should return null when Grafana is disabled", () => {
+    const url = buildSessionLogsUrl(disabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "my-agent");
+    expect(url).toBeNull();
+  });
+
+  it("should build Loki explore URL with agent label and trace_id filter", () => {
+    const url = buildSessionLogsUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "my-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("/grafana/explore");
+    expect(url).toContain("loki");
+    expect(url).toContain("6378abc1cda74f3291b5b311db3c7dac");
+    expect(url).toContain("my-agent");
+  });
+
+  it("should default to 6h time range", () => {
+    const url = buildSessionLogsUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "my-agent");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("now-6h");
+  });
+
+  it("should use custom time range", () => {
+    const url = buildSessionLogsUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "my-agent", {
+      from: "now-24h",
+      to: "now-1h",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("now-24h");
+    expect(url).toContain("now-1h");
+  });
+});
+
+describe("buildSessionTracesUrl", () => {
+  const enabledConfig: GrafanaConfig = {
+    enabled: true,
+    baseUrl: "https://grafana.example.com", // NOSONAR - test URL
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  const disabledConfig: GrafanaConfig = {
+    enabled: false,
+    baseUrl: null,
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  it("should return null when Grafana is disabled", () => {
+    const url = buildSessionTracesUrl(disabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    expect(url).toBeNull();
+  });
+
+  it("should build Tempo explore URL with trace ID", () => {
+    const url = buildSessionTracesUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("/grafana/explore");
+    expect(url).toContain("tempo");
+    expect(url).toContain("6378abc1cda74f3291b5b311db3c7dac");
+  });
+
+  it("should default to 6h time range", () => {
+    const url = buildSessionTracesUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("now-6h");
+  });
+});
+
+describe("buildSessionDashboardUrl", () => {
+  const enabledConfig: GrafanaConfig = {
+    enabled: true,
+    baseUrl: "https://grafana.example.com", // NOSONAR - test URL
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  const disabledConfig: GrafanaConfig = {
+    enabled: false,
+    baseUrl: null,
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  it("should return null when Grafana is disabled", () => {
+    const url = buildSessionDashboardUrl(disabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    expect(url).toBeNull();
+  });
+
+  it("should return null when baseUrl is not set", () => {
+    const configNoUrl: GrafanaConfig = {
+      enabled: true,
+      baseUrl: null,
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+    const url = buildSessionDashboardUrl(configNoUrl, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    expect(url).toBeNull();
+  });
+
+  it("should build dashboard URL with session_id and trace_id variables", () => {
+    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("/grafana/d/omnia-session-detail/_");
+    expect(url).toContain("var-session_id=6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    expect(url).toContain("var-trace_id=6378abc1cda74f3291b5b311db3c7dac");
+    expect(url).toContain("orgId=1");
+  });
+
+  it("should default to 6h time range", () => {
+    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("from=now-6h");
+    expect(url).toContain("to=now");
+  });
+
+  it("should use custom time range", () => {
+    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", {
+      from: "now-24h",
+      to: "now-1h",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("from=now-24h");
+    expect(url).toContain("to=now-1h");
+  });
+
+  it("should handle baseUrl with trailing slash", () => {
+    const configWithSlash: GrafanaConfig = {
+      enabled: true,
+      baseUrl: "https://grafana.example.com/", // NOSONAR - test URL
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+
+    const url = buildSessionDashboardUrl(configWithSlash, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("https://grafana.example.com/grafana/d/omnia-session-detail/_");
     expect(url).not.toContain("//grafana/");
   });
 });

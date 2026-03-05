@@ -86,6 +86,52 @@ export async function queryPrometheusRange(
   return response.json();
 }
 
+/** Prometheus metric type as reported by the metadata endpoint. */
+export type PrometheusMetricType = "gauge" | "counter" | "histogram" | "summary" | "unknown";
+
+interface PrometheusMetadataResponse {
+  status: "success" | "error";
+  data?: Record<string, Array<{ type: string; help: string; unit: string }>>;
+  errorType?: string;
+  error?: string;
+}
+
+/**
+ * Query Prometheus metadata to get metric types.
+ *
+ * Returns a map of metric name to its Prometheus type.
+ * If a metric filter is provided, only that metric's metadata is returned.
+ */
+export async function queryPrometheusMetadata(
+  metric?: string,
+): Promise<Record<string, PrometheusMetricType>> {
+  const params = new URLSearchParams();
+  if (metric) {
+    params.set("metric", metric);
+  }
+
+  const url = params.toString()
+    ? `/api/prometheus/metadata?${params}`
+    : "/api/prometheus/metadata";
+  const response = await fetch(url);
+  const body: PrometheusMetadataResponse = await response.json();
+
+  if (body.status !== "success" || !body.data) {
+    return {};
+  }
+
+  const result: Record<string, PrometheusMetricType> = {};
+  for (const [name, entries] of Object.entries(body.data)) {
+    const rawType = entries[0]?.type?.toLowerCase() ?? "unknown";
+    result[name] = isKnownMetricType(rawType) ? rawType : "unknown";
+  }
+  return result;
+}
+
+function isKnownMetricType(t: string): t is PrometheusMetricType {
+  return t === "gauge" || t === "counter" || t === "histogram" || t === "summary";
+}
+
 /**
  * Check if Prometheus is available by making a simple query.
  *

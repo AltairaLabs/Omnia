@@ -339,45 +339,78 @@ export const SystemQueries = {
 // =============================================================================
 // Eval metrics are dynamically named (defined in PromptPacks) with prefix
 // "omnia_eval_". They are emitted by the runtime's MetricCollector as gauge,
-// counter, histogram, or boolean types with no labels.
+// counter, histogram, or boolean types with labels: agent, namespace,
+// promptpack_name.
 
 /** Regex pattern to discover all eval metrics in Prometheus. */
 export const EVAL_METRIC_PATTERN = "omnia_eval_.*";
+
+/** Filter for eval metric queries by dimensional labels. */
+export interface EvalFilter {
+  agent?: string;
+  promptpackName?: string;
+}
+
+/** Build a label selector string from an EvalFilter. */
+export function buildEvalSelector(filter?: EvalFilter): string {
+  if (!filter) return "";
+  const parts: string[] = [];
+  if (filter.agent) parts.push(`${LABELS.AGENT}="${filter.agent}"`);
+  if (filter.promptpackName) parts.push(`${LABELS.PROMPTPACK_NAME}="${filter.promptpackName}"`);
+  return parts.join(",");
+}
 
 export const EvalQueries = {
   /**
    * Discover all eval metrics. Returns one result per metric name.
    */
-  discoverMetrics(): string {
-    return `{__name__=~"${EVAL_METRIC_PATTERN}"}`;
+  discoverMetrics(filter?: EvalFilter): string {
+    const sel = buildEvalSelector(filter);
+    const labels = sel ? `,${sel}` : "";
+    return `{__name__=~"${EVAL_METRIC_PATTERN}"${labels}}`;
   },
 
   /**
    * Current value of a specific eval metric (instant query).
    */
-  metricValue(metricName: string): string {
-    return metricName;
+  metricValue(metricName: string, filter?: EvalFilter): string {
+    const sel = buildEvalSelector(filter);
+    return sel ? `${metricName}{${sel}}` : metricName;
   },
 
   /**
    * Aggregate value of a specific eval metric across all instances.
    */
-  metricSum(metricName: string): string {
-    return `sum(${metricName})`;
+  metricSum(metricName: string, filter?: EvalFilter): string {
+    return `sum(${this.metricValue(metricName, filter)})`;
   },
 
   /**
    * Average value of a specific eval metric over a time window.
    * Useful for gauge/boolean metrics to get pass rate over time.
    */
-  metricAvgOverTime(metricName: string, window = "1h"): string {
-    return `avg_over_time(${metricName}[${window}])`;
+  metricAvgOverTime(metricName: string, window = "1h", filter?: EvalFilter): string {
+    return `avg_over_time(${this.metricValue(metricName, filter)}[${window}])`;
   },
 
   /**
    * Rate of change for counter-type eval metrics.
    */
-  metricRate(metricName: string, window = "5m"): string {
-    return `rate(${metricName}[${window}])`;
+  metricRate(metricName: string, window = "5m", filter?: EvalFilter): string {
+    return `rate(${this.metricValue(metricName, filter)}[${window}])`;
+  },
+
+  /**
+   * Discover unique agent label values from eval metrics.
+   */
+  discoverAgents(): string {
+    return `group({__name__=~"${EVAL_METRIC_PATTERN}"}) by (${LABELS.AGENT})`;
+  },
+
+  /**
+   * Discover unique promptpack_name label values from eval metrics.
+   */
+  discoverPromptPacks(): string {
+    return `group({__name__=~"${EVAL_METRIC_PATTERN}"}) by (${LABELS.PROMPTPACK_NAME})`;
   },
 };

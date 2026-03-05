@@ -29,12 +29,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -339,22 +335,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		UserEmail:     userEmail,
 		Authorization: authorization,
 	})
-
-	// Start session span if tracing is enabled
-	var sessionSpan trace.Span
-	if s.tracingProvider != nil {
-		connCtx, sessionSpan = s.tracingProvider.Tracer().Start(connCtx, "facade.session",
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(
-				attribute.String(otlp.AttrOmniaAgentName, agentName),
-				attribute.String(otlp.AttrOmniaAgentNamespace, namespace),
-				attribute.String(otlp.AttrOmniaPromptPackName, s.config.PromptPackName),
-				attribute.String(otlp.AttrOmniaPromptPackVersion, s.config.PromptPackVersion),
-				attribute.String(otlp.AttrOmniaPromptPackNamespace, namespace),
-			),
-		)
-		c.sessionSpan = sessionSpan
-	}
 
 	log := logctx.LoggerWithContext(s.log, connCtx)
 	log.Info("new connection")

@@ -436,30 +436,105 @@ func TestLoadFromCRD_HandlerModeFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_FallbackToEnv(t *testing.T) {
-	// When OMNIA_AGENT_NAME and OMNIA_NAMESPACE are not set, LoadConfig falls back to LoadFromEnv
-	t.Setenv(EnvAgentName, "env-agent")
-	t.Setenv(EnvNamespace, "env-ns")
-	t.Setenv(EnvPromptPackName, "env-pack")
-
-	cfg, err := LoadConfig(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestLoadConfig_MissingEnvVars(t *testing.T) {
+	// When OMNIA_AGENT_NAME and OMNIA_NAMESPACE are not set, LoadConfig returns an error
+	_, err := LoadConfig(context.Background())
+	if err == nil {
+		t.Fatal("expected error when env vars are missing")
 	}
-	// Since k8s.NewClient() will fail outside a cluster, it falls back to LoadFromEnv
-	if cfg.AgentName != "env-agent" {
-		t.Errorf("AgentName = %q, want %q", cfg.AgentName, "env-agent")
+	if got := err.Error(); got != "OMNIA_AGENT_NAME and OMNIA_NAMESPACE are required (set via Downward API)" {
+		t.Errorf("error = %q, want required env vars message", got)
 	}
 }
 
-func TestLoadConfig_EmptyEnv(t *testing.T) {
-	// When both env vars are empty, falls back to LoadFromEnv immediately
+func TestLoadConfig_MissingNamespaceOnly(t *testing.T) {
+	t.Setenv(EnvAgentName, "my-agent")
+	// OMNIA_NAMESPACE not set
+
+	_, err := LoadConfig(context.Background())
+	if err == nil {
+		t.Fatal("expected error when namespace is missing")
+	}
+}
+
+func TestLoadConfig_MissingAgentNameOnly(t *testing.T) {
+	t.Setenv(EnvNamespace, "my-ns")
+	// OMNIA_AGENT_NAME not set
+
+	_, err := LoadConfig(context.Background())
+	if err == nil {
+		t.Fatal("expected error when agent name is missing")
+	}
+}
+
+func TestLoadConfig_FallbackToEnv(t *testing.T) {
+	// When K8s is unavailable, LoadConfig should fall back to env-based config.
+	// In test environment there's no K8s cluster, so this tests the fallback path.
+	t.Setenv(EnvAgentName, "test-agent")
+	t.Setenv(EnvNamespace, "test-ns")
+	t.Setenv(EnvHandlerMode, "demo")
+	t.Setenv(EnvFacadePort, "8080")
+	t.Setenv(EnvHealthPort, "8081")
+	t.Setenv(EnvSessionType, "memory")
+
 	cfg, err := LoadConfig(context.Background())
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got error: %v", err)
+	}
+	if cfg.AgentName != "test-agent" {
+		t.Errorf("AgentName = %q, want %q", cfg.AgentName, "test-agent")
+	}
+	if cfg.Namespace != "test-ns" {
+		t.Errorf("Namespace = %q, want %q", cfg.Namespace, "test-ns")
+	}
+	if cfg.HandlerMode != HandlerModeDemo {
+		t.Errorf("HandlerMode = %q, want %q", cfg.HandlerMode, HandlerModeDemo)
+	}
+	if cfg.FacadePort != 8080 {
+		t.Errorf("FacadePort = %d, want 8080", cfg.FacadePort)
+	}
+	if cfg.SessionType != SessionTypeMemory {
+		t.Errorf("SessionType = %q, want %q", cfg.SessionType, SessionTypeMemory)
+	}
+}
+
+func TestLoadFromEnvFallback_Defaults(t *testing.T) {
+	cfg, err := loadFromEnvFallback("agent-1", "ns-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// LoadFromEnv succeeds with all defaults (empty name/namespace)
-	if cfg == nil {
-		t.Fatal("expected non-nil config")
+	if cfg.AgentName != "agent-1" {
+		t.Errorf("AgentName = %q, want %q", cfg.AgentName, "agent-1")
+	}
+	if cfg.Namespace != "ns-1" {
+		t.Errorf("Namespace = %q, want %q", cfg.Namespace, "ns-1")
+	}
+	if cfg.FacadePort != DefaultFacadePort {
+		t.Errorf("FacadePort = %d, want %d", cfg.FacadePort, DefaultFacadePort)
+	}
+	if cfg.HealthPort != DefaultHealthPort {
+		t.Errorf("HealthPort = %d, want %d", cfg.HealthPort, DefaultHealthPort)
+	}
+	if cfg.SessionType != SessionTypeMemory {
+		t.Errorf("SessionType = %q, want %q", cfg.SessionType, SessionTypeMemory)
+	}
+	if cfg.MediaStorageType != MediaStorageTypeNone {
+		t.Errorf("MediaStorageType = %q, want %q", cfg.MediaStorageType, MediaStorageTypeNone)
+	}
+}
+
+func TestLoadFromEnvFallback_InvalidFacadePort(t *testing.T) {
+	t.Setenv(EnvFacadePort, "not-a-number")
+	_, err := loadFromEnvFallback("agent", "ns")
+	if err == nil {
+		t.Fatal("expected error for invalid facade port")
+	}
+}
+
+func TestLoadFromEnvFallback_InvalidHealthPort(t *testing.T) {
+	t.Setenv(EnvHealthPort, "not-a-number")
+	_, err := loadFromEnvFallback("agent", "ns")
+	if err == nil {
+		t.Fatal("expected error for invalid health port")
 	}
 }

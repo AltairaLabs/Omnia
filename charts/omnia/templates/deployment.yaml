@@ -1,5 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
+{{- $resolvedTracingEndpoint := include "omnia.tracing.endpoint" . | trim }}
 metadata:
   name: {{ include "omnia.fullname" . }}-controller-manager
   labels:
@@ -49,9 +50,9 @@ spec:
             - --facade-image-pull-policy={{ .Values.facade.image.pullPolicy }}
             - --framework-image={{ .Values.framework.image.repository }}:{{ .Values.framework.image.tag | default .Chart.AppVersion }}
             - --framework-image-pull-policy={{ .Values.framework.image.pullPolicy }}
-            {{- if .Values.tracing.enabled }}
+            {{- if and .Values.tracing.enabled $resolvedTracingEndpoint }}
             - --tracing-enabled=true
-            - --tracing-endpoint={{ .Values.tracing.endpoint }}
+            - --tracing-endpoint={{ $resolvedTracingEndpoint }}
             {{- end }}
             {{- if .Values.sessionApi.enabled }}
             - --session-api-url=http://{{ include "omnia.sessionApi.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.sessionApi.service.port }}

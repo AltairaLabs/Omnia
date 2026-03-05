@@ -887,6 +887,84 @@ func TestManager_LoadFromHandlers_SkipMissingHTTPConfig(t *testing.T) {
 	}
 }
 
+func TestManager_SetRegistryInfo(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	tools := []ToolInfo{
+		{Name: "tool1", Description: "First tool"},
+		{Name: "tool2", Description: "Second tool"},
+	}
+	adapter := newMockAdapter("http-handler", tools)
+	_ = m.RegisterAdapter(adapter)
+	_ = m.Connect(context.Background())
+
+	handlers := []HandlerEntry{
+		{Name: "http-handler", Type: ToolTypeHTTP, Endpoint: "http://example.com/api"},
+	}
+	m.SetRegistryInfo("my-registry", "my-namespace", handlers)
+
+	meta, ok := m.GetToolMeta("tool1")
+	if !ok {
+		t.Fatal("expected tool1 metadata")
+	}
+	if meta.RegistryName != "my-registry" {
+		t.Errorf("expected registry name 'my-registry', got %q", meta.RegistryName)
+	}
+	if meta.RegistryNamespace != "my-namespace" {
+		t.Errorf("expected registry namespace 'my-namespace', got %q", meta.RegistryNamespace)
+	}
+	if meta.HandlerName != "http-handler" {
+		t.Errorf("expected handler name 'http-handler', got %q", meta.HandlerName)
+	}
+	if meta.HandlerType != ToolTypeHTTP {
+		t.Errorf("expected handler type 'http', got %q", meta.HandlerType)
+	}
+	if meta.Endpoint != "http://example.com/api" {
+		t.Errorf("expected endpoint 'http://example.com/api', got %q", meta.Endpoint)
+	}
+
+	// tool2 should also have metadata
+	meta2, ok := m.GetToolMeta("tool2")
+	if !ok {
+		t.Fatal("expected tool2 metadata")
+	}
+	if meta2.RegistryName != "my-registry" {
+		t.Errorf("expected registry name 'my-registry' for tool2, got %q", meta2.RegistryName)
+	}
+}
+
+func TestManager_GetToolMeta_Unknown(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	_, ok := m.GetToolMeta("nonexistent")
+	if ok {
+		t.Error("expected false for unknown tool")
+	}
+}
+
+func TestManager_SetRegistryInfo_NoHandler(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	tools := []ToolInfo{{Name: "tool1"}}
+	adapter := newMockAdapter("some-adapter", tools)
+	_ = m.RegisterAdapter(adapter)
+	_ = m.Connect(context.Background())
+
+	// Empty handlers — adapter name won't match, but meta should still have registry info
+	m.SetRegistryInfo("my-registry", "my-ns", nil)
+
+	meta, ok := m.GetToolMeta("tool1")
+	if !ok {
+		t.Fatal("expected tool1 metadata")
+	}
+	if meta.RegistryName != "my-registry" {
+		t.Errorf("expected registry name 'my-registry', got %q", meta.RegistryName)
+	}
+	if meta.HandlerType != "" {
+		t.Errorf("expected empty handler type, got %q", meta.HandlerType)
+	}
+}
+
 func TestManager_LoadFromHandlers_SkipMissingGRPCConfig(t *testing.T) {
 	m := NewManager(logr.Discard())
 

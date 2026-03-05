@@ -146,7 +146,7 @@ describe("AlertConfigPanel", () => {
 
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
       />
     );
 
@@ -165,7 +165,7 @@ describe("AlertConfigPanel", () => {
     const onAlertsChange = vi.fn();
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
         onAlertsChange={onAlertsChange}
       />
     );
@@ -195,7 +195,7 @@ describe("AlertConfigPanel", () => {
     const onAlertsChange = vi.fn();
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
         onAlertsChange={onAlertsChange}
       />
     );
@@ -216,7 +216,7 @@ describe("AlertConfigPanel", () => {
   it("renders add button as disabled when no metric selected", () => {
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
       />
     );
 
@@ -238,8 +238,8 @@ describe("AlertConfigPanel", () => {
     render(
       <AlertConfigPanel
         availableMetrics={[
-          { name: "omnia_eval_tone", value: 0.9 },
-          { name: "omnia_eval_safety", value: 0.85 },
+          { name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const },
+          { name: "omnia_eval_safety", value: 0.85, metricType: "gauge" as const },
         ]}
       />
     );
@@ -267,7 +267,7 @@ describe("AlertConfigPanel", () => {
     const onAlertsChange = vi.fn();
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
         onAlertsChange={onAlertsChange}
       />
     );
@@ -293,7 +293,7 @@ describe("AlertConfigPanel", () => {
     const onAlertsChange = vi.fn();
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
         onAlertsChange={onAlertsChange}
       />
     );
@@ -312,7 +312,7 @@ describe("AlertConfigPanel", () => {
     const onAlertsChange = vi.fn();
     render(
       <AlertConfigPanel
-        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9 }]}
+        availableMetrics={[{ name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const }]}
         onAlertsChange={onAlertsChange}
       />
     );
@@ -345,8 +345,8 @@ describe("AlertConfigPanel", () => {
     render(
       <AlertConfigPanel
         availableMetrics={[
-          { name: "omnia_eval_tone", value: 0.9 },
-          { name: "omnia_eval_safety", value: 0.85 },
+          { name: "omnia_eval_tone", value: 0.9, metricType: "gauge" as const },
+          { name: "omnia_eval_safety", value: 0.85, metricType: "gauge" as const },
         ]}
         onAlertsChange={onAlertsChange}
       />

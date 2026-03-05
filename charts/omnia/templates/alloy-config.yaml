@@ -29,7 +29,7 @@ data:
     // Fan-out 1: Session-API OTLP endpoint (full payload for session reconstruction)
     otelcol.exporter.otlphttp "session_api" {
       client {
-        endpoint = "http://{{ include "omnia.fullname" . }}-session-api:{{ .Values.sessionApi.service.port }}"
+        endpoint = "http://{{ include "omnia.fullname" . }}-session-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.sessionApi.otlp.httpPort }}"
         tls {
           insecure = true
         }
