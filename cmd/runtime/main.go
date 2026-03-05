@@ -390,8 +390,19 @@ func main() {
 		log.Error(err, "failed to shutdown health server")
 	}
 
-	// Stop gRPC server
-	grpcServer.GracefulStop()
+	// Stop gRPC server with deadline — fall back to hard stop if streams don't finish.
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(grpcDone)
+	}()
+	select {
+	case <-grpcDone:
+		// Graceful shutdown completed
+	case <-time.After(10 * time.Second):
+		log.Info("gRPC graceful stop timed out, forcing stop")
+		grpcServer.Stop()
+	}
 
 	log.Info("shutdown complete")
 }

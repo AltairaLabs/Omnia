@@ -83,7 +83,9 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 
 	if c.sessionID != "" {
 		go func() {
-			if err := s.sessionStore.UpdateSessionStats(context.Background(), c.sessionID, session.SessionStatsUpdate{
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := s.sessionStore.UpdateSessionStats(ctx, c.sessionID, session.SessionStatsUpdate{
 				SetStatus:  session.SessionStatusCompleted,
 				SetEndedAt: time.Now(),
 			}); err != nil {

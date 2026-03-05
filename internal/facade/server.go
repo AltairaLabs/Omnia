@@ -53,6 +53,9 @@ type ServerConfig struct {
 	WriteTimeout time.Duration
 	// MaxMessageSize is the maximum message size.
 	MaxMessageSize int64
+	// MaxConnections is the maximum number of concurrent WebSocket connections.
+	// 0 means unlimited (not recommended for production).
+	MaxConnections int
 	// SessionTTL is the default TTL for new sessions.
 	SessionTTL time.Duration
 	// PromptPackName is the PromptPack associated with this agent (from env).
@@ -70,6 +73,7 @@ func DefaultServerConfig() ServerConfig {
 		PongTimeout:     60 * time.Second,
 		WriteTimeout:    10 * time.Second,
 		MaxMessageSize:  16 * 1024 * 1024, // 16MB to support base64-encoded images
+		MaxConnections:  500,
 		SessionTTL:      24 * time.Hour,
 	}
 }
@@ -123,6 +127,7 @@ type Server struct {
 	metrics         ServerMetrics
 	mediaStorage    media.Storage
 	tracingProvider *tracing.Provider
+	recordingPool   *RecordingPool
 	allowedOrigins  []string
 	log             logr.Logger
 
@@ -154,6 +159,13 @@ func WithMediaStorage(ms media.Storage) ServerOption {
 func WithTracingProvider(p *tracing.Provider) ServerOption {
 	return func(s *Server) {
 		s.tracingProvider = p
+	}
+}
+
+// WithRecordingPool sets the recording worker pool for async session recording.
+func WithRecordingPool(p *RecordingPool) ServerOption {
+	return func(s *Server) {
+		s.recordingPool = p
 	}
 }
 
@@ -266,6 +278,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
 		return
 	}
+	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
+		s.mu.RUnlock()
+		http.Error(w, "connection limit reached", http.StatusServiceUnavailable)
+		return
+	}
 	s.mu.RUnlock()
 
 	// Extract agent info from query params, falling back to pod env vars
@@ -365,6 +382,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if err := conn.Close(); err != nil {
 			s.log.Error(err, "error closing connection")
 		}
+	}
+
+	// Drain the recording pool so in-flight writes complete
+	if s.recordingPool != nil {
+		s.recordingPool.Close()
 	}
 
 	return nil

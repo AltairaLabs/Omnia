@@ -22,10 +22,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/facade"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
+
+// defaultStreamInactivityTimeout is the maximum time to wait between gRPC messages
+// from the runtime before cancelling the stream. This prevents hanging connections
+// when the LLM provider stalls mid-response.
+const defaultStreamInactivityTimeout = 120 * time.Second
 
 // RuntimeHandler delegates message handling to the runtime sidecar via gRPC.
 type RuntimeHandler struct {
@@ -80,22 +86,58 @@ func (h *RuntimeHandler) HandleMessage(
 		return fmt.Errorf("failed to close send: %w", err)
 	}
 
-	// Receive and forward responses
-	for {
-		resp, err := stream.Recv()
-		if err == io.EOF {
-			// Stream completed normally
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("error receiving from runtime: %w", err)
-		}
+	return h.receiveResponses(stream, writer)
+}
 
-		// Forward response to client via ResponseWriter
-		if err := h.forwardResponse(resp, writer); err != nil {
-			return fmt.Errorf("error forwarding response: %w", err)
+// recvResult holds the result of a single gRPC Recv call.
+type recvResult struct {
+	resp *runtimev1.ServerMessage
+	err  error
+}
+
+// receiveResponses reads from the gRPC stream with an inactivity timeout.
+// If no message arrives within defaultStreamInactivityTimeout, it returns an error.
+func (h *RuntimeHandler) receiveResponses(
+	stream runtimev1.RuntimeService_ConverseClient,
+	writer facade.ResponseWriter,
+) error {
+	inactivityTimer := time.NewTimer(defaultStreamInactivityTimeout)
+	defer inactivityTimer.Stop()
+
+	for {
+		ch := make(chan recvResult, 1)
+		go func() {
+			resp, err := stream.Recv()
+			ch <- recvResult{resp, err}
+		}()
+
+		select {
+		case result := <-ch:
+			if result.err == io.EOF {
+				return nil
+			}
+			if result.err != nil {
+				return fmt.Errorf("error receiving from runtime: %w", result.err)
+			}
+			resetTimer(inactivityTimer, defaultStreamInactivityTimeout)
+			if err := h.forwardResponse(result.resp, writer); err != nil {
+				return fmt.Errorf("error forwarding response: %w", err)
+			}
+		case <-inactivityTimer.C:
+			return fmt.Errorf("runtime stream inactivity timeout (%s)", defaultStreamInactivityTimeout)
 		}
 	}
+}
+
+// resetTimer safely resets a timer, draining the channel if needed.
+func resetTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
 }
 
 // forwardResponse translates a gRPC ServerMessage to WebSocket response.

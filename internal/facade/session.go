@@ -145,7 +145,7 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 	}
 
 	// Wrap writer with recording decorator to persist assistant responses
-	recWriter := newRecordingWriter(writer, s.sessionStore, sessionID, log)
+	recWriter := newRecordingWriter(writer, s.sessionStore, sessionID, log, s.recordingPool)
 
 	// Handle message
 	if s.handler != nil {

@@ -188,7 +188,13 @@ func run() error {
 	// --- Servers ---
 	healthSrv := newHealthServer(f.healthAddr, pool)
 	metricsSrv := newMetricsServer(f.metricsAddr)
-	apiSrv := &http.Server{Addr: f.apiAddr, Handler: apiMux}
+	apiSrv := &http.Server{
+		Addr:         f.apiAddr,
+		Handler:      apiMux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
 	startHTTPServer(log, "health", f.healthAddr, healthSrv)
 	startHTTPServer(log, "metrics", f.metricsAddr, metricsSrv)
@@ -233,7 +239,18 @@ func shutdownServers(log logr.Logger, apiSrv, healthSrv, metricsSrv *http.Server
 	defer shutCancel()
 
 	if grpcSrv != nil {
-		grpcSrv.GracefulStop()
+		grpcDone := make(chan struct{})
+		go func() {
+			grpcSrv.GracefulStop()
+			close(grpcDone)
+		}()
+		select {
+		case <-grpcDone:
+			// Graceful shutdown completed
+		case <-time.After(10 * time.Second):
+			log.Info("gRPC graceful stop timed out, forcing stop")
+			grpcSrv.Stop()
+		}
 	}
 
 	for _, s := range []struct {

@@ -141,7 +141,15 @@ func main() {
 	wsConfig.SessionTTL = cfg.SessionTTL
 	wsConfig.PromptPackName = cfg.PromptPackName
 	wsConfig.PromptPackVersion = cfg.PromptPackVersion
-	serverOpts := []facade.ServerOption{facade.WithMetrics(metrics)}
+	recordingPool := facade.NewRecordingPool(
+		facade.DefaultRecordingPoolSize,
+		facade.DefaultRecordingQueueSize,
+		log,
+	)
+	serverOpts := []facade.ServerOption{
+		facade.WithMetrics(metrics),
+		facade.WithRecordingPool(recordingPool),
+	}
 	if tracingProvider != nil {
 		serverOpts = append(serverOpts, facade.WithTracingProvider(tracingProvider))
 	}

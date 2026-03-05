@@ -650,6 +650,57 @@ func TestRuntimeHandler_HandleMessage_MediaChunk(t *testing.T) {
 	assert.Equal(t, "Here is an image:", writer.doneMsg)
 }
 
+// stallingRuntimeServer stalls after receiving the client message — never sends a response.
+type stallingRuntimeServer struct {
+	runtimev1.UnimplementedRuntimeServiceServer
+}
+
+func (s *stallingRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	// Stall forever — simulates a hung LLM provider
+	select {}
+}
+
+func (s *stallingRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
+}
+
+func TestRuntimeHandler_HandleMessage_InactivityTimeout(t *testing.T) {
+	stallMock := &stallingRuntimeServer{}
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	grpcServer := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(grpcServer, stallMock)
+	go func() { _ = grpcServer.Serve(lis) }()
+	t.Cleanup(func() { grpcServer.Stop() })
+
+	// Connect with a generous timeout so the gRPC dial succeeds
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	// Use a context with a 2s deadline — the stream will stall and the context
+	// will cancel before the 120s inactivity timeout. In production, the
+	// inactivity timer fires first (120s << caller timeout).
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = handler.HandleMessage(ctx, "session-1", &facade.ClientMessage{
+		Type:    facade.MessageTypeMessage,
+		Content: "hello",
+	}, writer)
+
+	require.Error(t, err, "expected error from stalled stream")
+}
+
 func (s *capturingRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
 	msg, err := stream.Recv()
 	if err != nil {
