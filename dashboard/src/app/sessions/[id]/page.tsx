@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
@@ -189,30 +189,49 @@ function isConversationMessage(m: Message): boolean {
   return true;
 }
 
+const INITIAL_MESSAGE_WINDOW = 50;
+
 /**
  * Renders the conversation message list with eval results grouped by message.
+ * Uses windowed rendering to avoid mounting all messages at once for large sessions.
  */
 function ConversationMessages({
   messages,
   evalResults,
 }: Readonly<{ messages: Message[]; evalResults: EvalResult[] }>) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const evalsByMessage = groupEvalResultsByMessageId(evalResults);
 
   const sorted = messages
     .filter(isConversationMessage)
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
+  const total = sorted.length;
+  const startIndex = Math.max(0, total - visibleCount);
+  const visible = sorted.slice(startIndex);
+  const remaining = startIndex;
+
   return (
     <div className="space-y-6">
-      {sorted
-        .map((message) => (
-          <MessageBubble
-            key={message.id}
-            message={message}
-            showTimestamp
-            evalResults={evalsByMessage.get(message.id)}
-          />
-        ))}
+      {remaining > 0 && (
+        <div className="flex justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setVisibleCount((c) => c + INITIAL_MESSAGE_WINDOW)}
+          >
+            Show earlier messages ({remaining} remaining)
+          </Button>
+        </div>
+      )}
+      {visible.map((message) => (
+        <MessageBubble
+          key={message.id}
+          message={message}
+          showTimestamp
+          evalResults={evalsByMessage.get(message.id)}
+        />
+      ))}
     </div>
   );
 }

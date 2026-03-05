@@ -5,6 +5,7 @@
 import { Suspense } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import SessionDetailPage from "./page";
 
 // Mock hooks
@@ -318,5 +319,87 @@ describe("SessionDetailPage", () => {
     // Should still render normally without eval badges
     expect(screen.getByText("Hello, I need help")).toBeInTheDocument();
     expect(screen.queryByTestId("eval-results-badge")).not.toBeInTheDocument();
+  });
+
+  describe("windowed message rendering", () => {
+    function makeMessages(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        id: `msg-${i}`,
+        role: "user" as const,
+        content: `Message ${i}`,
+        timestamp: new Date(Date.now() - (count - i) * 60000).toISOString(),
+      }));
+    }
+
+    function makeSessionWithMessages(count: number) {
+      return {
+        ...mockSession,
+        messages: makeMessages(count),
+        metrics: { ...mockSession.metrics, messageCount: count },
+      };
+    }
+
+    it("shows load more button when messages exceed window", async () => {
+      const { useSessionDetail } = await import("@/hooks");
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: makeSessionWithMessages(60),
+        isLoading: false,
+        error: null,
+      } as any);
+
+      await renderPage();
+
+      // Should show the last 50 messages (Message 10 through Message 59)
+      expect(screen.getByText("Message 59")).toBeInTheDocument();
+      expect(screen.getByText("Message 10")).toBeInTheDocument();
+      expect(screen.queryByText("Message 9")).not.toBeInTheDocument();
+
+      // Should show the load more button with correct count
+      expect(screen.getByText("Show earlier messages (10 remaining)")).toBeInTheDocument();
+    });
+
+    it("shows all messages when count is within window", async () => {
+      const { useSessionDetail } = await import("@/hooks");
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: makeSessionWithMessages(30),
+        isLoading: false,
+        error: null,
+      } as any);
+
+      await renderPage();
+
+      // All 30 messages should be visible
+      expect(screen.getByText("Message 0")).toBeInTheDocument();
+      expect(screen.getByText("Message 29")).toBeInTheDocument();
+
+      // No load more button
+      expect(screen.queryByText(/Show earlier messages/)).not.toBeInTheDocument();
+    });
+
+    it("loads more messages on button click", async () => {
+      const { useSessionDetail } = await import("@/hooks");
+      vi.mocked(useSessionDetail).mockReturnValue({
+        data: makeSessionWithMessages(70),
+        isLoading: false,
+        error: null,
+      } as any);
+
+      await renderPage();
+
+      // Initially 20 messages are hidden
+      expect(screen.queryByText("Message 0")).not.toBeInTheDocument();
+      expect(screen.getByText("Show earlier messages (20 remaining)")).toBeInTheDocument();
+
+      // Click the load more button
+      const user = userEvent.setup();
+      await user.click(screen.getByText("Show earlier messages (20 remaining)"));
+
+      // Now all messages should be visible (50 + 50 = 100 window, only 70 messages)
+      expect(screen.getByText("Message 0")).toBeInTheDocument();
+      expect(screen.getByText("Message 69")).toBeInTheDocument();
+
+      // No more button needed
+      expect(screen.queryByText(/Show earlier messages/)).not.toBeInTheDocument();
+    });
   });
 });
