@@ -94,6 +94,7 @@ func ValidateEvalDefs(defs []evals.EvalDef) []string {
 }
 
 // buildEvalOptions builds SDK options for eval middleware when a collector is configured.
+// Eval results are recorded to Prometheus via OmniaEventStore (event-driven).
 func (s *Server) buildEvalOptions() []sdk.Option {
 	if s.evalCollector == nil {
 		s.log.V(1).Info("eval options skipped", "reason", "no collector")
@@ -102,28 +103,13 @@ func (s *Server) buildEvalOptions() []sdk.Option {
 
 	registry := evals.NewEvalTypeRegistry()
 	runner := evals.NewEvalRunner(registry)
-	metricWriter := evals.NewMetricResultWriter(s.evalCollector, s.evalDefs)
-
-	var writers []evals.ResultWriter
-	writers = append(writers, metricWriter)
-	if s.evalMetrics != nil {
-		promWriter := NewPrometheusResultWriter(s.evalMetrics, s.evalDefs, s.log)
-		writers = append(writers, promWriter)
-	}
-	compositeWriter := evals.NewCompositeResultWriter(writers...)
-
-	dispatcher := evals.NewInProcDispatcher(runner, compositeWriter)
 
 	s.log.V(1).Info("eval options built",
 		"evalDefCount", len(s.evalDefs),
 		"registeredTypes", registry.Types(),
-		"hasDispatcher", dispatcher != nil,
-		"hasMetricWriter", metricWriter != nil,
-		"hasEvalMetrics", s.evalMetrics != nil,
-		"writerCount", len(writers))
+		"hasEvalMetrics", s.evalMetrics != nil)
 
 	return []sdk.Option{
-		sdk.WithEvalDispatcher(dispatcher),
-		sdk.WithResultWriters(compositeWriter),
+		sdk.WithEvalRunner(runner),
 	}
 }

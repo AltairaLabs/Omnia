@@ -109,7 +109,7 @@ func TestBuildEvalOptions_WithCollector(t *testing.T) {
 	)
 
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 2, "should return WithEvalDispatcher and WithResultWriters options")
+	assert.Len(t, opts, 1, "should return WithEvalRunner option")
 }
 
 func TestBuildEvalOptions_EmptyDefs(t *testing.T) {
@@ -119,5 +119,5 @@ func TestBuildEvalOptions_EmptyDefs(t *testing.T) {
 	)
 
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 2, "should return options even with empty defs")
+	assert.Len(t, opts, 1, "should return options even with empty defs")
 }

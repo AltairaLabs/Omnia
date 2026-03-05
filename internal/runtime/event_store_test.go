@@ -29,7 +29,9 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 
+	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // mockSessionStore implements session.Store for testing.
@@ -1344,5 +1346,425 @@ func TestOmniaEventStore_ValueTypeProviderCallFailed(t *testing.T) {
 
 	if msg.Metadata["type"] != "provider_call_failed" {
 		t.Errorf("expected type=provider_call_failed, got %s", msg.Metadata["type"])
+	}
+}
+
+// TestOmniaEventStore_ToolCallWithRegistryMeta verifies that tool call messages
+// are enriched with registry/handler metadata when toolMetaFn is set.
+func TestOmniaEventStore_ToolCallWithRegistryMeta(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetToolMetaFn(func(toolName string) (tools.ToolMeta, bool) {
+		if toolName == "search" {
+			return tools.ToolMeta{
+				RegistryName:      "my-registry",
+				RegistryNamespace: "my-ns",
+				HandlerName:       "mcp-handler",
+				HandlerType:       "mcp",
+				Endpoint:          "http://mcp:8080/sse",
+			}, true
+		}
+		return tools.ToolMeta{}, false
+	})
+
+	event := &events.Event{
+		Type:      events.EventToolCallStarted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ToolCallStartedData{
+			ToolName: "search",
+			CallID:   "call-1",
+			Args:     map[string]any{"q": "test"},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if msg.Metadata["handler_name"] != "mcp-handler" {
+		t.Errorf("expected handler_name=mcp-handler, got %s", msg.Metadata["handler_name"])
+	}
+	if msg.Metadata["handler_type"] != "mcp" {
+		t.Errorf("expected handler_type=mcp, got %s", msg.Metadata["handler_type"])
+	}
+	if msg.Metadata["registry_name"] != "my-registry" {
+		t.Errorf("expected registry_name=my-registry, got %s", msg.Metadata["registry_name"])
+	}
+	if msg.Metadata["registry_namespace"] != "my-ns" {
+		t.Errorf("expected registry_namespace=my-ns, got %s", msg.Metadata["registry_namespace"])
+	}
+}
+
+// TestOmniaEventStore_ToolCallCompletedWithRegistryMeta verifies completed events get metadata.
+func TestOmniaEventStore_ToolCallCompletedWithRegistryMeta(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetToolMetaFn(func(toolName string) (tools.ToolMeta, bool) {
+		return tools.ToolMeta{
+			RegistryName: "reg",
+			HandlerName:  "h",
+			HandlerType:  "http",
+		}, true
+	})
+
+	event := &events.Event{
+		Type:      events.EventToolCallCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ToolCallCompletedData{
+			ToolName: "search",
+			CallID:   "call-1",
+			Status:   "success",
+			Duration: 100 * time.Millisecond,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if msg.Metadata["handler_type"] != "http" {
+		t.Errorf("expected handler_type=http, got %s", msg.Metadata["handler_type"])
+	}
+	if msg.Metadata["registry_name"] != "reg" {
+		t.Errorf("expected registry_name=reg, got %s", msg.Metadata["registry_name"])
+	}
+}
+
+// TestOmniaEventStore_ToolCallWithoutMetaFn verifies graceful behavior with no toolMetaFn.
+func TestOmniaEventStore_ToolCallWithoutMetaFn(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	// No SetToolMetaFn — should work without enrichment
+
+	event := &events.Event{
+		Type:      events.EventToolCallStarted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ToolCallStartedData{
+			ToolName: "search",
+			CallID:   "call-1",
+			Args:     map[string]any{"q": "test"},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	if _, ok := msg.Metadata["handler_name"]; ok {
+		t.Error("expected no handler_name when toolMetaFn is nil")
+	}
+}
+
+// --- Eval events ---
+
+// mockEvalRecorder captures RecordEval calls for assertions.
+type mockEvalRecorder struct {
+	mu    sync.Mutex
+	calls []metrics.EvalRecordMetrics
+}
+
+func (r *mockEvalRecorder) RecordEval(m metrics.EvalRecordMetrics) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, m)
+}
+
+func (r *mockEvalRecorder) getCalls() []metrics.EvalRecordMetrics {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]metrics.EvalRecordMetrics, len(r.calls))
+	copy(result, r.calls)
+	return result
+}
+
+func TestOmniaEventStore_EvalCompleted(t *testing.T) {
+	store := &mockSessionStore{}
+	recorder := &mockEvalRecorder{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetEvalMetrics(recorder)
+
+	score := 0.85
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:     "conciseness",
+			EvalType:   "regex",
+			Trigger:    "every_turn",
+			Passed:     true,
+			Score:      &score,
+			DurationMs: 5,
+			Message:    "Eval passed",
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	// Verify Prometheus metrics recorded synchronously
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
+	}
+	c := calls[0]
+	if c.EvalID != "conciseness" {
+		t.Errorf("expected EvalID 'conciseness', got %q", c.EvalID)
+	}
+	if c.EvalType != "regex" {
+		t.Errorf("expected EvalType 'regex', got %q", c.EvalType)
+	}
+	if c.Trigger != "every_turn" {
+		t.Errorf("expected Trigger 'every_turn', got %q", c.Trigger)
+	}
+	if !c.Passed {
+		t.Error("expected Passed=true")
+	}
+	if c.Score == nil || *c.Score != 0.85 {
+		t.Errorf("expected Score 0.85, got %v", c.Score)
+	}
+	if c.DurationSec != 0.005 {
+		t.Errorf("expected DurationSec 0.005, got %f", c.DurationSec)
+	}
+
+	// Verify session message recorded async
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["type"] != "eval_completed" {
+		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	}
+	if msg.Metadata["eval_id"] != "conciseness" {
+		t.Errorf("expected eval_id 'conciseness', got %q", msg.Metadata["eval_id"])
+	}
+	if msg.Metadata["passed"] != "true" {
+		t.Errorf("expected passed 'true', got %q", msg.Metadata["passed"])
+	}
+}
+
+func TestOmniaEventStore_EvalFailed(t *testing.T) {
+	store := &mockSessionStore{}
+	recorder := &mockEvalRecorder{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetEvalMetrics(recorder)
+
+	event := &events.Event{
+		Type:      events.EventEvalFailed,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:      "accuracy",
+			EvalType:    "llm_judge",
+			Trigger:     "on_session_complete",
+			Passed:      false,
+			DurationMs:  2500,
+			Message:     "Eval failed: accuracy below threshold",
+			Explanation: "Score was 0.3, threshold is 0.7",
+			Violations:  []string{"accuracy too low"},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
+	}
+	if calls[0].Passed {
+		t.Error("expected Passed=false")
+	}
+	if calls[0].DurationSec != 2.5 {
+		t.Errorf("expected DurationSec 2.5, got %f", calls[0].DurationSec)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["type"] != "eval_failed" {
+		t.Errorf("expected type 'eval_failed', got %q", msg.Metadata["type"])
+	}
+}
+
+func TestOmniaEventStore_EvalSkipped(t *testing.T) {
+	store := &mockSessionStore{}
+	recorder := &mockEvalRecorder{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetEvalMetrics(recorder)
+
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:     "sampled_eval",
+			EvalType:   "llm_judge",
+			Trigger:    "sample_turns",
+			Skipped:    true,
+			SkipReason: "sampling",
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if !calls[0].Skipped {
+		t.Error("expected Skipped=true")
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["skipped"] != "true" {
+		t.Errorf("expected skipped 'true', got %q", msg.Metadata["skipped"])
+	}
+	if msg.Metadata["skip_reason"] != "sampling" {
+		t.Errorf("expected skip_reason 'sampling', got %q", msg.Metadata["skip_reason"])
+	}
+}
+
+func TestOmniaEventStore_EvalWithError(t *testing.T) {
+	store := &mockSessionStore{}
+	recorder := &mockEvalRecorder{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetEvalMetrics(recorder)
+
+	event := &events.Event{
+		Type:      events.EventEvalFailed,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:     "broken",
+			EvalType:   "regex",
+			Trigger:    "every_turn",
+			Error:      "invalid regex pattern",
+			DurationMs: 1,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if !calls[0].HasError {
+		t.Error("expected HasError=true")
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["is_error"] != "true" {
+		t.Errorf("expected is_error 'true', got %q", msg.Metadata["is_error"])
+	}
+}
+
+func TestOmniaEventStore_EvalNoMetricsRecorder(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	// No SetEvalMetrics — should still persist to session-api without panic
+
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:   "test-eval",
+			EvalType: "contains",
+			Trigger:  "every_turn",
+			Passed:   true,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["type"] != "eval_completed" {
+		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	}
+}
+
+func TestOmniaEventStore_EvalMetricsOnlyMode(t *testing.T) {
+	// No session store — only eval metrics recording
+	recorder := &mockEvalRecorder{}
+	es := NewOmniaEventStore(nil, logr.Discard())
+	es.SetEvalMetrics(recorder)
+
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:   "test-eval",
+			EvalType: "contains",
+			Trigger:  "every_turn",
+			Passed:   true,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	// Metrics should be recorded synchronously
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
+	}
+	if calls[0].EvalID != "test-eval" {
+		t.Errorf("expected EvalID 'test-eval', got %q", calls[0].EvalID)
+	}
+}
+
+func TestOmniaEventStore_EvalValueTypedData(t *testing.T) {
+	// Verify asPtr handles value-typed EvalEventData (not just *EvalEventData)
+	store := &mockSessionStore{}
+	recorder := &mockEvalRecorder{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetEvalMetrics(recorder)
+
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: events.EvalEventData{ // value type, not pointer
+			EvalID:   "value-typed",
+			EvalType: "contains",
+			Trigger:  "every_turn",
+			Passed:   true,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
+	}
+	if calls[0].EvalID != "value-typed" {
+		t.Errorf("expected EvalID 'value-typed', got %q", calls[0].EvalID)
 	}
 }

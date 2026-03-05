@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -38,6 +39,12 @@ var ErrNotImplemented = errors.New("not implemented by HTTP session client")
 
 // Default timeout for HTTP requests to the session-api.
 const DefaultHTTPTimeout = 30 * time.Second
+
+// Retry configuration for transient failures.
+const (
+	maxRetries    = 3
+	retryBaseWait = 100 * time.Millisecond
+)
 
 // StoreOption is a functional option for configuring the HTTP session store.
 type StoreOption func(*Store)
@@ -134,7 +141,7 @@ func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOpt
 
 // GetSession retrieves a session via GET /api/v1/sessions/{sessionID}.
 func (s *Store) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
-	resp, err := s.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s", sessionID), nil)
+	resp, err := s.doWithRetry(ctx, http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s", sessionID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
@@ -234,19 +241,54 @@ func (s *Store) GetState(_ context.Context, _, _ string) (string, error) {
 // --- HTTP helpers ---
 
 func (s *Store) doJSON(ctx context.Context, method, path string, body any) (*http.Response, error) {
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+	data, err := json.Marshal(body)
+	if err != nil {
 		return nil, fmt.Errorf("encode request body: %w", err)
 	}
-	return s.doRequest(ctx, method, path, &buf)
+	return s.doWithRetry(ctx, method, path, data)
 }
 
-func (s *Store) doRequest(ctx context.Context, method, path string, body *bytes.Buffer) (*http.Response, error) {
+// doWithRetry executes an HTTP request with retry for transient failures.
+// It creates a fresh bytes.Reader per attempt so the body is re-readable.
+func (s *Store) doWithRetry(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	var lastErr error
+	for attempt := range maxRetries {
+		if attempt > 0 {
+			wait := retryBaseWait << uint(attempt-1) // 100ms, 200ms, 400ms
+			s.log.V(1).Info("retrying request",
+				"method", method, "path", path,
+				"attempt", attempt+1, "backoff", wait.String())
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		resp, err := s.doRequest(ctx, method, path, body)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			continue
+		}
+		if isRetryableStatus(resp.StatusCode) {
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			_ = drainAndClose(resp.Body)
+			continue
+		}
+		return resp, nil
+	}
+	return nil, lastErr
+}
+
+func (s *Store) doRequest(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	url := s.baseURL + path
 	var req *http.Request
 	var err error
 	if body != nil {
-		req, err = http.NewRequestWithContext(ctx, method, url, body)
+		req, err = http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	} else {
 		req, err = http.NewRequestWithContext(ctx, method, url, nil)
 	}
@@ -254,7 +296,31 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body *bytes.
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return s.httpClient.Do(req)
+
+	s.log.V(1).Info("session-api request",
+		"method", method, "path", path)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		s.log.V(1).Info("session-api request failed",
+			"method", method, "path", path, "error", err.Error())
+		return nil, err
+	}
+
+	s.log.V(1).Info("session-api response",
+		"method", method, "path", path, "status", resp.StatusCode)
+	return resp, nil
+}
+
+// isRetryableStatus returns true for HTTP status codes that indicate a transient server issue.
+func isRetryableStatus(code int) bool {
+	return code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
+}
+
+// drainAndClose reads remaining body bytes and closes it.
+func drainAndClose(body io.ReadCloser) error {
+	_, _ = io.Copy(io.Discard, body)
+	return body.Close()
 }
 
 // errorResponse mirrors the session-api ErrorResponse.

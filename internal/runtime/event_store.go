@@ -28,7 +28,9 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 
+	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Metadata key constants to avoid string duplication (SonarCloud go:S1192).
@@ -59,11 +61,16 @@ func asPtr[T any](data any) (*T, bool) {
 // This is the Pattern C integration point: the SDK's EventBus publishes
 // events here, and we persist them as session messages.
 //
+// Eval events (EventEvalCompleted, EventEvalFailed) are additionally recorded
+// to Prometheus via the evalMetrics recorder, replacing the old ResultWriter path.
+//
 // Every event the SDK emits is recorded — matching the fidelity of
 // PromptKit's FileEventStore.
 type OmniaEventStore struct {
 	sessionStore session.Store
 	log          logr.Logger
+	toolMetaFn   func(string) (tools.ToolMeta, bool)
+	evalMetrics  metrics.EvalMetricsRecorder
 }
 
 // NewOmniaEventStore creates a new event store that bridges to session-api.
@@ -74,12 +81,31 @@ func NewOmniaEventStore(store session.Store, log logr.Logger) *OmniaEventStore {
 	}
 }
 
+// SetToolMetaFn sets the function used to look up registry/handler metadata for tools.
+func (s *OmniaEventStore) SetToolMetaFn(fn func(string) (tools.ToolMeta, bool)) {
+	s.toolMetaFn = fn
+}
+
+// SetEvalMetrics sets the Prometheus metrics recorder for eval events.
+// When set, eval events are recorded to Prometheus in addition to session-api.
+func (s *OmniaEventStore) SetEvalMetrics(m metrics.EvalMetricsRecorder) {
+	s.evalMetrics = m
+}
+
 // Append adds an event to the store by converting it to a session message
 // and writing it to session-api. Writes are fire-and-forget (goroutines with
 // logged errors), matching the facade's async recording pattern.
+//
+// Eval events are additionally recorded to Prometheus synchronously (counter
+// increments are cheap) so metrics are never lost even if session-api is down.
 func (s *OmniaEventStore) Append(_ context.Context, event *events.Event) error {
 	if event.SessionID == "" {
 		return nil
+	}
+
+	// Record eval metrics synchronously before the async write.
+	if s.evalMetrics != nil && isEvalEvent(event.Type) {
+		s.recordEvalMetrics(event)
 	}
 
 	msg, stats, ok := s.convertEvent(event)
@@ -139,6 +165,10 @@ func (s *OmniaEventStore) convertEvent(event *events.Event) (session.Message, se
 		return s.convertProviderCallCompleted(event)
 	case events.EventProviderCallFailed:
 		return s.convertProviderCallFailed(event)
+
+	// Evals
+	case events.EventEvalCompleted, events.EventEvalFailed:
+		return s.convertEvalEvent(event)
 
 	// Pipeline lifecycle
 	case events.EventPipelineStarted,
@@ -355,6 +385,29 @@ func (s *OmniaEventStore) convertConversationStarted(event *events.Event) (sessi
 	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
 }
 
+// Metadata key constants for tool registry enrichment.
+const (
+	metaKeyHandlerName       = "handler_name"
+	metaKeyHandlerType       = "handler_type"
+	metaKeyRegistryName      = "registry_name"
+	metaKeyRegistryNamespace = "registry_namespace"
+)
+
+// enrichToolMeta adds registry/handler metadata to the map if available.
+func (s *OmniaEventStore) enrichToolMeta(metadata map[string]string, toolName string) {
+	if s.toolMetaFn == nil {
+		return
+	}
+	meta, ok := s.toolMetaFn(toolName)
+	if !ok {
+		return
+	}
+	metadata[metaKeyHandlerName] = meta.HandlerName
+	metadata[metaKeyHandlerType] = meta.HandlerType
+	metadata[metaKeyRegistryName] = meta.RegistryName
+	metadata[metaKeyRegistryNamespace] = meta.RegistryNamespace
+}
+
 // --- Tool call events ---
 
 // convertToolCallStarted creates a tool_call message matching the facade format.
@@ -373,10 +426,13 @@ func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (session.M
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
 
-	msg := s.buildMessage(session.RoleAssistant, string(content), event.Timestamp, map[string]string{
+	metadata := map[string]string{
 		metaKeyType:   "tool_call",
 		metaKeySource: metaValueSource,
-	})
+	}
+	s.enrichToolMeta(metadata, data.ToolName)
+
+	msg := s.buildMessage(session.RoleAssistant, string(content), event.Timestamp, metadata)
 	msg.ToolCallID = data.CallID
 
 	return msg, session.SessionStatsUpdate{AddToolCalls: 1, AddMessages: 1}, true
@@ -396,13 +452,16 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (session
 		"durationMs": data.Duration.Milliseconds(),
 	})
 
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, map[string]string{
+	metadata := map[string]string{
 		metaKeyType:       "tool_call_completed",
 		metaKeySource:     metaValueSource,
 		metaKeyToolName:   data.ToolName,
 		metaKeyDurationMs: strconv.FormatInt(data.Duration.Milliseconds(), 10),
 		"status":          data.Status,
-	})
+	}
+	s.enrichToolMeta(metadata, data.ToolName)
+
+	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
 	msg.ToolCallID = data.CallID
 
 	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
@@ -420,13 +479,16 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (session.Me
 		errMsg = data.Error.Error()
 	}
 
-	msg := s.buildMessage(session.RoleSystem, errMsg, event.Timestamp, map[string]string{
+	metadata := map[string]string{
 		metaKeyType:       "tool_result",
 		metaKeyIsError:    "true",
 		metaKeySource:     metaValueSource,
 		metaKeyToolName:   data.ToolName,
 		metaKeyDurationMs: strconv.FormatInt(data.Duration.Milliseconds(), 10),
-	})
+	}
+	s.enrichToolMeta(metadata, data.ToolName)
+
+	msg := s.buildMessage(session.RoleSystem, errMsg, event.Timestamp, metadata)
 	msg.ToolCallID = data.CallID
 
 	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
@@ -527,6 +589,82 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (sessio
 	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
 }
 
+// --- Eval events ---
+
+// isEvalEvent returns true for eval lifecycle event types.
+func isEvalEvent(t events.EventType) bool {
+	return t == events.EventEvalCompleted || t == events.EventEvalFailed
+}
+
+// convertEvalEvent creates a session message from an eval completed/failed event.
+func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
+	data, ok := asPtr[events.EvalEventData](event.Data)
+	if !ok {
+		return session.Message{}, session.SessionStatsUpdate{}, false
+	}
+
+	evtType := "eval_completed"
+	if event.Type == events.EventEvalFailed {
+		evtType = "eval_failed"
+	}
+
+	metadata := map[string]string{
+		metaKeyType:   evtType,
+		metaKeySource: metaValueSource,
+		"eval_id":     data.EvalID,
+		"eval_type":   data.EvalType,
+		"trigger":     data.Trigger,
+		"passed":      strconv.FormatBool(data.Passed),
+	}
+	if data.DurationMs > 0 {
+		metadata[metaKeyDurationMs] = strconv.FormatInt(data.DurationMs, 10)
+	}
+	if data.Error != "" {
+		metadata[metaKeyIsError] = "true"
+	}
+	if data.Skipped {
+		metadata["skipped"] = "true"
+		metadata["skip_reason"] = data.SkipReason
+	}
+
+	content, _ := json.Marshal(map[string]interface{}{
+		"evalID":      data.EvalID,
+		"evalType":    data.EvalType,
+		"trigger":     data.Trigger,
+		"passed":      data.Passed,
+		"score":       data.Score,
+		"durationMs":  data.DurationMs,
+		"explanation": data.Explanation,
+		"message":     data.Message,
+		"violations":  data.Violations,
+		"skipped":     data.Skipped,
+		"skipReason":  data.SkipReason,
+		"error":       data.Error,
+	})
+
+	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
+	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+}
+
+// recordEvalMetrics records eval event data to Prometheus metrics.
+func (s *OmniaEventStore) recordEvalMetrics(event *events.Event) {
+	data, ok := asPtr[events.EvalEventData](event.Data)
+	if !ok {
+		return
+	}
+
+	s.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
+		EvalID:      data.EvalID,
+		EvalType:    data.EvalType,
+		Trigger:     data.Trigger,
+		Passed:      data.Passed,
+		Score:       data.Score,
+		DurationSec: float64(data.DurationMs) / 1000.0,
+		Skipped:     data.Skipped,
+		HasError:    data.Error != "",
+	})
+}
+
 // --- Generic event handler ---
 
 // convertGenericEvent records any event type by serializing its Data as JSON.
@@ -567,21 +705,34 @@ func (s *OmniaEventStore) buildMessage(
 
 // writeMessage persists a message and stats update to session-api.
 // Errors are logged but never propagated, matching the facade's fire-and-forget pattern.
+// When sessionStore is nil (eval-metrics-only mode), this is a no-op.
 func (s *OmniaEventStore) writeMessage(sessionID string, msg session.Message, stats session.SessionStatsUpdate) {
+	if s.sessionStore == nil {
+		return
+	}
+
 	ctx := context.Background()
+	msgType := msg.Metadata[metaKeyType]
+
+	s.log.V(1).Info("writing event to session-api",
+		"sessionID", sessionID, "messageType", msgType, "messageID", msg.ID)
 
 	if err := s.sessionStore.AppendMessage(ctx, sessionID, msg); err != nil {
 		s.log.Error(err, "failed to append event message",
 			"sessionID", sessionID,
-			"messageType", msg.Metadata[metaKeyType])
+			"messageType", msgType)
 		return
 	}
 
 	if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, stats); err != nil {
 		s.log.Error(err, "failed to update session stats",
 			"sessionID", sessionID,
-			"messageType", msg.Metadata[metaKeyType])
+			"messageType", msgType)
+		return
 	}
+
+	s.log.V(1).Info("event written to session-api",
+		"sessionID", sessionID, "messageType", msgType)
 }
 
 // Verify interface compliance at compile time.

@@ -419,7 +419,7 @@ func TestEvalIntegration_FullPipelineWithMockProvider(t *testing.T) {
 
 	// Verify eval pipeline was wired correctly
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 2, "should have WithEvalDispatcher and WithResultWriters options")
+	assert.Len(t, opts, 1, "should have WithEvalRunner option")
 
 	// Verify eval metrics were actually recorded in the collector.
 	// This proves the full pipeline: SDK middleware → dispatcher → runner → writer → collector.
@@ -528,7 +528,7 @@ func TestEvalIntegration_ResultWriterCapture(t *testing.T) {
 }
 
 // TestEvalIntegration_PrometheusMetrics exercises the full pipeline and verifies
-// that PrometheusResultWriter records eval results to Prometheus metrics.
+// that eval events are recorded to Prometheus metrics via OmniaEventStore.
 // Mirrors TestEvalIntegration_FullPipelineWithMockProvider but checks Prometheus output.
 func TestEvalIntegration_PrometheusMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
