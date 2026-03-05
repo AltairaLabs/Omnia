@@ -504,6 +504,12 @@ app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url, true);
+
+      // Cache hashed static assets for 1 year (immutable content-addressed files)
+      if (parsedUrl.pathname && parsedUrl.pathname.startsWith("/_next/static/")) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+
       await handle(req, res, parsedUrl);
     } catch (err) {
       console.error("Error handling request:", err);

@@ -727,7 +727,7 @@ sessionApi:
   resources:
     limits:
       cpu: "1"
-      memory: 512Mi
+      memory: 1Gi
     requests:
       cpu: 250m
       memory: 256Mi
@@ -1615,6 +1615,13 @@ redis:
     persistence:
       # -- Disable persistence for development
       enabled: false
+    # -- Extra Redis server flags for memory management
+    # Production deployments should adjust maxmemory based on workload.
+    extraFlags:
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
     resources:
       limits:
         cpu: 200m
