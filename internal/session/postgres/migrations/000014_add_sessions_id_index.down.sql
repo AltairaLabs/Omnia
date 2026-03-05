@@ -1,1 +1,1 @@
-DROP INDEX CONCURRENTLY IF EXISTS idx_sessions_id;
+DROP INDEX IF EXISTS idx_sessions_id;
