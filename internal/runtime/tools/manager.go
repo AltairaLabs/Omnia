@@ -30,6 +30,7 @@ type Manager struct {
 	log      logr.Logger
 	adapters map[string]ToolAdapter // adapter name -> adapter
 	tools    map[string]string      // tool name -> adapter name
+	toolMeta map[string]ToolMeta    // tool name -> registry/handler metadata
 	mu       sync.RWMutex
 }
 
@@ -39,6 +40,7 @@ func NewManager(log logr.Logger) *Manager {
 		log:      log,
 		adapters: make(map[string]ToolAdapter),
 		tools:    make(map[string]string),
+		toolMeta: make(map[string]ToolMeta),
 	}
 }
 
@@ -103,6 +105,46 @@ func (m *Manager) ListTools() []string {
 	return names
 }
 
+// SetRegistryInfo populates tool metadata from the ToolRegistry CRD and handler config.
+// It maps each tool to its handler's type, endpoint, and registry identity.
+func (m *Manager) SetRegistryInfo(registryName, registryNamespace string, handlers []HandlerEntry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Build handler name → (type, endpoint) lookup
+	handlerLookup := make(map[string]HandlerEntry, len(handlers))
+	for _, h := range handlers {
+		handlerLookup[h.Name] = h
+	}
+
+	// For each tool, match its adapter name to a handler and populate metadata
+	for toolName, adapterName := range m.tools {
+		meta := ToolMeta{
+			RegistryName:      registryName,
+			RegistryNamespace: registryNamespace,
+			HandlerName:       adapterName,
+		}
+		if h, ok := handlerLookup[adapterName]; ok {
+			meta.HandlerType = h.Type
+			meta.Endpoint = h.Endpoint
+		}
+		m.toolMeta[toolName] = meta
+	}
+
+	m.log.V(1).Info("registry info set",
+		"registryName", registryName,
+		"registryNamespace", registryNamespace,
+		"toolCount", len(m.toolMeta))
+}
+
+// GetToolMeta returns the registry/handler metadata for a tool.
+func (m *Manager) GetToolMeta(toolName string) (ToolMeta, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	meta, ok := m.toolMeta[toolName]
+	return meta, ok
+}
+
 // Call invokes a tool by name.
 func (m *Manager) Call(ctx context.Context, toolName string, args map[string]any) (*ToolResult, error) {
 	m.mu.RLock()
@@ -133,6 +175,7 @@ func (m *Manager) Close() error {
 
 	m.adapters = make(map[string]ToolAdapter)
 	m.tools = make(map[string]string)
+	m.toolMeta = make(map[string]ToolMeta)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing adapters: %v", errs)
