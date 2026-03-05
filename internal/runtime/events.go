@@ -334,7 +334,6 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 	}))
 
 	// Store unsubscribe functions for cleanup when the conversation ends.
-	s.conversationMu.Lock()
+	// NOTE: caller (getOrCreateConversation) already holds conversationMu write lock.
 	s.unsubscribeFns[sessionID] = unsubs
-	s.conversationMu.Unlock()
 }
