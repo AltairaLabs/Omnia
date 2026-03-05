@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -173,6 +174,10 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		Volumes:            volumes,
 	}
 
+	// Termination grace period: 45s allows the 30s shutdown timeout to complete
+	// plus headroom for the pre-stop hook and connection draining.
+	podSpec.TerminationGracePeriodSeconds = ptr.To(int64(45))
+
 	// Add scheduling constraints if specified
 	if agentRuntime.Spec.Runtime != nil {
 		if agentRuntime.Spec.Runtime.NodeSelector != nil {
@@ -183,6 +188,21 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		}
 		if agentRuntime.Spec.Runtime.Affinity != nil {
 			podSpec.Affinity = agentRuntime.Spec.Runtime.Affinity
+		}
+	}
+
+	// Default topology spread: distribute agent pods across zones when replicas > 1.
+	// Users can override via CRD affinity rules.
+	if replicas > 1 && podSpec.Affinity == nil {
+		podSpec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{
+			{
+				MaxSkew:           1,
+				TopologyKey:       "topology.kubernetes.io/zone",
+				WhenUnsatisfiable: corev1.ScheduleAnyway,
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+			},
 		}
 	}
 
@@ -284,6 +304,15 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 			},
 			InitialDelaySeconds: 15,
 			PeriodSeconds:       20,
+		},
+		// Pre-stop hook: sleep 5s to let the load balancer stop routing traffic
+		// before SIGTERM triggers the 30s graceful shutdown in the facade process.
+		Lifecycle: &corev1.Lifecycle{
+			PreStop: &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"/bin/sh", "-c", "sleep 5"},
+				},
+			},
 		},
 	}
 

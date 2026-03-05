@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -228,6 +229,16 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(runtimeContainer.Image).To(Equal("test-runtime:v1.0.0"))
 			Expect(runtimeContainer.Ports).To(HaveLen(2)) // gRPC port + health port
 			Expect(runtimeContainer.Ports[0].ContainerPort).To(Equal(int32(DefaultRuntimeGRPCPort)))
+
+			By("verifying pre-stop lifecycle hook on facade container")
+			Expect(facadeContainer.Lifecycle).NotTo(BeNil())
+			Expect(facadeContainer.Lifecycle.PreStop).NotTo(BeNil())
+			Expect(facadeContainer.Lifecycle.PreStop.Exec).NotTo(BeNil())
+			Expect(facadeContainer.Lifecycle.PreStop.Exec.Command).To(Equal([]string{"/bin/sh", "-c", "sleep 5"}))
+
+			By("verifying termination grace period")
+			Expect(deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).NotTo(BeNil())
+			Expect(*deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(45)))
 
 			By("verifying the Service was created")
 			service := &corev1.Service{}
@@ -1988,6 +1999,141 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Eventually(func() error {
 				return k8sClient.Get(ctx, agentRuntimeKey, hpa)
 			}, timeout, interval).Should(Succeed())
+		})
+
+		It("should create PDB and topology spread when replicas > 1", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with 3 replicas")
+			replicas := int32(3)
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Replicas: &replicas,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying PDB was created")
+			pdb := &policyv1.PodDisruptionBudget{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, pdb)
+			}, timeout, interval).Should(Succeed())
+
+			Expect(pdb.Spec.MinAvailable).NotTo(BeNil())
+			Expect(pdb.Spec.MinAvailable.IntValue()).To(Equal(1))
+			Expect(pdb.OwnerReferences).To(HaveLen(1))
+			Expect(pdb.OwnerReferences[0].Name).To(Equal(agentRuntimeKey.Name))
+
+			By("verifying topology spread constraints on deployment")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			Expect(deployment.Spec.Template.Spec.TopologySpreadConstraints).To(HaveLen(1))
+			tsc := deployment.Spec.Template.Spec.TopologySpreadConstraints[0]
+			Expect(tsc.MaxSkew).To(Equal(int32(1)))
+			Expect(tsc.TopologyKey).To(Equal("topology.kubernetes.io/zone"))
+			Expect(tsc.WhenUnsatisfiable).To(Equal(corev1.ScheduleAnyway))
+		})
+
+		It("should not create PDB when replicas is 1", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version: "1.0.0",
+					Source: omniav1alpha1.PromptPackSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+					Rollout: omniav1alpha1.RolloutStrategy{
+						Type: omniav1alpha1.RolloutStrategyImmediate,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			By("creating an AgentRuntime with 1 replica (default)")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facade: omniav1alpha1.FacadeConfig{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					},
+					Provider: &omniav1alpha1.ProviderConfig{
+						Type: omniav1alpha1.ProviderTypeClaude,
+						SecretRef: &corev1.LocalObjectReference{
+							Name: "test-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying no PDB was created")
+			pdb := &policyv1.PodDisruptionBudget{}
+			err = k8sClient.Get(ctx, agentRuntimeKey, pdb)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			By("verifying no topology spread constraints on single-replica deployment")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+			Expect(deployment.Spec.Template.Spec.TopologySpreadConstraints).To(BeEmpty())
 		})
 
 		It("should return early when AgentRuntime is not found", func() {

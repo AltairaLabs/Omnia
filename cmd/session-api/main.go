@@ -365,7 +365,8 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	svcCfg.EventPublisher = initEventPublisher(registry, log, httpMetrics)
 
 	sessionService := api.NewSessionService(registry, svcCfg, log)
-	handler := api.NewHandler(sessionService, log)
+	maxBody := int64(envInt32("MAX_BODY_SIZE", int32(api.DefaultMaxBodySize)))
+	handler := api.NewHandler(sessionService, log, maxBody)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -437,6 +438,7 @@ func initProviders(ctx context.Context, f *flags, pool *pgxpool.Pool, log logr.L
 	if f.redisAddrs != "" {
 		redisCfg := redis.DefaultConfig()
 		redisCfg.Addrs = strings.Split(f.redisAddrs, ",")
+		redisCfg.MaxMessagesPerSession = int(envInt32("REDIS_MAX_MESSAGES", int32(redisCfg.MaxMessagesPerSession)))
 		hotProvider, err := redis.New(redisCfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("creating redis provider: %w", err)

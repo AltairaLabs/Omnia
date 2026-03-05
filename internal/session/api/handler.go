@@ -42,8 +42,9 @@ const (
 	maxSearchQueryLen   = 500
 	maxOffsetLimit      = 10000
 
-	// DefaultMaxBodySize is the maximum allowed request body size (10 MB).
-	DefaultMaxBodySize int64 = 10 << 20
+	// DefaultMaxBodySize is the maximum allowed request body size (16 MB).
+	// Aligned with WebSocket and gRPC max message sizes across the pipeline.
+	DefaultMaxBodySize int64 = 16 << 20
 )
 
 // SessionListResponse is the JSON response for session list/search endpoints.
