@@ -153,6 +153,12 @@ func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOpt
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Treat 409 Conflict as success — the session already exists from a
+	// previous attempt, making retries after network errors safe.
+	if resp.StatusCode == http.StatusConflict {
+		return s.GetSession(ctx, id)
+	}
+
 	if resp.StatusCode != http.StatusCreated {
 		return nil, s.readError(resp)
 	}

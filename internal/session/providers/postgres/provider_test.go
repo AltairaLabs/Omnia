@@ -207,7 +207,7 @@ func TestCreateGetSession(t *testing.T) {
 	assert.InDelta(t, s.EstimatedCostUSD, got.EstimatedCostUSD, 0.000001)
 }
 
-func TestCreateSession_Duplicate(t *testing.T) {
+func TestCreateSession_Idempotent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -219,9 +219,14 @@ func TestCreateSession_Duplicate(t *testing.T) {
 	s := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", now)
 	require.NoError(t, p.CreateSession(ctx, s))
 
+	// Second create with the same ID should succeed (idempotent).
 	err := p.CreateSession(ctx, s)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate")
+	assert.NoError(t, err)
+
+	// Session should still be retrievable.
+	got, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Equal(t, s.ID, got.ID)
 }
 
 func TestGetSession_NotFound(t *testing.T) {
