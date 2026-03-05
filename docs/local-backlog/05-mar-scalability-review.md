@@ -32,11 +32,11 @@ All media is base64-encoded for gRPC transport (`internal/runtime/media.go:233`)
 A 12 MB image becomes ~16 MB on the wire, hitting the gRPC ceiling.
 Large videos are effectively unsendable through the current pipeline.
 
-**S-MSG-3: No per-message compression.**
+**S-MSG-3: No per-message compression.** *(Fixed)*
 Binary WebSocket frames have a compression flag but it is not implemented.
 gRPC compression (gzip) is not enabled on the facade→runtime channel.
 
-**S-MSG-4: Read/write buffer asymmetry.**
+**S-MSG-4: Read/write buffer asymmetry.** *(Fixed)*
 WebSocket read/write buffers are 32 KB (`internal/facade/server.go:67-68`).
 Gorilla/websocket will internally allocate to fit the full message (up to 16 MB),
 but the small initial buffer means large messages trigger multiple reallocations.
@@ -45,9 +45,9 @@ but the small initial buffer means large messages trigger multiple reallocations
 
 - Align session-api max body to 16 MB (match the rest of the pipeline) or, better,
   introduce external blob storage for large payloads and store only a reference.
-- Enable gRPC gzip compression on the facade→runtime channel.
+- ~~Enable gRPC gzip compression on the facade→runtime channel.~~ **Done** — PR #582: `grpc.UseCompressor(gzip.Name)` on facade dial options.
 - Consider streaming media as chunked binary frames instead of single base64 blobs.
-- Raise WebSocket read/write buffers to 64–128 KB for pods expected to handle media.
+- ~~Raise WebSocket read/write buffers to 64–128 KB for pods expected to handle media.~~ **Done** — PR #582: 32 KB → 64 KB.
 
 ---
 
@@ -137,7 +137,7 @@ prevents repeated calls to a dead endpoint.
 `ReadTimeout`, `WriteTimeout`, or `IdleTimeout`. Slow or malicious clients can hold
 connections open forever.
 
-**S-RES-5: `CreateSession` is not retried.**
+**S-RES-5: `CreateSession` is not retried.** *(Fixed)*
 Only `doWithRetry` covers GET-like operations and `doJSON` (POST/PUT). But `CreateSession`
 calls `doJSON` which does go through retry — however, a duplicate-create on retry could
 cause a conflict error. Need idempotency key or upsert semantics.
@@ -198,7 +198,7 @@ Media is sent as one gRPC message (`message.go:226`, `IsLast: true`). A 15 MB im
 (within the 16 MB limit) is held entirely in memory on both facade and runtime simultaneously.
 No streaming of large blobs.
 
-**S-STR-5: No buffer pooling.**
+**S-STR-5: No buffer pooling.** *(Fixed)*
 `strings.Builder` and `[]byte` allocations happen per-message with no `sync.Pool`.
 Under sustained load, GC pressure will cause latency spikes.
 
@@ -214,7 +214,7 @@ linearly with eval diversity. At scale this bloats Prometheus memory and slows s
 - Set an explicit max-connections limit on the facade (e.g., 500 per pod) and return
   HTTP 503 when full. Pair with HPA to scale out.
 - Implement chunked media streaming over gRPC for payloads > 1 MB.
-- Add `sync.Pool` for `[]byte` buffers used in streaming and media encoding.
+- ~~Add `sync.Pool` for `[]byte` buffers used in streaming and media encoding.~~ **Done** — PR #582: `bufPool` in `binary.go` with `EncodePooled()`/`GetPooledBuf()`/`PutPooledBuf()`.
 - Move `eval_id` from Prometheus label to trace attribute. Use only `eval_type` and
   `trigger` as labels.
 - Set container `ulimit` to at least 65536 in the Helm chart security context.
@@ -238,7 +238,7 @@ session-api needs to handle thousands of writes/sec. With 50 connections and ~5 
 write, throughput caps at ~10 K writes/sec — but pool contention and lock waits will
 realistically halve that.
 
-**S-DB-2: Denormalized counter contention.**
+**S-DB-2: Denormalized counter contention.** *(Fixed)*
 `UpdateSessionStats` does `message_count = message_count + ?` on the sessions row
 (`provider.go:321`). Multiple concurrent messages to the same session serialize on the
 row lock. At 10+ msg/sec per session (tool-heavy conversations), this becomes a bottleneck.
@@ -247,7 +247,7 @@ row lock. At 10+ msg/sec per session (tool-heavy conversations), this becomes a 
 Weekly partitions with high write rates generate dead tuples. Without scheduled maintenance,
 index bloat and query planner staleness degrade over time.
 
-**S-DB-4: Delete cascades are multi-statement.**
+**S-DB-4: Delete cascades are multi-statement.** *(Fixed)*
 `DeleteSession` runs 4 separate DELETE statements in a transaction (`provider.go:332-366`).
 A session with 1,000 messages triggers 4 deletes touching thousands of rows under a single
 transaction lock.
@@ -258,7 +258,7 @@ transaction lock.
 Redis can grow unbounded. At 5,000 active sessions × 200 messages × 2 KB avg, hot cache
 alone is ~2 GB. Add session metadata and stream entries and it climbs fast.
 
-**S-DB-6: Single-node Redis (no cluster).**
+**S-DB-6: Single-node Redis (no cluster).** *(Fixed)*
 Helm values don't mention Redis Cluster or Sentinel. A Redis restart causes all hot-cache
 misses to hit PostgreSQL simultaneously (thundering herd).
 
@@ -271,7 +271,7 @@ A burst of 10 MB body requests can OOM the pod.
 **S-K8S-2: No HPA configured.**
 No `HorizontalPodAutoscaler` resource in the Helm chart. Scaling is manual.
 
-**S-K8S-3: Operator is single-replica.**
+**S-K8S-3: Operator is single-replica.** *(Fixed)*
 CRD reconciliation is serialized. 100+ agent updates queue up behind each other.
 
 **S-K8S-4: Dashboard assets served by operator pod.**
@@ -291,15 +291,13 @@ Session-api logs 4–6 lines per message write. At 1,000 msg/sec, that's 6,000 l
 ### Recommendations
 
 - Increase `PG_MAX_CONNS` to 50+ per replica and deploy 3+ session-api replicas.
-- Batch stats updates: accumulate deltas in-memory and flush every 1–5 s per session
-  instead of per-message.
-- Configure Redis with `maxmemory` and `allkeys-lru` eviction.
-- Deploy Redis with Sentinel or Cluster for HA.
-- Raise session-api memory limit to 512 Mi–1 Gi.
+- ~~Batch stats updates: accumulate deltas in-memory and flush every 1–5 s per session instead of per-message.~~ **Done** — PR #582: `StatsBatcher` flushes every 3s.
+- ~~Configure Redis with `maxmemory` and `allkeys-lru` eviction.~~ **Done** — PR #582.
+- ~~Deploy Redis with Sentinel or Cluster for HA.~~ **Done** — PR #582: `architecture: replication` + Sentinel.
+- ~~Raise session-api memory limit to 512 Mi–1 Gi.~~ **Done** — PR #582.
 - Add HPA for session-api and facade (target CPU 70% or custom request-rate metric).
-- Deploy operator with 3 replicas + leader election.
-- Serve dashboard assets via a CDN or add `Cache-Control: public, max-age=31536000, immutable`
-  for hashed bundles.
+- ~~Deploy operator with 3 replicas + leader election.~~ **Done** — PR #582: `replicaCount: 3`.
+- ~~Serve dashboard assets via a CDN or add `Cache-Control: public, max-age=31536000, immutable` for hashed bundles.~~ **Done** — PR #582.
 - Reduce trace sample rate to 0.01–0.1 in production.
 - Gate V(1) logging behind a feature flag or reduce to V(2) for high-frequency write paths.
 
@@ -405,7 +403,7 @@ At 200 connections per pod, 10 pods serve only 2,000 connections. Operators must
 raise `maxReplicas` to 50–100 per agent definition. Nothing in the CRD or docs warns about
 this.
 
-**S-K8S-6: KEDA threshold of 10 connections/pod is too low for text chat.**
+**S-K8S-6: KEDA threshold of 10 connections/pod is too low for text chat.** *(Fixed)*
 The default Prometheus trigger scales at 10 connections per pod. For text-only conversations
 this wastes resources — a single pod can easily handle 200–500 text sessions. The threshold
 should be tunable per workload type (text vs. audio).
@@ -444,8 +442,7 @@ Under churn this creates imbalanced pods.
 ### Recommendations
 
 - Raise default `maxReplicas` to 100 or remove the ceiling and let operators set it.
-- Make the KEDA connection threshold configurable per agent (e.g., 200 for text, 20 for
-  audio).
+- ~~Make the KEDA connection threshold configurable per agent (e.g., 200 for text, 20 for audio).~~ **Done** — PR #582: `connectionThreshold` field on `KEDAConfig`, default 200.
 - Add a `PodDisruptionBudget` with `minAvailable: 80%` to every agent deployment.
 - Implement a pre-stop lifecycle hook that closes the listener and waits for existing
   connections to finish (up to `terminationGracePeriodSeconds`).
@@ -677,19 +674,50 @@ processing), not memory.
 | S-CONV-3: Dashboard renders all messages at once | Windowed rendering in `ConversationMessages`: shows last 50 messages with "Show earlier messages" button |
 | S-CONV-5: Session existence check scans all partitions | Added migration 000014: `CREATE INDEX idx_sessions_id ON sessions(id)` |
 
+### Additional fixes in PR #582 (not in original top 15)
+
+| Issue | Fix |
+|-------|-----|
+| S-MSG-3: No gRPC compression on facade→runtime | `grpc.UseCompressor(gzip.Name)` on facade dial, blank import on runtime |
+| S-MSG-4: WebSocket read/write buffers too small (32 KB) | Raised to 64 KB in `DefaultServerConfig` |
+| S-STR-5: No buffer pooling for streaming | `sync.Pool` with `EncodePooled()`/`GetPooledBuf()`/`PutPooledBuf()` in `binary.go` |
+| S-K8S-3: Operator is single-replica | Default `replicaCount: 3` (leader election already enabled) |
+| S-K8S-6: KEDA threshold hardcoded at 10 | New `connectionThreshold` field on `KEDAConfig` CRD, default 200 |
+| S-DB-2: Row-lock contention on `UpdateSessionStats` | `StatsBatcher` accumulates deltas in-memory, flushes every 3s |
+| S-DB-4: Multi-statement `DeleteSession` | `BEFORE DELETE` trigger (migration 000015) cascades child row deletes |
+| S-DB-6: Single-node Redis | `architecture: replication` + Sentinel HA with 3 replicas |
+| S-RES-5: `CreateSession` not idempotent on retry | Postgres returns nil on duplicate; httpclient treats 409 as success |
+
 ---
 
 ## 11. Status Summary
 
-All **text-chat scalability issues** from the original review are resolved across PRs #578–#581.
+All **text-chat and infrastructure scalability issues** from the original review are resolved across PRs #578–#582.
 
-The remaining open items (#1, #4, #5, #11) are all **audio/duplex-specific** — they require the inbound audio path, gRPC proto changes, buffer pooling, and write-path batching that are prerequisites for duplex audio support. These are blocked until the duplex audio infrastructure work begins.
+The remaining open items (#1, #4, #5, #11) are all **audio/duplex-specific** — they require the inbound audio path, gRPC proto changes, and audio-specific write-path batching. These are blocked until the duplex audio infrastructure work begins.
+
+Note: S-STR-5 (buffer pooling) is partially resolved for text streaming. The audio-specific heap allocation concern (S-AUD-3) requires additional pooling in the audio frame encode/decode path once that path exists.
 
 ### Remaining open items
 
 | # | Issue | Severity | Category | Blocker |
 |---|-------|----------|----------|---------|
 | 1 | S-AUD-1: Inbound audio path is a stub | **Critical** | Audio | Duplex audio infra |
-| 4 | S-AUD-3: 1.8 GB/s heap allocation (no buffer pool) | **Critical** | Audio | Duplex audio infra |
+| 4 | S-AUD-3: 1.8 GB/s heap allocation (audio frames) | **Critical** | Audio | Duplex audio infra |
 | 5 | S-AUD-5: Session-API cannot absorb 200K writes/s | **Critical** | Audio / DB | Duplex audio infra |
 | 11 | S-AUD-6: WebSocket write mutex contention | **High** | Audio | Duplex audio infra |
+
+### Still open (non-critical, not audio-specific)
+
+| Issue | Severity | Notes |
+|-------|----------|-------|
+| S-MSG-2: Base64 encoding inflates media by 33% | Medium | Requires blob storage or chunked binary streaming |
+| S-STR-2: No backpressure between LLM stream and client | Medium | Correct flow control but ties up runtime slot |
+| S-STR-4: Single-chunk media transfer | Medium | Needs chunked gRPC streaming for payloads > 1 MB |
+| S-DB-3: No explicit VACUUM/ANALYZE schedule | Low | Ops concern — document recommended PG maintenance |
+| S-RES-3: Tool call failures stall LLM pipeline | Medium | Tool-level circuit breaker / health probing |
+| S-RES-7: No rate limiting on any API | Medium | Needs design decision on limiter placement |
+| S-K8S-2: No HPA for session-api | Medium | Add HPA resource to Helm chart |
+| S-K8S-11: Gateway/ingress WebSocket idle timeout | Low | Documentation — cloud-specific LB annotations |
+| S-K8S-12: No connection-aware load balancing | Low | Requires Envoy/Istio with least-connections |
+| S-STR-6: Prometheus eval_id label is high-cardinality | Low | Move eval_id to trace attribute |
