@@ -3119,7 +3119,36 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			Expect(metadata["serverAddress"]).To(Equal("http://omnia-prometheus-server.omnia-system.svc.cluster.local/prometheus"))
 			Expect(metadata["query"]).To(ContainSubstring("test-agent"))
 			Expect(metadata["query"]).To(ContainSubstring("test-ns"))
-			Expect(metadata["threshold"]).To(Equal("10"))
+			Expect(metadata["threshold"]).To(Equal("200"))
+		})
+
+		It("should use custom connectionThreshold when set", func() {
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "audio-agent",
+					Namespace: "test-ns",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					Runtime: &omniav1alpha1.RuntimeConfig{
+						Autoscaling: &omniav1alpha1.AutoscalingConfig{
+							Enabled: true,
+							Type:    omniav1alpha1.AutoscalerTypeKEDA,
+							KEDA: &omniav1alpha1.KEDAConfig{
+								ConnectionThreshold: ptr.To(int32(20)),
+							},
+						},
+					},
+				},
+			}
+
+			triggers := reconciler.buildKEDATriggers(agentRuntime)
+
+			Expect(triggers).To(HaveLen(1))
+			trigger := triggers[0].(map[string]interface{})
+			Expect(trigger["type"]).To(Equal("prometheus"))
+
+			metadata := trigger["metadata"].(map[string]interface{})
+			Expect(metadata["threshold"]).To(Equal("20"))
 		})
 
 		It("should return default trigger when KEDA config is nil", func() {

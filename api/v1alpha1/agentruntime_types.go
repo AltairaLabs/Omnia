@@ -183,6 +183,13 @@ type KEDAConfig struct {
 	// If empty, a default Prometheus trigger for connections is configured.
 	// +optional
 	Triggers []KEDATrigger `json:"triggers,omitempty"`
+
+	// connectionThreshold is the target number of active connections per pod
+	// for the default KEDA Prometheus trigger. Only used when triggers is empty.
+	// Defaults to 200 for text workloads. Set lower (e.g., 20) for audio/media workloads.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	ConnectionThreshold *int32 `json:"connectionThreshold,omitempty"`
 }
 
 // AutoscalingConfig defines horizontal pod autoscaling settings.
