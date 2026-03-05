@@ -385,20 +385,28 @@ func (r *SessionRetentionPolicyReconciler) findPoliciesForWorkspace(ctx context.
 	log := logf.FromContext(ctx)
 
 	policyList := &omniav1alpha1.SessionRetentionPolicyList{}
-	if err := r.List(ctx, policyList); err != nil {
-		log.Error(err, "Failed to list SessionRetentionPolicies for Workspace mapping")
-		return nil
+	if err := r.List(ctx, policyList, client.MatchingFields{IndexRetentionPolicyByWorkspace: workspace.Name}); err != nil {
+		// Fall back to list+filter if no index is registered (envtest).
+		if err2 := r.List(ctx, policyList); err2 != nil {
+			log.Error(err2, "Failed to list SessionRetentionPolicies for Workspace mapping")
+			return nil
+		}
+		var requests []reconcile.Request
+		for _, p := range policyList.Items {
+			if _, exists := p.Spec.PerWorkspace[workspace.Name]; exists {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: p.Name},
+				})
+			}
+		}
+		return requests
 	}
 
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(policyList.Items))
 	for _, p := range policyList.Items {
-		if _, exists := p.Spec.PerWorkspace[workspace.Name]; exists {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name: p.Name,
-				},
-			})
-		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: p.Name},
+		})
 	}
 
 	return requests

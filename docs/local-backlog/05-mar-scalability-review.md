@@ -716,8 +716,139 @@ Note: S-STR-5 (buffer pooling) is partially resolved for text streaming. The aud
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| S-MSG-2: Base64 encoding inflates media by 33% | Medium | Requires blob storage or chunked binary streaming |
-| S-DB-3: No explicit VACUUM/ANALYZE schedule | Low | Ops concern — document recommended PG maintenance |
-| S-K8S-11: Gateway/ingress WebSocket idle timeout | Low | Documentation — cloud-specific LB annotations |
-| S-K8S-12: No connection-aware load balancing | Low | Requires Envoy/Istio with least-connections |
-| S-STR-6: Prometheus eval_id label is high-cardinality | Low | Move eval_id to trace attribute |
+| S-MSG-2: Base64 encoding inflates media by 33% | Medium | Future — requires blob storage or chunked binary streaming |
+| S-DB-3: No explicit VACUUM/ANALYZE schedule | Low | Ops/docs — document recommended PG maintenance |
+| S-K8S-11: Gateway/ingress WebSocket idle timeout | Low | Ops/docs — cloud-specific LB annotations |
+| S-K8S-12: No connection-aware load balancing | Low | Future — requires Envoy/Istio with least-connections |
+| S-STR-6: Prometheus eval_id label is high-cardinality | Low | **False positive** — eval_id is bounded by eval definition count (~1-10), not per-execution |
+
+---
+
+## 12. Re-Analysis: Additional Findings (5 March 2026, Pass 2)
+
+Fresh codebase-wide analysis after PR #582. Focused on patterns that weren't caught in the
+original review: memory leaks, unbounded maps, missing caps, race conditions, and controller
+scalability.
+
+### Runtime
+
+**S-RT-1: `turnIndices` map never evicted (memory leak).** *(Fixed)*
+`internal/runtime/server.go:65` — `turnIndices map[string]int` grows with one entry per
+session. Entries are never removed when conversations close. `Close()` (line 419) resets
+`conversations` but not `turnIndices`. A long-running runtime handling thousands of sessions
+will accumulate stale entries indefinitely.
+
+**S-RT-2: `conversations` map has no per-session eviction.** *(Fixed)*
+`internal/runtime/server.go:64` — Completed conversations remain cached until server
+shutdown. No idle timeout or explicit removal after conversation close. Under sustained
+traffic over days/weeks this grows unbounded.
+
+**S-RT-3: Unbounded goroutines in event store writes.** *(Fixed)*
+`internal/runtime/event_store.go:116` — `go s.writeMessage(...)` spawns a goroutine for
+every SDK event (10–100 per conversation turn). No goroutine pool, semaphore, or backpressure.
+Under high load with slow session-api, goroutine count explodes. This is the runtime-side
+equivalent of the facade recording goroutine issue (S-STR-1, fixed in PR #578 with
+`RecordingPool`).
+
+**S-RT-4: Event bus subscriptions never unsubscribed.** *(Fixed)*
+`internal/runtime/events.go:42-330` — Each conversation registers 11 event bus subscriptions.
+These are never unsubscribed when the conversation closes. Combined with S-RT-2, callbacks
+accumulate over time, causing event publishing to traverse a growing subscriber list.
+
+### Session-API & Storage
+
+**S-API-1: GetMessages has no limit cap.** *(Fixed)*
+`internal/session/api/handler.go:299` — `parseIntParam(r, "limit", defaultMessageLimit)` is
+uncapped. Compare to `parseListParams` (line 504) which uses `min(limit, maxListLimit)`.
+A client can request `?limit=10000000` and load millions of messages in one request.
+
+**S-API-2: GetSessionArtifacts returns unbounded results.** *(Fixed)*
+`internal/session/providers/postgres/provider.go:546-556` — No LIMIT clause. A session with
+thousands of media artifacts loads the entire set into memory.
+
+**S-API-3: Untracked background goroutines in hot cache push.** *(Fixed)*
+`internal/session/api/service.go:375-382` — `pushToHotCache` spawns `go fn(hot)` with no
+goroutine tracking, timeout context, or backpressure. Called from every
+CreateSession/AppendMessage/UpdateSessionStats/DeleteSession — all high-frequency operations.
+Under sustained load with slow Redis, goroutines accumulate.
+
+**S-API-4: Redis AppendMessage TTL sync is non-atomic.** *(Fixed)*
+`internal/session/providers/redis/provider.go:183` — `p.client.TTL()` is issued outside the
+pipeline (not `pipe.TTL()`), so it executes independently of the pipeline's RPush/LTrim. The
+TTL read and subsequent Expire (line 196) are not atomic — another operation can change the
+session TTL between read and apply.
+
+### Facade
+
+**S-FAC-1: TOCTOU race between shutdown check and connection registration.** *(Fixed)*
+`internal/facade/server.go:283-346` — Shutdown flag is checked at line 284 (under RLock),
+but connection is registered at line 344 (under a separate Lock). Between these points,
+`Shutdown()` can run, close all connections, and this new connection gets added to the map
+after shutdown, leaving an orphaned goroutine.
+
+**S-FAC-2: `context.Background()` in all recording writer store calls.** *(Fixed)*
+`internal/facade/recording_writer.go:135,183,211,279` — Every `AppendMessage()` and
+`UpdateSessionStats()` call uses `context.Background()`. No timeout, no cancellation on
+shutdown. If the store is slow, these goroutines block indefinitely.
+
+**S-FAC-3: Session completion goroutines not tracked.** *(Fixed)*
+`internal/facade/connection.go:88-98` — Fire-and-forget `go func()` for session completion
+is not tracked by the server or recording pool. On shutdown, these goroutines are orphaned,
+potentially leaving sessions in incomplete state.
+
+### Helm & Controllers
+
+**S-CTRL-1: Watch handlers list all AgentRuntimes cluster-wide.** *(Fixed — field indexer on provider refs; falls back to list+filter in envtest)*
+`internal/controller/watch_handlers.go:39,151` — `findAgentRuntimesForProvider` and
+`findAgentRuntimesForSecret` list ALL AgentRuntimes without namespace filtering or field
+selectors. In clusters with hundreds of AgentRuntimes, every Provider or Secret change
+triggers a full cluster scan and can enqueue hundreds of reconciliation requests.
+
+**S-CTRL-2: SessionRetentionPolicy watch lists all policies.** *(Fixed — field indexer on workspace names; falls back to list+filter in envtest)*
+`internal/controller/sessionretentionpolicy_controller.go:387-391` — On every Workspace
+change, all SessionRetentionPolicies cluster-wide are loaded and scanned. O(n) with no
+indexing.
+
+**S-HELM-1: Operator resource limits too tight for HA.** *(Fixed)*
+`charts/omnia/values.yaml:87-91` — Operator limits: 500m CPU, 256 Mi memory. With 7+
+controllers, watch caches, and leader election, 256 Mi is insufficient for sustained
+reconciliation. Request of 10m CPU causes scheduler underprovisioning.
+
+**S-HELM-2: Operator terminationGracePeriodSeconds too short.** *(Fixed)*
+`charts/omnia/templates/deployment.yaml:110` — 10 seconds. During heavy reconciliation
+storms, the operator may be force-killed before graceful shutdown completes.
+
+**S-HELM-3: No default pod anti-affinity for operator.** *(Fixed)*
+`charts/omnia/values.yaml:280` — `affinity: {}`. With 3 replicas, all operator pods can
+land on the same node, defeating HA.
+
+**S-HELM-4: Dashboard memory limit too tight.** *(Fixed)*
+`charts/omnia/values.yaml:197-202` — 256 Mi for a Next.js app. Under concurrent users,
+SSR can exhaust memory.
+
+**S-HELM-5: Session-API and dashboard lack default topology spread.** *(Fixed)*
+`charts/omnia/values.yaml:747` — `topologySpreadConstraints: []`. Session-api replicas
+(with HPA) can co-locate on a single node.
+
+### New Summary Table
+
+| Issue | Severity | Category | Status |
+|-------|----------|----------|--------|
+| S-RT-3: Unbounded goroutines in event store | **Critical** | Runtime | **Fixed** |
+| S-API-1: GetMessages has no limit cap | **High** | Session-API | **Fixed** |
+| S-API-3: Untracked hot cache goroutines | **High** | Session-API | **Fixed** |
+| S-CTRL-1: Watch handlers list all AgentRuntimes | **High** | Controller | **Fixed** |
+| S-RT-1: turnIndices map never evicted | **High** | Runtime | **Fixed** |
+| S-RT-2: conversations map no eviction | **High** | Runtime | **Fixed** |
+| S-RT-4: Event bus subscriptions never unsubscribed | **Medium** | Runtime | **Fixed** |
+| S-FAC-1: Shutdown/registration race | **Medium** | Facade | **Fixed** |
+| S-FAC-2: context.Background() in recording | **Medium** | Facade | **Fixed** |
+| S-FAC-3: Session completion goroutines untracked | **Medium** | Facade | **Fixed** |
+| S-API-2: GetSessionArtifacts unbounded | **Medium** | Session-API | **Fixed** |
+| S-API-4: Redis TTL sync non-atomic | **Medium** | Redis | **Fixed** |
+| S-CTRL-2: Policy watch lists all policies | **Medium** | Controller | **Fixed** |
+| S-HELM-1: Operator limits too tight | **Medium** | Helm | **Fixed** |
+| S-HELM-2: Operator grace period too short | **Low** | Helm | **Fixed** |
+| S-HELM-3: No operator pod anti-affinity | **Low** | Helm | **Fixed** |
+| S-HELM-4: Dashboard memory too tight | **Low** | Helm | **Fixed** |
+| S-HELM-5: No topology spread for session-api/dashboard | **Low** | Helm | **Fixed** |
