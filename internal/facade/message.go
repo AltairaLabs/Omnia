@@ -111,6 +111,7 @@ func (s *Server) handleBinaryMessage(_ context.Context, c *Connection, data []by
 }
 
 // sendBinaryFrame sends a binary WebSocket frame to the connection.
+// Uses a pooled buffer for encoding to reduce GC pressure on the streaming path.
 func (s *Server) sendBinaryFrame(c *Connection, frame *BinaryFrame) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -119,16 +120,17 @@ func (s *Server) sendBinaryFrame(c *Connection, frame *BinaryFrame) error {
 		return nil
 	}
 
-	data, err := frame.Encode()
+	bp, err := frame.EncodePooled()
 	if err != nil {
 		return err
 	}
+	defer PutPooledBuf(bp)
 
 	if err := c.conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)); err != nil {
 		return err
 	}
 
-	if err := c.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+	if err := c.conn.WriteMessage(websocket.BinaryMessage, *bp); err != nil {
 		return err
 	}
 

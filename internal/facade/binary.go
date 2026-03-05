@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 const (
@@ -42,6 +43,34 @@ var (
 	ErrMetadataOverflow   = errors.New("metadata length exceeds frame size")
 	ErrPayloadOverflow    = errors.New("payload length exceeds frame size")
 )
+
+// bufPool is a sync.Pool for reusable []byte buffers used in the streaming
+// binary frame encoding path. This reduces GC pressure during high-throughput
+// media streaming by reusing allocations across frames.
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 4096)
+		return &b
+	},
+}
+
+// GetPooledBuf retrieves a []byte buffer from the pool and grows it to the
+// requested size. The caller must call PutPooledBuf when done.
+func GetPooledBuf(size int) *[]byte {
+	bp := bufPool.Get().(*[]byte)
+	if cap(*bp) < size {
+		*bp = make([]byte, size)
+	} else {
+		*bp = (*bp)[:size]
+	}
+	return bp
+}
+
+// PutPooledBuf returns a []byte buffer to the pool after resetting its length.
+func PutPooledBuf(bp *[]byte) {
+	*bp = (*bp)[:0]
+	bufPool.Put(bp)
+}
 
 // BinaryFlags represents the flags byte in binary frame headers.
 type BinaryFlags uint8
@@ -191,6 +220,29 @@ func (f *BinaryFrame) Encode() ([]byte, error) {
 	}
 
 	return buf, nil
+}
+
+// EncodePooled serializes a BinaryFrame into a pooled []byte buffer.
+// The caller MUST call PutPooledBuf(bp) when the buffer is no longer needed.
+func (f *BinaryFrame) EncodePooled() (*[]byte, error) {
+	f.Header.MetadataLen = uint32(len(f.Metadata))
+	f.Header.PayloadLen = uint32(len(f.Payload))
+
+	totalSize := BinaryHeaderSize + len(f.Metadata) + len(f.Payload)
+	bp := GetPooledBuf(totalSize)
+	buf := *bp
+
+	headerBytes := f.Header.Encode()
+	copy(buf[0:BinaryHeaderSize], headerBytes)
+
+	if len(f.Metadata) > 0 {
+		copy(buf[BinaryHeaderSize:BinaryHeaderSize+len(f.Metadata)], f.Metadata)
+	}
+	if len(f.Payload) > 0 {
+		copy(buf[BinaryHeaderSize+len(f.Metadata):], f.Payload)
+	}
+
+	return bp, nil
 }
 
 // DecodeBinaryFrame parses bytes into a BinaryFrame.

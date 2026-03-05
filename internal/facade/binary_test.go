@@ -413,3 +413,96 @@ func TestBinaryFrameEmptyMetadataAndPayload(t *testing.T) {
 	assert.Empty(t, decoded.Metadata)
 	assert.Empty(t, decoded.Payload)
 }
+
+func TestGetPooledBuf(t *testing.T) {
+	// Get a buffer from the pool
+	bp := GetPooledBuf(100)
+	require.NotNil(t, bp)
+	assert.Equal(t, 100, len(*bp))
+	assert.GreaterOrEqual(t, cap(*bp), 100)
+
+	// Return it
+	PutPooledBuf(bp)
+}
+
+func TestGetPooledBuf_GrowsBeyondDefault(t *testing.T) {
+	// Request a buffer larger than the default 4096 capacity
+	bp := GetPooledBuf(8192)
+	require.NotNil(t, bp)
+	assert.Equal(t, 8192, len(*bp))
+	assert.GreaterOrEqual(t, cap(*bp), 8192)
+
+	PutPooledBuf(bp)
+}
+
+func TestGetPooledBuf_ReusesBuffer(t *testing.T) {
+	// Get and return a buffer, then get again — the pool may reuse it
+	bp1 := GetPooledBuf(100)
+	PutPooledBuf(bp1)
+
+	bp2 := GetPooledBuf(50)
+	assert.Equal(t, 50, len(*bp2))
+	PutPooledBuf(bp2)
+}
+
+func TestEncodePooled_RoundTrip(t *testing.T) {
+	metadata := BinaryMediaChunkMetadata{
+		SessionID: "pooled-session",
+		MimeType:  "audio/opus",
+	}
+	metadataBytes, err := json.Marshal(metadata)
+	require.NoError(t, err)
+
+	payload := []byte("pooled payload data")
+
+	frame := &BinaryFrame{
+		Header: BinaryHeader{
+			Magic:       [4]byte{'O', 'M', 'N', 'I'},
+			Version:     BinaryVersion,
+			Flags:       FlagIsLast,
+			MessageType: BinaryMessageTypeMediaChunk,
+			Sequence:    7,
+			MediaID:     [MediaIDSize]byte{'p', 'o', 'o', 'l'},
+		},
+		Metadata: metadataBytes,
+		Payload:  payload,
+	}
+
+	bp, err := frame.EncodePooled()
+	require.NoError(t, err)
+	defer PutPooledBuf(bp)
+
+	// Decode from pooled buffer and verify round-trip
+	decoded, err := DecodeBinaryFrame(*bp)
+	require.NoError(t, err)
+
+	assert.Equal(t, frame.Header.Flags, decoded.Header.Flags)
+	assert.Equal(t, frame.Header.Sequence, decoded.Header.Sequence)
+	assert.Equal(t, frame.Metadata, decoded.Metadata)
+	assert.Equal(t, frame.Payload, decoded.Payload)
+}
+
+func TestEncodePooled_MatchesEncode(t *testing.T) {
+	frame := &BinaryFrame{
+		Header: BinaryHeader{
+			Magic:       [4]byte{'O', 'M', 'N', 'I'},
+			Version:     BinaryVersion,
+			Flags:       FlagChunked,
+			MessageType: BinaryMessageTypeMediaChunk,
+			Sequence:    3,
+			MediaID:     [MediaIDSize]byte{'c', 'm', 'p'},
+		},
+		Metadata: []byte(`{"session_id":"cmp","mime_type":"audio/wav"}`),
+		Payload:  []byte("compare data"),
+	}
+
+	// Encode with both methods
+	standard, err := frame.Encode()
+	require.NoError(t, err)
+
+	bp, err := frame.EncodePooled()
+	require.NoError(t, err)
+	defer PutPooledBuf(bp)
+
+	assert.Equal(t, standard, *bp)
+}

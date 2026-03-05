@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor for facade→runtime channel
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/stats"

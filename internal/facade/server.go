@@ -67,8 +67,8 @@ type ServerConfig struct {
 // DefaultServerConfig returns a ServerConfig with default values.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		ReadBufferSize:  32 * 1024, // 32KB for large message handling
-		WriteBufferSize: 32 * 1024, // 32KB for large message handling
+		ReadBufferSize:  64 * 1024, // 64KB to reduce reallocation for larger messages
+		WriteBufferSize: 64 * 1024, // 64KB to reduce reallocation for larger messages
 		PingInterval:    30 * time.Second,
 		PongTimeout:     60 * time.Second,
 		WriteTimeout:    10 * time.Second,
