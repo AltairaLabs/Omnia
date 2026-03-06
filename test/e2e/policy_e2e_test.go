@@ -305,6 +305,14 @@ spec:
 	Context("AgentPolicy", Ordered, func() {
 		const agentPolicyName = "e2e-agent-policy"
 
+		BeforeAll(func() {
+			// Check if the AgentPolicy CRD is installed (installed by Manager BeforeAll via make install)
+			cmd := exec.Command("kubectl", "get", "crd", "agentpolicies.omnia.altairalabs.ai")
+			if _, err := utils.Run(cmd); err != nil {
+				Skip("AgentPolicy CRD not installed")
+			}
+		})
+
 		AfterEach(func() {
 			deletePolicy("agentpolicy", agentPolicyName, policyNamespace)
 		})
