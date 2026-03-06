@@ -205,21 +205,32 @@ func (h *DemoHandler) HandleMessage(
 	return err
 }
 
-// simulateToolCall wraps a simulated tool call with a tracing span.
-// It does not send tool call/result messages to the client — real agents
-// handle tool execution internally and only return text and media.
-func (h *DemoHandler) simulateToolCall(ctx context.Context, toolName string, delay time.Duration) {
+// simulateToolCall wraps a simulated tool call with a tracing span and sends
+// tool_call / tool_result messages to the client so E2E tests can verify the
+// full message flow.
+func (h *DemoHandler) simulateToolCall(
+	ctx context.Context,
+	writer facade.ResponseWriter,
+	toolName string,
+	call *facade.ToolCallInfo,
+	result *facade.ToolResultInfo,
+	delay time.Duration,
+) error {
 	var toolSpan trace.Span
 	if h.tracer != nil {
 		_, toolSpan = h.tracer.StartToolSpan(ctx, toolName, tracing.ToolSpanMeta{})
 		defer toolSpan.End()
 	}
 
+	if err := writer.WriteToolCall(call); err != nil {
+		return err
+	}
 	time.Sleep(delay)
 
 	if toolSpan != nil {
 		tracing.SetSuccess(toolSpan)
 	}
+	return writer.WriteToolResult(result)
 }
 
 func (h *DemoHandler) handlePasswordReset(ctx context.Context, _ string, writer facade.ResponseWriter) (string, error) {
@@ -239,8 +250,26 @@ func (h *DemoHandler) handlePasswordReset(ctx context.Context, _ string, writer 
 		time.Sleep(80 * time.Millisecond)
 	}
 
-	// Simulate tool call with tracing (span only, no client messages)
-	h.simulateToolCall(ctx, "lookup-user", 400*time.Millisecond)
+	// Simulate tool call with tracing and client messages
+	if err := h.simulateToolCall(ctx, writer, "lookup-user",
+		&facade.ToolCallInfo{
+			ID:   "call_001",
+			Name: "lookup-user",
+			Arguments: map[string]interface{}{
+				"email": "user@example.com",
+			},
+		},
+		&facade.ToolResultInfo{
+			ID: "call_001",
+			Result: map[string]interface{}{
+				"found": true,
+				"email": "user@example.com",
+			},
+		},
+		400*time.Millisecond,
+	); err != nil {
+		return "", err
+	}
 
 	// Final response
 	finalResponse := `
@@ -275,8 +304,28 @@ func (h *DemoHandler) handleWeatherQuery(ctx context.Context, _ string, writer f
 		time.Sleep(150 * time.Millisecond)
 	}
 
-	// Simulate tool call with tracing (span only, no client messages)
-	h.simulateToolCall(ctx, "weather", 500*time.Millisecond)
+	// Simulate tool call with tracing and client messages
+	if err := h.simulateToolCall(ctx, writer, "weather",
+		&facade.ToolCallInfo{
+			ID:   "call_002",
+			Name: "weather",
+			Arguments: map[string]interface{}{
+				"location": "Denver, CO",
+			},
+		},
+		&facade.ToolResultInfo{
+			ID: "call_002",
+			Result: map[string]interface{}{
+				"temperature": "72°F",
+				"condition":   "Sunny",
+				"humidity":    "45%",
+				"wind":        "5 mph NW",
+			},
+		},
+		500*time.Millisecond,
+	); err != nil {
+		return "", err
+	}
 
 	finalResponse := `
 
