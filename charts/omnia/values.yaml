@@ -1698,7 +1698,7 @@ redis:
     # Production deployments should adjust maxmemory based on workload.
     extraFlags:
       - "--maxmemory"
-      - "1Gi"
+      - "1gb"
       - "--maxmemory-policy"
       - "allkeys-lru"
     resources:
