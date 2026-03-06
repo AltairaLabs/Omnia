@@ -187,6 +187,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := controller.SetupIndexers(context.Background(), mgr); err != nil {
+		setupLog.Error(err, "unable to setup field indexers")
+		os.Exit(1)
+	}
+
 	// Create license validator
 	var licenseValidator *license.Validator
 	validatorOpts := []license.ValidatorOption{}

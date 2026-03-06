@@ -31,6 +31,9 @@ const (
 	// Values are "namespace/name" of referenced Provider resources.
 	IndexAgentRuntimeByProvider = ".spec.providerRefs"
 
+	// IndexAgentRuntimeByPromptPack indexes AgentRuntimes by the PromptPack name they reference.
+	IndexAgentRuntimeByPromptPack = ".spec.promptPackRef"
+
 	// IndexRetentionPolicyByWorkspace indexes SessionRetentionPolicies by workspace names
 	// in their perWorkspace map.
 	IndexRetentionPolicyByWorkspace = ".spec.perWorkspace"
@@ -44,6 +47,15 @@ func SetupIndexers(ctx context.Context, mgr manager.Manager) error {
 		&omniav1alpha1.AgentRuntime{},
 		IndexAgentRuntimeByProvider,
 		extractProviderRefs,
+	); err != nil {
+		return err
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&omniav1alpha1.AgentRuntime{},
+		IndexAgentRuntimeByPromptPack,
+		extractPromptPackRef,
 	); err != nil {
 		return err
 	}
@@ -88,6 +100,15 @@ func providerRefKey(ref omniav1alpha1.ProviderRef, defaultNS string) string {
 		ns = *ref.Namespace
 	}
 	return ns + "/" + ref.Name
+}
+
+// extractPromptPackRef returns the PromptPack name referenced by an AgentRuntime.
+func extractPromptPackRef(obj client.Object) []string {
+	ar := obj.(*omniav1alpha1.AgentRuntime)
+	if ar.Spec.PromptPackRef.Name == "" {
+		return nil
+	}
+	return []string{ar.Spec.PromptPackRef.Name}
 }
 
 // extractWorkspaceNames returns the workspace names from a SessionRetentionPolicy's

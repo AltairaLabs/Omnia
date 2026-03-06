@@ -546,6 +546,9 @@ func (s *SessionService) publishSessionCompleted(_ context.Context, sess *sessio
 }
 
 // publishAsync publishes an event in a background goroutine so the caller is never blocked.
+// NOTE: Event ordering is not guaranteed because each call spawns an independent goroutine.
+// Consumers should use message timestamps (SessionEvent.Timestamp) for sequencing.
+// A per-session ordering guarantee would require a channel-per-session architecture.
 func (s *SessionService) publishAsync(event SessionEvent) {
 	go func() {
 		// Use a detached context so the publish is not cancelled by the HTTP request.

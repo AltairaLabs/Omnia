@@ -219,6 +219,14 @@ func TestNormalizeRoute_FallbackToPath(t *testing.T) {
 	assert.Equal(t, "/api/v1/sessions/abc", route)
 }
 
+func TestNormalizeRoute_FallbackSanitizesUUIDs(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000/messages", nil)
+	req.Pattern = ""
+	route := normalizeRoute(req)
+	assert.Equal(t, "/api/v1/sessions/:id/messages", route)
+}
+
 func TestNormalizeRoute_UsesPattern(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/abc", nil)
 	req.Pattern = "GET /api/v1/sessions/{sessionID}"

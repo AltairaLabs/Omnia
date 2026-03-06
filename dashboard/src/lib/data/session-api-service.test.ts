@@ -328,9 +328,20 @@ describe("SessionApiService", () => {
 
       const result = await service.getSessionEvalResults("ws", "s1");
 
-      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/sessions/s1/eval-results");
+      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/sessions/s1/eval-results?limit=1000");
       expect(result).toHaveLength(1);
       expect(result[0].evalId).toBe("tone");
+    });
+
+    it("passes custom limit parameter", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ evalResults: [] }),
+      });
+
+      await service.getSessionEvalResults("ws", "s1", 50);
+
+      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/sessions/s1/eval-results?limit=50");
     });
 
     it("returns empty array on 404", async () => {

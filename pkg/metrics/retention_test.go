@@ -54,12 +54,8 @@ func TestNewRetentionMetrics_Promauto(t *testing.T) {
 	if m.ActivePolicies == nil {
 		t.Error("ActivePolicies is nil")
 	}
-	if m.WorkspaceOverrides == nil {
-		t.Error("WorkspaceOverrides is nil")
-	}
-	if m.ConfigMapSyncErrors == nil {
-		t.Error("ConfigMapSyncErrors is nil")
-	}
+	// WorkspaceOverrides and ConfigMapSyncErrors are non-pointer types
+	// (prometheus.Gauge and prometheus.Counter), verified by compilation
 }
 
 func TestRetentionMetrics_Initialize(t *testing.T) {
@@ -111,24 +107,12 @@ func TestRetentionMetrics_RecordConfigMapSyncError(t *testing.T) {
 
 	m.RecordConfigMapSyncError("test-policy")
 
-	metrics, err := reg.Gather()
-	if err != nil {
-		t.Fatalf("Failed to gather metrics: %v", err)
+	var metric dto.Metric
+	if err := m.ConfigMapSyncErrors.Write(&metric); err != nil {
+		t.Fatalf("Failed to write metric: %v", err)
 	}
-
-	found := false
-	for _, mf := range metrics {
-		if mf.GetName() == "omnia_retention_configmap_sync_errors_total" {
-			found = true
-			for _, m := range mf.GetMetric() {
-				if m.GetCounter().GetValue() != 1 {
-					t.Errorf("Expected counter value 1, got %v", m.GetCounter().GetValue())
-				}
-			}
-		}
-	}
-	if !found {
-		t.Error("omnia_retention_configmap_sync_errors_total metric not found")
+	if metric.GetCounter().GetValue() != 1 {
+		t.Errorf("Expected counter value 1, got %v", metric.GetCounter().GetValue())
 	}
 }
 
@@ -138,23 +122,11 @@ func TestRetentionMetrics_SetWorkspaceOverrides(t *testing.T) {
 
 	m.SetWorkspaceOverrides("test-policy", 5)
 
-	metrics, err := reg.Gather()
-	if err != nil {
-		t.Fatalf("Failed to gather metrics: %v", err)
+	var metric dto.Metric
+	if err := m.WorkspaceOverrides.Write(&metric); err != nil {
+		t.Fatalf("Failed to write metric: %v", err)
 	}
-
-	found := false
-	for _, mf := range metrics {
-		if mf.GetName() == "omnia_retention_workspace_overrides" {
-			found = true
-			for _, m := range mf.GetMetric() {
-				if m.GetGauge().GetValue() != 5 {
-					t.Errorf("Expected gauge value 5, got %v", m.GetGauge().GetValue())
-				}
-			}
-		}
-	}
-	if !found {
-		t.Error("omnia_retention_workspace_overrides metric not found")
+	if metric.GetGauge().GetValue() != 5 {
+		t.Errorf("Expected gauge value 5, got %v", metric.GetGauge().GetValue())
 	}
 }

@@ -126,19 +126,32 @@ func (t *CompletionTracker) tryMarkCompleted(sessionID string) bool {
 }
 
 // findExpiredSessions returns session IDs that have exceeded the inactivity
-// timeout and marks them as completed.
+// timeout and marks them as completed. It also evicts sessions that have not
+// been seen for more than 2x the inactivity timeout to prevent unbounded
+// map growth.
 func (t *CompletionTracker) findExpiredSessions() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	now := t.now()
+	evictionThreshold := 2 * t.inactivityTimeout
 	var expired []string
 
 	for sessionID, lastTime := range t.lastSeen {
+		elapsed := now.Sub(lastTime)
+
+		// Evict stale completed sessions from both maps
+		if t.completed[sessionID] && elapsed >= evictionThreshold {
+			delete(t.lastSeen, sessionID)
+			delete(t.completed, sessionID)
+			continue
+		}
+
 		if t.completed[sessionID] {
 			continue
 		}
-		if now.Sub(lastTime) >= t.inactivityTimeout {
+
+		if elapsed >= t.inactivityTimeout {
 			t.completed[sessionID] = true
 			expired = append(expired, sessionID)
 		}

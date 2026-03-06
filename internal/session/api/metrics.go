@@ -18,12 +18,16 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+// uuidRegex matches UUID-like path segments (8-4-4-4-12 hex pattern).
+var uuidRegex = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 
 // Metric name constants.
 const (
@@ -134,5 +138,6 @@ func normalizeRoute(r *http.Request) string {
 	if pat := r.Pattern; pat != "" {
 		return pat
 	}
-	return r.URL.Path
+	// Fallback: sanitize UUID-like segments to prevent cardinality explosion.
+	return uuidRegex.ReplaceAllString(r.URL.Path, ":id")
 }

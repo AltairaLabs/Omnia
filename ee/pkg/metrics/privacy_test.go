@@ -68,8 +68,7 @@ func TestRecordReconcileError(t *testing.T) {
 	m.RecordReconcileError("test-policy", "parent_lookup")
 	m.RecordReconcileError("test-policy", "parent_lookup")
 
-	counter, err := m.ReconcileErrorsTotal.GetMetricWithLabelValues(
-		"test-policy", "parent_lookup")
+	counter, err := m.ReconcileErrorsTotal.GetMetricWithLabelValues("parent_lookup")
 	require.NoError(t, err)
 	metric := &dto.Metric{}
 	err = counter.Write(metric)
@@ -83,10 +82,8 @@ func TestRecordEffectivePolicyComputation(t *testing.T) {
 
 	m.RecordEffectivePolicyComputation("my-policy")
 
-	counter, err := m.EffectivePolicyComputations.GetMetricWithLabelValues("my-policy")
-	require.NoError(t, err)
 	metric := &dto.Metric{}
-	err = counter.Write(metric)
+	err := m.EffectivePolicyComputations.Write(metric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(1), metric.GetCounter().GetValue())
 }
@@ -97,10 +94,8 @@ func TestRecordConfigMapSyncError(t *testing.T) {
 
 	m.RecordConfigMapSyncError("sync-policy")
 
-	counter, err := m.ConfigMapSyncErrors.GetMetricWithLabelValues("sync-policy")
-	require.NoError(t, err)
 	metric := &dto.Metric{}
-	err = counter.Write(metric)
+	err := m.ConfigMapSyncErrors.Write(metric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(1), metric.GetCounter().GetValue())
 }
@@ -133,10 +128,8 @@ func TestSetInheritanceDepth(t *testing.T) {
 
 	m.SetInheritanceDepth("deep-policy", 3)
 
-	gauge, err := m.InheritanceDepth.GetMetricWithLabelValues("deep-policy")
-	require.NoError(t, err)
 	metric := &dto.Metric{}
-	err = gauge.Write(metric)
+	err := m.InheritanceDepth.Write(metric)
 	require.NoError(t, err)
 	assert.Equal(t, float64(3), metric.GetGauge().GetValue())
 }

@@ -20,10 +20,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/runtime/tools"
 	"github.com/go-logr/logr"
 )
+
+// executeTimeout bounds how long a tool execution can take when no caller
+// context is available (the non-context Execute path).
+const executeTimeout = 30 * time.Second
 
 // ManagerExecutor adapts the Manager to the PromptKit Executor interface.
 // This allows the tool manager to be wired into PromptKit conversations.
@@ -60,8 +65,12 @@ func (e *ManagerExecutor) Execute(descriptor *tools.ToolDescriptor, args json.Ra
 		"tool", descriptor.Name,
 		"args", string(args))
 
+	// Use a bounded context since Execute does not receive one from the caller.
+	ctx, cancel := context.WithTimeout(context.Background(), executeTimeout)
+	defer cancel()
+
 	// Call the tool through the manager
-	result, err := e.manager.Call(context.Background(), descriptor.Name, argsMap)
+	result, err := e.manager.Call(ctx, descriptor.Name, argsMap)
 	if err != nil {
 		return nil, fmt.Errorf("tool execution failed: %w", err)
 	}
@@ -130,16 +139,26 @@ func (e *ManagerExecutor) ListTools(ctx context.Context) ([]*tools.ToolDescripto
 		return nil, fmt.Errorf("failed to connect manager: %w", err)
 	}
 
-	// Get tools from all adapters
-	var descriptors []*tools.ToolDescriptor
+	// Collect adapters under the lock, then release before calling ListTools
+	// to avoid holding the read lock during potentially slow network calls.
+	type adapterEntry struct {
+		name    string
+		adapter ToolAdapter
+	}
 
 	e.manager.mu.RLock()
-	defer e.manager.mu.RUnlock()
+	entries := make([]adapterEntry, 0, len(e.manager.adapters))
+	for name, adapter := range e.manager.adapters {
+		entries = append(entries, adapterEntry{name: name, adapter: adapter})
+	}
+	e.manager.mu.RUnlock()
 
-	for adapterName, adapter := range e.manager.adapters {
-		adapterTools, err := adapter.ListTools(ctx)
+	// Call ListTools outside the lock.
+	var descriptors []*tools.ToolDescriptor
+	for _, entry := range entries {
+		adapterTools, err := entry.adapter.ListTools(ctx)
 		if err != nil {
-			e.log.Error(err, "failed to list tools from adapter", "adapter", adapterName)
+			e.log.Error(err, "failed to list tools from adapter", "adapter", entry.name)
 			continue
 		}
 

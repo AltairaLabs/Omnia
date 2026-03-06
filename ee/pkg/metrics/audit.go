@@ -13,6 +13,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// auditDurationBuckets are histogram buckets tuned for fast audit operations (sub-ms to 500ms).
+var auditDurationBuckets = []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5}
+
 // AuditMetrics holds Prometheus metrics for session audit logging.
 type AuditMetrics struct {
 	// EventsTotal counts audit events by event_type.
@@ -45,7 +48,7 @@ func NewAuditMetrics() *AuditMetrics {
 		WriteDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "omnia_audit_write_duration_seconds",
 			Help:    "Duration of audit log writes",
-			Buckets: prometheus.DefBuckets,
+			Buckets: auditDurationBuckets,
 		}, []string{"event_type"}),
 
 		BufferDrops: promauto.NewCounterVec(prometheus.CounterOpts{
@@ -61,7 +64,7 @@ func NewAuditMetrics() *AuditMetrics {
 		QueryDuration: promauto.NewHistogram(prometheus.HistogramOpts{
 			Name:    "omnia_audit_query_duration_seconds",
 			Help:    "Duration of audit log queries",
-			Buckets: prometheus.DefBuckets,
+			Buckets: auditDurationBuckets,
 		}),
 	}
 }
@@ -81,7 +84,7 @@ func NewAuditMetricsWithRegistry(reg *prometheus.Registry) *AuditMetrics {
 	writeDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "omnia_audit_write_duration_seconds",
 		Help:    "Duration of audit log writes",
-		Buckets: prometheus.DefBuckets,
+		Buckets: auditDurationBuckets,
 	}, []string{"event_type"})
 
 	bufferDrops := prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -97,7 +100,7 @@ func NewAuditMetricsWithRegistry(reg *prometheus.Registry) *AuditMetrics {
 	queryDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "omnia_audit_query_duration_seconds",
 		Help:    "Duration of audit log queries",
-		Buckets: prometheus.DefBuckets,
+		Buckets: auditDurationBuckets,
 	})
 
 	reg.MustRegister(

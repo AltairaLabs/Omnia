@@ -19,6 +19,8 @@ package facade
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -149,7 +151,7 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 
 	// Handle message
 	if s.handler != nil {
-		if err := s.handler.HandleMessage(ctx, sessionID, msg, recWriter); err != nil {
+		if err := safeHandleMessage(s.handler, ctx, sessionID, msg, recWriter, log); err != nil {
 			s.sendError(c, sessionID, ErrorCodeInternalError, err.Error())
 			return err
 		}
@@ -239,4 +241,19 @@ func (s *Server) handleUploadRequest(ctx context.Context, sessionID string, msg 
 		StorageRef: creds.StorageRef,
 		ExpiresAt:  creds.ExpiresAt,
 	})
+}
+
+// safeHandleMessage wraps handler.HandleMessage with panic recovery to prevent
+// a panic in the handler from crashing the connection goroutine.
+func safeHandleMessage(handler MessageHandler, ctx context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter, log logr.Logger) (retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			log.Error(fmt.Errorf("panic: %v", r), "handler panic recovered",
+				"sessionID", sessionID,
+				"stack", string(stack))
+			retErr = fmt.Errorf("internal error: handler panic")
+		}
+	}()
+	return handler.HandleMessage(ctx, sessionID, msg, writer)
 }

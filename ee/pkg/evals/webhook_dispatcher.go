@@ -29,6 +29,14 @@ const (
 	maxRetries          = 3
 	initialRetryBackoff = 1 * time.Second
 	backoffMultiplier   = 2
+
+	// lastFiredMaxAge is the maximum age for entries in the lastFired map.
+	// Entries older than this are pruned during cleanup.
+	lastFiredMaxAge = 1 * time.Hour
+
+	// cleanupInterval controls how often the lastFired map is pruned
+	// (measured in number of dispatch calls).
+	cleanupInterval = 100
 )
 
 // WebhookDispatcher evaluates recent eval results against configured
@@ -38,8 +46,9 @@ type WebhookDispatcher struct {
 	httpClient *http.Client
 	logger     *slog.Logger
 
-	mu        sync.Mutex
-	lastFired map[string]time.Time // key: evalID+configURL -> last fire time
+	mu            sync.Mutex
+	lastFired     map[string]time.Time // key: evalID+configURL -> last fire time
+	dispatchCount int                  // counts dispatches to trigger periodic cleanup
 }
 
 // NewWebhookDispatcher creates a new dispatcher with the given configs.
@@ -69,6 +78,8 @@ func (d *WebhookDispatcher) CheckAndFire(
 	evalID, agentName, namespace string,
 	recentResults []api.EvalResult,
 ) error {
+	d.maybeCleanup()
+
 	for i := range d.configs {
 		cfg := &d.configs[i]
 		if err := d.checkConfig(ctx, cfg, evalID, agentName, namespace, recentResults); err != nil {
@@ -80,6 +91,30 @@ func (d *WebhookDispatcher) CheckAndFire(
 		}
 	}
 	return nil
+}
+
+// maybeCleanup increments the dispatch counter and prunes stale lastFired
+// entries every cleanupInterval dispatches.
+func (d *WebhookDispatcher) maybeCleanup() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.dispatchCount++
+	if d.dispatchCount >= cleanupInterval {
+		d.dispatchCount = 0
+		d.pruneLastFiredLocked()
+	}
+}
+
+// pruneLastFiredLocked removes entries from lastFired older than lastFiredMaxAge.
+// Must be called with d.mu held.
+func (d *WebhookDispatcher) pruneLastFiredLocked() {
+	now := time.Now()
+	for key, fired := range d.lastFired {
+		if now.Sub(fired) >= lastFiredMaxAge {
+			delete(d.lastFired, key)
+		}
+	}
 }
 
 // checkConfig evaluates a single webhook config and fires if triggered.

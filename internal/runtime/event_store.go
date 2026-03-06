@@ -39,7 +39,10 @@ const (
 	metaKeySource     = "source"
 	metaKeyToolName   = "tool_name"
 	metaKeyDurationMs = "duration_ms"
-	metaKeyIsError    = "is_error"
+
+	// writeTimeout bounds how long a single writeMessage call can take.
+	writeTimeout   = 30 * time.Second
+	metaKeyIsError = "is_error"
 
 	metaValueSource = "runtime"
 )
@@ -722,7 +725,8 @@ func (s *OmniaEventStore) writeMessage(sessionID string, msg session.Message, st
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
 	msgType := msg.Metadata[metaKeyType]
 
 	s.log.V(1).Info("writing event to session-api",

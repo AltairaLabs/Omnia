@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -490,6 +491,39 @@ func TestFindAgentRuntimesForPromptPack(t *testing.T) {
 
 	assert.Len(t, requests, 1)
 	assert.Equal(t, "agent-using-pack", requests[0].Name)
+}
+
+func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	matching := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "match", Namespace: "default"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "target-pack"}},
+	}
+	other := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "default"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "other-pack"}},
+	}
+
+	indexedClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(matching, other).
+		WithIndex(&omniav1alpha1.AgentRuntime{}, IndexAgentRuntimeByPromptPack,
+			func(obj client.Object) []string {
+				return extractPromptPackRef(obj.(*omniav1alpha1.AgentRuntime))
+			}).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: indexedClient, Scheme: scheme}
+
+	promptPack := &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{Name: "target-pack", Namespace: "default"},
+	}
+
+	requests := r.findAgentRuntimesForPromptPack(context.Background(), promptPack)
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "match", requests[0].Name)
 }
 
 func TestGetSecretHash(t *testing.T) {
