@@ -39,6 +39,9 @@ const (
 	statusFail = "fail"
 )
 
+// maxItemTimeout is the maximum time allowed for a single work item execution.
+const maxItemTimeout = 10 * time.Minute
+
 // Execution mode constants.
 const (
 	executionModeFleet = "fleet"
@@ -213,8 +216,13 @@ func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundl
 
 		emptyCount = 0 // Reset on successful pop
 
-		// Execute and report result
-		result, execErr := executeWorkItem(ctx, cfg, item, bundlePath)
+		// Execute with per-item timeout
+		itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
+		result, execErr := executeWorkItem(itemCtx, cfg, item, bundlePath)
+		itemCancel()
+		if itemCtx.Err() == context.DeadlineExceeded {
+			execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
+		}
 		reportWorkItemResult(ctx, q, jobID, item, result, execErr)
 	}
 }

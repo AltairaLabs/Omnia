@@ -8,6 +8,10 @@ metadata:
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
     omnia.altairalabs.ai/gateway-type: external
+  {{- with .Values.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   gatewayClassName: {{ .Values.gateway.className }}
   listeners:

@@ -15,6 +15,7 @@ export function Providers({ children }: Readonly<{ children: React.ReactNode }>)
           queries: {
             staleTime: DEFAULT_STALE_TIME,
             refetchOnWindowFocus: false,
+            gcTime: 5 * 60 * 1000, // 5 minutes — evict unused queries
           },
         },
       })

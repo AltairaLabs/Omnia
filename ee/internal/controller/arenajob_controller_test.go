@@ -12,6 +12,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -2875,6 +2876,59 @@ spec:
 
 			envVars := reconciler.buildRedisPasswordEnvVar()
 			Expect(envVars).To(BeNil())
+		})
+	})
+
+	Context("When testing buildMatrixWorkItems limits", func() {
+		It("should return nil when work item count exceeds maxWorkItems", func() {
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			// Create enough scenarios and providers to exceed maxWorkItems (10000)
+			// 200 scenarios x 51 providers = 10200 > 10000
+			scenarios := make([]partitioner.Scenario, 200)
+			for i := range scenarios {
+				scenarios[i] = partitioner.Scenario{
+					ID:   fmt.Sprintf("scenario-%d", i),
+					Name: fmt.Sprintf("Scenario %d", i),
+					Path: fmt.Sprintf("scenario-%d.yaml", i),
+				}
+			}
+
+			providerCRDs := make([]*corev1alpha1.Provider, 51)
+			for i := range providerCRDs {
+				providerCRDs[i] = &corev1alpha1.Provider{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fmt.Sprintf("provider-%d", i),
+						Namespace: "default",
+					},
+				}
+			}
+
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs)
+			Expect(items).To(BeNil())
+		})
+
+		It("should return items when work item count is within limit", func() {
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			scenarios := []partitioner.Scenario{
+				{ID: "s1", Name: "Scenario 1", Path: "s1.yaml"},
+				{ID: "s2", Name: "Scenario 2", Path: "s2.yaml"},
+			}
+
+			providerCRDs := []*corev1alpha1.Provider{
+				{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "default"}},
+			}
+
+			items := reconciler.buildMatrixWorkItems(ctx, "test-job", "bundle-url", scenarios, providerCRDs)
+			Expect(items).To(HaveLen(4)) // 2 scenarios x 2 providers
 		})
 	})
 })

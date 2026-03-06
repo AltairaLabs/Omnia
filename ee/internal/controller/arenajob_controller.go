@@ -48,6 +48,9 @@ import (
 // Workspace label for namespace association
 const labelWorkspace = "omnia.altairalabs.ai/workspace"
 
+// maxWorkItems is the maximum number of scenario x provider work items allowed.
+const maxWorkItems = 10000
+
 // ArenaJob condition types
 const (
 	ArenaJobConditionTypeReady       = "Ready"
@@ -1228,6 +1231,13 @@ func (r *ArenaJobReconciler) buildMatrixWorkItems(ctx context.Context, jobName, 
 	})
 	if err != nil {
 		log.Error(err, "partitioning failed, falling back to per-provider mode")
+		return nil
+	}
+
+	if result.TotalCombinations > maxWorkItems {
+		log.Error(nil, "work item matrix exceeds limit, falling back to per-provider mode",
+			"totalCombinations", result.TotalCombinations,
+			"maxWorkItems", maxWorkItems)
 		return nil
 	}
 

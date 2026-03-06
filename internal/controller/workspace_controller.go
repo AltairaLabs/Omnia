@@ -18,9 +18,11 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -247,87 +249,172 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
+// deletePageSize is the maximum number of resources to list per page during workspace cleanup.
+const deletePageSize = 100
+
 //nolint:gocognit // Deletion logic requires handling many resource types
 func (r *WorkspaceReconciler) reconcileDelete(ctx context.Context, workspace *omniav1alpha1.Workspace) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-	log.Info("Handling deletion of Workspace")
+	log.Info("workspace deletion started")
 
 	namespaceName := workspace.Spec.Namespace.Name
+	labels := client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}
 
-	// Clean up PVCs in the namespace (only if retention policy is Delete or not specified)
+	var errs []error
+
+	// Clean up PVCs (only if retention policy is Delete or not specified)
 	retentionPolicy := "Delete"
 	if workspace.Spec.Storage != nil && workspace.Spec.Storage.RetentionPolicy != "" {
 		retentionPolicy = workspace.Spec.Storage.RetentionPolicy
 	}
 	if retentionPolicy == "Delete" {
-		pvcs := &corev1.PersistentVolumeClaimList{}
-		if err := r.List(ctx, pvcs, client.InNamespace(namespaceName),
-			client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
-			for i := range pvcs.Items {
-				if err := r.Delete(ctx, &pvcs.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-					log.Error(err, "Failed to delete PVC", "name", pvcs.Items[i].Name)
-				} else {
-					log.Info("Deleted PVC", "name", pvcs.Items[i].Name)
-				}
-			}
+		if err := r.deletePVCs(ctx, namespaceName, labels, log); err != nil {
+			errs = append(errs, err)
 		}
 	} else {
-		log.Info("Retaining PVC due to retention policy", "policy", retentionPolicy)
+		log.Info("retaining PVC", "retentionPolicy", retentionPolicy)
 	}
 
-	// Clean up NetworkPolicies in the namespace
-	networkPolicies := &networkingv1.NetworkPolicyList{}
-	if err := r.List(ctx, networkPolicies, client.InNamespace(namespaceName),
-		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
-		for i := range networkPolicies.Items {
-			if err := r.Delete(ctx, &networkPolicies.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "Failed to delete NetworkPolicy", "name", networkPolicies.Items[i].Name)
-			}
-		}
+	if err := r.deleteNetworkPolicies(ctx, namespaceName, labels, log); err != nil {
+		errs = append(errs, err)
+	}
+	if err := r.deleteRoleBindings(ctx, namespaceName, labels, log); err != nil {
+		errs = append(errs, err)
+	}
+	if err := r.deleteServiceAccounts(ctx, namespaceName, labels, log); err != nil {
+		errs = append(errs, err)
+	}
+	if err := r.deleteNamespaceIfCreated(ctx, workspace, namespaceName, log); err != nil {
+		errs = append(errs, err)
 	}
 
-	// Clean up RoleBindings in the namespace
-	roleBindings := &rbacv1.RoleBindingList{}
-	if err := r.List(ctx, roleBindings, client.InNamespace(namespaceName),
-		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
-		for i := range roleBindings.Items {
-			if err := r.Delete(ctx, &roleBindings.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "Failed to delete RoleBinding", "name", roleBindings.Items[i].Name)
-			}
-		}
+	// Only remove finalizer if ALL deletions succeeded
+	if len(errs) > 0 {
+		combined := errors.Join(errs...)
+		log.Error(combined, "partial cleanup failure, retaining finalizer", "errorCount", len(errs))
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, combined
 	}
 
-	// Clean up ServiceAccounts in the namespace
-	serviceAccounts := &corev1.ServiceAccountList{}
-	if err := r.List(ctx, serviceAccounts, client.InNamespace(namespaceName),
-		client.MatchingLabels{labelWorkspace: workspace.Name, labelWorkspaceManaged: labelValueTrue}); err == nil {
-		for i := range serviceAccounts.Items {
-			if err := r.Delete(ctx, &serviceAccounts.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "Failed to delete ServiceAccount", "name", serviceAccounts.Items[i].Name)
-			}
-		}
-	}
-
-	// Only delete namespace if we created it
-	if workspace.Status.Namespace != nil && workspace.Status.Namespace.Created {
-		ns := &corev1.Namespace{}
-		if err := r.Get(ctx, client.ObjectKey{Name: namespaceName}, ns); err == nil {
-			// Check if namespace has our label
-			if ns.Labels[labelWorkspace] == workspace.Name {
-				if err := r.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
-					log.Error(err, "Failed to delete namespace", "name", namespaceName)
-				}
-			}
-		}
-	}
-
-	// Remove finalizer
 	controllerutil.RemoveFinalizer(workspace, WorkspaceFinalizerName)
 	if err := r.Update(ctx, workspace); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// deletePVCs deletes all managed PVCs in the namespace with paginated listing.
+func (r *WorkspaceReconciler) deletePVCs(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	var errs []error
+	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
+	for {
+		pvcs := &corev1.PersistentVolumeClaimList{}
+		if err := r.List(ctx, pvcs, opts...); err != nil {
+			return fmt.Errorf("list PVCs: %w", err)
+		}
+		for i := range pvcs.Items {
+			if err := r.Delete(ctx, &pvcs.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "delete PVC failed", "name", pvcs.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+		if pvcs.Continue == "" {
+			break
+		}
+		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(pvcs.Continue)}
+	}
+	return errors.Join(errs...)
+}
+
+// deleteNetworkPolicies deletes all managed NetworkPolicies with paginated listing.
+func (r *WorkspaceReconciler) deleteNetworkPolicies(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	var errs []error
+	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
+	for {
+		list := &networkingv1.NetworkPolicyList{}
+		if err := r.List(ctx, list, opts...); err != nil {
+			return fmt.Errorf("list NetworkPolicies: %w", err)
+		}
+		for i := range list.Items {
+			if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "delete NetworkPolicy failed", "name", list.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+		if list.Continue == "" {
+			break
+		}
+		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(list.Continue)}
+	}
+	return errors.Join(errs...)
+}
+
+// deleteRoleBindings deletes all managed RoleBindings with paginated listing.
+func (r *WorkspaceReconciler) deleteRoleBindings(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	var errs []error
+	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
+	for {
+		list := &rbacv1.RoleBindingList{}
+		if err := r.List(ctx, list, opts...); err != nil {
+			return fmt.Errorf("list RoleBindings: %w", err)
+		}
+		for i := range list.Items {
+			if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "delete RoleBinding failed", "name", list.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+		if list.Continue == "" {
+			break
+		}
+		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(list.Continue)}
+	}
+	return errors.Join(errs...)
+}
+
+// deleteServiceAccounts deletes all managed ServiceAccounts with paginated listing.
+func (r *WorkspaceReconciler) deleteServiceAccounts(ctx context.Context, ns string, labels client.MatchingLabels, log logr.Logger) error {
+	var errs []error
+	opts := []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize)}
+	for {
+		list := &corev1.ServiceAccountList{}
+		if err := r.List(ctx, list, opts...); err != nil {
+			return fmt.Errorf("list ServiceAccounts: %w", err)
+		}
+		for i := range list.Items {
+			if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "delete ServiceAccount failed", "name", list.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+		if list.Continue == "" {
+			break
+		}
+		opts = []client.ListOption{client.InNamespace(ns), labels, client.Limit(deletePageSize), client.Continue(list.Continue)}
+	}
+	return errors.Join(errs...)
+}
+
+// deleteNamespaceIfCreated deletes the workspace namespace only if the controller created it.
+func (r *WorkspaceReconciler) deleteNamespaceIfCreated(ctx context.Context, workspace *omniav1alpha1.Workspace, namespaceName string, log logr.Logger) error {
+	if workspace.Status.Namespace == nil || !workspace.Status.Namespace.Created {
+		return nil
+	}
+	ns := &corev1.Namespace{}
+	if err := r.Get(ctx, client.ObjectKey{Name: namespaceName}, ns); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get namespace: %w", err)
+	}
+	if ns.Labels[labelWorkspace] != workspace.Name {
+		return nil
+	}
+	if err := r.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
+		log.Error(err, "delete namespace failed", "namespace", namespaceName)
+		return err
+	}
+	return nil
 }
 
 func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
