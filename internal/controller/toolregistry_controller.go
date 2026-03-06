@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -351,9 +352,9 @@ func (r *ToolRegistryReconciler) findToolRegistriesForService(ctx context.Contex
 	svc := obj.(*corev1.Service)
 	log := logf.FromContext(ctx)
 
-	// List all ToolRegistries
+	// List ToolRegistries in the Service's namespace
 	toolRegistryList := &omniav1alpha1.ToolRegistryList{}
-	if err := r.List(ctx, toolRegistryList); err != nil {
+	if err := r.List(ctx, toolRegistryList, client.InNamespace(svc.Namespace)); err != nil {
 		log.Error(err, "Failed to list ToolRegistries for Service mapping")
 		return nil
 	}
@@ -401,6 +402,7 @@ func (r *ToolRegistryReconciler) selectorMatchesService(selector *omniav1alpha1.
 // SetupWithManager sets up the controller with the Manager.
 func (r *ToolRegistryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.ToolRegistry{}).
 		Watches(
 			&corev1.Service{},

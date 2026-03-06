@@ -18,6 +18,9 @@ import {
 } from "lucide-react";
 import type { EvaluationResult } from "@/types/arena";
 
+/** Number of results to show initially before requiring "Show more" */
+const INITIAL_RESULTS_WINDOW = 100;
+
 interface JobResultsTabProps {
   readonly className?: string;
 }
@@ -48,6 +51,7 @@ export function JobResultsTab({ className }: JobResultsTabProps) {
   const [results, setResults] = useState<JobResultsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_RESULTS_WINDOW);
 
   const fetchResults = useCallback(async () => {
     if (!workspace || !currentJobName) return;
@@ -70,6 +74,7 @@ export function JobResultsTab({ className }: JobResultsTabProps) {
 
       const data = await response.json();
       setResults(data);
+      setVisibleCount(INITIAL_RESULTS_WINDOW);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
@@ -171,22 +176,11 @@ export function JobResultsTab({ className }: JobResultsTabProps) {
       {/* Results table */}
       {results.results && results.results.length > 0 ? (
         <div className="flex-1 overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/30 sticky top-0">
-              <tr>
-                <th className="px-4 py-2 text-left font-medium">Status</th>
-                <th className="px-4 py-2 text-left font-medium">Scenario</th>
-                <th className="px-4 py-2 text-left font-medium">Score</th>
-                <th className="px-4 py-2 text-left font-medium">Duration</th>
-                <th className="px-4 py-2 text-left font-medium">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {results.results.map((result) => (
-                <ResultRow key={`${result.scenario}-${result.status}-${result.score ?? 0}-${result.durationMs ?? 0}`} result={result} />
-              ))}
-            </tbody>
-          </table>
+          <ResultsTable
+            results={results.results}
+            visibleCount={visibleCount}
+            onShowMore={() => setVisibleCount((c) => c + INITIAL_RESULTS_WINDOW)}
+          />
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -194,6 +188,50 @@ export function JobResultsTab({ className }: JobResultsTabProps) {
         </div>
       )}
     </div>
+  );
+}
+
+// =============================================================================
+// Results Table (windowed)
+// =============================================================================
+
+interface ResultsTableProps {
+  readonly results: EvaluationResult[];
+  readonly visibleCount: number;
+  readonly onShowMore: () => void;
+}
+
+function ResultsTable({ results, visibleCount, onShowMore }: ResultsTableProps) {
+  const total = results.length;
+  const visible = results.slice(0, visibleCount);
+  const remaining = Math.max(0, total - visibleCount);
+
+  return (
+    <table className="w-full text-sm">
+      <thead className="bg-muted/30 sticky top-0">
+        <tr>
+          <th className="px-4 py-2 text-left font-medium">Status</th>
+          <th className="px-4 py-2 text-left font-medium">Scenario</th>
+          <th className="px-4 py-2 text-left font-medium">Score</th>
+          <th className="px-4 py-2 text-left font-medium">Duration</th>
+          <th className="px-4 py-2 text-left font-medium">Details</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y">
+        {visible.map((result) => (
+          <ResultRow key={`${result.scenario}-${result.status}-${result.score ?? 0}-${result.durationMs ?? 0}`} result={result} />
+        ))}
+        {remaining > 0 && (
+          <tr>
+            <td colSpan={5} className="px-4 py-2 text-center">
+              <Button variant="ghost" size="sm" onClick={onShowMore}>
+                Show more results ({remaining} remaining)
+              </Button>
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
   );
 }
 

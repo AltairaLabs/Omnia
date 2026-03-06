@@ -346,6 +346,8 @@ export class MockAgentConnection implements AgentConnection {
   disconnect(): void {
     this.sessionId = null;
     this.setStatus("disconnected");
+    this.messageHandlers.length = 0;
+    this.statusHandlers.length = 0;
   }
 
   send(content: string, _options?: { sessionId?: string; parts?: ContentPart[] }): void {
@@ -358,12 +360,20 @@ export class MockAgentConnection implements AgentConnection {
     this.simulateResponse(content);
   }
 
-  onMessage(handler: (message: ServerMessage) => void): void {
+  onMessage(handler: (message: ServerMessage) => void): () => void {
     this.messageHandlers.push(handler);
+    return () => {
+      const index = this.messageHandlers.indexOf(handler);
+      if (index !== -1) this.messageHandlers.splice(index, 1);
+    };
   }
 
-  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): void {
+  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): () => void {
     this.statusHandlers.push(handler);
+    return () => {
+      const index = this.statusHandlers.indexOf(handler);
+      if (index !== -1) this.statusHandlers.splice(index, 1);
+    };
   }
 
   getStatus(): ConnectionStatus {

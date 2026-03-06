@@ -88,21 +88,46 @@ func (r *AgentRuntimeReconciler) filterAgentRuntimesByProvider(list *omniav1alph
 
 // findAgentRuntimesForPromptPack returns reconcile requests for all AgentRuntimes
 // that reference the given PromptPack.
+//
+// When a field index is available (production, via SetupIndexers), the list is
+// scoped by index. Otherwise falls back to list-all + local filter (envtest).
 func (r *AgentRuntimeReconciler) findAgentRuntimesForPromptPack(ctx context.Context, obj client.Object) []reconcile.Request {
 	promptPack := obj.(*omniav1alpha1.PromptPack)
 	log := logf.FromContext(ctx).WithValues("promptpack", promptPack.Name, "namespace", promptPack.Namespace)
 
-	// List all AgentRuntimes in the same namespace (PromptPack refs don't have namespace field)
+	// Try indexed list first; fall back to unscoped list if no index is registered.
 	var agentRuntimes omniav1alpha1.AgentRuntimeList
-	if err := r.List(ctx, &agentRuntimes, client.InNamespace(promptPack.Namespace)); err != nil {
-		log.Error(err, "failed to list AgentRuntimes for PromptPack watch")
-		return nil
+	if err := r.List(ctx, &agentRuntimes,
+		client.InNamespace(promptPack.Namespace),
+		client.MatchingFields{IndexAgentRuntimeByPromptPack: promptPack.Name},
+	); err != nil {
+		// MatchingFields fails with a raw client (no index). Fall back to list+filter.
+		if err2 := r.List(ctx, &agentRuntimes, client.InNamespace(promptPack.Namespace)); err2 != nil {
+			log.Error(err2, "failed to list AgentRuntimes for PromptPack watch")
+			return nil
+		}
+		return r.filterAgentRuntimesByPromptPack(&agentRuntimes, promptPack.Name, log)
 	}
 
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(agentRuntimes.Items))
 	for _, ar := range agentRuntimes.Items {
-		// Check if this AgentRuntime references the changed PromptPack
-		if ar.Spec.PromptPackRef.Name == promptPack.Name {
+		log.Info("enqueueing AgentRuntime for PromptPack change", "agentruntime", ar.Name)
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      ar.Name,
+				Namespace: ar.Namespace,
+			},
+		})
+	}
+	return requests
+}
+
+// filterAgentRuntimesByPromptPack filters a list of AgentRuntimes to those that
+// reference the given PromptPack name.
+func (r *AgentRuntimeReconciler) filterAgentRuntimesByPromptPack(list *omniav1alpha1.AgentRuntimeList, name string, log logr.Logger) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, ar := range list.Items {
+		if ar.Spec.PromptPackRef.Name == name {
 			log.Info("enqueueing AgentRuntime for PromptPack change", "agentruntime", ar.Name)
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{

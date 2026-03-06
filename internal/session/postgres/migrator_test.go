@@ -138,7 +138,7 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 18, "should have at least 18 migration files (9 up + 9 down)")
+	assert.GreaterOrEqual(t, len(entries), 32, "should have at least 32 migration files (16 up + 16 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -190,7 +190,7 @@ func TestMigrator_UpDown(t *testing.T) {
 	// Verify version
 	v, dirty, err := mg.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(15), v)
+	assert.Equal(t, uint(16), v)
 	assert.False(t, dirty)
 
 	// Idempotent — running Up again should succeed
@@ -292,6 +292,7 @@ func TestMigrator_IndexesExist(t *testing.T) {
 		"idx_tool_calls_name",
 		"idx_message_artifacts_message",
 		"idx_message_artifacts_session",
+		"idx_messages_search_vector",
 	}
 
 	for _, idx := range expectedIndexes {

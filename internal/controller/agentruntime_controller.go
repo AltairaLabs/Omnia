@@ -32,12 +32,18 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// TODO(scalability): Reconcile calls Status().Update() multiple times per reconciliation
+// (once per condition change). Accumulate all condition changes and call Status().Update()
+// once at the end to reduce API server load. This requires a larger refactor across the
+// reconcileReferences, reconcileDeployment, and reconcileService paths.
 
 // AgentRuntimeReconciler reconciles a AgentRuntime object
 type AgentRuntimeReconciler struct {
@@ -467,6 +473,7 @@ func (r *AgentRuntimeReconciler) updateStatusFromDeployment(
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.AgentRuntime{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).

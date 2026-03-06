@@ -530,6 +530,62 @@ func TestNewWebhookDispatcher_Defaults(t *testing.T) {
 	}
 }
 
+func TestWebhookDispatcher_PruneLastFired(t *testing.T) {
+	d := NewWebhookDispatcher(nil, nil, newTestLogger())
+
+	// Manually populate lastFired with entries of varying ages.
+	d.mu.Lock()
+	now := time.Now()
+	d.lastFired["recent"] = now.Add(-30 * time.Minute)   // 30 min ago — should survive
+	d.lastFired["old"] = now.Add(-2 * time.Hour)         // 2 hours ago — should be pruned
+	d.lastFired["boundary"] = now.Add(-61 * time.Minute) // 61 min ago — should be pruned
+	d.mu.Unlock()
+
+	// Trigger cleanup by setting dispatchCount to threshold - 1.
+	d.mu.Lock()
+	d.dispatchCount = cleanupInterval - 1
+	d.mu.Unlock()
+
+	// Use a no-op server so CheckAndFire doesn't trigger actual webhooks.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// This call increments dispatchCount to cleanupInterval, triggering cleanup.
+	_ = d.CheckAndFire(context.Background(), "eval-x", "agent", "ns", nil)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if _, ok := d.lastFired["recent"]; !ok {
+		t.Error("expected 'recent' entry to survive cleanup")
+	}
+	if _, ok := d.lastFired["old"]; ok {
+		t.Error("expected 'old' entry to be pruned")
+	}
+	if _, ok := d.lastFired["boundary"]; ok {
+		t.Error("expected 'boundary' entry to be pruned")
+	}
+}
+
+func TestWebhookDispatcher_CleanupResetsCounter(t *testing.T) {
+	d := NewWebhookDispatcher(nil, nil, newTestLogger())
+
+	// Run cleanup by dispatching cleanupInterval times.
+	for range cleanupInterval {
+		_ = d.CheckAndFire(context.Background(), "eval-x", "agent", "ns", nil)
+	}
+
+	d.mu.Lock()
+	count := d.dispatchCount
+	d.mu.Unlock()
+
+	if count != 0 {
+		t.Errorf("expected dispatchCount to be reset to 0, got %d", count)
+	}
+}
+
 func TestContextCancellation(t *testing.T) {
 	// Server that blocks.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

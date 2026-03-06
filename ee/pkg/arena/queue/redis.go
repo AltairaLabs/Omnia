@@ -31,15 +31,26 @@ const (
 	completedKey     = ":completed"
 	failedKey        = ":failed"
 	metaKey          = ":meta"
+
+	// defaultItemTTL is the default TTL for queue items stored in Redis.
+	// Items older than this are automatically expired to prevent memory leaks.
+	defaultItemTTL = 24 * time.Hour
+
+	// sscanCount is the count hint for SScan iteration.
+	sscanCount = 100
+
+	// getItemsBatchSize is the batch size for pipelined GET calls.
+	getItemsBatchSize = 100
 )
 
 // RedisQueue implements WorkQueue using Redis for distributed queue operations.
 // It is suitable for production multi-worker deployments with horizontal scaling.
 type RedisQueue struct {
-	client *redis.Client
-	opts   Options
-	mu     sync.RWMutex
-	closed bool
+	client  *redis.Client
+	opts    Options
+	itemTTL time.Duration
+	mu      sync.RWMutex
+	closed  bool
 }
 
 // RedisOptions contains Redis-specific configuration options.
@@ -52,6 +63,10 @@ type RedisOptions struct {
 
 	// DB is the Redis database number.
 	DB int
+
+	// ItemTTL is the TTL for queue items stored in Redis.
+	// Defaults to 24 hours if zero.
+	ItemTTL time.Duration
 
 	// Options contains common queue options.
 	Options Options
@@ -81,25 +96,40 @@ func NewRedisQueue(redisOpts RedisOptions) (*RedisQueue, error) {
 		opts.MaxRetries = DefaultOptions().MaxRetries
 	}
 
+	itemTTL := redisOpts.ItemTTL
+	if itemTTL == 0 {
+		itemTTL = defaultItemTTL
+	}
+
 	return &RedisQueue{
-		client: client,
-		opts:   opts,
+		client:  client,
+		opts:    opts,
+		itemTTL: itemTTL,
 	}, nil
 }
 
 // NewRedisQueueFromClient creates a new Redis-backed work queue from an existing client.
 // This is useful for testing or when you want to share a Redis connection pool.
 func NewRedisQueueFromClient(client *redis.Client, opts Options) *RedisQueue {
+	return NewRedisQueueFromClientWithTTL(client, opts, defaultItemTTL)
+}
+
+// NewRedisQueueFromClientWithTTL creates a new Redis-backed work queue with a custom item TTL.
+func NewRedisQueueFromClientWithTTL(client *redis.Client, opts Options, itemTTL time.Duration) *RedisQueue {
 	if opts.VisibilityTimeout == 0 {
 		opts.VisibilityTimeout = DefaultOptions().VisibilityTimeout
 	}
 	if opts.MaxRetries == 0 {
 		opts.MaxRetries = DefaultOptions().MaxRetries
 	}
+	if itemTTL == 0 {
+		itemTTL = defaultItemTTL
+	}
 
 	return &RedisQueue{
-		client: client,
-		opts:   opts,
+		client:  client,
+		opts:    opts,
+		itemTTL: itemTTL,
 	}
 }
 
@@ -126,6 +156,7 @@ func (q *RedisQueue) Push(ctx context.Context, jobID string, items []WorkItem) e
 		"totalItems": len(items),
 		"createdAt":  now.Format(time.RFC3339),
 	})
+	pipe.Expire(ctx, metaKey, q.itemTTL)
 
 	for i := range items {
 		item := items[i]
@@ -142,8 +173,8 @@ func (q *RedisQueue) Push(ctx context.Context, jobID string, items []WorkItem) e
 			return fmt.Errorf("failed to marshal work item: %w", err)
 		}
 
-		// Store item data
-		pipe.Set(ctx, q.itemKey(item.ID), itemData, 0)
+		// Store item data with TTL
+		pipe.Set(ctx, q.itemKey(item.ID), itemData, q.itemTTL)
 
 		// Add to pending queue (LPUSH for FIFO with RPOP)
 		pipe.LPush(ctx, pendingKey, item.ID)
@@ -198,11 +229,13 @@ func (q *RedisQueue) Pop(ctx context.Context, jobID string) (*WorkItem, error) {
 	}
 
 	// Track processing start time with visibility timeout
+	processingZKey := q.processingZSetKey(jobID)
 	score := float64(now.Add(q.opts.VisibilityTimeout).UnixNano())
-	q.client.ZAdd(ctx, q.processingZSetKey(jobID), redis.Z{
+	q.client.ZAdd(ctx, processingZKey, redis.Z{
 		Score:  score,
 		Member: itemID,
 	})
+	q.client.Expire(ctx, processingZKey, q.itemTTL)
 
 	// Update job start time if this is the first item
 	q.client.HSetNX(ctx, q.metaKey(jobID), "startedAt", now.UnixNano())
@@ -248,8 +281,10 @@ func (q *RedisQueue) Ack(ctx context.Context, jobID string, itemID string, resul
 		return fmt.Errorf("failed to update item: %w", err)
 	}
 
-	// Add to completed set
-	q.client.SAdd(ctx, q.completedKey(jobID), itemID)
+	// Add to completed set with TTL
+	completedSetKey := q.completedKey(jobID)
+	q.client.SAdd(ctx, completedSetKey, itemID)
+	q.client.Expire(ctx, completedSetKey, q.itemTTL)
 
 	return nil
 }
@@ -311,8 +346,10 @@ func (q *RedisQueue) Nack(ctx context.Context, jobID string, itemID string, errM
 			return fmt.Errorf("failed to update item: %w", err)
 		}
 
-		// Add to failed set
-		q.client.SAdd(ctx, q.failedKey(jobID), itemID)
+		// Add to failed set with TTL
+		failedSetKey := q.failedKey(jobID)
+		q.client.SAdd(ctx, failedSetKey, itemID)
+		q.client.Expire(ctx, failedSetKey, q.itemTTL)
 	}
 
 	return nil
@@ -447,31 +484,66 @@ func (q *RedisQueue) saveItem(ctx context.Context, item *WorkItem) error {
 	if err != nil {
 		return err
 	}
-	return q.client.Set(ctx, q.itemKey(item.ID), data, 0).Err()
+	return q.client.Set(ctx, q.itemKey(item.ID), data, q.itemTTL).Err()
 }
 
 func (q *RedisQueue) findLatestCompletionTime(ctx context.Context, jobID string) time.Time {
 	var latestCompletion time.Time
 
-	// Check completed items
-	completedIDs, _ := q.client.SMembers(ctx, q.completedKey(jobID)).Result()
-	for _, itemID := range completedIDs {
-		item, err := q.getItem(ctx, itemID)
-		if err == nil && item.CompletedAt != nil && item.CompletedAt.After(latestCompletion) {
-			latestCompletion = *item.CompletedAt
-		}
-	}
+	// Check completed items using cursor-based iteration
+	q.scanSetForLatestCompletion(ctx, q.completedKey(jobID), &latestCompletion)
 
-	// Check failed items
-	failedIDs, _ := q.client.SMembers(ctx, q.failedKey(jobID)).Result()
-	for _, itemID := range failedIDs {
-		item, err := q.getItem(ctx, itemID)
-		if err == nil && item.CompletedAt != nil && item.CompletedAt.After(latestCompletion) {
-			latestCompletion = *item.CompletedAt
-		}
-	}
+	// Check failed items using cursor-based iteration
+	q.scanSetForLatestCompletion(ctx, q.failedKey(jobID), &latestCompletion)
 
 	return latestCompletion
+}
+
+// scanSetForLatestCompletion iterates a set with SScan and finds the latest completion time.
+func (q *RedisQueue) scanSetForLatestCompletion(ctx context.Context, setKey string, latest *time.Time) {
+	var cursor uint64
+	for {
+		ids, nextCursor, err := q.client.SScan(ctx, setKey, cursor, "", sscanCount).Result()
+		if err != nil {
+			return
+		}
+
+		// Batch GET for this chunk of IDs
+		q.updateLatestFromIDs(ctx, ids, latest)
+
+		cursor = nextCursor
+		if cursor == 0 {
+			return
+		}
+	}
+}
+
+// updateLatestFromIDs uses a pipeline to batch-GET items and update the latest completion time.
+func (q *RedisQueue) updateLatestFromIDs(ctx context.Context, ids []string, latest *time.Time) {
+	if len(ids) == 0 {
+		return
+	}
+
+	pipe := q.client.Pipeline()
+	cmds := make([]*redis.StringCmd, len(ids))
+	for i, itemID := range ids {
+		cmds[i] = pipe.Get(ctx, q.itemKey(itemID))
+	}
+	_, _ = pipe.Exec(ctx)
+
+	for _, cmd := range cmds {
+		data, err := cmd.Bytes()
+		if err != nil {
+			continue
+		}
+		var item WorkItem
+		if err := json.Unmarshal(data, &item); err != nil {
+			continue
+		}
+		if item.CompletedAt != nil && item.CompletedAt.After(*latest) {
+			*latest = *item.CompletedAt
+		}
+	}
 }
 
 // RequeueTimedOutItems moves items that have exceeded their visibility timeout
@@ -550,47 +622,97 @@ func (q *RedisQueue) getItemsFromSet(ctx context.Context, jobID, setKey, itemTyp
 	}
 	q.mu.RUnlock()
 
-	// Get all item IDs from the set
-	itemIDs, err := q.client.SMembers(ctx, setKey).Result()
+	// Use SScan to iterate the set in chunks instead of loading all at once
+	var allItems []*WorkItem
+	var cursor uint64
+	firstIteration := true
+
+	for {
+		ids, nextCursor, err := q.client.SScan(ctx, setKey, cursor, "", sscanCount).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan %s items: %w", itemType, err)
+		}
+
+		if firstIteration && len(ids) == 0 && nextCursor == 0 {
+			// Set is empty or doesn't exist — check if job exists
+			if err := q.checkJobExists(ctx, jobID); err != nil {
+				return nil, err
+			}
+			return []*WorkItem{}, nil
+		}
+		firstIteration = false
+
+		// Batch GET for this chunk of IDs
+		items := q.batchGetItems(ctx, ids)
+		allItems = append(allItems, items...)
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return allItems, nil
+}
+
+// checkJobExists verifies that a job exists by checking for any job-related keys.
+func (q *RedisQueue) checkJobExists(ctx context.Context, jobID string) error {
+	pipe := q.client.Pipeline()
+	metaExists := pipe.Exists(ctx, q.metaKey(jobID))
+	pendingExists := pipe.Exists(ctx, q.pendingKey(jobID))
+	processingExists := pipe.Exists(ctx, q.processingKey(jobID))
+	completedExists := pipe.Exists(ctx, q.completedKey(jobID))
+	failedExists := pipe.Exists(ctx, q.failedKey(jobID))
+
+	_, err := pipe.Exec(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get %s items: %w", itemType, err)
+		return fmt.Errorf("failed to check job existence: %w", err)
 	}
 
-	// If no items, check if job exists by looking for any job-related keys
-	if len(itemIDs) == 0 {
-		// Check for metadata, pending items, processing items, or items in either set
+	if metaExists.Val() == 0 && pendingExists.Val() == 0 && processingExists.Val() == 0 &&
+		completedExists.Val() == 0 && failedExists.Val() == 0 {
+		return ErrJobNotFound
+	}
+	return nil
+}
+
+// batchGetItems uses a pipeline to batch-GET items by their IDs.
+func (q *RedisQueue) batchGetItems(ctx context.Context, ids []string) []*WorkItem {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var allItems []*WorkItem
+
+	// Process in batches
+	for i := 0; i < len(ids); i += getItemsBatchSize {
+		end := i + getItemsBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[i:end]
+
 		pipe := q.client.Pipeline()
-		metaExists := pipe.Exists(ctx, q.metaKey(jobID))
-		pendingExists := pipe.Exists(ctx, q.pendingKey(jobID))
-		processingExists := pipe.Exists(ctx, q.processingKey(jobID))
-		completedExists := pipe.Exists(ctx, q.completedKey(jobID))
-		failedExists := pipe.Exists(ctx, q.failedKey(jobID))
-
-		_, err := pipe.Exec(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check job existence: %w", err)
+		cmds := make([]*redis.StringCmd, len(batch))
+		for j, itemID := range batch {
+			cmds[j] = pipe.Get(ctx, q.itemKey(itemID))
 		}
+		_, _ = pipe.Exec(ctx)
 
-		// If none of the job keys exist, the job doesn't exist
-		if metaExists.Val() == 0 && pendingExists.Val() == 0 && processingExists.Val() == 0 &&
-			completedExists.Val() == 0 && failedExists.Val() == 0 {
-			return nil, ErrJobNotFound
+		for _, cmd := range cmds {
+			data, err := cmd.Bytes()
+			if err != nil {
+				continue
+			}
+			var item WorkItem
+			if err := json.Unmarshal(data, &item); err != nil {
+				continue
+			}
+			allItems = append(allItems, &item)
 		}
-		return []*WorkItem{}, nil
 	}
 
-	// Load full item data for each item
-	items := make([]*WorkItem, 0, len(itemIDs))
-	for _, itemID := range itemIDs {
-		item, err := q.getItem(ctx, itemID)
-		if err != nil {
-			// Skip items that can't be loaded (may have been cleaned up)
-			continue
-		}
-		items = append(items, item)
-	}
-
-	return items, nil
+	return allItems
 }
 
 // Ensure RedisQueue implements WorkQueue interface.

@@ -262,10 +262,12 @@ export class SessionApiService {
 
   async getSessionEvalResults(
     workspace: string,
-    sessionId: string
+    sessionId: string,
+    limit: number = 1000
   ): Promise<EvalResult[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
     const response = await fetch(
-      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}/eval-results`
+      `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/sessions/${encodeURIComponent(sessionId)}/eval-results?${params}`
     );
     if (!response.ok) {
       if (response.status === 401 || response.status === 403 || response.status === 404) {

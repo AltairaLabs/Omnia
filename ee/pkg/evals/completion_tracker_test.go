@@ -344,3 +344,95 @@ func TestCompletionTracker_MarkCompleted_WithoutRecordActivity(t *testing.T) {
 func TestNewCompletionTracker_DefaultInactivityTimeout(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, DefaultInactivityTimeout)
 }
+
+func TestCompletionTracker_EvictsStaleCompletedSessions(t *testing.T) {
+	rec := &callbackRecorder{}
+	timeout := 100 * time.Millisecond
+	tracker := NewCompletionTracker(timeout, rec.callback, testLogger())
+
+	now := time.Now()
+	tracker.nowFunc = func() time.Time { return now }
+
+	// Record and complete two sessions.
+	tracker.RecordActivity("s1")
+	tracker.RecordActivity("s2")
+	tracker.RecordActivity("s3")
+
+	// Advance past inactivity timeout to mark all as completed.
+	now = now.Add(200 * time.Millisecond)
+	tracker.CheckInactive(context.Background())
+	assert.Equal(t, 3, rec.getCallCount())
+
+	// s1, s2, s3 are completed but still in maps.
+	assert.Equal(t, 3, tracker.TrackedCount())
+
+	// Advance past 2x timeout (eviction threshold).
+	now = now.Add(200 * time.Millisecond)
+	tracker.CheckInactive(context.Background())
+
+	// All completed sessions should be evicted from both maps.
+	assert.Equal(t, 0, tracker.TrackedCount())
+
+	// Callback should not have been called again.
+	assert.Equal(t, 3, rec.getCallCount())
+}
+
+func TestCompletionTracker_EvictionDoesNotAffectActiveSessions(t *testing.T) {
+	rec := &callbackRecorder{}
+	timeout := 100 * time.Millisecond
+	tracker := NewCompletionTracker(timeout, rec.callback, testLogger())
+
+	now := time.Now()
+	tracker.nowFunc = func() time.Time { return now }
+
+	tracker.RecordActivity("s1")
+	tracker.RecordActivity("s2")
+
+	// Advance past inactivity timeout — both expire.
+	now = now.Add(200 * time.Millisecond)
+	tracker.CheckInactive(context.Background())
+	assert.Equal(t, 2, rec.getCallCount())
+
+	// Add a new session.
+	tracker.RecordActivity("s3")
+
+	// Advance past 2x timeout — s1, s2 should be evicted, s3 should remain.
+	now = now.Add(200 * time.Millisecond)
+	tracker.CheckInactive(context.Background())
+
+	// s3 should still be tracked (it expired at this point too).
+	// s1 and s2 should be evicted.
+	// s3 was completed (expired) but not yet old enough to evict.
+	assert.Equal(t, 3, rec.getCallCount())     // s3 now also completed
+	assert.Equal(t, 1, tracker.TrackedCount()) // only s3 remains (completed but not stale)
+}
+
+// CompletedCount returns the number of sessions marked as completed.
+// Used for testing eviction behavior.
+func (t *CompletionTracker) CompletedCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.completed)
+}
+
+func TestCompletionTracker_EvictionCleansCompletedMap(t *testing.T) {
+	rec := &callbackRecorder{}
+	timeout := 100 * time.Millisecond
+	tracker := NewCompletionTracker(timeout, rec.callback, testLogger())
+
+	now := time.Now()
+	tracker.nowFunc = func() time.Time { return now }
+
+	tracker.RecordActivity("s1")
+	tracker.MarkCompleted(context.Background(), "s1")
+
+	assert.Equal(t, 1, tracker.CompletedCount())
+
+	// Advance past 2x timeout.
+	now = now.Add(300 * time.Millisecond)
+	tracker.CheckInactive(context.Background())
+
+	// Should be evicted from both maps.
+	assert.Equal(t, 0, tracker.TrackedCount())
+	assert.Equal(t, 0, tracker.CompletedCount())
+}

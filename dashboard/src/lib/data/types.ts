@@ -468,11 +468,11 @@ export interface AgentConnection {
   /** Send a message to the agent, optionally with multi-modal content parts */
   send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void;
 
-  /** Register a handler for incoming messages */
-  onMessage(handler: (message: ServerMessage) => void): void;
+  /** Register a handler for incoming messages. Returns an unsubscribe function. */
+  onMessage(handler: (message: ServerMessage) => void): () => void;
 
-  /** Register a handler for connection status changes */
-  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): void;
+  /** Register a handler for connection status changes. Returns an unsubscribe function. */
+  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): () => void;
 
   /** Get current connection status */
   getStatus(): ConnectionStatus;

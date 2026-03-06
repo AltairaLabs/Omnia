@@ -54,6 +54,11 @@ import { getWsProxyUrl } from "@/lib/config";
  * Live agent connection using real WebSocket.
  * Connects through the dashboard's WebSocket proxy to the agent's facade.
  */
+/** Initial reconnection delay in milliseconds */
+const RECONNECT_BASE_DELAY_MS = 1000;
+/** Maximum reconnection delay in milliseconds */
+const RECONNECT_MAX_DELAY_MS = 30000;
+
 export class LiveAgentConnection implements AgentConnection {
   private status: ConnectionStatus = "disconnected";
   private sessionId: string | null = null;
@@ -61,6 +66,9 @@ export class LiveAgentConnection implements AgentConnection {
   private ws: WebSocket | null = null;
   private readonly messageHandlers: Array<(message: ServerMessage) => void> = [];
   private readonly statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
+  private reconnectDelay: number = RECONNECT_BASE_DELAY_MS;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionalDisconnect = false;
 
   constructor(
     private readonly namespace: string,
@@ -72,6 +80,8 @@ export class LiveAgentConnection implements AgentConnection {
       return; // Already connected
     }
 
+    this.intentionalDisconnect = false;
+    this.clearReconnectTimer();
     this.setStatus("connecting");
 
     // Fetch runtime config and then connect
@@ -110,6 +120,7 @@ export class LiveAgentConnection implements AgentConnection {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
+        this.reconnectDelay = RECONNECT_BASE_DELAY_MS;
         this.setStatus("connected");
       };
 
@@ -159,6 +170,7 @@ export class LiveAgentConnection implements AgentConnection {
         } else {
           this.setStatus("disconnected");
         }
+        this.scheduleReconnect();
       };
     } catch (err) {
       this.setStatus("error", err instanceof Error ? err.message : "Failed to connect");
@@ -166,6 +178,8 @@ export class LiveAgentConnection implements AgentConnection {
   }
 
   disconnect(): void {
+    this.intentionalDisconnect = true;
+    this.clearReconnectTimer();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -173,6 +187,8 @@ export class LiveAgentConnection implements AgentConnection {
     this.sessionId = null;
     this.maxPayloadSize = null;
     this.setStatus("disconnected");
+    this.messageHandlers.length = 0;
+    this.statusHandlers.length = 0;
   }
 
   send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void {
@@ -191,12 +207,20 @@ export class LiveAgentConnection implements AgentConnection {
     this.ws.send(JSON.stringify(message));
   }
 
-  onMessage(handler: (message: ServerMessage) => void): void {
+  onMessage(handler: (message: ServerMessage) => void): () => void {
     this.messageHandlers.push(handler);
+    return () => {
+      const index = this.messageHandlers.indexOf(handler);
+      if (index !== -1) this.messageHandlers.splice(index, 1);
+    };
   }
 
-  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): void {
+  onStatusChange(handler: (status: ConnectionStatus, error?: string) => void): () => void {
     this.statusHandlers.push(handler);
+    return () => {
+      const index = this.statusHandlers.indexOf(handler);
+      if (index !== -1) this.statusHandlers.splice(index, 1);
+    };
   }
 
   getStatus(): ConnectionStatus {
@@ -218,6 +242,25 @@ export class LiveAgentConnection implements AgentConnection {
 
   private emitMessage(message: ServerMessage): void {
     this.messageHandlers.forEach((h) => h(message));
+  }
+
+  private scheduleReconnect(): void {
+    if (this.intentionalDisconnect) return;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, this.reconnectDelay);
+
+    // Exponential backoff: double delay up to max
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_DELAY_MS);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 }
 
