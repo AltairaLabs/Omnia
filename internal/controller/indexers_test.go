@@ -96,6 +96,28 @@ func TestExtractProviderRefs_Empty(t *testing.T) {
 	assert.Empty(t, refs)
 }
 
+func TestExtractPromptPackRef(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "ns1"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "my-prompts"},
+		},
+	}
+
+	refs := extractPromptPackRef(ar)
+	assert.Equal(t, []string{"my-prompts"}, refs)
+}
+
+func TestExtractPromptPackRef_Empty(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "ns1"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{},
+	}
+
+	refs := extractPromptPackRef(ar)
+	assert.Empty(t, refs)
+}
+
 func TestExtractWorkspaceNames(t *testing.T) {
 	policy := &omniav1alpha1.SessionRetentionPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},

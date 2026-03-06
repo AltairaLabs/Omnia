@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/altairalabs/omnia/internal/pgutil"
@@ -181,17 +182,35 @@ func (p *Provider) sessionExists(ctx context.Context, sessionID string) error {
 
 // --- helper: collect session page -------------------------------------------
 
-func collectSessionPage(rows pgx.Rows, totalCount int64, offset int) (*providers.SessionPage, error) {
+// collectSessionPageWithCount scans rows that include a COUNT(*) OVER() column
+// appended after the standard session columns. The total_count is extracted from
+// the first row and used to populate the SessionPage metadata.
+func collectSessionPageWithCount(rows pgx.Rows, offset int) (*providers.SessionPage, error) {
 	defer rows.Close()
 
 	var sessions []*session.Session
+	var totalCount int64
 
 	for rows.Next() {
-		s, err := scanSession(rows)
+		var s session.Session
+		var n nullableSessionFields
+		var rowTotal int64
+
+		err := rows.Scan(
+			&s.ID, &s.AgentName, &s.Namespace, &n.workspaceName, &s.Status,
+			&s.CreatedAt, &s.UpdatedAt, &n.expiresAt, &n.endedAt,
+			&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
+			&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
+			&n.promptPackName, &n.promptPackVersion,
+			&rowTotal,
+		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("postgres: scan session with count: %w", err)
 		}
-		sessions = append(sessions, s)
+
+		populateSession(&s, n)
+		sessions = append(sessions, &s)
+		totalCount = rowTotal
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres: iterate sessions: %w", err)
@@ -311,10 +330,6 @@ func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
-	if err := p.sessionExists(ctx, sessionID); err != nil {
-		return err
-	}
-
 	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 
@@ -324,6 +339,11 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
 	)
 	if err != nil {
+		// FK violation (code 23503) means the session_id does not exist.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return session.ErrSessionNotFound
+		}
 		return fmt.Errorf("postgres: append message: %w", err)
 	}
 	return nil
@@ -383,28 +403,21 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 	qb := &pgutil.QueryBuilder{}
 	p.applySessionFilters(qb, opts)
 
-	// Separate count query avoids COUNT(*) OVER() window function which forces
-	// a full scan before returning any rows.
-	countQuery := `SELECT count(*) FROM sessions WHERE 1=1` + qb.Where()
-	var totalCount int64
-	if err := p.pool.QueryRow(ctx, countQuery, qb.Args()...).Scan(&totalCount); err != nil {
-		return nil, fmt.Errorf("postgres: count sessions: %w", err)
-	}
-
 	sort := "DESC"
 	if opts.SortOrder == providers.SortAsc {
 		sort = "ASC"
 	}
 
-	dataQuery := `SELECT ` + sessionColumns + ` FROM sessions WHERE 1=1` + qb.Where() +
+	// Single query with COUNT(*) OVER() avoids a separate round-trip for the total.
+	query := `SELECT ` + sessionColumns + `, COUNT(*) OVER() AS total_count FROM sessions WHERE 1=1` + qb.Where() +
 		` ORDER BY created_at ` + sort
-	dataQuery = qb.AppendPagination(dataQuery, opts.Limit, opts.Offset)
+	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, dataQuery, qb.Args()...)
+	rows, err := p.pool.Query(ctx, query, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list sessions: %w", err)
 	}
-	return collectSessionPage(rows, totalCount, opts.Offset)
+	return collectSessionPageWithCount(rows, opts.Offset)
 }
 
 func (p *Provider) SearchSessions(ctx context.Context, query string, opts providers.SessionListOpts) (*providers.SessionPage, error) {
@@ -419,25 +432,15 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 	sessionQB.SetArgs(qb.Args())
 	p.applySessionFilters(sessionQB, opts)
 
-	// Separate count query avoids COUNT(*) OVER() window function.
-	countSQL := `WITH matching AS (
-		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
-	) SELECT count(*)
-	FROM sessions s JOIN matching ms ON ms.session_id = s.id
-	WHERE 1=1` + sessionQB.Where()
-	var totalCount int64
-	if err := p.pool.QueryRow(ctx, countSQL, sessionQB.Args()...).Scan(&totalCount); err != nil {
-		return nil, fmt.Errorf("postgres: count search sessions: %w", err)
-	}
-
 	sort := "DESC"
 	if opts.SortOrder == providers.SortAsc {
 		sort = "ASC"
 	}
 
+	// Single query with COUNT(*) OVER() avoids a separate round-trip for the total.
 	dataSQL := `WITH matching AS (
 		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
-	) SELECT ` + sessionColumns + `
+	) SELECT ` + sessionColumns + `, COUNT(*) OVER() AS total_count
 	FROM sessions s JOIN matching ms ON ms.session_id = s.id
 	WHERE 1=1` + sessionQB.Where() +
 		` ORDER BY s.created_at ` + sort
@@ -447,7 +450,7 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 	if err != nil {
 		return nil, fmt.Errorf("postgres: search sessions: %w", err)
 	}
-	return collectSessionPage(rows, totalCount, opts.Offset)
+	return collectSessionPageWithCount(rows, opts.Offset)
 }
 
 func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.SessionListOpts) {

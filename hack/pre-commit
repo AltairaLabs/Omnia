@@ -450,6 +450,11 @@ if [ -f coverage.out ]; then
             continue
         fi
 
+        # Skip arena Redis queue (requires live Redis, tested in integration)
+        if [[ "$file" == ee/pkg/arena/queue/redis.go ]]; then
+            continue
+        fi
+
         # Skip arena-dev-console server (WebSocket + PromptKit runtime integration, tested via E2E)
         if [[ "$file" == ee/cmd/arena-dev-console/server/* ]]; then
             continue

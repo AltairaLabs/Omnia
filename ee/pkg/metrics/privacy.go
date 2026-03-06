@@ -15,16 +15,16 @@ import (
 
 // PrivacyPolicyMetrics holds Prometheus metrics for SessionPrivacyPolicy reconciliation.
 type PrivacyPolicyMetrics struct {
-	// ReconcileErrorsTotal counts reconcile errors by policy name and error type.
+	// ReconcileErrorsTotal counts reconcile errors by error type.
 	ReconcileErrorsTotal *prometheus.CounterVec
 	// ActivePolicies tracks the current count of active privacy policies by level.
 	ActivePolicies *prometheus.GaugeVec
-	// EffectivePolicyComputations counts effective policy computations by policy name.
-	EffectivePolicyComputations *prometheus.CounterVec
-	// ConfigMapSyncErrors counts ConfigMap sync failures by policy name.
-	ConfigMapSyncErrors *prometheus.CounterVec
-	// InheritanceDepth tracks the inheritance chain depth by policy name.
-	InheritanceDepth *prometheus.GaugeVec
+	// EffectivePolicyComputations counts effective policy computations.
+	EffectivePolicyComputations prometheus.Counter
+	// ConfigMapSyncErrors counts ConfigMap sync failures.
+	ConfigMapSyncErrors prometheus.Counter
+	// InheritanceDepth tracks the maximum inheritance chain depth.
+	InheritanceDepth prometheus.Gauge
 }
 
 // NewPrivacyPolicyMetrics creates and registers all Prometheus metrics for privacy policy reconciliation.
@@ -33,27 +33,27 @@ func NewPrivacyPolicyMetrics() *PrivacyPolicyMetrics {
 		ReconcileErrorsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "omnia_privacy_policy_reconcile_errors_total",
 			Help: "Total number of privacy policy reconcile errors",
-		}, []string{"policy_name", "error_type"}),
+		}, []string{"error_type"}),
 
 		ActivePolicies: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omnia_privacy_policy_active_policies",
 			Help: "Current number of active privacy policies by level",
 		}, []string{"level"}),
 
-		EffectivePolicyComputations: promauto.NewCounterVec(prometheus.CounterOpts{
+		EffectivePolicyComputations: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "omnia_privacy_policy_effective_computations_total",
 			Help: "Total number of effective policy computations",
-		}, []string{"policy_name"}),
+		}),
 
-		ConfigMapSyncErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+		ConfigMapSyncErrors: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "omnia_privacy_policy_configmap_sync_errors_total",
 			Help: "Total number of ConfigMap sync errors for privacy policies",
-		}, []string{"policy_name"}),
+		}),
 
-		InheritanceDepth: promauto.NewGaugeVec(prometheus.GaugeOpts{
+		InheritanceDepth: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "omnia_privacy_policy_inheritance_depth",
-			Help: "Inheritance chain depth for privacy policies",
-		}, []string{"policy_name"}),
+			Help: "Maximum inheritance chain depth for privacy policies",
+		}),
 	}
 }
 
@@ -65,18 +65,18 @@ func (m *PrivacyPolicyMetrics) Initialize() {
 }
 
 // RecordReconcileError increments the reconcile error counter.
-func (m *PrivacyPolicyMetrics) RecordReconcileError(policyName, errorType string) {
-	m.ReconcileErrorsTotal.WithLabelValues(policyName, errorType).Inc()
+func (m *PrivacyPolicyMetrics) RecordReconcileError(_, errorType string) {
+	m.ReconcileErrorsTotal.WithLabelValues(errorType).Inc()
 }
 
 // RecordEffectivePolicyComputation increments the effective policy computation counter.
-func (m *PrivacyPolicyMetrics) RecordEffectivePolicyComputation(policyName string) {
-	m.EffectivePolicyComputations.WithLabelValues(policyName).Inc()
+func (m *PrivacyPolicyMetrics) RecordEffectivePolicyComputation(_ string) {
+	m.EffectivePolicyComputations.Inc()
 }
 
 // RecordConfigMapSyncError increments the ConfigMap sync error counter.
-func (m *PrivacyPolicyMetrics) RecordConfigMapSyncError(policyName string) {
-	m.ConfigMapSyncErrors.WithLabelValues(policyName).Inc()
+func (m *PrivacyPolicyMetrics) RecordConfigMapSyncError(_ string) {
+	m.ConfigMapSyncErrors.Inc()
 }
 
 // SetActivePolicies sets the active policy count for a level.
@@ -84,9 +84,9 @@ func (m *PrivacyPolicyMetrics) SetActivePolicies(level string, count int) {
 	m.ActivePolicies.WithLabelValues(level).Set(float64(count))
 }
 
-// SetInheritanceDepth sets the inheritance chain depth for a policy.
-func (m *PrivacyPolicyMetrics) SetInheritanceDepth(policyName string, depth int) {
-	m.InheritanceDepth.WithLabelValues(policyName).Set(float64(depth))
+// SetInheritanceDepth sets the inheritance chain depth.
+func (m *PrivacyPolicyMetrics) SetInheritanceDepth(_ string, depth int) {
+	m.InheritanceDepth.Set(float64(depth))
 }
 
 // NewPrivacyPolicyMetricsWithRegistry creates privacy policy metrics with a custom registry for testing.
@@ -94,27 +94,27 @@ func NewPrivacyPolicyMetricsWithRegistry(reg *prometheus.Registry) *PrivacyPolic
 	reconcileErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "omnia_privacy_policy_reconcile_errors_total",
 		Help: "Total number of privacy policy reconcile errors",
-	}, []string{"policy_name", "error_type"})
+	}, []string{"error_type"})
 
 	activePolicies := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "omnia_privacy_policy_active_policies",
 		Help: "Current number of active privacy policies by level",
 	}, []string{"level"})
 
-	effectivePolicyComputations := prometheus.NewCounterVec(prometheus.CounterOpts{
+	effectivePolicyComputations := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "omnia_privacy_policy_effective_computations_total",
 		Help: "Total number of effective policy computations",
-	}, []string{"policy_name"})
+	})
 
-	configMapSyncErrors := prometheus.NewCounterVec(prometheus.CounterOpts{
+	configMapSyncErrors := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "omnia_privacy_policy_configmap_sync_errors_total",
 		Help: "Total number of ConfigMap sync errors for privacy policies",
-	}, []string{"policy_name"})
+	})
 
-	inheritanceDepth := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	inheritanceDepth := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "omnia_privacy_policy_inheritance_depth",
-		Help: "Inheritance chain depth for privacy policies",
-	}, []string{"policy_name"})
+		Help: "Maximum inheritance chain depth for privacy policies",
+	})
 
 	reg.MustRegister(
 		reconcileErrorsTotal, activePolicies,

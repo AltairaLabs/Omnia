@@ -106,7 +106,8 @@ enterprise:
     # Work queue configuration for job distribution
     queue:
       # -- Queue backend type: memory (dev) or redis (prod)
-      type: memory
+      # Production deployments should use redis (requires redis.enabled: true)
+      type: redis
 
       # Redis configuration (when type: redis)
       redis:
@@ -264,7 +265,7 @@ resources:
 # Pod Disruption Budget for HA deployments
 podDisruptionBudget:
   # -- Enable PDB for operator
-  enabled: false
+  enabled: true
   # -- Minimum available pods (mutually exclusive with maxUnavailable)
   minAvailable: 1
   # -- Maximum unavailable pods (mutually exclusive with minAvailable)
@@ -371,7 +372,7 @@ dashboard:
     tag: ""
 
   # -- Number of dashboard replicas
-  replicaCount: 1
+  replicaCount: 2
 
   # -- Dashboard service configuration
   service:
@@ -1668,16 +1669,16 @@ redis:
     # Production deployments should adjust maxmemory based on workload.
     extraFlags:
       - "--maxmemory"
-      - "256mb"
+      - "1Gi"
       - "--maxmemory-policy"
       - "allkeys-lru"
     resources:
       limits:
         cpu: 200m
-        memory: 256Mi
+        memory: 1280Mi
       requests:
         cpu: 50m
-        memory: 64Mi
+        memory: 256Mi
 
   replica:
     # -- Number of replicas for Redis HA

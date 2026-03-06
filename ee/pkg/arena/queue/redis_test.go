@@ -734,6 +734,116 @@ func TestRedisQueue_GetFailedItems_JobNotFound(t *testing.T) {
 	assert.Equal(t, ErrJobNotFound, err)
 }
 
+func TestRedisQueue_ItemTTL(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	// Use a short TTL for testing
+	ttl := 2 * time.Second
+	q := NewRedisQueueFromClientWithTTL(client, DefaultOptions(), ttl)
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-ttl"
+
+	items := []WorkItem{
+		{ID: "item-ttl-1", ScenarioID: "scenario-1", ProviderID: "provider-1"},
+	}
+	err := q.Push(ctx, jobID, items)
+	require.NoError(t, err)
+
+	// Verify item key has a TTL set
+	itemTTL, err := client.TTL(ctx, q.itemKey("item-ttl-1")).Result()
+	require.NoError(t, err)
+	assert.Greater(t, itemTTL, time.Duration(0), "item key should have a TTL")
+	assert.LessOrEqual(t, itemTTL, ttl, "item TTL should not exceed configured TTL")
+
+	// Verify meta key has a TTL set
+	metaTTL, err := client.TTL(ctx, q.metaKey(jobID)).Result()
+	require.NoError(t, err)
+	assert.Greater(t, metaTTL, time.Duration(0), "meta key should have a TTL")
+}
+
+func TestRedisQueue_CompletedSetTTL(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	ttl := 5 * time.Second
+	q := NewRedisQueueFromClientWithTTL(client, DefaultOptions(), ttl)
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-set-ttl"
+
+	items := []WorkItem{
+		{ID: "item-set-1", ScenarioID: "scenario-1", ProviderID: "provider-1"},
+	}
+	err := q.Push(ctx, jobID, items)
+	require.NoError(t, err)
+
+	// Pop and ack to create a completed set entry
+	item, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	err = q.Ack(ctx, jobID, item.ID, []byte("result"))
+	require.NoError(t, err)
+
+	// Verify completed set has a TTL
+	completedTTL, err := client.TTL(ctx, q.completedKey(jobID)).Result()
+	require.NoError(t, err)
+	assert.Greater(t, completedTTL, time.Duration(0), "completed set should have a TTL")
+}
+
+func TestRedisQueue_FailedSetTTL(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	ttl := 5 * time.Second
+	q := NewRedisQueueFromClientWithTTL(client, Options{MaxRetries: 1}, ttl)
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-failed-ttl"
+
+	items := []WorkItem{
+		{ID: "item-fail-1", ScenarioID: "scenario-1", ProviderID: "provider-1"},
+	}
+	err := q.Push(ctx, jobID, items)
+	require.NoError(t, err)
+
+	// Pop and nack to create a failed set entry (maxRetries=1)
+	item, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	err = q.Nack(ctx, jobID, item.ID, errors.New("fatal"))
+	require.NoError(t, err)
+
+	// Verify failed set has a TTL
+	failedTTL, err := client.TTL(ctx, q.failedKey(jobID)).Result()
+	require.NoError(t, err)
+	assert.Greater(t, failedTTL, time.Duration(0), "failed set should have a TTL")
+}
+
+func TestRedisQueue_DefaultTTL(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	// NewRedisQueueFromClient should use defaultItemTTL
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	assert.Equal(t, defaultItemTTL, q.itemTTL)
+}
+
+func TestRedisQueue_CustomTTLZeroFallsBack(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClientWithTTL(client, DefaultOptions(), 0)
+	assert.Equal(t, defaultItemTTL, q.itemTTL)
+}
+
 func TestRedisQueue_GetItems_Closed(t *testing.T) {
 	client := getTestRedisClient(t)
 	defer cleanupRedisKeys(t, client)

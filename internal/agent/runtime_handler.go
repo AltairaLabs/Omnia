@@ -104,13 +104,28 @@ func (h *RuntimeHandler) receiveResponses(
 	inactivityTimer := time.NewTimer(defaultStreamInactivityTimeout)
 	defer inactivityTimer.Stop()
 
-	for {
-		ch := make(chan recvResult, 1)
-		go func() {
-			resp, err := stream.Recv()
-			ch <- recvResult{resp, err}
-		}()
+	ch := make(chan recvResult, 1)
+	done := make(chan struct{})
+	defer close(done)
 
+	// Start a single goroutine that continuously reads from the stream
+	// and sends results to ch. The goroutine exits when the stream ends
+	// or when done is closed (on timeout).
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			select {
+			case ch <- recvResult{resp, err}:
+			case <-done:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
 		select {
 		case result := <-ch:
 			if result.err == io.EOF {

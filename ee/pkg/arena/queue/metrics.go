@@ -44,8 +44,8 @@ type QueueMetrics struct {
 	// JobsActive tracks the number of active jobs.
 	JobsActive prometheus.Gauge
 
-	// ItemRetries tracks retry attempts by job.
-	ItemRetries *prometheus.CounterVec
+	// ItemRetries tracks retry attempts.
+	ItemRetries prometheus.Counter
 }
 
 // QueueMetricsConfig configures the queue metrics.
@@ -81,7 +81,7 @@ func NewQueueMetrics(cfg QueueMetricsConfig) *QueueMetrics {
 			Name:        "omnia_arena_queue_items",
 			Help:        "Current number of items in the queue by status",
 			ConstLabels: constLabels,
-		}, []string{"job_id", "status"}),
+		}, []string{"status"}),
 
 		OperationsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name:        "omnia_arena_queue_operations_total",
@@ -102,11 +102,11 @@ func NewQueueMetrics(cfg QueueMetricsConfig) *QueueMetrics {
 			ConstLabels: constLabels,
 		}),
 
-		ItemRetries: promauto.NewCounterVec(prometheus.CounterOpts{
+		ItemRetries: promauto.NewCounter(prometheus.CounterOpts{
 			Name:        "omnia_arena_queue_retries_total",
 			Help:        "Total number of item retry attempts",
 			ConstLabels: constLabels,
-		}, []string{"job_id"}),
+		}),
 	}
 }
 
@@ -136,23 +136,23 @@ func (m *QueueMetrics) RecordOperation(operation string, durationSeconds float64
 }
 
 // RecordItemStatusChange updates the item count gauges when an item changes status.
-func (m *QueueMetrics) RecordItemStatusChange(jobID string, oldStatus, newStatus ItemStatus) {
+func (m *QueueMetrics) RecordItemStatusChange(_ string, oldStatus, newStatus ItemStatus) {
 	if oldStatus != "" {
-		m.ItemsTotal.WithLabelValues(jobID, string(oldStatus)).Dec()
+		m.ItemsTotal.WithLabelValues(string(oldStatus)).Dec()
 	}
 	if newStatus != "" {
-		m.ItemsTotal.WithLabelValues(jobID, string(newStatus)).Inc()
+		m.ItemsTotal.WithLabelValues(string(newStatus)).Inc()
 	}
 }
 
 // RecordItemsPushed records when items are pushed to the queue.
-func (m *QueueMetrics) RecordItemsPushed(jobID string, count int) {
-	m.ItemsTotal.WithLabelValues(jobID, string(ItemStatusPending)).Add(float64(count))
+func (m *QueueMetrics) RecordItemsPushed(_ string, count int) {
+	m.ItemsTotal.WithLabelValues(string(ItemStatusPending)).Add(float64(count))
 }
 
 // RecordRetry records a retry attempt for an item.
-func (m *QueueMetrics) RecordRetry(jobID string) {
-	m.ItemRetries.WithLabelValues(jobID).Inc()
+func (m *QueueMetrics) RecordRetry(_ string) {
+	m.ItemRetries.Inc()
 }
 
 // IncrementActiveJobs increments the active jobs count.

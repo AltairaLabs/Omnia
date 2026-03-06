@@ -29,6 +29,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -1509,22 +1510,39 @@ func (r *ArenaJobReconciler) handleValidationError(ctx context.Context, arenaJob
 }
 
 // findArenaJobsForSource maps ArenaSource changes to ArenaJob reconcile requests.
+//
+// When a field index is available (production, via SetupIndexers), the list is
+// scoped by index. Otherwise falls back to list-all + local filter (envtest).
 func (r *ArenaJobReconciler) findArenaJobsForSource(ctx context.Context, obj client.Object) []ctrl.Request {
 	source, ok := obj.(*omniav1alpha1.ArenaSource)
 	if !ok {
 		return nil
 	}
+	log := logf.FromContext(ctx)
 
-	// Find all ArenaJobs in the same namespace that reference this source
+	// Try indexed list first; fall back to unscoped list if no index is registered.
 	jobList := &omniav1alpha1.ArenaJobList{}
-	if err := r.List(ctx, jobList, client.InNamespace(source.Namespace)); err != nil {
-		return nil
+	if err := r.List(ctx, jobList,
+		client.InNamespace(source.Namespace),
+		client.MatchingFields{IndexArenaJobBySourceRef: source.Name},
+	); err != nil {
+		// MatchingFields fails with a raw client (no index). Fall back to list+filter.
+		if err2 := r.List(ctx, jobList, client.InNamespace(source.Namespace)); err2 != nil {
+			log.Error(err2, "failed to list ArenaJobs for ArenaSource watch")
+			return nil
+		}
+		return filterArenaJobsBySource(jobList, source.Name)
 	}
 
+	return filterPendingArenaJobs(jobList)
+}
+
+// filterArenaJobsBySource filters a list of ArenaJobs to pending ones that
+// reference the given ArenaSource name.
+func filterArenaJobsBySource(list *omniav1alpha1.ArenaJobList, sourceName string) []ctrl.Request {
 	var requests []ctrl.Request
-	for _, job := range jobList.Items {
-		if job.Spec.SourceRef.Name == source.Name {
-			// Only trigger reconcile for pending jobs
+	for _, job := range list.Items {
+		if job.Spec.SourceRef.Name == sourceName {
 			if job.Status.Phase == omniav1alpha1.ArenaJobPhasePending || job.Status.Phase == "" {
 				requests = append(requests, ctrl.Request{
 					NamespacedName: types.NamespacedName{
@@ -1535,7 +1553,22 @@ func (r *ArenaJobReconciler) findArenaJobsForSource(ctx context.Context, obj cli
 			}
 		}
 	}
+	return requests
+}
 
+// filterPendingArenaJobs returns reconcile requests for pending ArenaJobs from an indexed list.
+func filterPendingArenaJobs(list *omniav1alpha1.ArenaJobList) []ctrl.Request {
+	var requests []ctrl.Request
+	for _, job := range list.Items {
+		if job.Status.Phase == omniav1alpha1.ArenaJobPhasePending || job.Status.Phase == "" {
+			requests = append(requests, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      job.Name,
+					Namespace: job.Namespace,
+				},
+			})
+		}
+	}
 	return requests
 }
 
@@ -1565,6 +1598,7 @@ func (r *ArenaJobReconciler) findArenaJobsForJob(_ context.Context, obj client.O
 // SetupWithManager sets up the controller with the Manager.
 func (r *ArenaJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.ArenaJob{}).
 		Owns(&batchv1.Job{}).
 		Watches(

@@ -70,7 +70,7 @@ func TestQueueMetricsStruct(t *testing.T) {
 		ItemsTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "test_struct_omnia_arena_queue_items",
 			Help: "Current number of items in the queue by status",
-		}, []string{"job_id", "status"}),
+		}, []string{"status"}),
 
 		OperationsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "test_struct_omnia_arena_queue_operations_total",
@@ -88,10 +88,10 @@ func TestQueueMetricsStruct(t *testing.T) {
 			Help: "Number of currently active jobs",
 		}),
 
-		ItemRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
+		ItemRetries: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "test_struct_omnia_arena_queue_retries_total",
 			Help: "Total number of item retry attempts",
-		}, []string{"job_id"}),
+		}),
 	}
 
 	// Verify all fields are initialized
@@ -160,7 +160,7 @@ func TestQueueMetricsRecordItemStatusChange(t *testing.T) {
 	// Add an item as pending
 	metrics.RecordItemStatusChange(testMetricsJobID, "", ItemStatusPending)
 
-	val := testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(testMetricsJobID, string(ItemStatusPending)))
+	val := testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(string(ItemStatusPending)))
 	if val != 1 {
 		t.Errorf("ItemsTotal pending = %f, want 1", val)
 	}
@@ -168,12 +168,12 @@ func TestQueueMetricsRecordItemStatusChange(t *testing.T) {
 	// Move from pending to processing
 	metrics.RecordItemStatusChange(testMetricsJobID, ItemStatusPending, ItemStatusProcessing)
 
-	val = testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(testMetricsJobID, string(ItemStatusPending)))
+	val = testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(string(ItemStatusPending)))
 	if val != 0 {
 		t.Errorf("ItemsTotal pending after change = %f, want 0", val)
 	}
 
-	val = testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(testMetricsJobID, string(ItemStatusProcessing)))
+	val = testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(string(ItemStatusProcessing)))
 	if val != 1 {
 		t.Errorf("ItemsTotal processing = %f, want 1", val)
 	}
@@ -184,7 +184,7 @@ func TestQueueMetricsRecordItemsPushed(t *testing.T) {
 
 	metrics.RecordItemsPushed(testMetricsJobID, 5)
 
-	val := testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(testMetricsJobID, string(ItemStatusPending)))
+	val := testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(string(ItemStatusPending)))
 	if val != 5 {
 		t.Errorf("ItemsTotal pending = %f, want 5", val)
 	}
@@ -192,7 +192,7 @@ func TestQueueMetricsRecordItemsPushed(t *testing.T) {
 	// Push more items
 	metrics.RecordItemsPushed(testMetricsJobID, 3)
 
-	val = testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(testMetricsJobID, string(ItemStatusPending)))
+	val = testutil.ToFloat64(metrics.ItemsTotal.WithLabelValues(string(ItemStatusPending)))
 	if val != 8 {
 		t.Errorf("ItemsTotal pending = %f, want 8", val)
 	}
@@ -204,7 +204,7 @@ func TestQueueMetricsRecordRetry(t *testing.T) {
 	metrics.RecordRetry(testMetricsJobID)
 	metrics.RecordRetry(testMetricsJobID)
 
-	val := testutil.ToFloat64(metrics.ItemRetries.WithLabelValues(testMetricsJobID))
+	val := testutil.ToFloat64(metrics.ItemRetries)
 	if val != 2 {
 		t.Errorf("ItemRetries = %f, want 2", val)
 	}
@@ -342,7 +342,7 @@ func createTestMetrics(t *testing.T) *QueueMetrics {
 		ItemsTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "test_omnia_arena_queue_items",
 			Help: "Current number of items in the queue by status",
-		}, []string{"job_id", "status"}),
+		}, []string{"status"}),
 
 		OperationsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "test_omnia_arena_queue_operations_total",
@@ -360,9 +360,9 @@ func createTestMetrics(t *testing.T) *QueueMetrics {
 			Help: "Number of currently active jobs",
 		}),
 
-		ItemRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
+		ItemRetries: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "test_omnia_arena_queue_retries_total",
 			Help: "Total number of item retry attempts",
-		}, []string{"job_id"}),
+		}),
 	}
 }

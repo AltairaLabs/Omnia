@@ -23,14 +23,14 @@ import (
 
 // RetentionMetrics holds Prometheus metrics for retention policy reconciliation.
 type RetentionMetrics struct {
-	// ReconcileErrorsTotal counts reconcile errors by policy name and error type.
+	// ReconcileErrorsTotal counts reconcile errors by error type.
 	ReconcileErrorsTotal *prometheus.CounterVec
 	// ActivePolicies is the current count of Active retention policies.
 	ActivePolicies prometheus.Gauge
-	// WorkspaceOverrides tracks the number of workspace overrides per policy.
-	WorkspaceOverrides *prometheus.GaugeVec
-	// ConfigMapSyncErrors counts ConfigMap sync failures by policy name.
-	ConfigMapSyncErrors *prometheus.CounterVec
+	// WorkspaceOverrides tracks the total number of workspace overrides.
+	WorkspaceOverrides prometheus.Gauge
+	// ConfigMapSyncErrors counts ConfigMap sync failures.
+	ConfigMapSyncErrors prometheus.Counter
 }
 
 // NewRetentionMetrics creates and registers all Prometheus metrics for retention policy reconciliation.
@@ -39,22 +39,22 @@ func NewRetentionMetrics() *RetentionMetrics {
 		ReconcileErrorsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "omnia_retention_reconcile_errors_total",
 			Help: "Total number of retention policy reconcile errors",
-		}, []string{"policy_name", "error_type"}),
+		}, []string{"error_type"}),
 
 		ActivePolicies: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "omnia_retention_active_policies",
 			Help: "Current number of active retention policies",
 		}),
 
-		WorkspaceOverrides: promauto.NewGaugeVec(prometheus.GaugeOpts{
+		WorkspaceOverrides: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "omnia_retention_workspace_overrides",
-			Help: "Number of workspace overrides per retention policy",
-		}, []string{"policy_name"}),
+			Help: "Total number of workspace overrides for retention policies",
+		}),
 
-		ConfigMapSyncErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+		ConfigMapSyncErrors: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "omnia_retention_configmap_sync_errors_total",
 			Help: "Total number of ConfigMap sync errors for retention policies",
-		}, []string{"policy_name"}),
+		}),
 	}
 }
 
@@ -64,18 +64,18 @@ func (m *RetentionMetrics) Initialize() {
 }
 
 // RecordReconcileError increments the reconcile error counter.
-func (m *RetentionMetrics) RecordReconcileError(policyName, errorType string) {
-	m.ReconcileErrorsTotal.WithLabelValues(policyName, errorType).Inc()
+func (m *RetentionMetrics) RecordReconcileError(_, errorType string) {
+	m.ReconcileErrorsTotal.WithLabelValues(errorType).Inc()
 }
 
 // RecordConfigMapSyncError increments the ConfigMap sync error counter.
-func (m *RetentionMetrics) RecordConfigMapSyncError(policyName string) {
-	m.ConfigMapSyncErrors.WithLabelValues(policyName).Inc()
+func (m *RetentionMetrics) RecordConfigMapSyncError(_ string) {
+	m.ConfigMapSyncErrors.Inc()
 }
 
-// SetWorkspaceOverrides sets the workspace override count for a policy.
-func (m *RetentionMetrics) SetWorkspaceOverrides(policyName string, count int) {
-	m.WorkspaceOverrides.WithLabelValues(policyName).Set(float64(count))
+// SetWorkspaceOverrides sets the workspace override count.
+func (m *RetentionMetrics) SetWorkspaceOverrides(_ string, count int) {
+	m.WorkspaceOverrides.Set(float64(count))
 }
 
 // newRetentionMetricsWithRegistry creates retention metrics with a custom registry for testing.
@@ -83,22 +83,22 @@ func newRetentionMetricsWithRegistry(reg *prometheus.Registry) *RetentionMetrics
 	reconcileErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "omnia_retention_reconcile_errors_total",
 		Help: "Total number of retention policy reconcile errors",
-	}, []string{"policy_name", "error_type"})
+	}, []string{"error_type"})
 
 	activePolicies := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "omnia_retention_active_policies",
 		Help: "Current number of active retention policies",
 	})
 
-	workspaceOverrides := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	workspaceOverrides := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "omnia_retention_workspace_overrides",
-		Help: "Number of workspace overrides per retention policy",
-	}, []string{"policy_name"})
+		Help: "Total number of workspace overrides for retention policies",
+	})
 
-	configMapSyncErrors := prometheus.NewCounterVec(prometheus.CounterOpts{
+	configMapSyncErrors := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "omnia_retention_configmap_sync_errors_total",
 		Help: "Total number of ConfigMap sync errors for retention policies",
-	}, []string{"policy_name"})
+	})
 
 	reg.MustRegister(reconcileErrorsTotal, activePolicies, workspaceOverrides, configMapSyncErrors)
 
