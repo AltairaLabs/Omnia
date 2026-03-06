@@ -107,7 +107,7 @@ wait
 log_info "Images loaded"
 
 # Pull and load third-party images that kind nodes can't pull (Docker Hub rate limits in CI)
-REDIS_IMAGE="docker.io/bitnami/redis:7.4"
+REDIS_IMAGE="docker.io/bitnami/redis:latest"
 log_info "Pulling third-party images..."
 docker pull "$REDIS_IMAGE"
 kind load docker-image "$REDIS_IMAGE" --name "$KIND_CLUSTER"
@@ -210,7 +210,7 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set redis.enabled=true \
     --set redis.architecture=standalone \
     --set redis.auth.enabled=false \
-    --set redis.image.tag=7.4 \
+    --set redis.image.tag=latest \
     --set redis.master.persistence.enabled=false \
     --set redis.master.podSecurityContext.enabled=false \
     --set redis.master.containerSecurityContext.enabled=false \
