@@ -81,12 +81,12 @@ lists.
 `dashboard/src/app/sessions/[id]/page.tsx` renders every message returned by the API.
 No virtual scrolling or "load more" pagination. 1,000+ messages will cause visible UI lag.
 
-**S-CONV-4: `COUNT(*) OVER()` in session list queries.**
+**S-CONV-4: `COUNT(*) OVER()` in session list queries.** *(Fixed)*
 `internal/session/providers/postgres/provider.go:421` uses a window function to compute
 total count on every paginated list request. At 100 K+ sessions per namespace this becomes
 expensive.
 
-**S-CONV-5: Session existence check scans all partitions.**
+**S-CONV-5: Session existence check scans all partitions.** *(Fixed)*
 `sessionExists()` queries by `id` alone (`provider.go:191`). Sessions are partitioned by
 `created_at`, so a lookup by `id` must probe every weekly partition.
 
@@ -95,10 +95,10 @@ expensive.
 - **Require** a non-zero `OMNIA_CONTEXT_WINDOW` in production deployments (e.g., 128 K tokens).
 - Set a sensible default `MaxMessagesPerSession` (e.g., 500) in the SessionRetentionPolicy CRD.
 - ~~Implement virtual scrolling or paginated "load more" in the session detail page.~~ **Done** — windowed rendering (last 50 messages) with "Show earlier messages" button.
-- Replace `COUNT(*) OVER()` with a separate, cacheable count query or use keyset pagination
-  (cursor-based) that doesn't need total count.
-- Add a partial index on `sessions(id)` or always include `created_at` in existence queries
-  to enable partition pruning.
+- ~~Replace `COUNT(*) OVER()` with a separate, cacheable count query or use keyset pagination
+  (cursor-based) that doesn't need total count.~~ **Done** — PR #586: split into separate data + count queries.
+- ~~Add a partial index on `sessions(id)` or always include `created_at` in existence queries
+  to enable partition pruning.~~ **Done** — migration 000014 adds `idx_sessions_id`.
 
 ---
 
@@ -118,7 +118,7 @@ expensive.
 
 ### Issues
 
-**S-RES-1: No circuit breaker anywhere.**
+**S-RES-1: No circuit breaker anywhere.** *(Fixed)*
 If session-api goes down, every facade goroutine retries 3× (total ~700 ms), then fails.
 Subsequent requests immediately retry again. There is no "open circuit" state to shed load
 and allow session-api to recover.
@@ -132,7 +132,7 @@ A 30-second tool timeout means the user waits 30 s with no feedback. If the tool
 multiple times in a multi-step pipeline, latency compounds. No tool-level circuit breaker
 prevents repeated calls to a dead endpoint.
 
-**S-RES-4: Session-API HTTP server has no timeouts.**
+**S-RES-4: Session-API HTTP server has no timeouts.** *(Fixed)*
 `cmd/session-api/main.go` creates `&http.Server{Addr: ..., Handler: ...}` with no
 `ReadTimeout`, `WriteTimeout`, or `IdleTimeout`. Slow or malicious clients can hold
 connections open forever.
@@ -142,7 +142,7 @@ Only `doWithRetry` covers GET-like operations and `doJSON` (POST/PUT). But `Crea
 calls `doJSON` which does go through retry — however, a duplicate-create on retry could
 cause a conflict error. Need idempotency key or upsert semantics.
 
-**S-RES-6: Fire-and-forget session completion uses `context.Background()`.**
+**S-RES-6: Fire-and-forget session completion uses `context.Background()`.** *(Fixed)*
 `internal/facade/connection.go:85` — if session-api is down, the goroutine hangs
 indefinitely with no timeout. Under load, these zombie goroutines accumulate.
 
@@ -152,13 +152,13 @@ A runaway client can saturate a pod.
 
 ### Recommendations
 
-- Add a circuit breaker (e.g., Sony's `gobreaker`) around session-api HTTP calls.
+- ~~Add a circuit breaker (e.g., Sony's `gobreaker`) around session-api HTTP calls.~~ **Done** — PR #585: `gobreaker` in `httpclient/store.go`.
 - Implement a per-chunk inactivity timeout on the gRPC Converse stream (e.g., 120 s between
   chunks from provider).
-- Add timeouts to session-api HTTP server: `ReadTimeout=30s`, `WriteTimeout=60s`,
-  `IdleTimeout=120s`.
-- Wrap fire-and-forget goroutines with `context.WithTimeout` (e.g., 10 s for session
-  completion writes).
+- ~~Add timeouts to session-api HTTP server: `ReadTimeout=30s`, `WriteTimeout=60s`,
+  `IdleTimeout=120s`.~~ **Done** — PR #585.
+- ~~Wrap fire-and-forget goroutines with `context.WithTimeout` (e.g., 10 s for session
+  completion writes).~~ **Done** — PR #585: `context.WithTimeout(context.Background(), 10*time.Second)` in `cleanupConnection`.
 - Add a semaphore or token-bucket rate limiter on WebSocket message ingestion per connection.
 - Consider tool health probing — temporarily disable a tool adapter after N consecutive
   failures.
@@ -176,7 +176,7 @@ A runaway client can saturate a pod.
 
 ### Issues
 
-**S-STR-1: Unbounded goroutine creation for async recording.**
+**S-STR-1: Unbounded goroutine creation for async recording.** *(Fixed)*
 Each streaming chunk triggers `go func()` in `internal/facade/recording_writer.go:103`.
 A single conversation with 500 chunks spawns 500 goroutines. With 1,000 concurrent
 sessions, that's 500 K goroutines just for recording — each holding an HTTP request to
@@ -188,7 +188,7 @@ blocks, which blocks the gRPC stream from the runtime, which blocks the PromptKi
 consuming the next provider chunk. This is correct flow control but means one slow client
 ties up an entire runtime conversation slot.
 
-**S-STR-3: No per-pod connection limit.**
+**S-STR-3: No per-pod connection limit.** *(Fixed)*
 `internal/facade/server.go` tracks connections in a `map[*websocket.Conn]*Connection` but
 never caps the count. File descriptor exhaustion (default ulimit 1024) will crash the pod
 before any application-level limit kicks in.
@@ -202,21 +202,21 @@ No streaming of large blobs.
 `strings.Builder` and `[]byte` allocations happen per-message with no `sync.Pool`.
 Under sustained load, GC pressure will cause latency spikes.
 
-**S-STR-6: Prometheus eval_id label is high-cardinality.**
+**S-STR-6: Prometheus eval_id label is high-cardinality.** *(Fixed)*
 `pkg/metrics/eval.go:77-101` uses `eval_id` as a label. Each unique eval definition creates
 a new time series. With 50 eval definitions × 3 label dimensions, the series count grows
 linearly with eval diversity. At scale this bloats Prometheus memory and slows scrapes.
 
 ### Recommendations
 
-- Replace per-chunk goroutines with a **bounded worker pool** (e.g., channel of size 100)
-  for session recording. Coalesce chunks into batched writes.
-- Set an explicit max-connections limit on the facade (e.g., 500 per pod) and return
-  HTTP 503 when full. Pair with HPA to scale out.
+- ~~Replace per-chunk goroutines with a **bounded worker pool** (e.g., channel of size 100)
+  for session recording. Coalesce chunks into batched writes.~~ **Done** — PR #585: `RecordingPool` with 100 workers and 1000-item queue.
+- ~~Set an explicit max-connections limit on the facade (e.g., 500 per pod) and return
+  HTTP 503 when full. Pair with HPA to scale out.~~ **Done** — PR #585: `MaxConnections: 500` with HTTP 503.
 - Implement chunked media streaming over gRPC for payloads > 1 MB.
 - ~~Add `sync.Pool` for `[]byte` buffers used in streaming and media encoding.~~ **Done** — PR #582: `bufPool` in `binary.go` with `EncodePooled()`/`GetPooledBuf()`/`PutPooledBuf()`.
-- Move `eval_id` from Prometheus label to trace attribute. Use only `eval_type` and
-  `trigger` as labels.
+- ~~Move `eval_id` from Prometheus label to trace attribute. Use only `eval_type` and
+  `trigger` as labels.~~ **Done** — PR #586: removed `eval_id` from all eval metric labels.
 - Set container `ulimit` to at least 65536 in the Helm chart security context.
 
 ---
@@ -232,7 +232,7 @@ linearly with eval diversity. At scale this bloats Prometheus memory and slows s
 | Max conn lifetime | 1 h | OK | Same |
 | Replicas | 2 | 50 total conns to PG | `charts/omnia/values.yaml` |
 
-**S-DB-1: Connection pool too small.**
+**S-DB-1: Connection pool too small.** *(Fixed)*
 2 replicas × 25 conns = 50 connections to PostgreSQL. At 5,000 users sending 1 msg/s,
 session-api needs to handle thousands of writes/sec. With 50 connections and ~5 ms per
 write, throughput caps at ~10 K writes/sec — but pool contention and lock waits will
@@ -254,7 +254,7 @@ transaction lock.
 
 ### Redis
 
-**S-DB-5: No maxmemory or eviction policy in Helm defaults.**
+**S-DB-5: No maxmemory or eviction policy in Helm defaults.** *(Fixed)*
 Redis can grow unbounded. At 5,000 active sessions × 200 messages × 2 KB avg, hot cache
 alone is ~2 GB. Add session metadata and stream entries and it climbs fast.
 
@@ -264,7 +264,7 @@ misses to hit PostgreSQL simultaneously (thundering herd).
 
 ### Kubernetes
 
-**S-K8S-1: Session-API memory limit is 256 Mi.**
+**S-K8S-1: Session-API memory limit is 256 Mi.** *(Fixed)*
 With connection pools, in-flight requests, and metrics, 256 MB is tight.
 A burst of 10 MB body requests can OOM the pod.
 
@@ -280,7 +280,7 @@ serving JS bundles on every page load.
 
 ### Observability
 
-**S-OBS-1: Default trace sample rate is 1.0 (100%).**
+**S-OBS-1: Default trace sample rate is 1.0 (100%).** *(Fixed)*
 `internal/tracing/tracing.go` samples every trace. At 10 K concurrent sessions, this
 generates ~50 K spans/sec, overwhelming Tempo/Jaeger.
 
@@ -290,7 +290,7 @@ Session-api logs 4–6 lines per message write. At 1,000 msg/sec, that's 6,000 l
 
 ### Recommendations
 
-- Increase `PG_MAX_CONNS` to 50+ per replica and deploy 3+ session-api replicas.
+- ~~Increase `PG_MAX_CONNS` to 50+ per replica and deploy 3+ session-api replicas.~~ **Done** — PR #585: `defaultMaxConns = 50`.
 - ~~Batch stats updates: accumulate deltas in-memory and flush every 1–5 s per session instead of per-message.~~ **Done** — PR #582: `StatsBatcher` flushes every 3s.
 - ~~Configure Redis with `maxmemory` and `allkeys-lru` eviction.~~ **Done** — PR #582.
 - ~~Deploy Redis with Sentinel or Cluster for HA.~~ **Done** — PR #582: `architecture: replication` + Sentinel.
@@ -298,7 +298,7 @@ Session-api logs 4–6 lines per message write. At 1,000 msg/sec, that's 6,000 l
 - Add HPA for session-api and facade (target CPU 70% or custom request-rate metric).
 - ~~Deploy operator with 3 replicas + leader election.~~ **Done** — PR #582: `replicaCount: 3`.
 - ~~Serve dashboard assets via a CDN or add `Cache-Control: public, max-age=31536000, immutable` for hashed bundles.~~ **Done** — PR #582.
-- Reduce trace sample rate to 0.01–0.1 in production.
+- ~~Reduce trace sample rate to 0.01–0.1 in production.~~ **Done** — default sample rate is 0.1.
 - Gate V(1) logging behind a feature flag or reduce to V(2) for high-frequency write paths.
 
 ---
@@ -311,18 +311,18 @@ Session-api logs 4–6 lines per message write. At 1,000 msg/sec, that's 6,000 l
 | Runtime | 30 s | HTTP shutdown, then `GracefulStop()` | `cmd/runtime/main.go:385-394` |
 | Session-API | 30 s | HTTP shutdown only | `cmd/session-api/main.go` |
 
-**S-SHUT-1: gRPC `GracefulStop()` has no timeout.**
+**S-SHUT-1: gRPC `GracefulStop()` has no timeout.** *(Fixed)*
 If a streaming RPC is in-flight, `GracefulStop()` waits forever. The 30-second context
 applies to HTTP, not gRPC.
 
-**S-SHUT-2: In-flight async recording goroutines are orphaned.**
+**S-SHUT-2: In-flight async recording goroutines are orphaned.** *(Fixed)*
 Fire-and-forget goroutines using `context.Background()` are not tracked. On shutdown,
 pending session-api writes are silently dropped.
 
 ### Recommendations
 
-- Wrap `GracefulStop()` with a 10-second deadline; fall back to `Stop()`.
-- Use a `sync.WaitGroup` for recording goroutines and drain on shutdown (with timeout).
+- ~~Wrap `GracefulStop()` with a 10-second deadline; fall back to `Stop()`.~~ **Done** — PR #585: both `cmd/runtime/main.go` and `cmd/session-api/main.go`.
+- ~~Use a `sync.WaitGroup` for recording goroutines and drain on shutdown (with timeout).~~ **Done** — PR #585: `RecordingPool.Close()` drains queue; `completionWg` for non-pool tasks.
 
 ---
 

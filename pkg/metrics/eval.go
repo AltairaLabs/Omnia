@@ -22,13 +22,13 @@ import (
 )
 
 // EvalMetrics holds Prometheus metrics for eval executions in the runtime.
-// Labels are low-cardinality only (eval_id, eval_type, trigger, status).
-// High-cardinality dimensions (session_id, turn) belong in OTel traces.
+// Labels are low-cardinality only (eval_type, trigger, status).
+// High-cardinality dimensions (eval_id, session_id, turn) belong in OTel traces.
 type EvalMetrics struct {
-	// EvalsExecuted counts eval executions by eval_id, eval_type, trigger, and status.
+	// EvalsExecuted counts eval executions by eval_type, trigger, and status.
 	EvalsExecuted *prometheus.CounterVec
 
-	// EvalScore tracks the latest eval score by eval_id, eval_type, and trigger.
+	// EvalScore tracks the latest eval score by eval_type and trigger.
 	EvalScore *prometheus.GaugeVec
 
 	// EvalDuration tracks eval execution duration in seconds.
@@ -76,34 +76,34 @@ func NewEvalMetricsWithRegisterer(reg prometheus.Registerer, cfg EvalMetricsConf
 	return &EvalMetrics{
 		EvalsExecuted: factory.NewCounterVec(prometheus.CounterOpts{
 			Name:        "omnia_eval_executed_total",
-			Help:        "Total eval executions by eval_id, eval_type, trigger, and status",
+			Help:        "Total eval executions by eval_type, trigger, and status",
 			ConstLabels: labels,
-		}, []string{"eval_id", "eval_type", "trigger", "status"}),
+		}, []string{"eval_type", "trigger", "status"}),
 
 		EvalScore: factory.NewGaugeVec(prometheus.GaugeOpts{
 			Name:        "omnia_eval_score",
-			Help:        "Latest eval score by eval_id, eval_type, and trigger",
+			Help:        "Latest eval score by eval_type and trigger",
 			ConstLabels: labels,
-		}, []string{"eval_id", "eval_type", "trigger"}),
+		}, []string{"eval_type", "trigger"}),
 
 		EvalDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Name:        "omnia_eval_duration_seconds",
 			Help:        "Eval execution duration in seconds",
 			ConstLabels: labels,
 			Buckets:     buckets,
-		}, []string{"eval_id", "eval_type", "trigger"}),
+		}, []string{"eval_type", "trigger"}),
 
 		EvalsPassed: factory.NewCounterVec(prometheus.CounterOpts{
 			Name:        "omnia_eval_passed_total",
 			Help:        "Total passed eval executions",
 			ConstLabels: labels,
-		}, []string{"eval_id", "eval_type", "trigger"}),
+		}, []string{"eval_type", "trigger"}),
 
 		EvalsFailed: factory.NewCounterVec(prometheus.CounterOpts{
 			Name:        "omnia_eval_failed_total",
 			Help:        "Total failed eval executions",
 			ConstLabels: labels,
-		}, []string{"eval_id", "eval_type", "trigger"}),
+		}, []string{"eval_type", "trigger"}),
 	}
 }
 
@@ -128,18 +128,18 @@ func (m *EvalMetrics) RecordEval(r EvalRecordMetrics) {
 		status = StatusError
 	}
 
-	m.EvalsExecuted.WithLabelValues(r.EvalID, r.EvalType, r.Trigger, status).Inc()
-	m.EvalDuration.WithLabelValues(r.EvalID, r.EvalType, r.Trigger).Observe(r.DurationSec)
+	m.EvalsExecuted.WithLabelValues(r.EvalType, r.Trigger, status).Inc()
+	m.EvalDuration.WithLabelValues(r.EvalType, r.Trigger).Observe(r.DurationSec)
 
 	if r.Score != nil {
-		m.EvalScore.WithLabelValues(r.EvalID, r.EvalType, r.Trigger).Set(*r.Score)
+		m.EvalScore.WithLabelValues(r.EvalType, r.Trigger).Set(*r.Score)
 	}
 
 	if !r.Skipped && !r.HasError {
 		if r.Passed {
-			m.EvalsPassed.WithLabelValues(r.EvalID, r.EvalType, r.Trigger).Inc()
+			m.EvalsPassed.WithLabelValues(r.EvalType, r.Trigger).Inc()
 		} else {
-			m.EvalsFailed.WithLabelValues(r.EvalID, r.EvalType, r.Trigger).Inc()
+			m.EvalsFailed.WithLabelValues(r.EvalType, r.Trigger).Inc()
 		}
 	}
 }

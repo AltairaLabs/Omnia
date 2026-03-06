@@ -180,52 +180,6 @@ func (p *Provider) sessionExists(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// --- helper: collect session page -------------------------------------------
-
-// collectSessionPageWithCount scans rows that include a COUNT(*) OVER() column
-// appended after the standard session columns. The total_count is extracted from
-// the first row and used to populate the SessionPage metadata.
-func collectSessionPageWithCount(rows pgx.Rows, offset int) (*providers.SessionPage, error) {
-	defer rows.Close()
-
-	var sessions []*session.Session
-	var totalCount int64
-
-	for rows.Next() {
-		var s session.Session
-		var n nullableSessionFields
-		var rowTotal int64
-
-		err := rows.Scan(
-			&s.ID, &s.AgentName, &s.Namespace, &n.workspaceName, &s.Status,
-			&s.CreatedAt, &s.UpdatedAt, &n.expiresAt, &n.endedAt,
-			&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
-			&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
-			&n.promptPackName, &n.promptPackVersion,
-			&rowTotal,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("postgres: scan session with count: %w", err)
-		}
-
-		populateSession(&s, n)
-		sessions = append(sessions, &s)
-		totalCount = rowTotal
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("postgres: iterate sessions: %w", err)
-	}
-	if sessions == nil {
-		sessions = []*session.Session{}
-	}
-
-	return &providers.SessionPage{
-		Sessions:   sessions,
-		TotalCount: totalCount,
-		HasMore:    int64(offset)+int64(len(sessions)) < totalCount,
-	}, nil
-}
-
 // --- helper: collect session list -------------------------------------------
 
 func collectSessions(rows pgx.Rows) ([]*session.Session, error) {
@@ -412,16 +366,34 @@ func (p *Provider) ListSessions(ctx context.Context, opts providers.SessionListO
 		sort = "ASC"
 	}
 
-	// Single query with COUNT(*) OVER() avoids a separate round-trip for the total.
-	query := `SELECT ` + sessionColumns + `, COUNT(*) OVER() AS total_count FROM sessions WHERE 1=1` + qb.Where() +
+	// Data query — no window function, uses index-backed LIMIT/OFFSET.
+	dataQuery := `SELECT ` + sessionColumns + ` FROM sessions WHERE 1=1` + qb.Where() +
 		` ORDER BY created_at ` + sort
-	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
+	dataQuery = qb.AppendPagination(dataQuery, opts.Limit, opts.Offset)
 
-	rows, err := p.pool.Query(ctx, query, qb.Args()...)
+	rows, err := p.pool.Query(ctx, dataQuery, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list sessions: %w", err)
 	}
-	return collectSessionPageWithCount(rows, opts.Offset)
+	sessions, err := collectSessions(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Separate count query — simple aggregate that can use index-only scans.
+	countQB := &pgutil.QueryBuilder{}
+	p.applySessionFilters(countQB, opts)
+	countQuery := `SELECT count(*) FROM sessions WHERE 1=1` + countQB.Where()
+	var totalCount int64
+	if err := p.pool.QueryRow(ctx, countQuery, countQB.Args()...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("postgres: count sessions: %w", err)
+	}
+
+	return &providers.SessionPage{
+		Sessions:   sessions,
+		TotalCount: totalCount,
+		HasMore:    int64(opts.Offset)+int64(len(sessions)) < totalCount,
+	}, nil
 }
 
 func (p *Provider) SearchSessions(ctx context.Context, query string, opts providers.SessionListOpts) (*providers.SessionPage, error) {
@@ -441,10 +413,10 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 		sort = "ASC"
 	}
 
-	// Single query with COUNT(*) OVER() avoids a separate round-trip for the total.
+	// Data query — no window function.
 	dataSQL := `WITH matching AS (
 		SELECT DISTINCT session_id FROM messages WHERE 1=1` + cteClauses + `
-	) SELECT ` + sessionColumns + `, COUNT(*) OVER() AS total_count
+	) SELECT ` + sessionColumns + `
 	FROM sessions s JOIN matching ms ON ms.session_id = s.id
 	WHERE 1=1` + sessionQB.Where() +
 		` ORDER BY s.created_at ` + sort
@@ -454,7 +426,35 @@ func (p *Provider) SearchSessions(ctx context.Context, query string, opts provid
 	if err != nil {
 		return nil, fmt.Errorf("postgres: search sessions: %w", err)
 	}
-	return collectSessionPageWithCount(rows, opts.Offset)
+	sessions, err := collectSessions(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Separate count query.
+	countQB := &pgutil.QueryBuilder{}
+	countQB.Add("search_vector @@ plainto_tsquery('english', $?)", query)
+	countCTE := countQB.Where()
+	countSessionQB := &pgutil.QueryBuilder{}
+	countSessionQB.SetArgs(countQB.Args())
+	p.applySessionFilters(countSessionQB, opts)
+
+	countSQL := `WITH matching AS (
+		SELECT DISTINCT session_id FROM messages WHERE 1=1` + countCTE + `
+	) SELECT count(*)
+	FROM sessions s JOIN matching ms ON ms.session_id = s.id
+	WHERE 1=1` + countSessionQB.Where()
+
+	var totalCount int64
+	if err := p.pool.QueryRow(ctx, countSQL, countSessionQB.Args()...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("postgres: count search sessions: %w", err)
+	}
+
+	return &providers.SessionPage{
+		Sessions:   sessions,
+		TotalCount: totalCount,
+		HasMore:    int64(opts.Offset)+int64(len(sessions)) < totalCount,
+	}, nil
 }
 
 func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.SessionListOpts) {
