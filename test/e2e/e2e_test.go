@@ -136,16 +136,12 @@ var _ = Describe("Manager", Ordered, func() {
 			return
 		}
 
-		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
-
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
-
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--timeout=60s")
+		// Delete the namespace directly with a timeout instead of using
+		// make undeploy/uninstall, which can hang indefinitely on finalizers
+		// and consume the entire 20-minute test timeout budget.
+		By("force-deleting the manager namespace and all resources")
+		cmd = exec.Command("kubectl", "delete", "ns", namespace,
+			"--ignore-not-found", "--timeout=120s", "--force", "--grace-period=0")
 		_, _ = utils.Run(cmd)
 	})
 

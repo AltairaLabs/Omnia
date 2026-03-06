@@ -330,6 +330,10 @@ func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
+	if err := p.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+
 	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 

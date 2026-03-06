@@ -165,6 +165,15 @@ jobs:
           echo ""
           echo "=== Arena controller logs ==="
           kubectl logs -n omnia-system -l control-plane=arena-controller-manager --tail=100 || true
+          echo ""
+          echo "=== Redis logs ==="
+          kubectl logs -n omnia-system omnia-redis-master-0 --tail=50 || true
+          echo ""
+          echo "=== Session-API logs ==="
+          kubectl logs -n omnia-system -l app.kubernetes.io/component=session-api --tail=50 || true
+          echo ""
+          echo "=== Eval-worker logs ==="
+          kubectl logs -n omnia-system -l app.kubernetes.io/component=eval-worker --tail=50 || true
 
       - name: Publish Test Results
         uses: mikepenz/action-junit-report@v6

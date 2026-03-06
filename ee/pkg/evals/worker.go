@@ -38,6 +38,7 @@ const (
 	eventTypeMessage      = "message.assistant"
 	eventTypeSessionDone  = "session.completed"
 	streamPayloadField    = "payload"
+	streamReadBatchSize   = 10
 	periodicCheckInterval = 30 * time.Second
 	evalTypeLLMJudge      = "llm_judge"
 )
@@ -288,7 +289,7 @@ func (w *EvalWorker) readFromStreams(ctx context.Context) ([]goredis.XStream, er
 		Group:    w.consumerGroup,
 		Consumer: w.consumerName,
 		Streams:  streamArgs,
-		Count:    1,
+		Count:    streamReadBatchSize,
 		Block:    blockTimeout,
 	}).Result()
 }

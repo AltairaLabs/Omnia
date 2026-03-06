@@ -733,6 +733,25 @@ sessionApi:
     # -- Deploy a dev-only single-node Postgres (NOT for production)
     dev:
       enabled: false
+    # -- PgBouncer connection pooling (recommended for production)
+    # Deploy a PgBouncer sidecar or standalone proxy in front of PostgreSQL
+    # to reduce connection overhead and improve scalability. When enabled,
+    # session-api and compaction jobs connect through PgBouncer instead of
+    # directly to PostgreSQL.
+    # NOTE: This section defines configuration values only. The actual PgBouncer
+    # deployment template is not included — use an external PgBouncer operator
+    # or add a sidecar container to your PostgreSQL deployment.
+    pgbouncer:
+      # -- Enable PgBouncer connection pooling
+      enabled: false
+      # -- PgBouncer pool mode (session, transaction, or statement)
+      poolMode: transaction
+      # -- Default pool size per user/database pair
+      defaultPoolSize: 20
+      # -- Maximum number of client connections
+      maxClientConn: 200
+      # -- Maximum number of server connections to PostgreSQL
+      maxDbConnections: 50
   redis:
     # -- Comma-separated Redis addresses for hot cache (optional)
     addrs: ""
@@ -992,6 +1011,11 @@ facade:
     tag: ""
     # -- Facade image pull policy
     pullPolicy: IfNotPresent
+  # NOTE: For high WebSocket connection counts (>10k per pod), ensure nodes have
+  # sufficient file descriptor limits. Kubernetes does not support setting ulimits
+  # directly (that is a Docker/containerd concept). Configure nofile limits at the
+  # node level via /etc/security/limits.conf or systemd LimitNOFILE.
+  # See: https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/
 
 # Framework container configuration (used by AgentRuntime)
 # This aligns with the CRD's spec.framework field
@@ -1549,6 +1573,11 @@ gateway:
       protocol: HTTPS
       # -- TLS secret name (must exist in the namespace)
       tlsSecretName: ""
+  # -- Annotations for the external gateway resource.
+  # Use implementation-specific annotations for WebSocket idle timeout, e.g.:
+  #   gateway.envoyproxy.io/timeout-idle: "3600s"
+  #   gateway.istio.io/controller-name: "istio.io/gateway-controller"
+  annotations: {}
 
 # Internal gateway for observability tools (Grafana, Prometheus, etc.)
 internalGateway:
@@ -1669,7 +1698,7 @@ redis:
     # Production deployments should adjust maxmemory based on workload.
     extraFlags:
       - "--maxmemory"
-      - "1Gi"
+      - "1gb"
       - "--maxmemory-policy"
       - "allkeys-lru"
     resources:

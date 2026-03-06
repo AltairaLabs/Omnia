@@ -26,6 +26,8 @@ RUNTIME_IMAGE="omnia-runtime-dev:latest"
 ARENA_CONTROLLER_IMAGE="omnia-arena-controller-dev:latest"
 ARENA_WORKER_IMAGE="omnia-arena-worker-dev:latest"
 ARENA_DEV_CONSOLE_IMAGE="omnia-arena-dev-console-dev:latest"
+SESSION_API_IMAGE="omnia-session-api-dev:latest"
+EVAL_WORKER_IMAGE="omnia-eval-worker-dev:latest"
 
 cd "$PROJECT_ROOT"
 
@@ -87,6 +89,8 @@ if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
     docker build -t "$ARENA_CONTROLLER_IMAGE" -f ee/Dockerfile.arena-controller . &
     docker build -t "$ARENA_WORKER_IMAGE" -f ee/Dockerfile.arena-worker . &
     docker build -t "$ARENA_DEV_CONSOLE_IMAGE" -f ee/Dockerfile.arena-dev-console . &
+    docker build -t "$SESSION_API_IMAGE" -f Dockerfile.session-api . &
+    docker build -t "$EVAL_WORKER_IMAGE" -f ee/Dockerfile.eval-worker . &
 
     wait
     log_info "All images built"
@@ -96,11 +100,18 @@ fi
 
 # Load images into kind
 log_info "Loading images into kind..."
-for img in "$OPERATOR_IMAGE" "$FACADE_IMAGE" "$RUNTIME_IMAGE" "$ARENA_CONTROLLER_IMAGE" "$ARENA_WORKER_IMAGE" "$ARENA_DEV_CONSOLE_IMAGE"; do
+for img in "$OPERATOR_IMAGE" "$FACADE_IMAGE" "$RUNTIME_IMAGE" "$ARENA_CONTROLLER_IMAGE" "$ARENA_WORKER_IMAGE" "$ARENA_DEV_CONSOLE_IMAGE" "$SESSION_API_IMAGE" "$EVAL_WORKER_IMAGE"; do
     kind load docker-image "$img" --name "$KIND_CLUSTER" &
 done
 wait
 log_info "Images loaded"
+
+# Pull and load third-party images that kind nodes can't pull (Docker Hub rate limits in CI)
+REDIS_IMAGE="docker.io/bitnami/redis:latest"
+log_info "Pulling third-party images..."
+docker pull "$REDIS_IMAGE"
+kind load docker-image "$REDIS_IMAGE" --name "$KIND_CLUSTER"
+log_info "Third-party images loaded"
 
 # Deploy with Helm (matching Tilt enterprise setup - NO --wait flag)
 # Download each Helm dependency individually with retries. This prevents a
@@ -186,13 +197,23 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set enterprise.arena.devConsole.image.repository=omnia-arena-dev-console-dev \
     --set enterprise.arena.devConsole.image.tag=latest \
     --set enterprise.arena.devConsole.image.pullPolicy=Never \
+    --set sessionApi.image.repository=omnia-session-api-dev \
+    --set sessionApi.image.tag=latest \
+    --set sessionApi.image.pullPolicy=Never \
+    --set sessionApi.postgres.dev.enabled=true \
+    --set enterprise.evalWorker.image.repository=omnia-eval-worker-dev \
+    --set enterprise.evalWorker.image.tag=latest \
+    --set enterprise.evalWorker.image.pullPolicy=Never \
     --set enterprise.arena.queue.type=redis \
     --set enterprise.arena.queue.redis.host=omnia-redis-master \
     --set enterprise.arena.queue.redis.port=6379 \
     --set redis.enabled=true \
     --set redis.architecture=standalone \
     --set redis.auth.enabled=false \
+    --set redis.image.tag=latest \
     --set redis.master.persistence.enabled=false \
+    --set redis.master.podSecurityContext.enabled=false \
+    --set redis.master.containerSecurityContext.enabled=false \
     --set nfs.server.enabled=false \
     --set nfs.csiDriver.enabled=false \
     --set workspaceContent.persistence.accessModes[0]=ReadWriteOnce \
@@ -221,6 +242,8 @@ log_info "Waiting for deployments..."
 kubectl rollout status deployment/omnia-controller-manager -n "$NAMESPACE" --timeout=3m
 kubectl rollout status deployment/omnia-arena-controller -n "$NAMESPACE" --timeout=3m
 kubectl rollout status statefulset/omnia-redis-master -n "$NAMESPACE" --timeout=3m
+kubectl rollout status statefulset/omnia-postgres -n "$NAMESPACE" --timeout=3m
+kubectl rollout status deployment/omnia-session-api -n "$NAMESPACE" --timeout=3m
 
 log_info "Arena E2E environment ready!"
 echo ""

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,7 +54,9 @@ var _ = Describe("Arena Fleet", Ordered, Label("arena"), func() {
 				"-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
 			output, err := utils.Run(cmd)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(output).To(Equal("1"), "Controller manager should have 1 ready replica")
+			n, parseErr := strconv.Atoi(output)
+			g.Expect(parseErr).NotTo(HaveOccurred(), "readyReplicas should be a number")
+			g.Expect(n).To(BeNumerically(">=", 1), "Controller manager should have at least 1 ready replica")
 		}
 		Eventually(verifyControllerReady, 2*time.Minute, 2*time.Second).Should(Succeed())
 

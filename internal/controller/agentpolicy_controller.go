@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -498,6 +499,7 @@ func (r *AgentPolicyReconciler) findPoliciesForAgent(ctx context.Context, obj cl
 	log := logf.FromContext(ctx)
 
 	policyList := &omniav1alpha1.AgentPolicyList{}
+	log.V(1).Info("listing AgentPolicies for agent mapping", "agentName", agent.Name, "namespace", agent.Namespace)
 	if err := r.List(ctx, policyList, client.InNamespace(agent.Namespace)); err != nil {
 		log.Error(err, "failed to list AgentPolicies for agent mapping")
 		return nil
@@ -534,6 +536,7 @@ func (r *AgentPolicyReconciler) policyMatchesAgent(policy *omniav1alpha1.AgentPo
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.AgentPolicy{}).
 		Watches(
 			&omniav1alpha1.AgentRuntime{},
