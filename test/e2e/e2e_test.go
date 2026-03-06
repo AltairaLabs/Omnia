@@ -20,7 +20,6 @@ limitations under the License.
 package e2e
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -137,24 +136,12 @@ var _ = Describe("Manager", Ordered, func() {
 			return
 		}
 
-		// Use context timeouts for cleanup commands to prevent AfterAll from
-		// hanging indefinitely (which consumes the entire test timeout budget).
-		cleanupTimeout := 2 * time.Minute
-
-		By("undeploying the controller-manager")
-		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-		cmd = exec.CommandContext(ctx, "make", "undeploy")
-		_, _ = utils.Run(cmd)
-		cancel()
-
-		By("uninstalling CRDs")
-		ctx, cancel = context.WithTimeout(context.Background(), cleanupTimeout)
-		cmd = exec.CommandContext(ctx, "make", "uninstall")
-		_, _ = utils.Run(cmd)
-		cancel()
-
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--timeout=60s")
+		// Delete the namespace directly with a timeout instead of using
+		// make undeploy/uninstall, which can hang indefinitely on finalizers
+		// and consume the entire 20-minute test timeout budget.
+		By("force-deleting the manager namespace and all resources")
+		cmd = exec.Command("kubectl", "delete", "ns", namespace,
+			"--ignore-not-found", "--timeout=120s", "--force", "--grace-period=0")
 		_, _ = utils.Run(cmd)
 	})
 

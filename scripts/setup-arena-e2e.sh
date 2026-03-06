@@ -193,6 +193,7 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set sessionApi.image.repository=omnia-session-api-dev \
     --set sessionApi.image.tag=latest \
     --set sessionApi.image.pullPolicy=Never \
+    --set sessionApi.postgres.dev.enabled=true \
     --set enterprise.evalWorker.image.repository=omnia-eval-worker-dev \
     --set enterprise.evalWorker.image.tag=latest \
     --set enterprise.evalWorker.image.pullPolicy=Never \
@@ -202,7 +203,10 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set redis.enabled=true \
     --set redis.architecture=standalone \
     --set redis.auth.enabled=false \
+    --set redis.image.tag=7.4 \
     --set redis.master.persistence.enabled=false \
+    --set redis.master.podSecurityContext.enabled=false \
+    --set redis.master.containerSecurityContext.enabled=false \
     --set nfs.server.enabled=false \
     --set nfs.csiDriver.enabled=false \
     --set workspaceContent.persistence.accessModes[0]=ReadWriteOnce \
@@ -231,6 +235,8 @@ log_info "Waiting for deployments..."
 kubectl rollout status deployment/omnia-controller-manager -n "$NAMESPACE" --timeout=3m
 kubectl rollout status deployment/omnia-arena-controller -n "$NAMESPACE" --timeout=3m
 kubectl rollout status statefulset/omnia-redis-master -n "$NAMESPACE" --timeout=3m
+kubectl rollout status statefulset/omnia-postgres -n "$NAMESPACE" --timeout=3m
+kubectl rollout status deployment/omnia-session-api -n "$NAMESPACE" --timeout=3m
 
 log_info "Arena E2E environment ready!"
 echo ""
