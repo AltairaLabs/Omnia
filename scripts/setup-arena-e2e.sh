@@ -106,6 +106,13 @@ done
 wait
 log_info "Images loaded"
 
+# Pull and load third-party images that kind nodes can't pull (Docker Hub rate limits in CI)
+REDIS_IMAGE="docker.io/bitnami/redis:7.4"
+log_info "Pulling third-party images..."
+docker pull "$REDIS_IMAGE"
+kind load docker-image "$REDIS_IMAGE" --name "$KIND_CLUSTER"
+log_info "Third-party images loaded"
+
 # Deploy with Helm (matching Tilt enterprise setup - NO --wait flag)
 # Download each Helm dependency individually with retries. This prevents a
 # transient CDN failure for one disabled subchart (e.g. 502 from Grafana's
