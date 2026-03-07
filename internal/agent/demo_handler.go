@@ -285,7 +285,7 @@ Great news! I found your account. Here's how to reset your password:
 The reset link will expire in 24 hours. Let me know if you need any other help!`
 
 	fullResponse += finalResponse
-	return fullResponse, writer.WriteDone(finalResponse)
+	return fullResponse, writer.WriteDone(fullResponse)
 }
 
 func (h *DemoHandler) handleWeatherQuery(ctx context.Context, _ string, writer facade.ResponseWriter) (string, error) {
@@ -339,7 +339,7 @@ Here's the current weather in Denver, CO:
 It's a beautiful day! Perfect for outdoor activities.`
 
 	fullResponse += finalResponse
-	return fullResponse, writer.WriteDone(finalResponse)
+	return fullResponse, writer.WriteDone(fullResponse)
 }
 
 func (h *DemoHandler) handleGreeting(_ context.Context, _ string, writer facade.ResponseWriter) (string, error) {
@@ -367,7 +367,7 @@ How can I help you today?`
 		time.Sleep(30 * time.Millisecond)
 	}
 
-	return response, writer.WriteDone("")
+	return response, writer.WriteDone(response)
 }
 
 func (h *DemoHandler) handleDefault(_ context.Context, _ string, input string, writer facade.ResponseWriter) (string, error) {
@@ -392,7 +392,7 @@ func (h *DemoHandler) handleDefault(_ context.Context, _ string, input string, w
 		time.Sleep(25 * time.Millisecond)
 	}
 
-	return response, writer.WriteDone("")
+	return response, writer.WriteDone(response)
 }
 
 // Multi-modal response handlers for E2E testing.

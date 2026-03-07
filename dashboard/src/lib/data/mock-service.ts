@@ -586,6 +586,27 @@ export class MockDataService implements DataService {
     throw new Error(`Agent ${workspace}/${name} not found`);
   }
 
+  async updateAgentEvals(
+    workspace: string,
+    name: string,
+    evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }
+  ): Promise<AgentRuntime> {
+    await delay(500);
+    const agent = mockAgentRuntimes.find(
+      (a) => a.metadata.namespace === workspace && a.metadata.name === name
+    );
+    if (agent) {
+      return {
+        ...agent,
+        spec: {
+          ...agent.spec,
+          evals: { ...agent.spec.evals, ...evals },
+        },
+      } as unknown as AgentRuntime;
+    }
+    throw new Error(`Agent ${workspace}/${name} not found`);
+  }
+
   async getAgentLogs(
     _workspace: string,
     _name: string,

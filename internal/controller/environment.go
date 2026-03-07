@@ -262,20 +262,20 @@ func buildEvalEnvVars(evalConfig *omniav1alpha1.EvalConfig) []corev1.EnvVar {
 // buildEvalSamplingEnvVars creates sampling rate env vars with defaults.
 func buildEvalSamplingEnvVars(sampling *omniav1alpha1.EvalSampling) []corev1.EnvVar {
 	defaultRate := int32(100)
-	llmJudgeRate := int32(10)
+	extendedRate := int32(10)
 
 	if sampling != nil {
 		if sampling.DefaultRate != nil {
 			defaultRate = *sampling.DefaultRate
 		}
-		if sampling.LLMJudgeRate != nil {
-			llmJudgeRate = *sampling.LLMJudgeRate
+		if sampling.ExtendedRate != nil {
+			extendedRate = *sampling.ExtendedRate
 		}
 	}
 
 	return []corev1.EnvVar{
 		{Name: envEvalsSamplingDef, Value: fmt.Sprintf("%d", defaultRate)},
-		{Name: envEvalsSamplingJudge, Value: fmt.Sprintf("%d", llmJudgeRate)},
+		{Name: envEvalsSamplingJudge, Value: fmt.Sprintf("%d", extendedRate)},
 	}
 }
 

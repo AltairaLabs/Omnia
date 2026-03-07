@@ -92,8 +92,9 @@ export interface AgentRuntimeSpec {
     sampling?: {
       /** defaultRate is the default sampling percentage (0-100) for all evals. */
       defaultRate?: number;
-      /** llmJudgeRate is the sampling percentage (0-100) for LLM judge evals. */
-      llmJudgeRate?: number;
+      /** extendedRate is the sampling percentage (0-100) for extended evals
+       * (model-powered evaluations that call an external service). */
+      extendedRate?: number;
     };
     /** sessionCompletion configures how session completion is detected
      * for on_session_complete evals. */

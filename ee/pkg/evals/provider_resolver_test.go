@@ -415,6 +415,59 @@ func TestResolveProviderSpecs_PlatformConfig(t *testing.T) {
 	assert.Contains(t, err.Error(), "platform credential")
 }
 
+func TestResolveSamplingConfig_WithConfig(t *testing.T) {
+	ns := testNamespace
+	dr := int32(50)
+	er := int32(20)
+
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Evals: &v1alpha1.EvalConfig{
+				Enabled: true,
+				Sampling: &v1alpha1.EvalSampling{
+					DefaultRate:  &dr,
+					ExtendedRate: &er,
+				},
+			},
+		},
+	}
+
+	c := buildFakeClient(ar).Build()
+	resolver := NewProviderResolver(c)
+
+	sampling := resolver.ResolveSamplingConfig(context.Background(), "agent", ns)
+	require.NotNil(t, sampling)
+	assert.Equal(t, int32(50), *sampling.DefaultRate)
+	assert.Equal(t, int32(20), *sampling.ExtendedRate)
+}
+
+func TestResolveSamplingConfig_NoEvalConfig(t *testing.T) {
+	ns := testNamespace
+
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: ns},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		},
+	}
+
+	c := buildFakeClient(ar).Build()
+	resolver := NewProviderResolver(c)
+
+	sampling := resolver.ResolveSamplingConfig(context.Background(), "agent", ns)
+	assert.Nil(t, sampling)
+}
+
+func TestResolveSamplingConfig_AgentNotFound(t *testing.T) {
+	c := buildFakeClient().Build()
+	resolver := NewProviderResolver(c)
+
+	sampling := resolver.ResolveSamplingConfig(context.Background(), "nonexistent", "ns")
+	assert.Nil(t, sampling)
+}
+
 func TestResolveProviders_NilResolver(t *testing.T) {
 	w := &EvalWorker{logger: testLogger()}
 	event := api.SessionEvent{AgentName: "agent", Namespace: "ns"}

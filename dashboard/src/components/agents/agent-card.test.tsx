@@ -83,6 +83,7 @@ const mockDataService: DataService = {
   getAgent: vi.fn().mockResolvedValue(undefined),
   createAgent: vi.fn().mockResolvedValue({}),
   scaleAgent: vi.fn().mockResolvedValue({}),
+  updateAgentEvals: vi.fn().mockResolvedValue({}),
   getAgentLogs: vi.fn().mockResolvedValue([]),
   getAgentEvents: vi.fn().mockResolvedValue([]),
   // PromptPacks

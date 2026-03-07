@@ -87,6 +87,26 @@ export class WorkspaceApiService {
     return response.json();
   }
 
+  async updateAgentEvals(
+    workspace: string,
+    name: string,
+    evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }
+  ): Promise<AgentRuntime> {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspace)}/agents/${encodeURIComponent(name)}/evals`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(evals),
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to update agent evals: ${errorText}`);
+    }
+    return response.json();
+  }
+
   async getAgentLogs(
     workspace: string,
     name: string,

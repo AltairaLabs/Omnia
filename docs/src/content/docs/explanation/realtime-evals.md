@@ -211,8 +211,8 @@ Sampling controls what percentage of sessions/turns are evaluated. It uses deter
 spec:
   evals:
     sampling:
-      defaultRate: 100    # 100% for rule-based evals (free)
-      llmJudgeRate: 10    # 10% for LLM judge evals (costs money)
+      defaultRate: 100    # 100% for lightweight evals (fast, free)
+      extendedRate: 10    # 10% for extended evals (model-powered, costs money)
 ```
 
 ### Rate Limiting

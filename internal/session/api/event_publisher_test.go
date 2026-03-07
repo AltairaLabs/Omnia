@@ -355,6 +355,47 @@ func TestRedisEventPublisher_PublishMessageEvent_WithPromptPack(t *testing.T) {
 	assert.Equal(t, "v2", decoded.PromptPackVersion)
 }
 
+func TestRedisEventPublisher_PublishMessageEvent_WithEvalTiers(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	pub := NewRedisEventPublisher(client, logr.Discard())
+
+	event := SessionEvent{
+		EventType: "message.assistant",
+		SessionID: "s1",
+		Namespace: "test-ns",
+		Timestamp: time.Now().Format(time.RFC3339),
+		EvalTiers: []string{"lightweight", "extended"},
+	}
+
+	err := pub.PublishMessageEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	streamKey := StreamKey("test-ns")
+	msgs, err := client.XRange(context.Background(), streamKey, "-", "+").Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	payload := msgs[0].Values["payload"].(string)
+	var decoded SessionEvent
+	err = json.Unmarshal([]byte(payload), &decoded)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"lightweight", "extended"}, decoded.EvalTiers)
+}
+
+func TestSessionEvent_EvalTiers_OmittedWhenEmpty(t *testing.T) {
+	event := SessionEvent{
+		EventType: "message.assistant",
+		SessionID: "s1",
+		Namespace: "ns",
+	}
+	data, err := json.Marshal(event)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "evalTiers")
+}
+
 func TestAppendMessage_AssistantPublishesEventWithPromptPack(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.sessions["s1"] = &session.Session{

@@ -26,6 +26,8 @@ import (
 const defaultHTTPTimeout = 10 * time.Second
 
 // SessionAPIClient is the interface for communicating with the session-api service.
+// It provides both read and write operations for sessions, messages, and eval results.
+// The eval worker uses the narrower EvalResultWriter for writes only.
 type SessionAPIClient interface {
 	// GetSession retrieves session metadata by ID.
 	GetSession(ctx context.Context, sessionID string) (*session.Session, error)
@@ -37,6 +39,12 @@ type SessionAPIClient interface {
 	ListEvalResults(ctx context.Context, opts api.EvalResultListOpts) ([]*api.EvalResult, error)
 	// GetSessionEvalResults retrieves eval results for a specific session.
 	GetSessionEvalResults(ctx context.Context, sessionID string) ([]*api.EvalResult, error)
+}
+
+// EvalResultWriter is the subset of SessionAPIClient needed by the eval worker
+// for persisting eval results. Session/message reads use the Redis hot tier.
+type EvalResultWriter interface {
+	WriteEvalResults(ctx context.Context, results []*api.EvalResult) error
 }
 
 // HTTPSessionAPIClient implements SessionAPIClient using HTTP calls to session-api.
@@ -100,7 +108,6 @@ func (c *HTTPSessionAPIClient) GetSessionMessages(ctx context.Context, sessionID
 		return nil, err
 	}
 
-	// Convert pointer slice to value slice.
 	messages := make([]session.Message, 0, len(result.Messages))
 	for _, m := range result.Messages {
 		if m != nil {

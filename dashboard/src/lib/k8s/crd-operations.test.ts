@@ -326,14 +326,17 @@ describe("crd-operations", () => {
       );
 
       expect(result.spec.replicas).toBe(5);
-      expect(mockPatchNamespacedCustomObject).toHaveBeenCalledWith({
-        group: "omnia.altairalabs.ai",
-        version: "v1alpha1",
-        namespace: "workspace-ns",
-        plural: "agentruntimes",
-        name: "agent-1",
-        body: { spec: { replicas: 5 } },
-      });
+      expect(mockPatchNamespacedCustomObject).toHaveBeenCalledWith(
+        {
+          group: "omnia.altairalabs.ai",
+          version: "v1alpha1",
+          namespace: "workspace-ns",
+          plural: "agentruntimes",
+          name: "agent-1",
+          body: { spec: { replicas: 5 } },
+        },
+        expect.objectContaining({ middleware: expect.any(Array) })
+      );
     });
   });
 

@@ -392,6 +392,7 @@ export interface DataService {
   getAgent(workspace: string, name: string): Promise<AgentRuntimeType | undefined>;
   createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntimeType>;
   scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntimeType>;
+  updateAgentEvals(workspace: string, name: string, evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }): Promise<AgentRuntimeType>;
   getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
   getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]>;
 

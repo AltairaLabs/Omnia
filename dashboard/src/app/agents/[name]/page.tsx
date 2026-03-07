@@ -6,7 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText, MessageSquare, Activity } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel } from "@/components/agents";
+import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { useDataService } from "@/lib/data";
@@ -359,6 +359,13 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                 </CardContent>
               </Card>
             </div>
+
+            <EvalConfigPanel
+              agentName={metadata.name}
+              frameworkType={spec.framework?.type || "promptkit"}
+              evalsEnabled={spec.evals?.enabled}
+              sampling={spec.evals?.sampling}
+            />
           </TabsContent>
 
           <TabsContent value="console" className="mt-4">

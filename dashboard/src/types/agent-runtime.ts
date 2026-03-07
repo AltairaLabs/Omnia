@@ -194,6 +194,22 @@ export interface AgentRuntimeSpec {
   provider?: ProviderConfig;
   providerRef?: ProviderRef;
   console?: ConsoleConfig;
+  evals?: EvalConfig;
+}
+
+export interface EvalConfig {
+  enabled?: boolean;
+  sampling?: {
+    defaultRate?: number;
+    extendedRate?: number;
+  };
+  rateLimit?: {
+    maxConcurrentJudgeCalls?: number;
+    maxEvalsPerSecond?: number;
+  };
+  sessionCompletion?: {
+    inactivityTimeout?: string;
+  };
 }
 
 // Status

@@ -26,6 +26,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/altairalabs/omnia/ee/pkg/evals"
+	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
 	"github.com/altairalabs/omnia/pkg/k8s"
 
 	// Register PromptKit provider factories for LLM judge eval execution.
@@ -77,14 +78,17 @@ func main() {
 
 	sessionClient := evals.NewHTTPSessionAPIClient(cfg.SessionAPIURL)
 
+	msgStore := redisprovider.NewFromClient(redisClient, redisprovider.DefaultOptions())
+
 	worker := evals.NewEvalWorker(evals.WorkerConfig{
-		RedisClient: redisClient,
-		SessionAPI:  sessionClient,
-		Namespaces:  cfg.Namespaces,
-		Logger:      logger,
-		K8sClient:   k8sClient,
-		PackLoader:  packLoader,
-		Metrics:     workerMetrics,
+		RedisClient:  redisClient,
+		ResultWriter: sessionClient,
+		MessageStore: msgStore,
+		Namespaces:   cfg.Namespaces,
+		Logger:       logger,
+		K8sClient:    k8sClient,
+		PackLoader:   packLoader,
+		Metrics:      workerMetrics,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

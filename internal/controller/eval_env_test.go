@@ -55,7 +55,7 @@ func TestBuildEvalEnvVars(t *testing.T) {
 				Enabled: true,
 				Sampling: &omniav1alpha1.EvalSampling{
 					DefaultRate:  ptr.To(int32(50)),
-					LLMJudgeRate: ptr.To(int32(5)),
+					ExtendedRate: ptr.To(int32(5)),
 				},
 			},
 			wantLen:  3,
@@ -89,7 +89,7 @@ func TestBuildEvalEnvVars_Values(t *testing.T) {
 		Enabled: true,
 		Sampling: &omniav1alpha1.EvalSampling{
 			DefaultRate:  ptr.To(int32(75)),
-			LLMJudgeRate: ptr.To(int32(20)),
+			ExtendedRate: ptr.To(int32(20)),
 		},
 	}
 
