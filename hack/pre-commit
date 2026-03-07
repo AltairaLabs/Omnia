@@ -213,6 +213,7 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/toolregistries/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/stats/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/projects/* ]] || \
+                   [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/arena/sources/* ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/\[name\]/route.ts ]] || \
                    [[ "$REL_FILE" == src/app/api/workspaces/route.ts ]] || \
                    [[ "$REL_FILE" == src/app/api/providers/* ]] || \
