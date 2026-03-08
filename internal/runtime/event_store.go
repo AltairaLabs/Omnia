@@ -269,7 +269,7 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (session.Me
 			metadata[metaKeyIsError] = "true"
 			content = data.ToolResult.Error
 		} else {
-			content = data.ToolResult.Content
+			content = textFromParts(data.ToolResult.Parts)
 		}
 		if data.ToolResult.LatencyMs > 0 {
 			metadata[metaKeyDurationMs] = strconv.FormatInt(data.ToolResult.LatencyMs, 10)
@@ -311,6 +311,17 @@ type partMetadata struct {
 	Caption  string `json:"caption,omitempty"`   // Optional caption
 	Detail   string `json:"detail,omitempty"`    // Vision model detail level
 	HasData  bool   `json:"has_data,omitempty"`  // Whether blob data was present (but stripped)
+}
+
+// textFromParts returns concatenated text content from content parts.
+func textFromParts(parts []types.ContentPart) string {
+	var s string
+	for _, p := range parts {
+		if p.Type == types.ContentTypeText && p.Text != nil {
+			s += *p.Text
+		}
+	}
+	return s
 }
 
 // extractPartsMetadata extracts metadata from content parts, stripping blob data.

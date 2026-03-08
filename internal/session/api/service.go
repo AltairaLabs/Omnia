@@ -140,14 +140,17 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 	}
 
 	// Try hot cache for simple queries.
+	// Only trust the hot cache result if it actually contains messages;
+	// an empty list may indicate the messages key expired or was never
+	// populated while the session key still exists.
 	if isHotEligible(opts) {
 		if hot, err := s.registry.HotCache(); err == nil {
 			msgs, err := hot.GetRecentMessages(ctx, sessionID, opts.Limit)
-			if err == nil {
+			if err == nil && len(msgs) > 0 {
 				s.auditMessagesAccess(ctx, sessionID, len(msgs))
 				return msgs, nil
 			}
-			if !errors.Is(err, session.ErrSessionNotFound) {
+			if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
 				s.log.Error(err, "hot cache GetRecentMessages failed", "sessionID", sessionID)
 			}
 		}

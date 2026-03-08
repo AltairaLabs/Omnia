@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useMemo } from "react";
+import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { Download, Search, X, RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import {
   useGrafana,
   buildLokiExploreUrl,
   buildTempoExploreUrl,
+  buildArenaJobDashboardUrl,
 } from "@/hooks";
 
 export interface LogEntry {
@@ -34,6 +35,7 @@ export interface LogEntry {
   level: "info" | "warn" | "error" | "debug";
   message: string;
   container?: string;
+  pod?: string;
   fields?: Record<string, unknown>;
   raw?: string;
 }
@@ -108,12 +110,14 @@ function LogContent({
   filteredLogs,
   formatTimestamp,
   showContainer,
+  showPod,
 }: Readonly<{
   isLoading: boolean;
   logs: LogEntry[];
   filteredLogs: LogEntry[];
   formatTimestamp: (date: Date) => string;
   showContainer: boolean;
+  showPod: boolean;
 }>) {
   if (isLoading && logs.length === 0) {
     return (
@@ -154,6 +158,11 @@ function LogContent({
           {showContainer && (
             <span className="text-muted-foreground shrink-0 w-16">
               [{log.container}]
+            </span>
+          )}
+          {showPod && log.pod && (
+            <span className="text-muted-foreground shrink-0">
+              [{log.pod}]
             </span>
           )}
           <span className="break-all">{log.message}</span>
@@ -209,6 +218,20 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   const tempoExploreUrl = showGrafanaLinks && !isArenaJob && tempoEnabled
     ? buildTempoExploreUrl(grafanaConfig, workspace, name)
     : null;
+  // Build Grafana dashboard URL for arena jobs (async — SHA-256 hash for trace ID)
+  const [arenaJobDashboardUrl, setArenaJobDashboardUrl] = useState<string | null>(null);
+  const { enabled: grafanaEnabled, baseUrl: grafanaBaseUrl, remotePath: grafanaRemotePath, orgId: grafanaOrgId } = grafanaConfig;
+  useEffect(() => {
+    if (!showGrafanaLinks || !isArenaJob || !grafanaEnabled) return;
+    let cancelled = false;
+    buildArenaJobDashboardUrl(
+      { enabled: grafanaEnabled, baseUrl: grafanaBaseUrl, remotePath: grafanaRemotePath, orgId: grafanaOrgId },
+      name,
+    ).then((url) => {
+      if (!cancelled) setArenaJobDashboardUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [showGrafanaLinks, isArenaJob, grafanaEnabled, grafanaBaseUrl, grafanaRemotePath, grafanaOrgId, name]);
 
   // Fetch logs via appropriate hook based on resource type
   const agentLogsQuery = useLogs(workspace, isArenaJob ? "" : name, {
@@ -234,6 +257,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       level: (log.level || "info") as LogEntry["level"],
       message: log.message || "",
       container: log.container,
+      pod: log.pod,
       fields: log.fields,
       raw: log.raw,
     }));
@@ -248,6 +272,13 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
 
   // Determine if we should show container selector (hide for single container)
   const showContainerSelector = containers.length > 1;
+
+  // Show pod column when logs come from multiple pods (e.g., multi-worker arena jobs)
+  const showPod = useMemo(() => {
+    if (!isArenaJob || logs.length === 0) return false;
+    const pods = new Set(logs.map((l) => l.pod).filter(Boolean));
+    return pods.size > 1;
+  }, [isArenaJob, logs]);
 
   // Filter logs based on user selections, newest first
   const filteredLogs = logs.filter((log) => {
@@ -280,10 +311,11 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
       .map(
         (log) => {
           const containerPart = log.container ? ` [${log.container}]` : "";
+          const podPart = log.pod ? ` [${log.pod}]` : "";
           const fieldsPart = log.fields && Object.keys(log.fields).length > 0
             ? ` ${JSON.stringify(log.fields)}`
             : "";
-          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart} ${log.message}${fieldsPart}`;
+          return `${log.timestamp.toISOString()} [${log.level.toUpperCase()}]${containerPart}${podPart} ${log.message}${fieldsPart}`;
         }
       )
       .join("\n");
@@ -430,6 +462,19 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
               </a>
             </Button>
           )}
+          {arenaJobDashboardUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              title="Open Arena Job dashboard in Grafana"
+            >
+              <a href={arenaJobDashboardUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1" />
+                Grafana
+              </a>
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={downloadLogs} title="Download logs">
             <Download className="h-4 w-4" />
           </Button>
@@ -448,6 +493,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
             filteredLogs={filteredLogs}
             formatTimestamp={formatTimestamp}
             showContainer={showContainerSelector}
+            showPod={showPod}
           />
         </div>
       </ScrollArea>

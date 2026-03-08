@@ -49,6 +49,8 @@ import (
 	"github.com/altairalabs/omnia/pkg/logging"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 )
 
@@ -197,6 +199,12 @@ func run() error {
 	defer providerCleanup()
 
 	// --- Tracing ---
+	// Set propagator so incoming trace context (e.g. from facade httpclient)
+	// is extracted and spans become children of the caller's trace.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 	if f.tracingEnabled {
 		tracingCfg := tracing.Config{
 			Enabled:     true,
@@ -209,6 +217,7 @@ func run() error {
 		if tpErr != nil {
 			log.Error(tpErr, "tracing provider creation failed")
 		} else {
+			otel.SetTracerProvider(tp.TracerProvider())
 			defer func() { _ = tp.Shutdown(ctx) }()
 			log.Info("tracing enabled", "endpoint", f.tracingEndpoint, "sampleRate", f.tracingSample)
 		}
@@ -422,7 +431,11 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	}
 	log.V(1).Info("rate limiter initialized", "rps", rlCfg.RPS, "burst", rlCfg.Burst)
 
-	traced := otelhttp.NewHandler(mux, "session-api")
+	traced := otelhttp.NewHandler(mux, "session-api",
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			return r.URL.Path != "/healthz"
+		}),
+	)
 	return rlMiddleware(api.MetricsMiddleware(httpMetrics, traced)), cleanup
 }
 

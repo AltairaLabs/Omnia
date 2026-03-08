@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -155,6 +156,21 @@ func findEndpoint(toolRegistry *omniav1alpha1.ToolRegistry, handlerName string) 
 	return ""
 }
 
+// unmarshalRawJSON converts apiextensionsv1.JSON raw bytes into a typed
+// interface{} value.  Without this step, []byte assigned to interface{} gets
+// base64-encoded when marshaled to YAML, which breaks schema extraction in the
+// runtime.
+func unmarshalRawJSON(raw []byte) interface{} {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v interface{}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	return v
+}
+
 // buildToolDefinition builds a ToolDefinition from the handler's tool spec.
 func buildToolDefinition(tool *omniav1alpha1.ToolDefinition) *ToolDefinition {
 	if tool == nil {
@@ -163,10 +179,10 @@ func buildToolDefinition(tool *omniav1alpha1.ToolDefinition) *ToolDefinition {
 	def := &ToolDefinition{
 		Name:        tool.Name,
 		Description: tool.Description,
-		InputSchema: tool.InputSchema.Raw,
+		InputSchema: unmarshalRawJSON(tool.InputSchema.Raw),
 	}
 	if tool.OutputSchema != nil {
-		def.OutputSchema = tool.OutputSchema.Raw
+		def.OutputSchema = unmarshalRawJSON(tool.OutputSchema.Raw)
 	}
 	return def
 }

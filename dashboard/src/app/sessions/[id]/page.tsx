@@ -31,7 +31,7 @@ import {
   ExternalLink,
   Bug,
 } from "lucide-react";
-import { useSessionDetail, useSessionEvalResults } from "@/hooks";
+import { useSessionDetail, useSessionAllMessages, useSessionEvalResults } from "@/hooks";
 import type { Message, Session, EvalResult } from "@/types";
 import { EvalResultsBadge } from "@/components/sessions/eval-results-badge";
 import { ToolCallBadge } from "@/components/sessions/tool-call-badge";
@@ -193,12 +193,22 @@ const INITIAL_MESSAGE_WINDOW = 50;
 
 /**
  * Renders the conversation message list with eval results grouped by message.
- * Uses windowed rendering to avoid mounting all messages at once for large sessions.
+ * Uses windowed rendering for the visible portion, plus server-side pagination
+ * via "Load more" to fetch additional pages from the API.
  */
 function ConversationMessages({
   messages,
   evalResults,
-}: Readonly<{ messages: Message[]; evalResults: EvalResult[] }>) {
+  hasMore,
+  isFetchingMore,
+  onLoadMore,
+}: Readonly<{
+  messages: Message[];
+  evalResults: EvalResult[];
+  hasMore?: boolean;
+  isFetchingMore?: boolean;
+  onLoadMore?: () => void;
+}>) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const evalsByMessage = groupEvalResultsByMessageId(evalResults);
 
@@ -213,6 +223,20 @@ function ConversationMessages({
 
   return (
     <div className="space-y-6">
+      {/* Server-side "load more" — fetch older pages from the API */}
+      {hasMore && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onLoadMore}
+            disabled={isFetchingMore}
+          >
+            {isFetchingMore ? "Loading..." : "Load more messages from server"}
+          </Button>
+        </div>
+      )}
+      {/* Client-side windowing — show more of the already-loaded messages */}
       {remaining > 0 && (
         <div className="flex justify-center">
           <Button
@@ -632,18 +656,36 @@ function ConversationWithDebugPanel({
 }: Readonly<{ session: Session; evalResults: EvalResult[] }>) {
   const debugOpen = useDebugPanelStore((s) => s.isOpen);
 
+  // Use paginated message loading. Falls back to session.messages while loading.
+  const {
+    messages: paginatedMessages,
+    hasMore,
+    isFetchingMore,
+    fetchMore,
+  } = useSessionAllMessages(session.id);
+
+  // Use paginated messages once loaded, otherwise fall back to session.messages
+  const messages = paginatedMessages.length > 0 ? paginatedMessages : session.messages;
+
+  const conversationContent = (
+    <ConversationMessages
+      messages={messages}
+      evalResults={evalResults}
+      hasMore={hasMore}
+      isFetchingMore={isFetchingMore}
+      onLoadMore={fetchMore}
+    />
+  );
+
   if (!debugOpen) {
     return (
       <div className="flex flex-col h-full">
         <Card className="flex-1 min-h-0">
           <ScrollArea className="h-full p-6">
-            <ConversationMessages
-              messages={session.messages}
-              evalResults={evalResults}
-            />
+            {conversationContent}
           </ScrollArea>
         </Card>
-        <DebugPanel messages={session.messages} session={session} />
+        <DebugPanel messages={messages} session={session} />
       </div>
     );
   }
@@ -653,16 +695,13 @@ function ConversationWithDebugPanel({
       <ResizablePanel defaultSize={70} minSize={30}>
         <Card className="h-full">
           <ScrollArea className="h-full p-6">
-            <ConversationMessages
-              messages={session.messages}
-              evalResults={evalResults}
-            />
+            {conversationContent}
           </ScrollArea>
         </Card>
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize={30} minSize={15}>
-        <DebugPanel messages={session.messages} session={session} />
+        <DebugPanel messages={messages} session={session} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

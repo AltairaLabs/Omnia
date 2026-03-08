@@ -152,7 +152,9 @@ describe("ToolCallCard", () => {
       render(<ToolCallCard toolCall={toolCall} />);
 
       expect(screen.getByText("Arguments:")).toBeInTheDocument();
-      expect(screen.getByText(/"query": "test"/)).toBeInTheDocument();
+      const jsonBlock = screen.getByTestId("json-block");
+      expect(jsonBlock.textContent).toContain("query");
+      expect(jsonBlock.textContent).toContain("test");
     });
 
     it("should display result for success status", () => {
@@ -164,7 +166,11 @@ describe("ToolCallCard", () => {
       render(<ToolCallCard toolCall={toolCall} />);
 
       expect(screen.getByText("Result:")).toBeInTheDocument();
-      expect(screen.getByText(/"found": true/)).toBeInTheDocument();
+      const jsonBlocks = screen.getAllByTestId("json-block");
+      // Second json-block is the result (first is arguments)
+      const resultBlock = jsonBlocks[jsonBlocks.length - 1];
+      expect(resultBlock.textContent).toContain("found");
+      expect(resultBlock.textContent).toContain("true");
     });
 
     it("should display string result directly", () => {

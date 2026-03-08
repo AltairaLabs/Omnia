@@ -345,6 +345,51 @@ func (a *HTTPAdapter) setAuth(req *http.Request) error {
 	return nil
 }
 
+// HealthCheck probes the HTTP endpoint with a short-timeout GET request.
+// For GET-based tools (like the calculator), it sends a request without
+// parameters. For other methods, it sends a HEAD request to verify reachability.
+func (a *HTTPAdapter) HealthCheck(ctx context.Context) error {
+	a.mu.RLock()
+	client := a.client
+	connected := a.connected
+	endpoint := a.config.Endpoint
+	a.mu.RUnlock()
+
+	if !connected || client == nil {
+		return fmt.Errorf("adapter not connected")
+	}
+
+	// Use a short timeout for health checks.
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	method := http.MethodHead
+	if strings.ToUpper(a.config.Method) == http.MethodGet {
+		method = http.MethodGet
+	}
+
+	req, err := http.NewRequestWithContext(probeCtx, method, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("health check request: %w", err)
+	}
+
+	if authErr := a.setAuth(req); authErr != nil {
+		return fmt.Errorf("health check auth: %w", authErr)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck // drain body
+
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("health check: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // Close closes the adapter.
 func (a *HTTPAdapter) Close() error {
 	a.mu.Lock()

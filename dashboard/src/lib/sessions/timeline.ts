@@ -5,6 +5,7 @@ export type TimelineEventKind =
   | "assistant_message"
   | "system_message"
   | "tool_call"
+  | "tool_result"
   | "pipeline_event"
   | "stage_event"
   | "provider_call"
@@ -35,6 +36,7 @@ function resolveMessageKind(message: Message): TimelineEventKind {
   const metadataType = message.metadata?.type;
 
   if (metadataType === "tool_call") return "tool_call";
+  if (metadataType === "tool_result" || metadataType === "tool_call_completed" || message.role === "tool") return "tool_result";
   if (metadataType === "workflow_transition") return "workflow_transition";
   if (metadataType === "workflow_completed") return "workflow_completed";
   if (metadataType === "error") return "error";
@@ -97,6 +99,10 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
       const tcName = parseToolName(message.content);
       return tcName ? `Tool: ${tcName}` : "Tool call";
     }
+    case "tool_result": {
+      const trName = message.metadata?.handler_name || parseToolName(message.content);
+      return trName ? `Result: ${trName}` : "Tool result";
+    }
     case "workflow_transition": {
       const from = message.metadata?.from;
       const to = message.metadata?.to;
@@ -121,17 +127,11 @@ function resolveEventStatus(kind: TimelineEventKind, message: Message): Timeline
 
 /**
  * Extract a flat, chronologically sorted list of timeline events from session messages.
- *
- * Skips `role === "tool"` messages since tool results are represented
- * through the tool_call events attached to their parent assistant message.
  */
 export function extractTimelineEvents(messages: Message[]): TimelineEvent[] {
   const events: TimelineEvent[] = [];
 
   for (const message of messages) {
-    // Skip raw tool result messages
-    if (message.role === "tool") continue;
-
     const kind = resolveMessageKind(message);
 
     const durationStr = message.metadata?.duration_ms;
@@ -143,7 +143,7 @@ export function extractTimelineEvents(messages: Message[]): TimelineEvent[] {
       kind,
       label: buildLabel(kind, message),
       detail: message.content ? truncate(message.content, MAX_DETAIL_LENGTH) : undefined,
-      toolCallId: kind === "tool_call" ? message.toolCallId : undefined,
+      toolCallId: (kind === "tool_call" || kind === "tool_result") ? message.toolCallId : undefined,
       duration: duration && !Number.isNaN(duration) ? duration : undefined,
       metadata: message.metadata,
       status: resolveEventStatus(kind, message),

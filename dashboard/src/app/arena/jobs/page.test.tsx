@@ -87,7 +87,7 @@ const mockJob = {
       failed: 0,
       pending: 50,
     },
-    workers: { desired: 2, active: 2 },
+    activeWorkers: 2,
     startTime: "2026-01-15T10:00:00Z",
   },
 };

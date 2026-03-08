@@ -98,7 +98,7 @@ const mockJob = {
       failed: 0,
       pending: 50,
     },
-    workers: { desired: 2, active: 2 },
+    activeWorkers: 2,
     startTime: "2026-01-15T10:00:00Z",
     conditions: [
       {
@@ -463,7 +463,7 @@ describe("ArenaJobDetailPage", () => {
     expect(screen.queryByText("Clone")).not.toBeInTheDocument();
   });
 
-  it("does not show clone button when job has no project-id label", async () => {
+  it("shows clone button for finished job without project-id label", async () => {
     const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
 
     const finishedJobNoProject = {
@@ -487,7 +487,7 @@ describe("ArenaJobDetailPage", () => {
 
     render(<ArenaJobDetailPage />);
 
-    expect(screen.queryByText("Clone")).not.toBeInTheDocument();
+    expect(screen.getByText("Clone")).toBeInTheDocument();
   });
 
   it("opens clone dialog when clone button is clicked", async () => {

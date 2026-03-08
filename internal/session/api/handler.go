@@ -129,6 +129,12 @@ type RefreshTTLRequest struct {
 
 // RegisterRoutes registers the session API routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	// Health check (lightweight, no DB call)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	// Read endpoints
 	mux.HandleFunc("GET /api/v1/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/v1/sessions/search", h.handleSearchSessions)

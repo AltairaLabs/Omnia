@@ -61,6 +61,29 @@ type ToolMeta struct {
 	Endpoint          string
 }
 
+// HealthChecker is an optional interface that adapters can implement to
+// support endpoint health probing. The Manager uses this during Connect
+// to warn about unreachable tool backends.
+type HealthChecker interface {
+	// HealthCheck probes the tool backend and returns nil if reachable.
+	HealthCheck(ctx context.Context) error
+}
+
+// ToolHealth reports the health status of a single tool.
+type ToolHealth struct {
+	// ToolName is the registered tool name.
+	ToolName string `json:"toolName"`
+
+	// AdapterName is the adapter that provides this tool.
+	AdapterName string `json:"adapterName"`
+
+	// Healthy is true if the backend is reachable.
+	Healthy bool `json:"healthy"`
+
+	// Error is set when the health check failed.
+	Error string `json:"error,omitempty"`
+}
+
 // ToolResult contains the result of a tool invocation.
 type ToolResult struct {
 	// Content is the result content (can be text, JSON, etc.).

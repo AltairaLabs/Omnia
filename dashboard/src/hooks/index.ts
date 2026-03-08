@@ -24,6 +24,8 @@ export {
   buildDashboardUrl,
   buildLokiExploreUrl,
   buildTempoExploreUrl,
+  buildArenaJobDashboardUrl,
+  jobNameToTraceId,
   GRAFANA_DASHBOARDS,
   OVERVIEW_PANELS,
   AGENT_DETAIL_PANELS,
@@ -84,7 +86,7 @@ export { useProviderPreview } from "./use-provider-preview";
 export { useToolRegistryPreview } from "./use-tool-registry-preview";
 export type { ProviderPreviewResult } from "./use-provider-preview";
 export type { ToolRegistryPreviewResult } from "./use-tool-registry-preview";
-export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionEvalResults } from "./use-sessions";
+export { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionEvalResults } from "./use-sessions";
 export { useEvalSummary, useRecentEvalFailures } from "./use-eval-quality";
 export type { EvalListParams } from "./use-eval-quality";
 export { useEvalPassRateTrends, useEvalMetrics, EVAL_TREND_RANGES } from "./use-eval-trends";

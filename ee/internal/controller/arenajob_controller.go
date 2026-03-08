@@ -126,6 +126,10 @@ type ArenaJobReconciler struct {
 	// Used for workload identity authentication with hyperscaler providers.
 	// When set and a provider uses workloadIdentity auth, worker pods will use this SA.
 	WorkerServiceAccountName string
+	// TracingEnabled enables OTel tracing for arena worker pods.
+	TracingEnabled bool
+	// TracingEndpoint is the OTLP gRPC endpoint for arena worker tracing.
+	TracingEndpoint string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -408,7 +412,11 @@ func (r *ArenaJobReconciler) resolveFleetTarget(ctx context.Context, arenaJob *o
 		return "", fmt.Errorf("agentRuntime %s/%s has no service endpoint (not ready)", targetNamespace, target.AgentRuntimeRef.Name)
 	}
 
-	wsURL := fmt.Sprintf("ws://%s/ws", agentRuntime.Status.ServiceEndpoint)
+	wsURL := fmt.Sprintf("ws://%s/ws?agent=%s&namespace=%s",
+		agentRuntime.Status.ServiceEndpoint,
+		target.AgentRuntimeRef.Name,
+		targetNamespace,
+	)
 	return wsURL, nil
 }
 
@@ -570,28 +578,7 @@ func convertProviderToOverride(p *corev1alpha1.Provider) overrides.ProviderOverr
 		BaseURL: p.Spec.BaseURL,
 	}
 
-	// Set credential configuration
-	if p.Spec.Credential != nil {
-		if p.Spec.Credential.SecretRef != nil {
-			// credential.secretRef — use the standard env var name
-			secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
-			if len(secretRefs) > 0 {
-				override.SecretEnvVar = secretRefs[0].EnvVar
-			}
-		} else if p.Spec.Credential.EnvVar != "" {
-			// credential.envVar — the env var is pre-injected, pass it through
-			override.SecretEnvVar = p.Spec.Credential.EnvVar
-		} else if p.Spec.Credential.FilePath != "" {
-			// credential.filePath — pass to worker via override config
-			override.CredentialFile = p.Spec.Credential.FilePath
-		}
-	} else if p.Spec.SecretRef != nil {
-		// Legacy secretRef
-		secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
-		if len(secretRefs) > 0 {
-			override.SecretEnvVar = secretRefs[0].EnvVar
-		}
-	}
+	override.SecretEnvVar, override.CredentialFile = resolveCredential(p)
 
 	// Set platform configuration
 	if p.Spec.Platform != nil {
@@ -610,24 +597,53 @@ func convertProviderToOverride(p *corev1alpha1.Provider) overrides.ProviderOverr
 		override.ServiceAccountEmail = p.Spec.Auth.ServiceAccountEmail
 	}
 
-	// Set defaults if specified
-	if p.Spec.Defaults != nil {
-		if p.Spec.Defaults.Temperature != nil {
-			if temp, err := strconv.ParseFloat(*p.Spec.Defaults.Temperature, 64); err == nil {
-				override.Temperature = temp
-			}
-		}
-		if p.Spec.Defaults.TopP != nil {
-			if topP, err := strconv.ParseFloat(*p.Spec.Defaults.TopP, 64); err == nil {
-				override.TopP = topP
-			}
-		}
-		if p.Spec.Defaults.MaxTokens != nil {
-			override.MaxTokens = int(*p.Spec.Defaults.MaxTokens)
-		}
-	}
+	applyDefaults(&override, p.Spec.Defaults)
 
 	return override
+}
+
+// resolveCredential determines the secret env var and credential file path from the provider spec.
+func resolveCredential(p *corev1alpha1.Provider) (secretEnvVar, credentialFile string) {
+	if p.Spec.Credential != nil {
+		if p.Spec.Credential.SecretRef != nil {
+			secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
+			if len(secretRefs) > 0 {
+				return secretRefs[0].EnvVar, ""
+			}
+		} else if p.Spec.Credential.EnvVar != "" {
+			return p.Spec.Credential.EnvVar, ""
+		} else if p.Spec.Credential.FilePath != "" {
+			return "", p.Spec.Credential.FilePath
+		}
+		return "", ""
+	}
+	if p.Spec.SecretRef != nil {
+		secretRefs := providers.GetSecretRefsForProvider(string(p.Spec.Type))
+		if len(secretRefs) > 0 {
+			return secretRefs[0].EnvVar, ""
+		}
+	}
+	return "", ""
+}
+
+// applyDefaults sets temperature, topP, and maxTokens on the override from the provider defaults.
+func applyDefaults(override *overrides.ProviderOverride, defaults *corev1alpha1.ProviderDefaults) {
+	if defaults == nil {
+		return
+	}
+	if defaults.Temperature != nil {
+		if temp, err := strconv.ParseFloat(*defaults.Temperature, 64); err == nil {
+			override.Temperature = temp
+		}
+	}
+	if defaults.TopP != nil {
+		if topP, err := strconv.ParseFloat(*defaults.TopP, 64); err == nil {
+			override.TopP = topP
+		}
+	}
+	if defaults.MaxTokens != nil {
+		override.MaxTokens = int(*defaults.MaxTokens)
+	}
 }
 
 // convertToolOverrides converts tool overrides to the override config format.
@@ -865,6 +881,9 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		env = append(env, corev1.EnvVar{
 			Name:  "ARENA_VERBOSE",
 			Value: "true",
+		}, corev1.EnvVar{
+			Name:  "LOG_LEVEL",
+			Value: "debug",
 		})
 	}
 
@@ -946,6 +965,15 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 			corev1.EnvVar{Name: "ARENA_FLEET_WS_URL", Value: wsURL},
 		)
 		log.Info("fleet mode enabled", "wsURL", wsURL)
+	}
+
+	// Add tracing env vars for arena worker pods
+	if r.TracingEnabled && r.TracingEndpoint != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "TRACING_ENABLED", Value: "true"},
+			corev1.EnvVar{Name: "TRACING_ENDPOINT", Value: r.TracingEndpoint},
+			corev1.EnvVar{Name: "TRACING_INSECURE", Value: "true"},
+		)
 	}
 
 	// Add overrides path env var if ConfigMap was created

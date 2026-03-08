@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { JsonBlock } from "@/components/ui/json-block";
 import { Copy, Check } from "lucide-react";
 import type { Session } from "@/types/session";
 
@@ -36,9 +37,9 @@ export function RawTab({ session }: RawTabProps) {
         )}
       </Button>
       <ScrollArea className="h-full">
-        <pre className="p-4 text-xs font-mono whitespace-pre-wrap" data-testid="raw-json">
-          {json}
-        </pre>
+        <div className="p-4" data-testid="raw-json">
+          <JsonBlock data={session} defaultExpandDepth={1} defaultCollapsed={["messages", "metadata"]} />
+        </div>
       </ScrollArea>
     </div>
   );

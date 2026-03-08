@@ -106,6 +106,10 @@ func main() {
 			// Continue without tracing - it's optional
 		} else {
 			tracingProvider = tracingProvider.WithLogger(log)
+			// Set the global tracer provider so otelhttp (used by the
+			// session-api httpclient) creates real spans and propagates
+			// trace context into outbound HTTP calls.
+			otel.SetTracerProvider(tracingProvider.TracerProvider())
 			defer func() {
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer shutdownCancel()
@@ -281,18 +285,31 @@ func healthzHandler(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// pinger is an optional interface for stores that support lightweight health checks.
+type pinger interface {
+	Ping(ctx context.Context) error
+}
+
 func readyzHandler(store session.Store, handler facade.MessageHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Check session store connectivity using a nil UUID that won't match any
-		// real session but is a valid UUID (avoids PostgreSQL type errors).
-		_, err := store.GetSession(ctx, "00000000-0000-0000-0000-000000000000")
-		if err != nil && err != session.ErrSessionNotFound {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
-			return
+		// Prefer lightweight Ping if the store supports it (e.g. httpclient);
+		// fall back to a dummy GetSession for stores that don't.
+		if p, ok := store.(pinger); ok {
+			if err := p.Ping(ctx); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
+				return
+			}
+		} else {
+			_, err := store.GetSession(ctx, "00000000-0000-0000-0000-000000000000")
+			if err != nil && err != session.ErrSessionNotFound {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
+				return
+			}
 		}
 
 		// Check runtime health if using runtime handler

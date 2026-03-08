@@ -42,16 +42,28 @@ describe("extractTimelineEvents", () => {
     expect(events[0].label).toBe("System message");
   });
 
-  it("skips tool role messages", () => {
+  it("maps tool role messages to tool_result kind", () => {
     const messages = [
       makeMessage({ id: "m1", role: "user", content: "Q" }),
-      makeMessage({ id: "m2", role: "tool", content: "result" }),
+      makeMessage({ id: "m2", role: "tool", content: '{"output":"42"}', metadata: { type: "tool_result", handler_name: "calc" } }),
       makeMessage({ id: "m3", role: "assistant", content: "A" }),
     ];
     const events = extractTimelineEvents(messages);
 
-    expect(events).toHaveLength(2);
-    expect(events.every(e => e.kind !== "system_message" || e.id !== "m2")).toBe(true);
+    expect(events).toHaveLength(3);
+    expect(events[1].kind).toBe("tool_result");
+    expect(events[1].label).toBe("Result: calc");
+  });
+
+  it("maps tool role without metadata to tool_result kind", () => {
+    const messages = [
+      makeMessage({ id: "m1", role: "tool", content: "result data" }),
+    ];
+    const events = extractTimelineEvents(messages);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("tool_result");
+    expect(events[0].label).toBe("Tool result");
   });
 
   it("emits tool_call events from tool_call messages", () => {

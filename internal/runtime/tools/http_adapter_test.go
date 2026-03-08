@@ -517,6 +517,147 @@ func TestHTTPAdapter_UnsupportedAuthType(t *testing.T) {
 	}
 }
 
+func TestHTTPAdapter_HealthCheck_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: server.URL,
+		Method:   http.MethodGet,
+	}, logr.Discard())
+
+	ctx := context.Background()
+	if err := adapter.Connect(ctx); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer adapter.Close()
+
+	if err := adapter.HealthCheck(ctx); err != nil {
+		t.Fatalf("HealthCheck failed: %v", err)
+	}
+}
+
+func TestHTTPAdapter_HealthCheck_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: server.URL,
+	}, logr.Discard())
+
+	ctx := context.Background()
+	if err := adapter.Connect(ctx); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer adapter.Close()
+
+	err := adapter.HealthCheck(ctx)
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestHTTPAdapter_HealthCheck_Unreachable(t *testing.T) {
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: "http://localhost:1", // nothing listening
+	}, logr.Discard())
+
+	ctx := context.Background()
+	if err := adapter.Connect(ctx); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer adapter.Close()
+
+	err := adapter.HealthCheck(ctx)
+	if err == nil {
+		t.Fatal("expected error for unreachable endpoint")
+	}
+}
+
+func TestHTTPAdapter_HealthCheck_NotConnected(t *testing.T) {
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: "http://localhost:8080",
+	}, logr.Discard())
+
+	err := adapter.HealthCheck(context.Background())
+	if err == nil {
+		t.Fatal("expected error when not connected")
+	}
+}
+
+func TestHTTPAdapter_HealthCheck_UsesGETForGetMethod(t *testing.T) {
+	var receivedMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: server.URL,
+		Method:   http.MethodGet,
+	}, logr.Discard())
+
+	ctx := context.Background()
+	if err := adapter.Connect(ctx); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer adapter.Close()
+
+	if err := adapter.HealthCheck(ctx); err != nil {
+		t.Fatalf("HealthCheck failed: %v", err)
+	}
+	if receivedMethod != http.MethodGet {
+		t.Errorf("expected GET for GET-based adapter, got %s", receivedMethod)
+	}
+}
+
+func TestHTTPAdapter_HealthCheck_UsesHEADForPostMethod(t *testing.T) {
+	var receivedMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: server.URL,
+		Method:   http.MethodPost,
+	}, logr.Discard())
+
+	ctx := context.Background()
+	if err := adapter.Connect(ctx); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer adapter.Close()
+
+	if err := adapter.HealthCheck(ctx); err != nil {
+		t.Fatalf("HealthCheck failed: %v", err)
+	}
+	if receivedMethod != http.MethodHead {
+		t.Errorf("expected HEAD for POST-based adapter, got %s", receivedMethod)
+	}
+}
+
+func TestHTTPAdapter_ImplementsHealthChecker(t *testing.T) {
+	adapter := NewHTTPAdapter(HTTPAdapterConfig{
+		Name:     "test-http",
+		Endpoint: "http://localhost:8080",
+	}, logr.Discard())
+
+	var _ HealthChecker = adapter // compile-time check
+}
+
 func TestHTTPAdapter_DeleteRequest(t *testing.T) {
 	// Start a mock HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

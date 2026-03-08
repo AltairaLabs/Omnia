@@ -12,6 +12,15 @@ import SessionDetailPage from "./page";
 vi.mock("@/hooks", () => ({
   useSessionDetail: vi.fn(),
   useSessionEvalResults: vi.fn(),
+  useSessionAllMessages: vi.fn(() => ({
+    messages: [],
+    totalLoaded: 0,
+    hasMore: false,
+    isLoading: false,
+    isFetchingMore: false,
+    fetchMore: vi.fn(),
+    error: null,
+  })),
 }));
 
 // Mock next/link

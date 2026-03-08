@@ -318,12 +318,12 @@ describe("SessionApiService", () => {
 
   describe("getSessionEvalResults", () => {
     it("fetches eval results for a session", async () => {
-      const evalResults = [
+      const results = [
         { id: "e1", sessionId: "s1", evalId: "tone", evalType: "llm_judge", passed: true, score: 0.9, source: "in_proc", createdAt: "2026-01-15T10:00:00Z" },
       ];
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ evalResults }),
+        json: () => Promise.resolve({ results }),
       });
 
       const result = await service.getSessionEvalResults("ws", "s1");
@@ -336,7 +336,7 @@ describe("SessionApiService", () => {
     it("passes custom limit parameter", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ evalResults: [] }),
+        json: () => Promise.resolve({ results: [] }),
       });
 
       await service.getSessionEvalResults("ws", "s1", 50);
@@ -364,7 +364,7 @@ describe("SessionApiService", () => {
       await expect(service.getSessionEvalResults("ws", "s1")).rejects.toThrow("Failed to fetch eval results");
     });
 
-    it("handles response with no evalResults field", async () => {
+    it("handles response with no results field", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({}),

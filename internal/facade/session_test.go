@@ -99,7 +99,7 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 
 	ts := newTestServerWithTracing(t, handler, provider)
 
-	// Connect and send a message
+	// Connect and read eagerly-sent connected
 	ws, _, err := websocket.DefaultDialer.Dial(
 		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", nil)
 	if err != nil {
@@ -107,17 +107,19 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hello"}); err != nil {
-		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
+	// Read eagerly-sent connected message
 	var connectedMsg ServerMessage
 	if err := ws.ReadJSON(&connectedMsg); err != nil {
 		t.Fatalf("Failed to read connected: %v", err)
 	}
 	if connectedMsg.Type != MessageTypeConnected {
 		t.Fatalf("Expected connected, got %v", connectedMsg.Type)
+	}
+	sessionID := connectedMsg.SessionID
+
+	// Send message with session ID
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read done message
@@ -153,16 +155,16 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 	if !ok {
 		t.Fatal("missing attribute 'session.id' on facade.message span")
 	}
-	sessionID := val.AsString()
-	if sessionID == "" {
+	spanSessionID := val.AsString()
+	if spanSessionID == "" {
 		t.Fatal("session.id attribute should not be empty")
 	}
 
 	// Verify trace ID is derived from session ID (UUID without dashes)
-	expectedTraceID := sessionIDToTraceID(sessionID)
+	expectedTraceID := sessionIDToTraceID(spanSessionID)
 	if msgSpan.SpanContext.TraceID() != expectedTraceID {
 		t.Errorf("trace ID = %s, want %s (derived from session %s)",
-			msgSpan.SpanContext.TraceID(), expectedTraceID, sessionID)
+			msgSpan.SpanContext.TraceID(), expectedTraceID, spanSessionID)
 	}
 
 	// Verify span has a non-zero duration (it wasn't ended immediately)
@@ -220,14 +222,16 @@ func TestProcessMessage_WithParentTraceContext(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hello"}); err != nil {
-		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
+	// Read eagerly-sent connected message
 	var connectedMsg ServerMessage
 	if err := ws.ReadJSON(&connectedMsg); err != nil {
 		t.Fatalf("Failed to read connected: %v", err)
+	}
+	sessionID := connectedMsg.SessionID
+
+	// Send message with session ID
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read done message
@@ -258,15 +262,15 @@ func TestProcessMessage_WithParentTraceContext(t *testing.T) {
 	}
 
 	// Verify the session-derived trace ID is present as a span link
-	sessionID := ""
+	spanSessionID := ""
 	if val, ok := findSpanAttr(*msgSpan, "session.id"); ok {
-		sessionID = val.AsString()
+		spanSessionID = val.AsString()
 	}
-	if sessionID == "" {
+	if spanSessionID == "" {
 		t.Fatal("missing session.id attribute")
 	}
 
-	expectedSessionTraceID := sessionIDToTraceID(sessionID)
+	expectedSessionTraceID := sessionIDToTraceID(spanSessionID)
 	if len(msgSpan.Links) == 0 {
 		t.Fatal("expected span link for session-derived trace ID")
 	}
@@ -304,18 +308,19 @@ func TestProcessMessage_NoTracingProvider(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send message — should succeed without panic
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hello"}); err != nil {
-		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
+	// Read eagerly-sent connected message
 	var connectedMsg ServerMessage
 	if err := ws.ReadJSON(&connectedMsg); err != nil {
 		t.Fatalf("Failed to read connected: %v", err)
 	}
 	if connectedMsg.Type != MessageTypeConnected {
 		t.Fatalf("Expected connected, got %v", connectedMsg.Type)
+	}
+	sessionID := connectedMsg.SessionID
+
+	// Send message with session ID — should succeed without panic
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read done message — verifies full path works without tracing

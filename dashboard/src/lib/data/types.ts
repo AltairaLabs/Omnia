@@ -105,6 +105,8 @@ export interface LogEntry {
   level: string;
   message: string;
   container?: string;
+  /** Pod name that produced this log line (useful for multi-pod resources like arena jobs) */
+  pod?: string;
   fields?: Record<string, unknown>;
   /** Original unparsed log line from the container */
   raw?: string;

@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,25 @@ const (
 	statusPass = "pass"
 	statusFail = "fail"
 )
+
+// jobNameToTraceID derives a deterministic trace ID from a job name by hashing it.
+// This makes traces easy to look up in Tempo by job name without searching.
+func jobNameToTraceID(jobName string) trace.TraceID {
+	h := sha256.Sum256([]byte(jobName))
+	var tid trace.TraceID
+	copy(tid[:], h[:16]) // trace ID is 128 bits = 16 bytes
+	return tid
+}
+
+// jobNameToSpanID derives a deterministic span ID from a job name.
+// Uses bytes 16–24 of the SHA-256 hash (the half not used for the trace ID).
+// A non-zero SpanID is required for SpanContext.IsValid() to return true.
+func jobNameToSpanID(jobName string) trace.SpanID {
+	h := sha256.Sum256([]byte(jobName))
+	var sid trace.SpanID
+	copy(sid[:], h[16:24]) // span ID is 64 bits = 8 bytes
+	return sid
+}
 
 // maxItemTimeout is the maximum time allowed for a single work item execution.
 const maxItemTimeout = 10 * time.Minute
@@ -197,6 +217,27 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 	emptyCount := 0
 	maxEmptyPolls := 10 // Exit after this many consecutive empty polls
 
+	// Derive a deterministic trace ID from the job name so traces are easy
+	// to look up in Tempo without searching by span attribute.
+	traceID := jobNameToTraceID(jobID)
+	spanID := jobNameToSpanID(jobID)
+	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
+
+	// Root span for the entire worker lifecycle so all Redis/fleet operations
+	// are correlated under a common parent trace.
+	ctx, rootSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.worker",
+		trace.WithAttributes(
+			attribute.String("arena.job", jobID),
+			attribute.String("arena.execution_mode", cfg.ExecutionMode),
+		),
+	)
+	defer rootSpan.End()
+
 	log.Info("processing work items", "jobID", jobID)
 
 	for {
@@ -227,6 +268,8 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 		)
 
 		// Execute with per-item timeout, wrapped in a trace span.
+		// The span covers the full lifecycle: execute → ack/nack so that
+		// Redis operations are correlated under the work-item span.
 		itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
 		itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
 			trace.WithAttributes(
@@ -240,12 +283,15 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 		if execErr != nil {
 			span.RecordError(execErr)
 		}
-		span.End()
 		itemCancel()
 		if itemCtx.Err() == context.DeadlineExceeded {
 			execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
 		}
-		reportWorkItemResult(ctx, log, q, jobID, item, result, execErr)
+		// Ack/Nack uses the root ctx (not the timed-out itemCtx) but carries
+		// the work-item span so Redis operations are children of this item.
+		ackCtx := trace.ContextWithSpan(ctx, span)
+		reportWorkItemResult(ackCtx, log, q, jobID, item, result, execErr)
+		span.End()
 	}
 }
 

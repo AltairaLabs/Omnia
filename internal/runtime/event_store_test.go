@@ -550,7 +550,7 @@ func TestOmniaEventStore_AppendMessageCreated_WithToolResult(t *testing.T) {
 			ToolResult: &events.MessageToolResult{
 				ID:        "tc-1",
 				Name:      "get_weather",
-				Content:   `{"temp":22,"condition":"sunny"}`,
+				Parts:     []types.ContentPart{types.NewTextPart(`{"temp":22,"condition":"sunny"}`)},
 				LatencyMs: 150,
 			},
 		},

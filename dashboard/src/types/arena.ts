@@ -323,18 +323,6 @@ export interface ArenaJobSpec {
   execution?: ExecutionConfig;
 }
 
-/** Worker status within a job */
-export interface JobWorkerStatus {
-  /** Desired worker count */
-  desired: number;
-  /** Active/running workers */
-  active: number;
-  /** Completed workers */
-  succeeded?: number;
-  /** Failed workers */
-  failed?: number;
-}
-
 /** Job progress tracking (work item level) */
 export interface JobProgress {
   /** Total work items */
@@ -369,8 +357,6 @@ export interface ArenaJobStatus {
   result?: JobResult;
   /** Active worker count */
   activeWorkers?: number;
-  /** Worker status */
-  workers?: JobWorkerStatus;
   /** Standard conditions */
   conditions?: Condition[];
   /** Observed generation */

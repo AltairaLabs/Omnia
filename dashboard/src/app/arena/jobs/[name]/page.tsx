@@ -50,6 +50,7 @@ import {
 } from "@/components/arena";
 import { LogViewer } from "@/components/logs";
 import { QuickRunDialog, type QuickRunInitialValues } from "@/components/arena/quick-run-dialog";
+import { generateName } from "@/lib/name-generator";
 import type {
   ArenaJob,
   ArenaJobPhase,
@@ -401,25 +402,25 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
             <div>
               <p className="text-sm text-muted-foreground">Desired</p>
               <p className="text-2xl font-bold">
-                {status?.workers?.desired ?? spec?.workers?.replicas ?? 0}
+                {spec?.workers?.replicas ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Active</p>
               <p className="text-2xl font-bold text-blue-600">
-                {status?.workers?.active ?? 0}
+                {status?.activeWorkers ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Succeeded</p>
               <p className="text-2xl font-bold text-green-600">
-                {status?.workers?.succeeded ?? 0}
+                {status?.progress?.completed ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
               <p className="text-2xl font-bold text-red-600">
-                {status?.workers?.failed ?? 0}
+                {status?.progress?.failed ?? 0}
               </p>
             </div>
           </div>
@@ -795,12 +796,13 @@ export default function ArenaJobDetailPage() {
   const jobName = params.name as string;
 
   const { job, loading, error, refetch } = useArenaJob(jobName);
-  const { cancelJob, deleteJob } = useArenaJobMutations();
+  const { cancelJob, deleteJob, createJob } = useArenaJobMutations();
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
 
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
 
   const isRunning = job?.status?.phase === "Running" || job?.status?.phase === "Pending";
@@ -833,6 +835,18 @@ export default function ArenaJobDetailPage() {
     } catch {
       setDeleting(false);
       // Error is handled by the hook
+    }
+  };
+
+  const handleClone = async () => {
+    if (!job?.spec) return;
+    try {
+      setCloning(true);
+      const cloneName = generateName();
+      const cloned = await createJob(cloneName, job.spec);
+      router.push(`/arena/jobs/${cloned.metadata.name}`);
+    } catch {
+      setCloning(false);
     }
   };
 
@@ -908,10 +922,11 @@ export default function ArenaJobDetailPage() {
                 Cancel
               </Button>
             )}
-            {isFinished && projectId && canEdit && (
+            {isFinished && canEdit && (
               <Button
                 variant="outline"
-                onClick={() => setCloneDialogOpen(true)}
+                onClick={projectId ? () => setCloneDialogOpen(true) : handleClone}
+                disabled={cloning}
               >
                 <Copy className="h-4 w-4 mr-2" />
                 Clone
@@ -936,7 +951,7 @@ export default function ArenaJobDetailPage() {
           {getJobTypeBadge(job.spec?.type)}
           <Badge variant="outline" className="gap-1">
             <Users className="h-3 w-3" />
-            {job.status?.workers?.active ?? 0} / {job.status?.workers?.desired ?? job.spec?.workers?.replicas ?? 0} workers
+            {job.status?.activeWorkers ?? 0} / {job.spec?.workers?.replicas ?? 0} workers
           </Badge>
           <Badge variant="outline" className="gap-1">
             <Timer className="h-3 w-3" />
@@ -990,7 +1005,7 @@ export default function ArenaJobDetailPage() {
               workspace={currentWorkspace?.name || ""}
               resourceName={jobName}
               containers={["worker"]}
-              showGrafanaLinks={false}
+              showGrafanaLinks={true}
             />
           </TabsContent>
 

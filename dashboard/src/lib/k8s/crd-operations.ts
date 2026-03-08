@@ -228,7 +228,7 @@ async function fetchContainerLogs(
     return logText
       .split("\n")
       .filter(Boolean)
-      .map((line) => parseLogLine(line, containerName));
+      .map((line) => ({ ...parseLogLine(line, containerName), pod: podName }));
   } catch (error) {
     console.warn(`Failed to get logs from ${podName}/${containerName}:`, error);
     return [];

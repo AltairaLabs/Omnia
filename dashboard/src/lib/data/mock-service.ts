@@ -199,7 +199,6 @@ const mockArenaJobs: ArenaJob[] = [
         pending: 5,
       },
       activeWorkers: 2,
-      workers: { desired: 2, active: 2 },
       conditions: [
         {
           type: "Running",

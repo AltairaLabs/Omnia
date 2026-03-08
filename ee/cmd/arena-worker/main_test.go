@@ -19,6 +19,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
@@ -866,5 +871,186 @@ func TestLoadConfigWithToolOverrides(t *testing.T) {
 		if err == nil {
 			t.Error("expected error on invalid JSON")
 		}
+	})
+}
+
+func TestJobNameToTraceID(t *testing.T) {
+	t.Run("deterministic output", func(t *testing.T) {
+		id1 := jobNameToTraceID("my-eval-job")
+		id2 := jobNameToTraceID("my-eval-job")
+		assert.Equal(t, id1, id2, "same job name should produce same trace ID")
+	})
+
+	t.Run("different names produce different IDs", func(t *testing.T) {
+		id1 := jobNameToTraceID("job-a")
+		id2 := jobNameToTraceID("job-b")
+		assert.NotEqual(t, id1, id2, "different job names should produce different trace IDs")
+	})
+
+	t.Run("produces valid trace ID", func(t *testing.T) {
+		id := jobNameToTraceID("test-job")
+		assert.True(t, id.IsValid(), "should produce a valid (non-zero) trace ID")
+	})
+}
+
+func TestJobNameToSpanID(t *testing.T) {
+	t.Run("deterministic output", func(t *testing.T) {
+		id1 := jobNameToSpanID("my-eval-job")
+		id2 := jobNameToSpanID("my-eval-job")
+		assert.Equal(t, id1, id2, "same job name should produce same span ID")
+	})
+
+	t.Run("different names produce different IDs", func(t *testing.T) {
+		id1 := jobNameToSpanID("job-a")
+		id2 := jobNameToSpanID("job-b")
+		assert.NotEqual(t, id1, id2, "different job names should produce different span IDs")
+	})
+
+	t.Run("produces valid span ID", func(t *testing.T) {
+		id := jobNameToSpanID("test-job")
+		assert.True(t, id.IsValid(), "should produce a valid (non-zero) span ID")
+	})
+
+	t.Run("differs from trace ID bytes", func(t *testing.T) {
+		tid := jobNameToTraceID("test-job")
+		sid := jobNameToSpanID("test-job")
+		// span ID uses bytes 16-24, trace ID uses bytes 0-16 — they should differ
+		assert.NotEqual(t, tid[:8], sid[:], "span ID should use different hash bytes than trace ID")
+	})
+}
+
+func TestProcessWorkItemsTracing(t *testing.T) {
+	t.Run("root span parents work-item spans", func(t *testing.T) {
+		// Set up in-memory exporter to capture spans.
+		exporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithSyncer(exporter),
+			sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
+
+		// Set the global tracer provider so processWorkItems uses it.
+		prev := otel.GetTracerProvider()
+		otel.SetTracerProvider(tp)
+		defer otel.SetTracerProvider(prev)
+
+		q := queue.NewMemoryQueue(queue.Options{
+			VisibilityTimeout: 5 * time.Minute,
+			MaxRetries:        1,
+		})
+		jobID := "trace-test-job"
+
+		// Initialize job with metadata but no items so the worker exits
+		// after empty polls.
+		err := q.Push(context.Background(), jobID, []queue.WorkItem{})
+		require.NoError(t, err)
+
+		cfg := &Config{
+			JobName:      jobID,
+			PollInterval: 1 * time.Millisecond,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		err = processWorkItems(ctx, testLog(), cfg, q, t.TempDir())
+		require.NoError(t, err)
+
+		// Force flush
+		_ = tp.ForceFlush(context.Background())
+
+		spans := exporter.GetSpans()
+		require.NotEmpty(t, spans, "expected at least the root span")
+
+		// Find the root arena.worker span.
+		var rootSpan *tracetest.SpanStub
+		for i := range spans {
+			if spans[i].Name == "arena.worker" {
+				rootSpan = &spans[i]
+				break
+			}
+		}
+		require.NotNil(t, rootSpan, "expected arena.worker root span")
+		assert.True(t, rootSpan.SpanContext.TraceID().IsValid(), "root span should have valid trace ID")
+		assert.True(t, rootSpan.SpanContext.SpanID().IsValid(), "root span should have valid span ID")
+
+		// Verify the trace ID is deterministic (derived from job name).
+		expectedTraceID := jobNameToTraceID(jobID)
+		assert.Equal(t, expectedTraceID, rootSpan.SpanContext.TraceID(),
+			"root span should use deterministic trace ID derived from job name")
+
+		// Verify arena.job attribute.
+		found := false
+		for _, attr := range rootSpan.Attributes {
+			if string(attr.Key) == "arena.job" && attr.Value.AsString() == jobID {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "root span should have arena.job attribute")
+	})
+
+	t.Run("work-item span is child of root span", func(t *testing.T) {
+		exporter := tracetest.NewInMemoryExporter()
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithSyncer(exporter),
+			sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
+
+		prev := otel.GetTracerProvider()
+		otel.SetTracerProvider(tp)
+		defer otel.SetTracerProvider(prev)
+
+		q := queue.NewMemoryQueue(queue.Options{
+			VisibilityTimeout: 5 * time.Minute,
+			MaxRetries:        1,
+		})
+		jobID := "trace-child-job"
+
+		// Push a work item that will fail execution (no config file) but
+		// still create the work-item span.
+		err := q.Push(context.Background(), jobID, []queue.WorkItem{
+			{ID: "item-1", ScenarioID: "s1", ProviderID: "p1"},
+		})
+		require.NoError(t, err)
+
+		tmpDir := t.TempDir()
+		cfg := &Config{
+			JobName:      jobID,
+			PollInterval: 1 * time.Millisecond,
+			ContentPath:  tmpDir,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		// Will return error because no arena config file exists.
+		_ = processWorkItems(ctx, testLog(), cfg, q, tmpDir)
+
+		_ = tp.ForceFlush(context.Background())
+
+		spans := exporter.GetSpans()
+
+		var rootSpan, itemSpan *tracetest.SpanStub
+		for i := range spans {
+			switch spans[i].Name {
+			case "arena.worker":
+				rootSpan = &spans[i]
+			case "arena.work-item":
+				itemSpan = &spans[i]
+			}
+		}
+
+		require.NotNil(t, rootSpan, "expected arena.worker root span")
+		require.NotNil(t, itemSpan, "expected arena.work-item span")
+
+		// The work-item span must share the same trace ID as the root span.
+		assert.Equal(t, rootSpan.SpanContext.TraceID(), itemSpan.SpanContext.TraceID(),
+			"work-item span should share trace ID with root span")
+
+		// The work-item span's parent must be the root span.
+		assert.Equal(t, rootSpan.SpanContext.SpanID(), itemSpan.Parent.SpanID(),
+			"work-item span parent should be the root span")
 	})
 }

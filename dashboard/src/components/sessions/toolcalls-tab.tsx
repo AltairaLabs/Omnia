@@ -4,17 +4,20 @@ import { useMemo } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDebugPanelStore } from "@/stores/debug-panel-store";
 import { ToolCallBadge } from "./tool-call-badge";
+import { JsonBlock } from "@/components/ui/json-block";
 import { Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types/session";
 
 /**
- * Extracted tool call info from a tool_call message.
+ * Extracted tool call info from a tool_call message, paired with its result.
  */
 interface ExtractedToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  result?: string;
+  resultIsError?: boolean;
   status?: "success" | "error" | "pending";
   duration?: number;
   handlerName?: string;
@@ -26,32 +29,16 @@ interface ToolCallsTabProps {
   readonly messages: Message[];
 }
 
-function isFlat(obj: unknown): obj is Record<string, string | number | boolean | null> {
-  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) return false;
-  return Object.values(obj).every(
-    (v) => v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean"
-  );
+function RenderValue({ value }: Readonly<{ value: unknown }>) {
+  return <JsonBlock data={value} />;
 }
 
-function RenderValue({ value }: Readonly<{ value: unknown }>) {
-  if (isFlat(value)) {
-    return (
-      <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-        {Object.entries(value).map(([k, v]) => (
-          <div key={k} className="contents">
-            <span className="font-medium text-muted-foreground">{k}</span>
-            <span className="font-mono">{String(v)}</span>
-          </div>
-        ))}
-      </div>
-    );
+function tryParseJSON(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
-
-  return (
-    <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap" data-testid="json-block">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
 }
 
 /**
@@ -88,9 +75,29 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
   const selectToolCall = useDebugPanelStore((s) => s.selectToolCall);
 
   const toolCalls = useMemo(() => {
+    // Build a map of toolCallId → result content from tool_result messages.
+    const resultsByCallId = new Map<string, { content: string; isError: boolean }>();
+    for (const m of messages) {
+      const mType = m.metadata?.type;
+      if ((mType === "tool_result" || mType === "tool_call_completed" || m.role === "tool") && m.toolCallId) {
+        resultsByCallId.set(m.toolCallId, {
+          content: m.content,
+          isError: m.metadata?.is_error === "true" || m.metadata?.status === "error",
+        });
+      }
+    }
+
     return messages
       .filter((m) => m.metadata?.type === "tool_call")
-      .map(extractToolCall);
+      .map((m) => {
+        const tc = extractToolCall(m);
+        const result = resultsByCallId.get(tc.id);
+        if (result) {
+          tc.result = result.content;
+          tc.resultIsError = result.isError;
+        }
+        return tc;
+      });
   }, [messages]);
 
   const selectedTc = toolCalls.find((tc) => tc.id === selectedToolCallId);
@@ -157,6 +164,17 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
               <h4 className="text-sm font-medium text-muted-foreground mb-2">Arguments</h4>
               <RenderValue value={selectedTc.arguments} />
             </div>
+            {selectedTc.result !== undefined && (
+              <div>
+                <h4 className={cn(
+                  "text-sm font-medium mb-2",
+                  selectedTc.resultIsError ? "text-destructive" : "text-muted-foreground"
+                )}>
+                  {selectedTc.resultIsError ? "Error" : "Result"}
+                </h4>
+                <RenderValue value={tryParseJSON(selectedTc.result)} />
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-muted-foreground" data-testid="toolcall-no-selection">
