@@ -31,6 +31,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/sony/gobreaker/v2"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -94,6 +95,9 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 	for _, opt := range opts {
 		opt(s)
 	}
+	// Wrap the HTTP transport for OTel trace context propagation.
+	// This injects traceparent into outbound requests to session-api.
+	s.httpClient.Transport = otelhttp.NewTransport(s.httpClient.Transport)
 	s.cb = gobreaker.NewCircuitBreaker[*http.Response](gobreaker.Settings{
 		Name:        "session-api",
 		MaxRequests: cbMaxRequests,

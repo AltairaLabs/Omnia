@@ -25,6 +25,9 @@ import (
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
 	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
 	"github.com/altairalabs/omnia/ee/pkg/arena/binding"
@@ -223,9 +226,21 @@ func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue
 			"providerID", item.ProviderID,
 		)
 
-		// Execute with per-item timeout
+		// Execute with per-item timeout, wrapped in a trace span.
 		itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
+		itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
+			trace.WithAttributes(
+				attribute.String("arena.job", jobID),
+				attribute.String("arena.scenario", item.ScenarioID),
+				attribute.String("arena.provider", item.ProviderID),
+				attribute.String("arena.execution_mode", cfg.ExecutionMode),
+			),
+		)
 		result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
+		if execErr != nil {
+			span.RecordError(execErr)
+		}
+		span.End()
 		itemCancel()
 		if itemCtx.Err() == context.DeadlineExceeded {
 			execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
@@ -484,8 +499,14 @@ func executeWorkItem(
 		"provider", providerDesc,
 	)
 
-	// Execute runs with concurrency of 1 (single work item at a time)
+	// Execute runs with concurrency of 1 (single work item at a time).
+	ctx, runSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.engine.execute",
+		trace.WithAttributes(
+			attribute.Int("arena.combinations", len(plan.Combinations)),
+		),
+	)
 	runIDs, err := eng.ExecuteRuns(ctx, plan, 1)
+	runSpan.End()
 	if err != nil {
 		return nil, fmt.Errorf("execution failed: %w", err)
 	}

@@ -16,6 +16,9 @@ import (
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // registers default eval handlers
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
@@ -43,6 +46,13 @@ func (s *SDKRunner) RunTurnEvals(
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 ) []api.EvaluateResultItem {
+	ctx, span := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.eval.turn",
+		trace.WithAttributes(
+			attribute.Int("arena.eval.count", len(defs)),
+			attribute.String("session.id", sessionID),
+		),
+	)
+	defer span.End()
 	sdkDefs := convertToSDKDefs(defs)
 	evalCtx := buildSDKEvalContext(messages, sessionID, turnIndex, providerSpecs)
 	results := s.runner.RunTurnEvals(ctx, sdkDefs, evalCtx)
@@ -58,6 +68,13 @@ func (s *SDKRunner) RunSessionEvals(
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 ) []api.EvaluateResultItem {
+	ctx, span := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.eval.session",
+		trace.WithAttributes(
+			attribute.Int("arena.eval.count", len(defs)),
+			attribute.String("session.id", sessionID),
+		),
+	)
+	defer span.End()
 	sdkDefs := convertToSDKDefs(defs)
 	evalCtx := buildSDKEvalContext(messages, sessionID, turnIndex, providerSpecs)
 	results := s.runner.RunSessionEvals(ctx, sdkDefs, evalCtx)

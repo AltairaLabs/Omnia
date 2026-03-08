@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
 
@@ -54,6 +55,29 @@ func run(ctx context.Context) error {
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
+
+	// Initialize tracing provider (reads TRACING_* env vars, same as facade/runtime).
+	tracingCfg := tracing.Config{
+		Enabled:     os.Getenv("TRACING_ENABLED") == "true",
+		Endpoint:    os.Getenv("TRACING_ENDPOINT"),
+		ServiceName: "omnia-arena-worker",
+		Insecure:    os.Getenv("TRACING_INSECURE") == "true",
+	}
+	if rate := os.Getenv("TRACING_SAMPLE_RATE"); rate != "" {
+		if v, parseErr := fmt.Sscanf(rate, "%f", &tracingCfg.SampleRate); v == 0 || parseErr != nil {
+			log.V(1).Info("invalid TRACING_SAMPLE_RATE, using default")
+		}
+	}
+	tp, tpErr := tracing.NewProvider(ctx, tracingCfg)
+	if tpErr != nil {
+		log.Error(tpErr, "tracing provider creation failed")
+	} else {
+		otel.SetTracerProvider(tp.TracerProvider())
+		defer func() { _ = tp.Shutdown(ctx) }()
+		if tracingCfg.Enabled {
+			log.Info("tracing enabled", "endpoint", tracingCfg.Endpoint, "sampleRate", tracingCfg.SampleRate)
+		}
+	}
 
 	// Bridge PromptKit SDK logging to the same Zap core
 	sdkLogger := logging.SlogFromZap(zapLog)

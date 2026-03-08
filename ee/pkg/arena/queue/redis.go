@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -79,6 +80,11 @@ func NewRedisQueue(redisOpts RedisOptions) (*RedisQueue, error) {
 		Password: redisOpts.Password,
 		DB:       redisOpts.DB,
 	})
+	// Instrument Redis client for OTel tracing.
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("failed to instrument redis tracing: %w", err)
+	}
 
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

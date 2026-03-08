@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/altairalabs/omnia/internal/session"
@@ -66,6 +67,11 @@ func New(cfg Config) (*Provider, error) {
 	}
 
 	client := goredis.NewUniversalClient(opts)
+	// Instrument Redis client for OTel tracing (creates spans for each command).
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("redis: failed to instrument tracing: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

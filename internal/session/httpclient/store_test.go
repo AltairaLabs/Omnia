@@ -29,6 +29,11 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/sony/gobreaker/v2"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -832,5 +837,49 @@ func TestCreateSession_409ConflictReturnsExisting(t *testing.T) {
 	}
 	if sess.ID != "existing-id" {
 		t.Fatalf("expected existing session ID, got %s", sess.ID)
+	}
+}
+
+func TestNewStore_TransportPropagatesTraceContext(t *testing.T) {
+	// Set up OTel with in-memory exporter and W3C propagator.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	})
+
+	// Create a test server that captures the traceparent header.
+	var capturedTraceparent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedTraceparent = r.Header.Get("Traceparent")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"test"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	store := NewStore(srv.URL, logr.Discard())
+
+	// Start a span so there's a trace context to propagate.
+	ctx, span := tp.Tracer("test").Start(context.Background(), "test-op")
+	defer span.End()
+
+	// Make a request — the otelhttp transport should inject traceparent.
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/v1/sessions/test", nil)
+	resp, err := store.httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if capturedTraceparent == "" {
+		t.Fatal("expected traceparent header to be propagated by otelhttp transport")
+	}
+	// Verify the traceparent contains the expected trace ID.
+	if !strings.Contains(capturedTraceparent, span.SpanContext().TraceID().String()) {
+		t.Errorf("traceparent %q does not contain trace ID %s",
+			capturedTraceparent, span.SpanContext().TraceID())
 	}
 }

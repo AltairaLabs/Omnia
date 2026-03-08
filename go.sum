@@ -539,6 +539,10 @@ github.com/prometheus/procfs v0.16.1 h1:hZ15bTNuirocR6u0JZ6BAHHmwS1p8B4P6MRqxtzM
 github.com/prometheus/procfs v0.16.1/go.mod h1:teAbpZRB1iIAJYREa1LsoWUXykVXA1KlTmWl8x/U+Is=
 github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 h1:bsUq1dX0N8AOIL7EB/X911+m4EHsnWEHeJ0c+3TTBrg=
 github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
+github.com/redis/go-redis/extra/rediscmd/v9 v9.18.0 h1:QY4nmPHLFAJjtT5O4OMUEOxP8WVaRNOFpcbmxT2NLZU=
+github.com/redis/go-redis/extra/rediscmd/v9 v9.18.0/go.mod h1:WH8cY/0fT41Bsf341qzo8v4nx0GCE8FykAA23IVbVmo=
+github.com/redis/go-redis/extra/redisotel/v9 v9.18.0 h1:2dKdoEYBJ0CZCLPiCdvvc7luz3DPwY6hKdzjL6m1eHE=
+github.com/redis/go-redis/extra/redisotel/v9 v9.18.0/go.mod h1:WzkrVG9ro9BwCQD0eJOWn6AGL4Z1CleGflM45w1hu10=
 github.com/redis/go-redis/v9 v9.18.0 h1:pMkxYPkEbMPwRdenAzUNyFNrDgHx9U+DrBabWNfSRQs=
 github.com/redis/go-redis/v9 v9.18.0/go.mod h1:k3ufPphLU5YXwNTUcCRXGxUoF1fqxnhFQmscfkCoDA0=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=

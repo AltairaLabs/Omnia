@@ -600,6 +600,47 @@ func TestNew_ConnectionError(t *testing.T) {
 	}
 }
 
+func TestNew_EmptyAddrs(t *testing.T) {
+	_, err := New(Config{})
+	if err == nil {
+		t.Fatal("New with empty addrs should fail")
+	}
+}
+
+func TestNew_DefaultPrefix(t *testing.T) {
+	mr := miniredis.RunT(t)
+	p, err := New(Config{
+		Addrs:    []string{mr.Addr()},
+		PoolSize: 2, // cover PoolSize > 0 branch
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	if p.keyPrefix != defaultKeyPrefix {
+		t.Errorf("keyPrefix = %q, want %q", p.keyPrefix, defaultKeyPrefix)
+	}
+}
+
+func TestNewFromClient_DefaultPrefix(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	p := NewFromClient(client, Options{})
+	if p.keyPrefix != defaultKeyPrefix {
+		t.Errorf("keyPrefix = %q, want %q", p.keyPrefix, defaultKeyPrefix)
+	}
+}
+
+func TestRedisClient(t *testing.T) {
+	p, _ := setupTestProvider(t)
+	if p.RedisClient() == nil {
+		t.Error("RedisClient() returned nil")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AppendMessage syncs TTL to messages key
 // ---------------------------------------------------------------------------
