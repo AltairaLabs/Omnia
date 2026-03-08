@@ -25,7 +25,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -66,7 +68,7 @@ func findSpanAttr(span tracetest.SpanStub, key string) (attribute.Value, bool) {
 	return attribute.Value{}, false
 }
 
-func newTestServerWithTracing(t *testing.T, handler MessageHandler, provider *tracing.Provider) (*Server, *httptest.Server) {
+func newTestServerWithTracing(t *testing.T, handler MessageHandler, provider *tracing.Provider) *httptest.Server {
 	t.Helper()
 
 	store := session.NewMemoryStore()
@@ -83,7 +85,7 @@ func newTestServerWithTracing(t *testing.T, handler MessageHandler, provider *tr
 		_ = store.Close()
 	})
 
-	return server, ts
+	return ts
 }
 
 func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
@@ -95,7 +97,7 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 		},
 	}
 
-	_, ts := newTestServerWithTracing(t, handler, provider)
+	ts := newTestServerWithTracing(t, handler, provider)
 
 	// Connect and send a message
 	ws, _, err := websocket.DefaultDialer.Dial(
@@ -181,6 +183,107 @@ func TestProcessMessage_CreatesMessageSpan(t *testing.T) {
 	sessionSpan := findSpanByName(spans, "facade.session")
 	if sessionSpan != nil {
 		t.Error("facade.session span should no longer be created")
+	}
+}
+
+func TestProcessMessage_WithParentTraceContext(t *testing.T) {
+	// Register the W3C trace context propagator so the facade extracts traceparent.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+	))
+
+	provider, exporter := newTracingTestProvider(t)
+
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, msg *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteDone("echo: " + msg.Content)
+		},
+	}
+
+	ts := newTestServerWithTracing(t, handler, provider)
+
+	// Create a traceparent header with a known trace ID
+	parentTraceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	parentSpanID := trace.SpanID{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11}
+	traceparent := "00-" + parentTraceID.String() + "-" + parentSpanID.String() + "-01"
+
+	// Connect with traceparent header
+	dialer := websocket.Dialer{}
+	headers := make(map[string][]string)
+	headers["Traceparent"] = []string{traceparent}
+
+	ws, _, err := dialer.Dial(
+		strings.Replace(ts.URL, "http://", "ws://", 1)+"?agent=test-agent", headers)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	// Read connected message
+	var connectedMsg ServerMessage
+	if err := ws.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("Failed to read connected: %v", err)
+	}
+
+	// Read done message
+	var doneMsg ServerMessage
+	if err := ws.ReadJSON(&doneMsg); err != nil {
+		t.Fatalf("Failed to read done: %v", err)
+	}
+
+	_ = ws.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	spans := exporter.GetSpans()
+	msgSpan := findSpanByName(spans, "omnia.facade.message")
+	if msgSpan == nil {
+		t.Fatal("expected 'omnia.facade.message' span to be recorded")
+	}
+
+	// Verify the span uses the caller's trace ID (not the session-derived one)
+	if msgSpan.SpanContext.TraceID() != parentTraceID {
+		t.Errorf("trace ID = %s, want %s (from traceparent)",
+			msgSpan.SpanContext.TraceID(), parentTraceID)
+	}
+
+	// Verify the span has a parent span ID matching the traceparent
+	if msgSpan.Parent.SpanID() != parentSpanID {
+		t.Errorf("parent span ID = %s, want %s (from traceparent)",
+			msgSpan.Parent.SpanID(), parentSpanID)
+	}
+
+	// Verify the session-derived trace ID is present as a span link
+	sessionID := ""
+	if val, ok := findSpanAttr(*msgSpan, "session.id"); ok {
+		sessionID = val.AsString()
+	}
+	if sessionID == "" {
+		t.Fatal("missing session.id attribute")
+	}
+
+	expectedSessionTraceID := sessionIDToTraceID(sessionID)
+	if len(msgSpan.Links) == 0 {
+		t.Fatal("expected span link for session-derived trace ID")
+	}
+	if msgSpan.Links[0].SpanContext.TraceID() != expectedSessionTraceID {
+		t.Errorf("link trace ID = %s, want %s (session-derived)",
+			msgSpan.Links[0].SpanContext.TraceID(), expectedSessionTraceID)
+	}
+
+	// Verify link has the session-trace type attribute
+	linkHasType := false
+	for _, a := range msgSpan.Links[0].Attributes {
+		if string(a.Key) == "link.type" && a.Value.AsString() == "session-trace" {
+			linkHasType = true
+		}
+	}
+	if !linkHasType {
+		t.Error("expected link.type=session-trace attribute on span link")
 	}
 }
 

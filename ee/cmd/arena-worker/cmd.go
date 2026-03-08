@@ -13,11 +13,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/AltairaLabs/PromptKit/runtime/logger"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 func main() {
@@ -31,39 +39,62 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	// Initialize structured logger (same pattern as facade/runtime)
+	zapLog, err := logging.NewZapLogger()
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+	defer func() { _ = zapLog.Sync() }()
+
+	log := zapr.NewLogger(zapLog)
+
+	// Initialize global OpenTelemetry text map propagator so that trace context
+	// is injected into outbound WebSocket upgrade requests (fleet mode).
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	// Bridge PromptKit SDK logging to the same Zap core
+	sdkLogger := logging.SlogFromZap(zapLog)
+
 	cfg, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	fmt.Printf("Arena Worker starting\n")
-	fmt.Printf("  Job: %s/%s\n", cfg.JobNamespace, cfg.JobName)
-	fmt.Printf("  Type: %s\n", cfg.JobType)
-	fmt.Printf("  Content: %s (version: %s)\n", cfg.ContentPath, cfg.ContentVersion)
+	log.Info("arena worker starting",
+		"job", cfg.JobName,
+		"namespace", cfg.JobNamespace,
+		"jobType", cfg.JobType,
+		"contentPath", cfg.ContentPath,
+		"contentVersion", cfg.ContentVersion,
+		"executionMode", cfg.ExecutionMode,
+	)
 
 	if cfg.ExecutionMode == executionModeFleet {
-		fmt.Printf("  Execution mode: fleet (target: %s)\n", cfg.FleetWSURL)
-	} else {
-		fmt.Printf("  Execution mode: direct\n")
+		log.Info("fleet mode configured", "wsURL", cfg.FleetWSURL)
 	}
+
+	// Configure PromptKit SDK logging via slog bridge
+	configureSDKLogging(cfg, sdkLogger)
 
 	// Log override config if present
 	if cfg.OverridesPath != "" {
-		logOverrideConfig(cfg.OverridesPath)
+		logOverrideConfig(log, cfg.OverridesPath)
 	} else {
-		// Log legacy tool registry overrides (deprecated)
-		logToolOverrides(cfg)
+		logToolOverrides(log, cfg)
 	}
 
 	// Log provider credential overrides (detected from environment)
-	logProviderOverrides()
+	logProviderOverrides(log)
 
 	// Get content path (mounted from PVC)
 	bundlePath, err := getContentPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get content path: %w", err)
 	}
-	fmt.Printf("  Using mounted content at: %s\n", bundlePath)
+	log.V(1).Info("content path resolved", "bundlePath", bundlePath)
 
 	// Connect to Redis queue
 	q, err := queue.NewRedisQueue(queue.RedisOptions{
@@ -76,88 +107,87 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to queue: %w", err)
 	}
 	defer func() {
-		if err := q.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close queue: %v\n", err)
+		if closeErr := q.Close(); closeErr != nil {
+			log.Error(closeErr, "failed to close queue")
 		}
 	}()
 
-	fmt.Printf("  Connected to Redis at %s\n", cfg.RedisAddr)
+	log.Info("connected to redis", "addr", cfg.RedisAddr)
 
 	// Process work items
-	return processWorkItems(ctx, cfg, q, bundlePath)
+	return processWorkItems(ctx, log, cfg, q, bundlePath)
+}
+
+// configureSDKLogging sets up PromptKit SDK logging via the slog bridge.
+func configureSDKLogging(cfg *Config, sdkLogger *slog.Logger) {
+	logger.SetLogger(sdkLogger)
+	if cfg.Verbose {
+		logger.SetVerbose(true)
+	}
 }
 
 // logToolOverrides logs tool registry overrides that will be used.
-func logToolOverrides(cfg *Config) {
+func logToolOverrides(log logr.Logger, cfg *Config) {
 	if len(cfg.ToolOverrides) == 0 {
-		fmt.Printf("  Tool overrides: none\n")
+		log.V(1).Info("tool overrides", "count", 0)
 		return
 	}
 
-	fmt.Printf("  Tool overrides: %d tool(s) from ToolRegistry CRDs\n", len(cfg.ToolOverrides))
+	log.Info("tool overrides loaded", "count", len(cfg.ToolOverrides))
 	for name, override := range cfg.ToolOverrides {
-		fmt.Printf("    - %s: registry=%s handler=%s", name, override.RegistryName, override.HandlerName)
-		if override.Endpoint != "" {
-			fmt.Printf(" endpoint=%s", override.Endpoint)
-		}
-		if override.HandlerType != "" {
-			fmt.Printf(" type=%s", override.HandlerType)
-		}
-		fmt.Printf("\n")
+		log.V(1).Info("tool override",
+			"tool", name,
+			"registry", override.RegistryName,
+			"handler", override.HandlerName,
+			"endpoint", override.Endpoint,
+			"handlerType", override.HandlerType,
+		)
 	}
 }
 
 // logOverrideConfig logs details about the override config loaded from ConfigMap.
-func logOverrideConfig(path string) {
+func logOverrideConfig(log logr.Logger, path string) {
 	cfg, err := loadOverrides(path)
 	if err != nil {
-		fmt.Printf("  Override config: error loading from %s: %v\n", path, err)
+		log.Error(err, "failed to load override config", "path", path)
 		return
 	}
 	if cfg == nil {
-		fmt.Printf("  Override config: none (file not found at %s)\n", path)
+		log.V(1).Info("override config not found", "path", path)
 		return
 	}
 
-	fmt.Printf("  Override config: %s\n", path)
-
-	// Log provider overrides by group
+	// Count providers across all groups
 	totalProviders := 0
 	for group, providers := range cfg.Providers {
-		fmt.Printf("    Provider group '%s': %d provider(s)\n", group, len(providers))
+		log.V(1).Info("provider group loaded", "group", group, "count", len(providers))
 		for _, p := range providers {
 			totalProviders++
-			credStatus := "no credentials required"
-			if p.SecretEnvVar != "" {
-				if os.Getenv(p.SecretEnvVar) != "" {
-					credStatus = fmt.Sprintf("✓ %s set", p.SecretEnvVar)
-				} else {
-					credStatus = fmt.Sprintf("✗ %s MISSING", p.SecretEnvVar)
-				}
-			}
-			model := p.Model
-			if model == "" {
-				model = "default"
-			}
-			fmt.Printf("      - %s (%s/%s) [%s]\n", p.ID, p.Type, model, credStatus)
+			hasCreds := p.SecretEnvVar != "" && os.Getenv(p.SecretEnvVar) != ""
+			log.V(1).Info("provider override",
+				"providerID", p.ID,
+				"providerType", p.Type,
+				"model", p.Model,
+				"group", group,
+				"hasCreds", hasCreds,
+			)
 		}
-	}
-	if totalProviders > 0 {
-		fmt.Printf("    Total override providers: %d\n", totalProviders)
 	}
 
-	// Log tool overrides
-	if len(cfg.Tools) > 0 {
-		fmt.Printf("    Tool overrides: %d tool(s)\n", len(cfg.Tools))
-		for _, t := range cfg.Tools {
-			fmt.Printf("      - %s -> %s\n", t.Name, t.Endpoint)
-		}
+	toolCount := len(cfg.Tools)
+	log.Info("override config loaded",
+		"path", path,
+		"providerCount", totalProviders,
+		"toolCount", toolCount,
+	)
+
+	for _, t := range cfg.Tools {
+		log.V(1).Info("tool override", "tool", t.Name, "endpoint", t.Endpoint)
 	}
 }
 
 // logProviderOverrides logs provider credential overrides detected from environment.
-// Provider overrides are resolved by the controller and passed as environment variables.
-func logProviderOverrides() {
+func logProviderOverrides(log logr.Logger) {
 	// Known provider credential environment variables
 	providerEnvVars := map[string]string{
 		"OPENAI_API_KEY":      "OpenAI",
@@ -181,13 +211,5 @@ func logProviderOverrides() {
 		}
 	}
 
-	if len(detected) == 0 {
-		fmt.Printf("  Provider credentials: none detected\n")
-		return
-	}
-
-	fmt.Printf("  Provider credentials: %d provider(s) configured\n", len(detected))
-	for _, provider := range detected {
-		fmt.Printf("    - %s\n", provider)
-	}
+	log.Info("provider credentials detected", "count", len(detected), "providers", detected)
 }

@@ -97,21 +97,42 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 // It derives the trace ID from the session ID (UUID → 128-bit trace ID) so that
 // all messages in a session share the same trace, enabling direct Tempo lookup
 // by session ID without search indexing.
+//
+// When a W3C traceparent was present on the WebSocket upgrade request, ctx already
+// carries a remote span context — the new span uses it as parent and adds the
+// session-derived trace ID as a span link for cross-referencing in Tempo.
 func (s *Server) startMessageSpan(ctx context.Context, c *Connection, sessionID string) (context.Context, trace.Span) {
 	if s.tracingProvider == nil {
 		return ctx, trace.SpanFromContext(ctx)
 	}
 
-	// Inject session-derived trace ID as a remote span context so the new
-	// span inherits it. All messages in the same session share a trace.
-	traceID := sessionIDToTraceID(sessionID)
-	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		TraceFlags: trace.FlagsSampled,
-	})
-	ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
+	sessionTraceID := sessionIDToTraceID(sessionID)
+	var opts []trace.SpanStartOption
 
-	return s.tracingProvider.Tracer().Start(ctx, "omnia.facade.message",
+	// If the caller injected a W3C traceparent on the WebSocket upgrade,
+	// ctx already carries a remote span context — use it as parent.
+	// Add the session-derived trace ID as a link for cross-referencing.
+	if parentSC := trace.SpanContextFromContext(ctx); parentSC.IsValid() {
+		sessionLink := trace.Link{
+			SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID:    sessionTraceID,
+				TraceFlags: trace.FlagsSampled,
+			}),
+			Attributes: []attribute.KeyValue{
+				attribute.String("link.type", "session-trace"),
+			},
+		}
+		opts = append(opts, trace.WithLinks(sessionLink))
+	} else {
+		// No caller trace — use session-derived trace ID (existing behavior).
+		remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    sessionTraceID,
+			TraceFlags: trace.FlagsSampled,
+		})
+		ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
+	}
+
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
 			attribute.String("session.id", sessionID),
@@ -122,6 +143,8 @@ func (s *Server) startMessageSpan(ctx context.Context, c *Connection, sessionID 
 			attribute.String(otlp.AttrOmniaPromptPackNamespace, c.namespace),
 		),
 	)
+
+	return s.tracingProvider.Tracer().Start(ctx, "omnia.facade.message", opts...)
 }
 
 // sessionIDToTraceID converts a UUID session ID to an OpenTelemetry trace ID.

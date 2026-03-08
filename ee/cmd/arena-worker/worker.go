@@ -21,16 +21,17 @@ import (
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
-	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
 	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
+	"github.com/go-logr/logr"
+	"gopkg.in/yaml.v3"
+
 	"github.com/altairalabs/omnia/ee/pkg/arena/binding"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
-	"gopkg.in/yaml.v3"
 )
 
 // Status constants for execution results.
@@ -188,22 +189,22 @@ func getContentPath(cfg *Config) (string, error) {
 	return cfg.ContentPath, nil
 }
 
-func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundlePath string) error {
+func processWorkItems(ctx context.Context, log logr.Logger, cfg *Config, q queue.WorkQueue, bundlePath string) error {
 	jobID := cfg.JobName
 	emptyCount := 0
 	maxEmptyPolls := 10 // Exit after this many consecutive empty polls
 
-	fmt.Printf("Processing work items for job: %s\n", jobID)
+	log.Info("processing work items", "jobID", jobID)
 
 	for {
-		if checkContextDone(ctx) {
+		if checkContextDone(ctx, log) {
 			return nil
 		}
 
 		// Pop next work item
 		item, err := q.Pop(ctx, jobID)
 		if err != nil {
-			done, resetCount, retErr := handlePopError(ctx, err, emptyCount, maxEmptyPolls, cfg, q, jobID)
+			done, resetCount, retErr := handlePopError(ctx, log, err, emptyCount, maxEmptyPolls, cfg, q, jobID)
 			if retErr != nil {
 				return retErr
 			}
@@ -216,22 +217,28 @@ func processWorkItems(ctx context.Context, cfg *Config, q queue.WorkQueue, bundl
 
 		emptyCount = 0 // Reset on successful pop
 
+		log.Info("work item popped",
+			"itemID", item.ID,
+			"scenarioID", item.ScenarioID,
+			"providerID", item.ProviderID,
+		)
+
 		// Execute with per-item timeout
 		itemCtx, itemCancel := context.WithTimeout(ctx, maxItemTimeout)
-		result, execErr := executeWorkItem(itemCtx, cfg, item, bundlePath)
+		result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
 		itemCancel()
 		if itemCtx.Err() == context.DeadlineExceeded {
 			execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
 		}
-		reportWorkItemResult(ctx, q, jobID, item, result, execErr)
+		reportWorkItemResult(ctx, log, q, jobID, item, result, execErr)
 	}
 }
 
 // checkContextDone returns true if the context is cancelled.
-func checkContextDone(ctx context.Context) bool {
+func checkContextDone(ctx context.Context, log logr.Logger) bool {
 	select {
 	case <-ctx.Done():
-		fmt.Println("Shutdown signal received, exiting...")
+		log.Info("shutdown signal received")
 		return true
 	default:
 		return false
@@ -242,7 +249,8 @@ func checkContextDone(ctx context.Context) bool {
 //
 //nolint:unparam // maxEmptyPolls kept as parameter for testability
 func handlePopError(
-	ctx context.Context, err error, emptyCount, maxEmptyPolls int, cfg *Config, q queue.WorkQueue, jobID string,
+	ctx context.Context, log logr.Logger, err error, emptyCount, maxEmptyPolls int,
+	cfg *Config, q queue.WorkQueue, jobID string,
 ) (bool, int, error) {
 	if !errors.Is(err, queue.ErrQueueEmpty) {
 		return false, emptyCount, fmt.Errorf("failed to pop work item: %w", err)
@@ -250,9 +258,9 @@ func handlePopError(
 
 	emptyCount++
 	if emptyCount >= maxEmptyPolls {
-		done, err := checkJobCompletion(ctx, q, jobID, emptyCount)
-		if err != nil {
-			return false, 0, err
+		done, checkErr := checkJobCompletion(ctx, log, q, jobID, emptyCount)
+		if checkErr != nil {
+			return false, 0, checkErr
 		}
 		if done {
 			return true, 0, nil
@@ -265,8 +273,10 @@ func handlePopError(
 }
 
 // checkJobCompletion checks if the job is complete and returns (done, error).
-func checkJobCompletion(ctx context.Context, q queue.WorkQueue, jobID string, emptyCount int) (bool, error) {
-	fmt.Printf("Queue empty after %d polls, checking if job is complete...\n", emptyCount)
+func checkJobCompletion(
+	ctx context.Context, log logr.Logger, q queue.WorkQueue, jobID string, emptyCount int,
+) (bool, error) {
+	log.V(1).Info("queue empty, checking job completion", "emptyPolls", emptyCount)
 
 	progress, err := q.Progress(ctx, jobID)
 	if err != nil {
@@ -274,39 +284,55 @@ func checkJobCompletion(ctx context.Context, q queue.WorkQueue, jobID string, em
 	}
 
 	if progress.IsComplete() {
-		fmt.Printf("Job complete: %d/%d items processed\n",
-			progress.Completed+progress.Failed, progress.Total)
+		log.Info("job complete",
+			"completed", progress.Completed+progress.Failed,
+			"total", progress.Total,
+		)
 		return true, nil
 	}
 
+	log.V(1).Info("job still in progress",
+		"pending", progress.Pending,
+		"processing", progress.Processing,
+		"completed", progress.Completed,
+		"total", progress.Total,
+	)
 	return false, nil
 }
 
 // reportWorkItemResult reports the result of a work item execution.
 func reportWorkItemResult(
-	ctx context.Context, q queue.WorkQueue, jobID string, item *queue.WorkItem, result *ExecutionResult, execErr error,
+	ctx context.Context, log logr.Logger, q queue.WorkQueue, jobID string,
+	item *queue.WorkItem, result *ExecutionResult, execErr error,
 ) {
 	if execErr != nil {
-		fmt.Printf("  [FAIL] %s: %v\n", item.ID, execErr)
+		log.Error(execErr, "work item failed", "itemID", item.ID)
 		if err := q.Nack(ctx, jobID, item.ID, execErr); err != nil {
-			fmt.Printf("  Warning: failed to nack item %s: %v\n", item.ID, err)
+			log.Error(err, "failed to nack item", "itemID", item.ID)
 		}
 		return
 	}
 
 	resultJSON, _ := json.Marshal(result)
+	log.Info("work item completed",
+		"itemID", item.ID,
+		"status", result.Status,
+		"durationMs", result.DurationMs,
+	)
 	if result.Status == statusFail && result.Error != "" {
-		fmt.Printf("  [%s] %s (%.0fms): %s\n", result.Status, item.ID, result.DurationMs, result.Error)
-	} else {
-		fmt.Printf("  [%s] %s (%.0fms)\n", result.Status, item.ID, result.DurationMs)
+		log.Info("work item result error",
+			"itemID", item.ID,
+			"error", result.Error,
+		)
 	}
 	if err := q.Ack(ctx, jobID, item.ID, resultJSON); err != nil {
-		fmt.Printf("  Warning: failed to ack item %s: %v\n", item.ID, err)
+		log.Error(err, "failed to ack item", "itemID", item.ID)
 	}
 }
 
 func executeWorkItem(
 	ctx context.Context,
+	log logr.Logger,
 	cfg *Config,
 	item *queue.WorkItem,
 	bundlePath string,
@@ -323,12 +349,7 @@ func executeWorkItem(
 		return nil, fmt.Errorf("arena config file not found in bundle: %s", bundlePath)
 	}
 
-	// Configure verbose logging BEFORE creating the engine
-	if cfg.Verbose {
-		fmt.Printf("  Loading arena config from: %s\n", configPath)
-		logger.SetVerbose(true)
-		logger.SetOutput(os.Stderr) // Ensure logs go to stderr for kubectl logs
-	}
+	log.Info("loading arena config", "configPath", configPath)
 
 	// Load configuration from file BEFORE creating engine so we can modify it
 	arenaCfg, err := config.LoadConfig(configPath)
@@ -351,12 +372,12 @@ func executeWorkItem(
 		return nil, fmt.Errorf("failed to load overrides: %w", err)
 	}
 	if overrideCfg != nil {
-		if err := applyOverridesFromConfig(arenaCfg, overrideCfg, cfg.Verbose); err != nil {
+		if err := applyOverridesFromConfig(log, arenaCfg, overrideCfg); err != nil {
 			return nil, fmt.Errorf("failed to apply overrides from ConfigMap: %w", err)
 		}
 	} else if len(cfg.ToolOverrides) > 0 {
 		// Fall back to legacy tool overrides from env var (for backwards compatibility)
-		if err := applyToolOverrides(arenaCfg, cfg.ToolOverrides, cfg.Verbose); err != nil {
+		if err := applyToolOverrides(log, arenaCfg, cfg.ToolOverrides); err != nil {
 			return nil, fmt.Errorf("failed to apply tool overrides: %w", err)
 		}
 	}
@@ -364,9 +385,9 @@ func executeWorkItem(
 	// Apply provider bindings (annotation-based credential resolution)
 	// This runs after explicit overrides so they take precedence
 	if overrideCfg != nil && len(overrideCfg.Bindings) > 0 {
-		if err := applyProviderBindings(arenaCfg, overrideCfg.Bindings, configPath, cfg.Verbose); err != nil {
+		if err := applyProviderBindings(log, arenaCfg, overrideCfg.Bindings, configPath); err != nil {
 			// Non-fatal: log warning and continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to apply provider bindings: %v\n", err)
+			log.Error(err, "failed to apply provider bindings")
 		}
 	}
 
@@ -379,12 +400,11 @@ func executeWorkItem(
 		}
 		defer func() { _ = fleetProvider.Close() }()
 
-		if cfg.Verbose {
-			fmt.Printf("  Fleet mode: connected to %s\n", cfg.FleetWSURL)
-		}
+		log.Info("fleet agent connected", "wsURL", cfg.FleetWSURL)
 	}
 
 	// Build registries and executors from the config
+	log.Info("building engine components")
 	providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, a2aCleanup, _, err :=
 		engine.BuildEngineComponents(arenaCfg)
 	if err != nil {
@@ -404,9 +424,10 @@ func executeWorkItem(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create engine: %w", err)
 	}
+	log.Info("engine created")
 	defer func() {
-		if err := eng.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close engine: %v\n", err)
+		if closeErr := eng.Close(); closeErr != nil {
+			log.Error(closeErr, "failed to close engine")
 		}
 	}()
 
@@ -452,16 +473,16 @@ func executeWorkItem(
 		return result, nil
 	}
 
-	if cfg.Verbose {
-		providerDesc := "all providers"
-		if cfg.ExecutionMode == executionModeFleet {
-			providerDesc = "fleet agent"
-		} else if item.ProviderID != "" {
-			providerDesc = "provider " + item.ProviderID
-		}
-		fmt.Printf("  Executing %d scenario(s) with %s\n",
-			len(plan.Combinations), providerDesc)
+	providerDesc := "all providers"
+	if cfg.ExecutionMode == executionModeFleet {
+		providerDesc = "fleet agent"
+	} else if item.ProviderID != "" {
+		providerDesc = item.ProviderID
 	}
+	log.Info("executing scenarios",
+		"combinations", len(plan.Combinations),
+		"provider", providerDesc,
+	)
 
 	// Execute runs with concurrency of 1 (single work item at a time)
 	runIDs, err := eng.ExecuteRuns(ctx, plan, 1)
@@ -470,7 +491,7 @@ func executeWorkItem(
 	}
 
 	// Build result from state store
-	result = buildExecutionResult(eng.GetStateStore(), runIDs, start, cfg.Verbose)
+	result = buildExecutionResult(log, eng.GetStateStore(), runIDs, start)
 	return result, nil
 }
 
@@ -514,15 +535,13 @@ type runAggregator struct {
 	errors        []string
 	totalDuration time.Duration
 	assertions    []AssertionResult
-	verbose       bool
+	log           logr.Logger
 }
 
 // processRun processes a single run's state and updates aggregated counts.
 func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaConversationState) {
 	if state.RunMetadata == nil {
-		if a.verbose {
-			fmt.Printf("    Run %s: no metadata available\n", runID)
-		}
+		a.log.V(1).Info("run has no metadata", "runID", runID)
 		return
 	}
 	meta := state.RunMetadata
@@ -531,14 +550,10 @@ func (a *runAggregator) processRun(runID string, state *arenastatestore.ArenaCon
 	if meta.Error != "" {
 		a.errors = append(a.errors, fmt.Sprintf("run %s: %s", runID, meta.Error))
 		a.failCount++
-		if a.verbose {
-			fmt.Printf("    Run %s FAILED: %s\n", runID, meta.Error)
-		}
+		a.log.V(1).Info("run failed", "runID", runID, "error", meta.Error)
 	} else {
 		a.passCount++
-		if a.verbose {
-			fmt.Printf("    Run %s PASSED (duration: %v)\n", runID, meta.Duration)
-		}
+		a.log.V(1).Info("run passed", "runID", runID, "duration", meta.Duration)
 	}
 
 	a.processAssertions(runID, meta.ConversationAssertionResults)
@@ -552,13 +567,12 @@ func (a *runAggregator) processAssertions(runID string, assertions []arenastates
 			Passed:  assertion.Passed,
 			Message: assertion.Message,
 		})
-		if a.verbose {
-			status := "PASS"
-			if !assertion.Passed {
-				status = "FAIL"
-			}
-			fmt.Printf("      Assertion [%s] %s: %s\n", assertion.Type, status, assertion.Message)
-		}
+		a.log.V(1).Info("assertion result",
+			"runID", runID,
+			"type", assertion.Type,
+			"passed", assertion.Passed,
+			"message", assertion.Message,
+		)
 		if !assertion.Passed {
 			errMsg := fmt.Sprintf("run %s: assertion [%s] failed: %s",
 				runID, assertion.Type, assertion.Message)
@@ -572,7 +586,9 @@ func (a *runAggregator) processAssertions(runID string, assertions []arenastates
 }
 
 // buildExecutionResult constructs an ExecutionResult from the engine's state store.
-func buildExecutionResult(store statestore.Store, runIDs []string, startTime time.Time, verbose bool) *ExecutionResult {
+func buildExecutionResult(
+	log logr.Logger, store statestore.Store, runIDs []string, startTime time.Time,
+) *ExecutionResult {
 	result := &ExecutionResult{
 		DurationMs: float64(time.Since(startTime).Milliseconds()),
 		Metrics:    make(map[string]float64),
@@ -584,13 +600,11 @@ func buildExecutionResult(store statestore.Store, runIDs []string, startTime tim
 		return buildFallbackResult(result, runIDs)
 	}
 
-	agg := &runAggregator{verbose: verbose}
+	agg := &runAggregator{log: log}
 	for _, runID := range runIDs {
 		state, err := arenaStore.GetArenaState(context.Background(), runID)
 		if err != nil {
-			if verbose {
-				fmt.Printf("  Warning: failed to get state for run %s: %v\n", runID, err)
-			}
+			log.Error(err, "failed to get run state", "runID", runID)
 			agg.failCount++
 			continue
 		}
@@ -672,7 +686,7 @@ type toolHTTPConfig struct {
 
 // applyToolOverrides modifies LoadedTools in the config to apply overrides from ToolRegistry CRDs.
 // For each tool that has an override, it changes the mode to "http" and sets the endpoint URL.
-func applyToolOverrides(cfg *config.Config, toolOverrides map[string]ToolOverrideConfig, verbose bool) error {
+func applyToolOverrides(log logr.Logger, cfg *config.Config, toolOverrides map[string]ToolOverrideConfig) error {
 	if len(toolOverrides) == 0 {
 		return nil
 	}
@@ -723,14 +737,16 @@ func applyToolOverrides(cfg *config.Config, toolOverrides map[string]ToolOverrid
 		cfg.LoadedTools[i].Data = newData
 		appliedCount++
 
-		if verbose {
-			fmt.Printf("  Applied tool override: %s -> %s (registry: %s, handler: %s)\n",
-				toolName, override.Endpoint, override.RegistryName, override.HandlerName)
-		}
+		log.V(1).Info("tool override applied",
+			"tool", toolName,
+			"endpoint", override.Endpoint,
+			"registry", override.RegistryName,
+			"handler", override.HandlerName,
+		)
 	}
 
-	if verbose && appliedCount > 0 {
-		fmt.Printf("  Applied %d tool override(s)\n", appliedCount)
+	if appliedCount > 0 {
+		log.Info("tool overrides applied", "count", appliedCount)
 	}
 
 	return nil
@@ -762,9 +778,9 @@ func loadOverrides(path string) (*overrides.OverrideConfig, error) {
 // applyProviderOverrides injects provider configs from CRD overrides into the arena config.
 // Providers are added to LoadedProviders and can be used by the engine.
 func applyProviderOverrides(
+	log logr.Logger,
 	arenaCfg *config.Config,
 	providersByGroup map[string][]overrides.ProviderOverride,
-	verbose bool,
 ) {
 	if len(providersByGroup) == 0 {
 		return
@@ -811,50 +827,52 @@ func applyProviderOverrides(
 			arenaCfg.ProviderGroups[p.ID] = groupName
 
 			appliedCount++
-			if verbose {
-				credStatus := "no credentials required"
-				if p.SecretEnvVar != "" {
-					if os.Getenv(p.SecretEnvVar) != "" {
-						credStatus = fmt.Sprintf("✓ %s set", p.SecretEnvVar)
-					} else {
-						credStatus = fmt.Sprintf("✗ %s MISSING", p.SecretEnvVar)
-					}
-				} else if p.CredentialFile != "" {
-					if _, err := os.Stat(p.CredentialFile); err == nil {
-						credStatus = fmt.Sprintf("✓ file %s exists", p.CredentialFile)
-					} else {
-						credStatus = fmt.Sprintf("✗ file %s MISSING", p.CredentialFile)
-					}
-				}
-				fmt.Printf("  Provider override: %s (%s/%s) group=%s [%s]\n",
-					p.ID, p.Type, p.Model, groupName, credStatus)
-			}
+
+			hasCreds := (p.SecretEnvVar != "" && os.Getenv(p.SecretEnvVar) != "") ||
+				(p.CredentialFile != "" && fileExists(p.CredentialFile))
+			log.V(1).Info("provider override applied",
+				"providerID", p.ID,
+				"providerType", p.Type,
+				"model", p.Model,
+				"group", groupName,
+				"hasCreds", hasCreds,
+			)
 		}
 	}
 
-	if verbose && appliedCount > 0 {
-		fmt.Printf("  Applied %d provider override(s)\n", appliedCount)
+	if appliedCount > 0 {
+		log.Info("provider overrides applied", "count", appliedCount)
 	}
+}
+
+// fileExists returns true if the file exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // applyProviderBindings resolves provider binding annotations against the registry
 // and injects credentials into providers that don't already have them.
 func applyProviderBindings(
+	log logr.Logger,
 	cfg *config.Config,
 	registry map[string]overrides.ProviderOverride,
 	configPath string,
-	verbose bool,
 ) error {
 	bindings, err := binding.ParseProviderAnnotations(cfg, configPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse provider annotations: %w", err)
 	}
 
+	verbose := log.V(1).Enabled()
 	boundCount := binding.ApplyBindings(cfg, bindings, registry, verbose)
 	matchedCount := binding.ApplyNameMatching(cfg, registry, verbose)
 
-	if verbose && (boundCount > 0 || matchedCount > 0) {
-		fmt.Printf("  Provider bindings: %d annotation-based, %d name-matched\n", boundCount, matchedCount)
+	if boundCount > 0 || matchedCount > 0 {
+		log.V(1).Info("provider bindings applied",
+			"annotationBound", boundCount,
+			"nameMatched", matchedCount,
+		)
 	}
 
 	return nil
@@ -863,16 +881,16 @@ func applyProviderBindings(
 // applyOverridesFromConfig applies all overrides from the loaded override config.
 // This handles both provider and tool overrides from the ConfigMap.
 func applyOverridesFromConfig(
+	log logr.Logger,
 	arenaCfg *config.Config,
 	overrideCfg *overrides.OverrideConfig,
-	verbose bool,
 ) error {
 	if overrideCfg == nil {
 		return nil
 	}
 
 	// Apply provider overrides first
-	applyProviderOverrides(arenaCfg, overrideCfg.Providers, verbose)
+	applyProviderOverrides(log, arenaCfg, overrideCfg.Providers)
 
 	// Apply tool overrides
 	if len(overrideCfg.Tools) > 0 {
@@ -888,7 +906,7 @@ func applyOverridesFromConfig(
 				HandlerName:  t.HandlerName,
 			}
 		}
-		if err := applyToolOverrides(arenaCfg, toolOverrides, verbose); err != nil {
+		if err := applyToolOverrides(log, arenaCfg, toolOverrides); err != nil {
 			return fmt.Errorf("failed to apply tool overrides: %w", err)
 		}
 	}

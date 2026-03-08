@@ -65,6 +65,8 @@ interface AgentLogViewerProps extends BaseLogViewerProps {
 interface ArenaJobLogViewerProps extends BaseLogViewerProps {
   /** Arena job name - use this for arena job logs */
   jobName: string;
+  /** Job phase — when terminal, log polling stops to preserve cached data */
+  jobPhase?: string;
   agentName?: never;
 }
 
@@ -193,6 +195,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   const isArenaJob = "jobName" in props && !!props.jobName;
   // One of jobName or agentName is always defined due to discriminated union
   const name = (isArenaJob ? props.jobName : props.agentName) as string;
+  const jobPhase = isArenaJob ? props.jobPhase : undefined;
 
   const { isDemoMode } = useDemoMode();
   const { lokiEnabled, tempoEnabled } = useObservabilityConfig();
@@ -215,6 +218,7 @@ export function LogViewer(props: Readonly<LogViewerProps>) {
   const arenaJobLogsQuery = useArenaJobLogs(workspace, isArenaJob ? name : "", {
     tailLines,
     sinceSeconds: 3600,
+    jobPhase,
   });
 
   // Select the appropriate query result

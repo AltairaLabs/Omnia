@@ -3,8 +3,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
-import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 import { handleMutationResponse } from "@/lib/api/fetch-helpers";
+
+/** Polling interval when there are active (running/pending) jobs. */
+const ACTIVE_POLL_INTERVAL = 10_000;
 
 const NO_WORKSPACE_ERROR = "No workspace selected";
 
@@ -79,7 +81,14 @@ export function useArenaJobs(options?: UseArenaJobsOptions): UseArenaJobsResult 
     queryKey: ["arena-jobs", workspace, options?.sourceRef, options?.type, options?.phase],
     queryFn: () => fetchJobs(workspace!, options),
     enabled: !!workspace,
-    staleTime: DEFAULT_STALE_TIME,
+    staleTime: ACTIVE_POLL_INTERVAL,
+    refetchInterval: (query) => {
+      const jobs = query.state.data;
+      if (jobs?.some((j) => j.status?.phase === "Running" || j.status?.phase === "Pending")) {
+        return ACTIVE_POLL_INTERVAL;
+      }
+      return false;
+    },
   });
 
   return {
@@ -101,7 +110,14 @@ export function useArenaJob(name: string | undefined): UseArenaJobResult {
     queryKey: ["arena-job", workspace, name],
     queryFn: () => fetchJob(workspace!, name!),
     enabled: !!workspace && !!name,
-    staleTime: DEFAULT_STALE_TIME,
+    staleTime: ACTIVE_POLL_INTERVAL,
+    refetchInterval: (query) => {
+      const phase = query.state.data?.status?.phase;
+      if (phase === "Running" || phase === "Pending") {
+        return 5000; // faster polling for single job detail
+      }
+      return false;
+    },
   });
 
   return {
@@ -122,6 +138,7 @@ export function useArenaJobMutations(): UseArenaJobMutationsResult {
 
   const invalidateJobs = () => {
     queryClient.invalidateQueries({ queryKey: ["arena-jobs", workspace] });
+    queryClient.invalidateQueries({ queryKey: ["arena-stats", workspace] });
   };
 
   const createMutation = useMutation({

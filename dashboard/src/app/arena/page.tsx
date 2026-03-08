@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { Header } from "@/components/layout";
 import { StatCard } from "@/components/dashboard";
+import { JobDialog } from "@/components/arena";
 import { useArenaStats } from "@/hooks";
+import { useArenaSources } from "@/hooks/use-arena-sources";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -15,10 +18,12 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EnterpriseGate } from "@/components/license/license-gate";
+import { Button } from "@/components/ui/button";
 import {
   Database,
   Settings,
   Play,
+  Plus,
   CheckCircle,
   AlertCircle,
   Loader2,
@@ -152,6 +157,8 @@ function LoadingSkeleton() {
 
 function ArenaContent() {
   const { stats, recentJobs, loading, error } = useArenaStats();
+  const { sources } = useArenaSources();
+  const [jobDialogOpen, setJobDialogOpen] = useState(false);
 
   if (loading) {
     return <LoadingSkeleton />;
@@ -226,12 +233,18 @@ function ArenaContent() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Recent Jobs</h2>
-            <Link
-              href="/arena/jobs"
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              View all
-            </Link>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setJobDialogOpen(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                New Job
+              </Button>
+              <Link
+                href="/arena/jobs"
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                View all
+              </Link>
+            </div>
           </div>
           <RecentJobsTable jobs={recentJobs} />
         </div>
@@ -283,6 +296,13 @@ function ArenaContent() {
           </Link>
         </div>
       </div>
+
+      <JobDialog
+        open={jobDialogOpen}
+        onOpenChange={setJobDialogOpen}
+        sources={sources}
+        onClose={() => setJobDialogOpen(false)}
+      />
     </div>
   );
 }

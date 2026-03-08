@@ -142,7 +142,7 @@ const mockArenaJobs: ArenaJob[] = [
     spec: {
       sourceRef: { name: "support-eval-config" },
       type: "evaluation",
-      evaluation: { outputFormats: ["json", "junit"], passingThreshold: 0.8 },
+      evaluation: { outputFormats: ["json", "junit"] },
     },
     status: {
       phase: "Succeeded",
@@ -187,7 +187,7 @@ const mockArenaJobs: ArenaJob[] = [
     spec: {
       sourceRef: { name: "sales-eval-config" },
       type: "evaluation",
-      evaluation: { outputFormats: ["json"], passingThreshold: 0.75 },
+      evaluation: { outputFormats: ["json"] },
     },
     status: {
       phase: "Running",
@@ -223,7 +223,7 @@ const mockArenaJobs: ArenaJob[] = [
     spec: {
       sourceRef: { name: "support-eval-config" },
       type: "evaluation",
-      evaluation: { outputFormats: ["json"], passingThreshold: 0.9 },
+      evaluation: { outputFormats: ["json"] },
     },
     status: {
       phase: "Failed",

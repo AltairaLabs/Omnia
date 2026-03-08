@@ -18,9 +18,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
+
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 )
+
+// testLog returns a no-op logger for tests.
+func testLog() logr.Logger {
+	return logr.Discard()
+}
 
 func TestGetEnvOrDefault(t *testing.T) {
 	tests := []struct {
@@ -171,7 +178,7 @@ func TestProcessWorkItems(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := processWorkItems(ctx, cfg, q, tmpDir)
+		err := processWorkItems(ctx, testLog(), cfg, q, tmpDir)
 		if err != nil {
 			t.Fatalf("processWorkItems() with cancelled context should return nil, got %v", err)
 		}
@@ -259,7 +266,7 @@ func TestExecuteWorkItem(t *testing.T) {
 			ProviderID: "test-provider",
 		}
 
-		_, err := executeWorkItem(context.Background(), cfg, item, tmpDir)
+		_, err := executeWorkItem(context.Background(), testLog(), cfg, item, tmpDir)
 		if err == nil {
 			t.Error("executeWorkItem() should return error when arena config is missing")
 		}
@@ -338,6 +345,7 @@ func TestHandlePopError(t *testing.T) {
 
 		done, newCount, err := handlePopError(
 			context.Background(),
+			testLog(),
 			context.DeadlineExceeded, // Non-queue error
 			0,
 			10,
@@ -365,6 +373,7 @@ func TestHandlePopError(t *testing.T) {
 
 		done, newCount, err := handlePopError(
 			context.Background(),
+			testLog(),
 			queue.ErrQueueEmpty,
 			5,
 			10,
@@ -402,6 +411,7 @@ func TestHandlePopError(t *testing.T) {
 
 		done, _, err := handlePopError(
 			context.Background(),
+			testLog(),
 			queue.ErrQueueEmpty,
 			9, // At max - 1
 			10,
@@ -432,7 +442,7 @@ func TestCheckJobCompletion(t *testing.T) {
 		item, _ := q.Pop(context.Background(), jobID)
 		_ = q.Ack(context.Background(), jobID, item.ID, []byte(`{}`))
 
-		done, err := checkJobCompletion(context.Background(), q, jobID, 10)
+		done, err := checkJobCompletion(context.Background(), testLog(), q, jobID, 10)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -451,7 +461,7 @@ func TestCheckJobCompletion(t *testing.T) {
 			t.Fatalf("failed to push: %v", err)
 		}
 
-		done, err := checkJobCompletion(context.Background(), q, jobID, 10)
+		done, err := checkJobCompletion(context.Background(), testLog(), q, jobID, 10)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -477,7 +487,7 @@ func TestReportWorkItemResult(t *testing.T) {
 			DurationMs: 100,
 		}
 
-		reportWorkItemResult(context.Background(), q, jobID, item, result, nil)
+		reportWorkItemResult(context.Background(), testLog(), q, jobID, item, result, nil)
 
 		// Check progress
 		progress, _ := q.Progress(context.Background(), jobID)
@@ -501,7 +511,7 @@ func TestReportWorkItemResult(t *testing.T) {
 		item, _ := q.Pop(context.Background(), jobID)
 
 		execErr := context.DeadlineExceeded
-		reportWorkItemResult(context.Background(), q, jobID, item, nil, execErr)
+		reportWorkItemResult(context.Background(), testLog(), q, jobID, item, nil, execErr)
 
 		// Check progress - with MaxRetries=1, the item should be marked as failed
 		progress, _ := q.Progress(context.Background(), jobID)
@@ -628,6 +638,7 @@ func TestRunAggregatorProcessAssertions(t *testing.T) {
 		agg := &runAggregator{
 			passCount:  1,
 			assertions: []AssertionResult{},
+			log:        testLog(),
 		}
 
 		// Simulate PromptKit assertion results using the type from worker.go
@@ -656,6 +667,7 @@ func TestRunAggregatorProcessAssertions(t *testing.T) {
 			passCount:  1,
 			failCount:  0,
 			assertions: []AssertionResult{},
+			log:        testLog(),
 		}
 
 		// Add a failing assertion
@@ -688,7 +700,7 @@ func TestBuildExecutionResult(t *testing.T) {
 		runIDs := []string{"run-1"}
 		startTime := time.Now()
 
-		result := buildExecutionResult(mockStore, runIDs, startTime, false)
+		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime)
 
 		// Should return pass via fallback since runs exist
 		if result.Status != statusPass {
@@ -701,7 +713,7 @@ func TestBuildExecutionResult(t *testing.T) {
 		runIDs := []string{}
 		startTime := time.Now()
 
-		result := buildExecutionResult(mockStore, runIDs, startTime, false)
+		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime)
 
 		if result.Status != statusFail {
 			t.Errorf("expected status %s, got %s", statusFail, result.Status)
@@ -743,7 +755,7 @@ func TestProcessWorkItemsComplete(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 
-		err := processWorkItems(ctx, cfg, q, tmpDir)
+		err := processWorkItems(ctx, testLog(), cfg, q, tmpDir)
 		if err != nil {
 			t.Fatalf("processWorkItems() error = %v", err)
 		}
@@ -753,7 +765,7 @@ func TestProcessWorkItemsComplete(t *testing.T) {
 func TestRunAggregator(t *testing.T) {
 	t.Run("aggregator tracks pass count", func(t *testing.T) {
 		agg := &runAggregator{
-			verbose: false,
+			log: testLog(),
 		}
 
 		// Verify initial state
@@ -774,6 +786,7 @@ func TestRunAggregator(t *testing.T) {
 	t.Run("aggregator tracks errors", func(t *testing.T) {
 		agg := &runAggregator{
 			errors: []string{},
+			log:    testLog(),
 		}
 
 		agg.errors = append(agg.errors, "run-1: timeout")
@@ -786,7 +799,9 @@ func TestRunAggregator(t *testing.T) {
 	})
 
 	t.Run("aggregator tracks duration", func(t *testing.T) {
-		agg := &runAggregator{}
+		agg := &runAggregator{
+			log: testLog(),
+		}
 
 		agg.totalDuration += 100 * time.Millisecond
 		agg.totalDuration += 200 * time.Millisecond
@@ -800,7 +815,7 @@ func TestRunAggregator(t *testing.T) {
 func TestCheckContextDone(t *testing.T) {
 	t.Run("returns false when context not cancelled", func(t *testing.T) {
 		ctx := context.Background()
-		done := checkContextDone(ctx)
+		done := checkContextDone(ctx, testLog())
 		if done {
 			t.Error("expected done=false for active context")
 		}
@@ -809,7 +824,7 @@ func TestCheckContextDone(t *testing.T) {
 	t.Run("returns true when context cancelled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		done := checkContextDone(ctx)
+		done := checkContextDone(ctx, testLog())
 		if !done {
 			t.Error("expected done=true for cancelled context")
 		}

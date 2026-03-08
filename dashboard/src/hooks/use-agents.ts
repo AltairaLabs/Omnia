@@ -8,28 +8,32 @@ import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 
 interface UseAgentsOptions {
   phase?: AgentRuntimePhase;
+  /** Override workspace name (defaults to current workspace). */
+  workspaceName?: string;
 }
 
 /**
- * Fetch agents for the current workspace.
+ * Fetch agents for a workspace.
+ * Defaults to the current workspace; pass `workspaceName` to fetch from a different one.
  * The DataService handles whether to use mock data (demo mode) or real API (live mode).
  */
 export function useAgents(options: UseAgentsOptions = {}) {
   const service = useDataService();
   const { currentWorkspace } = useWorkspace();
 
-  // Extract phase for stable query key (avoid object comparison issues)
-  const { phase } = options;
+  // Extract for stable query key (avoid object comparison issues)
+  const { phase, workspaceName } = options;
+  const effectiveWorkspace = workspaceName || currentWorkspace?.name;
 
   return useQuery({
-    queryKey: ["agents", currentWorkspace?.name, phase, service.name],
+    queryKey: ["agents", effectiveWorkspace, phase, service.name],
     queryFn: async (): Promise<AgentRuntime[]> => {
-      if (!currentWorkspace) {
+      if (!effectiveWorkspace) {
         return [];
       }
 
       // DataService handles demo vs live mode internally
-      let agents = await service.getAgents(currentWorkspace.name) as unknown as AgentRuntime[];
+      let agents = await service.getAgents(effectiveWorkspace) as unknown as AgentRuntime[];
 
       // Client-side filtering for phase
       if (phase) {
@@ -38,7 +42,7 @@ export function useAgents(options: UseAgentsOptions = {}) {
 
       return agents;
     },
-    enabled: !!currentWorkspace,
+    enabled: !!effectiveWorkspace,
     // Ensure fresh data on workspace change
     staleTime: DEFAULT_STALE_TIME,
     refetchOnMount: true, // Only refetch if stale

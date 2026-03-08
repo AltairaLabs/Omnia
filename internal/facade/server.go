@@ -28,6 +28,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/time/rate"
 
 	"github.com/altairalabs/omnia/internal/media"
@@ -372,6 +374,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connCtx := logctx.WithAgent(context.Background(), agentName)
 	connCtx = logctx.WithNamespace(connCtx, namespace)
 	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
+
+	// Extract W3C trace context (traceparent/tracestate) from upgrade headers.
+	// If no traceparent header is present, the context is unchanged (no-op).
+	connCtx = otel.GetTextMapPropagator().Extract(connCtx, propagation.HeaderCarrier(r.Header))
 
 	// Store policy propagation fields for gRPC metadata forwarding
 	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{

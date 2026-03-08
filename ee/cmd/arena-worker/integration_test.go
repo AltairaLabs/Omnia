@@ -159,7 +159,7 @@ scenarios:
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := executeWorkItem(ctx, cfg, item, bundleDir)
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
 	require.NoError(t, err, "executeWorkItem should not return error")
 
 	// Verify the result
@@ -291,7 +291,7 @@ scenarios:
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := executeWorkItem(ctx, cfg, item, bundleDir)
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
 	require.NoError(t, err, "executeWorkItem should not return error even for assertion failures")
 
 	// The status should be fail due to assertion failure
@@ -426,7 +426,7 @@ scenarios:
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := executeWorkItem(ctx, cfg, item, bundleDir)
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
 	require.NoError(t, err, "executeWorkItem should not return error")
 
 	assert.NotNil(t, result)
@@ -543,7 +543,7 @@ spec:
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := executeWorkItem(ctx, cfg, item, bundleDir)
+	result, err := executeWorkItem(ctx, testLog(), cfg, item, bundleDir)
 
 	// Restore stderr and capture output
 	w.Close()
