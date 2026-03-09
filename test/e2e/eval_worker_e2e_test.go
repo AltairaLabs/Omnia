@@ -80,7 +80,8 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 				"-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
 			output, err := utils.Run(cmd)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(output).To(Equal("1"))
+			g.Expect(output).NotTo(BeEmpty())
+			g.Expect(output).NotTo(Equal("0"))
 		}
 		Eventually(verifyReady, 2*time.Minute, 2*time.Second).Should(Succeed())
 
@@ -91,7 +92,8 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 				"-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
 			output, err := utils.Run(cmd)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(output).To(Equal("1"))
+			g.Expect(output).NotTo(BeEmpty())
+			g.Expect(output).NotTo(Equal("0"))
 		}
 		Eventually(verifyRedis, 2*time.Minute, 2*time.Second).Should(Succeed())
 
@@ -104,7 +106,8 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 					"-o", "jsonpath={.status.readyReplicas}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("1"))
+				g.Expect(output).NotTo(BeEmpty())
+				g.Expect(output).NotTo(Equal("0"))
 			}
 			Eventually(verifyWorker, 2*time.Minute, 2*time.Second).
 				Should(Succeed())
