@@ -62,6 +62,9 @@ var (
 
 	// sessionApiImage is the name of the session-api image
 	sessionApiImage = "example.com/omnia-session-api:v0.0.1"
+
+	// evalWorkerImage is the name of the arena eval worker image (Enterprise)
+	evalWorkerImage = "example.com/arena-eval-worker:v0.0.1"
 )
 
 // buildResult holds the result of an image build operation
@@ -101,6 +104,7 @@ var _ = BeforeSuite(func() {
 		{"session-api", "./cmd/session-api", sessionApiImage},
 		{"arena-worker", "./ee/cmd/arena-worker", arenaWorkerImage},
 		{"arena-controller", "./ee/cmd/omnia-arena-controller", arenaControllerImage},
+		{"arena-eval-worker", "./ee/cmd/arena-eval-worker", evalWorkerImage},
 	}
 
 	projectDir, err := utils.GetProjectDir()
