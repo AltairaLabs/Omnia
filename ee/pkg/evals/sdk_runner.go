@@ -10,34 +10,47 @@ package evals
 
 import (
 	"context"
-	"encoding/json"
+	"log/slog"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
-	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // registers default eval handlers
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
-	"github.com/AltairaLabs/PromptKit/runtime/types"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
+	"github.com/AltairaLabs/PromptKit/sdk"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
-// SDKRunner wraps the PromptKit EvalRunner to execute evals via the SDK's
-// public API (RunTurnEvals / RunSessionEvals) instead of calling internals.
+// SDKRunner executes evals via the PromptKit SDK's Evaluate() function.
+// When a TracerProvider is set, the SDK emits per-eval OTel spans automatically.
 type SDKRunner struct {
-	runner *runtimeevals.EvalRunner
+	tracerProvider trace.TracerProvider
+	logger         *slog.Logger
 }
 
-// NewSDKRunner creates an SDKRunner backed by the full PromptKit eval registry.
-func NewSDKRunner() *SDKRunner {
-	registry := runtimeevals.NewEvalTypeRegistry()
-	runner := runtimeevals.NewEvalRunner(registry)
-	return &SDKRunner{runner: runner}
+// NewSDKRunner creates an SDKRunner. Options can configure tracing and logging.
+func NewSDKRunner(opts ...SDKRunnerOption) *SDKRunner {
+	r := &SDKRunner{}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
-// RunTurnEvals executes per-turn evals via the SDK pipeline.
+// SDKRunnerOption configures an SDKRunner.
+type SDKRunnerOption func(*SDKRunner)
+
+// WithTracerProvider sets the OTel tracer provider for per-eval span emission.
+func WithTracerProvider(tp trace.TracerProvider) SDKRunnerOption {
+	return func(r *SDKRunner) { r.tracerProvider = tp }
+}
+
+// WithLogger sets the logger for the SDK runner.
+func WithLogger(l *slog.Logger) SDKRunnerOption {
+	return func(r *SDKRunner) { r.logger = l }
+}
+
+// RunTurnEvals executes per-turn evals via sdk.Evaluate().
 func (s *SDKRunner) RunTurnEvals(
 	ctx context.Context,
 	defs []EvalDef,
@@ -46,20 +59,10 @@ func (s *SDKRunner) RunTurnEvals(
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 ) []api.EvaluateResultItem {
-	ctx, span := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.eval.turn",
-		trace.WithAttributes(
-			attribute.Int("arena.eval.count", len(defs)),
-			attribute.String("session.id", sessionID),
-		),
-	)
-	defer span.End()
-	sdkDefs := convertToSDKDefs(defs)
-	evalCtx := buildSDKEvalContext(messages, sessionID, turnIndex, providerSpecs)
-	results := s.runner.RunTurnEvals(ctx, sdkDefs, evalCtx)
-	return convertSDKResults(results)
+	return s.evaluate(ctx, defs, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn)
 }
 
-// RunSessionEvals executes session-complete evals via the SDK pipeline.
+// RunSessionEvals executes session-complete evals via sdk.Evaluate().
 func (s *SDKRunner) RunSessionEvals(
 	ctx context.Context,
 	defs []EvalDef,
@@ -68,16 +71,48 @@ func (s *SDKRunner) RunSessionEvals(
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 ) []api.EvaluateResultItem {
-	ctx, span := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.eval.session",
-		trace.WithAttributes(
-			attribute.Int("arena.eval.count", len(defs)),
-			attribute.String("session.id", sessionID),
-		),
-	)
-	defer span.End()
+	return s.evaluate(ctx, defs, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerOnSessionComplete)
+}
+
+// evaluate calls sdk.Evaluate() with the appropriate trigger and converts results.
+func (s *SDKRunner) evaluate(
+	ctx context.Context,
+	defs []EvalDef,
+	messages []session.Message,
+	sessionID string,
+	turnIndex int,
+	providerSpecs map[string]providers.ProviderSpec,
+	trigger runtimeevals.EvalTrigger,
+) []api.EvaluateResultItem {
 	sdkDefs := convertToSDKDefs(defs)
-	evalCtx := buildSDKEvalContext(messages, sessionID, turnIndex, providerSpecs)
-	results := s.runner.RunSessionEvals(ctx, sdkDefs, evalCtx)
+	typesMessages := ConvertToTypesMessages(messages)
+
+	opts := sdk.EvaluateOpts{
+		EvalDefs:       sdkDefs,
+		Messages:       typesMessages,
+		SessionID:      sessionID,
+		TurnIndex:      turnIndex,
+		Trigger:        trigger,
+		TracerProvider: s.tracerProvider,
+		Logger:         s.logger,
+	}
+
+	if len(providerSpecs) > 0 {
+		opts.JudgeTargets = toAnyMap(providerSpecs)
+	}
+
+	results, err := sdk.Evaluate(ctx, opts)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("sdk.Evaluate failed",
+				"sessionID", sessionID,
+				"trigger", string(trigger),
+				"error", err,
+			)
+		}
+		return nil
+	}
+
 	return convertSDKResults(results)
 }
 
@@ -107,66 +142,6 @@ func mapTrigger(trigger string) runtimeevals.EvalTrigger {
 	}
 }
 
-// buildSDKEvalContext constructs the PromptKit EvalContext from session messages.
-func buildSDKEvalContext(
-	messages []session.Message,
-	sessionID string,
-	turnIndex int,
-	providerSpecs map[string]providers.ProviderSpec,
-) *runtimeevals.EvalContext {
-	typesMessages := ConvertToTypesMessages(messages)
-
-	evalCtx := &runtimeevals.EvalContext{
-		Messages:      typesMessages,
-		SessionID:     sessionID,
-		TurnIndex:     turnIndex,
-		CurrentOutput: lastAssistantContent(typesMessages),
-	}
-
-	// Build tool call records from messages.
-	for i, msg := range typesMessages {
-		for _, tc := range msg.ToolCalls {
-			evalCtx.ToolCalls = append(evalCtx.ToolCalls, runtimeevals.ToolCallRecord{
-				TurnIndex: i,
-				ToolName:  tc.Name,
-				Arguments: parseArgsToMap(tc.Args),
-			})
-		}
-	}
-
-	// Inject provider specs for LLM judge evals.
-	if len(providerSpecs) > 0 {
-		evalCtx.Metadata = map[string]any{
-			"judge_targets": providerSpecs,
-		}
-	}
-
-	return evalCtx
-}
-
-// lastAssistantContent returns the content of the last assistant message,
-// which SDK eval handlers use as CurrentOutput.
-func lastAssistantContent(msgs []types.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" {
-			return msgs[i].Content
-		}
-	}
-	return ""
-}
-
-// parseArgsToMap converts JSON-encoded arguments to a map.
-func parseArgsToMap(raw json.RawMessage) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil
-	}
-	return m
-}
-
 // convertSDKResults converts PromptKit EvalResult to Omnia EvaluateResultItem.
 func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultItem {
 	items := make([]api.EvaluateResultItem, 0, len(results))
@@ -190,4 +165,13 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 		items = append(items, item)
 	}
 	return items
+}
+
+// toAnyMap converts a typed map to map[string]any for SDK compatibility.
+func toAnyMap(specs map[string]providers.ProviderSpec) map[string]any {
+	m := make(map[string]any, len(specs))
+	for k, v := range specs {
+		m[k] = v
+	}
+	return m
 }

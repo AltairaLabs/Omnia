@@ -5,10 +5,10 @@ go 1.25.6
 require (
 	cloud.google.com/go/kms v1.25.0
 	cloud.google.com/go/storage v1.60.0
-	github.com/AltairaLabs/PromptKit/pkg v1.3.10
-	github.com/AltairaLabs/PromptKit/runtime v1.3.10
-	github.com/AltairaLabs/PromptKit/sdk v1.3.10
-	github.com/AltairaLabs/PromptKit/tools/arena v1.3.10
+	github.com/AltairaLabs/PromptKit/pkg v1.3.11
+	github.com/AltairaLabs/PromptKit/runtime v1.3.11
+	github.com/AltairaLabs/PromptKit/sdk v1.3.11
+	github.com/AltairaLabs/PromptKit/tools/arena v1.3.11
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
@@ -82,7 +82,7 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.2 // indirect
-	github.com/AltairaLabs/PromptKit/server/a2a v1.3.10 // indirect
+	github.com/AltairaLabs/PromptKit/server/a2a v1.3.11 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/internal v1.2.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect

@@ -86,6 +86,9 @@ type WorkerConfig struct {
 	// Metrics records Prometheus metrics for the eval worker.
 	// If nil, a NoOpWorkerMetrics is used.
 	Metrics WorkerMetricsRecorder
+	// TracerProvider enables OTel tracing for eval execution.
+	// When set, the SDK emits per-eval spans with GenAI attributes.
+	TracerProvider trace.TracerProvider
 }
 
 // EvalWorker consumes session events from Redis Streams and runs evals.
@@ -110,7 +113,14 @@ type EvalWorker struct {
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
 	sdkRunner := config.SDKRunner
 	if sdkRunner == nil {
-		sdkRunner = NewSDKRunner()
+		var runnerOpts []SDKRunnerOption
+		if config.TracerProvider != nil {
+			runnerOpts = append(runnerOpts, WithTracerProvider(config.TracerProvider))
+		}
+		if config.Logger != nil {
+			runnerOpts = append(runnerOpts, WithLogger(config.Logger))
+		}
+		sdkRunner = NewSDKRunner(runnerOpts...)
 	}
 
 	msgStore := config.MessageStore
@@ -509,6 +519,14 @@ func (w *EvalWorker) getSDKRunner() *SDKRunner {
 		w.sdkRunner = NewSDKRunner()
 	}
 	return w.sdkRunner
+}
+
+// TracerProvider returns the tracer provider, if any. Exported for testing.
+func (w *EvalWorker) TracerProvider() trace.TracerProvider {
+	if w.sdkRunner != nil {
+		return w.sdkRunner.tracerProvider
+	}
+	return nil
 }
 
 // getMessageStore returns the message store, initializing from the redis client if needed.

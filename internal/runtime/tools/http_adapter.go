@@ -209,7 +209,7 @@ func (a *HTTPAdapter) Call(ctx context.Context, name string, args map[string]any
 		}
 	}
 
-	result, err := executor.ExecuteWithContext(ctx, desc, argsJSON)
+	result, err := executor.Execute(ctx, desc, argsJSON)
 	if err != nil {
 		// The SDK returns errors for non-2xx responses; convert to ToolResult
 		// so the LLM sees the error message rather than a hard failure.

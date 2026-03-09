@@ -15,6 +15,7 @@ import (
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -59,38 +60,6 @@ func TestMapTrigger(t *testing.T) {
 	}
 }
 
-func TestBuildSDKEvalContext(t *testing.T) {
-	messages := []session.Message{
-		{ID: "m1", Role: session.RoleUser, Content: "hello"},
-		{ID: "m2", Role: session.RoleAssistant, Content: "hi there"},
-	}
-
-	ctx := buildSDKEvalContext(messages, "sess-1", 1, nil)
-
-	assert.Equal(t, "sess-1", ctx.SessionID)
-	assert.Equal(t, 1, ctx.TurnIndex)
-	require.Len(t, ctx.Messages, 2)
-	assert.Equal(t, "user", ctx.Messages[0].Role)
-	assert.Equal(t, "assistant", ctx.Messages[1].Role)
-	assert.Nil(t, ctx.Metadata)
-}
-
-func TestBuildSDKEvalContext_WithProviderSpecs(t *testing.T) {
-	messages := []session.Message{
-		{ID: "m1", Role: session.RoleUser, Content: "hello"},
-	}
-
-	specs := map[string]any{"default": "spec"}
-	// We can't easily construct a real providers.ProviderSpec without the SDK,
-	// so we test that Metadata is set when providerSpecs is non-nil.
-	ctx := buildSDKEvalContext(messages, "sess-1", 0, nil)
-	assert.Nil(t, ctx.Metadata)
-
-	// With a non-empty map, metadata should be set.
-	// Use a type assertion workaround since we need the real type.
-	_ = specs
-}
-
 func TestConvertSDKResults(t *testing.T) {
 	score := 0.85
 	results := []runtimeevals.EvalResult{
@@ -120,7 +89,14 @@ func TestConvertSDKResults(t *testing.T) {
 func TestNewSDKRunner(t *testing.T) {
 	runner := NewSDKRunner()
 	require.NotNil(t, runner)
-	require.NotNil(t, runner.runner)
+	assert.Nil(t, runner.tracerProvider, "no tracer provider by default")
+}
+
+func TestNewSDKRunner_WithTracerProvider(t *testing.T) {
+	tp := noop.NewTracerProvider()
+	runner := NewSDKRunner(WithTracerProvider(tp))
+	require.NotNil(t, runner)
+	assert.Equal(t, tp, runner.tracerProvider)
 }
 
 func TestSDKRunner_RunTurnEvals_ContainsHandler(t *testing.T) {
