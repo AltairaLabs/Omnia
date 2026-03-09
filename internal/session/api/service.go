@@ -28,6 +28,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
+	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
 // Sentinel errors returned by the session service.
@@ -96,16 +97,23 @@ func NewSessionService(registry *providers.Registry, cfg ServiceConfig, log logr
 	}
 }
 
+// requestLog returns a logger enriched with trace context from ctx.
+func (s *SessionService) requestLog(ctx context.Context) logr.Logger {
+	return logctx.LoggerWithContext(s.log, ctx)
+}
+
 // GetSession retrieves a session by ID using tiered fallback: hot → warm → cold.
 func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
 	if sessionID == "" {
 		return nil, ErrMissingSessionID
 	}
 
+	log := s.requestLog(ctx)
+
 	// Try hot cache first.
 	sess, err := s.getFromHot(ctx, sessionID)
 	if err == nil {
-		s.log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "hot")
+		log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "hot")
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
@@ -113,7 +121,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try warm store.
 	sess, err = s.getFromWarm(ctx, sessionID)
 	if err == nil {
-		s.log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "warm")
+		log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "warm")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -122,7 +130,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try cold archive.
 	sess, err = s.getFromCold(ctx, sessionID)
 	if err == nil {
-		s.log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "cold")
+		log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "cold")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -139,6 +147,8 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 		return nil, ErrMissingSessionID
 	}
 
+	log := s.requestLog(ctx)
+
 	// Try hot cache for simple queries.
 	// Only trust the hot cache result if it actually contains messages;
 	// an empty list may indicate the messages key expired or was never
@@ -151,7 +161,7 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 				return msgs, nil
 			}
 			if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
-				s.log.Error(err, "hot cache GetRecentMessages failed", "sessionID", sessionID)
+				log.Error(err, "hot cache GetRecentMessages failed", "sessionID", sessionID)
 			}
 		}
 	}
@@ -164,7 +174,7 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 			return msgs, nil
 		}
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			s.log.Error(err, "warm store GetMessages failed", "sessionID", sessionID)
+			log.Error(err, "warm store GetMessages failed", "sessionID", sessionID)
 		}
 	}
 
@@ -177,7 +187,7 @@ func (s *SessionService) GetMessages(ctx context.Context, sessionID string, opts
 			return msgs, nil
 		}
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			s.log.Error(err, "cold archive GetSession failed", "sessionID", sessionID)
+			log.Error(err, "cold archive GetSession failed", "sessionID", sessionID)
 		}
 	}
 
@@ -377,10 +387,10 @@ func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Ses
 		return
 	}
 	if err := hot.SetSession(ctx, sess, s.cacheTTL); err != nil {
-		s.log.Error(err, "failed to populate hot cache", "sessionID", sess.ID)
+		s.requestLog(ctx).Error(err, "failed to populate hot cache", "sessionID", sess.ID)
 		return
 	}
-	s.log.V(2).Info("hot cache populated", "sessionID", sess.ID)
+	s.requestLog(ctx).V(2).Info("hot cache populated", "sessionID", sess.ID)
 }
 
 // pushToHotCache runs a hot-cache write operation in a bounded goroutine.

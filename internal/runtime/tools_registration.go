@@ -18,87 +18,53 @@ package runtime
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
-	"go.opentelemetry.io/otel/trace"
 
-	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
-// registerToolsWithConversation registers all available tools with a conversation.
+// registerToolsWithConversation registers the OmniaExecutor with a conversation's
+// tool registry. Pack-defined tools get their Mode updated to "omnia" so the
+// registry dispatches them to our executor. Discovered tools (MCP, OpenAPI,
+// gRPC) that are not in the pack are registered as new descriptors.
 func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Conversation) error {
 	log := logctx.LoggerWithContext(s.log, ctx)
 
-	// Get all tool descriptors from the executor
-	descriptors, err := s.toolExecutor.ListTools(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list tools: %w", err)
-	}
+	registry := conv.ToolRegistry()
 
-	// Register each tool with the conversation using a context-aware handler
-	for _, desc := range descriptors {
-		toolName := desc.Name
-		log.V(1).Info("registering tool with conversation", "tool", toolName)
+	// Register the OmniaExecutor so the registry can dispatch "omnia" mode tools.
+	registry.RegisterExecutor(s.toolExecutor)
 
-		conv.OnToolCtx(toolName, func(toolCtx context.Context, args map[string]any) (any, error) {
-			toolCtx = logctx.WithTool(toolCtx, toolName)
-			return s.executeToolForConversation(toolCtx, toolName, args)
-		})
-	}
+	toolNames := s.toolExecutor.ToolNames()
 
-	log.Info("registered tools with conversation", "count", len(descriptors))
-	return nil
-}
-
-// executeToolForConversation executes a tool call for a conversation.
-func (s *Server) executeToolForConversation(ctx context.Context, toolName string, args map[string]any) (any, error) {
-	log := logctx.LoggerWithContext(s.log, ctx)
-
-	// Start tool span if tracing is enabled
-	var span trace.Span
-	if s.tracingProvider != nil {
-		meta, _ := s.toolManager.GetToolMeta(toolName)
-		ctx, span = s.tracingProvider.StartToolSpan(ctx, toolName, tracing.ToolSpanMeta{
-			RegistryName:      meta.RegistryName,
-			RegistryNamespace: meta.RegistryNamespace,
-			HandlerName:       meta.HandlerName,
-			HandlerType:       meta.HandlerType,
-		})
-		defer span.End()
-	}
-
-	log.V(1).Info("executing tool for conversation")
-
-	// Call the tool through the manager
-	start := time.Now()
-	result, err := s.toolManager.Call(ctx, toolName, args)
-	durationMs := int(time.Since(start).Milliseconds())
-	if err != nil {
-		log.Error(err, "tool execution failed", "durationMs", durationMs)
-		if span != nil {
-			tracing.RecordError(span, err)
-		}
-		return nil, fmt.Errorf("tool execution failed: %w", err)
-	}
-
-	// Add tool result metrics to span
-	if span != nil {
-		tracing.AddToolResult(span, result.IsError, durationMs)
-		if result.IsError {
-			tracing.RecordError(span, fmt.Errorf("tool error: %v", result.Content))
+	var updated, registered int
+	for _, name := range toolNames {
+		if desc := registry.Get(name); desc != nil {
+			// Tool already exists in the pack — update its mode so the
+			// registry dispatches it through our executor instead of the
+			// default local executor.
+			desc.Mode = s.toolExecutor.Name()
+			updated++
 		} else {
-			tracing.SetSuccess(span)
+			// Tool discovered from backend (MCP, OpenAPI, gRPC ListTools)
+			// but not declared in the pack — register it.
+			for _, d := range s.toolExecutor.ToolDescriptors() {
+				if d.Name == name {
+					if err := registry.Register(d); err != nil {
+						log.Error(err, "failed to register discovered tool", "tool", name)
+					} else {
+						registered++
+					}
+					break
+				}
+			}
 		}
 	}
 
-	if result.IsError {
-		log.Info("tool returned error", "durationMs", durationMs)
-		return nil, fmt.Errorf("tool error: %v", result.Content)
-	}
-
-	log.V(1).Info("tool execution completed", "durationMs", durationMs)
-	return result.Content, nil
+	log.Info("tools registered with conversation",
+		"updated", updated,
+		"registered", registered,
+		"total", len(toolNames))
+	return nil
 }

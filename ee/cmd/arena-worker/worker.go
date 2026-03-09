@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,6 +62,16 @@ func jobNameToSpanID(jobName string) trace.SpanID {
 	var sid trace.SpanID
 	copy(sid[:], h[16:24]) // span ID is 64 bits = 8 bytes
 	return sid
+}
+
+// sessionIDToTraceID converts a UUID session ID to an OpenTelemetry trace ID.
+// This mirrors the facade's logic so the arena worker can create span links
+// that point to the session-derived trace.
+func sessionIDToTraceID(sessionID string) trace.TraceID {
+	cleaned := strings.ReplaceAll(sessionID, "-", "")
+	var tid trace.TraceID
+	_, _ = hex.Decode(tid[:], []byte(cleaned))
+	return tid
 }
 
 // maxItemTimeout is the maximum time allowed for a single work item execution.
@@ -461,7 +472,26 @@ func executeWorkItem(
 		}
 		defer func() { _ = fleetProvider.Close() }()
 
-		log.Info("fleet agent connected", "wsURL", cfg.FleetWSURL)
+		// Record a link from this arena trace to the session trace so the two
+		// can be cross-referenced in Tempo from either direction.
+		sessionTraceID := sessionIDToTraceID(fleetProvider.SessionID())
+		_, linkSpan := otel.Tracer("omnia-arena-worker").Start(ctx, "arena.fleet.session",
+			trace.WithLinks(trace.Link{
+				SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
+					TraceID:    sessionTraceID,
+					TraceFlags: trace.FlagsSampled,
+				}),
+				Attributes: []attribute.KeyValue{
+					attribute.String("link.type", "session-trace"),
+				},
+			}),
+			trace.WithAttributes(
+				attribute.String("session.id", fleetProvider.SessionID()),
+			),
+		)
+		linkSpan.End()
+
+		log.Info("fleet agent connected", "wsURL", cfg.FleetWSURL, "sessionID", fleetProvider.SessionID())
 	}
 
 	// Build registries and executors from the config

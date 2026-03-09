@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -27,10 +28,12 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
+	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
 // Handler constants.
@@ -97,6 +100,25 @@ func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) 
 // SetEvalService configures the eval service for eval result endpoints.
 func (h *Handler) SetEvalService(svc *EvalService) {
 	h.evalService = svc
+}
+
+// TraceLogMiddleware extracts the OTel trace ID from the request's span context
+// and injects it into logctx so that downstream handlers can produce logs
+// correlated with the active trace (trace_id field in JSON output).
+func TraceLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+			ctx = logctx.WithTraceID(ctx, sc.TraceID().String())
+			r = r.WithContext(ctx)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requestLog returns a logger enriched with trace and request context from ctx.
+func (h *Handler) requestLog(ctx context.Context) logr.Logger {
+	return logctx.LoggerWithContext(h.log, ctx)
 }
 
 // Request types for write endpoints.
@@ -220,7 +242,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
 	page, err := h.service.ListSessions(ctx, opts)
 	if err != nil {
-		h.log.Error(err, "ListSessions failed")
+		h.requestLog(r.Context()).Error(err, "ListSessions failed")
 		writeError(w, err)
 		return
 	}
@@ -258,7 +280,7 @@ func (h *Handler) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
 	page, err := h.service.SearchSessions(ctx, q, opts)
 	if err != nil {
-		h.log.Error(err, "SearchSessions failed")
+		h.requestLog(r.Context()).Error(err, "SearchSessions failed")
 		writeError(w, err)
 		return
 	}
@@ -279,10 +301,11 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	log := h.requestLog(r.Context())
 	sess, err := h.service.GetSession(ctx, sessionID)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.log.Error(err, "GetSession failed", "sessionID", sessionID)
+			log.Error(err, "GetSession failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
@@ -293,7 +316,7 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		Limit: defaultMessageLimit,
 	})
 	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
-		h.log.Error(err, "GetMessages failed", "sessionID", sessionID)
+		log.Error(err, "GetMessages failed", "sessionID", sessionID)
 	}
 	msgs := make([]session.Message, 0, len(msgPtrs))
 	for _, m := range msgPtrs {
@@ -328,7 +351,7 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	msgs, err := h.service.GetMessages(ctx, sessionID, opts)
 	if err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.log.Error(err, "GetMessages failed", "sessionID", sessionID)
+			h.requestLog(r.Context()).Error(err, "GetMessages failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
@@ -388,13 +411,14 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	log := h.requestLog(r.Context())
 	if err := h.service.CreateSession(ctx, sess); err != nil {
-		h.log.Error(err, "CreateSession failed")
+		log.Error(err, "CreateSession failed")
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(1).Info("session created", "sessionID", sess.ID, "agent", req.AgentName, "namespace", req.Namespace)
+	log.V(1).Info("session created", "sessionID", sess.ID, "agent", req.AgentName, "namespace", req.Namespace)
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(SessionResponse{Session: sess})
@@ -419,15 +443,16 @@ func (h *Handler) handleAppendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log := h.requestLog(r.Context())
 	if err := h.service.AppendMessage(r.Context(), sessionID, &msg); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.log.Error(err, "AppendMessage failed", "sessionID", sessionID)
+			log.Error(err, "AppendMessage failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(2).Info("message appended", "sessionID", sessionID, "role", msg.Role)
+	log.V(2).Info("message appended", "sessionID", sessionID, "role", msg.Role)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -450,15 +475,16 @@ func (h *Handler) handleUpdateStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log := h.requestLog(r.Context())
 	if err := h.service.UpdateSessionStats(r.Context(), sessionID, update); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.log.Error(err, "UpdateSessionStats failed", "sessionID", sessionID)
+			log.Error(err, "UpdateSessionStats failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(2).Info("session stats updated", "sessionID", sessionID)
+	log.V(2).Info("session stats updated", "sessionID", sessionID)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -481,16 +507,17 @@ func (h *Handler) handleRefreshTTL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log := h.requestLog(r.Context())
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 	if err := h.service.RefreshTTL(r.Context(), sessionID, ttl); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.log.Error(err, "RefreshTTL failed", "sessionID", sessionID)
+			log.Error(err, "RefreshTTL failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(2).Info("session TTL refreshed", "sessionID", sessionID, "ttlSeconds", req.TTLSeconds)
+	log.V(2).Info("session TTL refreshed", "sessionID", sessionID, "ttlSeconds", req.TTLSeconds)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -503,15 +530,16 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := withRequestContext(r.Context(), extractRequestContext(r))
+	log := h.requestLog(r.Context())
 	if err := h.service.DeleteSession(ctx, sessionID); err != nil {
 		if !errors.Is(err, session.ErrSessionNotFound) {
-			h.log.Error(err, "DeleteSession failed", "sessionID", sessionID)
+			log.Error(err, "DeleteSession failed", "sessionID", sessionID)
 		}
 		writeError(w, err)
 		return
 	}
 
-	h.log.V(1).Info("session deleted", "sessionID", sessionID)
+	log.V(1).Info("session deleted", "sessionID", sessionID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

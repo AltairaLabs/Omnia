@@ -138,3 +138,13 @@ const ToolTypeMCP = "mcp"
 
 // ToolTypeOpenAPI is the OpenAPI tool type.
 const ToolTypeOpenAPI = "openapi"
+
+// MCPTransportType defines the transport type for MCP connections.
+type MCPTransportType string
+
+const (
+	// MCPTransportSSE indicates connection via Server-Sent Events.
+	MCPTransportSSE MCPTransportType = "sse"
+	// MCPTransportStdio indicates connection via subprocess stdin/stdout.
+	MCPTransportStdio MCPTransportType = "stdio"
+)

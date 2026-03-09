@@ -431,7 +431,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	}
 	log.V(1).Info("rate limiter initialized", "rps", rlCfg.RPS, "burst", rlCfg.Burst)
 
-	traced := otelhttp.NewHandler(mux, "session-api",
+	traced := otelhttp.NewHandler(api.TraceLogMiddleware(mux), "session-api",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			return r.URL.Path != "/healthz"
 		}),

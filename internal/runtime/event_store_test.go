@@ -248,6 +248,76 @@ func TestOmniaEventStore_AppendToolCallCompleted(t *testing.T) {
 	}
 }
 
+func TestOmniaEventStore_ToolCallCompletedWithResultBody(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventToolCallCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ToolCallCompletedData{
+			ToolName: "calculate",
+			CallID:   "call-456",
+			Status:   "complete",
+			Duration: 200 * time.Millisecond,
+			Parts:    []types.ContentPart{types.NewTextPart("91")},
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	var content map[string]interface{}
+	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
+		t.Fatalf("failed to unmarshal content: %v", err)
+	}
+
+	if content["result"] != "91" {
+		t.Errorf("expected result=91, got %v", content["result"])
+	}
+	if content["toolName"] != "calculate" {
+		t.Errorf("expected toolName=calculate, got %v", content["toolName"])
+	}
+}
+
+func TestOmniaEventStore_ToolCallCompletedWithoutParts(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+
+	event := &events.Event{
+		Type:      events.EventToolCallCompleted,
+		SessionID: "test-session",
+		Timestamp: time.Now(),
+		Data: &events.ToolCallCompletedData{
+			ToolName: "search",
+			CallID:   "call-789",
+			Status:   "complete",
+			Duration: 100 * time.Millisecond,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+
+	var content map[string]interface{}
+	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
+		t.Fatalf("failed to unmarshal content: %v", err)
+	}
+
+	if _, exists := content["result"]; exists {
+		t.Errorf("expected no result key when Parts is empty, got %v", content["result"])
+	}
+}
+
 func TestOmniaEventStore_AppendToolCallFailed(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())

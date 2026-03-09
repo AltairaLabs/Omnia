@@ -31,6 +31,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
@@ -476,12 +477,19 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (session
 		return session.Message{}, session.SessionStatsUpdate{}, false
 	}
 
-	content, _ := json.Marshal(map[string]interface{}{
+	// Extract tool result content from Parts (text parts survive MetadataOnlyParts).
+	resultBody := textFromParts(data.Parts)
+
+	payload := map[string]interface{}{
 		"toolName":   data.ToolName,
 		"callID":     data.CallID,
 		"status":     data.Status,
 		"durationMs": data.Duration.Milliseconds(),
-	})
+	}
+	if resultBody != "" {
+		payload["result"] = resultBody
+	}
+	content, _ := json.Marshal(payload)
 
 	metadata := map[string]string{
 		metaKeyType:       "tool_call_completed",
@@ -745,38 +753,41 @@ func (s *OmniaEventStore) writeMessage(traceCtx context.Context, sessionID strin
 
 	ctx, cancel := context.WithTimeout(traceCtx, writeTimeout)
 	defer cancel()
+	log := logctx.LoggerWithContext(s.log, traceCtx)
 	msgType := msg.Metadata[metaKeyType]
 
-	s.log.V(1).Info("writing event to session-api",
+	log.V(1).Info("writing event to session-api",
 		"sessionID", sessionID, "messageType", msgType, "messageID", msg.ID)
 
 	if err := s.sessionStore.AppendMessage(ctx, sessionID, msg); err != nil {
-		s.log.Error(err, "failed to append event message",
+		log.Error(err, "failed to append event message",
 			"sessionID", sessionID,
 			"messageType", msgType)
 		return
 	}
 
 	if err := s.sessionStore.UpdateSessionStats(ctx, sessionID, stats); err != nil {
-		s.log.Error(err, "failed to update session stats",
+		log.Error(err, "failed to update session stats",
 			"sessionID", sessionID,
 			"messageType", msgType)
 		return
 	}
 
-	s.log.V(1).Info("event written to session-api",
+	log.V(1).Info("event written to session-api",
 		"sessionID", sessionID, "messageType", msgType)
 }
 
-// detachedTraceContext returns a background context carrying only the span
-// context from ctx. This preserves trace propagation for async writes
-// without inheriting the parent's cancellation or deadline.
+// detachedTraceContext returns a background context carrying the span context
+// and logctx trace_id from ctx. This preserves trace propagation and log
+// correlation for async writes without inheriting cancellation or deadline.
 func detachedTraceContext(ctx context.Context) context.Context {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
 		return context.Background()
 	}
-	return trace.ContextWithSpanContext(context.Background(), sc)
+	bg := trace.ContextWithSpanContext(context.Background(), sc)
+	bg = logctx.WithTraceID(bg, sc.TraceID().String())
+	return bg
 }
 
 // Verify interface compliance at compile time.

@@ -919,6 +919,25 @@ func TestJobNameToSpanID(t *testing.T) {
 	})
 }
 
+func TestSessionIDToTraceID(t *testing.T) {
+	t.Run("matches facade logic", func(t *testing.T) {
+		// UUID "aabbccdd-1122-3344-5566-778899aabbcc" should map to trace ID aabbccdd112233445566778899aabbcc
+		tid := sessionIDToTraceID("aabbccdd-1122-3344-5566-778899aabbcc")
+		assert.Equal(t, "aabbccdd112233445566778899aabbcc", tid.String())
+	})
+
+	t.Run("produces valid trace ID", func(t *testing.T) {
+		tid := sessionIDToTraceID("550e8400-e29b-41d4-a716-446655440000")
+		assert.True(t, tid.IsValid(), "should produce a valid (non-zero) trace ID")
+	})
+
+	t.Run("deterministic", func(t *testing.T) {
+		id1 := sessionIDToTraceID("550e8400-e29b-41d4-a716-446655440000")
+		id2 := sessionIDToTraceID("550e8400-e29b-41d4-a716-446655440000")
+		assert.Equal(t, id1, id2)
+	})
+}
+
 func TestProcessWorkItemsTracing(t *testing.T) {
 	t.Run("root span parents work-item spans", func(t *testing.T) {
 		// Set up in-memory exporter to capture spans.

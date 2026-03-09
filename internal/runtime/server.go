@@ -69,8 +69,7 @@ type Server struct {
 	mu                sync.RWMutex
 
 	// Tool management
-	toolManager      *tools.Manager
-	toolExecutor     *tools.ManagerExecutor
+	toolExecutor     *tools.OmniaExecutor
 	toolsConfigPath  string
 	toolsInitialized bool
 
@@ -311,7 +310,7 @@ func NewServer(opts ...ServerOption) *Server {
 	return s
 }
 
-// InitializeTools loads and connects tool adapters from the config file.
+// InitializeTools loads and connects tool backends from the config file.
 // This should be called before handling any conversations.
 func (s *Server) InitializeTools(ctx context.Context) error {
 	if s.toolsConfigPath == "" {
@@ -321,36 +320,31 @@ func (s *Server) InitializeTools(ctx context.Context) error {
 
 	s.log.Info("initializing tools", "configPath", s.toolsConfigPath)
 
-	// Create tool manager
-	s.toolManager = tools.NewManager(s.log.WithName("tools"))
+	executor := tools.NewOmniaExecutor(s.log, s.tracingProvider)
 
-	// Load configuration
-	if err := s.toolManager.LoadFromConfig(s.toolsConfigPath); err != nil {
+	if err := executor.LoadConfig(s.toolsConfigPath); err != nil {
 		return fmt.Errorf("failed to load tools config: %w", err)
 	}
 
-	// Connect all adapters
-	if err := s.toolManager.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect tool adapters: %w", err)
+	if err := executor.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize tool backends: %w", err)
 	}
 
-	// Create the executor for PromptKit integration
-	s.toolExecutor = tools.NewManagerExecutor(s.toolManager, s.log)
-
+	s.toolExecutor = executor
 	s.toolsInitialized = true
 	s.log.Info("tools initialized successfully",
-		"toolCount", len(s.toolManager.ListTools()))
+		"toolCount", len(executor.ToolNames()))
 
 	return nil
 }
 
-// SetToolRegistryInfo populates registry/handler metadata on the tool manager.
+// SetToolRegistryInfo populates registry/handler metadata on the tool executor.
 // This must be called after InitializeTools and before handling conversations.
 func (s *Server) SetToolRegistryInfo(registryName, registryNamespace string, handlers []tools.HandlerEntry) {
-	if s.toolManager == nil {
+	if s.toolExecutor == nil {
 		return
 	}
-	s.toolManager.SetRegistryInfo(registryName, registryNamespace, handlers)
+	s.toolExecutor.SetRegistryInfo(registryName, registryNamespace, handlers)
 }
 
 // SetHealthy sets the server health status.
@@ -461,12 +455,11 @@ func (s *Server) Close() error {
 	s.turnIndices = make(map[string]int)
 	s.unsubscribeFns = make(map[string][]func())
 
-	// Close tool manager
-	if s.toolManager != nil {
-		if err := s.toolManager.Close(); err != nil {
-			s.log.Error(err, "failed to close tool manager")
+	// Close tool executor
+	if s.toolExecutor != nil {
+		if err := s.toolExecutor.Close(); err != nil {
+			s.log.Error(err, "failed to close tool executor")
 		}
-		s.toolManager = nil
 		s.toolExecutor = nil
 		s.toolsInitialized = false
 	}
