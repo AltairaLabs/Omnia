@@ -3,10 +3,10 @@
 import { use, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText, MessageSquare, Activity } from "lucide-react";
+import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel } from "@/components/agents";
+import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab } from "@/components/agents";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { useDataService } from "@/lib/data";
@@ -130,6 +130,10 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
             <TabsTrigger value="metrics" className="gap-1.5">
               <Activity className="h-4 w-4" />
               Metrics
+            </TabsTrigger>
+            <TabsTrigger value="quality" className="gap-1.5">
+              <ShieldCheck className="h-4 w-4" />
+              Quality
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
@@ -388,6 +392,10 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               agentName={metadata.name}
               namespace={metadata.namespace || "default"}
             />
+          </TabsContent>
+
+          <TabsContent value="quality" className="mt-4">
+            <AgentQualityTab agentName={metadata.name} />
           </TabsContent>
 
           <TabsContent value="config" className="mt-4">

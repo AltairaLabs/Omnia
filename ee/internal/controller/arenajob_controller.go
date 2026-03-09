@@ -1124,9 +1124,12 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		log.Info("setting worker ServiceAccountName for workload identity", "serviceAccount", saName)
 	}
 
-	// Set TTL if specified
+	// Set TTL for automatic cleanup after completion (default: 1 hour)
 	if arenaJob.Spec.TTLSecondsAfterFinished != nil {
 		job.Spec.TTLSecondsAfterFinished = arenaJob.Spec.TTLSecondsAfterFinished
+	} else {
+		defaultTTL := int32(3600)
+		job.Spec.TTLSecondsAfterFinished = &defaultTTL
 	}
 
 	// Set owner reference
