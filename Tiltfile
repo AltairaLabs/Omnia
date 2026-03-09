@@ -1065,3 +1065,18 @@ local_resource(
     trigger_mode=TRIGGER_MODE_MANUAL,
     resource_deps=['omnia-controller-manager'],
 )
+
+# Tool calling e2e tests — runs against pre-deployed demo agents with Ollama.
+# Requires ENABLE_DEMO=true. Tests real tool execution (calculate, weather) via llama3.2.
+if ENABLE_DEMO:
+    _tool_e2e_env = dict(_e2e_env)
+    _tool_e2e_env['ENABLE_TOOL_CALLING_E2E'] = 'true'
+    _tool_e2e_cmd = 'kubectl config use-context %s && ' % k8s_context() + ' '.join(['%s=%s' % (k, v) for k, v in _tool_e2e_env.items()])
+    local_resource(
+        'e2e-tests-tool-calling',
+        cmd=_tool_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -ginkgo.label-filter=tool-calling -timeout 15m',
+        labels=['test'],
+        auto_init=False,
+        trigger_mode=TRIGGER_MODE_MANUAL,
+        resource_deps=['omnia-controller-manager', 'omnia-demos'],
+    )

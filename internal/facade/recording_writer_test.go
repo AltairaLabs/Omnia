@@ -171,7 +171,7 @@ func TestRecordingWriter_WriteDone(t *testing.T) {
 	}
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	if err := rw.WriteDone("Hello from assistant"); err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestRecordingWriter_WriteDoneWithUsage(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	rw.ReportUsage(&UsageInfo{
 		InputTokens:  100,
@@ -267,7 +267,7 @@ func TestRecordingWriter_WriteDoneWithParts(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	parts := []ContentPart{
 		{Type: ContentPartTypeText, Text: "Hello from parts"},
@@ -304,7 +304,7 @@ func TestRecordingWriter_WriteToolCall(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	tc := &ToolCallInfo{
 		ID:   "tc-1",
@@ -358,7 +358,7 @@ func TestRecordingWriter_WriteToolResult(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	result := &ToolResultInfo{
 		ID:     "tc-1",
@@ -395,7 +395,7 @@ func TestRecordingWriter_WriteToolResult_Error(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	result := &ToolResultInfo{
 		ID:    "tc-1",
@@ -429,7 +429,7 @@ func TestRecordingWriter_WriteError(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	if err := rw.WriteError("INTERNAL_ERROR", "something went wrong"); err != nil {
 		t.Fatal(err)
@@ -475,7 +475,7 @@ func TestRecordingWriter_WriteError_SetsEndedAt(t *testing.T) {
 	before := time.Now()
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	if err := rw.WriteError("INTERNAL_ERROR", "boom"); err != nil {
 		t.Fatal(err)
@@ -505,7 +505,7 @@ func TestRecordingWriter_StoreFailure_GracefulDegradation(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	// Close the store to make it fail
 	_ = store.Close()
@@ -534,7 +534,7 @@ func TestRecordingWriter_PassThrough(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{supportsBinary: true}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	// WriteChunk -- pass-through, no recording
 	if err := rw.WriteChunk("chunk data"); err != nil {
@@ -592,7 +592,7 @@ func TestRecordingWriter_Latency(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	// Wait a bit to have measurable latency
 	time.Sleep(10 * time.Millisecond)
@@ -628,7 +628,7 @@ func TestRecordingWriter_ReportUsage(t *testing.T) {
 	})
 
 	inner := &mockResponseWriter{}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	// Verify UsageReporter interface
 	var reporter UsageReporter = rw
@@ -668,7 +668,7 @@ func TestRecordingWriter_InnerWriteError_Propagated(t *testing.T) {
 
 	writeErr := errors.New("connection closed")
 	inner := &mockResponseWriter{writeErr: writeErr}
-	rw := newRecordingWriter(inner, store, sess.ID, logr.Discard(), nil)
+	rw := newRecordingWriter(context.Background(), inner, store, sess.ID, logr.Discard(), nil)
 
 	// Inner write errors should be propagated
 	if err := rw.WriteDone("test"); err == nil {

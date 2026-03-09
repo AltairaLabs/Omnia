@@ -32,6 +32,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
@@ -595,4 +596,66 @@ func TestLookupSessionMetadata_Success(t *testing.T) {
 	sess := svc.lookupSessionMetadata(context.Background(), "s1")
 	assert.Equal(t, "s1", sess.ID)
 	assert.Equal(t, "agent", sess.AgentName)
+}
+
+// --- FormatTraceparent / ParseTraceparent tests ---
+
+func TestFormatTraceparent_NoSpan(t *testing.T) {
+	assert.Equal(t, "", FormatTraceparent(context.Background()))
+}
+
+func TestFormatTraceparent_WithSpan(t *testing.T) {
+	traceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	spanID, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	got := FormatTraceparent(ctx)
+	assert.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", got)
+}
+
+func TestParseTraceparent_Empty(t *testing.T) {
+	sc := ParseTraceparent("")
+	assert.False(t, sc.IsValid())
+}
+
+func TestParseTraceparent_Invalid(t *testing.T) {
+	sc := ParseTraceparent("not-a-traceparent")
+	assert.False(t, sc.IsValid())
+}
+
+func TestParseTraceparent_Valid(t *testing.T) {
+	sc := ParseTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	assert.True(t, sc.IsValid())
+	assert.True(t, sc.IsSampled())
+	assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", sc.TraceID().String())
+	assert.Equal(t, "00f067aa0ba902b7", sc.SpanID().String())
+	assert.True(t, sc.IsRemote())
+}
+
+func TestParseTraceparent_NotSampled(t *testing.T) {
+	sc := ParseTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
+	assert.True(t, sc.IsValid())
+	assert.False(t, sc.IsSampled())
+}
+
+func TestFormatAndParseTraceparent_Roundtrip(t *testing.T) {
+	traceID, _ := trace.TraceIDFromHex("abcdef1234567890abcdef1234567890")
+	spanID, _ := trace.SpanIDFromHex("1234567890abcdef")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	tp := FormatTraceparent(ctx)
+	parsed := ParseTraceparent(tp)
+	assert.Equal(t, sc.TraceID(), parsed.TraceID())
+	assert.Equal(t, sc.SpanID(), parsed.SpanID())
+	assert.Equal(t, sc.TraceFlags(), parsed.TraceFlags())
 }

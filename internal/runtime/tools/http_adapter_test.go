@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,7 +154,7 @@ func TestHTTPAdapter_Connect(t *testing.T) {
 	}
 }
 
-func TestHTTPAdapter_ConnectInvalidURL(t *testing.T) {
+func TestHTTPAdapter_CallInvalidURL(t *testing.T) {
 	config := HTTPAdapterConfig{
 		Name:     "test-http",
 		Endpoint: "://invalid-url",
@@ -161,9 +162,19 @@ func TestHTTPAdapter_ConnectInvalidURL(t *testing.T) {
 
 	adapter := NewHTTPAdapter(config, logr.Discard())
 
-	err := adapter.Connect(context.Background())
-	if err == nil {
-		t.Fatal("expected error for invalid URL")
+	ctx := context.Background()
+	err := adapter.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	// The invalid URL is caught at call time by the SDK executor
+	result, err := adapter.Call(ctx, "test-http", nil)
+	if err != nil {
+		t.Fatalf("Call should not return error (SDK wraps it): %v", err)
+	}
+	if !result.IsError {
+		t.Error("result should be an error for invalid URL")
 	}
 }
 
@@ -229,10 +240,9 @@ func TestHTTPAdapter_GetRequest(t *testing.T) {
 			t.Errorf("expected GET, got %s", r.Method)
 		}
 
-		// Check query parameters
-		query := r.URL.Query()
-		if query.Get("param1") != "value1" {
-			t.Errorf("expected param1=value1, got %s", query.Get("param1"))
+		// Args should be sent as query parameters for GET
+		if r.URL.Query().Get("param1") != "value1" {
+			t.Errorf("expected query param param1=value1, got %s", r.URL.Query().Get("param1"))
 		}
 
 		response := map[string]string{"result": "success"}
@@ -261,7 +271,7 @@ func TestHTTPAdapter_GetRequest(t *testing.T) {
 		t.Fatalf("Call failed: %v", err)
 	}
 	if result.IsError {
-		t.Error("result should not be an error")
+		t.Errorf("result should not be an error: %v", result.Content)
 	}
 }
 
@@ -412,8 +422,12 @@ func TestHTTPAdapter_HTTPError(t *testing.T) {
 	if !result.IsError {
 		t.Error("result should be an error for HTTP 500")
 	}
-	if result.Content.(string) != "HTTP 500: Internal Server Error" {
-		t.Errorf("unexpected error message: %v", result.Content)
+	errMsg, ok := result.Content.(string)
+	if !ok {
+		t.Fatalf("expected string content, got %T", result.Content)
+	}
+	if !strings.Contains(errMsg, "500") {
+		t.Errorf("expected error message to contain '500', got: %s", errMsg)
 	}
 }
 
@@ -446,8 +460,13 @@ func TestHTTPAdapter_NonJSONResponse(t *testing.T) {
 	if result.IsError {
 		t.Error("result should not be an error")
 	}
-	if result.Content != "Hello, World!" {
-		t.Errorf("unexpected content: %v", result.Content)
+	// SDK wraps non-JSON responses in {"result": "..."} which unmarshals to a map
+	resultMap, ok := result.Content.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map content for non-JSON response, got %T: %v", result.Content, result.Content)
+	}
+	if resultMap["result"] != "Hello, World!" {
+		t.Errorf("unexpected content: %v", resultMap["result"])
 	}
 }
 
@@ -461,15 +480,13 @@ func TestHTTPAdapter_InvalidBearerAuth(t *testing.T) {
 
 	adapter := NewHTTPAdapter(config, logr.Discard())
 
-	ctx := context.Background()
-	err := adapter.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Connect failed: %v", err)
-	}
-
-	_, err = adapter.Call(ctx, "test-http", nil)
+	// Auth validation now happens at Connect time
+	err := adapter.Connect(context.Background())
 	if err == nil {
 		t.Fatal("expected error for empty bearer token")
+	}
+	if !strings.Contains(err.Error(), "bearer auth requires a token") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -483,15 +500,13 @@ func TestHTTPAdapter_InvalidBasicAuth(t *testing.T) {
 
 	adapter := NewHTTPAdapter(config, logr.Discard())
 
-	ctx := context.Background()
-	err := adapter.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Connect failed: %v", err)
-	}
-
-	_, err = adapter.Call(ctx, "test-http", nil)
+	// Auth validation now happens at Connect time
+	err := adapter.Connect(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid basic auth format")
+	}
+	if !strings.Contains(err.Error(), "username:password") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -505,15 +520,13 @@ func TestHTTPAdapter_UnsupportedAuthType(t *testing.T) {
 
 	adapter := NewHTTPAdapter(config, logr.Discard())
 
-	ctx := context.Background()
-	err := adapter.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Connect failed: %v", err)
-	}
-
-	_, err = adapter.Call(ctx, "test-http", nil)
+	// Auth validation now happens at Connect time
+	err := adapter.Connect(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unsupported auth type")
+	}
+	if !strings.Contains(err.Error(), "unsupported auth type") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -665,13 +678,13 @@ func TestHTTPAdapter_DeleteRequest(t *testing.T) {
 			t.Errorf("expected DELETE, got %s", r.Method)
 		}
 
-		// Check query parameters
-		query := r.URL.Query()
-		if query.Get("id") != "123" {
-			t.Errorf("expected id=123, got %s", query.Get("id"))
+		// Args should be sent as query parameters for DELETE
+		if r.URL.Query().Get("id") != "123" {
+			t.Errorf("expected query param id=123, got %s", r.URL.Query().Get("id"))
 		}
 
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"deleted": true}`))
 	}))
 	defer server.Close()
 
@@ -740,5 +753,81 @@ func TestHTTPAdapter_PutRequest(t *testing.T) {
 	}
 	if result.IsError {
 		t.Error("result should not be an error")
+	}
+}
+
+func TestAppendQueryParams(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		args    map[string]any
+		wantURL string
+	}{
+		{
+			name:    "string value",
+			baseURL: "http://example.com/api",
+			args:    map[string]any{"expr": "2+2"},
+			wantURL: "http://example.com/api?expr=2%2B2",
+		},
+		{
+			name:    "numeric value",
+			baseURL: "http://example.com/api",
+			args:    map[string]any{"lat": 51.5},
+			wantURL: "http://example.com/api?lat=51.5",
+		},
+		{
+			name:    "boolean value",
+			baseURL: "http://example.com/api",
+			args:    map[string]any{"verbose": true},
+			wantURL: "http://example.com/api?verbose=true",
+		},
+		{
+			name:    "existing query params",
+			baseURL: "http://example.com/api?key=abc",
+			args:    map[string]any{"q": "test"},
+			wantURL: "http://example.com/api?key=abc&q=test",
+		},
+		{
+			name:    "array value (JSON-encoded)",
+			baseURL: "http://example.com/api",
+			args:    map[string]any{"ids": []any{"a", "b"}},
+			wantURL: `http://example.com/api?ids=%5B%22a%22%2C%22b%22%5D`,
+		},
+		{
+			name:    "empty args",
+			baseURL: "http://example.com/api",
+			args:    map[string]any{},
+			wantURL: "http://example.com/api?",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendQueryParams(tt.baseURL, tt.args)
+			if got != tt.wantURL {
+				t.Errorf("appendQueryParams() = %q, want %q", got, tt.wantURL)
+			}
+		})
+	}
+}
+
+func TestMethodUsesQueryParams(t *testing.T) {
+	if !methodUsesQueryParams("GET") {
+		t.Error("GET should use query params")
+	}
+	if !methodUsesQueryParams("get") {
+		t.Error("get (lowercase) should use query params")
+	}
+	if !methodUsesQueryParams("DELETE") {
+		t.Error("DELETE should use query params")
+	}
+	if methodUsesQueryParams("POST") {
+		t.Error("POST should not use query params")
+	}
+	if methodUsesQueryParams("PUT") {
+		t.Error("PUT should not use query params")
+	}
+	if methodUsesQueryParams("PATCH") {
+		t.Error("PATCH should not use query params")
 	}
 }

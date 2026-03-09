@@ -19,6 +19,9 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -304,6 +307,10 @@ func (w *EvalWorker) handleMessage(ctx context.Context, streamKey string, msg go
 		return
 	}
 
+	// Restore trace context from the event's traceparent so spans are nested
+	// under the originating session trace.
+	ctx = restoreTraceContext(ctx, event)
+
 	w.getMetrics().RecordEventReceived(event.EventType)
 
 	if err := w.processEvent(ctx, event); err != nil {
@@ -332,6 +339,14 @@ func (w *EvalWorker) getTracker() *CompletionTracker {
 
 // processEvent handles a single session event.
 func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) error {
+	ctx, span := otel.Tracer("omnia-eval-worker").Start(ctx, "eval.process-event",
+		trace.WithAttributes(
+			attribute.String("session.id", event.SessionID),
+			attribute.String("event.type", event.EventType),
+		),
+	)
+	defer span.End()
+
 	if isSessionCompletedEvent(event) {
 		w.getTracker().MarkCompleted(ctx, event.SessionID)
 		return nil
@@ -638,6 +653,17 @@ func hostname() string {
 		return "unknown"
 	}
 	return h
+}
+
+// restoreTraceContext extracts the W3C traceparent from the event and sets it as
+// the remote span context on the returned context. If no valid traceparent is
+// present, the context is returned unchanged.
+func restoreTraceContext(ctx context.Context, event api.SessionEvent) context.Context {
+	sc := api.ParseTraceparent(event.Traceparent)
+	if !sc.IsValid() {
+		return ctx
+	}
+	return trace.ContextWithRemoteSpanContext(ctx, sc)
 }
 
 // resolveEvalTiers determines which eval tiers should run for the given event's session.

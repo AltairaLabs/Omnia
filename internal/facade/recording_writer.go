@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -56,11 +57,14 @@ type recordingResponseWriter struct {
 	log       logr.Logger
 	startTime time.Time
 	usage     *UsageInfo
+	traceCtx  context.Context // carries span context for trace propagation (not cancellation)
 }
 
 // newRecordingWriter creates a recordingResponseWriter that wraps inner.
+// The ctx parameter provides the span context for distributed trace
+// propagation — recording tasks will appear as children of the message span.
 // If pool is nil, recording tasks are run inline (test/fallback mode).
-func newRecordingWriter(inner ResponseWriter, store session.Store, sessionID string, log logr.Logger, pool *RecordingPool) *recordingResponseWriter {
+func newRecordingWriter(ctx context.Context, inner ResponseWriter, store session.Store, sessionID string, log logr.Logger, pool *RecordingPool) *recordingResponseWriter {
 	return &recordingResponseWriter{
 		inner:     inner,
 		store:     store,
@@ -68,7 +72,19 @@ func newRecordingWriter(inner ResponseWriter, store session.Store, sessionID str
 		sessionID: sessionID,
 		log:       log.WithName("recording-writer"),
 		startTime: time.Now(),
+		traceCtx:  detachedTraceContext(ctx),
 	}
+}
+
+// detachedTraceContext returns a background context carrying only the span
+// context from ctx. This preserves trace propagation for async recording
+// tasks without inheriting the parent's cancellation or deadline.
+func detachedTraceContext(ctx context.Context) context.Context {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return context.Background()
+	}
+	return trace.ContextWithSpanContext(context.Background(), sc)
 }
 
 // submit sends a recording task to the pool, or runs it inline if no pool.
@@ -135,7 +151,7 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 				"type": "tool_call",
 			},
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		ctx, cancel := context.WithTimeout(w.traceCtx, storeTimeout)
 		defer cancel()
 		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record tool call")
@@ -185,7 +201,7 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 			Timestamp:  time.Now(),
 			Metadata:   metadata,
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		ctx, cancel := context.WithTimeout(w.traceCtx, storeTimeout)
 		defer cancel()
 		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record tool result")
@@ -215,7 +231,7 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 				"type": "error",
 			},
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		ctx, cancel := context.WithTimeout(w.traceCtx, storeTimeout)
 		defer cancel()
 		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record error message")
@@ -285,7 +301,7 @@ func (w *recordingResponseWriter) recordDone(content string) {
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+		ctx, cancel := context.WithTimeout(w.traceCtx, storeTimeout)
 		defer cancel()
 		if storeErr := w.store.AppendMessage(ctx, w.sessionID, msg); storeErr != nil {
 			w.log.Error(storeErr, "failed to record assistant message")

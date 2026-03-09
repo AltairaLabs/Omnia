@@ -249,19 +249,9 @@ func TestProcessMessage_WithParentTraceContext(t *testing.T) {
 		t.Fatal("expected 'omnia.facade.message' span to be recorded")
 	}
 
-	// Verify the span uses the caller's trace ID (not the session-derived one)
-	if msgSpan.SpanContext.TraceID() != parentTraceID {
-		t.Errorf("trace ID = %s, want %s (from traceparent)",
-			msgSpan.SpanContext.TraceID(), parentTraceID)
-	}
-
-	// Verify the span has a parent span ID matching the traceparent
-	if msgSpan.Parent.SpanID() != parentSpanID {
-		t.Errorf("parent span ID = %s, want %s (from traceparent)",
-			msgSpan.Parent.SpanID(), parentSpanID)
-	}
-
-	// Verify the session-derived trace ID is present as a span link
+	// Verify the span uses the session-derived trace ID (not the caller's).
+	// This ensures all messages in a session share one trace, so evals and
+	// downstream spans are nested under the session in Tempo.
 	spanSessionID := ""
 	if val, ok := findSpanAttr(*msgSpan, "session.id"); ok {
 		spanSessionID = val.AsString()
@@ -271,23 +261,29 @@ func TestProcessMessage_WithParentTraceContext(t *testing.T) {
 	}
 
 	expectedSessionTraceID := sessionIDToTraceID(spanSessionID)
-	if len(msgSpan.Links) == 0 {
-		t.Fatal("expected span link for session-derived trace ID")
-	}
-	if msgSpan.Links[0].SpanContext.TraceID() != expectedSessionTraceID {
-		t.Errorf("link trace ID = %s, want %s (session-derived)",
-			msgSpan.Links[0].SpanContext.TraceID(), expectedSessionTraceID)
+	if msgSpan.SpanContext.TraceID() != expectedSessionTraceID {
+		t.Errorf("trace ID = %s, want %s (session-derived)",
+			msgSpan.SpanContext.TraceID(), expectedSessionTraceID)
 	}
 
-	// Verify link has the session-trace type attribute
+	// Verify the caller's trace context is present as a span link for cross-referencing.
+	if len(msgSpan.Links) == 0 {
+		t.Fatal("expected span link for caller trace context")
+	}
+	if msgSpan.Links[0].SpanContext.TraceID() != parentTraceID {
+		t.Errorf("link trace ID = %s, want %s (caller trace)",
+			msgSpan.Links[0].SpanContext.TraceID(), parentTraceID)
+	}
+
+	// Verify link has the caller-trace type attribute
 	linkHasType := false
 	for _, a := range msgSpan.Links[0].Attributes {
-		if string(a.Key) == "link.type" && a.Value.AsString() == "session-trace" {
+		if string(a.Key) == "link.type" && a.Value.AsString() == "caller-trace" {
 			linkHasType = true
 		}
 	}
 	if !linkHasType {
-		t.Error("expected link.type=session-trace attribute on span link")
+		t.Error("expected link.type=caller-trace attribute on span link")
 	}
 }
 

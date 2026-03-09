@@ -20,6 +20,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Default HTTP client timeout for session-api requests.
@@ -54,11 +55,13 @@ type HTTPSessionAPIClient struct {
 }
 
 // NewHTTPSessionAPIClient creates a new HTTP client for session-api.
+// The client's transport is wrapped with otelhttp to propagate trace context.
 func NewHTTPSessionAPIClient(baseURL string) *HTTPSessionAPIClient {
 	return &HTTPSessionAPIClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: defaultHTTPTimeout,
+			Timeout:   defaultHTTPTimeout,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 	}
 }

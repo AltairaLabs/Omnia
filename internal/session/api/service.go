@@ -527,12 +527,13 @@ func (s *SessionService) publishMessageEvent(ctx context.Context, sessionID stri
 		PromptPackName:    sess.PromptPackName,
 		PromptPackVersion: sess.PromptPackVersion,
 		Timestamp:         time.Now().UTC().Format(time.RFC3339),
+		Traceparent:       FormatTraceparent(ctx),
 	}
 	s.publishAsync(event)
 }
 
 // publishSessionCompleted fires a session.completed event asynchronously.
-func (s *SessionService) publishSessionCompleted(_ context.Context, sess *session.Session) {
+func (s *SessionService) publishSessionCompleted(ctx context.Context, sess *session.Session) {
 	if s.eventPublisher == nil {
 		return
 	}
@@ -544,6 +545,7 @@ func (s *SessionService) publishSessionCompleted(_ context.Context, sess *sessio
 		PromptPackName:    sess.PromptPackName,
 		PromptPackVersion: sess.PromptPackVersion,
 		Timestamp:         time.Now().UTC().Format(time.RFC3339),
+		Traceparent:       FormatTraceparent(ctx),
 	}
 	s.publishAsync(event)
 }
