@@ -32,9 +32,20 @@ import (
 	"github.com/altairalabs/omnia/test/utils"
 )
 
-// evalWorkerNamespace is the namespace for test PromptPack ConfigMaps and
-// Redis Stream events. The eval worker watches this namespace.
-const evalWorkerNamespace = "test-eval-worker"
+// evalWorkerNamespaceCI is the isolated namespace used in CI mode.
+// In predeployed mode we use the main namespace instead, since the
+// eval worker is already watching it.
+const evalWorkerNamespaceCI = "test-eval-worker"
+
+// effectiveEvalNamespace returns the namespace for PromptPack ConfigMaps
+// and Redis Stream events. In predeployed mode the eval worker already
+// watches the main namespace, so we use that directly.
+func effectiveEvalNamespace() string {
+	if predeployed {
+		return namespace
+	}
+	return evalWorkerNamespaceCI
+}
 
 // evalCurlPod is the name of the helper pod used for HTTP requests.
 const evalCurlPod = "eval-e2e-curl"
@@ -126,19 +137,22 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 				Should(Succeed())
 		}
 
-		By("creating eval worker test namespace")
-		cmd := exec.Command("kubectl", "create", "ns", evalWorkerNamespace)
-		_, _ = utils.Run(cmd) // Ignore error if already exists
+		if !predeployed {
+			By("creating eval worker test namespace")
+			cmd := exec.Command("kubectl", "create", "ns",
+				evalWorkerNamespaceCI)
+			_, _ = utils.Run(cmd) // Ignore error if already exists
 
-		By("labeling namespace with restricted security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns",
-			evalWorkerNamespace,
-			"pod-security.kubernetes.io/enforce=restricted")
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred())
+			By("labeling namespace with restricted security policy")
+			cmd = exec.Command("kubectl", "label", "--overwrite", "ns",
+				evalWorkerNamespaceCI,
+				"pod-security.kubernetes.io/enforce=restricted")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+		}
 
 		By("creating a curl helper pod for HTTP requests")
-		cmd = exec.Command("kubectl", "run", evalCurlPod,
+		cmd := exec.Command("kubectl", "run", evalCurlPod,
 			"-n", namespace,
 			"--image=curlimages/curl:8.5.0",
 			"--restart=Never",
@@ -185,11 +199,13 @@ var _ = Describe("Eval Worker Pipeline", Ordered, Label("arena"), func() {
 			}
 		}
 
-		By("cleaning up eval worker namespace")
-		nsCmd := exec.Command("kubectl", "delete", "ns",
-			evalWorkerNamespace,
-			"--ignore-not-found", "--timeout=120s")
-		_, _ = utils.Run(nsCmd)
+		if !predeployed {
+			By("cleaning up eval worker namespace")
+			nsCmd := exec.Command("kubectl", "delete", "ns",
+				evalWorkerNamespaceCI,
+				"--ignore-not-found", "--timeout=120s")
+			_, _ = utils.Run(nsCmd)
+		}
 	})
 
 	AfterEach(func() {
@@ -429,7 +445,7 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop: ["ALL"]
-`, namespace, evalWorkerImage, namespace, evalWorkerNamespace, namespace)
+`, namespace, evalWorkerImage, namespace, evalWorkerNamespaceCI, namespace)
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(evalWorkerManifest)
@@ -467,7 +483,7 @@ roleRef:
   kind: Role
   name: e2e-eval-worker
   apiGroup: rbac.authorization.k8s.io
-`, namespace, evalWorkerNamespace, evalWorkerNamespace, namespace)
+`, namespace, evalWorkerNamespaceCI, evalWorkerNamespaceCI, namespace)
 
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(rbacManifest)
@@ -514,7 +530,7 @@ metadata:
 data:
   pack.json: |
     %s
-`, testPackName, evalWorkerNamespace,
+`, testPackName, effectiveEvalNamespace(),
 				strings.ReplaceAll(packJSON, "\n", "\n    "))
 
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -529,7 +545,7 @@ data:
 
 			By("ensuring Redis Stream consumer group exists")
 			streamKey := fmt.Sprintf(
-				"omnia:eval-events:%s", evalWorkerNamespace)
+				"omnia:eval-events:%s", effectiveEvalNamespace())
 			consumerGroup := "omnia-eval-workers-cluster"
 			cmd := exec.Command("kubectl", "exec", "omnia-redis-master-0",
 				"-n", namespace, "--",
@@ -546,7 +562,7 @@ data:
   "updatedAt": "2026-03-09T00:00:01Z",
   "messages": [],
   "status": "active"
-}`, testSessionID, testAgentName, evalWorkerNamespace)
+}`, testSessionID, testAgentName, effectiveEvalNamespace())
 
 			sessionKey := fmt.Sprintf("hot:session:{%s}", testSessionID)
 			cmd = exec.Command("kubectl", "exec", "omnia-redis-master-0",
@@ -577,7 +593,7 @@ data:
 				"eventType":         "message.assistant",
 				"sessionId":         testSessionID,
 				"agentName":         testAgentName,
-				"namespace":         evalWorkerNamespace,
+				"namespace":         effectiveEvalNamespace(),
 				"messageId":         testMessageID,
 				"messageRole":       "assistant",
 				"promptPackName":    testPackName,
@@ -649,7 +665,7 @@ data:
 				"Message contains 'hello' so eval should pass")
 			Expect(result.Source).To(Equal("worker"))
 			Expect(result.AgentName).To(Equal(testAgentName))
-			Expect(result.Namespace).To(Equal(evalWorkerNamespace))
+			Expect(result.Namespace).To(Equal(effectiveEvalNamespace()))
 
 			By("checking eval worker metrics (best-effort)")
 			podIPCmd := exec.Command("kubectl", "get", "pod",
@@ -688,7 +704,7 @@ data:
   "updatedAt": "2026-03-09T00:01:01Z",
   "messages": [],
   "status": "active"
-}`, failSessionID, testAgentName, evalWorkerNamespace)
+}`, failSessionID, testAgentName, effectiveEvalNamespace())
 
 			sessionKey := fmt.Sprintf("hot:session:{%s}", failSessionID)
 			cmd := exec.Command("kubectl", "exec", "omnia-redis-master-0",
@@ -716,7 +732,7 @@ data:
 				"eventType":         "message.assistant",
 				"sessionId":         failSessionID,
 				"agentName":         testAgentName,
-				"namespace":         evalWorkerNamespace,
+				"namespace":         effectiveEvalNamespace(),
 				"messageId":         failMessageID,
 				"messageRole":       "assistant",
 				"promptPackName":    testPackName,
@@ -728,7 +744,7 @@ data:
 			Expect(err).NotTo(HaveOccurred())
 
 			streamKey := fmt.Sprintf(
-				"omnia:eval-events:%s", evalWorkerNamespace)
+				"omnia:eval-events:%s", effectiveEvalNamespace())
 			cmd = exec.Command("kubectl", "exec", "omnia-redis-master-0",
 				"-n", namespace, "--",
 				"redis-cli", "XADD", streamKey, "*",
@@ -796,7 +812,7 @@ func dumpEvalWorkerDebugInfo(reason string) {
 	cmd = exec.Command("kubectl", "exec", "omnia-redis-master-0",
 		"-n", namespace, "--",
 		"redis-cli", "XINFO", "STREAM",
-		fmt.Sprintf("omnia:eval-events:%s", evalWorkerNamespace))
+		fmt.Sprintf("omnia:eval-events:%s", effectiveEvalNamespace()))
 	output, _ = utils.Run(cmd)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Redis stream info:\n%s\n", output)
 
