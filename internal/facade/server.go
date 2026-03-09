@@ -222,12 +222,20 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 
 // submitCompletion runs a task through the recording pool if available,
 // otherwise as a tracked goroutine. All tasks are waited on during Shutdown.
+// After Shutdown has been called, new tasks are silently dropped to avoid
+// a WaitGroup Add/Wait race.
 func (s *Server) submitCompletion(task func()) {
 	if s.recordingPool != nil {
 		s.recordingPool.Submit(task)
 		return
 	}
+	s.mu.RLock()
+	if s.shutdown {
+		s.mu.RUnlock()
+		return
+	}
 	s.completionWg.Add(1)
+	s.mu.RUnlock()
 	go func() {
 		defer s.completionWg.Done()
 		task()
