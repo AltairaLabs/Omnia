@@ -816,6 +816,113 @@ var _ = Describe("ArenaJob Controller", func() {
 		})
 	})
 
+	Context("When ArenaJob does not specify TTL", func() {
+		var (
+			arenaJob    *omniav1alpha1.ArenaJob
+			arenaSource *omniav1alpha1.ArenaSource
+		)
+
+		BeforeEach(func() {
+			By("creating the ArenaSource in Ready state")
+			arenaSource = &omniav1alpha1.ArenaSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "default-ttl-source",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaSourceSpec{
+					Type:     omniav1alpha1.ArenaSourceTypeConfigMap,
+					Interval: "5m",
+					ConfigMap: &omniav1alpha1.ConfigMapSource{
+						Name: "test-configmap",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaSource)).To(Succeed())
+
+			arenaSource.Status.Phase = omniav1alpha1.ArenaSourcePhaseReady
+			arenaSource.Status.Artifact = &omniav1alpha1.Artifact{
+				Revision:       "v1.0.0",
+				Checksum:       "sha256:abc123",
+				LastUpdateTime: metav1.Now(),
+			}
+			Expect(k8sClient.Status().Update(ctx, arenaSource)).To(Succeed())
+
+			By("creating the ArenaJob without TTL")
+			arenaJob = &omniav1alpha1.ArenaJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "default-ttl-job",
+					Namespace: arenaJobNamespace,
+				},
+				Spec: omniav1alpha1.ArenaJobSpec{
+					SourceRef: corev1alpha1.LocalObjectReference{
+						Name: "default-ttl-source",
+					},
+					Type: omniav1alpha1.ArenaJobTypeLoadTest,
+				},
+			}
+			Expect(k8sClient.Create(ctx, arenaJob)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			job := &omniav1alpha1.ArenaJob{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "default-ttl-job",
+				Namespace: arenaJobNamespace,
+			}, job)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, job)).To(Succeed())
+			}
+
+			k8sJob := &batchv1.Job{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "default-ttl-job-worker",
+				Namespace: arenaJobNamespace,
+			}, k8sJob)
+			if err == nil {
+				propagation := metav1.DeletePropagationBackground
+				Expect(k8sClient.Delete(ctx, k8sJob, &client.DeleteOptions{
+					PropagationPolicy: &propagation,
+				})).To(Succeed())
+			}
+
+			source := &omniav1alpha1.ArenaSource{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "default-ttl-source",
+				Namespace: arenaJobNamespace,
+			}, source)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, source)).To(Succeed())
+			}
+		})
+
+		It("should default to 1 hour TTL", func() {
+			By("reconciling the ArenaJob")
+			reconciler := &ArenaJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "default-ttl-job",
+					Namespace: arenaJobNamespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying the K8s Job has default TTL of 3600 seconds")
+			k8sJob := &batchv1.Job{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "default-ttl-job-worker",
+				Namespace: arenaJobNamespace,
+			}, k8sJob)).To(Succeed())
+
+			Expect(k8sJob.Spec.TTLSecondsAfterFinished).NotTo(BeNil())
+			Expect(*k8sJob.Spec.TTLSecondsAfterFinished).To(Equal(int32(3600)))
+		})
+	})
+
 	Context("When testing SetupWithManager", func() {
 		It("should return error with nil manager", func() {
 			reconciler := &ArenaJobReconciler{
