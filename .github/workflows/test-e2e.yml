@@ -141,7 +141,7 @@ jobs:
       - name: Running Arena E2E Tests
         run: |
           kubectl config use-context kind-omnia-arena-e2e
-          E2E_SKIP_SETUP=true ENABLE_ARENA_E2E=true E2E_SKIP_CLEANUP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+          E2E_SKIP_SETUP=true E2E_PREDEPLOYED=true ENABLE_ARENA_E2E=true E2E_SKIP_CLEANUP=true go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
             -ginkgo.label-filter=arena \
             -ginkgo.junit-report=arena-e2e-results.xml \
             -ginkgo.show-node-events \
