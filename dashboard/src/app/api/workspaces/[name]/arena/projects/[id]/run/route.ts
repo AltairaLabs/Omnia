@@ -163,18 +163,16 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
       if (body.type === "evaluation") {
         jobSpec.evaluation = {
           outputFormats: ["json"],
-          continueOnFailure: true,
         };
       } else if (body.type === "loadtest") {
-        jobSpec.loadtest = {
-          profileType: "constant",
+        jobSpec.loadTest = {
+          rampUp: "30s",
           duration: "1m",
         };
       } else if (body.type === "datagen") {
-        jobSpec.datagen = {
-          sampleCount: 10,
-          mode: "selfplay",
-          outputFormat: "jsonl",
+        jobSpec.dataGen = {
+          count: 10,
+          format: "jsonl",
         };
       }
 

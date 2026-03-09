@@ -142,4 +142,58 @@ describe("TimelineTab", () => {
     render(<TimelineTab messages={messages} />);
     expect(screen.queryByText("mcp")).not.toBeInTheDocument();
   });
+
+  it("renders tool result events", () => {
+    const messages: Message[] = [
+      {
+        id: "m1",
+        role: "tool",
+        content: '{"output":"42"}',
+        timestamp: "2024-01-01T00:00:01Z",
+        metadata: { type: "tool_result", handler_name: "calc", status: "success" },
+      },
+    ];
+
+    render(<TimelineTab messages={messages} />);
+    expect(screen.getByText("Result: calc")).toBeInTheDocument();
+    expect(screen.getByText("OK")).toBeInTheDocument();
+  });
+
+  it("renders pipeline events as collapsible group", () => {
+    const messages: Message[] = [
+      { id: "m1", role: "user", content: "Hi", timestamp: "2024-01-01T00:00:00Z" },
+      { id: "m2", role: "system", content: "{}", timestamp: "2024-01-01T00:00:01Z", metadata: { source: "runtime", type: "pipeline.started" } },
+      { id: "m3", role: "system", content: '{"Name":"provider"}', timestamp: "2024-01-01T00:00:02Z", metadata: { source: "runtime", type: "stage.started" } },
+      { id: "m4", role: "system", content: '{"Name":"provider"}', timestamp: "2024-01-01T00:00:03Z", metadata: { source: "runtime", type: "stage.completed" } },
+      { id: "m5", role: "system", content: "{}", timestamp: "2024-01-01T00:00:04Z", metadata: { source: "runtime", type: "pipeline.completed" } },
+      { id: "m6", role: "assistant", content: "Hello!", timestamp: "2024-01-01T00:00:05Z" },
+    ];
+
+    render(<TimelineTab messages={messages} />);
+
+    // Pipeline group is collapsed by default — child events not visible
+    expect(screen.getByText("Pipeline")).toBeInTheDocument();
+    expect(screen.getByText("2 events")).toBeInTheDocument();
+    expect(screen.queryByText("Stage: provider started")).not.toBeInTheDocument();
+
+    // Top-level events still visible
+    expect(screen.getByText("User message")).toBeInTheDocument();
+    expect(screen.getByText("Assistant response")).toBeInTheDocument();
+  });
+
+  it("expands pipeline group on click", () => {
+    const messages: Message[] = [
+      { id: "m1", role: "system", content: "{}", timestamp: "2024-01-01T00:00:01Z", metadata: { source: "runtime", type: "pipeline.started" } },
+      { id: "m2", role: "system", content: '{"Name":"provider"}', timestamp: "2024-01-01T00:00:02Z", metadata: { source: "runtime", type: "stage.started" } },
+      { id: "m3", role: "system", content: "{}", timestamp: "2024-01-01T00:00:03Z", metadata: { source: "runtime", type: "pipeline.completed" } },
+    ];
+
+    render(<TimelineTab messages={messages} />);
+
+    // Click to expand
+    fireEvent.click(screen.getByText("Pipeline"));
+
+    // Child events now visible
+    expect(screen.getByText("Stage: provider started")).toBeInTheDocument();
+  });
 });

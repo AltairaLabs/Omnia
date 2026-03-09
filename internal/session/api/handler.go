@@ -75,6 +75,7 @@ type ErrorResponse struct {
 // Handler provides HTTP endpoints for session history.
 type Handler struct {
 	service     *SessionService
+	evalService *EvalService
 	log         logr.Logger
 	maxBodySize int64
 }
@@ -91,6 +92,11 @@ func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) 
 		log:         log.WithName("session-handler"),
 		maxBodySize: mbs,
 	}
+}
+
+// SetEvalService configures the eval service for eval result endpoints.
+func (h *Handler) SetEvalService(svc *EvalService) {
+	h.evalService = svc
 }
 
 // Request types for write endpoints.
@@ -123,6 +129,12 @@ type RefreshTTLRequest struct {
 
 // RegisterRoutes registers the session API routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	// Health check (lightweight, no DB call)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	// Read endpoints
 	mux.HandleFunc("GET /api/v1/sessions", h.handleListSessions)
 	mux.HandleFunc("GET /api/v1/sessions/search", h.handleSearchSessions)
@@ -135,6 +147,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/sessions/{sessionID}/stats", h.handleUpdateStats)
 	mux.HandleFunc("POST /api/v1/sessions/{sessionID}/ttl", h.handleRefreshTTL)
 	mux.HandleFunc("DELETE /api/v1/sessions/{sessionID}", h.handleDeleteSession)
+
+	// Eval result endpoints
+	mux.HandleFunc("GET /api/v1/sessions/{sessionID}/eval-results", h.handleGetSessionEvalResults)
+	mux.HandleFunc("POST /api/v1/eval-results", h.handleCreateEvalResults)
+	mux.HandleFunc("GET /api/v1/eval-results", h.handleListEvalResults)
 }
 
 // extractRequestContext extracts client IP and User-Agent from the request.

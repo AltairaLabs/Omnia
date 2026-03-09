@@ -675,12 +675,13 @@ type EvalSampling struct {
 	// +optional
 	DefaultRate *int32 `json:"defaultRate,omitempty"`
 
-	// llmJudgeRate is the sampling percentage (0-100) for LLM judge evals.
+	// extendedRate is the sampling percentage (0-100) for extended evals
+	// (model-powered evaluations that call an external service).
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
 	// +kubebuilder:default=10
 	// +optional
-	LLMJudgeRate *int32 `json:"llmJudgeRate,omitempty"`
+	ExtendedRate *int32 `json:"extendedRate,omitempty"`
 }
 
 // EvalRateLimit configures rate limits for eval execution.

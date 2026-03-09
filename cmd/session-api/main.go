@@ -45,8 +45,12 @@ import (
 	"github.com/altairalabs/omnia/internal/session/providers/cold"
 	pgprovider "github.com/altairalabs/omnia/internal/session/providers/postgres"
 	"github.com/altairalabs/omnia/internal/session/providers/redis"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 )
 
@@ -57,19 +61,23 @@ type redisClientProvider interface {
 
 // flags groups all CLI flags for the session-api binary.
 type flags struct {
-	apiAddr      string
-	healthAddr   string
-	metricsAddr  string
-	postgresConn string
-	redisAddrs   string
-	coldBackend  string
-	coldBucket   string
-	coldRegion   string
-	coldEndpoint string
-	enterprise   bool
-	otlpEnabled  bool
-	otlpGRPCAddr string
-	otlpHTTPAddr string
+	apiAddr         string
+	healthAddr      string
+	metricsAddr     string
+	postgresConn    string
+	redisAddrs      string
+	coldBackend     string
+	coldBucket      string
+	coldRegion      string
+	coldEndpoint    string
+	enterprise      bool
+	otlpEnabled     bool
+	otlpGRPCAddr    string
+	otlpHTTPAddr    string
+	tracingEnabled  bool
+	tracingEndpoint string
+	tracingSample   float64
+	tracingInsecure bool
 }
 
 func parseFlags() *flags {
@@ -109,6 +117,15 @@ func (f *flags) applyEnvFallbacks() {
 
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
 	envBoolFallback(&f.otlpEnabled, "OTLP_ENABLED")
+
+	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
+	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
+	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
+	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
+		if rate, err := strconv.ParseFloat(v, 64); err == nil {
+			f.tracingSample = rate
+		}
+	}
 }
 
 // envFallback sets *dst from the environment variable envKey when *dst still
@@ -180,6 +197,31 @@ func run() error {
 		return err
 	}
 	defer providerCleanup()
+
+	// --- Tracing ---
+	// Set propagator so incoming trace context (e.g. from facade httpclient)
+	// is extracted and spans become children of the caller's trace.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+	if f.tracingEnabled {
+		tracingCfg := tracing.Config{
+			Enabled:     true,
+			Endpoint:    f.tracingEndpoint,
+			ServiceName: "omnia-session-api",
+			SampleRate:  f.tracingSample,
+			Insecure:    f.tracingInsecure,
+		}
+		tp, tpErr := tracing.NewProvider(ctx, tracingCfg)
+		if tpErr != nil {
+			log.Error(tpErr, "tracing provider creation failed")
+		} else {
+			otel.SetTracerProvider(tp.TracerProvider())
+			defer func() { _ = tp.Shutdown(ctx) }()
+			log.Info("tracing enabled", "endpoint", f.tracingEndpoint, "sampleRate", f.tracingSample)
+		}
+	}
 
 	// --- Build API mux ---
 	apiMux, auditCleanup := buildAPIMux(pool, registry, f, log)
@@ -368,6 +410,13 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	maxBody := int64(envInt32("MAX_BODY_SIZE", int32(api.DefaultMaxBodySize)))
 	handler := api.NewHandler(sessionService, log, maxBody)
 
+	// Wire up eval result endpoints when Postgres is available.
+	if pool != nil {
+		evalStore := pgprovider.NewEvalStore(pool)
+		evalService := api.NewEvalService(evalStore, log)
+		handler.SetEvalService(evalService)
+	}
+
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
@@ -382,7 +431,12 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	}
 	log.V(1).Info("rate limiter initialized", "rps", rlCfg.RPS, "burst", rlCfg.Burst)
 
-	return rlMiddleware(api.MetricsMiddleware(httpMetrics, mux)), cleanup
+	traced := otelhttp.NewHandler(mux, "session-api",
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			return r.URL.Path != "/healthz"
+		}),
+	)
+	return rlMiddleware(api.MetricsMiddleware(httpMetrics, traced)), cleanup
 }
 
 // registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when

@@ -16,13 +16,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { generateName } from "@/lib/name-generator";
 import { FolderBrowser } from "./folder-browser";
 import {
   K8sLabelSelector,
   type LabelSelectorValue,
 } from "@/components/ui/k8s-label-selector";
 import { useArenaSourceContent } from "@/hooks/use-arena-source-content";
-import { useProviderPreview, useToolRegistryPreview } from "@/hooks";
+import { useProviderPreview, useToolRegistryPreview, useAgents } from "@/hooks";
+import { useWorkspace } from "@/contexts/workspace-context";
 import {
   ChevronLeft,
   ChevronRight,
@@ -35,12 +37,15 @@ import {
   Settings,
   Plus,
   X,
+  Zap,
+  Network,
 } from "lucide-react";
 import type {
   ArenaSource,
   ArenaJob,
   ArenaJobSpec,
   ArenaJobType,
+  ExecutionMode,
   ProviderGroupSelector,
   ToolRegistrySelector,
 } from "@/types/arena";
@@ -59,13 +64,14 @@ const JOB_TYPES: {
   { value: "datagen", label: "Data Generation", enterprise: true },
 ];
 
-const STEPS = [
-  { title: "Basic Info", description: "Name and type" },
-  { title: "Source", description: "Source and configuration" },
-  { title: "Providers", description: "Provider overrides" },
-  { title: "Tools", description: "Tool registry" },
-  { title: "Options", description: "Workers and settings" },
-  { title: "Review", description: "Create job" },
+const ALL_STEPS = [
+  { key: "basic", title: "Basic Info", description: "Name and type" },
+  { key: "source", title: "Source", description: "Source and configuration" },
+  { key: "execution", title: "Execution", description: "Direct or fleet mode" },
+  { key: "providers", title: "Providers", description: "Provider overrides" },
+  { key: "tools", title: "Tools", description: "Tool registry" },
+  { key: "options", title: "Options", description: "Workers and settings" },
+  { key: "review", title: "Review", description: "Create job" },
 ];
 
 const DEFAULT_PROVIDER_GROUPS = ["default", "evaluation", "judge", "selfplay"];
@@ -80,56 +86,54 @@ interface JobWizardFormState {
   rootPath: string;
   arenaFileName: string;
 
-  // Step 2: Providers
+  // Step 2: Execution Mode
+  executionMode: ExecutionMode;
+  targetAgent: string;
+  targetNamespace: string;
+
+  // Step 3: Providers (direct mode only)
   providerOverridesEnabled: boolean;
   providerOverrides: Record<string, LabelSelectorValue>;
   activeProviderGroups: string[];
 
-  // Step 3: Tools
+  // Step 4: Tools (direct mode only)
   toolRegistryOverrideEnabled: boolean;
   toolRegistryOverride: LabelSelectorValue;
 
-  // Step 4: Options
+  // Step 5: Options
   workers: string;
-  timeout: string;
   verbose: boolean;
 
-  // Evaluation options
-  continueOnFailure: boolean;
-  passingThreshold: string;
-
   // Load test options
-  profileType: string;
+  rampUp: string;
   duration: string;
   targetRPS: string;
 
   // Data gen options
   sampleCount: string;
-  deduplicate: boolean;
 }
 
 function getInitialFormState(preselectedSource?: string): JobWizardFormState {
   return {
-    name: "",
+    name: generateName(),
     type: "evaluation",
     sourceRef: preselectedSource || "",
     rootPath: "",
     arenaFileName: "config.arena.yaml",
+    executionMode: "direct",
+    targetAgent: "",
+    targetNamespace: "",
     providerOverridesEnabled: false,
     providerOverrides: {},
     activeProviderGroups: [],
     toolRegistryOverrideEnabled: false,
     toolRegistryOverride: {},
     workers: "1",
-    timeout: "30m",
     verbose: false,
-    continueOnFailure: true,
-    passingThreshold: "0.8",
-    profileType: "constant",
+    rampUp: "30s",
     duration: "5m",
     targetRPS: "10",
     sampleCount: "100",
-    deduplicate: true,
   };
 }
 
@@ -150,11 +154,8 @@ export interface JobWizardProps {
 
 function validateJobTypeOptions(form: JobWizardFormState): string | null {
   switch (form.type) {
-    case "evaluation": {
-      const threshold = Number.parseFloat(form.passingThreshold);
-      const isValidThreshold = !Number.isNaN(threshold) && threshold >= 0 && threshold <= 1;
-      return isValidThreshold ? null : "Passing threshold must be a number between 0 and 1";
-    }
+    case "evaluation":
+      return null;
     case "loadtest": {
       const rps = Number.parseInt(form.targetRPS, 10);
       const isValidRps = !Number.isNaN(rps) && rps >= 1;
@@ -183,6 +184,10 @@ function validateForm(
   }
   if (!form.sourceRef) {
     return "Source is required";
+  }
+
+  if (form.executionMode === "fleet" && !form.targetAgent) {
+    return "Target agent is required for fleet mode";
   }
 
   const jobType = JOB_TYPES.find((t) => t.value === form.type);
@@ -258,6 +263,8 @@ function buildToolRegistryOverride(
 
 function buildSpec(form: JobWizardFormState): ArenaJobSpec {
   const arenaFile = buildArenaFilePath(form.rootPath, form.arenaFileName);
+  const isFleet = form.executionMode === "fleet";
+
   const spec: ArenaJobSpec = {
     sourceRef: { name: form.sourceRef },
     arenaFile: arenaFile || undefined,
@@ -265,29 +272,36 @@ function buildSpec(form: JobWizardFormState): ArenaJobSpec {
     workers: {
       replicas: Number.parseInt(form.workers, 10),
     },
-    timeout: form.timeout || undefined,
     verbose: form.verbose || undefined,
-    providerOverrides: buildProviderOverrides(form),
-    toolRegistryOverride: buildToolRegistryOverride(form),
+    // Provider/tool overrides only apply in direct mode
+    providerOverrides: isFleet ? undefined : buildProviderOverrides(form),
+    toolRegistryOverride: isFleet ? undefined : buildToolRegistryOverride(form),
   };
+
+  if (isFleet) {
+    spec.execution = {
+      mode: "fleet",
+      target: {
+        agentRuntimeRef: { name: form.targetAgent },
+        namespace: form.targetNamespace || undefined,
+      },
+    };
+  }
 
   if (form.type === "evaluation") {
     spec.evaluation = {
-      continueOnFailure: form.continueOnFailure,
-      passingThreshold: Number.parseFloat(form.passingThreshold),
       outputFormats: ["json", "junit"],
     };
   } else if (form.type === "loadtest") {
-    spec.loadtest = {
-      profileType: form.profileType as "constant" | "ramp" | "spike" | "soak",
+    spec.loadTest = {
+      rampUp: form.rampUp,
       duration: form.duration,
       targetRPS: Number.parseInt(form.targetRPS, 10),
     };
   } else if (form.type === "datagen") {
-    spec.datagen = {
-      sampleCount: Number.parseInt(form.sampleCount, 10),
-      deduplicate: form.deduplicate,
-      outputFormat: "jsonl",
+    spec.dataGen = {
+      count: Number.parseInt(form.sampleCount, 10),
+      format: "jsonl",
     };
   }
 
@@ -379,6 +393,189 @@ function ToolRegistryPreviewBadge({ selector }: ToolRegistryPreviewBadgeProps) {
   );
 }
 
+interface ExecutionStepProps {
+  readonly formState: JobWizardFormState;
+  readonly setFormState: React.Dispatch<React.SetStateAction<JobWizardFormState>>;
+  readonly updateField: <K extends keyof JobWizardFormState>(
+    field: K,
+    value: JobWizardFormState[K]
+  ) => void;
+}
+
+function ExecutionStep({
+  formState,
+  setFormState,
+  updateField,
+}: ExecutionStepProps) {
+  const { workspaces, currentWorkspace } = useWorkspace();
+
+  // Build unique namespace list from available workspaces
+  const namespaces = useMemo(() => {
+    const ns = workspaces.map((w) => w.namespace).filter(Boolean);
+    return [...new Set(ns)];
+  }, [workspaces]);
+
+  const singleNamespace = namespaces.length <= 1;
+
+  // Default targetNamespace to current workspace's namespace when entering fleet mode
+  const effectiveNamespace = formState.targetNamespace || currentWorkspace?.namespace || "";
+
+  // Find workspace name for the selected namespace so we can fetch its agents
+  const workspaceForNamespace = useMemo(() => {
+    return workspaces.find((w) => w.namespace === effectiveNamespace)?.name;
+  }, [workspaces, effectiveNamespace]);
+
+  // Fetch agents for the selected namespace's workspace
+  const { data: agents, isLoading: agentsLoading } = useAgents({
+    workspaceName: workspaceForNamespace,
+  });
+
+  const runningAgents = useMemo(() => {
+    return (agents || []).filter((a) => a.status?.phase === "Running");
+  }, [agents]);
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Execution Mode</Label>
+        <p className="text-xs text-muted-foreground">
+          Choose how the job executes scenarios against LLMs
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          className={cn(
+            "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
+            formState.executionMode === "direct"
+              ? "border-primary bg-primary/5"
+              : "hover:bg-muted/50"
+          )}
+          onClick={() => {
+            setFormState((prev) => ({
+              ...prev,
+              executionMode: "direct",
+              targetAgent: "",
+              targetNamespace: "",
+            }));
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Zap className="h-5 w-5 text-amber-500" />
+            <span className="font-medium">Direct</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Workers call LLM providers directly. You can configure provider
+            and tool registry overrides.
+          </p>
+        </button>
+
+        <button
+          type="button"
+          className={cn(
+            "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
+            formState.executionMode === "fleet"
+              ? "border-primary bg-primary/5"
+              : "hover:bg-muted/50"
+          )}
+          onClick={() => {
+            setFormState((prev) => ({
+              ...prev,
+              executionMode: "fleet",
+              targetNamespace: currentWorkspace?.namespace || "",
+              providerOverridesEnabled: false,
+              providerOverrides: {},
+              activeProviderGroups: [],
+              toolRegistryOverrideEnabled: false,
+              toolRegistryOverride: {},
+            }));
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Network className="h-5 w-5 text-blue-500" />
+            <span className="font-medium">Fleet</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Workers connect to a deployed agent via WebSocket. The agent uses its
+            own providers and tools.
+          </p>
+        </button>
+      </div>
+
+      {formState.executionMode === "fleet" && (
+        <div className="space-y-4 pt-2 border-t">
+          <div className="space-y-2">
+            <Label htmlFor="targetNamespace">Namespace</Label>
+            <Select
+              value={effectiveNamespace}
+              onValueChange={(v) => {
+                setFormState((prev) => ({
+                  ...prev,
+                  targetNamespace: v,
+                  targetAgent: "",
+                }));
+              }}
+              disabled={singleNamespace}
+            >
+              <SelectTrigger id="targetNamespace">
+                <SelectValue placeholder="Select namespace" />
+              </SelectTrigger>
+              <SelectContent>
+                {namespaces.map((ns) => (
+                  <SelectItem key={ns} value={ns}>
+                    {ns}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Namespace of the target agent
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="targetAgent">Target Agent</Label>
+            <Select
+              value={formState.targetAgent}
+              onValueChange={(v) => updateField("targetAgent", v)}
+              disabled={agentsLoading}
+            >
+              <SelectTrigger id="targetAgent">
+                <SelectValue
+                  placeholder={
+                    agentsLoading ? "Loading agents..." : "Select an agent"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {runningAgents.length === 0 ? (
+                  <div className="flex items-center gap-2 text-muted-foreground p-2 text-sm">
+                    <AlertTriangle className="h-4 w-4" />
+                    No running agents available
+                  </div>
+                ) : (
+                  runningAgents.map((agent) => (
+                    <SelectItem
+                      key={agent.metadata?.uid || agent.metadata?.name}
+                      value={agent.metadata?.name || "unknown"}
+                    >
+                      {agent.metadata?.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Select a running AgentRuntime to test against
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // =============================================================================
 // Main Component
 // =============================================================================
@@ -401,6 +598,18 @@ export function JobWizard({
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Compute visible steps — fleet mode hides providers/tools
+  const isFleetMode = formState.executionMode === "fleet";
+  const steps = useMemo(() => {
+    if (isFleetMode) {
+      return ALL_STEPS.filter((s) => s.key !== "providers" && s.key !== "tools");
+    }
+    return ALL_STEPS;
+  }, [isFleetMode]);
+
+  const effectiveStep = Math.min(step, steps.length - 1);
+  const currentStepKey = steps[effectiveStep]?.key ?? "basic";
+
   // Fetch source content for folder browser
   const {
     tree: sourceTree,
@@ -411,6 +620,8 @@ export function JobWizard({
   // Get available labels for providers and tool registries
   const { availableLabels: providerLabels } = useProviderPreview(undefined);
   const { availableLabels: toolRegistryLabels } = useToolRegistryPreview(undefined);
+
+  // Agents are fetched inside ExecutionStep based on selected namespace
 
   const updateField = useCallback(<K extends keyof JobWizardFormState>(
     field: K,
@@ -497,23 +708,28 @@ export function JobWizard({
   const [newGroupName, setNewGroupName] = useState("");
 
   const canProceed = useCallback(() => {
-    switch (step) {
-      case 0: // Basic Info
+    switch (currentStepKey) {
+      case "basic":
         return formState.name.length > 0 && /^[a-z0-9-]+$/.test(formState.name);
-      case 1: // Source
+      case "source":
         return formState.sourceRef.length > 0;
-      case 2: // Providers
-        return true; // Optional step
-      case 3: // Tools
-        return true; // Optional step
-      case 4: // Options
+      case "execution":
+        if (formState.executionMode === "fleet") {
+          return formState.targetAgent.length > 0;
+        }
         return true;
-      case 5: // Review
+      case "providers":
+        return true; // Optional step
+      case "tools":
+        return true; // Optional step
+      case "options":
+        return true;
+      case "review":
         return true;
       default:
         return false;
     }
-  }, [step, formState]);
+  }, [currentStepKey, formState]);
 
   const handleSubmit = async () => {
     try {
@@ -542,8 +758,8 @@ export function JobWizard({
 
   // Step rendering
   const renderStep = () => {
-    switch (step) {
-      case 0: // Basic Info
+    switch (currentStepKey) {
+      case "basic": // Basic Info
         return (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -602,7 +818,7 @@ export function JobWizard({
           </div>
         );
 
-      case 1: // Source
+      case "source": // Source
         return (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -680,7 +896,16 @@ export function JobWizard({
           </div>
         );
 
-      case 2: // Providers
+      case "execution": // Execution Mode
+        return (
+          <ExecutionStep
+            formState={formState}
+            setFormState={setFormState}
+            updateField={updateField}
+          />
+        );
+
+      case "providers": // Providers
         return (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -772,7 +997,7 @@ export function JobWizard({
           </div>
         );
 
-      case 3: // Tools
+      case "tools": // Tools
         return (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -810,7 +1035,7 @@ export function JobWizard({
           </div>
         );
 
-      case 4: // Options
+      case "options": // Options
         return (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -832,15 +1057,6 @@ export function JobWizard({
                   </p>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="timeout">Timeout</Label>
-                <Input
-                  id="timeout"
-                  placeholder="30m"
-                  value={formState.timeout}
-                  onChange={(e) => updateField("timeout", e.target.value)}
-                />
-              </div>
             </div>
 
             <div className="flex items-center justify-between">
@@ -858,71 +1074,23 @@ export function JobWizard({
             </div>
 
             {/* Type-specific options */}
-            {formState.type === "evaluation" && (
-              <div className="space-y-4 pt-2 border-t">
-                <Label className="text-sm font-medium">Evaluation Options</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="threshold"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Passing Threshold
-                    </Label>
-                    <Input
-                      id="threshold"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="1"
-                      value={formState.passingThreshold}
-                      onChange={(e) =>
-                        updateField("passingThreshold", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Continue on Failure
-                    </Label>
-                    <div className="flex items-center h-10">
-                      <Switch
-                        checked={formState.continueOnFailure}
-                        onCheckedChange={(checked) =>
-                          updateField("continueOnFailure", checked)
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {formState.type === "loadtest" && (
               <div className="space-y-4 pt-2 border-t">
                 <Label className="text-sm font-medium">Load Test Options</Label>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label
-                      htmlFor="profile"
+                      htmlFor="rampUp"
                       className="text-xs text-muted-foreground"
                     >
-                      Profile Type
+                      Ramp Up
                     </Label>
-                    <Select
-                      value={formState.profileType}
-                      onValueChange={(v) => updateField("profileType", v)}
-                    >
-                      <SelectTrigger id="profile">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="constant">Constant</SelectItem>
-                        <SelectItem value="ramp">Ramp</SelectItem>
-                        <SelectItem value="spike">Spike</SelectItem>
-                        <SelectItem value="soak">Soak</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      id="rampUp"
+                      placeholder="30s"
+                      value={formState.rampUp}
+                      onChange={(e) => updateField("rampUp", e.target.value)}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label
@@ -962,44 +1130,29 @@ export function JobWizard({
                 <Label className="text-sm font-medium">
                   Data Generation Options
                 </Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="samples"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Sample Count
-                    </Label>
-                    <Input
-                      id="samples"
-                      type="number"
-                      min="1"
-                      value={formState.sampleCount}
-                      onChange={(e) =>
-                        updateField("sampleCount", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Deduplicate
-                    </Label>
-                    <div className="flex items-center h-10">
-                      <Switch
-                        checked={formState.deduplicate}
-                        onCheckedChange={(checked) =>
-                          updateField("deduplicate", checked)
-                        }
-                      />
-                    </div>
-                  </div>
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="samples"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Sample Count
+                  </Label>
+                  <Input
+                    id="samples"
+                    type="number"
+                    min="1"
+                    value={formState.sampleCount}
+                    onChange={(e) =>
+                      updateField("sampleCount", e.target.value)
+                    }
+                  />
                 </div>
               </div>
             )}
           </div>
         );
 
-      case 5: // Review
+      case "review": // Review
         return (
           <div className="space-y-4">
             {success ? (
@@ -1036,11 +1189,38 @@ export function JobWizard({
                     ) || "config.arena.yaml"}
                   </div>
 
+                  <div className="text-muted-foreground">Execution Mode</div>
+                  <div className="flex items-center gap-2">
+                    {formState.executionMode === "fleet" ? (
+                      <>
+                        <Network className="h-3.5 w-3.5 text-blue-500" />
+                        Fleet
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-3.5 w-3.5 text-amber-500" />
+                        Direct
+                      </>
+                    )}
+                  </div>
+
+                  {formState.executionMode === "fleet" && (
+                    <>
+                      <div className="text-muted-foreground">Target Agent</div>
+                      <div>{formState.targetAgent}</div>
+                      {formState.targetNamespace && (
+                        <>
+                          <div className="text-muted-foreground">
+                            Target Namespace
+                          </div>
+                          <div>{formState.targetNamespace}</div>
+                        </>
+                      )}
+                    </>
+                  )}
+
                   <div className="text-muted-foreground">Workers</div>
                   <div>{formState.workers}</div>
-
-                  <div className="text-muted-foreground">Timeout</div>
-                  <div>{formState.timeout || "30m"}</div>
 
                   {formState.providerOverridesEnabled &&
                     formState.activeProviderGroups.length > 0 && (
@@ -1095,25 +1275,25 @@ export function JobWizard({
   return (
     <div className="flex flex-col h-full">
       {/* Progress */}
-      <Progress value={((step + 1) / STEPS.length) * 100} className="h-1" />
+      <Progress value={((effectiveStep + 1) / steps.length) * 100} className="h-1" />
 
       {/* Step indicators */}
       <div className="flex justify-between px-2 py-3">
-        {STEPS.map((s, i) => (
+        {steps.map((s, i) => (
           <div
             key={s.title}
             className={cn(
               "flex flex-col items-center",
-              i <= step ? "text-primary" : "text-muted-foreground"
+              i <= effectiveStep ? "text-primary" : "text-muted-foreground"
             )}
           >
             <div
               className={cn(
                 "w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium",
-                getStepIndicatorClassName(i, step)
+                getStepIndicatorClassName(i, effectiveStep)
               )}
             >
-              {i < step ? <Check className="h-3 w-3" /> : i + 1}
+              {i < effectiveStep ? <Check className="h-3 w-3" /> : i + 1}
             </div>
             <span className="text-[10px] mt-1 hidden sm:block">{s.title}</span>
           </div>
@@ -1130,7 +1310,7 @@ export function JobWizard({
         <Button
           variant="outline"
           onClick={() => {
-            if (step === 0) {
+            if (effectiveStep === 0) {
               onClose?.();
             } else {
               setStep((s) => Math.max(0, s - 1));
@@ -1139,10 +1319,10 @@ export function JobWizard({
           disabled={isSubmitting || success}
         >
           <ChevronLeft className="h-4 w-4 mr-1" />
-          {step === 0 ? "Cancel" : "Back"}
+          {effectiveStep === 0 ? "Cancel" : "Back"}
         </Button>
 
-        {step < STEPS.length - 1 ? (
+        {effectiveStep < steps.length - 1 ? (
           <Button onClick={() => setStep((s) => s + 1)} disabled={!canProceed()}>
             Next
             <ChevronRight className="h-4 w-4 ml-1" />

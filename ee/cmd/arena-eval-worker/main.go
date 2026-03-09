@@ -23,9 +23,14 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/altairalabs/omnia/ee/pkg/evals"
+	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
 
 	// Register PromptKit provider factories for LLM judge eval execution.
@@ -50,6 +55,31 @@ const (
 func main() {
 	logger := buildLogger()
 
+	// Initialize global OpenTelemetry text map propagator for trace context propagation.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	// Initialize tracing provider (same pattern as arena-worker).
+	tracingCfg := tracing.Config{
+		Enabled:     os.Getenv("TRACING_ENABLED") == "true",
+		Endpoint:    os.Getenv("TRACING_ENDPOINT"),
+		ServiceName: "omnia-arena-eval-worker",
+		Insecure:    os.Getenv("TRACING_INSECURE") == "true",
+		SampleRate:  1.0, // Always sample — eval events carry parent context
+	}
+	tp, tpErr := tracing.NewProvider(context.Background(), tracingCfg)
+	if tpErr != nil {
+		logger.Error("tracing provider creation failed", "error", tpErr)
+	} else {
+		otel.SetTracerProvider(tp.TracerProvider())
+		defer func() { _ = tp.Shutdown(context.Background()) }()
+		if tracingCfg.Enabled {
+			logger.Info("tracing enabled", "endpoint", tracingCfg.Endpoint)
+		}
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		logger.Error("failed to load configuration", "error", err)
@@ -73,18 +103,24 @@ func main() {
 		Password: cfg.RedisPassword,
 		DB:       cfg.RedisDB,
 	})
+	if err := redisotel.InstrumentTracing(redisClient); err != nil {
+		logger.Error("failed to instrument redis tracing", "error", err)
+	}
 	defer func() { _ = redisClient.Close() }()
 
 	sessionClient := evals.NewHTTPSessionAPIClient(cfg.SessionAPIURL)
 
+	msgStore := redisprovider.NewFromClient(redisClient, redisprovider.DefaultOptions())
+
 	worker := evals.NewEvalWorker(evals.WorkerConfig{
-		RedisClient: redisClient,
-		SessionAPI:  sessionClient,
-		Namespaces:  cfg.Namespaces,
-		Logger:      logger,
-		K8sClient:   k8sClient,
-		PackLoader:  packLoader,
-		Metrics:     workerMetrics,
+		RedisClient:  redisClient,
+		ResultWriter: sessionClient,
+		MessageStore: msgStore,
+		Namespaces:   cfg.Namespaces,
+		Logger:       logger,
+		K8sClient:    k8sClient,
+		PackLoader:   packLoader,
+		Metrics:      workerMetrics,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

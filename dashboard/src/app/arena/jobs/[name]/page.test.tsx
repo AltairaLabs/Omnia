@@ -86,10 +86,7 @@ const mockJob = {
     arenaFile: "arena.yaml",
     type: "evaluation" as const,
     workers: { replicas: 2 },
-    timeout: "30m",
     evaluation: {
-      passingThreshold: 0.8,
-      continueOnFailure: true,
       outputFormats: ["json", "junit"] as ("json" | "junit" | "csv")[],
     },
   },
@@ -101,7 +98,7 @@ const mockJob = {
       failed: 0,
       pending: 50,
     },
-    workers: { desired: 2, active: 2 },
+    activeWorkers: 2,
     startTime: "2026-01-15T10:00:00Z",
     conditions: [
       {
@@ -354,7 +351,7 @@ describe("ArenaJobDetailPage", () => {
     render(<ArenaJobDetailPage />);
 
     expect(screen.getByText("Evaluation Settings")).toBeInTheDocument();
-    expect(screen.getByText("Passing Threshold")).toBeInTheDocument();
+    expect(screen.getByText("Output Formats")).toBeInTheDocument();
   });
 
   it("hides cancel button for read-only user", async () => {
@@ -403,7 +400,6 @@ describe("ArenaJobDetailPage", () => {
     expect(screen.getByText("Timing")).toBeInTheDocument();
     expect(screen.getByText("Started")).toBeInTheDocument();
     expect(screen.getByText("Duration")).toBeInTheDocument();
-    expect(screen.getByText("Timeout")).toBeInTheDocument();
   });
 
   it("shows clone button for finished job with project-id label", async () => {
@@ -467,7 +463,7 @@ describe("ArenaJobDetailPage", () => {
     expect(screen.queryByText("Clone")).not.toBeInTheDocument();
   });
 
-  it("does not show clone button when job has no project-id label", async () => {
+  it("shows clone button for finished job without project-id label", async () => {
     const { useArenaJob, useArenaJobMutations } = await import("@/hooks/use-arena-jobs");
 
     const finishedJobNoProject = {
@@ -491,7 +487,7 @@ describe("ArenaJobDetailPage", () => {
 
     render(<ArenaJobDetailPage />);
 
-    expect(screen.queryByText("Clone")).not.toBeInTheDocument();
+    expect(screen.getByText("Clone")).toBeInTheDocument();
   });
 
   it("opens clone dialog when clone button is clicked", async () => {

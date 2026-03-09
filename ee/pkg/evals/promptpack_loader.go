@@ -23,6 +23,9 @@ import (
 // ConfigMap data key containing the pack definition.
 const packJSONKey = "pack.json"
 
+// EvalTypeArenaAssertion is the eval type for PromptKit arena assertions.
+const EvalTypeArenaAssertion = "arena_assertion"
+
 // EvalDef represents an eval definition from a PromptPack.
 type EvalDef struct {
 	// ID is the unique identifier for this eval.

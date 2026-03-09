@@ -29,7 +29,7 @@ export const GET = withWorkspaceAccess<Params>(
 
     if (!SESSION_API_URL) {
       return NextResponse.json(
-        { error: "Session API not configured", evalResults: [] },
+        { error: "Session API not configured", results: [] },
         { status: 503 }
       );
     }
@@ -50,7 +50,7 @@ export const GET = withWorkspaceAccess<Params>(
         {
           error: "Failed to connect to Session API",
           details: error instanceof Error ? error.message : String(error),
-          evalResults: [],
+          results: [],
         },
         { status: 502 }
       );

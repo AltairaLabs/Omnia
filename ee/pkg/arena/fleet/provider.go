@@ -52,17 +52,23 @@ func NewProvider(id, wsURL string, dialer Dialer) *Provider {
 }
 
 // Connect dials the agent's WebSocket and waits for the connected message.
+// It injects W3C trace context into the upgrade request headers so the
+// facade can correlate spans with the caller's trace.
 func (p *Provider) Connect(ctx context.Context) error {
-	conn, err := p.dialer.DialContext(ctx, p.wsURL)
+	headers := traceHeaders(ctx)
+	conn, err := p.dialer.DialContext(ctx, p.wsURL, headers)
 	if err != nil {
 		return fmt.Errorf("failed to connect to agent: %w", err)
 	}
 
-	sessionID, err := waitForConnected(conn)
+	sessionID, err := waitForConnected(conn, defaultConnectTimeout)
 	if err != nil {
 		_ = conn.Close()
 		return fmt.Errorf("failed to receive connected message: %w", err)
 	}
+
+	// Clear read deadline set by waitForConnected so subsequent reads are not bounded.
+	_ = conn.SetReadDeadline(time.Time{})
 
 	p.conn = conn
 	p.sessionID = sessionID

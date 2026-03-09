@@ -80,6 +80,24 @@ func wsURL(httpURL string) string {
 	return strings.Replace(httpURL, "http://", "ws://", 1)
 }
 
+// readConnected reads the eagerly-sent "connected" message from the server
+// and returns the session ID. With eager session creation, "connected" is
+// sent immediately on WebSocket connection before any client message.
+func readConnected(t *testing.T, ws *websocket.Conn) string {
+	t.Helper()
+	var msg ServerMessage
+	if err := ws.ReadJSON(&msg); err != nil {
+		t.Fatalf("Failed to read connected message: %v", err)
+	}
+	if msg.Type != MessageTypeConnected {
+		t.Fatalf("Expected connected message, got %v", msg.Type)
+	}
+	if msg.SessionID == "" {
+		t.Fatal("Session ID should not be empty in connected message")
+	}
+	return msg.SessionID
+}
+
 func TestDefaultServerConfig(t *testing.T) {
 	cfg := DefaultServerConfig()
 
@@ -160,25 +178,17 @@ func TestServerMessageHandling(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send a message
+	// Read eagerly-sent connected message
+	sessionID := readConnected(t, ws)
+
+	// Send a message with the session ID from connected
 	clientMsg := ClientMessage{
-		Type:    MessageTypeMessage,
-		Content: "Hello",
+		Type:      MessageTypeMessage,
+		SessionID: sessionID,
+		Content:   "Hello",
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
-	}
-	if connectedMsg.Type != MessageTypeConnected {
-		t.Errorf("Expected connected message, got %v", connectedMsg.Type)
-	}
-	if connectedMsg.SessionID == "" {
-		t.Error("Session ID should not be empty")
 	}
 
 	// Read chunk message
@@ -210,29 +220,22 @@ func TestServerSessionResumption(t *testing.T) {
 	handler := &mockHandler{}
 	_, ts := newTestServer(t, handler)
 
-	// First connection
+	// First connection — read eagerly-sent connected to get session ID
 	ws1, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
 
-	// Send message to get session ID
+	sessionID := readConnected(t, ws1)
+
+	// Send message with the session ID
 	clientMsg := ClientMessage{
-		Type:    MessageTypeMessage,
-		Content: "Hello",
+		Type:      MessageTypeMessage,
+		SessionID: sessionID,
+		Content:   "Hello",
 	}
 	if err := ws1.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message to get session ID
-	var connectedMsg ServerMessage
-	if err := ws1.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected: %v", err)
-	}
-	sessionID := connectedMsg.SessionID
-	if sessionID == "" {
-		t.Fatal("Session ID should not be empty")
 	}
 
 	// Drain the done message
@@ -244,14 +247,20 @@ func TestServerSessionResumption(t *testing.T) {
 	// Close first connection
 	_ = ws1.Close()
 
-	// Second connection with session resumption
+	// Wait for cleanup to complete so session status is updated
+	time.Sleep(100 * time.Millisecond)
+
+	// Second connection — gets its own eagerly-sent connected (new session)
 	ws2, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
 	defer func() { _ = ws2.Close() }()
 
-	// Send message with existing session ID
+	// Read the eager connected for the second connection (new session)
+	_ = readConnected(t, ws2)
+
+	// Send message with the ORIGINAL session ID to trigger resumption
 	clientMsg2 := ClientMessage{
 		Type:      MessageTypeMessage,
 		SessionID: sessionID,
@@ -261,7 +270,7 @@ func TestServerSessionResumption(t *testing.T) {
 		t.Fatalf("Failed to send message: %v", err)
 	}
 
-	// Should not receive connected message for resumed session
+	// Should not receive another connected message for resumed session
 	// Should receive done message directly
 	var msg ServerMessage
 	if err := ws2.ReadJSON(&msg); err != nil {
@@ -306,15 +315,12 @@ func TestServerToolCallHandling(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send message
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "test"}); err != nil {
-		t.Fatalf("Failed to send: %v", err)
-	}
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
 
-	// Read connected
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected: %v", err)
+	// Send message with session ID
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "test"}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
 	}
 
 	// Read tool call
@@ -359,6 +365,9 @@ func TestServerErrorHandling(t *testing.T) {
 		t.Fatalf("Failed to connect: %v", err)
 	}
 	defer func() { _ = ws.Close() }()
+
+	// Read eagerly-sent connected
+	_ = readConnected(t, ws)
 
 	// Send invalid JSON
 	if err := ws.WriteMessage(websocket.TextMessage, []byte("not json")); err != nil {
@@ -478,15 +487,12 @@ func TestServerDefaultHandler(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send message
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "test"}); err != nil {
-		t.Fatalf("Failed to send: %v", err)
-	}
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
 
-	// Read connected
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected: %v", err)
+	// Send message with session ID
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "test"}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
 	}
 
 	// Should get default response
@@ -570,21 +576,12 @@ func TestServerWithTracingProvider(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send a message (triggers facade.session span, facade.message span, session_id attribute)
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hello"}); err != nil {
-		t.Fatalf("Failed to send message: %v", err)
-	}
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
 
-	// Read connected message
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected: %v", err)
-	}
-	if connectedMsg.Type != MessageTypeConnected {
-		t.Errorf("Expected connected, got %v", connectedMsg.Type)
-	}
-	if connectedMsg.SessionID == "" {
-		t.Error("Session ID should not be empty")
+	// Send a message with session ID
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "hello"}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
 	}
 
 	// Read done message
@@ -694,15 +691,12 @@ func TestServerHandlerError(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send message
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "test"}); err != nil {
-		t.Fatalf("Failed to send: %v", err)
-	}
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
 
-	// Read connected
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected: %v", err)
+	// Send message with session ID
+	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "test"}); err != nil {
+		t.Fatalf("Failed to send: %v", err)
 	}
 
 	// Should receive error message from handler
@@ -725,9 +719,13 @@ func TestServerUploadRequest_MediaNotEnabled(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send upload_request
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
+
+	// Send upload_request with session ID
 	clientMsg := ClientMessage{
-		Type: MessageTypeUploadRequest,
+		Type:      MessageTypeUploadRequest,
+		SessionID: sessionID,
 		UploadRequest: &UploadRequestInfo{
 			Filename:  "test.jpg",
 			MimeType:  "image/jpeg",
@@ -736,15 +734,6 @@ func TestServerUploadRequest_MediaNotEnabled(t *testing.T) {
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message first
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
-	}
-	if connectedMsg.Type != MessageTypeConnected {
-		t.Errorf("Expected connected message, got %v", connectedMsg.Type)
 	}
 
 	// Read error message
@@ -773,19 +762,17 @@ func TestServerUploadRequest_MissingUploadRequestField(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
+
 	// Send upload_request without the upload_request field
 	clientMsg := ClientMessage{
-		Type: MessageTypeUploadRequest,
+		Type:      MessageTypeUploadRequest,
+		SessionID: sessionID,
 		// UploadRequest intentionally nil
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
 	}
 
 	// Read error message - should get MEDIA_NOT_ENABLED first since no media storage
@@ -971,9 +958,13 @@ func TestServerUploadRequest_Success(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send upload_request
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
+
+	// Send upload_request with session ID
 	clientMsg := ClientMessage{
-		Type: MessageTypeUploadRequest,
+		Type:      MessageTypeUploadRequest,
+		SessionID: sessionID,
 		UploadRequest: &UploadRequestInfo{
 			Filename:  "test.jpg",
 			MimeType:  "image/jpeg",
@@ -982,15 +973,6 @@ func TestServerUploadRequest_Success(t *testing.T) {
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message first
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
-	}
-	if connectedMsg.Type != MessageTypeConnected {
-		t.Errorf("Expected connected message, got %v", connectedMsg.Type)
 	}
 
 	// Read upload_ready message
@@ -1054,19 +1036,17 @@ func TestServerUploadRequest_ValidationErrors(t *testing.T) {
 			}
 			defer func() { _ = ws.Close() }()
 
-			// Send upload_request
+			// Read eagerly-sent connected
+			sessionID := readConnected(t, ws)
+
+			// Send upload_request with session ID
 			clientMsg := ClientMessage{
 				Type:          MessageTypeUploadRequest,
+				SessionID:     sessionID,
 				UploadRequest: tc.uploadRequest,
 			}
 			if err := ws.WriteJSON(clientMsg); err != nil {
 				t.Fatalf("Failed to send message: %v", err)
-			}
-
-			// Read connected message
-			var connectedMsg ServerMessage
-			if err := ws.ReadJSON(&connectedMsg); err != nil {
-				t.Fatalf("Failed to read connected message: %v", err)
 			}
 
 			// Read error message
@@ -1101,9 +1081,13 @@ func TestServerUploadRequest_StorageError(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send upload_request
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
+
+	// Send upload_request with session ID
 	clientMsg := ClientMessage{
-		Type: MessageTypeUploadRequest,
+		Type:      MessageTypeUploadRequest,
+		SessionID: sessionID,
 		UploadRequest: &UploadRequestInfo{
 			Filename:  "test.jpg",
 			MimeType:  "image/jpeg",
@@ -1112,12 +1096,6 @@ func TestServerUploadRequest_StorageError(t *testing.T) {
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
 	}
 
 	// Read error message
@@ -1151,8 +1129,8 @@ func TestWithMediaStorage(t *testing.T) {
 	}
 }
 
-// connectAndReadCapabilities dials the WebSocket URL, sends a hello message,
-// and returns the capabilities from the connected response.
+// connectAndReadCapabilities dials the WebSocket URL and returns the
+// capabilities from the eagerly-sent connected response.
 func connectAndReadCapabilities(t *testing.T, url string) *ConnectionCapabilities {
 	t.Helper()
 	ws, _, err := websocket.DefaultDialer.Dial(url, nil)
@@ -1161,10 +1139,7 @@ func connectAndReadCapabilities(t *testing.T, url string) *ConnectionCapabilitie
 	}
 	defer func() { _ = ws.Close() }()
 
-	if err := ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "Hello"}); err != nil {
-		t.Fatalf("Failed to send message: %v", err)
-	}
-
+	// Read eagerly-sent connected message (no need to send first)
 	var connectedMsg ServerMessage
 	if err := ws.ReadJSON(&connectedMsg); err != nil {
 		t.Fatalf("Failed to read connected message: %v", err)
@@ -1228,6 +1203,9 @@ func TestServerBinaryMessageHandling(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
+	// Read eagerly-sent connected
+	_ = readConnected(t, ws)
+
 	// Create a binary frame with unknown message type
 	frame := &BinaryFrame{
 		Header: BinaryHeader{
@@ -1277,6 +1255,9 @@ func TestServerInvalidBinaryFrame(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
+	// Read eagerly-sent connected
+	_ = readConnected(t, ws)
+
 	// Send invalid binary message (wrong magic bytes)
 	invalidData := make([]byte, BinaryHeaderSize)
 	copy(invalidData[0:4], "BAD!")
@@ -1325,19 +1306,17 @@ func TestServerWriteBinaryMediaChunk(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send message
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
+
+	// Send message with session ID
 	clientMsg := ClientMessage{
-		Type:    MessageTypeMessage,
-		Content: "Hello",
+		Type:      MessageTypeMessage,
+		SessionID: sessionID,
+		Content:   "Hello",
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
 	}
 
 	// Read binary frame
@@ -1389,19 +1368,17 @@ func TestServerWriteBinaryMediaChunkFallback(t *testing.T) {
 	}
 	defer func() { _ = ws.Close() }()
 
-	// Send message
+	// Read eagerly-sent connected
+	sessionID := readConnected(t, ws)
+
+	// Send message with session ID
 	clientMsg := ClientMessage{
-		Type:    MessageTypeMessage,
-		Content: "Hello",
+		Type:      MessageTypeMessage,
+		SessionID: sessionID,
+		Content:   "Hello",
 	}
 	if err := ws.WriteJSON(clientMsg); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
-	}
-
-	// Read connected message
-	var connectedMsg ServerMessage
-	if err := ws.ReadJSON(&connectedMsg); err != nil {
-		t.Fatalf("Failed to read connected message: %v", err)
 	}
 
 	// Read media_chunk message (should be JSON fallback)

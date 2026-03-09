@@ -26,6 +26,7 @@ import (
 
 	"github.com/go-logr/logr"
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Stream key and MAXLEN constants for Redis Streams event publishing.
@@ -37,15 +38,19 @@ const (
 
 // SessionEvent represents a lightweight event published to Redis Streams.
 type SessionEvent struct {
-	EventType         string `json:"eventType"`
-	SessionID         string `json:"sessionId"`
-	AgentName         string `json:"agentName"`
-	Namespace         string `json:"namespace"`
-	MessageID         string `json:"messageId,omitempty"`
-	MessageRole       string `json:"messageRole,omitempty"`
-	PromptPackName    string `json:"promptPackName,omitempty"`
-	PromptPackVersion string `json:"promptPackVersion,omitempty"`
-	Timestamp         string `json:"timestamp"`
+	EventType         string   `json:"eventType"`
+	SessionID         string   `json:"sessionId"`
+	AgentName         string   `json:"agentName"`
+	Namespace         string   `json:"namespace"`
+	MessageID         string   `json:"messageId,omitempty"`
+	MessageRole       string   `json:"messageRole,omitempty"`
+	PromptPackName    string   `json:"promptPackName,omitempty"`
+	PromptPackVersion string   `json:"promptPackVersion,omitempty"`
+	Timestamp         string   `json:"timestamp"`
+	EvalTiers         []string `json:"evalTiers,omitempty"`
+	// Traceparent carries W3C trace context through Redis Streams so that
+	// downstream consumers (eval worker) can join the originating trace.
+	Traceparent string `json:"traceparent,omitempty"`
 }
 
 // EventPublisher publishes session events for downstream consumers.
@@ -119,4 +124,70 @@ func (p *RedisEventPublisher) Close() error {
 // streamKey returns the Redis Stream key for the given namespace.
 func StreamKey(namespace string) string {
 	return streamKeyPrefix + namespace
+}
+
+// FormatTraceparent serializes the span context from ctx as a W3C traceparent string.
+// Returns "" if there is no valid span context.
+func FormatTraceparent(ctx context.Context) string {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return ""
+	}
+	flags := "00"
+	if sc.IsSampled() {
+		flags = "01"
+	}
+	return fmt.Sprintf("00-%s-%s-%s", sc.TraceID(), sc.SpanID(), flags)
+}
+
+// ParseTraceparent parses a W3C traceparent string and returns a remote SpanContext.
+// Returns an invalid SpanContext if the string is empty or malformed.
+func ParseTraceparent(tp string) trace.SpanContext {
+	if tp == "" {
+		return trace.SpanContext{}
+	}
+	// W3C traceparent: "00-<traceID>-<spanID>-<flags>"
+	parts := splitTraceparent(tp)
+	if parts == nil {
+		return trace.SpanContext{}
+	}
+
+	traceID, err := trace.TraceIDFromHex(parts[1])
+	if err != nil {
+		return trace.SpanContext{}
+	}
+	spanID, err := trace.SpanIDFromHex(parts[2])
+	if err != nil {
+		return trace.SpanContext{}
+	}
+
+	var flags trace.TraceFlags
+	if parts[3] == "01" {
+		flags = trace.FlagsSampled
+	}
+
+	return trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: flags,
+		Remote:     true,
+	})
+}
+
+// splitTraceparent splits a traceparent string into its 4 components.
+// Returns nil if the format is invalid.
+func splitTraceparent(tp string) []string {
+	// Manually split to avoid importing strings just for Split.
+	var parts []string
+	start := 0
+	for i := 0; i <= len(tp); i++ {
+		if i == len(tp) || tp[i] == '-' {
+			parts = append(parts, tp[start:i])
+			start = i + 1
+		}
+	}
+	if len(parts) != 4 {
+		return nil
+	}
+	return parts
 }

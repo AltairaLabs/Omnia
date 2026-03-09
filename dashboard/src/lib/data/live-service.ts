@@ -303,6 +303,14 @@ export class LiveDataService implements DataService {
     return this.workspaceService.scaleAgent(workspace, name, replicas);
   }
 
+  async updateAgentEvals(
+    workspace: string,
+    name: string,
+    evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }
+  ): Promise<AgentRuntime> {
+    return this.workspaceService.updateAgentEvals(workspace, name, evals);
+  }
+
   async getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]> {
     return this.workspaceService.getAgentLogs(workspace, name, options);
   }

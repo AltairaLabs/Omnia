@@ -96,6 +96,7 @@ function transformApiMessage(api: ApiMessage): Message {
       api.inputTokens || api.outputTokens
         ? { input: api.inputTokens, output: api.outputTokens }
         : undefined,
+    sequenceNum: api.sequenceNum,
   };
 }
 
@@ -277,7 +278,7 @@ export class SessionApiService {
     }
 
     const data = await response.json();
-    return data.evalResults || [];
+    return data.results || [];
   }
 
 }

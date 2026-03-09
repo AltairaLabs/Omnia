@@ -18,6 +18,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -72,6 +73,89 @@ func (a *mockAdapter) Call(ctx context.Context, name string, args map[string]any
 func (a *mockAdapter) Close() error {
 	a.closed = true
 	return nil
+}
+
+// mockHealthyAdapter is a mock adapter that implements HealthChecker.
+type mockHealthyAdapter struct {
+	mockAdapter
+	healthErr error
+}
+
+func newMockHealthyAdapter(name string, tools []ToolInfo, healthErr error) *mockHealthyAdapter {
+	return &mockHealthyAdapter{
+		mockAdapter: *newMockAdapter(name, tools),
+		healthErr:   healthErr,
+	}
+}
+
+func (a *mockHealthyAdapter) HealthCheck(ctx context.Context) error {
+	return a.healthErr
+}
+
+func TestManager_CheckHealth_AllHealthy(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	adapter := newMockHealthyAdapter("healthy-adapter",
+		[]ToolInfo{{Name: "tool1"}, {Name: "tool2"}}, nil)
+	_ = m.RegisterAdapter(adapter)
+	_ = m.Connect(context.Background())
+
+	results := m.CheckHealth(context.Background())
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.Healthy {
+			t.Errorf("tool %s should be healthy", r.ToolName)
+		}
+	}
+}
+
+func TestManager_CheckHealth_Unhealthy(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	adapter := newMockHealthyAdapter("unhealthy-adapter",
+		[]ToolInfo{{Name: "broken-tool"}},
+		fmt.Errorf("connection refused"))
+	_ = m.RegisterAdapter(adapter)
+	_ = m.Connect(context.Background())
+
+	results := m.CheckHealth(context.Background())
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Healthy {
+		t.Error("tool should be unhealthy")
+	}
+	if results[0].Error != "connection refused" {
+		t.Errorf("expected 'connection refused', got %q", results[0].Error)
+	}
+}
+
+func TestManager_CheckHealth_MixedAdapters(t *testing.T) {
+	m := NewManager(logr.Discard())
+
+	// One adapter with health check, one without
+	healthyAdapter := newMockHealthyAdapter("healthy",
+		[]ToolInfo{{Name: "checked-tool"}}, nil)
+	plainAdapter := newMockAdapter("plain",
+		[]ToolInfo{{Name: "unchecked-tool"}})
+
+	_ = m.RegisterAdapter(healthyAdapter)
+	_ = m.RegisterAdapter(plainAdapter)
+	_ = m.Connect(context.Background())
+
+	results := m.CheckHealth(context.Background())
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// Both should be reported as healthy (plain adapter skips check)
+	for _, r := range results {
+		if !r.Healthy {
+			t.Errorf("tool %s should be healthy", r.ToolName)
+		}
+	}
 }
 
 func TestManager_RegisterAdapter(t *testing.T) {

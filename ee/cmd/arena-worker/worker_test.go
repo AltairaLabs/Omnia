@@ -40,7 +40,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, map[string]ToolOverrideConfig{}, false)
+		err := applyToolOverrides(testLog(), cfg, map[string]ToolOverrideConfig{})
 		require.NoError(t, err)
 
 		// Verify tool is unchanged
@@ -67,7 +67,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, nil, false)
+		err := applyToolOverrides(testLog(), cfg, nil)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -105,7 +105,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -146,7 +146,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -183,7 +183,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -223,7 +223,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -265,7 +265,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -320,7 +320,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		// Weather tool should be overridden
@@ -371,7 +371,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		// Invalid tool should still be invalid (unchanged)
@@ -426,7 +426,7 @@ spec:
 			},
 		}
 
-		err := applyToolOverrides(cfg, overrides, false)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 
 		var wrapper toolConfigWrapper
@@ -478,7 +478,7 @@ spec:
 		}
 
 		// Just verify it doesn't error with verbose mode
-		err := applyToolOverrides(cfg, overrides, true)
+		err := applyToolOverrides(testLog(), cfg, overrides)
 		require.NoError(t, err)
 	})
 }
@@ -530,7 +530,7 @@ func TestApplyProviderOverrides(t *testing.T) {
 			},
 		}
 
-		applyProviderOverrides(cfg, providersByGroup, false)
+		applyProviderOverrides(testLog(), cfg, providersByGroup)
 
 		require.NotNil(t, cfg.LoadedProviders)
 		require.Contains(t, cfg.LoadedProviders, "test-openai")
@@ -553,7 +553,7 @@ func TestApplyProviderOverrides(t *testing.T) {
 			},
 		}
 
-		applyProviderOverrides(cfg, providersByGroup, false)
+		applyProviderOverrides(testLog(), cfg, providersByGroup)
 
 		require.NotNil(t, cfg.LoadedProviders)
 		require.Contains(t, cfg.LoadedProviders, "test-file-provider")
@@ -575,7 +575,7 @@ func TestApplyProviderOverrides(t *testing.T) {
 			},
 		}
 
-		applyProviderOverrides(cfg, providersByGroup, false)
+		applyProviderOverrides(testLog(), cfg, providersByGroup)
 
 		require.NotNil(t, cfg.LoadedProviders)
 		require.Contains(t, cfg.LoadedProviders, "test-mock")
@@ -597,7 +597,7 @@ func TestApplyProviderOverrides(t *testing.T) {
 			},
 		}
 
-		applyProviderOverrides(cfg, providersByGroup, false)
+		applyProviderOverrides(testLog(), cfg, providersByGroup)
 
 		provider := cfg.LoadedProviders["test-both"]
 		require.NotNil(t, provider.Credential)
@@ -617,7 +617,7 @@ func TestApplyProviderOverrides(t *testing.T) {
 			},
 		}
 
-		applyProviderOverrides(cfg, providersByGroup, false)
+		applyProviderOverrides(testLog(), cfg, providersByGroup)
 
 		require.NotNil(t, cfg.ProviderGroups)
 		assert.Equal(t, "judge", cfg.ProviderGroups["judge-claude"])

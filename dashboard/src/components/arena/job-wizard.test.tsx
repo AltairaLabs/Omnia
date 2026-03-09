@@ -9,17 +9,24 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JobWizard } from "./job-wizard";
 import type { ArenaSource, ArenaJob } from "@/types/arena";
 
-// Mock workspace context
+// Mock name generator to return a predictable default
+vi.mock("@/lib/name-generator", () => ({
+  generateName: () => "swift-falcon",
+}));
+
+// Mock workspace context — mutable so tests can add extra workspaces
 const mockCurrentWorkspace = {
   name: "test-workspace",
   namespace: "test-namespace",
   role: "editor",
 };
 
+let mockWorkspaces = [mockCurrentWorkspace];
+
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({
     currentWorkspace: mockCurrentWorkspace,
-    workspaces: [mockCurrentWorkspace],
+    workspaces: mockWorkspaces,
     isLoading: false,
     error: null,
     setCurrentWorkspace: vi.fn(),
@@ -34,6 +41,21 @@ vi.mock("@/hooks/use-arena-source-content", () => ({
     loading: false,
     error: null,
   }),
+}));
+
+// Mock useAgents hook
+const mockAgents = [
+  {
+    metadata: { name: "chat-agent", namespace: "omnia-system", uid: "agent-1" },
+    status: { phase: "Running" },
+  },
+  {
+    metadata: { name: "stopped-agent", namespace: "omnia-system", uid: "agent-2" },
+    status: { phase: "Stopped" },
+  },
+];
+vi.mock("@/hooks/use-agents", () => ({
+  useAgents: () => ({ data: mockAgents, isLoading: false }),
 }));
 
 // Mock provider data
@@ -143,6 +165,7 @@ async function selectOption(trigger: HTMLElement, optionText: string) {
 describe("JobWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWorkspaces = [mockCurrentWorkspace];
   });
 
   describe("Step 0: Basic Info", () => {
@@ -153,11 +176,19 @@ describe("JobWizard", () => {
       expect(screen.getByText("Job Type")).toBeInTheDocument();
     });
 
+    it("pre-populates a default name", () => {
+      renderWizard();
+
+      const nameInput = screen.getByPlaceholderText("my-job") as HTMLInputElement;
+      expect(nameInput.value).toBe("swift-falcon");
+    });
+
     it("allows entering a job name", async () => {
       const user = userEvent.setup();
       renderWizard();
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
 
       expect(nameInput).toHaveValue("test-job");
@@ -168,13 +199,18 @@ describe("JobWizard", () => {
       renderWizard();
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "Test Job");
 
       expect(nameInput).toHaveValue("test-job");
     });
 
-    it("disables Next button when name is empty", () => {
+    it("disables Next button when name is cleared", async () => {
+      const user = userEvent.setup();
       renderWizard();
+
+      const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
 
       const nextButton = screen.getByRole("button", { name: /next/i });
       expect(nextButton).toBeDisabled();
@@ -185,6 +221,7 @@ describe("JobWizard", () => {
       renderWizard();
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
 
       const nextButton = screen.getByRole("button", { name: /next/i });
@@ -209,6 +246,7 @@ describe("JobWizard", () => {
 
       // Fill in name
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
 
       // Click Next
@@ -226,6 +264,7 @@ describe("JobWizard", () => {
 
       // Navigate to source step
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       await user.click(screen.getByRole("button", { name: /next/i }));
 
@@ -242,11 +281,15 @@ describe("JobWizard", () => {
     async function navigateToProvidersStep(user: ReturnType<typeof userEvent.setup>) {
       // Step 0: Fill name and advance
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
       // Step 1: Select source and advance
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Step 2: Skip execution mode (default: direct)
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     }
 
@@ -278,6 +321,7 @@ describe("JobWizard", () => {
     async function navigateToToolsStep(user: ReturnType<typeof userEvent.setup>) {
       // Step 0: Fill name and advance
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -285,7 +329,10 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2: Skip providers
+      // Step 2: Skip execution mode
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Step 3: Skip providers
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     }
 
@@ -317,6 +364,7 @@ describe("JobWizard", () => {
     async function navigateToOptionsStep(user: ReturnType<typeof userEvent.setup>) {
       // Step 0: Fill name and advance
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -324,7 +372,8 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2-3: Skip
+      // Step 2-4: Skip execution, providers, tools
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     }
@@ -336,17 +385,6 @@ describe("JobWizard", () => {
       await navigateToOptionsStep(user);
 
       expect(screen.getByText("Workers")).toBeInTheDocument();
-      expect(screen.getByText("Timeout")).toBeInTheDocument();
-    });
-
-    it("shows evaluation options for evaluation job type", async () => {
-      const user = userEvent.setup();
-      renderWizard();
-
-      await navigateToOptionsStep(user);
-
-      expect(screen.getByText("Evaluation Options")).toBeInTheDocument();
-      expect(screen.getByText("Passing Threshold")).toBeInTheDocument();
     });
 
     it("shows worker limit warning when maxWorkerReplicas is set", async () => {
@@ -363,6 +401,7 @@ describe("JobWizard", () => {
     async function navigateToReviewStep(user: ReturnType<typeof userEvent.setup>) {
       // Step 0: Fill name and advance
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -370,7 +409,8 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2-4: Skip
+      // Step 2-5: Skip execution, providers, tools, options
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -469,6 +509,7 @@ describe("JobWizard", () => {
 
       // Navigate to step 1
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -488,6 +529,7 @@ describe("JobWizard", () => {
 
       // Step 0: Fill name and advance
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -495,7 +537,8 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2-4: Skip
+      // Step 2-5: Skip execution, providers, tools, options
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -520,6 +563,7 @@ describe("JobWizard", () => {
     async function navigateToOptionsWithLoadTest(user: ReturnType<typeof userEvent.setup>) {
       // Step 0: Fill name and select loadtest type
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "loadtest-job");
 
       // Select loadtest type
@@ -532,7 +576,8 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2-3: Skip
+      // Step 2-4: Skip execution, providers, tools
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     }
@@ -544,23 +589,9 @@ describe("JobWizard", () => {
       await navigateToOptionsWithLoadTest(user);
 
       expect(screen.getByText("Load Test Options")).toBeInTheDocument();
-      expect(screen.getByText("Profile Type")).toBeInTheDocument();
+      expect(screen.getByText("Ramp Up")).toBeInTheDocument();
       expect(screen.getByText("Duration")).toBeInTheDocument();
       expect(screen.getByText("Target RPS")).toBeInTheDocument();
-    });
-
-    it("allows changing load test profile type", async () => {
-      const user = userEvent.setup();
-      renderWizard({ isEnterprise: true });
-
-      await navigateToOptionsWithLoadTest(user);
-
-      // Select ramp profile
-      const profileSelect = screen.getByLabelText("Profile Type");
-      await selectOption(profileSelect, "Ramp");
-
-      // Verify the selection by checking if dropdown is closed
-      expect(screen.getByText("Load Test Options")).toBeInTheDocument();
     });
 
     it("builds loadtest spec correctly", async () => {
@@ -589,8 +620,8 @@ describe("JobWizard", () => {
           "loadtest-job",
           expect.objectContaining({
             type: "loadtest",
-            loadtest: expect.objectContaining({
-              profileType: "constant",
+            loadTest: expect.objectContaining({
+              rampUp: "30s",
               duration: "10m",
               targetRPS: 20,
             }),
@@ -604,6 +635,7 @@ describe("JobWizard", () => {
     async function navigateToOptionsWithDatagen(user: ReturnType<typeof userEvent.setup>) {
       // Step 0: Fill name and select datagen type
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "datagen-job");
 
       // Select datagen type
@@ -616,7 +648,8 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2-3: Skip
+      // Step 2-4: Skip execution, providers, tools
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     }
@@ -629,7 +662,6 @@ describe("JobWizard", () => {
 
       expect(screen.getByText("Data Generation Options")).toBeInTheDocument();
       expect(screen.getByText("Sample Count")).toBeInTheDocument();
-      expect(screen.getByText("Deduplicate")).toBeInTheDocument();
     });
 
     it("builds datagen spec correctly", async () => {
@@ -644,10 +676,6 @@ describe("JobWizard", () => {
       await user.clear(samplesInput);
       await user.type(samplesInput, "200");
 
-      // Toggle deduplicate off
-      const deduplicateSwitch = screen.getAllByRole("switch")[1]; // Second switch is deduplicate
-      await user.click(deduplicateSwitch);
-
       // Go to review and submit
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /create job/i }));
@@ -657,10 +685,9 @@ describe("JobWizard", () => {
           "datagen-job",
           expect.objectContaining({
             type: "datagen",
-            datagen: expect.objectContaining({
-              sampleCount: 200,
-              deduplicate: false,
-              outputFormat: "jsonl",
+            dataGen: expect.objectContaining({
+              count: 200,
+              format: "jsonl",
             }),
           })
         );
@@ -671,9 +698,12 @@ describe("JobWizard", () => {
   describe("Provider group management", () => {
     async function navigateToProviders(user: ReturnType<typeof userEvent.setup>) {
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      // Skip execution mode
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
     }
 
@@ -835,10 +865,12 @@ describe("JobWizard", () => {
   describe("Tool registry override", () => {
     async function navigateToTools(user: ReturnType<typeof userEvent.setup>) {
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // Skip execution
       fireEvent.click(screen.getByRole("button", { name: /next/i })); // Skip providers
     }
 
@@ -872,6 +904,7 @@ describe("JobWizard", () => {
       renderWizard({ sources: pendingSources });
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -888,6 +921,7 @@ describe("JobWizard", () => {
 
       // Navigate to source step
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -904,6 +938,7 @@ describe("JobWizard", () => {
 
       // Select loadtest (enterprise only) - need to do it before navigating
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
 
       // Note: The select is disabled for non-enterprise, but we test the validation
@@ -911,6 +946,7 @@ describe("JobWizard", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -929,9 +965,11 @@ describe("JobWizard", () => {
       renderWizard({ maxWorkerReplicas: 1, onSubmit });
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -955,12 +993,14 @@ describe("JobWizard", () => {
   describe("Options step", () => {
     async function navigateToOptions(user: ReturnType<typeof userEvent.setup>) {
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // execution
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // providers
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // tools
     }
 
     it("allows toggling verbose logging", async () => {
@@ -992,36 +1032,6 @@ describe("JobWizard", () => {
       expect(workersInput).toHaveValue(4);
     });
 
-    it("allows modifying timeout", async () => {
-      const user = userEvent.setup();
-      renderWizard();
-
-      await navigateToOptions(user);
-
-      const timeoutInput = screen.getByLabelText("Timeout");
-      await user.clear(timeoutInput);
-      await user.type(timeoutInput, "1h");
-
-      expect(timeoutInput).toHaveValue("1h");
-    });
-
-    it("allows toggling continue on failure for evaluation", async () => {
-      const user = userEvent.setup();
-      renderWizard();
-
-      await navigateToOptions(user);
-
-      // Find the continue on failure switch (second switch in evaluation options)
-      const switches = screen.getAllByRole("switch");
-      const continueOnFailureSwitch = switches.find(s =>
-        s.closest(".grid")?.textContent?.includes("Continue on Failure")
-      );
-
-      if (continueOnFailureSwitch) {
-        await user.click(continueOnFailureSwitch);
-        expect(continueOnFailureSwitch).not.toBeChecked();
-      }
-    });
   });
 
   describe("Review step with provider/tool overrides", () => {
@@ -1032,6 +1042,7 @@ describe("JobWizard", () => {
 
       // Step 0
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -1039,7 +1050,10 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2: Enable providers and add a group
+      // Step 2: Skip execution
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Step 3: Enable providers and add a group
       const providerSwitch = screen.getByRole("switch");
       await user.click(providerSwitch);
 
@@ -1065,6 +1079,7 @@ describe("JobWizard", () => {
 
       // Step 0
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -1072,10 +1087,13 @@ describe("JobWizard", () => {
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 2: Skip providers
+      // Step 2: Skip execution
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
-      // Step 3: Enable tool registry override
+      // Step 3: Skip providers
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Step 4: Enable tool registry override
       const toolSwitch = screen.getByRole("switch");
       await user.click(toolSwitch);
 
@@ -1096,9 +1114,11 @@ describe("JobWizard", () => {
 
       // Navigate to review
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -1115,9 +1135,11 @@ describe("JobWizard", () => {
 
       // Navigate to review
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -1143,9 +1165,11 @@ describe("JobWizard", () => {
 
       // Navigate to options
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -1154,65 +1178,15 @@ describe("JobWizard", () => {
     });
   });
 
-  describe("Evaluation options", () => {
-    async function navigateToOptions(user: ReturnType<typeof userEvent.setup>) {
-      const nameInput = screen.getByPlaceholderText("my-job");
-      await user.type(nameInput, "test-job");
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      await selectOption(screen.getByLabelText("Source"), "test-source");
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    }
-
-    it("allows modifying passing threshold", async () => {
-      const user = userEvent.setup();
-      renderWizard();
-
-      await navigateToOptions(user);
-
-      const thresholdInput = screen.getByLabelText("Passing Threshold");
-      await user.clear(thresholdInput);
-      await user.type(thresholdInput, "0.95");
-
-      expect(thresholdInput).toHaveValue(0.95);
-    });
-
-    it("builds spec with modified threshold", async () => {
-      const user = userEvent.setup();
-      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
-      renderWizard({ onSubmit });
-
-      await navigateToOptions(user);
-
-      const thresholdInput = screen.getByLabelText("Passing Threshold");
-      await user.clear(thresholdInput);
-      await user.type(thresholdInput, "0.9");
-
-      // Go to review and submit
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
-
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalledWith(
-          "test-job",
-          expect.objectContaining({
-            evaluation: expect.objectContaining({
-              passingThreshold: 0.9,
-            }),
-          })
-        );
-      });
-    });
-  });
-
   describe("Tool registry override with selector", () => {
     async function navigateToTools(user: ReturnType<typeof userEvent.setup>) {
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // Skip execution
       fireEvent.click(screen.getByRole("button", { name: /next/i })); // Skip providers
     }
 
@@ -1255,6 +1229,7 @@ describe("JobWizard", () => {
       renderWizard();
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -1270,6 +1245,7 @@ describe("JobWizard", () => {
       renderWizard();
 
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
 
@@ -1293,9 +1269,11 @@ describe("JobWizard", () => {
 
       // Navigate to review
       const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
       await user.type(nameInput, "test-job");
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
       fireEvent.click(screen.getByRole("button", { name: /next/i }));
@@ -1308,6 +1286,221 @@ describe("JobWizard", () => {
       await waitFor(() => {
         expect(screen.getByText("Failed to create job")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("Execution mode", () => {
+    async function navigateToExecutionStep(user: ReturnType<typeof userEvent.setup>) {
+      const nameInput = screen.getByPlaceholderText("my-job");
+      await user.clear(nameInput);
+      await user.type(nameInput, "test-job");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      await selectOption(screen.getByLabelText("Source"), "test-source");
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+    }
+
+    it("shows execution mode step with direct and fleet options", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+
+      expect(screen.getByText("Execution Mode")).toBeInTheDocument();
+      expect(screen.getByText("Direct")).toBeInTheDocument();
+      expect(screen.getByText("Fleet")).toBeInTheDocument();
+    });
+
+    it("defaults to direct mode", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+
+      // Direct card should have selected styling
+      const directButton = screen.getByText("Direct").closest("button")!;
+      expect(directButton.className).toContain("border-primary");
+    });
+
+    it("shows agent selector when fleet mode is selected", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+
+      // Click Fleet
+      fireEvent.click(screen.getByText("Fleet"));
+
+      expect(screen.getByText("Target Agent")).toBeInTheDocument();
+      expect(screen.getByText("Namespace")).toBeInTheDocument();
+    });
+
+    it("shows running agents in dropdown", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByText("Fleet"));
+
+      // Open the agent dropdown
+      fireEvent.click(screen.getByLabelText("Target Agent"));
+      expect(screen.getByRole("option", { name: /chat-agent/ })).toBeInTheDocument();
+      // stopped-agent should not be shown (not Running)
+      expect(screen.queryByRole("option", { name: /stopped-agent/ })).not.toBeInTheDocument();
+    });
+
+    it("disables Next when fleet mode selected without agent", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByText("Fleet"));
+
+      const nextButton = screen.getByRole("button", { name: /next/i });
+      expect(nextButton).toBeDisabled();
+    });
+
+    it("enables Next when fleet mode has agent selected", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByText("Fleet"));
+      fireEvent.click(screen.getByLabelText("Target Agent"));
+      fireEvent.click(await screen.findByRole("option", { name: /chat-agent/ }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+
+      const nextButton = screen.getByRole("button", { name: /next/i });
+      expect(nextButton).not.toBeDisabled();
+    });
+
+    it("skips providers and tools steps in fleet mode", async () => {
+      const user = userEvent.setup();
+      renderWizard();
+
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByText("Fleet"));
+      fireEvent.click(screen.getByLabelText("Target Agent"));
+      fireEvent.click(await screen.findByRole("option", { name: /chat-agent/ }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+
+      // Click Next from execution step - should go straight to Options
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      expect(screen.getByText("Workers")).toBeInTheDocument();
+      expect(screen.queryByText("Provider Overrides")).not.toBeInTheDocument();
+    });
+
+    it("builds spec with fleet execution config", async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
+      renderWizard({ onSubmit });
+
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByText("Fleet"));
+      fireEvent.click(screen.getByLabelText("Target Agent"));
+      fireEvent.click(await screen.findByRole("option", { name: /chat-agent/ }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+
+      // Fleet mode: execution -> options -> review
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // options
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // review
+
+      // Review should show execution mode
+      expect(screen.getByText("Fleet")).toBeInTheDocument();
+      expect(screen.getByText("chat-agent")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          "test-job",
+          expect.objectContaining({
+            execution: {
+              mode: "fleet",
+              target: {
+                agentRuntimeRef: { name: "chat-agent" },
+                namespace: "test-namespace",
+              },
+            },
+          })
+        );
+      });
+    });
+
+    it("omits provider/tool overrides in fleet mode spec", async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
+      renderWizard({ onSubmit });
+
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByText("Fleet"));
+      fireEvent.click(screen.getByLabelText("Target Agent"));
+      fireEvent.click(await screen.findByRole("option", { name: /chat-agent/ }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+
+      // Fleet mode: execution -> options -> review -> submit
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+      await waitFor(() => {
+        const spec = onSubmit.mock.calls[0][1];
+        expect(spec.providerOverrides).toBeUndefined();
+        expect(spec.toolRegistryOverride).toBeUndefined();
+      });
+    });
+
+    it("includes namespace in fleet spec when specified", async () => {
+      // Add a second workspace so the namespace dropdown is enabled
+      mockWorkspaces = [
+        mockCurrentWorkspace,
+        { name: "staging-workspace", namespace: "staging-ns", role: "editor" },
+      ];
+
+      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
+      renderWizard({ onSubmit });
+
+      await navigateToExecutionStep(userEvent.setup());
+      fireEvent.click(screen.getByText("Fleet"));
+
+      // Change namespace via dropdown
+      fireEvent.click(screen.getByLabelText(/Namespace/));
+      fireEvent.click(await screen.findByRole("option", { name: "staging-ns" }));
+
+      // Select an agent (agents list reloads for new namespace but mock returns same agents)
+      fireEvent.click(screen.getByLabelText("Target Agent"));
+      fireEvent.click(await screen.findByRole("option", { name: /chat-agent/ }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+
+      // Fleet mode: execution -> options -> review -> submit
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+      // Review should show namespace
+      expect(screen.getByText("Target Namespace")).toBeInTheDocument();
+      expect(screen.getByText("staging-ns")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+      await waitFor(() => {
+        const spec = onSubmit.mock.calls[0][1];
+        expect(spec.execution.target.namespace).toBe("staging-ns");
+      });
+    });
+
+    it("shows direct mode in review for direct execution", async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
+      renderWizard({ onSubmit });
+
+      // Navigate all the way to review in direct mode
+      await navigateToExecutionStep(user);
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // execution (direct)
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // providers
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // tools
+      fireEvent.click(screen.getByRole("button", { name: /next/i })); // options
+
+      // Review should show Direct
+      expect(screen.getByText("Direct")).toBeInTheDocument();
     });
   });
 });

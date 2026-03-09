@@ -17,10 +17,8 @@ limitations under the License.
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,19 +28,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
+	sdktools "github.com/AltairaLabs/PromptKit/sdk/tools"
+
+	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 )
-
-// httpServerError is returned by the circuit breaker function for 5xx responses.
-// It allows the circuit breaker to count the failure while the caller can still
-// extract the status code and body to build a ToolResult.
-type httpServerError struct {
-	statusCode int
-	body       []byte
-}
-
-func (e *httpServerError) Error() string {
-	return fmt.Sprintf("HTTP %d: %s", e.statusCode, string(e.body))
-}
 
 // HTTPAdapterConfig contains configuration for the HTTP adapter.
 type HTTPAdapterConfig struct {
@@ -85,15 +75,19 @@ type HTTPAdapterConfig struct {
 	ToolInputSchema map[string]any
 }
 
-// HTTPAdapter implements ToolAdapter for HTTP tool endpoints.
+// HTTPAdapter implements ToolAdapter by delegating HTTP execution to the
+// PromptKit SDK's HTTPExecutor. This ensures a single code path for HTTP
+// tool calls with consistent logging, OTel trace propagation, and error
+// handling across both the runtime and the SDK.
 type HTTPAdapter struct {
-	config    HTTPAdapterConfig
-	log       logr.Logger
-	client    *http.Client
-	tools     map[string]ToolInfo
-	mu        sync.RWMutex
-	connected bool
-	breakers  *ToolCircuitBreakers
+	config     HTTPAdapterConfig
+	log        logr.Logger
+	executor   *sdktools.HTTPExecutor
+	descriptor *pktools.ToolDescriptor
+	tools      map[string]ToolInfo
+	client     *http.Client // kept for health checks
+	mu         sync.RWMutex
+	connected  bool
 }
 
 // NewHTTPAdapter creates a new HTTP adapter.
@@ -108,10 +102,9 @@ func NewHTTPAdapter(config HTTPAdapterConfig, log logr.Logger) *HTTPAdapter {
 		config.ContentType = "application/json"
 	}
 	return &HTTPAdapter{
-		config:   config,
-		log:      log.WithValues("adapter", config.Name, "endpoint", config.Endpoint),
-		tools:    make(map[string]ToolInfo),
-		breakers: NewToolCircuitBreakers(),
+		config: config,
+		log:    log.WithValues("adapter", config.Name, "endpoint", config.Endpoint),
+		tools:  make(map[string]ToolInfo),
 	}
 }
 
@@ -120,32 +113,41 @@ func (a *HTTPAdapter) Name() string {
 	return a.config.Name
 }
 
-// Connect initializes the HTTP client and validates the endpoint.
-func (a *HTTPAdapter) Connect(ctx context.Context) error {
+// Connect initializes the SDK executor and registers tool metadata.
+func (a *HTTPAdapter) Connect(_ context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Validate endpoint URL
-	if _, err := url.Parse(a.config.Endpoint); err != nil {
-		return fmt.Errorf("invalid endpoint URL: %w", err)
+	// Build headers including auth
+	headers := make(map[string]string, len(a.config.Headers))
+	for k, v := range a.config.Headers {
+		headers[k] = v
+	}
+	if err := mergeAuthHeaders(headers, a.config.AuthType, a.config.AuthToken); err != nil {
+		return fmt.Errorf("invalid auth config: %w", err)
 	}
 
-	// Create HTTP client with timeout
-	a.client = &http.Client{
-		Timeout: a.config.Timeout,
+	// Create the SDK HTTP executor with a client matching our timeout
+	client := &http.Client{Timeout: a.config.Timeout}
+	a.executor = sdktools.NewHTTPExecutorWithClient(client)
+	a.client = client
+
+	// Build the PromptKit ToolDescriptor that the executor expects
+	a.descriptor = &pktools.ToolDescriptor{
+		Name: a.resolveToolName(),
+		HTTPConfig: &pktools.HTTPConfig{
+			URL:     a.config.Endpoint,
+			Method:  a.config.Method,
+			Headers: headers,
+		},
 	}
 
-	// Use tool definition from config if provided, otherwise use defaults
-	toolName := a.config.ToolName
-	if toolName == "" {
-		toolName = a.config.Name
-	}
-
+	// Register tool info for ListTools
+	toolName := a.resolveToolName()
 	toolDescription := a.config.ToolDescription
 	if toolDescription == "" {
 		toolDescription = fmt.Sprintf("HTTP tool at %s", a.config.Endpoint)
 	}
-
 	inputSchema := a.config.ToolInputSchema
 	if inputSchema == nil {
 		inputSchema = map[string]any{
@@ -153,8 +155,6 @@ func (a *HTTPAdapter) Connect(ctx context.Context) error {
 			"additionalProperties": true,
 		}
 	}
-
-	// Register the tool
 	a.tools[toolName] = ToolInfo{
 		Name:        toolName,
 		Description: toolDescription,
@@ -167,7 +167,7 @@ func (a *HTTPAdapter) Connect(ctx context.Context) error {
 }
 
 // ListTools returns available tools from this adapter.
-func (a *HTTPAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
+func (a *HTTPAdapter) ListTools(_ context.Context) ([]ToolInfo, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -178,77 +178,51 @@ func (a *HTTPAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 	return tools, nil
 }
 
-// Call invokes the HTTP endpoint with the given arguments.
+// Call delegates to the PromptKit SDK HTTPExecutor for consistent logging,
+// OTel trace injection, and error handling.
 func (a *HTTPAdapter) Call(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
 	a.mu.RLock()
-	client := a.client
+	executor := a.executor
 	connected := a.connected
 	a.mu.RUnlock()
 
-	if !connected || client == nil {
+	if !connected || executor == nil {
 		return nil, fmt.Errorf("adapter not connected")
 	}
 
-	a.log.V(1).Info("calling HTTP tool", "name", name, "method", a.config.Method)
+	// Set Omnia policy propagation headers on the descriptor before calling.
+	// The SDK executor handles OTel trace injection and structured logging.
+	desc := a.descriptorWithPolicyHeaders(ctx, name, args)
 
-	// Build request
-	req, err := a.buildRequest(ctx, args)
+	// For GET/DELETE, encode args as URL query parameters and send an empty
+	// body. The SDK executor always sends args as a JSON body, which doesn't
+	// work for APIs that expect query parameters.
+	var argsJSON []byte
+	if methodUsesQueryParams(a.config.Method) && len(args) > 0 {
+		desc.HTTPConfig.URL = appendQueryParams(desc.HTTPConfig.URL, args)
+		argsJSON = []byte("{}")
+	} else {
+		var err error
+		argsJSON, err = json.Marshal(args)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal arguments: %w", err)
+		}
+	}
+
+	result, err := executor.ExecuteWithContext(ctx, desc, argsJSON)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build request: %w", err)
-	}
-
-	// Set policy propagation, tool, and parameter headers
-	SetAllOutboundHeaders(ctx, req, name, a.config.Name, args)
-
-	// Execute request through circuit breaker
-	var statusCode int
-	body, err := a.breakers.Execute(name, func() ([]byte, error) {
-		resp, doErr := client.Do(req)
-		if doErr != nil {
-			return nil, doErr
-		}
-		defer resp.Body.Close()
-
-		data, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf("failed to read response: %w", readErr)
-		}
-
-		statusCode = resp.StatusCode
-		// Treat server errors (5xx) as failures for the circuit breaker,
-		// but still return the body so the caller can build a ToolResult.
-		if resp.StatusCode >= 500 {
-			return data, &httpServerError{statusCode: resp.StatusCode, body: data}
-		}
-		return data, nil
-	})
-
-	// If the error is a server error, convert to a ToolResult rather than
-	// propagating as a hard failure. The circuit breaker still counts it.
-	var serverErr *httpServerError
-	if errors.As(err, &serverErr) {
+		// The SDK returns errors for non-2xx responses; convert to ToolResult
+		// so the LLM sees the error message rather than a hard failure.
 		return &ToolResult{
-			Content: fmt.Sprintf("HTTP %d: %s", serverErr.statusCode, string(serverErr.body)),
-			IsError: true,
-		}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-
-	// Check for client errors (4xx) — not circuit breaker failures
-	if statusCode >= 400 {
-		return &ToolResult{
-			Content: fmt.Sprintf("HTTP %d: %s", statusCode, string(body)),
+			Content: err.Error(),
 			IsError: true,
 		}, nil
 	}
 
-	// Parse response as JSON if possible
+	// Parse the JSON result back to a Go value
 	var content any
-	if json.Unmarshal(body, &content) != nil {
-		// If not JSON, return as string
-		content = string(body)
+	if json.Unmarshal(result, &content) != nil {
+		content = string(result)
 	}
 
 	return &ToolResult{
@@ -257,90 +231,75 @@ func (a *HTTPAdapter) Call(ctx context.Context, name string, args map[string]any
 	}, nil
 }
 
-// buildRequest creates an HTTP request with the configured options.
-func (a *HTTPAdapter) buildRequest(ctx context.Context, args map[string]any) (*http.Request, error) {
-	method := strings.ToUpper(a.config.Method)
-	endpoint, reqBody, err := a.prepareRequestData(method, args)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	a.setHeaders(req, reqBody != nil)
-	if err := a.setAuth(req); err != nil {
-		return nil, err
-	}
-	return req, nil
+// methodUsesQueryParams returns true for HTTP methods where tool arguments
+// should be sent as URL query parameters rather than a JSON request body.
+func methodUsesQueryParams(method string) bool {
+	m := strings.ToUpper(method)
+	return m == http.MethodGet || m == http.MethodDelete
 }
 
-// prepareRequestData prepares the endpoint URL and request body based on HTTP method.
-func (a *HTTPAdapter) prepareRequestData(method string, args map[string]any) (string, io.Reader, error) {
+// appendQueryParams encodes args as URL query parameters appended to baseURL.
+// String values are used directly; all other types are JSON-encoded.
+func appendQueryParams(baseURL string, args map[string]any) string {
+	params := url.Values{}
+	for key, val := range args {
+		switch v := val.(type) {
+		case string:
+			params.Set(key, v)
+		case float64:
+			params.Set(key, fmt.Sprintf("%g", v))
+		case bool:
+			params.Set(key, fmt.Sprintf("%t", v))
+		default:
+			// JSON-encode complex values (arrays, objects)
+			b, err := json.Marshal(v)
+			if err == nil {
+				params.Set(key, string(b))
+			}
+		}
+	}
+
+	sep := "?"
+	if strings.Contains(baseURL, "?") {
+		sep = "&"
+	}
+	return baseURL + sep + params.Encode()
+}
+
+// HealthCheck probes the HTTP endpoint with a short-timeout request.
+func (a *HTTPAdapter) HealthCheck(ctx context.Context) error {
+	a.mu.RLock()
+	client := a.client
+	connected := a.connected
 	endpoint := a.config.Endpoint
+	a.mu.RUnlock()
 
-	// For GET/DELETE, encode args as query parameters
-	if method == http.MethodGet || method == http.MethodDelete {
-		if len(args) > 0 {
-			u, err := url.Parse(endpoint)
-			if err != nil {
-				return "", nil, err
-			}
-			q := u.Query()
-			for k, v := range args {
-				q.Set(k, fmt.Sprintf("%v", v))
-			}
-			u.RawQuery = q.Encode()
-			endpoint = u.String()
-		}
-		return endpoint, nil, nil
+	if !connected || client == nil {
+		return fmt.Errorf("adapter not connected")
 	}
 
-	// POST, PUT, PATCH - encode as JSON body
-	if args == nil {
-		return endpoint, nil, nil
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	method := http.MethodHead
+	if strings.ToUpper(a.config.Method) == http.MethodGet {
+		method = http.MethodGet
 	}
-	jsonBody, err := json.Marshal(args)
+
+	req, err := http.NewRequestWithContext(probeCtx, method, endpoint, nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to marshal arguments: %w", err)
+		return fmt.Errorf("health check request: %w", err)
 	}
-	return endpoint, bytes.NewReader(jsonBody), nil
-}
 
-// setHeaders sets Content-Type and custom headers on the request.
-func (a *HTTPAdapter) setHeaders(req *http.Request, hasBody bool) {
-	if hasBody {
-		req.Header.Set("Content-Type", a.config.ContentType)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
 	}
-	for k, v := range a.config.Headers {
-		req.Header.Set(k, v)
-	}
-}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 
-// setAuth sets the authentication header on the request.
-func (a *HTTPAdapter) setAuth(req *http.Request) error {
-	switch strings.ToLower(a.config.AuthType) {
-	case "bearer":
-		if a.config.AuthToken == "" {
-			return fmt.Errorf("bearer auth requires a token")
-		}
-		req.Header.Set("Authorization", "Bearer "+a.config.AuthToken)
-	case "basic":
-		if a.config.AuthToken == "" {
-			return fmt.Errorf("basic auth requires credentials")
-		}
-		// AuthToken should be "username:password"
-		parts := strings.SplitN(a.config.AuthToken, ":", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("basic auth token must be 'username:password'")
-		}
-		req.SetBasicAuth(parts[0], parts[1])
-	case "":
-		// No authentication
-	default:
-		return fmt.Errorf("unsupported auth type: %s", a.config.AuthType)
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("health check: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -350,13 +309,87 @@ func (a *HTTPAdapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.client != nil {
+	if a.connected {
 		a.log.Info("closing HTTP adapter")
-		// HTTP client doesn't need explicit closing, but we clear state
+		a.executor = nil
 		a.client = nil
 		a.connected = false
 	}
 
 	a.tools = make(map[string]ToolInfo)
 	return nil
+}
+
+// resolveToolName returns the effective tool name.
+func (a *HTTPAdapter) resolveToolName() string {
+	if a.config.ToolName != "" {
+		return a.config.ToolName
+	}
+	return a.config.Name
+}
+
+// descriptorWithPolicyHeaders returns a copy of the descriptor with Omnia
+// policy headers merged into the HTTPConfig headers.
+func (a *HTTPAdapter) descriptorWithPolicyHeaders(ctx context.Context, toolName string, args map[string]any) *pktools.ToolDescriptor {
+	// Start with the base descriptor's headers
+	merged := make(map[string]string, len(a.descriptor.HTTPConfig.Headers))
+	for k, v := range a.descriptor.HTTPConfig.Headers {
+		merged[k] = v
+	}
+
+	// Add Omnia policy, tool, and parameter headers
+	for k, v := range policyHeaders(ctx, toolName, a.config.Name, args) {
+		merged[k] = v
+	}
+
+	return &pktools.ToolDescriptor{
+		Name: a.descriptor.Name,
+		HTTPConfig: &pktools.HTTPConfig{
+			URL:     a.descriptor.HTTPConfig.URL,
+			Method:  a.descriptor.HTTPConfig.Method,
+			Headers: merged,
+		},
+	}
+}
+
+// mergeAuthHeaders adds authentication headers to the map based on auth type.
+func mergeAuthHeaders(headers map[string]string, authType, authToken string) error {
+	switch strings.ToLower(authType) {
+	case "bearer":
+		if authToken == "" {
+			return fmt.Errorf("bearer auth requires a token")
+		}
+		headers["Authorization"] = "Bearer " + authToken
+	case "basic":
+		if authToken == "" {
+			return fmt.Errorf("basic auth requires credentials")
+		}
+		parts := strings.SplitN(authToken, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("basic auth token must be 'username:password'")
+		}
+		// Use net/http's SetBasicAuth equivalent via header
+		req := &http.Request{Header: http.Header{}}
+		req.SetBasicAuth(parts[0], parts[1])
+		headers["Authorization"] = req.Header.Get("Authorization")
+	case "":
+		// No authentication
+	default:
+		return fmt.Errorf("unsupported auth type: %s", authType)
+	}
+	return nil
+}
+
+// policyHeaders returns Omnia policy, tool, and parameter headers as a map.
+func policyHeaders(ctx context.Context, toolName, registryName string, args map[string]any) map[string]string {
+	// Build a temporary request to collect headers using existing helpers
+	req := &http.Request{Header: http.Header{}}
+	SetAllOutboundHeaders(ctx, req, toolName, registryName, args)
+	result := make(map[string]string, len(req.Header))
+	for k, v := range req.Header {
+		if len(v) > 0 {
+			result[k] = v[0]
+		}
+	}
+	return result
 }

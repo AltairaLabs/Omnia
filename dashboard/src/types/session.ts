@@ -21,6 +21,7 @@ export interface Message {
     input?: number;
     output?: number;
   };
+  sequenceNum?: number; // ordering within session, used for pagination cursors
 }
 
 export interface Session {

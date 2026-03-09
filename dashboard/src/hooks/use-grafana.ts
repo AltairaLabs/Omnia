@@ -54,6 +54,8 @@ export const GRAFANA_DASHBOARDS = {
   QUALITY: "omnia-quality",
   /** Session detail: traces + logs filtered by session ID */
   SESSION_DETAIL: "omnia-session-detail",
+  /** Arena job detail: traces + logs + metrics filtered by job name */
+  ARENA_JOB: "omnia-arena-job",
 } as const;
 
 // Panel IDs within the Overview dashboard
@@ -404,4 +406,45 @@ export function buildSessionDashboardUrl(
   const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
   const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
   return `${base}${path}/d/${GRAFANA_DASHBOARDS.SESSION_DETAIL}/_?${params.toString()}`;
+}
+
+/**
+ * Derives a deterministic trace ID from an arena job name.
+ * Mirrors the Go function jobNameToTraceID in ee/cmd/arena-worker/worker.go:
+ * SHA-256 hash of the job name, truncated to 128 bits (16 bytes) = 32 hex chars.
+ */
+export async function jobNameToTraceId(jobName: string): Promise<string> {
+  const data = new TextEncoder().encode(jobName);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = new Uint8Array(hashBuffer).slice(0, 16);
+  return Array.from(hashArray, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Builds a Grafana dashboard URL for the arena job detail dashboard.
+ * Opens the omnia-arena-job dashboard with job_name and trace_id pre-filled.
+ * The trace_id is derived deterministically from the job name (SHA-256).
+ */
+export async function buildArenaJobDashboardUrl(
+  config: GrafanaConfig,
+  jobName: string,
+  options: ExploreQueryOptions = {}
+): Promise<string | null> {
+  if (!config.enabled || !config.baseUrl) {
+    return null;
+  }
+
+  const { from = "now-1h", to = "now" } = options;
+  const traceId = await jobNameToTraceId(jobName);
+
+  const params = new URLSearchParams();
+  params.set("orgId", config.orgId.toString());
+  params.set("from", from);
+  params.set("to", to);
+  params.set("var-job_name", jobName);
+  params.set("var-trace_id", traceId);
+
+  const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
+  const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;
+  return `${base}${path}/d/${GRAFANA_DASHBOARDS.ARENA_JOB}/_?${params.toString()}`;
 }

@@ -50,6 +50,7 @@ import {
 } from "@/components/arena";
 import { LogViewer } from "@/components/logs";
 import { QuickRunDialog, type QuickRunInitialValues } from "@/components/arena/quick-run-dialog";
+import { generateName } from "@/lib/name-generator";
 import type {
   ArenaJob,
   ArenaJobPhase,
@@ -384,10 +385,6 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
                 {formatDuration(status?.startTime, status?.completionTime)}
               </p>
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Timeout</p>
-              <p className="mt-1 font-medium">{spec?.timeout || "30m"}</p>
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -405,25 +402,25 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
             <div>
               <p className="text-sm text-muted-foreground">Desired</p>
               <p className="text-2xl font-bold">
-                {status?.workers?.desired ?? spec?.workers?.replicas ?? 0}
+                {spec?.workers?.replicas ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Active</p>
               <p className="text-2xl font-bold text-blue-600">
-                {status?.workers?.active ?? 0}
+                {status?.activeWorkers ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Succeeded</p>
               <p className="text-2xl font-bold text-green-600">
-                {status?.workers?.succeeded ?? 0}
+                {status?.progress?.completed ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
               <p className="text-2xl font-bold text-red-600">
-                {status?.workers?.failed ?? 0}
+                {status?.progress?.failed ?? 0}
               </p>
             </div>
           </div>
@@ -481,20 +478,6 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Passing Threshold</p>
-                <p className="mt-1 font-medium">
-                  {spec.evaluation.passingThreshold == null
-                    ? "-"
-                    : `${(spec.evaluation.passingThreshold * 100).toFixed(0)}%`}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Continue on Failure</p>
-                <p className="mt-1 font-medium">
-                  {spec.evaluation.continueOnFailure ? "Yes" : "No"}
-                </p>
-              </div>
-              <div>
                 <p className="text-sm text-muted-foreground">Output Formats</p>
                 <div className="flex gap-1 mt-1">
                   {spec.evaluation.outputFormats?.map((fmt) => (
@@ -509,7 +492,7 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         </Card>
       )}
 
-      {spec?.type === "loadtest" && spec.loadtest && (
+      {spec?.type === "loadtest" && spec.loadTest && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -520,21 +503,21 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Profile Type</p>
-                <p className="mt-1 font-medium capitalize">
-                  {spec.loadtest.profileType ?? "constant"}
+                <p className="text-sm text-muted-foreground">Ramp Up</p>
+                <p className="mt-1 font-medium">
+                  {spec.loadTest.rampUp ?? "30s"}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Duration</p>
                 <p className="mt-1 font-medium">
-                  {spec.loadtest.duration ?? "-"}
+                  {spec.loadTest.duration ?? "-"}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Target RPS</p>
                 <p className="mt-1 font-medium">
-                  {spec.loadtest.targetRPS ?? "-"}
+                  {spec.loadTest.targetRPS ?? "-"}
                 </p>
               </div>
             </div>
@@ -542,7 +525,7 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
         </Card>
       )}
 
-      {spec?.type === "datagen" && spec.datagen && (
+      {spec?.type === "datagen" && spec.dataGen && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -553,21 +536,15 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Sample Count</p>
+                <p className="text-sm text-muted-foreground">Count</p>
                 <p className="mt-1 font-medium">
-                  {spec.datagen.sampleCount ?? "-"}
+                  {spec.dataGen.count ?? "-"}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Output Format</p>
                 <p className="mt-1 font-medium">
-                  {spec.datagen.outputFormat ?? "jsonl"}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Deduplicate</p>
-                <p className="mt-1 font-medium">
-                  {spec.datagen.deduplicate ? "Yes" : "No"}
+                  {spec.dataGen.format ?? "jsonl"}
                 </p>
               </div>
             </div>
@@ -819,12 +796,13 @@ export default function ArenaJobDetailPage() {
   const jobName = params.name as string;
 
   const { job, loading, error, refetch } = useArenaJob(jobName);
-  const { cancelJob, deleteJob } = useArenaJobMutations();
+  const { cancelJob, deleteJob, createJob } = useArenaJobMutations();
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
 
   const [cancelling, setCancelling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
 
   const isRunning = job?.status?.phase === "Running" || job?.status?.phase === "Pending";
@@ -857,6 +835,18 @@ export default function ArenaJobDetailPage() {
     } catch {
       setDeleting(false);
       // Error is handled by the hook
+    }
+  };
+
+  const handleClone = async () => {
+    if (!job?.spec) return;
+    try {
+      setCloning(true);
+      const cloneName = generateName();
+      const cloned = await createJob(cloneName, job.spec);
+      router.push(`/arena/jobs/${cloned.metadata.name}`);
+    } catch {
+      setCloning(false);
     }
   };
 
@@ -932,10 +922,11 @@ export default function ArenaJobDetailPage() {
                 Cancel
               </Button>
             )}
-            {isFinished && projectId && canEdit && (
+            {isFinished && canEdit && (
               <Button
                 variant="outline"
-                onClick={() => setCloneDialogOpen(true)}
+                onClick={projectId ? () => setCloneDialogOpen(true) : handleClone}
+                disabled={cloning}
               >
                 <Copy className="h-4 w-4 mr-2" />
                 Clone
@@ -960,7 +951,7 @@ export default function ArenaJobDetailPage() {
           {getJobTypeBadge(job.spec?.type)}
           <Badge variant="outline" className="gap-1">
             <Users className="h-3 w-3" />
-            {job.status?.workers?.active ?? 0} / {job.status?.workers?.desired ?? job.spec?.workers?.replicas ?? 0} workers
+            {job.status?.activeWorkers ?? 0} / {job.spec?.workers?.replicas ?? 0} workers
           </Badge>
           <Badge variant="outline" className="gap-1">
             <Timer className="h-3 w-3" />
@@ -1010,10 +1001,11 @@ export default function ArenaJobDetailPage() {
           <TabsContent value="logs">
             <LogViewer
               jobName={jobName}
+              jobPhase={job?.status?.phase}
               workspace={currentWorkspace?.name || ""}
               resourceName={jobName}
               containers={["worker"]}
-              showGrafanaLinks={false}
+              showGrafanaLinks={true}
             />
           </TabsContent>
 

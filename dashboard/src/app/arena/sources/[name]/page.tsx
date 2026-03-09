@@ -24,11 +24,13 @@ import {
   History,
   Info,
   AlertTriangle,
+  FolderTree,
 } from "lucide-react";
 import Link from "next/link";
 import {
   ArenaBreadcrumb,
   SourceDialog,
+  SourceExplorer,
   formatDate as formatDateBase,
   formatInterval,
   formatBytes,
@@ -371,63 +373,70 @@ export default function ArenaSourceDetailPage() {
         description={`${source.spec?.type?.toUpperCase()} source for PromptKit bundles`}
       />
 
-      <div className="flex-1 p-6 space-y-6 overflow-auto">
-        {/* Breadcrumb and Actions */}
-        <div className="flex items-center justify-between">
-          <ArenaBreadcrumb
-            items={[
-              { label: "Sources", href: "/arena/sources" },
-              { label: sourceName },
-            ]}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={handleSync}
-              disabled={syncing || !canEdit}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
-              Sync Now
-            </Button>
-            {canEdit && (
-              <>
-                <Button variant="outline" onClick={() => setDialogOpen(true)}>
-                  <Pencil className="h-4 w-4 mr-2" />
-                  Edit
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDelete}
-                  disabled={deleting}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </Button>
-              </>
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Breadcrumb, Status, and Tabs chrome */}
+        <div className="px-6 pt-6 space-y-6">
+          {/* Breadcrumb and Actions */}
+          <div className="flex items-center justify-between">
+            <ArenaBreadcrumb
+              items={[
+                { label: "Sources", href: "/arena/sources" },
+                { label: sourceName },
+              ]}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={handleSync}
+                disabled={syncing || !canEdit}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
+                Sync Now
+              </Button>
+              {canEdit && (
+                <>
+                  <Button variant="outline" onClick={() => setDialogOpen(true)}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Status Summary */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              {getSourceTypeIcon(source.spec?.type)}
+              <span className="capitalize font-medium">{source.spec?.type}</span>
+            </div>
+            {getStatusBadge(source.status?.phase)}
+            {source.status?.artifact && (
+              <span className="text-sm text-muted-foreground">
+                Last synced: {formatDate(source.status.artifact.lastUpdateTime)}
+              </span>
             )}
           </div>
         </div>
 
-        {/* Status Summary */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            {getSourceTypeIcon(source.spec?.type)}
-            <span className="capitalize font-medium">{source.spec?.type}</span>
-          </div>
-          {getStatusBadge(source.status?.phase)}
-          {source.status?.artifact && (
-            <span className="text-sm text-muted-foreground">
-              Last synced: {formatDate(source.status.artifact.lastUpdateTime)}
-            </span>
-          )}
-        </div>
-
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-4">
+        <Tabs defaultValue="overview" className="flex-1 flex flex-col min-h-0 px-6 pt-4">
           <TabsList>
             <TabsTrigger value="overview">
               <Info className="h-4 w-4 mr-2" />
               Overview
+            </TabsTrigger>
+            <TabsTrigger value="explorer">
+              <FolderTree className="h-4 w-4 mr-2" />
+              Explorer
             </TabsTrigger>
             <TabsTrigger value="history">
               <History className="h-4 w-4 mr-2" />
@@ -435,11 +444,15 @@ export default function ArenaSourceDetailPage() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview">
+          <TabsContent value="overview" className="overflow-auto pb-6">
             <OverviewTab source={source} />
           </TabsContent>
 
-          <TabsContent value="history">
+          <TabsContent value="explorer" className="flex-1 min-h-0 pb-6">
+            <SourceExplorer sourceName={sourceName} />
+          </TabsContent>
+
+          <TabsContent value="history" className="overflow-auto pb-6">
             <SyncHistoryTab source={source} />
           </TabsContent>
         </Tabs>

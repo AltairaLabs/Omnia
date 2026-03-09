@@ -86,7 +86,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-worker-dev', 'omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-arena-dev-console-dev', 'omnia-eval-worker-dev'])
+    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -328,25 +328,22 @@ if ENABLE_ENTERPRISE:
     )
 
     # Build arena-worker image (evaluation job worker)
-    arena_worker_only = [
+    # Uses local_resource because Tilt can't detect image refs in CRD fields —
+    # the controller spawns worker pods dynamically at runtime.
+    arena_worker_deps = [
         './ee/cmd/arena-worker',
+        './ee/Dockerfile.arena-worker',
         './ee/internal',
         './ee/pkg',
         './ee/api',
-        './internal',
-        './pkg',
-        './api',
         './go.mod',
         './go.sum',
     ]
-    if USE_LOCAL_PROMPTKIT:
-        arena_worker_only.append('./promptkit-local')
-
-    docker_build(
-        'omnia-arena-worker-dev',
-        context='.',
-        dockerfile='./ee/Dockerfile.arena-worker',
-        only=arena_worker_only,
+    local_resource(
+        'arena-worker-image',
+        cmd='docker build -t omnia-arena-worker-dev:latest -f ./ee/Dockerfile.arena-worker .',
+        deps=arena_worker_deps,
+        labels=['arena'],
     )
 
     # Build promptkit-lsp image (LSP server for PromptKit YAML validation)
@@ -368,47 +365,39 @@ if ENABLE_ENTERPRISE:
     )
 
     # Build arena-dev-console image (interactive agent testing in project editor)
-    arena_dev_console_only = [
+    # Uses local_resource — dynamically spawned by ArenaDevSession controller.
+    arena_dev_console_deps = [
         './ee/cmd/arena-dev-console',
+        './ee/Dockerfile.arena-dev-console',
         './ee/internal',
         './ee/pkg',
         './ee/api',
-        './internal',
-        './pkg',
-        './api',
         './go.mod',
         './go.sum',
     ]
-    if USE_LOCAL_PROMPTKIT:
-        arena_dev_console_only.append('./promptkit-local')
-
-    docker_build(
-        'omnia-arena-dev-console-dev',
-        context='.',
-        dockerfile='./ee/Dockerfile.arena-dev-console',
-        only=arena_dev_console_only,
+    local_resource(
+        'arena-dev-console-image',
+        cmd='docker build -t omnia-arena-dev-console-dev:latest -f ./ee/Dockerfile.arena-dev-console .',
+        deps=arena_dev_console_deps,
+        labels=['arena'],
     )
 
     # Build eval-worker image (non-PromptKit agent eval execution)
-    eval_worker_only = [
+    # Uses local_resource — dynamically spawned by ArenaJob controller.
+    eval_worker_deps = [
         './ee/cmd/arena-eval-worker',
+        './ee/Dockerfile.eval-worker',
         './ee/internal',
         './ee/pkg',
         './ee/api',
-        './internal',
-        './pkg',
-        './api',
         './go.mod',
         './go.sum',
     ]
-    if USE_LOCAL_PROMPTKIT:
-        eval_worker_only.append('./promptkit-local')
-
-    docker_build(
-        'omnia-eval-worker-dev',
-        context='.',
-        dockerfile='./ee/Dockerfile.eval-worker',
-        only=eval_worker_only,
+    local_resource(
+        'eval-worker-image',
+        cmd='docker build -t omnia-eval-worker-dev:latest -f ./ee/Dockerfile.eval-worker .',
+        deps=eval_worker_deps,
+        labels=['arena'],
     )
 
 # ============================================================================
@@ -1076,3 +1065,18 @@ local_resource(
     trigger_mode=TRIGGER_MODE_MANUAL,
     resource_deps=['omnia-controller-manager'],
 )
+
+# Tool calling e2e tests — runs against pre-deployed demo agents with Ollama.
+# Requires ENABLE_DEMO=true. Tests real tool execution (calculate, weather) via llama3.2.
+if ENABLE_DEMO:
+    _tool_e2e_env = dict(_e2e_env)
+    _tool_e2e_env['ENABLE_TOOL_CALLING_E2E'] = 'true'
+    _tool_e2e_cmd = 'kubectl config use-context %s && ' % k8s_context() + ' '.join(['%s=%s' % (k, v) for k, v in _tool_e2e_env.items()])
+    local_resource(
+        'e2e-tests-tool-calling',
+        cmd=_tool_e2e_cmd + ' go test -tags=e2e -count=1 -v ./test/e2e/ -ginkgo.v -ginkgo.label-filter=tool-calling -timeout 15m',
+        labels=['test'],
+        auto_init=False,
+        trigger_mode=TRIGGER_MODE_MANUAL,
+        resource_deps=['omnia-controller-manager', 'omnia-demos'],
+    )

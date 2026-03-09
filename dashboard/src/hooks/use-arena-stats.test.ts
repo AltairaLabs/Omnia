@@ -4,7 +4,18 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
 import { useArenaStats } from "./use-arena-stats";
+
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
 
 // Mock workspace context
 vi.mock("@/contexts/workspace-context", () => ({
@@ -35,16 +46,13 @@ describe("useArenaStats", () => {
       refetch: vi.fn(),
     });
 
-    const { result } = renderHook(() => useArenaStats());
+    const { result } = renderHook(() => useArenaStats(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.stats).toEqual({
-      sources: { total: 0, ready: 0, failed: 0, active: 0 },
-      jobs: { total: 0, running: 0, queued: 0, completed: 0, failed: 0, successRate: 0 },
-    });
+    expect(result.current.stats).toBeNull();
     expect(result.current.recentJobs).toEqual([]);
     expect(result.current.error).toBeNull();
   });
@@ -102,7 +110,7 @@ describe("useArenaStats", () => {
         json: () => Promise.resolve(mockJobs),
       });
 
-    const { result } = renderHook(() => useArenaStats());
+    const { result } = renderHook(() => useArenaStats(), { wrapper: createWrapper() });
 
     expect(result.current.loading).toBe(true);
 
@@ -149,7 +157,7 @@ describe("useArenaStats", () => {
       statusText: "Internal Server Error",
     });
 
-    const { result } = renderHook(() => useArenaStats());
+    const { result } = renderHook(() => useArenaStats(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -201,7 +209,7 @@ describe("useArenaStats", () => {
         statusText: "Not Found",
       });
 
-    const { result } = renderHook(() => useArenaStats());
+    const { result } = renderHook(() => useArenaStats(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -248,7 +256,7 @@ describe("useArenaStats", () => {
         json: () => Promise.resolve(mockStats),
       });
 
-    const { result } = renderHook(() => useArenaStats());
+    const { result } = renderHook(() => useArenaStats(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);

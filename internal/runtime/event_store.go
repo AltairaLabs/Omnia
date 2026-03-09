@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
@@ -108,7 +109,7 @@ func (s *OmniaEventStore) SetEvalMetrics(m metrics.EvalMetricsRecorder) {
 //
 // Eval events are additionally recorded to Prometheus synchronously (counter
 // increments are cheap) so metrics are never lost even if session-api is down.
-func (s *OmniaEventStore) Append(_ context.Context, event *events.Event) error {
+func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error {
 	if event.SessionID == "" {
 		return nil
 	}
@@ -123,10 +124,15 @@ func (s *OmniaEventStore) Append(_ context.Context, event *events.Event) error {
 		return nil
 	}
 
+	// Carry span context into the goroutine so session-api calls are
+	// children of the conversation turn span, but detach cancellation
+	// so the write is not aborted when the caller's context expires.
+	traceCtx := detachedTraceContext(ctx)
+
 	s.sem <- struct{}{}
 	go func() {
 		defer func() { <-s.sem }()
-		s.writeMessage(event.SessionID, msg, stats)
+		s.writeMessage(traceCtx, event.SessionID, msg, stats)
 	}()
 	return nil
 }
@@ -269,7 +275,7 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (session.Me
 			metadata[metaKeyIsError] = "true"
 			content = data.ToolResult.Error
 		} else {
-			content = data.ToolResult.Content
+			content = textFromParts(data.ToolResult.Parts)
 		}
 		if data.ToolResult.LatencyMs > 0 {
 			metadata[metaKeyDurationMs] = strconv.FormatInt(data.ToolResult.LatencyMs, 10)
@@ -311,6 +317,17 @@ type partMetadata struct {
 	Caption  string `json:"caption,omitempty"`   // Optional caption
 	Detail   string `json:"detail,omitempty"`    // Vision model detail level
 	HasData  bool   `json:"has_data,omitempty"`  // Whether blob data was present (but stripped)
+}
+
+// textFromParts returns concatenated text content from content parts.
+func textFromParts(parts []types.ContentPart) string {
+	var s string
+	for _, p := range parts {
+		if p.Type == types.ContentTypeText && p.Text != nil {
+			s += *p.Text
+		}
+	}
+	return s
 }
 
 // extractPartsMetadata extracts metadata from content parts, stripping blob data.
@@ -720,12 +737,13 @@ func (s *OmniaEventStore) buildMessage(
 // writeMessage persists a message and stats update to session-api.
 // Errors are logged but never propagated, matching the facade's fire-and-forget pattern.
 // When sessionStore is nil (eval-metrics-only mode), this is a no-op.
-func (s *OmniaEventStore) writeMessage(sessionID string, msg session.Message, stats session.SessionStatsUpdate) {
+// The traceCtx carries span context for trace propagation without cancellation.
+func (s *OmniaEventStore) writeMessage(traceCtx context.Context, sessionID string, msg session.Message, stats session.SessionStatsUpdate) {
 	if s.sessionStore == nil {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	ctx, cancel := context.WithTimeout(traceCtx, writeTimeout)
 	defer cancel()
 	msgType := msg.Metadata[metaKeyType]
 
@@ -748,6 +766,17 @@ func (s *OmniaEventStore) writeMessage(sessionID string, msg session.Message, st
 
 	s.log.V(1).Info("event written to session-api",
 		"sessionID", sessionID, "messageType", msgType)
+}
+
+// detachedTraceContext returns a background context carrying only the span
+// context from ctx. This preserves trace propagation for async writes
+// without inheriting the parent's cancellation or deadline.
+func detachedTraceContext(ctx context.Context) context.Context {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return context.Background()
+	}
+	return trace.ContextWithSpanContext(context.Background(), sc)
 }
 
 // Verify interface compliance at compile time.

@@ -38,14 +38,7 @@ func TestCleanupConnection_MarksSessionCompleted(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Send a message to trigger session creation
-	msg := ClientMessage{Type: MessageTypeMessage, Content: "hello"}
-	data, _ := json.Marshal(msg)
-	if err := wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
-		t.Fatal(err)
-	}
-
-	// Read the connected message to get session ID
+	// Read eagerly-sent connected message to get session ID
 	var connectedMsg ServerMessage
 	if err := wsConn.ReadJSON(&connectedMsg); err != nil {
 		t.Fatalf("failed to read connected: %v", err)
@@ -53,6 +46,13 @@ func TestCleanupConnection_MarksSessionCompleted(t *testing.T) {
 	sessionID := connectedMsg.SessionID
 	if sessionID == "" {
 		t.Fatal("session ID should not be empty")
+	}
+
+	// Send a message with session ID
+	msg := ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "hello"}
+	data, _ := json.Marshal(msg)
+	if err := wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatal(err)
 	}
 
 	// Read the done response
@@ -114,19 +114,19 @@ func TestCleanupConnection_ErrorStatusNotOverwritten(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Send a message that triggers an error response
-	msg := ClientMessage{Type: MessageTypeMessage, Content: "trigger error"}
-	data, _ := json.Marshal(msg)
-	if err := wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
-		t.Fatal(err)
-	}
-
-	// Read the connected message
+	// Read eagerly-sent connected message
 	var connectedMsg ServerMessage
 	if err := wsConn.ReadJSON(&connectedMsg); err != nil {
 		t.Fatalf("failed to read connected: %v", err)
 	}
 	sessionID := connectedMsg.SessionID
+
+	// Send a message that triggers an error response
+	msg := ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "trigger error"}
+	data, _ := json.Marshal(msg)
+	if err := wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatal(err)
+	}
 
 	// Read the error response
 	_, rawMsg, err := wsConn.ReadMessage()

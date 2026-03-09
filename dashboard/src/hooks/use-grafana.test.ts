@@ -10,6 +10,8 @@ import {
   buildSessionLogsUrl,
   buildSessionTracesUrl,
   buildSessionDashboardUrl,
+  buildArenaJobDashboardUrl,
+  jobNameToTraceId,
   GRAFANA_DASHBOARDS,
   OVERVIEW_PANELS,
   type GrafanaConfig,
@@ -574,5 +576,107 @@ describe("buildSessionDashboardUrl", () => {
     expect(url).not.toBeNull();
     expect(url).toContain("https://grafana.example.com/grafana/d/omnia-session-detail/_");
     expect(url).not.toContain("//grafana/");
+  });
+});
+
+describe("jobNameToTraceId", () => {
+  it("should produce deterministic output", async () => {
+    const id1 = await jobNameToTraceId("my-eval-job");
+    const id2 = await jobNameToTraceId("my-eval-job");
+    expect(id1).toBe(id2);
+  });
+
+  it("should produce different IDs for different names", async () => {
+    const id1 = await jobNameToTraceId("job-a");
+    const id2 = await jobNameToTraceId("job-b");
+    expect(id1).not.toBe(id2);
+  });
+
+  it("should produce a 32-char hex string", async () => {
+    const id = await jobNameToTraceId("test-job");
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("buildArenaJobDashboardUrl", () => {
+  const enabledConfig: GrafanaConfig = {
+    enabled: true,
+    baseUrl: "https://grafana.example.com", // NOSONAR - test URL
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  const disabledConfig: GrafanaConfig = {
+    enabled: false,
+    baseUrl: null,
+    remotePath: "/grafana/",
+    orgId: 1,
+  };
+
+  it("should return null when Grafana is disabled", async () => {
+    const url = await buildArenaJobDashboardUrl(disabledConfig, "eval-job-1");
+    expect(url).toBeNull();
+  });
+
+  it("should return null when baseUrl is not set", async () => {
+    const configNoUrl: GrafanaConfig = {
+      enabled: true,
+      baseUrl: null,
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+    const url = await buildArenaJobDashboardUrl(configNoUrl, "eval-job-1");
+    expect(url).toBeNull();
+  });
+
+  it("should build dashboard URL with job_name and trace_id variables", async () => {
+    const url = await buildArenaJobDashboardUrl(enabledConfig, "eval-job-1");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("/grafana/d/omnia-arena-job/_");
+    expect(url).toContain("var-job_name=eval-job-1");
+    expect(url).toContain("var-trace_id=");
+    expect(url).toContain("orgId=1");
+  });
+
+  it("should default to 1h time range", async () => {
+    const url = await buildArenaJobDashboardUrl(enabledConfig, "eval-job-1");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("from=now-1h");
+    expect(url).toContain("to=now");
+  });
+
+  it("should use custom time range", async () => {
+    const url = await buildArenaJobDashboardUrl(enabledConfig, "eval-job-1", {
+      from: "now-24h",
+      to: "now-1h",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("from=now-24h");
+    expect(url).toContain("to=now-1h");
+  });
+
+  it("should handle baseUrl with trailing slash", async () => {
+    const configWithSlash: GrafanaConfig = {
+      enabled: true,
+      baseUrl: "https://grafana.example.com/", // NOSONAR - test URL
+      remotePath: "/grafana/",
+      orgId: 1,
+    };
+
+    const url = await buildArenaJobDashboardUrl(configWithSlash, "eval-job-1");
+
+    expect(url).not.toBeNull();
+    expect(url).toContain("https://grafana.example.com/grafana/d/omnia-arena-job/_");
+    expect(url).not.toContain("//grafana/");
+  });
+
+  it("should include deterministic trace_id matching jobNameToTraceId", async () => {
+    const url = await buildArenaJobDashboardUrl(enabledConfig, "eval-job-1");
+    const expectedTraceId = await jobNameToTraceId("eval-job-1");
+
+    expect(url).toContain(`var-trace_id=${expectedTraceId}`);
   });
 });

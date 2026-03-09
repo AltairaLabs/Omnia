@@ -227,7 +227,6 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
           type: "evaluation",
           evaluation: expect.objectContaining({
             outputFormats: ["json"],
-            continueOnFailure: true,
           }),
         }),
       })
@@ -273,8 +272,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
       expect.objectContaining({
         spec: expect.objectContaining({
           type: "loadtest",
-          loadtest: expect.objectContaining({
-            profileType: "constant",
+          loadTest: expect.objectContaining({
+            rampUp: "30s",
             duration: "1m",
           }),
         }),
@@ -321,10 +320,9 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/run", () => {
       expect.objectContaining({
         spec: expect.objectContaining({
           type: "datagen",
-          datagen: expect.objectContaining({
-            sampleCount: 10,
-            mode: "selfplay",
-            outputFormat: "jsonl",
+          dataGen: expect.objectContaining({
+            count: 10,
+            format: "jsonl",
           }),
         }),
       })

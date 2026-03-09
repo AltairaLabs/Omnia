@@ -14,6 +14,7 @@ export { FileContextMenu } from "./file-context-menu";
 export { NewItemDialog } from "./new-item-dialog";
 export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export { DevConsolePanel } from "./dev-console-panel";
+export { SourceExplorer } from "./source-explorer";
 
 export {
   formatDate,

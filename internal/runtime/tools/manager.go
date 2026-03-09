@@ -90,6 +90,18 @@ func (m *Manager) Connect(ctx context.Context) error {
 	}
 
 	m.log.Info("all adapters connected", "adapterCount", len(m.adapters), "toolCount", len(m.tools))
+
+	// Probe health of adapters that support it (non-blocking, log only).
+	for adapterName, adapter := range m.adapters {
+		if hc, ok := adapter.(HealthChecker); ok {
+			if err := hc.HealthCheck(ctx); err != nil {
+				m.log.Error(err, "tool health check failed", "adapter", adapterName)
+			} else {
+				m.log.V(1).Info("tool health check passed", "adapter", adapterName)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -158,6 +170,36 @@ func (m *Manager) Call(ctx context.Context, toolName string, args map[string]any
 
 	m.log.V(1).Info("calling tool", "tool", toolName, "adapter", adapterName)
 	return adapter.Call(ctx, toolName, args)
+}
+
+// CheckHealth probes all adapters that implement HealthChecker and returns
+// per-tool health status. Adapters without HealthChecker are reported as healthy.
+func (m *Manager) CheckHealth(ctx context.Context) []ToolHealth {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Deduplicate: check each adapter once, map result to all its tools.
+	adapterHealth := make(map[string]error, len(m.adapters))
+	for name, adapter := range m.adapters {
+		if hc, ok := adapter.(HealthChecker); ok {
+			adapterHealth[name] = hc.HealthCheck(ctx)
+		}
+	}
+
+	results := make([]ToolHealth, 0, len(m.tools))
+	for toolName, adapterName := range m.tools {
+		th := ToolHealth{
+			ToolName:    toolName,
+			AdapterName: adapterName,
+			Healthy:     true,
+		}
+		if err, checked := adapterHealth[adapterName]; checked && err != nil {
+			th.Healthy = false
+			th.Error = err.Error()
+		}
+		results = append(results, th)
+	}
+	return results
 }
 
 // Close closes all adapters.

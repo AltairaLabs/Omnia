@@ -239,56 +239,24 @@ export interface OutputConfig {
 export interface EvaluationConfig {
   /** Output formats to generate */
   outputFormats?: ("json" | "junit" | "csv")[];
-  /** Passing score threshold (0-1) */
-  passingThreshold?: number;
-  /** Continue on failure */
-  continueOnFailure?: boolean;
 }
 
-/** Load test profile stage */
-export interface LoadStage {
-  /** Stage duration (e.g., "5m") */
-  duration: string;
-  /** Target virtual users at end of stage */
-  targetVUs: number;
-}
-
-/** Load test threshold */
-export interface LoadThreshold {
-  /** Metric name */
-  metric: string;
-  /** Comparison operator */
-  operator: "<" | ">" | "<=" | ">=" | "==" | "!=";
-  /** Threshold value */
-  value: string;
-}
-
-/** Load test-specific configuration */
+/** Load test-specific configuration — matches LoadTestSettings in CRD */
 export interface LoadTestConfig {
-  /** Load profile type */
-  profileType?: "constant" | "ramp" | "spike" | "soak";
-  /** Load stages */
-  stages?: LoadStage[];
-  /** Target requests per second (alternative to stages) */
-  targetRPS?: number;
-  /** Test duration (for constant profile) */
+  /** Ramp-up duration to target concurrency (e.g., "30s") */
+  rampUp?: string;
+  /** Total duration of the load test (e.g., "5m") */
   duration?: string;
-  /** Performance thresholds */
-  thresholds?: LoadThreshold[];
+  /** Target requests per second */
+  targetRPS?: number;
 }
 
-/** Data generation-specific configuration */
+/** Data generation-specific configuration — matches DataGenSettings in CRD */
 export interface DataGenConfig {
-  /** Target number of samples to generate */
-  sampleCount: number;
-  /** Generation mode */
-  mode?: "selfplay" | "template" | "variation";
-  /** Output format */
-  outputFormat?: "jsonl" | "parquet" | "csv";
-  /** Quality filters to apply */
-  filters?: string[];
-  /** Deduplication enabled */
-  deduplicate?: boolean;
+  /** Number of data items to generate */
+  count?: number;
+  /** Output format (json, jsonl, csv) */
+  format?: "json" | "jsonl" | "csv";
 }
 
 /** Schedule configuration */
@@ -340,31 +308,19 @@ export interface ArenaJobSpec {
   /** Evaluation-specific config */
   evaluation?: EvaluationConfig;
   /** Load test-specific config */
-  loadtest?: LoadTestConfig;
+  loadTest?: LoadTestConfig;
   /** Data generation-specific config */
-  datagen?: DataGenConfig;
+  dataGen?: DataGenConfig;
   /** Schedule for recurring jobs */
   schedule?: ScheduleConfig;
-  /** Job timeout */
-  timeout?: string;
+  /** TTL seconds after finished */
+  ttlSecondsAfterFinished?: number;
   /** Suspend job */
   suspend?: boolean;
   /** Enable verbose/debug logging for promptarena */
   verbose?: boolean;
   /** Execution mode configuration (direct or fleet) */
   execution?: ExecutionConfig;
-}
-
-/** Worker status within a job */
-export interface JobWorkerStatus {
-  /** Desired worker count */
-  desired: number;
-  /** Active/running workers */
-  active: number;
-  /** Completed workers */
-  succeeded?: number;
-  /** Failed workers */
-  failed?: number;
 }
 
 /** Job progress tracking (work item level) */
@@ -401,8 +357,6 @@ export interface ArenaJobStatus {
   result?: JobResult;
   /** Active worker count */
   activeWorkers?: number;
-  /** Worker status */
-  workers?: JobWorkerStatus;
   /** Standard conditions */
   conditions?: Condition[];
   /** Observed generation */

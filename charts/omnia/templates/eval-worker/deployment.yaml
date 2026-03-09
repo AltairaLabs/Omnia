@@ -60,6 +60,15 @@ spec:
                   name: {{ .Values.enterprise.arena.queue.redis.passwordSecret }}
                   key: redis-password
             {{- end }}
+            {{- $tracingEndpoint := include "omnia.tracing.endpoint" . | trim }}
+            {{- if and .Values.tracing.enabled $tracingEndpoint }}
+            - name: TRACING_ENABLED
+              value: "true"
+            - name: TRACING_ENDPOINT
+              value: {{ $tracingEndpoint | quote }}
+            - name: TRACING_INSECURE
+              value: "true"
+            {{- end }}
             {{- with .Values.enterprise.evalWorker.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

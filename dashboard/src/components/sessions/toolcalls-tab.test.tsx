@@ -62,13 +62,12 @@ describe("ToolCallsTab", () => {
 
     expect(useDebugPanelStore.getState().selectedToolCallId).toBe("tc1");
 
-    // Detail pane should show arguments as key-value table (flat object)
-    expect(screen.getByText("q")).toBeInTheDocument();
-    expect(screen.getByText("cats")).toBeInTheDocument();
+    // Detail pane should show arguments in collapsible JSON viewer
     expect(screen.getByText("Arguments")).toBeInTheDocument();
+    expect(screen.getByTestId("json-block")).toBeInTheDocument();
   });
 
-  it("renders flat arguments as key-value table", () => {
+  it("renders arguments in collapsible JSON viewer", () => {
     useDebugPanelStore.setState({ selectedToolCallId: "tc1" });
 
     const messages: Message[] = [
@@ -77,10 +76,13 @@ describe("ToolCallsTab", () => {
 
     render(<ToolCallsTab messages={messages} />);
 
-    expect(screen.getByText("path")).toBeInTheDocument();
-    expect(screen.getByText("/tmp")).toBeInTheDocument();
-    expect(screen.getByText("recursive")).toBeInTheDocument();
-    expect(screen.getByText("true")).toBeInTheDocument();
+    const jsonBlock = screen.getByTestId("json-block");
+    expect(jsonBlock).toBeInTheDocument();
+    // Values are rendered with syntax highlighting in separate elements
+    expect(jsonBlock.textContent).toContain("path");
+    expect(jsonBlock.textContent).toContain("/tmp");
+    expect(jsonBlock.textContent).toContain("recursive");
+    expect(jsonBlock.textContent).toContain("true");
   });
 
   it("renders nested arguments as JSON", () => {

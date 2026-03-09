@@ -579,8 +579,8 @@ func TestConvertToTypesMessages_ToolResult(t *testing.T) {
 	if msg.ToolResult.ID != "tc-1" {
 		t.Errorf("expected tool result ID 'tc-1', got %q", msg.ToolResult.ID)
 	}
-	if msg.ToolResult.Content != `{"temp":72}` {
-		t.Errorf("expected tool result content, got %q", msg.ToolResult.Content)
+	if got := msg.ToolResult.GetTextContent(); got != `{"temp":72}` {
+		t.Errorf("expected tool result content, got %q", got)
 	}
 }
 

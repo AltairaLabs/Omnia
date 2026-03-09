@@ -90,6 +90,21 @@ func (r *ProviderResolver) putCache(key string, specs map[string]providers.Provi
 	}
 }
 
+// ResolveSamplingConfig returns the eval sampling config from the AgentRuntime CRD.
+// Returns nil if the agent has no eval config or on resolution error (logged by caller).
+func (r *ProviderResolver) ResolveSamplingConfig(
+	ctx context.Context, agentName, namespace string,
+) *v1alpha1.EvalSampling {
+	ar, err := k8s.GetAgentRuntime(ctx, r.client, agentName, namespace)
+	if err != nil {
+		return nil
+	}
+	if ar.Spec.Evals == nil {
+		return nil
+	}
+	return ar.Spec.Evals.Sampling
+}
+
 func (r *ProviderResolver) resolve(
 	ctx context.Context, agentName, namespace string,
 ) (map[string]providers.ProviderSpec, error) {

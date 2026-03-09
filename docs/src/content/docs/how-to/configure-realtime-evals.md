@@ -46,7 +46,7 @@ With just `enabled: true` and no other settings, evals use these defaults:
 | Setting | Default |
 |---------|---------|
 | `sampling.defaultRate` | 100 (all evals run) |
-| `sampling.llmJudgeRate` | 10 (10% of LLM judge evals run) |
+| `sampling.extendedRate` | 10 (10% of extended evals run) |
 | `rateLimit.maxEvalsPerSecond` | 50 |
 | `rateLimit.maxConcurrentJudgeCalls` | 5 |
 | `sessionCompletion.inactivityTimeout` | 5m |
@@ -158,8 +158,8 @@ For high-traffic agents, you may not want to run expensive LLM judge evals on ev
 spec:
   evals:
     sampling:
-      defaultRate: 100    # Run all rule-based evals (they're free)
-      llmJudgeRate: 10    # Only run LLM judge on 10% of eligible turns
+      defaultRate: 100    # Run all lightweight evals (fast, free)
+      extendedRate: 10    # Only run extended evals on 10% of eligible turns
 ```
 
 Sampling is deterministic — the same `sessionID:turnIndex` combination always produces the same sampling decision. This means results are consistent across retries and you get an evenly distributed sample.
@@ -293,7 +293,7 @@ spec:
     enabled: true
     sampling:
       defaultRate: 100
-      llmJudgeRate: 10
+      extendedRate: 10
     rateLimit:
       maxEvalsPerSecond: 50
       maxConcurrentJudgeCalls: 5

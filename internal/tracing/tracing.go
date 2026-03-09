@@ -134,15 +134,18 @@ func NewProvider(ctx context.Context, cfg Config) (*Provider, error) {
 		semconv.DeploymentEnvironment(cfg.Environment),
 	)
 
-	// Create sampler
-	var sampler sdktrace.Sampler
+	// Create sampler — wrapped in ParentBased so that remote parents with
+	// the Sampled flag (e.g. arena worker deterministic traces) are always
+	// recorded, while root spans use the configured rate.
+	var rootSampler sdktrace.Sampler
 	if cfg.SampleRate >= 1.0 {
-		sampler = sdktrace.AlwaysSample()
+		rootSampler = sdktrace.AlwaysSample()
 	} else if cfg.SampleRate <= 0 {
-		sampler = sdktrace.NeverSample()
+		rootSampler = sdktrace.NeverSample()
 	} else {
-		sampler = sdktrace.TraceIDRatioBased(cfg.SampleRate)
+		rootSampler = sdktrace.TraceIDRatioBased(cfg.SampleRate)
 	}
+	sampler := sdktrace.ParentBased(rootSampler)
 
 	// Create TracerProvider
 	tp := sdktrace.NewTracerProvider(

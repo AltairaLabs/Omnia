@@ -96,6 +96,22 @@ func TestProvider_Connect(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expected connected message")
 	})
+
+	t.Run("connect timeout when server does not respond", func(t *testing.T) {
+		wsURL := testServer(t, func(_ *websocket.Conn) {
+			// Never send anything — just hold the connection open
+			time.Sleep(5 * time.Second)
+		})
+
+		dialer := newDefaultDialer()
+		conn, err := dialer.DialContext(context.Background(), wsURL, nil)
+		require.NoError(t, err)
+		defer func() { _ = conn.Close() }()
+
+		_, err = waitForConnected(conn, 100*time.Millisecond)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read error")
+	})
 }
 
 func TestProvider_Predict_SingleTurn(t *testing.T) {

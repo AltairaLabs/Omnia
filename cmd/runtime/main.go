@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
@@ -162,6 +163,9 @@ func main() {
 			os.Exit(1)
 		}
 		client := redis.NewClient(opts)
+		if err := redisotel.InstrumentTracing(client); err != nil {
+			log.Error(err, "failed to instrument redis tracing")
+		}
 
 		// Test connection
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

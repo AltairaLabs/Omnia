@@ -248,8 +248,10 @@ func extractTypesToolCall(msg *session.Message) *types.MessageToolCall {
 // extractToolResult builds a MessageToolResult from a tool_result message.
 func extractToolResult(msg *session.Message) *types.MessageToolResult {
 	tr := &types.MessageToolResult{
-		ID:      msg.ToolCallID,
-		Content: msg.Content,
+		ID: msg.ToolCallID,
+	}
+	if msg.Content != "" {
+		tr.Parts = []types.ContentPart{types.NewTextPart(msg.Content)}
 	}
 	if msg.Metadata[metaKeyIsError] == "true" {
 		tr.Error = msg.Content

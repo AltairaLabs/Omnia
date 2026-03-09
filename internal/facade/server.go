@@ -28,6 +28,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/time/rate"
 
 	"github.com/altairalabs/omnia/internal/media"
@@ -220,12 +222,20 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 
 // submitCompletion runs a task through the recording pool if available,
 // otherwise as a tracked goroutine. All tasks are waited on during Shutdown.
+// After Shutdown has been called, new tasks are silently dropped to avoid
+// a WaitGroup Add/Wait race.
 func (s *Server) submitCompletion(task func()) {
 	if s.recordingPool != nil {
 		s.recordingPool.Submit(task)
 		return
 	}
+	s.mu.RLock()
+	if s.shutdown {
+		s.mu.RUnlock()
+		return
+	}
 	s.completionWg.Add(1)
+	s.mu.RUnlock()
 	go func() {
 		defer s.completionWg.Done()
 		task()
@@ -372,6 +382,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connCtx := logctx.WithAgent(context.Background(), agentName)
 	connCtx = logctx.WithNamespace(connCtx, namespace)
 	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
+
+	// Extract W3C trace context (traceparent/tracestate) from upgrade headers.
+	// If no traceparent header is present, the context is unchanged (no-op).
+	connCtx = otel.GetTextMapPropagator().Extract(connCtx, propagation.HeaderCarrier(r.Header))
 
 	// Store policy propagation fields for gRPC metadata forwarding
 	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{

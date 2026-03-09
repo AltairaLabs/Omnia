@@ -64,13 +64,13 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]/eval-results", () => {
       permissions: viewerPermissions,
     });
 
-    const evalResults = [
+    const results = [
       { id: "e1", sessionId: "sess-123", evalId: "tone", evalType: "llm_judge", passed: true },
     ];
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ evalResults }),
+      json: () => Promise.resolve({ results }),
     });
 
     const { GET } = await import("./route");
@@ -78,7 +78,7 @@ describe("GET /api/workspaces/[name]/sessions/[sessionId]/eval-results", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.evalResults).toHaveLength(1);
+    expect(body.results).toHaveLength(1);
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
     expect(fetchUrl).toContain("/api/v1/sessions/sess-123/eval-results");

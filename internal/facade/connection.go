@@ -59,6 +59,21 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 		return
 	}
 
+	// Eagerly create a session and send "connected" so the client can start
+	// sending messages immediately without a handshake deadlock.
+	sessionID, err := s.ensureSession(ctx, c, "", log)
+	if err != nil {
+		log.Error(err, "failed to create session on connect")
+		return
+	}
+	c.mu.Lock()
+	c.sessionID = sessionID
+	c.mu.Unlock()
+	if err := s.sendConnected(c, sessionID); err != nil {
+		log.Error(err, "failed to send connected message")
+		return
+	}
+
 	// Start ping ticker
 	pingTicker := time.NewTicker(s.config.PingInterval)
 	defer pingTicker.Stop()

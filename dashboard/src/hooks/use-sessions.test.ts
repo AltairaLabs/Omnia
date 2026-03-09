@@ -36,7 +36,7 @@ vi.mock("@/lib/data/session-api-service", () => ({
 }));
 
 // Import after mocks
-import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionEvalResults } from "./use-sessions";
+import { useSessions, useSessionDetail, useSessionSearch, useSessionMessages, useSessionAllMessages, useSessionEvalResults } from "./use-sessions";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -159,6 +159,79 @@ describe("useSessionMessages", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(mockGetSessionMessages).toHaveBeenCalledWith("test-workspace", "s1", opts);
+  });
+});
+
+describe("useSessionAllMessages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("fetches first page of messages", async () => {
+    mockGetSessionMessages.mockResolvedValue({
+      messages: [
+        { id: "m1", role: "user", content: "hello", timestamp: new Date().toISOString(), sequenceNum: 1 },
+        { id: "m2", role: "assistant", content: "hi", timestamp: new Date().toISOString(), sequenceNum: 2 },
+      ],
+      hasMore: false,
+    });
+
+    const { result } = renderHook(() => useSessionAllMessages("s1"), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(mockGetSessionMessages).toHaveBeenCalledWith("test-workspace", "s1", { limit: 100 });
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.totalLoaded).toBe(2);
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it("is disabled when sessionId is empty", () => {
+    const { result } = renderHook(() => useSessionAllMessages(""), { wrapper: createWrapper() });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it("is disabled when enabled=false", () => {
+    const { result } = renderHook(() => useSessionAllMessages("s1", false), { wrapper: createWrapper() });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it("deduplicates messages across pages", async () => {
+    mockGetSessionMessages.mockResolvedValue({
+      messages: [
+        { id: "m1", role: "user", content: "hello", timestamp: new Date().toISOString(), sequenceNum: 1 },
+        { id: "m1", role: "user", content: "hello", timestamp: new Date().toISOString(), sequenceNum: 1 },
+      ],
+      hasMore: false,
+    });
+
+    const { result } = renderHook(() => useSessionAllMessages("s1"), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.messages).toHaveLength(1);
+  });
+
+  it("reports hasMore when more pages available", async () => {
+    mockGetSessionMessages.mockResolvedValue({
+      messages: Array.from({ length: 100 }, (_, i) => ({
+        id: `m${i}`,
+        role: "user",
+        content: `msg ${i}`,
+        timestamp: new Date().toISOString(),
+        sequenceNum: i + 1,
+      })),
+      hasMore: true,
+    });
+
+    const { result } = renderHook(() => useSessionAllMessages("s1"), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.messages).toHaveLength(100);
+    expect(result.current.hasMore).toBe(true);
   });
 });
 

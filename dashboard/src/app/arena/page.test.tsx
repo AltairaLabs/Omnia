@@ -11,6 +11,39 @@ vi.mock("@/hooks", () => ({
   useArenaStats: vi.fn(),
 }));
 
+// Mock useArenaSources hook
+vi.mock("@/hooks/use-arena-sources", () => ({
+  useArenaSources: () => ({ sources: [], loading: false, error: null }),
+}));
+
+// Mock useArenaJobMutations hook
+vi.mock("@/hooks/use-arena-jobs", () => ({
+  useArenaJobMutations: () => ({
+    createJob: vi.fn(),
+    cancelJob: vi.fn(),
+    deleteJob: vi.fn(),
+    loading: false,
+    error: null,
+  }),
+}));
+
+// Mock workspace context
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({
+    currentWorkspace: { name: "default", permissions: { write: true } },
+  }),
+}));
+
+// Mock next/navigation
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
+// Mock JobDialog
+vi.mock("@/components/arena", () => ({
+  JobDialog: () => null,
+}));
+
 // Mock useEnterpriseConfig hook to enable enterprise features for tests
 vi.mock("@/hooks/use-runtime-config", () => ({
   useEnterpriseConfig: vi.fn().mockReturnValue({

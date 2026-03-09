@@ -45,13 +45,14 @@ func TestWriteDeadlineResetOnTextMessage(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
 
-	// Send message
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "hi"}))
-
-	// Read connected
+	// Read eagerly-sent connected
 	var connMsg ServerMessage
 	require.NoError(t, ws.ReadJSON(&connMsg))
 	assert.Equal(t, MessageTypeConnected, connMsg.Type)
+	sessionID := connMsg.SessionID
+
+	// Send message with session ID
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "hi"}))
 
 	// Read chunk
 	var chunk ServerMessage
@@ -85,12 +86,14 @@ func TestWriteDeadlineResetOnBinaryFrame(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
 
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "go"}))
-
-	// Read connected (JSON)
+	// Read eagerly-sent connected (JSON)
 	var connMsg ServerMessage
 	require.NoError(t, ws.ReadJSON(&connMsg))
 	assert.Equal(t, MessageTypeConnected, connMsg.Type)
+	sessionID := connMsg.SessionID
+
+	// Send message with session ID
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "go"}))
 
 	// Read first binary frame
 	msgType, data, err := ws.ReadMessage()
@@ -132,12 +135,14 @@ func TestChunkedMediaStreamingLargePayload(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
 
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "stream"}))
-
-	// Read connected
+	// Read eagerly-sent connected
 	var connMsg ServerMessage
 	require.NoError(t, ws.ReadJSON(&connMsg))
 	assert.Equal(t, MessageTypeConnected, connMsg.Type)
+	sessionID := connMsg.SessionID
+
+	// Send message with session ID
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "stream"}))
 
 	// Calculate expected chunk count
 	expectedChunks := (payloadSize + MaxChunkSize - 1) / MaxChunkSize
@@ -196,11 +201,13 @@ func TestSmallPayloadNotChunked(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
 
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "go"}))
-
-	// Read connected
+	// Read eagerly-sent connected
 	var connMsg ServerMessage
 	require.NoError(t, ws.ReadJSON(&connMsg))
+	sessionID := connMsg.SessionID
+
+	// Send message with session ID
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "go"}))
 
 	// Read single binary frame — should NOT be chunked
 	msgType, data, err := ws.ReadMessage()
@@ -233,10 +240,13 @@ func TestExactThresholdPayloadNotChunked(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
 
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "go"}))
-
+	// Read eagerly-sent connected
 	var connMsg ServerMessage
 	require.NoError(t, ws.ReadJSON(&connMsg))
+	sessionID := connMsg.SessionID
+
+	// Send message with session ID
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "go"}))
 
 	msgType, data, err := ws.ReadMessage()
 	require.NoError(t, err)
@@ -300,11 +310,13 @@ func TestChunkedMediaFallbackToJSON(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
 
-	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, Content: "go"}))
-
-	// Read connected
+	// Read eagerly-sent connected
 	var connMsg ServerMessage
 	require.NoError(t, ws.ReadJSON(&connMsg))
+	sessionID := connMsg.SessionID
+
+	// Send message with session ID
+	require.NoError(t, ws.WriteJSON(ClientMessage{Type: MessageTypeMessage, SessionID: sessionID, Content: "go"}))
 
 	// Should receive a single JSON media_chunk message (base64 fallback)
 	var mediaMsg ServerMessage

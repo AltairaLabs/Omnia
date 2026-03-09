@@ -905,8 +905,8 @@ func (in *EvalSampling) DeepCopyInto(out *EvalSampling) {
 		*out = new(int32)
 		**out = **in
 	}
-	if in.LLMJudgeRate != nil {
-		in, out := &in.LLMJudgeRate, &out.LLMJudgeRate
+	if in.ExtendedRate != nil {
+		in, out := &in.ExtendedRate, &out.ExtendedRate
 		*out = new(int32)
 		**out = **in
 	}

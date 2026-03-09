@@ -105,6 +105,8 @@ export interface LogEntry {
   level: string;
   message: string;
   container?: string;
+  /** Pod name that produced this log line (useful for multi-pod resources like arena jobs) */
+  pod?: string;
   fields?: Record<string, unknown>;
   /** Original unparsed log line from the container */
   raw?: string;
@@ -392,6 +394,7 @@ export interface DataService {
   getAgent(workspace: string, name: string): Promise<AgentRuntimeType | undefined>;
   createAgent(workspace: string, spec: Record<string, unknown>): Promise<AgentRuntimeType>;
   scaleAgent(workspace: string, name: string, replicas: number): Promise<AgentRuntimeType>;
+  updateAgentEvals(workspace: string, name: string, evals: { enabled?: boolean; sampling?: { defaultRate?: number; extendedRate?: number } }): Promise<AgentRuntimeType>;
   getAgentLogs(workspace: string, name: string, options?: LogOptions): Promise<LogEntry[]>;
   getAgentEvents(workspace: string, name: string): Promise<K8sEvent[]>;
 

@@ -10,7 +10,7 @@ rules:
     resources: ["configmaps", "secrets"]
     verbs: ["get", "list"]
   - apiGroups: ["omnia.altairalabs.ai"]
-    resources: ["agentriuntimes", "providers"]
+    resources: ["agentruntimes", "providers"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

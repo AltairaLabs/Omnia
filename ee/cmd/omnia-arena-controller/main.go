@@ -83,6 +83,8 @@ func main() {
 	var enableLicenseWebhooks bool
 	var devMode bool
 	var sessionAPIURL string
+	var tracingEnabled bool
+	var tracingEndpoint string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to.")
@@ -120,6 +122,10 @@ func main() {
 		"Enable license validation webhooks for Arena resources.")
 	flag.BoolVar(&devMode, "dev-mode", false,
 		"Enable development mode with a full-featured license. DO NOT USE IN PRODUCTION.")
+	flag.BoolVar(&tracingEnabled, "tracing-enabled", false,
+		"Enable OTel tracing for arena worker pods.")
+	flag.StringVar(&tracingEndpoint, "tracing-endpoint", "",
+		"OTLP gRPC endpoint for arena worker tracing (e.g. tempo:4317).")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager.")
@@ -281,6 +287,8 @@ func main() {
 		NFSPath:                  nfsPath,
 		StorageManager:           storageManager,
 		WorkerServiceAccountName: workerServiceAccountName,
+		TracingEnabled:           tracingEnabled,
+		TracingEndpoint:          tracingEndpoint,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "ArenaJob")
 		os.Exit(1)

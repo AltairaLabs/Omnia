@@ -86,6 +86,11 @@ spec:
             {{- if .Values.sessionApi.enabled }}
             - --session-api-url=http://{{ include "omnia.sessionApi.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.sessionApi.service.port }}
             {{- end }}
+            {{- $resolvedTracingEndpoint := include "omnia.tracing.endpoint" . | trim }}
+            {{- if and .Values.tracing.enabled $resolvedTracingEndpoint }}
+            - --tracing-enabled=true
+            - --tracing-endpoint={{ $resolvedTracingEndpoint }}
+            {{- end }}
             - --api-bind-address=:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
           ports:
             - name: api

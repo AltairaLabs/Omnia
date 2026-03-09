@@ -94,24 +94,45 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 }
 
 // startMessageSpan starts a tracing span for the message if tracing is enabled.
-// It derives the trace ID from the session ID (UUID → 128-bit trace ID) so that
-// all messages in a session share the same trace, enabling direct Tempo lookup
-// by session ID without search indexing.
+// It always derives the trace ID from the session ID (UUID → 128-bit trace ID)
+// so that all messages in a session share the same trace, enabling direct Tempo
+// lookup by session ID without search indexing. Downstream spans (runtime,
+// session-api, eval-worker) inherit this trace ID, keeping evals nested under
+// the session that originated them.
+//
+// When a W3C traceparent was present on the WebSocket upgrade request (e.g. from
+// arena-worker), the caller's span context is added as a span link for
+// cross-referencing in Tempo, but the session-derived trace ID remains primary.
 func (s *Server) startMessageSpan(ctx context.Context, c *Connection, sessionID string) (context.Context, trace.Span) {
 	if s.tracingProvider == nil {
 		return ctx, trace.SpanFromContext(ctx)
 	}
 
-	// Inject session-derived trace ID as a remote span context so the new
-	// span inherits it. All messages in the same session share a trace.
-	traceID := sessionIDToTraceID(sessionID)
+	sessionTraceID := sessionIDToTraceID(sessionID)
+	var opts []trace.SpanStartOption
+
+	// If a caller (e.g. arena-worker) injected a W3C traceparent, add it as
+	// a span link so the two traces can be cross-referenced in Tempo.
+	// The session-derived trace ID stays primary so that every span in the
+	// session (facade → runtime → session-api → eval-worker) shares one trace.
+	if parentSC := trace.SpanContextFromContext(ctx); parentSC.IsValid() {
+		callerLink := trace.Link{
+			SpanContext: parentSC,
+			Attributes: []attribute.KeyValue{
+				attribute.String("link.type", "caller-trace"),
+			},
+		}
+		opts = append(opts, trace.WithLinks(callerLink))
+	}
+
+	// Always use the session-derived trace ID as the primary trace.
 	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
+		TraceID:    sessionTraceID,
 		TraceFlags: trace.FlagsSampled,
 	})
 	ctx = trace.ContextWithRemoteSpanContext(ctx, remoteCtx)
 
-	return s.tracingProvider.Tracer().Start(ctx, "omnia.facade.message",
+	opts = append(opts,
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
 			attribute.String("session.id", sessionID),
@@ -122,6 +143,8 @@ func (s *Server) startMessageSpan(ctx context.Context, c *Connection, sessionID 
 			attribute.String(otlp.AttrOmniaPromptPackNamespace, c.namespace),
 		),
 	)
+
+	return s.tracingProvider.Tracer().Start(ctx, "omnia.facade.message", opts...)
 }
 
 // sessionIDToTraceID converts a UUID session ID to an OpenTelemetry trace ID.
@@ -147,7 +170,7 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 	}
 
 	// Wrap writer with recording decorator to persist assistant responses
-	recWriter := newRecordingWriter(writer, s.sessionStore, sessionID, log, s.recordingPool)
+	recWriter := newRecordingWriter(ctx, writer, s.sessionStore, sessionID, log, s.recordingPool)
 
 	// Handle message
 	if s.handler != nil {

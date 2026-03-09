@@ -65,6 +65,7 @@ import {
   JobDialog,
 } from "@/components/arena";
 import { QuickRunDialog } from "@/components/arena/quick-run-dialog";
+import { generateName } from "@/lib/name-generator";
 import type { ArenaJob, ArenaJobPhase, ArenaJobType } from "@/types/arena";
 
 interface JobActionsProps {
@@ -84,7 +85,6 @@ function JobActions({
 }: Readonly<JobActionsProps>) {
   const isRunning = job.status?.phase === "Running" || job.status?.phase === "Pending";
   const isFinished = job.status?.phase === "Succeeded" || job.status?.phase === "Failed" || job.status?.phase === "Cancelled";
-  const hasProjectId = !!job.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"];
 
   return (
     <DropdownMenu>
@@ -94,7 +94,7 @@ function JobActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {isFinished && hasProjectId && (
+        {isFinished && (
           <DropdownMenuItem onClick={onClone} disabled={!canEdit}>
             <Copy className="h-4 w-4 mr-2" />
             Clone
@@ -294,7 +294,7 @@ function JobsTable({
             <TableCell>
               <Badge variant="outline" className="gap-1">
                 <Users className="h-3 w-3" />
-                {job.status?.workers?.active ?? 0}/{job.status?.workers?.desired ?? job.spec?.workers?.replicas ?? 0}
+                {job.status?.activeWorkers ?? 0}/{job.spec?.workers?.replicas ?? 0}
               </Badge>
             </TableCell>
             <TableCell className="text-muted-foreground">
@@ -384,7 +384,7 @@ function JobsGrid({
                 <span className="text-muted-foreground">Workers</span>
                 <Badge variant="outline" className="gap-1">
                   <Users className="h-3 w-3" />
-                  {job.status?.workers?.active ?? 0}/{job.status?.workers?.desired ?? job.spec?.workers?.replicas ?? 0}
+                  {job.status?.activeWorkers ?? 0}/{job.spec?.workers?.replicas ?? 0}
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
@@ -432,7 +432,7 @@ export default function ArenaJobsPage() {
     sourceRef: initialSourceRef,
   });
   const { sources } = useArenaSources();
-  const { cancelJob, deleteJob } = useArenaJobMutations();
+  const { cancelJob, deleteJob, createJob } = useArenaJobMutations();
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
 
@@ -471,6 +471,22 @@ export default function ArenaJobsPage() {
     }
     try {
       await deleteJob(name);
+      refetch();
+    } catch {
+      // Error is handled by the hook
+    }
+  };
+
+  const handleClone = async (job: ArenaJob) => {
+    const projectId = job.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"];
+    if (projectId) {
+      setCloneJob(job);
+      return;
+    }
+    if (!job.spec) return;
+    try {
+      const cloneName = generateName();
+      await createJob(cloneName, job.spec);
       refetch();
     } catch {
       // Error is handled by the hook
@@ -573,7 +589,7 @@ export default function ArenaJobsPage() {
               jobs={filteredJobs}
               onCancel={handleCancel}
               onDelete={handleDelete}
-              onClone={setCloneJob}
+              onClone={handleClone}
               canEdit={canEdit}
             />
           ) : (
@@ -581,7 +597,7 @@ export default function ArenaJobsPage() {
               jobs={filteredJobs}
               onCancel={handleCancel}
               onDelete={handleDelete}
-              onClone={setCloneJob}
+              onClone={handleClone}
               canEdit={canEdit}
             />
           )}

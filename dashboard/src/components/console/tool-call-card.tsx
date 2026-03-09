@@ -2,6 +2,7 @@
 
 import { useState, useRef, useLayoutEffect } from "react";
 import { ChevronDown, ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
+import { JsonBlock } from "@/components/ui/json-block";
 import { cn } from "@/lib/utils";
 import type { ToolCallWithResult } from "@/types/websocket";
 
@@ -66,20 +67,20 @@ export function ToolCallCard({ toolCall, className }: Readonly<ToolCallCardProps
           {toolCall.arguments && Object.keys(toolCall.arguments).length > 0 && (
             <div>
               <p className="text-muted-foreground mb-1">Arguments:</p>
-              <pre className="bg-muted/50 rounded p-2 overflow-x-auto">
-                {JSON.stringify(toolCall.arguments, null, 2)}
-              </pre>
+              <JsonBlock data={toolCall.arguments} />
             </div>
           )}
 
           {toolCall.status === "success" && toolCall.result !== undefined && (
             <div>
               <p className="text-muted-foreground mb-1">Result:</p>
-              <pre className="bg-muted/50 rounded p-2 overflow-x-auto">
-                {typeof toolCall.result === "string"
-                  ? toolCall.result
-                  : JSON.stringify(toolCall.result, null, 2)}
-              </pre>
+              {typeof toolCall.result === "string" ? (
+                <pre className="bg-muted/50 rounded p-2 overflow-x-auto">
+                  {toolCall.result}
+                </pre>
+              ) : (
+                <JsonBlock data={toolCall.result} />
+              )}
             </div>
           )}
 

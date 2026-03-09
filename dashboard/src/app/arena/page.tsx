@@ -1,8 +1,14 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout";
 import { StatCard } from "@/components/dashboard";
+import { JobDialog } from "@/components/arena";
 import { useArenaStats } from "@/hooks";
+import { useArenaSources } from "@/hooks/use-arena-sources";
+import { useArenaJobMutations } from "@/hooks/use-arena-jobs";
+import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -13,12 +19,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { EnterpriseGate } from "@/components/license/license-gate";
+import { Button } from "@/components/ui/button";
 import {
   Database,
   Settings,
   Play,
+  Plus,
   CheckCircle,
   AlertCircle,
   Loader2,
@@ -26,8 +40,13 @@ import {
   Target,
   FileCode,
   LayoutTemplate,
+  MoreHorizontal,
+  XCircle,
+  Trash2,
+  Copy,
 } from "lucide-react";
 import Link from "next/link";
+import { generateName } from "@/lib/name-generator";
 import type { ArenaJob } from "@/types/arena";
 
 function formatDate(dateString?: string): string {
@@ -71,7 +90,15 @@ function getJobTypeBadge(type?: string) {
   }
 }
 
-function RecentJobsTable({ jobs }: Readonly<{ jobs: ArenaJob[] }>) {
+interface RecentJobsTableProps {
+  jobs: ArenaJob[];
+  onCancel: (name: string) => void;
+  onDelete: (name: string) => void;
+  onClone: (job: ArenaJob) => void;
+  canEdit: boolean;
+}
+
+function RecentJobsTable({ jobs, onCancel, onDelete, onClone, canEdit }: Readonly<RecentJobsTableProps>) {
   if (jobs.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -89,6 +116,7 @@ function RecentJobsTable({ jobs }: Readonly<{ jobs: ArenaJob[] }>) {
           <TableHead>Status</TableHead>
           <TableHead>Progress</TableHead>
           <TableHead>Created</TableHead>
+          <TableHead className="w-10" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -96,6 +124,8 @@ function RecentJobsTable({ jobs }: Readonly<{ jobs: ArenaJob[] }>) {
           const completed = job.status?.progress?.completed || 0;
           const total = job.status?.progress?.total || 0;
           const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const isRunning = job.status?.phase === "Running" || job.status?.phase === "Pending";
+          const isFinished = job.status?.phase === "Succeeded" || job.status?.phase === "Failed" || job.status?.phase === "Cancelled";
 
           return (
             <TableRow key={job.metadata?.name}>
@@ -122,6 +152,37 @@ function RecentJobsTable({ jobs }: Readonly<{ jobs: ArenaJob[] }>) {
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatDate(job.metadata?.creationTimestamp)}
+              </TableCell>
+              <TableCell>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {isFinished && (
+                      <DropdownMenuItem onClick={() => onClone(job)} disabled={!canEdit}>
+                        <Copy className="h-4 w-4 mr-2" />
+                        Clone
+                      </DropdownMenuItem>
+                    )}
+                    {isRunning && (
+                      <DropdownMenuItem onClick={() => onCancel(job.metadata?.name || "")} disabled={!canEdit}>
+                        <XCircle className="h-4 w-4 mr-2" />
+                        Cancel
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      onClick={() => onDelete(job.metadata?.name || "")}
+                      disabled={!canEdit || isRunning}
+                      className="text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </TableCell>
             </TableRow>
           );
@@ -151,7 +212,44 @@ function LoadingSkeleton() {
 }
 
 function ArenaContent() {
-  const { stats, recentJobs, loading, error } = useArenaStats();
+  const router = useRouter();
+  const { stats, recentJobs, loading, error, refetch } = useArenaStats();
+  const { sources } = useArenaSources();
+  const { cancelJob, deleteJob, createJob } = useArenaJobMutations();
+  const { currentWorkspace } = useWorkspace();
+  const canEdit = currentWorkspace?.permissions?.write ?? false;
+  const [jobDialogOpen, setJobDialogOpen] = useState(false);
+
+  const handleCancel = async (name: string) => {
+    if (!confirm(`Are you sure you want to cancel job "${name}"?`)) return;
+    try {
+      await cancelJob(name);
+      refetch();
+    } catch {
+      // Error handled by hook
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    if (!confirm(`Are you sure you want to delete job "${name}"?`)) return;
+    try {
+      await deleteJob(name);
+      refetch();
+    } catch {
+      // Error handled by hook
+    }
+  };
+
+  const handleClone = async (job: ArenaJob) => {
+    if (!job.spec) return;
+    try {
+      const cloneName = generateName();
+      const cloned = await createJob(cloneName, job.spec);
+      router.push(`/arena/jobs/${cloned.metadata.name}`);
+    } catch {
+      // Error handled by hook
+    }
+  };
 
   if (loading) {
     return <LoadingSkeleton />;
@@ -226,14 +324,26 @@ function ArenaContent() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Recent Jobs</h2>
-            <Link
-              href="/arena/jobs"
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              View all
-            </Link>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setJobDialogOpen(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                New Job
+              </Button>
+              <Link
+                href="/arena/jobs"
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                View all
+              </Link>
+            </div>
           </div>
-          <RecentJobsTable jobs={recentJobs} />
+          <RecentJobsTable
+            jobs={recentJobs}
+            onCancel={handleCancel}
+            onDelete={handleDelete}
+            onClone={handleClone}
+            canEdit={canEdit}
+          />
         </div>
 
         {/* Quick Links */}
@@ -283,6 +393,13 @@ function ArenaContent() {
           </Link>
         </div>
       </div>
+
+      <JobDialog
+        open={jobDialogOpen}
+        onOpenChange={setJobDialogOpen}
+        sources={sources}
+        onClose={() => setJobDialogOpen(false)}
+      />
     </div>
   );
 }

@@ -18,6 +18,8 @@ data:
 {{ .Files.Get "dashboards/omnia-platform-services.json" | indent 4 }}
   omnia-session-detail.json: |
 {{ tpl (.Files.Get "dashboards/omnia-session-detail.json.tpl") . | indent 4 }}
+  omnia-arena-job.json: |
+{{ tpl (.Files.Get "dashboards/omnia-arena-job.json.tpl") . | indent 4 }}
 ---
 apiVersion: v1
 kind: ConfigMap

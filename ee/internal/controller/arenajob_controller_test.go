@@ -2795,7 +2795,7 @@ spec:
 
 			wsURL, err := reconciler.resolveFleetTarget(ctx, arenaJob)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(wsURL).To(Equal("ws://test-agent-runtime.default.svc.cluster.local:8080/ws"))
+			Expect(wsURL).To(Equal("ws://test-agent-runtime.default.svc.cluster.local:8080/ws?agent=test-agent-runtime&namespace=" + arenaJobNamespace))
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, agentRuntime)).To(Succeed())

@@ -19,13 +19,18 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 
+	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
+	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
 )
 
 // Constants for Redis consumer group and stream configuration.
@@ -40,24 +45,22 @@ const (
 	streamPayloadField    = "payload"
 	streamReadBatchSize   = 10
 	periodicCheckInterval = 30 * time.Second
-	evalTypeLLMJudge      = "llm_judge"
 )
 
-// EvalRunner executes a rule-based eval against session messages.
-type EvalRunner func(evalDef api.EvalDefinition, messages []session.Message) (api.EvaluateResultItem, error)
-
-// ProviderAwareEvalRunner executes evals with access to resolved provider specs.
-// The providers map is keyed by provider name (e.g., "default", "judge").
-type ProviderAwareEvalRunner func(
-	evalDef api.EvalDefinition,
-	messages []session.Message,
-	providerSpecs map[string]providers.ProviderSpec,
-) (api.EvaluateResultItem, error)
+// MessageStore provides read access to session data from the Redis hot tier.
+type MessageStore interface {
+	GetSession(ctx context.Context, sessionID string) (*session.Session, error)
+	GetRecentMessages(ctx context.Context, sessionID string, limit int) ([]*session.Message, error)
+}
 
 // WorkerConfig holds the configuration for an EvalWorker.
 type WorkerConfig struct {
 	RedisClient goredis.UniversalClient
-	SessionAPI  SessionAPIClient
+	// ResultWriter persists eval results to session-api.
+	ResultWriter EvalResultWriter
+	// MessageStore reads session data from the Redis hot tier.
+	// If nil, the worker creates one from RedisClient with default options.
+	MessageStore MessageStore
 	// Namespaces is the list of namespaces to watch for eval events.
 	// Each namespace gets its own Redis stream key.
 	Namespaces []string
@@ -68,15 +71,12 @@ type WorkerConfig struct {
 	// K8sClient is used to resolve provider specs from CRDs.
 	// If nil, provider resolution is disabled and llm_judge evals will fail.
 	K8sClient client.Client
-	// EvalRunner overrides the default eval runner.
-	// If nil, a dispatcher that routes to RunArenaAssertion or RunRuleEval is used.
-	EvalRunner EvalRunner
+	// SDKRunner overrides the default SDK-based eval runner.
+	// If nil, a default SDKRunner with the full PromptKit registry is used.
+	SDKRunner *SDKRunner
 	// InactivityTimeout overrides the default completion inactivity timeout.
 	// If zero, DefaultInactivityTimeout is used.
 	InactivityTimeout time.Duration
-	// Sampler controls hash-based deterministic eval sampling.
-	// If nil, a default Sampler (100% default, 10% LLM judge) is used.
-	Sampler *Sampler
 	// RateLimiter controls eval execution throughput.
 	// If nil, a default RateLimiter (50 evals/sec, 5 concurrent judges) is used.
 	RateLimiter *RateLimiter
@@ -91,16 +91,15 @@ type WorkerConfig struct {
 // EvalWorker consumes session events from Redis Streams and runs evals.
 type EvalWorker struct {
 	redisClient       goredis.UniversalClient
-	sessionAPI        SessionAPIClient
+	resultWriter      EvalResultWriter
+	messageStore      MessageStore
 	namespaces        []string
 	streamKeys        []string
 	consumerGroup     string
 	consumerName      string
 	logger            *slog.Logger
-	evalRunner        EvalRunner
-	evalRunnerPA      ProviderAwareEvalRunner
+	sdkRunner         *SDKRunner
 	completionTracker *CompletionTracker
-	sampler           *Sampler
 	rateLimiter       *RateLimiter
 	packLoader        *PromptPackLoader
 	providerResolver  *ProviderResolver
@@ -109,26 +108,19 @@ type EvalWorker struct {
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
-	runner := config.EvalRunner
-	if runner == nil {
-		runner = func(def api.EvalDefinition, msgs []session.Message) (api.EvaluateResultItem, error) {
-			if def.Type == EvalTypeArenaAssertion {
-				return RunArenaAssertion(def, msgs)
-			}
-			return RunRuleEval(def, msgs)
-		}
+	sdkRunner := config.SDKRunner
+	if sdkRunner == nil {
+		sdkRunner = NewSDKRunner()
 	}
 
-	paRunner := defaultProviderAwareRunner(runner)
+	msgStore := config.MessageStore
+	if msgStore == nil {
+		msgStore = redisprovider.NewFromClient(config.RedisClient, redisprovider.DefaultOptions())
+	}
 
 	timeout := config.InactivityTimeout
 	if timeout == 0 {
 		timeout = DefaultInactivityTimeout
-	}
-
-	sampler := config.Sampler
-	if sampler == nil {
-		sampler = NewSampler(nil)
 	}
 
 	rateLimiter := config.RateLimiter
@@ -152,15 +144,14 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 
 	w := &EvalWorker{
 		redisClient:      config.RedisClient,
-		sessionAPI:       config.SessionAPI,
+		resultWriter:     config.ResultWriter,
+		messageStore:     msgStore,
 		namespaces:       namespaces,
 		streamKeys:       streamKeys,
 		consumerGroup:    consumerGroup,
 		consumerName:     hostname(),
 		logger:           config.Logger,
-		evalRunner:       runner,
-		evalRunnerPA:     paRunner,
-		sampler:          sampler,
+		sdkRunner:        sdkRunner,
 		rateLimiter:      rateLimiter,
 		packLoader:       config.PackLoader,
 		providerResolver: resolver,
@@ -316,6 +307,10 @@ func (w *EvalWorker) handleMessage(ctx context.Context, streamKey string, msg go
 		return
 	}
 
+	// Restore trace context from the event's traceparent so spans are nested
+	// under the originating session trace.
+	ctx = restoreTraceContext(ctx, event)
+
 	w.getMetrics().RecordEventReceived(event.EventType)
 
 	if err := w.processEvent(ctx, event); err != nil {
@@ -344,6 +339,14 @@ func (w *EvalWorker) getTracker() *CompletionTracker {
 
 // processEvent handles a single session event.
 func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) error {
+	ctx, span := otel.Tracer("omnia-eval-worker").Start(ctx, "eval.process-event",
+		trace.WithAttributes(
+			attribute.String("session.id", event.SessionID),
+			attribute.String("event.type", event.EventType),
+		),
+	)
+	defer span.End()
+
 	if isSessionCompletedEvent(event) {
 		w.getTracker().MarkCompleted(ctx, event.SessionID)
 		return nil
@@ -363,34 +366,42 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 
 // processAssistantMessage handles assistant message events by running per-turn evals.
 func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.SessionEvent) error {
+	// Resolve eval tiers from event (pre-computed) or compute from agent config.
+	tiers := w.resolveEvalTiers(ctx, event)
+	if len(tiers) == 0 {
+		w.logger.Debug("session sampled out", "sessionID", event.SessionID)
+		return nil
+	}
+
 	packEvals := w.loadPackEvals(ctx, event)
 	if packEvals == nil {
 		w.logger.Debug("no per_turn evals to run (no pack)", "sessionID", event.SessionID)
 		return nil
 	}
 
-	evalDefs := filterPerTurnEvals(packEvals.Evals)
-	if len(evalDefs) == 0 {
-		w.logger.Debug("no per_turn evals to run", "sessionID", event.SessionID)
+	// Filter evals to only those matching the sampled tiers.
+	evals := FilterEvalsByTiers(packEvals.Evals, tiers)
+	if len(evals) == 0 {
+		w.logger.Debug("no per_turn evals after tier filtering", "sessionID", event.SessionID, "tiers", tiers)
 		return nil
 	}
 
-	sess, err := w.sessionAPI.GetSession(ctx, event.SessionID)
+	messages, err := w.getMessages(ctx, event.SessionID)
+	if err != nil {
+		return err
+	}
+
+	sess, err := w.getMessageStore().GetSession(ctx, event.SessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
 	}
 
-	messages, err := w.sessionAPI.GetSessionMessages(ctx, event.SessionID)
-	if err != nil {
-		return fmt.Errorf("get session messages: %w", err)
-	}
-
 	turnIndex := countAssistantMessages(messages)
-
 	providerSpecs := w.resolveProviders(ctx, event)
-
 	enrichedEvent := enrichEvent(event, packEvals)
-	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex, providerSpecs)
+
+	items := w.getSDKRunner().RunTurnEvals(ctx, evals, messages, event.SessionID, turnIndex, providerSpecs)
+	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
 	return w.writeResults(ctx, results, event.SessionID)
 }
 
@@ -398,16 +409,23 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) error {
 	defer w.completionTracker.Cleanup(sessionID)
 
-	sess, err := w.sessionAPI.GetSession(ctx, sessionID)
+	sess, err := w.getMessageStore().GetSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
 	}
 
 	event := api.SessionEvent{
 		SessionID:         sessionID,
+		AgentName:         sess.AgentName,
 		Namespace:         sess.Namespace,
 		PromptPackName:    sess.PromptPackName,
 		PromptPackVersion: sess.PromptPackVersion,
+	}
+
+	tiers := w.resolveEvalTiers(ctx, event)
+	if len(tiers) == 0 {
+		w.logger.Debug("session sampled out for completion evals", "sessionID", sessionID)
+		return nil
 	}
 
 	packEvals := w.loadPackEvals(ctx, event)
@@ -416,23 +434,23 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		return nil
 	}
 
-	evalDefs := filterOnCompleteEvals(packEvals.Evals)
-	if len(evalDefs) == 0 {
-		w.logger.Debug("no on_session_complete evals to run", "sessionID", sessionID)
+	evals := FilterEvalsByTiers(packEvals.Evals, tiers)
+	if len(evals) == 0 {
+		w.logger.Debug("no on_session_complete evals after tier filtering", "sessionID", sessionID, "tiers", tiers)
 		return nil
 	}
 
-	messages, err := w.sessionAPI.GetSessionMessages(ctx, sessionID)
+	messages, err := w.getMessages(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("get session messages: %w", err)
+		return err
 	}
 
 	turnIndex := countAssistantMessages(messages)
-
 	providerSpecs := w.resolveProviders(ctx, event)
-
 	enrichedEvent := enrichEvent(event, packEvals)
-	results := w.runEvalsWithSampling(ctx, evalDefs, messages, enrichedEvent, sess.AgentName, turnIndex, providerSpecs)
+
+	items := w.getSDKRunner().RunSessionEvals(ctx, evals, messages, sessionID, turnIndex, providerSpecs)
+	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
 	return w.writeResults(ctx, results, sessionID)
 }
 
@@ -442,7 +460,7 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 		return nil
 	}
 
-	if err := w.sessionAPI.WriteEvalResults(ctx, results); err != nil {
+	if err := w.getResultWriter().WriteEvalResults(ctx, results); err != nil {
 		w.getMetrics().RecordResultsWritten(len(results), false)
 		return fmt.Errorf("write eval results: %w", err)
 	}
@@ -456,130 +474,54 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 	return nil
 }
 
-// runEvals executes the given eval definitions against session messages.
-func (w *EvalWorker) runEvals(
-	evalDefs []api.EvalDefinition,
-	messages []session.Message,
+// getMessages reads session messages from the Redis hot tier.
+func (w *EvalWorker) getMessages(ctx context.Context, sessionID string) ([]session.Message, error) {
+	ptrMsgs, err := w.getMessageStore().GetRecentMessages(ctx, sessionID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("get messages from redis: %w", err)
+	}
+	messages := make([]session.Message, 0, len(ptrMsgs))
+	for _, m := range ptrMsgs {
+		if m != nil {
+			messages = append(messages, *m)
+		}
+	}
+	return messages, nil
+}
+
+// convertToEvalResults converts SDK result items into persistable EvalResults.
+func (w *EvalWorker) convertToEvalResults(
+	items []api.EvaluateResultItem,
 	event api.SessionEvent,
 	agentName string,
 ) []*api.EvalResult {
-	results := make([]*api.EvalResult, 0, len(evalDefs))
-
-	for _, def := range evalDefs {
-		item, err := w.evalRunner(def, messages)
-		if err != nil {
-			w.logger.Warn("eval failed",
-				"evalID", def.ID,
-				"sessionID", event.SessionID,
-				"error", err,
-			)
-			continue
-		}
-
-		item.Source = evalSource
+	results := make([]*api.EvalResult, 0, len(items))
+	for _, item := range items {
 		result := toEvalResult(item, event, agentName)
 		results = append(results, result)
 	}
-
 	return results
 }
 
-// runEvalsWithSampling runs evals with sampling and rate limiting applied.
-// Each eval is checked against the sampler before execution, and the rate
-// limiter is consulted to avoid exceeding throughput limits.
-func (w *EvalWorker) runEvalsWithSampling(
-	ctx context.Context,
-	evalDefs []api.EvalDefinition,
-	messages []session.Message,
-	event api.SessionEvent,
-	agentName string,
-	turnIndex int,
-	providerSpecs map[string]providers.ProviderSpec,
-) []*api.EvalResult {
-	results := make([]*api.EvalResult, 0, len(evalDefs))
-
-	for _, def := range evalDefs {
-		isJudge := def.Type == evalTypeLLMJudge
-		if !w.getSampler().ShouldSample(event.SessionID, turnIndex, isJudge) {
-			w.getMetrics().RecordSamplingDecision(def.Type, MetricStatusSkipped)
-			continue
-		}
-		w.getMetrics().RecordSamplingDecision(def.Type, "sampled")
-
-		if err := w.acquireRateLimit(ctx, isJudge); err != nil {
-			w.logger.Warn("rate limit acquisition failed",
-				"evalID", def.ID,
-				"sessionID", event.SessionID,
-				"error", err,
-			)
-			break
-		}
-
-		if isJudge {
-			defer w.getRateLimiter().ReleaseJudge()
-		}
-
-		result := w.executeSingleEval(def, messages, event, agentName, providerSpecs)
-		if result != nil {
-			results = append(results, result)
-		}
+// getSDKRunner returns the SDK runner, initializing a default one if needed.
+func (w *EvalWorker) getSDKRunner() *SDKRunner {
+	if w.sdkRunner == nil {
+		w.sdkRunner = NewSDKRunner()
 	}
-
-	return results
+	return w.sdkRunner
 }
 
-// executeSingleEval runs one eval and returns the result, or nil on error.
-func (w *EvalWorker) executeSingleEval(
-	def api.EvalDefinition,
-	messages []session.Message,
-	event api.SessionEvent,
-	agentName string,
-	providerSpecs map[string]providers.ProviderSpec,
-) *api.EvalResult {
-	start := time.Now()
-	item, err := w.getProviderAwareRunner()(def, messages, providerSpecs)
-	duration := time.Since(start).Seconds()
-
-	if err != nil {
-		w.getMetrics().RecordEvalExecuted(def.Type, def.Trigger, MetricStatusError, duration)
-		w.logger.Warn("eval failed",
-			"evalID", def.ID,
-			"sessionID", event.SessionID,
-			"error", err,
-		)
-		return nil
+// getMessageStore returns the message store, initializing from the redis client if needed.
+func (w *EvalWorker) getMessageStore() MessageStore {
+	if w.messageStore == nil {
+		w.messageStore = redisprovider.NewFromClient(w.redisClient, redisprovider.DefaultOptions())
 	}
-
-	w.getMetrics().RecordEvalExecuted(def.Type, def.Trigger, MetricStatusSuccess, duration)
-	item.Source = evalSource
-	return toEvalResult(item, event, agentName)
+	return w.messageStore
 }
 
-// acquireRateLimit acquires the appropriate rate limit token.
-func (w *EvalWorker) acquireRateLimit(ctx context.Context, isJudge bool) error {
-	rl := w.getRateLimiter()
-	if isJudge {
-		return rl.AcquireJudge(ctx)
-	}
-	return rl.Acquire(ctx)
-}
-
-// getSampler returns the sampler, initializing a default one if needed.
-func (w *EvalWorker) getSampler() *Sampler {
-	if w.sampler == nil {
-		w.sampler = NewSampler(nil)
-	}
-	return w.sampler
-}
-
-// getProviderAwareRunner returns the provider-aware eval runner, initializing from
-// the legacy evalRunner if needed. This ensures backward compatibility with tests
-// that construct EvalWorker directly without using NewEvalWorker.
-func (w *EvalWorker) getProviderAwareRunner() ProviderAwareEvalRunner {
-	if w.evalRunnerPA == nil {
-		w.evalRunnerPA = defaultProviderAwareRunner(w.evalRunner)
-	}
-	return w.evalRunnerPA
+// getResultWriter returns the result writer.
+func (w *EvalWorker) getResultWriter() EvalResultWriter {
+	return w.resultWriter
 }
 
 // getMetrics returns the metrics recorder, initializing a no-op one if needed.
@@ -635,61 +577,6 @@ func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName
 	return result
 }
 
-// isDeterministicEval returns true for eval types that are deterministic
-// (not requiring an LLM call) and can be run synchronously in-process.
-func isDeterministicEval(evalType string) bool {
-	return evalType != evalTypeLLMJudge
-}
-
-// filterPerTurnDeterministicEvals filters eval definitions to per_turn deterministic evals.
-// This includes rule-based evals and arena assertions, but excludes LLM judge evals.
-func filterPerTurnDeterministicEvals(defs []EvalDef) []api.EvalDefinition {
-	var result []api.EvalDefinition
-	for _, d := range defs {
-		if d.Trigger == triggerPerTurn && isDeterministicEval(d.Type) {
-			result = append(result, api.EvalDefinition{
-				ID:      d.ID,
-				Type:    d.Type,
-				Trigger: d.Trigger,
-				Params:  d.Params,
-			})
-		}
-	}
-	return result
-}
-
-// filterPerTurnEvals filters eval definitions to all per_turn evals (including LLM judges).
-func filterPerTurnEvals(defs []EvalDef) []api.EvalDefinition {
-	var result []api.EvalDefinition
-	for _, d := range defs {
-		if d.Trigger == triggerPerTurn {
-			result = append(result, api.EvalDefinition{
-				ID:      d.ID,
-				Type:    d.Type,
-				Trigger: d.Trigger,
-				Params:  d.Params,
-			})
-		}
-	}
-	return result
-}
-
-// filterOnCompleteEvals filters eval definitions to all on_session_complete evals.
-func filterOnCompleteEvals(defs []EvalDef) []api.EvalDefinition {
-	var result []api.EvalDefinition
-	for _, d := range defs {
-		if d.Trigger == triggerOnComplete {
-			result = append(result, api.EvalDefinition{
-				ID:      d.ID,
-				Type:    d.Type,
-				Trigger: d.Trigger,
-				Params:  d.Params,
-			})
-		}
-	}
-	return result
-}
-
 // loadPackEvals loads eval definitions from the PromptPack referenced in the event.
 // Returns nil if no pack loader is configured or the event has no PromptPack name.
 func (w *EvalWorker) loadPackEvals(ctx context.Context, event api.SessionEvent) *PromptPackEvals {
@@ -725,23 +612,6 @@ func isAssistantMessageEvent(event api.SessionEvent) bool {
 // isSessionCompletedEvent returns true if the event signals session completion.
 func isSessionCompletedEvent(event api.SessionEvent) bool {
 	return event.EventType == eventTypeSessionDone
-}
-
-// filterOnCompleteDeterministicEvals filters eval definitions to on_session_complete deterministic evals.
-// This includes rule-based evals and arena assertions, but excludes LLM judge evals.
-func filterOnCompleteDeterministicEvals(defs []EvalDef) []api.EvalDefinition {
-	var result []api.EvalDefinition
-	for _, d := range defs {
-		if d.Trigger == triggerOnComplete && isDeterministicEval(d.Type) {
-			result = append(result, api.EvalDefinition{
-				ID:      d.ID,
-				Type:    d.Type,
-				Trigger: d.Trigger,
-				Params:  d.Params,
-			})
-		}
-	}
-	return result
 }
 
 // parseEvent extracts a SessionEvent from a Redis stream message.
@@ -785,21 +655,34 @@ func hostname() string {
 	return h
 }
 
-// defaultProviderAwareRunner wraps a legacy EvalRunner in a ProviderAwareEvalRunner.
-// For arena assertions and PromptKit eval types, it passes providers via
-// RunArenaAssertionWithProviders. Other eval types fall through to the legacy runner.
-func defaultProviderAwareRunner(legacy EvalRunner) ProviderAwareEvalRunner {
-	return func(
-		def api.EvalDefinition,
-		msgs []session.Message,
-		providerSpecs map[string]providers.ProviderSpec,
-	) (api.EvaluateResultItem, error) {
-		if def.Type == EvalTypeArenaAssertion {
-			return RunArenaAssertionWithProviders(def, msgs, providerSpecs)
-		}
-		// Rule-based evals don't need providers
-		return legacy(def, msgs)
+// restoreTraceContext extracts the W3C traceparent from the event and sets it as
+// the remote span context on the returned context. If no valid traceparent is
+// present, the context is returned unchanged.
+func restoreTraceContext(ctx context.Context, event api.SessionEvent) context.Context {
+	sc := api.ParseTraceparent(event.Traceparent)
+	if !sc.IsValid() {
+		return ctx
 	}
+	return trace.ContextWithRemoteSpanContext(ctx, sc)
+}
+
+// resolveEvalTiers determines which eval tiers should run for the given event's session.
+// If the event already has EvalTiers set (pre-computed by publisher), those are used.
+// Otherwise, sampling config is resolved from the AgentRuntime CRD.
+func (w *EvalWorker) resolveEvalTiers(ctx context.Context, event api.SessionEvent) []string {
+	// If EvalTiers is set on the event (non-nil), use it directly.
+	// A non-nil empty slice means the session was explicitly sampled out.
+	if event.EvalTiers != nil {
+		return event.EvalTiers
+	}
+
+	var samplingConfig *v1alpha1.EvalSampling
+	if w.providerResolver != nil && event.AgentName != "" && event.Namespace != "" {
+		samplingConfig = w.providerResolver.ResolveSamplingConfig(ctx, event.AgentName, event.Namespace)
+	}
+
+	sampler := NewSampler(samplingConfig)
+	return sampler.EvalTiersForSession(event.SessionID)
 }
 
 // resolveProviders resolves provider specs from the AgentRuntime CRD.

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -109,6 +110,7 @@ type mockWarmStore struct {
 	createdSessions []*session.Session
 	appendedMsgs    map[string][]*session.Message
 	updatedSessions []*session.Session
+	getMessagesErr  error // if set, GetMessages returns this error for any session
 }
 
 func newMockWarmStore() *mockWarmStore {
@@ -173,6 +175,9 @@ func (m *mockWarmStore) AppendMessage(_ context.Context, sessionID string, msg *
 }
 
 func (m *mockWarmStore) GetMessages(_ context.Context, id string, _ providers.MessageQueryOpts) ([]*session.Message, error) {
+	if m.getMessagesErr != nil {
+		return nil, m.getMessagesErr
+	}
 	msgs, ok := m.messages[id]
 	if !ok {
 		return nil, session.ErrSessionNotFound
@@ -409,6 +414,37 @@ func TestGetMessages_HotEligible(t *testing.T) {
 	}
 }
 
+func TestGetMessages_HotEmptyFallsThrough(t *testing.T) {
+	// When the hot cache returns an empty message list (e.g. messages key
+	// expired while session key persists), the service should fall through
+	// to the warm store instead of returning an empty result.
+	hot := newMockHotCache()
+	// Session exists in hot cache but has NO messages.
+	hot.sessions[testSessionID] = &session.Session{
+		ID:        testSessionID,
+		AgentName: "test-agent",
+		Namespace: "default",
+		Status:    session.SessionStatusActive,
+		Messages:  []session.Message{},
+	}
+
+	warm := newMockWarmStore()
+	warm.messages[testSessionID] = testMessages()
+
+	reg := providers.NewRegistry()
+	reg.SetHotCache(hot)
+	reg.SetWarmStore(warm)
+
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	msgs, err := svc.GetMessages(context.Background(), testSessionID, providers.MessageQueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages from warm store fallthrough, got %d", len(msgs))
+	}
+}
+
 func TestGetMessages_ComplexQuery(t *testing.T) {
 	warm := newMockWarmStore()
 	warm.messages[testSessionID] = testMessages()
@@ -466,6 +502,29 @@ func TestGetMessages_NotFound(t *testing.T) {
 	_, err := svc.GetMessages(context.Background(), "nonexistent", providers.MessageQueryOpts{Limit: 10})
 	if err != session.ErrSessionNotFound {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestGetMessages_WarmErrorFallsThrough(t *testing.T) {
+	// When the warm store returns a non-NotFound error, the service
+	// should fall through to cold archive.
+	warm := newMockWarmStore()
+	warm.getMessagesErr = fmt.Errorf("connection reset")
+
+	cold := newMockColdArchive()
+	cold.sessions[testSessionID] = testSession(testSessionID)
+
+	reg := providers.NewRegistry()
+	reg.SetWarmStore(warm)
+	reg.SetColdArchive(cold)
+
+	svc := NewSessionService(reg, ServiceConfig{}, logr.Discard())
+	msgs, err := svc.GetMessages(context.Background(), testSessionID, providers.MessageQueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages from cold fallthrough, got %d", len(msgs))
 	}
 }
 

@@ -17,12 +17,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/altairalabs/omnia/internal/facade"
 )
+
+// defaultConnectTimeout is the maximum time to wait for the "connected" handshake.
+const defaultConnectTimeout = 30 * time.Second
 
 // Message represents a single message in the conversation transcript.
 type Message struct {
@@ -35,13 +41,14 @@ type Message struct {
 
 // Dialer abstracts WebSocket connection creation for testing.
 type Dialer interface {
-	DialContext(ctx context.Context, urlStr string) (Conn, error)
+	DialContext(ctx context.Context, urlStr string, headers http.Header) (Conn, error)
 }
 
 // Conn abstracts a WebSocket connection for testing.
 type Conn interface {
 	ReadMessage() (int, []byte, error)
 	WriteMessage(messageType int, data []byte) error
+	SetReadDeadline(t time.Time) error
 	Close() error
 }
 
@@ -50,12 +57,19 @@ type gorillaDialer struct {
 	dialer *websocket.Dialer
 }
 
-func (d *gorillaDialer) DialContext(ctx context.Context, urlStr string) (Conn, error) {
-	conn, _, err := d.dialer.DialContext(ctx, urlStr, nil)
+func (d *gorillaDialer) DialContext(ctx context.Context, urlStr string, headers http.Header) (Conn, error) {
+	conn, _, err := d.dialer.DialContext(ctx, urlStr, headers)
 	if err != nil {
 		return nil, err
 	}
 	return conn, nil
+}
+
+// traceHeaders returns HTTP headers with W3C trace context injected from ctx.
+func traceHeaders(ctx context.Context) http.Header {
+	h := http.Header{}
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(h))
+	return h
 }
 
 // newDefaultDialer creates a gorilla WebSocket dialer with sensible defaults.
@@ -68,8 +82,12 @@ func newDefaultDialer() Dialer {
 }
 
 // waitForConnected reads messages until it receives a "connected" message,
-// returning the session ID.
-func waitForConnected(conn Conn) (string, error) {
+// returning the session ID. It enforces the given timeout on the read.
+func waitForConnected(conn Conn, timeout time.Duration) (string, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return "", fmt.Errorf("failed to set read deadline: %w", err)
+	}
+
 	_, data, err := conn.ReadMessage()
 	if err != nil {
 		return "", fmt.Errorf("read error: %w", err)

@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { JsonBlock } from "@/components/ui/json-block";
 import { CheckCircle2, XCircle, ChevronDown, ChevronRight } from "lucide-react";
 import type { EvalResult } from "@/types/eval";
 import { cn } from "@/lib/utils";
@@ -101,9 +102,7 @@ function EvalDetailRow({ result }: Readonly<{ result: EvalResult }>) {
               <span>${result.judgeCostUsd.toFixed(4)}</span>
             )}
           </div>
-          <pre className="bg-background p-1.5 rounded text-[10px] overflow-x-auto">
-            {JSON.stringify(result.details, null, 2)}
-          </pre>
+          <JsonBlock data={result.details} className="bg-background text-[10px]" />
         </div>
       )}
     </div>

@@ -31,6 +31,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/sony/gobreaker/v2"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/altairalabs/omnia/internal/session"
 )
@@ -40,6 +41,9 @@ var ErrNotImplemented = errors.New("not implemented by HTTP session client")
 
 // Default timeout for HTTP requests to the session-api.
 const DefaultHTTPTimeout = 30 * time.Second
+
+// healthCheckTimeout is used for the uninstrumented Ping client.
+const healthCheckTimeout = 5 * time.Second
 
 // Retry configuration for transient failures.
 const (
@@ -76,10 +80,11 @@ func WithHTTPClient(c *http.Client) StoreOption {
 // Store implements session.Store by calling the session-api over HTTP.
 // It is used by the facade's recordingResponseWriter for session persistence.
 type Store struct {
-	baseURL    string
-	httpClient *http.Client
-	cb         *gobreaker.CircuitBreaker[*http.Response]
-	log        logr.Logger
+	baseURL      string
+	httpClient   *http.Client
+	healthClient *http.Client // uninstrumented client for Ping — avoids trace noise from K8s probes
+	cb           *gobreaker.CircuitBreaker[*http.Response]
+	log          logr.Logger
 }
 
 // NewStore creates a new HTTP-backed session store.
@@ -94,6 +99,15 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 	for _, opt := range opts {
 		opt(s)
 	}
+	// Keep an uninstrumented copy for health checks before wrapping with OTel.
+	// K8s readiness probes call Ping() every 10s — tracing those creates noise.
+	s.healthClient = &http.Client{
+		Timeout:   healthCheckTimeout,
+		Transport: s.httpClient.Transport,
+	}
+	// Wrap the HTTP transport for OTel trace context propagation.
+	// This injects traceparent into outbound requests to session-api.
+	s.httpClient.Transport = otelhttp.NewTransport(s.httpClient.Transport)
 	s.cb = gobreaker.NewCircuitBreaker[*http.Response](gobreaker.Settings{
 		Name:        "session-api",
 		MaxRequests: cbMaxRequests,
@@ -240,6 +254,25 @@ func (s *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Durat
 	}
 	if resp.StatusCode != http.StatusOK {
 		return s.readError(resp)
+	}
+	return nil
+}
+
+// Ping checks session-api connectivity via a lightweight /healthz endpoint.
+// Uses an uninstrumented HTTP client to avoid generating trace spans from
+// K8s readiness probes (which call Ping every 10s per agent).
+func (s *Store) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/healthz", nil)
+	if err != nil {
+		return fmt.Errorf("httpclient: ping: %w", err)
+	}
+	resp, err := s.healthClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("httpclient: ping: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("httpclient: ping: status %d", resp.StatusCode)
 	}
 	return nil
 }

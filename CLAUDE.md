@@ -197,6 +197,38 @@ log.V(1).Info("forwarding event to session-api successfully")
 - **Duplicated lines**: Keep below 3% on new code. Avoid copy-paste patterns.
 - **Type safety**: `npm run typecheck` must pass. Use proper TypeScript types, not `any`.
 
+## Testing Standards
+
+### Mock-to-contract, not mock-to-code
+
+When mocking API responses (Go→TS, service→service), the mock's response shape MUST match the **real API response struct**, not what the calling code expects. If the code has a bug reading `data.evalResults` but the API returns `data.results`, the test must use `{ results: [...] }` — catching the bug immediately.
+
+**Rules:**
+- Always check the Go response struct's `json:"..."` tags when writing a TS mock for a proxy or API call
+- For proxy routes that pass through backend responses, mock the backend's actual response shape
+- When writing a new API endpoint, verify the consumer (dashboard service, test mock) uses the correct JSON field names
+
+### Tiered/fallback system tests
+
+For any system with tiered fallback (hot → warm → cold, cache → database → archive), test **all degraded states**, not just hit/miss:
+
+| Scenario | What to test |
+|----------|-------------|
+| Cache hit | Returns cached data |
+| Cache miss (not found) | Falls through to next tier |
+| Cache empty (found but no data) | Falls through to next tier — empty is not the same as "definitive answer" for caches |
+| Cache error (non-NotFound) | Falls through and logs error |
+| All tiers miss | Returns appropriate not-found error |
+
+The most dangerous case is **"cache empty"** — the cache returns success with zero results, which the service trusts as definitive, never checking the authoritative store. Always validate that an empty cache result falls through.
+
+### Test coverage requirements
+
+- **Happy path**: Basic functionality works
+- **Error paths**: All error branches are exercised (not just logged-and-swallowed)
+- **Degraded states**: Partial data, expired caches, split-key TTL expiry
+- **Contract alignment**: Mock response shapes match real API structs
+
 ## CRD / Kubernetes Patterns
 
 - CEL validation: For optional string fields with `omitempty`, always use `has(self.fieldName)` guard before accessing the value. Direct access fails with "no such key" when the field is omitted.

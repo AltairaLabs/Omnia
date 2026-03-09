@@ -77,8 +77,9 @@ export default defineConfig({
         // License API routes - require license server
         "src/app/api/license/**",
 
-        // Arena project API routes - require K8s infrastructure
+        // Arena project/source API routes - require K8s infrastructure
         "src/app/api/workspaces/[name]/arena/projects/**",
+        "src/app/api/workspaces/[name]/arena/sources/[sourceName]/file/**",
 
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",

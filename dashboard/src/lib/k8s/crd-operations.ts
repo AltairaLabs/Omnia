@@ -15,6 +15,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
+import { of } from "@kubernetes/client-node/dist/gen/rxjsStub.js";
 import {
   getWorkspaceCustomObjectsApi,
   getWorkspaceCoreApi,
@@ -162,6 +163,14 @@ export async function patchCrd<T>(
       plural,
       name,
       body: patch,
+    }, {
+      middleware: [{
+        pre: (ctx) => {
+          ctx.setHeaderParam("Content-Type", "application/merge-patch+json");
+          return of(ctx);
+        },
+        post: (ctx) => of(ctx),
+      }],
     });
     return result as T;
   });
@@ -219,7 +228,7 @@ async function fetchContainerLogs(
     return logText
       .split("\n")
       .filter(Boolean)
-      .map((line) => parseLogLine(line, containerName));
+      .map((line) => ({ ...parseLogLine(line, containerName), pod: podName }));
   } catch (error) {
     console.warn(`Failed to get logs from ${podName}/${containerName}:`, error);
     return [];

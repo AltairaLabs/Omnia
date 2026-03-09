@@ -21,7 +21,7 @@ func TestNewSampler_NilConfig(t *testing.T) {
 	s := NewSampler(nil)
 	require.NotNil(t, s)
 	assert.Equal(t, int32(DefaultSamplingRate), s.DefaultRate())
-	assert.Equal(t, int32(DefaultLLMJudgeRate), s.LLMJudgeRate())
+	assert.Equal(t, int32(DefaultExtendedRate), s.ExtendedRate())
 }
 
 func TestNewSampler_WithConfig(t *testing.T) {
@@ -29,10 +29,10 @@ func TestNewSampler_WithConfig(t *testing.T) {
 	jr := int32(20)
 	s := NewSampler(&v1alpha1.EvalSampling{
 		DefaultRate:  &dr,
-		LLMJudgeRate: &jr,
+		ExtendedRate: &jr,
 	})
 	assert.Equal(t, int32(50), s.DefaultRate())
-	assert.Equal(t, int32(20), s.LLMJudgeRate())
+	assert.Equal(t, int32(20), s.ExtendedRate())
 }
 
 func TestNewSampler_PartialConfig(t *testing.T) {
@@ -41,74 +41,61 @@ func TestNewSampler_PartialConfig(t *testing.T) {
 		DefaultRate: &dr,
 	})
 	assert.Equal(t, int32(75), s.DefaultRate())
-	assert.Equal(t, int32(DefaultLLMJudgeRate), s.LLMJudgeRate())
+	assert.Equal(t, int32(DefaultExtendedRate), s.ExtendedRate())
 }
 
 func TestNewSampler_EmptyConfig(t *testing.T) {
 	s := NewSampler(&v1alpha1.EvalSampling{})
 	assert.Equal(t, int32(DefaultSamplingRate), s.DefaultRate())
-	assert.Equal(t, int32(DefaultLLMJudgeRate), s.LLMJudgeRate())
+	assert.Equal(t, int32(DefaultExtendedRate), s.ExtendedRate())
 }
 
-func TestShouldSample_Rate100_AlwaysTrue(t *testing.T) {
-	s := NewSampler(nil) // defaultRate = 100
-	for i := 0; i < 100; i++ {
-		assert.True(t, s.ShouldSample("session-abc", i, false))
-	}
+func TestEvalTiersForSession_DefaultConfig_IncludesLightweight(t *testing.T) {
+	s := NewSampler(nil) // defaultRate=100, extendedRate=10
+	tiers := s.EvalTiersForSession("session-abc")
+	assert.Contains(t, tiers, TierLightweight, "defaultRate=100 should always include lightweight")
 }
 
-func TestShouldSample_Rate0_AlwaysFalse(t *testing.T) {
+func TestEvalTiersForSession_Rate0_ExcludesTier(t *testing.T) {
 	dr := int32(0)
-	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
-	for i := 0; i < 100; i++ {
-		assert.False(t, s.ShouldSample("session-xyz", i, false))
-	}
+	er := int32(0)
+	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr, ExtendedRate: &er})
+	tiers := s.EvalTiersForSession("session-xyz")
+	assert.Empty(t, tiers)
 }
 
-func TestShouldSample_LLMJudgeRate0_AlwaysFalse(t *testing.T) {
-	jr := int32(0)
-	s := NewSampler(&v1alpha1.EvalSampling{LLMJudgeRate: &jr})
-	for i := 0; i < 100; i++ {
-		assert.False(t, s.ShouldSample("session-xyz", i, true))
-	}
+func TestEvalTiersForSession_Rate100_IncludesBoth(t *testing.T) {
+	dr := int32(100)
+	er := int32(100)
+	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr, ExtendedRate: &er})
+	tiers := s.EvalTiersForSession("session-123")
+	assert.Contains(t, tiers, TierLightweight)
+	assert.Contains(t, tiers, TierExtended)
 }
 
-func TestShouldSample_Deterministic(t *testing.T) {
+func TestEvalTiersForSession_Deterministic(t *testing.T) {
 	dr := int32(50)
 	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
 
-	// Same inputs should always produce the same result.
-	first := s.ShouldSample("session-123", 5, false)
+	first := s.EvalTiersForSession("session-123")
 	for i := 0; i < 50; i++ {
-		assert.Equal(t, first, s.ShouldSample("session-123", 5, false),
-			"sampling must be deterministic for the same inputs")
+		assert.Equal(t, first, s.EvalTiersForSession("session-123"),
+			"sampling must be deterministic for the same session")
 	}
 }
 
-func TestShouldSample_UsesLLMJudgeRate(t *testing.T) {
-	dr := int32(100)
-	jr := int32(0)
-	s := NewSampler(&v1alpha1.EvalSampling{
-		DefaultRate:  &dr,
-		LLMJudgeRate: &jr,
-	})
-
-	// Non-judge evals should pass (rate 100).
-	assert.True(t, s.ShouldSample("s1", 0, false))
-	// Judge evals should fail (rate 0).
-	assert.False(t, s.ShouldSample("s1", 0, true))
-}
-
-func TestShouldSample_Distribution(t *testing.T) {
-	// With a 50% rate over many samples, we should see roughly 50% sampled.
+func TestEvalTiersForSession_Distribution(t *testing.T) {
 	dr := int32(50)
 	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
 
 	sampled := 0
 	total := 10000
 	for i := 0; i < total; i++ {
-		if s.ShouldSample("distribution-test", i, false) {
-			sampled++
+		tiers := s.EvalTiersForSession("distribution-test-" + string(rune(i)))
+		for _, tier := range tiers {
+			if tier == TierLightweight {
+				sampled++
+			}
 		}
 	}
 
@@ -117,30 +104,37 @@ func TestShouldSample_Distribution(t *testing.T) {
 		"expected ~50%% sampling, got %.2f%%", ratio*100)
 }
 
-func TestShouldSample_NegativeRate(t *testing.T) {
-	dr := int32(-1)
-	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
-	assert.False(t, s.ShouldSample("s1", 0, false))
-}
-
-func TestShouldSample_DifferentSessionsDifferentResults(t *testing.T) {
-	// With a rate that is not 0 or 100, different session IDs should
-	// produce a mix of true and false.
+func TestEvalTiersForSession_DifferentSessionsDifferentResults(t *testing.T) {
 	dr := int32(50)
 	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
 
-	results := make(map[bool]int)
+	results := make(map[int]int) // count of tiers per session
 	for i := 0; i < 100; i++ {
-		result := s.ShouldSample("unique-session-"+string(rune(i+'A')), 0, false)
-		results[result]++
+		tiers := s.EvalTiersForSession("unique-session-" + string(rune(i+'A')))
+		results[len(tiers)]++
 	}
 
-	// With 50% rate, we should have both true and false results.
-	assert.Greater(t, results[true], 0, "expected some true results")
-	assert.Greater(t, results[false], 0, "expected some false results")
+	assert.Greater(t, results[0]+results[1]+results[2], 0, "expected varied results")
 }
 
-func TestHashShouldSample_BoundaryRates(t *testing.T) {
+func TestEvalTiersForSession_NegativeRate(t *testing.T) {
+	dr := int32(-1)
+	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr})
+	tiers := s.EvalTiersForSession("s1")
+	assert.NotContains(t, tiers, TierLightweight)
+}
+
+func TestEvalTiersForSession_TiersAreIndependent(t *testing.T) {
+	// With different rates, the sampling decisions should be independent.
+	dr := int32(100)
+	er := int32(0)
+	s := NewSampler(&v1alpha1.EvalSampling{DefaultRate: &dr, ExtendedRate: &er})
+	tiers := s.EvalTiersForSession("s1")
+	assert.Contains(t, tiers, TierLightweight)
+	assert.NotContains(t, tiers, TierExtended)
+}
+
+func TestSessionShouldSample_BoundaryRates(t *testing.T) {
 	tests := []struct {
 		name     string
 		rate     int32
@@ -156,7 +150,7 @@ func TestHashShouldSample_BoundaryRates(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			for i := 0; i < 20; i++ {
-				result := hashShouldSample("test", i, tc.rate)
+				result := sessionShouldSample("test", TierLightweight, tc.rate)
 				if tc.allTrue {
 					assert.True(t, result)
 				}
@@ -166,4 +160,52 @@ func TestHashShouldSample_BoundaryRates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsExtendedEvalType(t *testing.T) {
+	assert.True(t, IsExtendedEvalType("llm_judge"))
+	assert.True(t, IsExtendedEvalType("llm_judge_turn"))
+	assert.True(t, IsExtendedEvalType("llm_judge_session"))
+	assert.False(t, IsExtendedEvalType("contains"))
+	assert.False(t, IsExtendedEvalType("regex"))
+	assert.False(t, IsExtendedEvalType("content_includes"))
+	assert.False(t, IsExtendedEvalType("guardrail_triggered"))
+}
+
+func TestEvalTierForType(t *testing.T) {
+	assert.Equal(t, TierExtended, EvalTierForType("llm_judge"))
+	assert.Equal(t, TierLightweight, EvalTierForType("contains"))
+}
+
+func TestFilterEvalsByTiers(t *testing.T) {
+	evals := []EvalDef{
+		{ID: "e1", Type: "contains"},
+		{ID: "e2", Type: "llm_judge"},
+		{ID: "e3", Type: "regex"},
+		{ID: "e4", Type: "llm_judge_turn"},
+	}
+
+	t.Run("both tiers", func(t *testing.T) {
+		filtered := FilterEvalsByTiers(evals, []string{TierLightweight, TierExtended})
+		assert.Len(t, filtered, 4)
+	})
+
+	t.Run("lightweight only", func(t *testing.T) {
+		filtered := FilterEvalsByTiers(evals, []string{TierLightweight})
+		assert.Len(t, filtered, 2)
+		assert.Equal(t, "e1", filtered[0].ID)
+		assert.Equal(t, "e3", filtered[1].ID)
+	})
+
+	t.Run("extended only", func(t *testing.T) {
+		filtered := FilterEvalsByTiers(evals, []string{TierExtended})
+		assert.Len(t, filtered, 2)
+		assert.Equal(t, "e2", filtered[0].ID)
+		assert.Equal(t, "e4", filtered[1].ID)
+	})
+
+	t.Run("empty tiers", func(t *testing.T) {
+		filtered := FilterEvalsByTiers(evals, nil)
+		assert.Empty(t, filtered)
+	})
 }

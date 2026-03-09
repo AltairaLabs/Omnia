@@ -530,18 +530,18 @@ Controls what percentage of sessions and turns are evaluated to manage cost.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `evals.sampling.defaultRate` | integer (0-100) | 100 | Sampling percentage for all evals |
-| `evals.sampling.llmJudgeRate` | integer (0-100) | 10 | Sampling percentage for LLM judge evals |
+| `evals.sampling.defaultRate` | integer (0-100) | 100 | Sampling percentage for lightweight (in-process) evals |
+| `evals.sampling.extendedRate` | integer (0-100) | 10 | Sampling percentage for extended (model-powered) evals |
 
 ```yaml
 spec:
   evals:
     sampling:
-      defaultRate: 100   # Run all rule-based evals
-      llmJudgeRate: 10   # Sample 10% for LLM judge evals (cost control)
+      defaultRate: 100   # Run all lightweight evals
+      extendedRate: 10   # Sample 10% for extended evals (cost control)
 ```
 
-Sampling uses deterministic hashing on `sessionID:turnIndex`, so the same session/turn always produces the same sampling decision. Non-LLM evals (e.g., `content_includes`) are free to run and typically use the `defaultRate`. LLM judge evals incur API costs, so `llmJudgeRate` is set lower by default.
+Sampling uses deterministic hashing on `sessionID:turnIndex`, so the same session/turn always produces the same sampling decision. Lightweight evals (e.g., `content_includes`) are fast and free to run, using `defaultRate`. Extended evals (model-powered evaluations) incur API costs and latency, so `extendedRate` is set lower by default.
 
 #### `evals.rateLimit`
 
@@ -643,7 +643,7 @@ spec:
     enabled: true
     sampling:
       defaultRate: 100
-      llmJudgeRate: 10
+      extendedRate: 10
     rateLimit:
       maxEvalsPerSecond: 50
       maxConcurrentJudgeCalls: 5
