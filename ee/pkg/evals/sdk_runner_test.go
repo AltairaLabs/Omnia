@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -160,6 +161,27 @@ func TestSDKRunner_RunSessionEvals(t *testing.T) {
 	items := runner.RunSessionEvals(context.Background(), defs, messages, "sess-1", 1, nil)
 	require.Len(t, items, 1)
 	assert.True(t, items[0].Passed)
+}
+
+func TestToAnyMap(t *testing.T) {
+	specs := map[string]providers.ProviderSpec{
+		"openai":    {Model: "gpt-4"},
+		"anthropic": {Model: "claude-3"},
+	}
+	result := toAnyMap(specs)
+	assert.Len(t, result, 2)
+	assert.Equal(t, providers.ProviderSpec{Model: "gpt-4"}, result["openai"])
+	assert.Equal(t, providers.ProviderSpec{Model: "claude-3"}, result["anthropic"])
+}
+
+func TestToAnyMap_Empty(t *testing.T) {
+	result := toAnyMap(map[string]providers.ProviderSpec{})
+	assert.Empty(t, result)
+}
+
+func TestToAnyMap_Nil(t *testing.T) {
+	result := toAnyMap(nil)
+	assert.Empty(t, result)
 }
 
 func TestSDKRunner_RunTurnEvals_SkipsMismatchedTrigger(t *testing.T) {
