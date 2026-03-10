@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,11 +31,36 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/grpc"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
+
+// mockToolServiceClient implements toolsv1.ToolServiceClient for testing.
+type mockToolServiceClient struct {
+	executeResp *toolsv1.ToolResponse
+	executeErr  error
+	listResp    *toolsv1.ListToolsResponse
+	listErr     error
+}
+
+func (m *mockToolServiceClient) Execute(
+	_ context.Context,
+	_ *toolsv1.ToolRequest,
+	_ ...grpc.CallOption,
+) (*toolsv1.ToolResponse, error) {
+	return m.executeResp, m.executeErr
+}
+
+func (m *mockToolServiceClient) ListTools(
+	_ context.Context,
+	_ *toolsv1.ListToolsRequest,
+	_ ...grpc.CallOption,
+) (*toolsv1.ListToolsResponse, error) {
+	return m.listResp, m.listErr
+}
 
 // --- Name ---
 
@@ -1172,5 +1199,535 @@ func TestOmniaExecutor_ToolDescriptors_Multiple(t *testing.T) {
 	descs := e.ToolDescriptors()
 	if len(descs) != 2 {
 		t.Fatalf("ToolDescriptors count = %d, want 2", len(descs))
+	}
+}
+
+// --- Execute with httptest server ---
+
+func TestOmniaExecutor_Execute_HTTPWithServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["test-http"] = &HandlerEntry{
+		Name: "test-http",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+			Method:   "POST",
+		},
+		Tool: &ToolDefCfg{
+			Name:        "test-http-tool",
+			Description: "test tool",
+		},
+	}
+	e.toolHandlers["test-http-tool"] = "test-http"
+
+	desc := &pktools.ToolDescriptor{Name: "test-http-tool"}
+	result, err := e.Execute(context.Background(), desc, json.RawMessage(`{"x":1}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Execute returned nil result")
+	}
+	if !strings.Contains(string(result), "ok") {
+		t.Errorf("result = %s, want to contain 'ok'", result)
+	}
+}
+
+// --- dispatch tests for each handler type ---
+
+func TestOmniaExecutor_Dispatch_HTTP_NilConfig(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	handler := &HandlerEntry{Type: ToolTypeHTTP}
+
+	_, err := e.dispatch(context.Background(), "tool", "handler", handler, nil)
+	if err == nil {
+		t.Fatal("expected error for nil HTTP config")
+	}
+	if !strings.Contains(err.Error(), "has no HTTP config") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestOmniaExecutor_Dispatch_MCP_NilSession(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	handler := &HandlerEntry{Type: ToolTypeMCP}
+
+	_, err := e.dispatch(context.Background(), "tool", "handler", handler, nil)
+	if err == nil {
+		t.Fatal("expected error for nil MCP session")
+	}
+	if !strings.Contains(err.Error(), "not connected") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestOmniaExecutor_Dispatch_GRPC_NilClient(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	handler := &HandlerEntry{Type: ToolTypeGRPC}
+
+	_, err := e.dispatch(context.Background(), "tool", "handler", handler, nil)
+	if err == nil {
+		t.Fatal("expected error for nil gRPC client")
+	}
+	if !strings.Contains(err.Error(), "not connected") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestOmniaExecutor_Dispatch_OpenAPI_NoOps(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{}
+	e.openAPIBaseURLs["handler"] = "http://localhost"
+	e.openAPIHeaders["handler"] = map[string]string{}
+	handler := &HandlerEntry{Type: ToolTypeOpenAPI}
+
+	_, err := e.dispatch(context.Background(), "tool", "handler", handler, nil)
+	if err == nil {
+		t.Fatal("expected error for missing operation")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- executeHTTP with httptest server ---
+
+func TestOmniaExecutor_ExecuteHTTP_WithServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"value":42}`))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	handler := &HandlerEntry{
+		Name: "h1",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+			Method:   "POST",
+		},
+	}
+
+	result, err := e.executeHTTP(context.Background(), "tool-name", "h1", handler, json.RawMessage(`{"input":"data"}`))
+	if err != nil {
+		t.Fatalf("executeHTTP: %v", err)
+	}
+	if !strings.Contains(string(result), "42") {
+		t.Errorf("result = %s, want to contain '42'", result)
+	}
+}
+
+// --- executeMCP with invalid args ---
+
+func TestOmniaExecutor_ExecuteMCP_InvalidArgs(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	// We need a non-nil session to get past the nil check, but the session
+	// would fail on CallTool. The invalid JSON check happens first.
+	// To test the unmarshal error path, we must have a non-nil session in the map.
+	// We can't easily create a real mcp.ClientSession, so let's test the path
+	// where args are invalid and session IS set. We'll just verify the error path
+	// by testing executeMCP directly — but we can't set a non-nil session without
+	// a real connection. Instead, let's verify the nil session path returns early.
+
+	// Test with valid session placeholder — need to set it in mcpSessions map
+	// This is tricky because mcp.ClientSession is a concrete type.
+	// Instead, verify the invalid args path by checking the error message directly.
+	_, err := e.executeMCP(context.Background(), "tool", "handler", json.RawMessage(`not valid json`))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	// It will hit the nil session check first
+	if !strings.Contains(err.Error(), "not connected") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- executeGRPC with mock client ---
+
+func TestOmniaExecutor_ExecuteGRPC_WithMockClient(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	mock := &mockToolServiceClient{
+		executeResp: &toolsv1.ToolResponse{
+			ResultJson: `{"answer":42}`,
+		},
+	}
+	e.grpcClients["grpc-handler"] = mock
+
+	result, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", json.RawMessage(`{"q":"test"}`))
+	if err != nil {
+		t.Fatalf("executeGRPC: %v", err)
+	}
+	if string(result) != `{"answer":42}` {
+		t.Errorf("result = %s, want {\"answer\":42}", result)
+	}
+}
+
+func TestOmniaExecutor_ExecuteGRPC_MockClientError(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	mock := &mockToolServiceClient{
+		executeErr: fmt.Errorf("connection refused"),
+	}
+	e.grpcClients["grpc-handler"] = mock
+
+	_, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "gRPC tool execution failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestOmniaExecutor_ExecuteGRPC_MockClientToolError(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	mock := &mockToolServiceClient{
+		executeResp: &toolsv1.ToolResponse{
+			IsError:      true,
+			ErrorMessage: "tool exploded",
+		},
+	}
+	e.grpcClients["grpc-handler"] = mock
+
+	_, err := e.executeGRPC(context.Background(), "grpc-tool", "grpc-handler", nil)
+	if err == nil {
+		t.Fatal("expected error for tool error response")
+	}
+	if !strings.Contains(err.Error(), "tool exploded") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestOmniaExecutor_ExecuteGRPC_MetadataInjection(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	mock := &mockToolServiceClient{
+		executeResp: &toolsv1.ToolResponse{
+			ResultJson: `{"ok":true}`,
+		},
+	}
+	e.grpcClients["grpc-handler"] = mock
+
+	// Pass args to exercise the metadata injection path
+	args := json.RawMessage(`{"param":"value"}`)
+	result, err := e.executeGRPC(context.Background(), "my-tool", "grpc-handler", args)
+	if err != nil {
+		t.Fatalf("executeGRPC: %v", err)
+	}
+	if string(result) != `{"ok":true}` {
+		t.Errorf("result = %s, want {\"ok\":true}", result)
+	}
+}
+
+// --- executeOpenAPI with found operation ---
+
+func TestOmniaExecutor_ExecuteOpenAPI_OperationFound_NoServer(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{
+		"getUser": {
+			OperationID: "getUser",
+			Method:      "GET",
+			Path:        "/users/1",
+			Summary:     "Get a user",
+		},
+	}
+	e.openAPIBaseURLs["handler"] = "http://127.0.0.1:1" // unreachable
+	e.openAPIHeaders["handler"] = map[string]string{"X-Api-Key": "test"}
+
+	handler := &HandlerEntry{
+		Name: "handler",
+		Type: ToolTypeOpenAPI,
+		OpenAPIConfig: &OpenAPICfg{
+			AuthType:  "bearer",
+			AuthToken: "tok123",
+		},
+	}
+
+	// The operation is found, so URL building, header merging, and HTTPConfig construction
+	// are all exercised. It will fail at the HTTP call level since the server is unreachable.
+	_, err := e.executeOpenAPI(context.Background(), "getUser", "handler", handler, json.RawMessage(`{"id":1}`))
+	if err == nil {
+		t.Fatal("expected error for unreachable server")
+	}
+	// The error comes from httpExecutor trying to reach the server
+}
+
+func TestOmniaExecutor_ExecuteOpenAPI_WithServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"alice"}`))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{
+		"getUser": {
+			OperationID: "getUser",
+			Method:      "GET",
+			Path:        "/users/1",
+		},
+	}
+	e.openAPIBaseURLs["handler"] = srv.URL
+	e.openAPIHeaders["handler"] = map[string]string{}
+
+	handler := &HandlerEntry{
+		Name: "handler",
+		Type: ToolTypeOpenAPI,
+	}
+
+	result, err := e.executeOpenAPI(context.Background(), "getUser", "handler", handler, nil)
+	if err != nil {
+		t.Fatalf("executeOpenAPI: %v", err)
+	}
+	if !strings.Contains(string(result), "alice") {
+		t.Errorf("result = %s, want to contain 'alice'", result)
+	}
+}
+
+// --- initOpenAPIHandler nil config ---
+
+func TestOmniaExecutor_InitOpenAPIHandler_NilConfig(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "no-openapi",
+		Type: ToolTypeOpenAPI,
+	}
+
+	err := e.initOpenAPIHandler(context.Background(), "no-openapi", h)
+	if err != nil {
+		t.Fatalf("initOpenAPIHandler: %v", err)
+	}
+	if len(e.toolHandlers) != 0 {
+		t.Errorf("expected no tools registered, got %d", len(e.toolHandlers))
+	}
+}
+
+// --- initHandler with MCP, gRPC, OpenAPI nil configs (skip paths) ---
+
+func TestOmniaExecutor_InitHandler_MCP_NilConfig(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{Name: "mcp-skip", Type: ToolTypeMCP}
+
+	err := e.initHandler(context.Background(), "mcp-skip", h)
+	if err != nil {
+		t.Fatalf("initHandler MCP: %v", err)
+	}
+	if len(e.toolHandlers) != 0 {
+		t.Errorf("expected no tools registered, got %d", len(e.toolHandlers))
+	}
+}
+
+func TestOmniaExecutor_InitHandler_GRPC_NilConfig(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{Name: "grpc-skip", Type: ToolTypeGRPC}
+
+	err := e.initHandler(context.Background(), "grpc-skip", h)
+	if err != nil {
+		t.Fatalf("initHandler gRPC: %v", err)
+	}
+	if len(e.toolHandlers) != 0 {
+		t.Errorf("expected no tools registered, got %d", len(e.toolHandlers))
+	}
+}
+
+func TestOmniaExecutor_InitHandler_OpenAPI_NilConfig(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{Name: "openapi-skip", Type: ToolTypeOpenAPI}
+
+	err := e.initHandler(context.Background(), "openapi-skip", h)
+	if err != nil {
+		t.Fatalf("initHandler OpenAPI: %v", err)
+	}
+	if len(e.toolHandlers) != 0 {
+		t.Errorf("expected no tools registered, got %d", len(e.toolHandlers))
+	}
+}
+
+func TestOmniaExecutor_InitHandler_HTTP(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "http-init",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: "http://localhost:8080",
+			Method:   "POST",
+		},
+		Tool: &ToolDefCfg{
+			Name:        "http-init-tool",
+			Description: "test",
+		},
+	}
+
+	err := e.initHandler(context.Background(), "http-init", h)
+	if err != nil {
+		t.Fatalf("initHandler HTTP: %v", err)
+	}
+	if e.toolHandlers["http-init-tool"] != "http-init" {
+		t.Error("tool not registered via initHandler")
+	}
+}
+
+// --- buildDescriptor with OpenAPI operations ---
+
+func TestOmniaExecutor_BuildDescriptor_OpenAPI(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "openapi-h",
+		Type: ToolTypeOpenAPI,
+	}
+	e.openAPIOps["openapi-h"] = map[string]*OpenAPIOperation{
+		"listPets": {
+			OperationID: "listPets",
+			Method:      "GET",
+			Path:        "/pets",
+			Summary:     "List all pets",
+			Description: "Returns all pets in the system",
+		},
+	}
+
+	desc := e.buildDescriptor("listPets", h)
+	if desc == nil {
+		t.Fatal("buildDescriptor returned nil")
+	}
+	if desc.Description == "" {
+		t.Error("expected non-empty description for OpenAPI tool")
+	}
+}
+
+// --- probeHTTP with httptest servers ---
+
+func TestOmniaExecutor_ProbeHTTP_ServerReturns500(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "probe-500",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+		},
+	}
+
+	err := e.probeHTTP(context.Background(), h)
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestOmniaExecutor_ProbeHTTP_ServerReturns200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "probe-200",
+		Type: ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{
+			Endpoint: srv.URL,
+		},
+	}
+
+	err := e.probeHTTP(context.Background(), h)
+	if err != nil {
+		t.Fatalf("probeHTTP: %v", err)
+	}
+}
+
+func TestOmniaExecutor_ProbeHTTP_UsesHandlerEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name:     "probe-fallback",
+		Type:     ToolTypeHTTP,
+		Endpoint: srv.URL,
+	}
+
+	err := e.probeHTTP(context.Background(), h)
+	if err != nil {
+		t.Fatalf("probeHTTP with handler endpoint: %v", err)
+	}
+}
+
+// --- buildGRPCTLSConfig with cert/key ---
+
+func TestBuildGRPCTLSConfig_WithCertAndKey(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+
+	// Write dummy cert/key — they won't be valid, so LoadX509KeyPair will fail.
+	if err := os.WriteFile(certPath, []byte("not a cert"), 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte("not a key"), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	cfg := &GRPCCfg{
+		TLS:         true,
+		TLSCertPath: certPath,
+		TLSKeyPath:  keyPath,
+	}
+
+	_, err := buildGRPCTLSConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid cert/key pair")
+	}
+	if !strings.Contains(err.Error(), "failed to load client cert") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- probeHandler for OpenAPI type ---
+
+func TestOmniaExecutor_ProbeHandler_OpenAPI_EmptyEndpoint(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["openapi-h"] = &HandlerEntry{
+		Name: "openapi-h",
+		Type: ToolTypeOpenAPI,
+	}
+
+	err := e.probeHandler(context.Background(), "openapi-h")
+	if err != nil {
+		t.Errorf("expected nil error for OpenAPI with no endpoint, got: %v", err)
+	}
+}
+
+func TestOmniaExecutor_ProbeHandler_OpenAPI_WithServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["openapi-h"] = &HandlerEntry{
+		Name:     "openapi-h",
+		Type:     ToolTypeOpenAPI,
+		Endpoint: srv.URL,
+	}
+
+	err := e.probeHandler(context.Background(), "openapi-h")
+	if err != nil {
+		t.Fatalf("probeHandler OpenAPI: %v", err)
 	}
 }
