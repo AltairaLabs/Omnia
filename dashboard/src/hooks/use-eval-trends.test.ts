@@ -218,7 +218,7 @@ describe("useEvalPassRateTrends", () => {
     expect(mockQueryPrometheusRange).toHaveBeenCalledTimes(1);
   });
 
-  it("filters out infrastructure suffixes during discovery", async () => {
+  it("filters out histogram sub-metrics and worker infra metrics during discovery", async () => {
     mockQueryPrometheus.mockResolvedValue({
       status: "success",
       data: {
@@ -229,6 +229,7 @@ describe("useEvalPassRateTrends", () => {
           { metric: { __name__: "omnia_eval_latency_count" }, value: [1000, "1"] },
           { metric: { __name__: "omnia_eval_executed_total" }, value: [1000, "47"] },
           { metric: { __name__: "omnia_eval_passed_total" }, value: [1000, "42"] },
+          { metric: { __name__: "omnia_eval_worker_events_received_total" }, value: [1000, "99"] },
         ],
       },
     });
@@ -238,7 +239,7 @@ describe("useEvalPassRateTrends", () => {
       data: {
         result: [
           {
-            metric: { __name__: "omnia_eval_latency" },
+            metric: {},
             values: [[1000, "0.5"]],
           },
         ],
@@ -251,8 +252,9 @@ describe("useEvalPassRateTrends", () => {
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // Only one range query for the non-suffixed metric
-    expect(mockQueryPrometheusRange).toHaveBeenCalledTimes(1);
+    // Three range queries: executed_total, latency, passed_total (alphabetical)
+    // _bucket/_sum/_count excluded, omnia_eval_worker_* excluded, _total counters kept
+    expect(mockQueryPrometheusRange).toHaveBeenCalledTimes(3);
   });
 });
 
