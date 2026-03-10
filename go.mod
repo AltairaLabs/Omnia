@@ -3,7 +3,7 @@ module github.com/altairalabs/omnia
 go 1.25.6
 
 require (
-	cloud.google.com/go/kms v1.25.0
+	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.60.0
 	github.com/AltairaLabs/PromptKit/pkg v1.3.11
 	github.com/AltairaLabs/PromptKit/runtime v1.3.11
