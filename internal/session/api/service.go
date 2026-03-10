@@ -49,6 +49,10 @@ var (
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.
 const DefaultCacheTTL = 15 * time.Minute
 
+// logSessionRetrieved is the structured log message used when a session is
+// successfully retrieved from any storage tier.
+const logSessionRetrieved = "session retrieved"
+
 // ServiceConfig configures the SessionService.
 type ServiceConfig struct {
 	// CacheTTL is the TTL for hot cache entries populated from lower tiers.
@@ -113,7 +117,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try hot cache first.
 	sess, err := s.getFromHot(ctx, sessionID)
 	if err == nil {
-		log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "hot")
+		log.V(2).Info(logSessionRetrieved, "sessionID", sessionID, "tier", "hot")
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
 	}
@@ -121,7 +125,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try warm store.
 	sess, err = s.getFromWarm(ctx, sessionID)
 	if err == nil {
-		log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "warm")
+		log.V(2).Info(logSessionRetrieved, "sessionID", sessionID, "tier", "warm")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil
@@ -130,7 +134,7 @@ func (s *SessionService) GetSession(ctx context.Context, sessionID string) (*ses
 	// Try cold archive.
 	sess, err = s.getFromCold(ctx, sessionID)
 	if err == nil {
-		log.V(2).Info("session retrieved", "sessionID", sessionID, "tier", "cold")
+		log.V(2).Info(logSessionRetrieved, "sessionID", sessionID, "tier", "cold")
 		s.populateHotCache(ctx, sess)
 		s.auditSessionAccess(ctx, sess)
 		return sess, nil

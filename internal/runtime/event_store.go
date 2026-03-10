@@ -24,7 +24,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
@@ -777,17 +776,11 @@ func (s *OmniaEventStore) writeMessage(traceCtx context.Context, sessionID strin
 		"sessionID", sessionID, "messageType", msgType)
 }
 
-// detachedTraceContext returns a background context carrying the span context
-// and logctx trace_id from ctx. This preserves trace propagation and log
-// correlation for async writes without inheriting cancellation or deadline.
+// detachedTraceContext returns a context that inherits all values (including
+// span context and logctx trace_id) from ctx but does not inherit its
+// cancellation or deadline. This is used for async fire-and-forget writes.
 func detachedTraceContext(ctx context.Context) context.Context {
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.IsValid() {
-		return context.Background()
-	}
-	bg := trace.ContextWithSpanContext(context.Background(), sc)
-	bg = logctx.WithTraceID(bg, sc.TraceID().String())
-	return bg
+	return context.WithoutCancel(ctx)
 }
 
 // Verify interface compliance at compile time.

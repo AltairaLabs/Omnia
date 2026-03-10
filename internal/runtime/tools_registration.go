@@ -21,6 +21,8 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/sdk"
 
+	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
+
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
@@ -38,6 +40,12 @@ func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Co
 
 	toolNames := s.toolExecutor.ToolNames()
 
+	// Build a lookup map from discovered tool descriptors for O(1) access.
+	descriptorsByName := make(map[string]*pktools.ToolDescriptor, len(s.toolExecutor.ToolDescriptors()))
+	for _, d := range s.toolExecutor.ToolDescriptors() {
+		descriptorsByName[d.Name] = d
+	}
+
 	var updated, registered int
 	for _, name := range toolNames {
 		if desc := registry.Get(name); desc != nil {
@@ -46,19 +54,18 @@ func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Co
 			// default local executor.
 			desc.Mode = s.toolExecutor.Name()
 			updated++
+			continue
+		}
+		// Tool discovered from backend (MCP, OpenAPI, gRPC ListTools)
+		// but not declared in the pack — register it.
+		d, ok := descriptorsByName[name]
+		if !ok {
+			continue
+		}
+		if err := registry.Register(d); err != nil {
+			log.Error(err, "failed to register discovered tool", "tool", name)
 		} else {
-			// Tool discovered from backend (MCP, OpenAPI, gRPC ListTools)
-			// but not declared in the pack — register it.
-			for _, d := range s.toolExecutor.ToolDescriptors() {
-				if d.Name == name {
-					if err := registry.Register(d); err != nil {
-						log.Error(err, "failed to register discovered tool", "tool", name)
-					} else {
-						registered++
-					}
-					break
-				}
-			}
+			registered++
 		}
 	}
 

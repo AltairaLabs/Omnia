@@ -203,6 +203,18 @@ func (e *OmniaExecutor) ToolDescriptors() []*pktools.ToolDescriptor {
 	return descs
 }
 
+// marshalSchema marshals v to JSON if non-nil, returning nil on error.
+func marshalSchema(v any) json.RawMessage {
+	if v == nil {
+		return nil
+	}
+	bytes, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return bytes
+}
+
 // buildDescriptor creates a PromptKit ToolDescriptor for a tool.
 func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktools.ToolDescriptor {
 	desc := &pktools.ToolDescriptor{
@@ -210,58 +222,67 @@ func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktoo
 		Mode: executorName,
 	}
 
-	// For HTTP/gRPC tools, the tool definition comes from the handler config
+	// For HTTP tools, the tool definition comes from the handler config
 	if h.Tool != nil {
 		desc.Description = h.Tool.Description
-		if h.Tool.InputSchema != nil {
-			if schemaBytes, err := json.Marshal(h.Tool.InputSchema); err == nil {
-				desc.InputSchema = schemaBytes
-			}
-		}
+		desc.InputSchema = marshalSchema(h.Tool.InputSchema)
 	}
 
-	// For MCP tools, get info from discovered tools
-	if h.Type == ToolTypeMCP {
-		if tools, ok := e.mcpTools[h.Name]; ok {
-			if tool, ok := tools[toolName]; ok {
-				desc.Description = tool.Description
-				if tool.InputSchema != nil {
-					if schemaBytes, err := json.Marshal(tool.InputSchema); err == nil {
-						desc.InputSchema = schemaBytes
-					}
-				}
-			}
-		}
-	}
-
-	// For OpenAPI tools, get info from parsed operations
-	if h.Type == ToolTypeOpenAPI {
-		if ops, ok := e.openAPIOps[h.Name]; ok {
-			if op, ok := ops[toolName]; ok {
-				adapter := &OpenAPIAdapter{log: e.log}
-				desc.Description = adapter.buildDescription(op)
-				if schema := adapter.buildInputSchema(op); schema != nil {
-					if schemaBytes, err := json.Marshal(schema); err == nil {
-						desc.InputSchema = schemaBytes
-					}
-				}
-			}
-		}
-	}
-
-	// For gRPC tools, get info from discovered tools
-	if h.Type == ToolTypeGRPC {
-		if tools, ok := e.grpcTools[h.Name]; ok {
-			if tool, ok := tools[toolName]; ok {
-				desc.Description = tool.Description
-				if tool.InputSchema != "" {
-					desc.InputSchema = json.RawMessage(tool.InputSchema)
-				}
-			}
-		}
+	switch h.Type {
+	case ToolTypeMCP:
+		e.buildMCPDescriptor(desc, toolName, h.Name)
+	case ToolTypeOpenAPI:
+		e.buildOpenAPIDescriptor(desc, toolName, h.Name)
+	case ToolTypeGRPC:
+		e.buildGRPCDescriptor(desc, toolName, h.Name)
 	}
 
 	return desc
+}
+
+// buildMCPDescriptor populates the descriptor from discovered MCP tools.
+func (e *OmniaExecutor) buildMCPDescriptor(desc *pktools.ToolDescriptor, toolName, handlerName string) {
+	tools, ok := e.mcpTools[handlerName]
+	if !ok {
+		return
+	}
+	tool, ok := tools[toolName]
+	if !ok {
+		return
+	}
+	desc.Description = tool.Description
+	desc.InputSchema = marshalSchema(tool.InputSchema)
+}
+
+// buildOpenAPIDescriptor populates the descriptor from parsed OpenAPI operations.
+func (e *OmniaExecutor) buildOpenAPIDescriptor(desc *pktools.ToolDescriptor, toolName, handlerName string) {
+	ops, ok := e.openAPIOps[handlerName]
+	if !ok {
+		return
+	}
+	op, ok := ops[toolName]
+	if !ok {
+		return
+	}
+	adapter := &OpenAPIAdapter{log: e.log}
+	desc.Description = adapter.buildDescription(op)
+	desc.InputSchema = marshalSchema(adapter.buildInputSchema(op))
+}
+
+// buildGRPCDescriptor populates the descriptor from discovered gRPC tools.
+func (e *OmniaExecutor) buildGRPCDescriptor(desc *pktools.ToolDescriptor, toolName, handlerName string) {
+	tools, ok := e.grpcTools[handlerName]
+	if !ok {
+		return
+	}
+	tool, ok := tools[toolName]
+	if !ok {
+		return
+	}
+	desc.Description = tool.Description
+	if tool.InputSchema != "" {
+		desc.InputSchema = json.RawMessage(tool.InputSchema)
+	}
 }
 
 // GetToolMeta returns registry/handler metadata for a tool.
