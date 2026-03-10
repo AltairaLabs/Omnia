@@ -32,6 +32,7 @@ import (
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
+	"github.com/altairalabs/omnia/pkg/metrics"
 
 	// Register PromptKit provider factories for LLM judge eval execution.
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
@@ -98,6 +99,8 @@ func main() {
 	workerMetrics := evals.NewWorkerMetrics(nil)
 	workerMetrics.Initialize()
 
+	evalMetrics := metrics.NewMultiAgentEvalMetrics(metrics.MultiAgentEvalMetricsConfig{})
+
 	redisClient := goredis.NewClient(&goredis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
@@ -121,6 +124,7 @@ func main() {
 		K8sClient:    k8sClient,
 		PackLoader:   packLoader,
 		Metrics:      workerMetrics,
+		EvalMetrics:  evalMetrics,
 	}
 	if tp != nil {
 		workerCfg.TracerProvider = tp.TracerProvider()

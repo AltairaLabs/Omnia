@@ -2,8 +2,8 @@
  * Hooks for agent quality dashboard with eval pass rates.
  *
  * useEvalSummary reads from Prometheus (eval gauge metrics).
- * useRecentEvalFailures is a placeholder -- the session-api does not yet
- * have an eval-results endpoint, so it returns empty data.
+ * useRecentEvalFailures calls the session-api eval-results endpoint
+ * with passed=false to fetch recent failures.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -15,6 +15,8 @@ import { useQuery } from "@tanstack/react-query";
 import { queryPrometheus, queryPrometheusMetadata, type PrometheusVectorResult, type PrometheusMetricType } from "@/lib/prometheus";
 import { EvalQueries, type EvalFilter } from "@/lib/prometheus-queries";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { SessionApiService } from "@/lib/data/session-api-service";
 import type { EvalResult, EvalResultSummary, EvalMetricType } from "@/types/eval";
 
 export interface EvalListParams {
@@ -152,16 +154,28 @@ async function fetchMetricTypes(names: string[]): Promise<Record<string, EvalMet
 }
 
 /**
- * Placeholder for recent eval failures.
+ * Fetch recent eval failures from the session-api eval-results endpoint.
  *
- * The session-api does not yet expose an eval-results endpoint, so this
- * hook returns empty data. Once the Go backend adds
- * GET /api/v1/eval-results, this can be wired back up.
+ * Calls GET /api/workspaces/{name}/eval-results?passed=false with optional
+ * additional filters. Returns { results, total, hasMore } from the backend.
  */
-export function useRecentEvalFailures(_params?: EvalListParams) {
+export function useRecentEvalFailures(params?: EvalListParams) {
+  const { currentWorkspace } = useWorkspace();
+
   return useQuery({
-    queryKey: ["eval-failures"],
-    queryFn: async () => ({ evalResults: [] as EvalResult[], total: 0 }),
+    queryKey: ["eval-failures", currentWorkspace?.name, params],
+    queryFn: async () => {
+      if (!currentWorkspace) {
+        return { results: [] as EvalResult[], total: 0, hasMore: false };
+      }
+      const service = new SessionApiService();
+      return service.getEvalResults(currentWorkspace.name, {
+        ...params,
+        passed: false,
+        limit: params?.limit ?? 20,
+      });
+    },
+    enabled: !!currentWorkspace,
     staleTime: DEFAULT_STALE_TIME,
   });
 }

@@ -271,8 +271,9 @@ func main() {
 
 	if evalCollector != nil {
 		evalM := pkmetrics.NewEvalMetrics(pkmetrics.EvalMetricsConfig{
-			AgentName: cfg.AgentName,
-			Namespace: cfg.Namespace,
+			AgentName:      cfg.AgentName,
+			Namespace:      cfg.Namespace,
+			PromptPackName: cfg.PromptPackName,
 		})
 		serverOpts = append(serverOpts,
 			pkruntime.WithEvalCollector(evalCollector),

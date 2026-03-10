@@ -31,6 +31,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Constants for Redis consumer group and stream configuration.
@@ -86,6 +87,9 @@ type WorkerConfig struct {
 	// Metrics records Prometheus metrics for the eval worker.
 	// If nil, a NoOpWorkerMetrics is used.
 	Metrics WorkerMetricsRecorder
+	// EvalMetrics records per-eval Prometheus metrics (omnia_eval_*) so the
+	// quality dashboard can discover them. If nil, per-eval metrics are not emitted.
+	EvalMetrics metrics.EvalMetricsRecorder
 	// TracerProvider enables OTel tracing for eval execution.
 	// When set, the SDK emits per-eval spans with GenAI attributes.
 	TracerProvider trace.TracerProvider
@@ -107,6 +111,7 @@ type EvalWorker struct {
 	packLoader        *PromptPackLoader
 	providerResolver  *ProviderResolver
 	metrics           WorkerMetricsRecorder
+	evalMetrics       metrics.EvalMetricsRecorder
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
@@ -166,6 +171,7 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		packLoader:       config.PackLoader,
 		providerResolver: resolver,
 		metrics:          metricsRecorder,
+		evalMetrics:      config.EvalMetrics,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -476,12 +482,42 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 	}
 
 	w.getMetrics().RecordResultsWritten(len(results), true)
+	w.recordPerEvalMetrics(results)
 	w.logger.Info("eval results written",
 		"sessionID", sessionID,
 		"count", len(results),
 	)
 
 	return nil
+}
+
+// recordPerEvalMetrics emits omnia_eval_* Prometheus metrics for each result
+// so the quality dashboard can discover them alongside runtime-emitted metrics.
+func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult) {
+	if w.evalMetrics == nil {
+		return
+	}
+	for _, r := range results {
+		w.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
+			EvalID:         r.EvalID,
+			EvalType:       r.EvalType,
+			Trigger:        r.Trigger,
+			Passed:         r.Passed,
+			Score:          r.Score,
+			DurationSec:    durationMsToSec(r.DurationMs),
+			Agent:          r.AgentName,
+			Namespace:      r.Namespace,
+			PromptPackName: r.PromptPackName,
+		})
+	}
+}
+
+// durationMsToSec converts an optional duration in milliseconds to seconds.
+func durationMsToSec(ms *int) float64 {
+	if ms == nil {
+		return 0
+	}
+	return float64(*ms) / 1000.0
 }
 
 // getMessages reads session messages from the Redis hot tier.

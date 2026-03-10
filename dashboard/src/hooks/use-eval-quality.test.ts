@@ -212,13 +212,78 @@ describe("useEvalSummary", () => {
   });
 });
 
+const { mockGetEvalResults } = vi.hoisted(() => ({
+  mockGetEvalResults: vi.fn(),
+}));
+
+vi.mock("@/lib/data/session-api-service", () => ({
+  SessionApiService: class MockSessionApiService {
+    getEvalResults = mockGetEvalResults;
+  },
+}));
+
 describe("useRecentEvalFailures", () => {
-  it("returns empty data (session-api has no eval-results endpoint yet)", async () => {
+  beforeEach(() => {
+    mockGetEvalResults.mockReset();
+  });
+
+  it("fetches recent failures from session-api with passed=false", async () => {
+    mockGetEvalResults.mockResolvedValue({
+      results: [
+        {
+          id: "er-1",
+          sessionId: "s-1",
+          agentName: "agent-1",
+          namespace: "default",
+          promptpackName: "pp-1",
+          evalId: "safety",
+          evalType: "llm-judge",
+          trigger: "on-message",
+          passed: false,
+          score: 0.3,
+          source: "runtime",
+          createdAt: "2026-03-10T12:00:00Z",
+        },
+      ],
+      total: 1,
+      hasMore: false,
+    });
+
     const { result } = renderHook(() => useRecentEvalFailures(), {
       wrapper: createWrapper(),
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual({ evalResults: [], total: 0 });
+
+    expect(mockGetEvalResults).toHaveBeenCalledWith("test-workspace", {
+      passed: false,
+      limit: 20,
+    });
+    expect(result.current.data?.results).toHaveLength(1);
+    expect(result.current.data?.results[0].evalId).toBe("safety");
+    expect(result.current.data?.total).toBe(1);
+    expect(result.current.data?.hasMore).toBe(false);
+  });
+
+  it("passes custom params along with passed=false", async () => {
+    mockGetEvalResults.mockResolvedValue({
+      results: [],
+      total: 0,
+      hasMore: false,
+    });
+
+    const { result } = renderHook(
+      () => useRecentEvalFailures({ agentName: "agent-1", limit: 10 }),
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockGetEvalResults).toHaveBeenCalledWith("test-workspace", {
+      agentName: "agent-1",
+      passed: false,
+      limit: 10,
+    });
+    expect(result.current.data?.results).toEqual([]);
   });
 });

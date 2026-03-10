@@ -375,4 +375,97 @@ describe("SessionApiService", () => {
     });
   });
 
+  describe("getEvalResults", () => {
+    it("fetches eval results with no params", async () => {
+      const results = [
+        { id: "e1", sessionId: "s1", evalId: "tone", evalType: "llm_judge", passed: true, score: 0.9, source: "in_proc", createdAt: "2026-01-15T10:00:00Z" },
+      ];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results, total: 1, hasMore: false }),
+      });
+
+      const result = await service.getEvalResults("ws");
+
+      expect(mockFetch).toHaveBeenCalledWith("/api/workspaces/ws/eval-results");
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].evalId).toBe("tone");
+      expect(result.total).toBe(1);
+      expect(result.hasMore).toBe(false);
+    });
+
+    it("passes all filter params as query string", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [], total: 0, hasMore: false }),
+      });
+
+      await service.getEvalResults("ws", {
+        agentName: "agent-1",
+        evalId: "tone",
+        evalType: "llm_judge",
+        passed: true,
+        limit: 25,
+        offset: 10,
+      });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("agentName=agent-1");
+      expect(url).toContain("evalId=tone");
+      expect(url).toContain("evalType=llm_judge");
+      expect(url).toContain("passed=true");
+      expect(url).toContain("limit=25");
+      expect(url).toContain("offset=10");
+    });
+
+    it("passes passed=false correctly", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ results: [], total: 0, hasMore: false }),
+      });
+
+      await service.getEvalResults("ws", { passed: false });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("passed=false");
+    });
+
+    it("returns empty result on 403", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 403, statusText: "Forbidden" });
+
+      const result = await service.getEvalResults("ws");
+      expect(result).toEqual({ results: [], total: 0, hasMore: false });
+    });
+
+    it("returns empty result on 401", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401, statusText: "Unauthorized" });
+
+      const result = await service.getEvalResults("ws");
+      expect(result).toEqual({ results: [], total: 0, hasMore: false });
+    });
+
+    it("returns empty result on 404", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 404, statusText: "Not Found" });
+
+      const result = await service.getEvalResults("ws");
+      expect(result).toEqual({ results: [], total: 0, hasMore: false });
+    });
+
+    it("throws on server error", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: "Server Error" });
+
+      await expect(service.getEvalResults("ws")).rejects.toThrow("Failed to fetch eval results");
+    });
+
+    it("handles response with missing fields", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
+
+      const result = await service.getEvalResults("ws");
+      expect(result).toEqual({ results: [], total: 0, hasMore: false });
+    });
+  });
+
 });

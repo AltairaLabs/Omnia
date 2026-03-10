@@ -275,10 +275,10 @@ function RecentFailures({
   error,
 }: Readonly<{
   isLoading: boolean;
-  data: { evalResults: { id: string; sessionId: string; agentName: string; evalId: string; evalType: string; score?: number; createdAt: string }[]; total: number } | undefined;
+  data: { results: { id: string; sessionId: string; agentName: string; evalId: string; evalType: string; score?: number; createdAt: string }[]; total: number; hasMore: boolean } | undefined;
   error: Error | null;
 }>) {
-  const failures = data?.evalResults || [];
+  const failures = data?.results || [];
 
   return (
     <Card>

@@ -45,7 +45,7 @@ export function FailingSessionsTable({
     limit,
   });
 
-  const failures = data?.evalResults ?? [];
+  const failures = data?.results ?? [];
   const displayName = evalType
     ? evalType.replaceAll(/^omnia_eval_/g, "").replaceAll("_", " ")
     : "All Types";
