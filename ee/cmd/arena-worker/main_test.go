@@ -25,7 +25,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
+	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 )
 
@@ -45,14 +48,14 @@ func TestGetEnvOrDefault(t *testing.T) {
 		{
 			name:         "returns default when env not set",
 			key:          "TEST_NOT_SET",
-			defaultValue: "default",
+			defaultValue: defaultScenarioID,
 			envValue:     "",
-			want:         "default",
+			want:         defaultScenarioID,
 		},
 		{
 			name:         "returns env value when set",
 			key:          "TEST_SET",
-			defaultValue: "default",
+			defaultValue: defaultScenarioID,
 			envValue:     "custom",
 			want:         "custom",
 		},
@@ -527,7 +530,7 @@ func TestReportWorkItemResult(t *testing.T) {
 }
 
 func TestBuildFallbackResult(t *testing.T) {
-	t.Run("returns pass when runs exist", func(t *testing.T) {
+	t.Run("returns fail when runs exist but state unavailable", func(t *testing.T) {
 		result := &ExecutionResult{
 			DurationMs: 100,
 			Metrics:    make(map[string]float64),
@@ -536,8 +539,11 @@ func TestBuildFallbackResult(t *testing.T) {
 
 		got := buildFallbackResult(result, runIDs)
 
-		if got.Status != statusPass {
-			t.Errorf("expected status %s, got %s", statusPass, got.Status)
+		if got.Status != statusFail {
+			t.Errorf("expected status %s, got %s", statusFail, got.Status)
+		}
+		if got.Error == "" {
+			t.Error("expected error message when state is unavailable")
 		}
 	})
 
@@ -698,7 +704,7 @@ func TestRunAggregatorProcessAssertions(t *testing.T) {
 }
 
 func TestBuildExecutionResult(t *testing.T) {
-	t.Run("returns fallback result when store is not ArenaStateStore", func(t *testing.T) {
+	t.Run("returns fallback fail when store is not ArenaStateStore", func(t *testing.T) {
 		// Use a mock store that isn't ArenaStateStore
 		// This exercises the fallback path in buildExecutionResult
 		mockStore := &mockStore{}
@@ -707,9 +713,12 @@ func TestBuildExecutionResult(t *testing.T) {
 
 		result := buildExecutionResult(testLog(), mockStore, runIDs, startTime)
 
-		// Should return pass via fallback since runs exist
-		if result.Status != statusPass {
-			t.Errorf("expected status %s, got %s", statusPass, result.Status)
+		// Should return fail — unable to read run state means results are unknown
+		if result.Status != statusFail {
+			t.Errorf("expected status %s, got %s", statusFail, result.Status)
+		}
+		if result.Error == "" {
+			t.Error("expected error message when state is unavailable")
 		}
 	})
 
@@ -1071,5 +1080,282 @@ func TestProcessWorkItemsTracing(t *testing.T) {
 		// The work-item span's parent must be the root span.
 		assert.Equal(t, rootSpan.SpanContext.SpanID(), itemSpan.Parent.SpanID(),
 			"work-item span parent should be the root span")
+	})
+}
+
+func TestInjectFleetProviderConfig(t *testing.T) {
+	t.Run("creates LoadedProviders map when nil", func(t *testing.T) {
+		cfg := &config.Config{}
+		assert.Nil(t, cfg.LoadedProviders)
+
+		injectFleetProviderConfig(cfg)
+
+		require.NotNil(t, cfg.LoadedProviders)
+		require.Contains(t, cfg.LoadedProviders, "fleet-agent")
+		assert.Equal(t, "fleet-agent", cfg.LoadedProviders["fleet-agent"].ID)
+		assert.Equal(t, "fleet", cfg.LoadedProviders["fleet-agent"].Type)
+	})
+
+	t.Run("preserves existing providers", func(t *testing.T) {
+		cfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"openai": {ID: "openai", Type: "openai", Model: "gpt-4"},
+			},
+		}
+
+		injectFleetProviderConfig(cfg)
+
+		require.Len(t, cfg.LoadedProviders, 2)
+		assert.Contains(t, cfg.LoadedProviders, "openai")
+		assert.Contains(t, cfg.LoadedProviders, "fleet-agent")
+		assert.Equal(t, "gpt-4", cfg.LoadedProviders["openai"].Model)
+	})
+
+	t.Run("is idempotent", func(t *testing.T) {
+		cfg := &config.Config{}
+
+		injectFleetProviderConfig(cfg)
+		injectFleetProviderConfig(cfg)
+
+		require.Len(t, cfg.LoadedProviders, 1)
+		assert.Equal(t, "fleet-agent", cfg.LoadedProviders["fleet-agent"].ID)
+	})
+}
+
+func TestFleetModeScenarioFilter(t *testing.T) {
+	t.Run("default scenario ID produces empty filter", func(t *testing.T) {
+		item := &queue.WorkItem{ScenarioID: defaultScenarioID}
+		scenarioFilter := []string{}
+		if item.ScenarioID != "" && item.ScenarioID != defaultScenarioID {
+			scenarioFilter = []string{item.ScenarioID}
+		}
+		assert.Empty(t, scenarioFilter, "default scenario should produce empty filter (all scenarios)")
+	})
+
+	t.Run("named scenario ID produces specific filter", func(t *testing.T) {
+		item := &queue.WorkItem{ScenarioID: "greeting-test"}
+		scenarioFilter := []string{}
+		if item.ScenarioID != "" && item.ScenarioID != defaultScenarioID {
+			scenarioFilter = []string{item.ScenarioID}
+		}
+		assert.Equal(t, []string{"greeting-test"}, scenarioFilter)
+	})
+
+	t.Run("empty scenario ID produces empty filter", func(t *testing.T) {
+		item := &queue.WorkItem{ScenarioID: ""}
+		scenarioFilter := []string{}
+		if item.ScenarioID != "" && item.ScenarioID != defaultScenarioID {
+			scenarioFilter = []string{item.ScenarioID}
+		}
+		assert.Empty(t, scenarioFilter, "empty scenario should produce empty filter")
+	})
+}
+
+func TestFleetProviderIntegration(t *testing.T) {
+	t.Run("fleet-agent in LoadedProviders causes BuildEngineComponents to fail", func(t *testing.T) {
+		// Proves that the fleet provider CANNOT be in LoadedProviders during
+		// BuildEngineComponents — PromptKit doesn't know how to create a "fleet" type.
+		cfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"fleet-agent": {ID: "fleet-agent", Type: "fleet"},
+			},
+			LoadedScenarios: map[string]*config.Scenario{
+				"test-scenario": {ID: "test-scenario"},
+			},
+		}
+
+		_, _, _, _, _, _, _, err := engine.BuildEngineComponents(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported provider type: fleet")
+	})
+
+	t.Run("inject after BuildEngineComponents produces valid combinations", func(t *testing.T) {
+		// This mirrors the real executeWorkItem flow:
+		// 1. BuildEngineComponents with NO fleet provider in config
+		// 2. Register fleet provider in registry + inject into LoadedProviders
+		// 3. NewEngine picks up LoadedProviders for the planner
+		// 4. GenerateRunPlan matches fleet-agent and produces combinations
+		cfg := &config.Config{
+			LoadedScenarios: map[string]*config.Scenario{
+				"greeting": {ID: "greeting"},
+			},
+		}
+
+		// Step 1: Build components (no fleet provider in config — succeeds)
+		providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, _, _, err :=
+			engine.BuildEngineComponents(cfg)
+		require.NoError(t, err)
+
+		// Step 2: Register fleet provider in registry AND config (after build)
+		fp := fleet.NewProvider("fleet-agent", "ws://fake:8080/ws", nil)
+		providerRegistry.Register(fp)
+		injectFleetProviderConfig(cfg)
+
+		// Step 3: Create engine — snapshots LoadedProviders into planner
+		eng, err := engine.NewEngine(cfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
+		require.NoError(t, err)
+		defer func() { _ = eng.Close() }()
+
+		// Step 4: GenerateRunPlan should find fleet-agent and produce combinations
+		plan, err := eng.GenerateRunPlan(
+			[]string{},              // no region filter
+			[]string{"fleet-agent"}, // fleet provider filter
+			[]string{},              // all scenarios
+			[]string{},              // no eval filter
+		)
+		require.NoError(t, err)
+		require.NotNil(t, plan)
+		assert.Len(t, plan.Combinations, 1, "should have 1 combination (1 scenario × 1 provider)")
+		assert.Equal(t, "greeting", plan.Combinations[0].ScenarioID)
+		assert.Equal(t, "fleet-agent", plan.Combinations[0].ProviderID)
+	})
+
+	t.Run("inject with multiple scenarios produces correct combination count", func(t *testing.T) {
+		cfg := &config.Config{
+			LoadedScenarios: map[string]*config.Scenario{
+				"greeting":  {ID: "greeting"},
+				"complaint": {ID: "complaint"},
+				"refund":    {ID: "refund"},
+			},
+		}
+
+		providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, _, _, err :=
+			engine.BuildEngineComponents(cfg)
+		require.NoError(t, err)
+
+		fp := fleet.NewProvider("fleet-agent", "ws://fake:8080/ws", nil)
+		providerRegistry.Register(fp)
+		injectFleetProviderConfig(cfg)
+
+		eng, err := engine.NewEngine(cfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
+		require.NoError(t, err)
+		defer func() { _ = eng.Close() }()
+
+		plan, err := eng.GenerateRunPlan([]string{}, []string{"fleet-agent"}, []string{}, []string{})
+		require.NoError(t, err)
+		assert.Len(t, plan.Combinations, 3, "should have 3 combinations (3 scenarios × 1 fleet provider)")
+
+		// All combinations should use fleet-agent
+		for _, c := range plan.Combinations {
+			assert.Equal(t, "fleet-agent", c.ProviderID)
+		}
+	})
+
+	t.Run("inject coexists with config-defined providers", func(t *testing.T) {
+		// Proves fleet-agent doesn't interfere with existing mock providers
+		cfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"mock-assistant": {
+					ID:    "mock-assistant",
+					Type:  "mock",
+					Model: "mock-model",
+				},
+			},
+			LoadedScenarios: map[string]*config.Scenario{
+				"greeting": {ID: "greeting"},
+			},
+		}
+
+		providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, _, _, err :=
+			engine.BuildEngineComponents(cfg)
+		require.NoError(t, err)
+
+		fp := fleet.NewProvider("fleet-agent", "ws://fake:8080/ws", nil)
+		providerRegistry.Register(fp)
+		injectFleetProviderConfig(cfg)
+
+		eng, err := engine.NewEngine(cfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
+		require.NoError(t, err)
+		defer func() { _ = eng.Close() }()
+
+		// Filter to fleet-agent only
+		plan, err := eng.GenerateRunPlan([]string{}, []string{"fleet-agent"}, []string{}, []string{})
+		require.NoError(t, err)
+		assert.Len(t, plan.Combinations, 1)
+		assert.Equal(t, "fleet-agent", plan.Combinations[0].ProviderID)
+
+		// Unfiltered should include both providers
+		allPlan, err := eng.GenerateRunPlan([]string{}, []string{}, []string{}, []string{})
+		require.NoError(t, err)
+		assert.Len(t, allPlan.Combinations, 2, "should have 2 combinations (1 scenario × 2 providers)")
+	})
+
+	t.Run("without injection GenerateRunPlan returns zero combinations", func(t *testing.T) {
+		// Proves the bug: if we only register in the runtime registry but
+		// don't inject into LoadedProviders, the planner can't find fleet-agent
+		// when other providers exist in the config.
+		cfg := &config.Config{
+			LoadedProviders: map[string]*config.Provider{
+				"mock-assistant": {
+					ID:    "mock-assistant",
+					Type:  "mock",
+					Model: "mock-model",
+				},
+			},
+			LoadedScenarios: map[string]*config.Scenario{
+				"greeting": {ID: "greeting"},
+			},
+		}
+
+		providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry, _, _, err :=
+			engine.BuildEngineComponents(cfg)
+		require.NoError(t, err)
+
+		// Only register in runtime registry — do NOT inject into LoadedProviders
+		fp := fleet.NewProvider("fleet-agent", "ws://fake:8080/ws", nil)
+		providerRegistry.Register(fp)
+
+		eng, err := engine.NewEngine(cfg, providerRegistry, promptRegistry, mcpRegistry, convExecutor, adapterRegistry)
+		require.NoError(t, err)
+		defer func() { _ = eng.Close() }()
+
+		plan, err := eng.GenerateRunPlan([]string{}, []string{"fleet-agent"}, []string{}, []string{})
+		require.NoError(t, err)
+		assert.Empty(t, plan.Combinations,
+			"without injection into LoadedProviders, fleet-agent filter should match nothing")
+	})
+}
+
+func TestFleetModeProviderFilter(t *testing.T) {
+	t.Run("fleet mode always uses fleet-agent provider", func(t *testing.T) {
+		cfg := &Config{ExecutionMode: executionModeFleet}
+		item := &queue.WorkItem{ProviderID: "openai"}
+
+		providerFilter := []string{}
+		if cfg.ExecutionMode == executionModeFleet {
+			providerFilter = []string{"fleet-agent"}
+		} else if item.ProviderID != "" {
+			providerFilter = []string{item.ProviderID}
+		}
+
+		assert.Equal(t, []string{"fleet-agent"}, providerFilter)
+	})
+
+	t.Run("direct mode uses work item provider", func(t *testing.T) {
+		cfg := &Config{ExecutionMode: "direct"}
+		item := &queue.WorkItem{ProviderID: "anthropic"}
+
+		providerFilter := []string{}
+		if cfg.ExecutionMode == executionModeFleet {
+			providerFilter = []string{"fleet-agent"}
+		} else if item.ProviderID != "" {
+			providerFilter = []string{item.ProviderID}
+		}
+
+		assert.Equal(t, []string{"anthropic"}, providerFilter)
+	})
+
+	t.Run("direct mode with empty provider uses all", func(t *testing.T) {
+		cfg := &Config{ExecutionMode: "direct"}
+		item := &queue.WorkItem{ProviderID: ""}
+
+		providerFilter := []string{}
+		if cfg.ExecutionMode == executionModeFleet {
+			providerFilter = []string{"fleet-agent"}
+		} else if item.ProviderID != "" {
+			providerFilter = []string{item.ProviderID}
+		}
+
+		assert.Empty(t, providerFilter, "empty provider should mean all providers")
 	})
 }

@@ -166,4 +166,7 @@ type AggregatedResult struct {
 
 	// Errors contains grouped error summaries.
 	Errors []ErrorSummary `json:"errors,omitempty"`
+
+	// Assertions contains all individual assertion results across work items.
+	Assertions []AssertionResult `json:"assertions,omitempty"`
 }

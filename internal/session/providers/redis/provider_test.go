@@ -645,6 +645,80 @@ func TestRedisClient(t *testing.T) {
 // AppendMessage syncs TTL to messages key
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Error paths — cover recordErr and span error recording
+// ---------------------------------------------------------------------------
+
+func TestGetSession_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close() // force Redis errors
+
+	_, err := p.GetSession(context.Background(), "sess-1")
+	if err == nil {
+		t.Fatal("GetSession should fail when Redis is down")
+	}
+}
+
+func TestSetSession_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close()
+
+	err := p.SetSession(context.Background(), testSession(), time.Minute)
+	if err == nil {
+		t.Fatal("SetSession should fail when Redis is down")
+	}
+}
+
+func TestDeleteSession_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close()
+
+	err := p.DeleteSession(context.Background(), "sess-1")
+	if err == nil {
+		t.Fatal("DeleteSession should fail when Redis is down")
+	}
+}
+
+func TestAppendMessage_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close()
+
+	err := p.AppendMessage(context.Background(), "sess-1", testMessage("m1", 1))
+	if err == nil {
+		t.Fatal("AppendMessage should fail when Redis is down")
+	}
+}
+
+func TestGetRecentMessages_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close()
+
+	_, err := p.GetRecentMessages(context.Background(), "sess-1", 10)
+	if err == nil {
+		t.Fatal("GetRecentMessages should fail when Redis is down")
+	}
+}
+
+func TestRefreshTTL_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close()
+
+	err := p.RefreshTTL(context.Background(), "sess-1", time.Minute)
+	if err == nil {
+		t.Fatal("RefreshTTL should fail when Redis is down")
+	}
+}
+
+func TestInvalidate_RedisError(t *testing.T) {
+	p, mr := setupTestProvider(t)
+	mr.Close()
+
+	err := p.Invalidate(context.Background(), "sess-1")
+	if err == nil {
+		t.Fatal("Invalidate should fail when Redis is down")
+	}
+}
+
 func TestAppendMessage_SyncsTTL(t *testing.T) {
 	p, mr := setupTestProvider(t)
 	ctx := context.Background()

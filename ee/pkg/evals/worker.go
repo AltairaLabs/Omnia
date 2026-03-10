@@ -433,7 +433,7 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 
 	items := w.getSDKRunner().RunTurnEvals(ctx, evals, messages, event.SessionID, turnIndex, providerSpecs)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
-	return w.writeResults(ctx, results, event.SessionID)
+	return w.writeResults(ctx, results, event.SessionID, evals)
 }
 
 // onSessionComplete is the CompletionTracker callback. It runs on_session_complete evals.
@@ -482,11 +482,13 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 
 	items := w.getSDKRunner().RunSessionEvals(ctx, evals, messages, sessionID, turnIndex, providerSpecs)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
-	return w.writeResults(ctx, results, sessionID)
+	return w.writeResults(ctx, results, sessionID, evals)
 }
 
 // writeResults writes eval results if there are any.
-func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult, sessionID string) error {
+func (w *EvalWorker) writeResults(
+	ctx context.Context, results []*api.EvalResult, sessionID string, evalDefs []EvalDef,
+) error {
 	if len(results) == 0 {
 		return nil
 	}
@@ -497,7 +499,7 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 	}
 
 	w.getMetrics().RecordResultsWritten(len(results), true)
-	w.recordPerEvalMetrics(results)
+	w.recordPerEvalMetrics(results, evalDefs)
 	w.logger.Info("eval results written",
 		"sessionID", sessionID,
 		"count", len(results),
@@ -514,42 +516,61 @@ func (w *EvalWorker) EvalCollector() *runtimeevals.MetricCollector {
 
 // recordPerEvalMetrics emits omnia_eval_* Prometheus metrics for each result
 // so the quality dashboard can discover them alongside runtime-emitted metrics.
-func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult) {
-	if w.evalMetrics == nil {
-		return
-	}
+func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult, evalDefs []EvalDef) {
+	defMap := buildEvalDefMap(evalDefs)
 	for _, r := range results {
-		w.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
-			EvalID:         r.EvalID,
-			EvalType:       r.EvalType,
-			Trigger:        r.Trigger,
-			Passed:         r.Passed,
-			Score:          r.Score,
-			DurationSec:    durationMsToSec(r.DurationMs),
-			Agent:          r.AgentName,
-			Namespace:      r.Namespace,
-			PromptPackName: r.PromptPackName,
-		})
-		w.recordEvalCollectorMetric(r)
+		if w.evalMetrics != nil {
+			w.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
+				EvalID:         r.EvalID,
+				EvalType:       r.EvalType,
+				Trigger:        r.Trigger,
+				Passed:         r.Passed,
+				Score:          r.Score,
+				DurationSec:    durationMsToSec(r.DurationMs),
+				Agent:          r.AgentName,
+				Namespace:      r.Namespace,
+				PromptPackName: r.PromptPackName,
+			})
+		}
+		w.recordEvalCollectorMetric(r, defMap[r.EvalID])
 	}
+}
+
+// buildEvalDefMap creates a lookup map from eval ID to its MetricDef.
+func buildEvalDefMap(defs []EvalDef) map[string]*runtimeevals.MetricDef {
+	m := make(map[string]*runtimeevals.MetricDef, len(defs))
+	for i := range defs {
+		if defs[i].Metric != nil {
+			m[defs[i].ID] = defs[i].Metric
+		}
+	}
+	return m
 }
 
 // recordEvalCollectorMetric records a per-eval-name metric to the PromptKit
 // MetricCollector. This creates dynamically-named metrics like
-// omnia_eval_helpfulness that the quality dashboard discovers.
-func (w *EvalWorker) recordEvalCollectorMetric(r *api.EvalResult) {
+// omnia_eval_response_conciseness that the quality dashboard discovers.
+// When the eval definition includes a MetricDef, its name and type are used;
+// otherwise falls back to using the eval ID with boolean type.
+func (w *EvalWorker) recordEvalCollectorMetric(r *api.EvalResult, metricDef *runtimeevals.MetricDef) {
 	if w.evalCollector == nil {
 		return
 	}
-	metric := &runtimeevals.MetricDef{
-		Name: r.EvalID,
-		Type: runtimeevals.MetricBoolean,
-		Labels: map[string]string{
-			"agent":           r.AgentName,
-			"namespace":       r.Namespace,
-			"promptpack_name": r.PromptPackName,
-		},
+	metric := metricDef
+	if metric == nil {
+		metric = &runtimeevals.MetricDef{
+			Name: r.EvalID,
+			Type: runtimeevals.MetricBoolean,
+		}
 	}
+	// Ensure standard labels are always set.
+	if metric.Labels == nil {
+		metric.Labels = make(map[string]string)
+	}
+	metric.Labels["agent"] = r.AgentName
+	metric.Labels["namespace"] = r.Namespace
+	metric.Labels["promptpack_name"] = r.PromptPackName
+
 	result := runtimeevals.EvalResult{
 		EvalID: r.EvalID,
 		Type:   r.EvalType,
@@ -671,6 +692,7 @@ func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName
 		Trigger:           item.Trigger,
 		Passed:            item.Passed,
 		Score:             item.Score,
+		Details:           item.Details,
 		Source:            evalSource,
 		CreatedAt:         time.Now(),
 	}

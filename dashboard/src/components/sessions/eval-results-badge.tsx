@@ -114,7 +114,8 @@ function EvalDetailRow({ result }: Readonly<{ result: EvalResult }>) {
  * Click to expand and see individual eval details.
  */
 export function EvalResultsBadge({ results }: Readonly<{ results: EvalResult[] }>) {
-  const [expanded, setExpanded] = useState(false);
+  const hasFailures = results.some((r) => !r.passed);
+  const [expanded, setExpanded] = useState(hasFailures);
 
   if (results.length === 0) {
     return null;

@@ -129,10 +129,7 @@ describe("EvalResultsBadge", () => {
 
     render(<EvalResultsBadge results={results} />);
 
-    // Expand the badge
-    fireEvent.click(screen.getByTestId("eval-results-badge"));
-
-    // Click the detail row to expand it
+    // Badge auto-expands for failures; click the detail row to expand it
     fireEvent.click(screen.getByText("safety-check"));
 
     expect(screen.getByText("Rule")).toBeInTheDocument();

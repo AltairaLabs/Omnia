@@ -10,6 +10,7 @@ package evals
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
@@ -125,6 +126,7 @@ func convertToSDKDefs(defs []EvalDef) []runtimeevals.EvalDef {
 			Type:    d.Type,
 			Trigger: mapTrigger(d.Trigger),
 			Params:  d.Params,
+			Metric:  d.Metric,
 		}
 	}
 	return sdkDefs
@@ -162,9 +164,40 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 		if r.Error != "" {
 			item.Passed = false
 		}
+		item.Details = buildDetailsJSON(r)
 		items = append(items, item)
 	}
 	return items
+}
+
+// buildDetailsJSON assembles a details JSON blob from the SDK result's
+// diagnostic fields (explanation, error, message, details, violations).
+// Returns nil if no diagnostic fields are populated.
+func buildDetailsJSON(r runtimeevals.EvalResult) json.RawMessage {
+	details := make(map[string]any)
+	if r.Explanation != "" {
+		details["explanation"] = r.Explanation
+	}
+	if r.Error != "" {
+		details["error"] = r.Error
+	}
+	if r.Message != "" {
+		details["message"] = r.Message
+	}
+	if len(r.Details) > 0 {
+		details["details"] = r.Details
+	}
+	if len(r.Violations) > 0 {
+		details["violations"] = r.Violations
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(details)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // toAnyMap converts a typed map to map[string]any for SDK compatibility.

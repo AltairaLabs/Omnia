@@ -190,6 +190,8 @@ describe("QualityPage", () => {
     expect(toneElements.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("agent-1")).toBeInTheDocument();
     expect(screen.getByText("0.30")).toBeInTheDocument();
+    // Pagination info
+    expect(screen.getByText(/1–1 of 1/)).toBeInTheDocument();
   });
 
   it("shows empty state when no eval data", () => {

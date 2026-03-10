@@ -1459,6 +1459,7 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 				// Aggregate results from queue if aggregator is available
 				// The aggregated results determine actual success/failure based on test outcomes
 				var hasTestFailures bool
+				var hasAggregation bool
 				var passedItems, failedItems int
 				if r.Aggregator != nil {
 					log.V(1).Info("aggregating results from queue", "jobID", arenaJob.Name)
@@ -1466,6 +1467,7 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					if err != nil {
 						log.Error(err, "failed to aggregate results")
 					} else {
+						hasAggregation = true
 						log.V(1).Info("aggregation complete",
 							"totalItems", result.TotalItems,
 							"passedItems", result.PassedItems,
@@ -1494,6 +1496,19 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 					log.Info("job completed with test failures",
 						"passed", passedItems,
 						"failed", failedItems)
+				} else if hasAggregation && passedItems == 0 {
+					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseFailed
+					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
+						"NoTestsRan", "Job completed but no tests produced results")
+					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeReady, metav1.ConditionFalse,
+						"Failed", "Job completed but no tests produced results")
+					if r.Recorder != nil {
+						r.Recorder.Event(arenaJob, corev1.EventTypeWarning, ArenaJobEventReasonJobFailed,
+							"Job completed but no tests produced results")
+					}
+					log.Info("job completed with no test results",
+						"passed", passedItems,
+						"failed", failedItems)
 				} else {
 					arenaJob.Status.Phase = omniav1alpha1.ArenaJobPhaseSucceeded
 					SetCondition(&arenaJob.Status.Conditions, arenaJob.Generation, ArenaJobConditionTypeProgressing, metav1.ConditionFalse,
@@ -1504,7 +1519,8 @@ func (r *ArenaJobReconciler) updateStatusFromJob(ctx context.Context, arenaJob *
 						r.Recorder.Event(arenaJob, corev1.EventTypeNormal, ArenaJobEventReasonJobSucceeded,
 							"Job completed successfully")
 					}
-					log.Info("job completed successfully")
+					log.Info("job completed successfully",
+						"passed", passedItems)
 				}
 			}
 		case batchv1.JobFailed:

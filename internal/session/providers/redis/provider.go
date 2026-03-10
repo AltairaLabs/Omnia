@@ -24,10 +24,16 @@ import (
 
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
+
+const tracerName = "omnia-redis-cache"
 
 // Compile-time interface check.
 var _ providers.HotCacheProvider = (*Provider)(nil)
@@ -35,6 +41,7 @@ var _ providers.HotCacheProvider = (*Provider)(nil)
 // Provider implements providers.HotCacheProvider using Redis.
 type Provider struct {
 	client     goredis.UniversalClient
+	tracer     trace.Tracer
 	keyPrefix  string
 	maxMsgs    int
 	ownsClient bool
@@ -83,6 +90,7 @@ func New(cfg Config) (*Provider, error) {
 
 	return &Provider{
 		client:     client,
+		tracer:     otel.Tracer(tracerName),
 		keyPrefix:  prefix,
 		maxMsgs:    cfg.MaxMessagesPerSession,
 		ownsClient: true,
@@ -98,6 +106,7 @@ func NewFromClient(client goredis.UniversalClient, opts Options) *Provider {
 	}
 	return &Provider{
 		client:     client,
+		tracer:     otel.Tracer(tracerName),
 		keyPrefix:  prefix,
 		maxMsgs:    opts.MaxMessagesPerSession,
 		ownsClient: false,
@@ -114,14 +123,32 @@ func (p *Provider) messagesKey(id string) string {
 	return p.keyPrefix + "session:{" + id + "}:msgs"
 }
 
+// startSpan creates a parent span that groups individual Redis commands.
+func (p *Provider) startSpan(ctx context.Context, op string, sessionID string) (context.Context, trace.Span) {
+	return p.tracer.Start(ctx, "redis.cache."+op,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("session.id", sessionID)),
+	)
+}
+
+// recordErr records an error on the span (does not end it).
+func recordErr(span trace.Span, err error) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+}
+
 // --- HotCacheProvider implementation ---------------------------------------
 
 func (p *Provider) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
+	ctx, span := p.startSpan(ctx, "GetSession", sessionID)
+	defer span.End()
+
 	data, err := p.client.Get(ctx, p.sessionKey(sessionID)).Bytes()
 	if err != nil {
 		if err == goredis.Nil {
 			return nil, session.ErrSessionNotFound
 		}
+		recordErr(span, err)
 		return nil, fmt.Errorf("redis: get session: %w", err)
 	}
 
@@ -133,19 +160,27 @@ func (p *Provider) GetSession(ctx context.Context, sessionID string) (*session.S
 }
 
 func (p *Provider) SetSession(ctx context.Context, s *session.Session, ttl time.Duration) error {
+	ctx, span := p.startSpan(ctx, "SetSession", s.ID)
+	defer span.End()
+
 	data, err := json.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("redis: marshal session: %w", err)
 	}
 	if err := p.client.Set(ctx, p.sessionKey(s.ID), data, ttl).Err(); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: set session: %w", err)
 	}
 	return nil
 }
 
 func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
+	ctx, span := p.startSpan(ctx, "DeleteSession", sessionID)
+	defer span.End()
+
 	exists, err := p.client.Exists(ctx, p.sessionKey(sessionID)).Result()
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: check existence: %w", err)
 	}
 	if exists == 0 {
@@ -156,17 +191,22 @@ func (p *Provider) DeleteSession(ctx context.Context, sessionID string) error {
 	pipe.Del(ctx, p.sessionKey(sessionID))
 	pipe.Del(ctx, p.messagesKey(sessionID))
 	if _, err := pipe.Exec(ctx); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: delete session: %w", err)
 	}
 	return nil
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
+	ctx, span := p.startSpan(ctx, "AppendMessage", sessionID)
+	defer span.End()
+
 	sessionKey := p.sessionKey(sessionID)
 	msgsKey := p.messagesKey(sessionID)
 
 	exists, err := p.client.Exists(ctx, sessionKey).Result()
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: check existence: %w", err)
 	}
 	if exists == 0 {
@@ -188,23 +228,27 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 	// Sync messages key TTL with session key TTL (atomic within the pipeline).
 	ttlCmd := pipe.TTL(ctx, sessionKey)
 	if _, err := pipe.Exec(ctx); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: append message: %w", err)
 	}
 
 	// Apply TTL from session key to messages key.
 	ttl, err := ttlCmd.Result()
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: get session ttl: %w", err)
 	}
 
 	switch {
 	case ttl > 0:
 		if err := p.client.Expire(ctx, msgsKey, ttl).Err(); err != nil {
+			recordErr(span, err)
 			return fmt.Errorf("redis: sync messages ttl: %w", err)
 		}
 	case ttl == -1:
 		// Session has no expiry — make sure messages key also has no expiry.
 		if err := p.client.Persist(ctx, msgsKey).Err(); err != nil {
+			recordErr(span, err)
 			return fmt.Errorf("redis: persist messages key: %w", err)
 		}
 	}
@@ -214,8 +258,12 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 }
 
 func (p *Provider) GetRecentMessages(ctx context.Context, sessionID string, limit int) ([]*session.Message, error) {
+	ctx, span := p.startSpan(ctx, "GetRecentMessages", sessionID)
+	defer span.End()
+
 	exists, err := p.client.Exists(ctx, p.sessionKey(sessionID)).Result()
 	if err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("redis: check existence: %w", err)
 	}
 	if exists == 0 {
@@ -229,6 +277,7 @@ func (p *Provider) GetRecentMessages(ctx context.Context, sessionID string, limi
 
 	data, err := p.client.LRange(ctx, p.messagesKey(sessionID), start, -1).Result()
 	if err != nil {
+		recordErr(span, err)
 		return nil, fmt.Errorf("redis: lrange messages: %w", err)
 	}
 
@@ -244,11 +293,15 @@ func (p *Provider) GetRecentMessages(ctx context.Context, sessionID string, limi
 }
 
 func (p *Provider) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
+	ctx, span := p.startSpan(ctx, "RefreshTTL", sessionID)
+	defer span.End()
+
 	sessionKey := p.sessionKey(sessionID)
 	msgsKey := p.messagesKey(sessionID)
 
 	exists, err := p.client.Exists(ctx, sessionKey).Result()
 	if err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: check existence: %w", err)
 	}
 	if exists == 0 {
@@ -264,16 +317,21 @@ func (p *Provider) RefreshTTL(ctx context.Context, sessionID string, ttl time.Du
 		pipe.Persist(ctx, msgsKey)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: refresh ttl: %w", err)
 	}
 	return nil
 }
 
 func (p *Provider) Invalidate(ctx context.Context, sessionID string) error {
+	ctx, span := p.startSpan(ctx, "Invalidate", sessionID)
+	defer span.End()
+
 	pipe := p.client.Pipeline()
 	pipe.Del(ctx, p.sessionKey(sessionID))
 	pipe.Del(ctx, p.messagesKey(sessionID))
 	if _, err := pipe.Exec(ctx); err != nil {
+		recordErr(span, err)
 		return fmt.Errorf("redis: invalidate: %w", err)
 	}
 	return nil

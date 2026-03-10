@@ -268,22 +268,32 @@ function EvalPassRateTable({
   );
 }
 
-/** Recent eval failures table. */
-function RecentFailures({
-  isLoading,
-  data,
-  error,
-}: Readonly<{
-  isLoading: boolean;
-  data: { results: { id: string; sessionId: string; agentName: string; evalId: string; evalType: string; score?: number; createdAt: string }[]; total: number; hasMore: boolean } | undefined;
-  error: Error | null;
-}>) {
+const FAILURES_PAGE_SIZE = 10;
+
+/** Recent eval failures table with pagination. */
+function RecentFailures() {
+  const [page, setPage] = useState(0);
+  const offset = page * FAILURES_PAGE_SIZE;
+  const { data, isLoading, error } = useRecentEvalFailures({
+    limit: FAILURES_PAGE_SIZE,
+    offset,
+  });
+
   const failures = data?.results || [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / FAILURES_PAGE_SIZE));
+  const showFrom = total > 0 ? offset + 1 : 0;
+  const showTo = Math.min(offset + FAILURES_PAGE_SIZE, total);
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-base">Recent Failures</CardTitle>
+        {total > 0 && (
+          <span className="text-sm text-muted-foreground">
+            {showFrom}&ndash;{showTo} of {total}
+          </span>
+        )}
       </CardHeader>
       {error && (
         <CardContent>
@@ -341,7 +351,7 @@ function RecentFailures({
                 {formatDistanceToNow(new Date(result.createdAt), { addSuffix: true })}
               </TableCell>
               <TableCell>
-                <Link href={`/sessions/${result.sessionId}`} className="text-primary hover:underline">
+                <Link href={`/sessions/${result.sessionId}?tab=evals`} className="text-primary hover:underline">
                   <ExternalLink className="h-4 w-4" />
                 </Link>
               </TableCell>
@@ -349,6 +359,29 @@ function RecentFailures({
           ))}
         </TableBody>
       </Table>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-end gap-2 p-4 pt-0">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {page + 1} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!data?.hasMore}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -436,8 +469,6 @@ export default function QualityPage() {
   const { filter } = evalFilter;
 
   const summaryQuery = useEvalSummary(filter);
-  const failuresQuery = useRecentEvalFailures();
-
   const summaries = summaryQuery.data || [];
 
   return (
@@ -490,11 +521,7 @@ export default function QualityPage() {
           <TabsContent value="overview" className="space-y-6 mt-4">
             <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
             <EvalPassRateTable summaries={summaries} isLoading={summaryQuery.isLoading} />
-            <RecentFailures
-              isLoading={failuresQuery.isLoading}
-              data={failuresQuery.data}
-              error={failuresQuery.error}
-            />
+            <RecentFailures />
           </TabsContent>
 
           <TabsContent value="assertions" className="space-y-6 mt-4">

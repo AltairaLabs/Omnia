@@ -2,12 +2,20 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +38,9 @@ import {
   AlertCircle,
   ExternalLink,
   Bug,
+  CheckCircle2,
+  XCircle,
+  Shield,
 } from "lucide-react";
 import { useSessionDetail, useSessionAllMessages, useSessionEvalResults } from "@/hooks";
 import type { Message, Session, EvalResult } from "@/types";
@@ -330,6 +341,8 @@ export default function SessionDetailPage({
 }>) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const defaultTab = searchParams.get("tab") ?? "conversation";
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
   const grafana = useGrafana();
@@ -493,15 +506,33 @@ export default function SessionDetailPage({
       </Header>
 
       <div className="flex-1 flex flex-col min-h-0 p-6">
-        <Tabs defaultValue="conversation" className="flex-1 flex flex-col min-h-0">
+        <Tabs defaultValue={defaultTab} className="flex-1 flex flex-col min-h-0">
           <TabsList>
             <TabsTrigger value="conversation">Conversation</TabsTrigger>
+            <TabsTrigger value="evals" className="gap-1">
+              <Shield className="h-3.5 w-3.5" />
+              Evals
+              {evalResults && evalResults.length > 0 && (
+                <Badge
+                  variant={evalResults.some((r) => !r.passed) ? "destructive" : "secondary"}
+                  className="ml-1 px-1.5 py-0 text-[10px] leading-4"
+                >
+                  {evalResults.filter((r) => !r.passed).length > 0
+                    ? `${evalResults.filter((r) => !r.passed).length} failed`
+                    : evalResults.length}
+                </Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
             <TabsTrigger value="metadata">Metadata</TabsTrigger>
           </TabsList>
 
           <TabsContent value="conversation" className="flex-1 min-h-0 mt-4">
             <ConversationWithDebugPanel session={session} evalResults={evalResults || []} />
+          </TabsContent>
+
+          <TabsContent value="evals" className="mt-4">
+            <EvalResultsPanel results={evalResults || []} />
           </TabsContent>
 
           <TabsContent value="metrics" className="mt-4">
@@ -647,6 +678,166 @@ export default function SessionDetailPage({
         </Tabs>
       </div>
     </div>
+  );
+}
+
+/** Eval type label mapping. */
+function evalTypeLabel(evalType: string): string {
+  const labels: Record<string, string> = {
+    rule: "Rule", llm_judge: "LLM Judge", similarity: "Similarity",
+    regex: "Regex", custom: "Custom", contains: "Contains",
+  };
+  return labels[evalType] || evalType;
+}
+
+/** Full eval results panel shown in the Evals tab. */
+function EvalResultsPanel({ results }: Readonly<{ results: EvalResult[] }>) {
+  const passed = results.filter((r) => r.passed);
+  const failed = results.filter((r) => !r.passed);
+
+  if (results.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          No eval results for this session.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Shield className="h-4 w-4" />
+              Total Evals
+            </div>
+            <p className="text-2xl font-bold mt-1">{results.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              Passed
+            </div>
+            <p className="text-2xl font-bold mt-1 text-green-600 dark:text-green-400">{passed.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <XCircle className="h-4 w-4 text-red-500" />
+              Failed
+            </div>
+            <p className="text-2xl font-bold mt-1 text-red-600 dark:text-red-400">{failed.length}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Failed evals first */}
+      {failed.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-red-600 dark:text-red-400 flex items-center gap-2">
+              <XCircle className="h-4 w-4" />
+              Failed Evals ({failed.length})
+            </CardTitle>
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Eval ID</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Score</TableHead>
+                <TableHead>Details</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {failed.map((r) => (
+                <EvalResultRow key={r.id} result={r} />
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
+      {/* Passed evals */}
+      {passed.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-green-600 dark:text-green-400 flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4" />
+              Passed Evals ({passed.length})
+            </CardTitle>
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Eval ID</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Score</TableHead>
+                <TableHead>Details</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {passed.map((r) => (
+                <EvalResultRow key={r.id} result={r} />
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/** Single eval result row with expandable details. */
+function EvalResultRow({ result }: Readonly<{ result: EvalResult }>) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = result.details && Object.keys(result.details).length > 0;
+
+  return (
+    <>
+      <TableRow
+        className={cn("cursor-pointer", hasDetails && "hover:bg-muted/50")}
+        onClick={() => hasDetails && setExpanded(!expanded)}
+      >
+        <TableCell className="font-mono text-sm">
+          <div className="flex items-center gap-2">
+            {result.passed
+              ? <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+              : <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+            }
+            {result.evalId}
+          </div>
+        </TableCell>
+        <TableCell>
+          <Badge variant="outline">{evalTypeLabel(result.evalType)}</Badge>
+        </TableCell>
+        <TableCell>
+          {result.score === undefined ? "-" : `${(result.score * 100).toFixed(0)}%`}
+        </TableCell>
+        <TableCell className="text-muted-foreground text-sm">
+          {hasDetails
+            ? <span className="text-primary text-xs">{expanded ? "Hide details" : "Show details"}</span>
+            : <span className="text-xs">-</span>
+          }
+        </TableCell>
+      </TableRow>
+      {expanded && hasDetails && (
+        <TableRow>
+          <TableCell colSpan={4} className="bg-muted/30 p-4">
+            <pre className="text-xs font-mono whitespace-pre-wrap overflow-auto max-h-48">
+              {JSON.stringify(result.details, null, 2)}
+            </pre>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 

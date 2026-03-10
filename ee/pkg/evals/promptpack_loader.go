@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sync"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +41,9 @@ type EvalDef struct {
 	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 	// JudgeName references an AgentRuntime.Spec.Evals.Judges entry.
 	JudgeName string `json:"judgeName,omitempty" yaml:"judgeName,omitempty"`
+	// Metric defines the Prometheus metric emitted for this eval.
+	// Parsed from the PromptPack "metric" field on each eval definition.
+	Metric *runtimeevals.MetricDef `json:"metric,omitempty" yaml:"metric,omitempty"`
 }
 
 // PromptPackEvals holds the parsed eval definitions from a PromptPack.
