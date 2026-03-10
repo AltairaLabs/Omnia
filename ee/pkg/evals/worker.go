@@ -25,6 +25,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -90,6 +91,11 @@ type WorkerConfig struct {
 	// EvalMetrics records per-eval Prometheus metrics (omnia_eval_*) so the
 	// quality dashboard can discover them. If nil, per-eval metrics are not emitted.
 	EvalMetrics metrics.EvalMetricsRecorder
+	// EvalCollector is a PromptKit MetricCollector that creates dynamically-named
+	// per-eval Prometheus metrics (e.g., omnia_eval_helpfulness). The quality
+	// dashboard discovers these via {__name__=~"omnia_eval_.*"}. If nil, one is
+	// created automatically.
+	EvalCollector *runtimeevals.MetricCollector
 	// TracerProvider enables OTel tracing for eval execution.
 	// When set, the SDK emits per-eval spans with GenAI attributes.
 	TracerProvider trace.TracerProvider
@@ -112,6 +118,7 @@ type EvalWorker struct {
 	providerResolver  *ProviderResolver
 	metrics           WorkerMetricsRecorder
 	evalMetrics       metrics.EvalMetricsRecorder
+	evalCollector     *runtimeevals.MetricCollector
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
@@ -153,6 +160,13 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		metricsRecorder = &NoOpWorkerMetrics{}
 	}
 
+	evalCollector := config.EvalCollector
+	if evalCollector == nil {
+		evalCollector = runtimeevals.NewMetricCollector(
+			runtimeevals.WithNamespace("omnia_eval"),
+		)
+	}
+
 	namespaces := resolveNamespaces(config)
 	streamKeys := buildStreamKeys(namespaces)
 	consumerGroup := buildConsumerGroup(namespaces)
@@ -172,6 +186,7 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		providerResolver: resolver,
 		metrics:          metricsRecorder,
 		evalMetrics:      config.EvalMetrics,
+		evalCollector:    evalCollector,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -491,6 +506,12 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 	return nil
 }
 
+// EvalCollector returns the PromptKit MetricCollector for per-eval-name metrics.
+// The caller (main.go) should append evalCollector.WritePrometheus(w) to /metrics.
+func (w *EvalWorker) EvalCollector() *runtimeevals.MetricCollector {
+	return w.evalCollector
+}
+
 // recordPerEvalMetrics emits omnia_eval_* Prometheus metrics for each result
 // so the quality dashboard can discover them alongside runtime-emitted metrics.
 func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult) {
@@ -509,6 +530,37 @@ func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult) {
 			Namespace:      r.Namespace,
 			PromptPackName: r.PromptPackName,
 		})
+		w.recordEvalCollectorMetric(r)
+	}
+}
+
+// recordEvalCollectorMetric records a per-eval-name metric to the PromptKit
+// MetricCollector. This creates dynamically-named metrics like
+// omnia_eval_helpfulness that the quality dashboard discovers.
+func (w *EvalWorker) recordEvalCollectorMetric(r *api.EvalResult) {
+	if w.evalCollector == nil {
+		return
+	}
+	metric := &runtimeevals.MetricDef{
+		Name: r.EvalID,
+		Type: runtimeevals.MetricBoolean,
+		Labels: map[string]string{
+			"agent":           r.AgentName,
+			"namespace":       r.Namespace,
+			"promptpack_name": r.PromptPackName,
+		},
+	}
+	result := runtimeevals.EvalResult{
+		EvalID: r.EvalID,
+		Type:   r.EvalType,
+		Passed: r.Passed,
+		Score:  r.Score,
+	}
+	if err := w.evalCollector.Record(result, metric); err != nil {
+		w.logger.Warn("failed to record eval collector metric",
+			"evalID", r.EvalID,
+			"error", err,
+		)
 	}
 }
 

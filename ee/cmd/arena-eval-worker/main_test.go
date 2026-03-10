@@ -152,7 +152,7 @@ func TestStartHTTPServer(t *testing.T) {
 	t.Setenv(envLogLevel, "error")
 	logger := buildLogger()
 
-	go startHTTPServer("127.0.0.1:0", logger)
+	go startHTTPServer("127.0.0.1:0", logger, nil)
 	time.Sleep(50 * time.Millisecond)
 }
 

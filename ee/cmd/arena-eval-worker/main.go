@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
@@ -144,7 +146,7 @@ func main() {
 	}()
 
 	// Start HTTP server for metrics and health probes.
-	go startHTTPServer(cfg.MetricsAddr, logger)
+	go startHTTPServer(cfg.MetricsAddr, logger, worker.EvalCollector())
 
 	logger.Info("starting arena-eval-worker",
 		"namespaces", cfg.Namespaces,
@@ -227,9 +229,24 @@ func parseNamespaces() []string {
 }
 
 // startHTTPServer starts the metrics and health probe HTTP server.
-func startHTTPServer(addr string, logger *slog.Logger) {
+// The evalCollector appends per-eval-name metrics (e.g., omnia_eval_helpfulness)
+// to the /metrics response for dashboard discovery.
+func startHTTPServer(addr string, logger *slog.Logger, evalCollector *runtimeevals.MetricCollector) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+
+	// Disable compression so we can safely append SDK eval metrics after
+	// the standard Prometheus output (same pattern as cmd/runtime/main.go).
+	uncompressedHandler := promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{DisableCompression: true},
+	)
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		uncompressedHandler.ServeHTTP(w, r)
+		if evalCollector != nil {
+			_ = evalCollector.WritePrometheus(w)
+		}
+	})
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
