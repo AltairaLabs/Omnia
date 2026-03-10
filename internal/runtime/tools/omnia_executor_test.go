@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,11 +31,15 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 
+	"github.com/altairalabs/omnia/internal/tracing"
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
 
@@ -1729,5 +1734,564 @@ func TestOmniaExecutor_ProbeHandler_OpenAPI_WithServer(t *testing.T) {
 	err := e.probeHandler(context.Background(), "openapi-h")
 	if err != nil {
 		t.Fatalf("probeHandler OpenAPI: %v", err)
+	}
+}
+
+// --- marshalSchema ---
+
+func TestMarshalSchema_Nil(t *testing.T) {
+	result := marshalSchema(nil)
+	if result != nil {
+		t.Errorf("marshalSchema(nil) = %v, want nil", result)
+	}
+}
+
+func TestMarshalSchema_Unmarshalable(t *testing.T) {
+	// Channels cannot be marshaled to JSON
+	ch := make(chan int)
+	result := marshalSchema(ch)
+	if result != nil {
+		t.Errorf("marshalSchema(chan) = %v, want nil", result)
+	}
+}
+
+func TestMarshalSchema_ValidMap(t *testing.T) {
+	input := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string"},
+		},
+	}
+	result := marshalSchema(input)
+	if result == nil {
+		t.Fatal("marshalSchema returned nil for valid input")
+	}
+	// Verify it's valid JSON
+	var parsed map[string]any
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	if parsed["type"] != "object" {
+		t.Errorf("type = %v, want %q", parsed["type"], "object")
+	}
+}
+
+// --- buildMCPDescriptor with InputSchema ---
+
+func TestOmniaExecutor_BuildMCPDescriptor_WithInputSchema(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	mcpTool := &mcp.Tool{
+		Name:        "mcp-schema-tool",
+		Description: "tool with schema",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+		},
+	}
+	e.mcpTools["mcp-h"] = map[string]*mcp.Tool{
+		"mcp-schema-tool": mcpTool,
+	}
+
+	desc := &pktools.ToolDescriptor{Name: "mcp-schema-tool"}
+	e.buildMCPDescriptor(desc, "mcp-schema-tool", "mcp-h")
+
+	if desc.Description != "tool with schema" {
+		t.Errorf("Description = %q, want %q", desc.Description, "tool with schema")
+	}
+	if desc.InputSchema == nil {
+		t.Fatal("InputSchema is nil, expected non-nil")
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(desc.InputSchema, &parsed); err != nil {
+		t.Fatalf("InputSchema is not valid JSON: %v", err)
+	}
+	if parsed["type"] != "object" {
+		t.Errorf("InputSchema type = %v, want %q", parsed["type"], "object")
+	}
+}
+
+func TestOmniaExecutor_BuildMCPDescriptor_HandlerNotFound(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	desc := &pktools.ToolDescriptor{Name: "missing"}
+	e.buildMCPDescriptor(desc, "missing", "no-such-handler")
+	// Should be a no-op — description remains empty
+	if desc.Description != "" {
+		t.Errorf("Description = %q, want empty", desc.Description)
+	}
+}
+
+func TestOmniaExecutor_BuildMCPDescriptor_ToolNotFound(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.mcpTools["mcp-h"] = map[string]*mcp.Tool{}
+	desc := &pktools.ToolDescriptor{Name: "missing-tool"}
+	e.buildMCPDescriptor(desc, "missing-tool", "mcp-h")
+	if desc.Description != "" {
+		t.Errorf("Description = %q, want empty", desc.Description)
+	}
+}
+
+// --- buildOpenAPIDescriptor with parameters ---
+
+func TestOmniaExecutor_BuildOpenAPIDescriptor_WithParameters(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["openapi-h"] = map[string]*OpenAPIOperation{
+		"getPet": {
+			OperationID: "getPet",
+			Method:      "GET",
+			Path:        "/pets/{petId}",
+			Summary:     "Get a pet by ID",
+			Parameters: []OpenAPIParameter{
+				{
+					Name:        "petId",
+					In:          "path",
+					Required:    true,
+					Description: "The pet ID",
+					Schema:      map[string]any{"type": "string"},
+				},
+				{
+					Name:        "include",
+					In:          "query",
+					Required:    false,
+					Description: "Fields to include",
+					Schema:      map[string]any{"type": "string"},
+				},
+			},
+		},
+	}
+
+	desc := &pktools.ToolDescriptor{Name: "getPet"}
+	e.buildOpenAPIDescriptor(desc, "getPet", "openapi-h")
+
+	if desc.Description != "Get a pet by ID" {
+		t.Errorf("Description = %q, want %q", desc.Description, "Get a pet by ID")
+	}
+	if desc.InputSchema == nil {
+		t.Fatal("InputSchema is nil, expected non-nil for operation with parameters")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(desc.InputSchema, &schema); err != nil {
+		t.Fatalf("InputSchema is not valid JSON: %v", err)
+	}
+	if schema["type"] != "object" {
+		t.Errorf("schema type = %v, want %q", schema["type"], "object")
+	}
+}
+
+func TestOmniaExecutor_BuildOpenAPIDescriptor_HandlerNotFound(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	desc := &pktools.ToolDescriptor{Name: "missing"}
+	e.buildOpenAPIDescriptor(desc, "missing", "no-handler")
+	if desc.Description != "" {
+		t.Errorf("Description = %q, want empty", desc.Description)
+	}
+}
+
+func TestOmniaExecutor_BuildOpenAPIDescriptor_OpNotFound(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["openapi-h"] = map[string]*OpenAPIOperation{}
+	desc := &pktools.ToolDescriptor{Name: "missing"}
+	e.buildOpenAPIDescriptor(desc, "missing", "openapi-h")
+	if desc.Description != "" {
+		t.Errorf("Description = %q, want empty", desc.Description)
+	}
+}
+
+// --- buildGRPCDescriptor edge cases ---
+
+func TestOmniaExecutor_BuildGRPCDescriptor_EmptyInputSchema(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcTools["grpc-h"] = map[string]*toolsv1.ToolInfo{
+		"grpc-empty": {
+			Name:        "grpc-empty",
+			Description: "tool with empty schema",
+			InputSchema: "",
+		},
+	}
+
+	desc := &pktools.ToolDescriptor{Name: "grpc-empty"}
+	e.buildGRPCDescriptor(desc, "grpc-empty", "grpc-h")
+
+	if desc.Description != "tool with empty schema" {
+		t.Errorf("Description = %q, want %q", desc.Description, "tool with empty schema")
+	}
+	if desc.InputSchema != nil {
+		t.Errorf("InputSchema = %s, want nil for empty schema", desc.InputSchema)
+	}
+}
+
+func TestOmniaExecutor_BuildGRPCDescriptor_WithInputSchema(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	schema := `{"type":"object","properties":{"q":{"type":"string"}}}`
+	e.grpcTools["grpc-h"] = map[string]*toolsv1.ToolInfo{
+		"grpc-schema": {
+			Name:        "grpc-schema",
+			Description: "tool with schema",
+			InputSchema: schema,
+		},
+	}
+
+	desc := &pktools.ToolDescriptor{Name: "grpc-schema"}
+	e.buildGRPCDescriptor(desc, "grpc-schema", "grpc-h")
+
+	if string(desc.InputSchema) != schema {
+		t.Errorf("InputSchema = %s, want %s", desc.InputSchema, schema)
+	}
+}
+
+func TestOmniaExecutor_BuildGRPCDescriptor_HandlerNotFound(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	desc := &pktools.ToolDescriptor{Name: "missing"}
+	e.buildGRPCDescriptor(desc, "missing", "no-handler")
+	if desc.Description != "" {
+		t.Errorf("Description = %q, want empty", desc.Description)
+	}
+}
+
+func TestOmniaExecutor_BuildGRPCDescriptor_ToolNotFound(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcTools["grpc-h"] = map[string]*toolsv1.ToolInfo{}
+	desc := &pktools.ToolDescriptor{Name: "missing"}
+	e.buildGRPCDescriptor(desc, "missing", "grpc-h")
+	if desc.Description != "" {
+		t.Errorf("Description = %q, want empty", desc.Description)
+	}
+}
+
+// --- startSpan with tracing provider ---
+
+func TestOmniaExecutor_StartSpan_WithTracingProvider(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	provider := tracing.NewTestProvider(tp)
+	e := NewOmniaExecutor(logr.Discard(), provider)
+
+	// Set some tool meta so the span includes attributes
+	e.toolMeta["test-tool"] = ToolMeta{
+		RegistryName:      "my-registry",
+		RegistryNamespace: "default",
+		HandlerName:       "test-handler",
+		HandlerType:       "http",
+	}
+
+	ctx, span := e.startSpan(context.Background(), "test-tool")
+	span.End()
+
+	if ctx == nil {
+		t.Fatal("startSpan returned nil context")
+	}
+
+	spans := exporter.GetSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected at least one span")
+	}
+}
+
+// --- Close with MCP and gRPC connections ---
+
+func TestOmniaExecutor_Close_WithGRPCConn(t *testing.T) {
+	// Start a real gRPC listener so we can get a real connection to close
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer lis.Close()
+
+	conn, err := grpc.Dial(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcConns["test-grpc"] = conn
+	e.grpcClients["test-grpc"] = toolsv1.NewToolServiceClient(conn)
+	e.grpcTools["test-grpc"] = map[string]*toolsv1.ToolInfo{
+		"tool1": {Name: "tool1"},
+	}
+
+	if err := e.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(e.grpcConns) != 0 {
+		t.Error("grpcConns not reset after Close")
+	}
+	if len(e.grpcClients) != 0 {
+		t.Error("grpcClients not reset after Close")
+	}
+}
+
+func TestOmniaExecutor_Close_WithMCPSession(t *testing.T) {
+	// Create a real MCP client/server pair using in-memory transport
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: "test-server", Version: "1.0"},
+		nil,
+	)
+
+	// Connect server first (required before client)
+	_, err := server.Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+
+	client := mcp.NewClient(
+		&mcp.Implementation{Name: "test-client", Version: "1.0"},
+		nil,
+	)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.mcpClients["test-mcp"] = client
+	e.mcpSessions["test-mcp"] = session
+	e.mcpTools["test-mcp"] = map[string]*mcp.Tool{
+		"tool1": {Name: "tool1"},
+	}
+
+	if err := e.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(e.mcpSessions) != 0 {
+		t.Error("mcpSessions not reset after Close")
+	}
+	if len(e.mcpClients) != 0 {
+		t.Error("mcpClients not reset after Close")
+	}
+	if len(e.mcpTools) != 0 {
+		t.Error("mcpTools not reset after Close")
+	}
+}
+
+// --- executeMCP successful call ---
+
+func TestOmniaExecutor_ExecuteMCP_Success(t *testing.T) {
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: "test-server", Version: "1.0"},
+		nil,
+	)
+	server.AddTool(&mcp.Tool{
+		Name:        "echo",
+		Description: "Echoes input",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "hello world"},
+			},
+		}, nil
+	})
+
+	_, err := server.Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+
+	client := mcp.NewClient(
+		&mcp.Implementation{Name: "test-client", Version: "1.0"},
+		nil,
+	)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer session.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.mcpSessions["test-mcp"] = session
+
+	result, err := e.executeMCP(context.Background(), "echo", "test-mcp", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("executeMCP: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	var text string
+	if err := json.Unmarshal(result, &text); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	if text != "hello world" {
+		t.Errorf("result = %q, want %q", text, "hello world")
+	}
+}
+
+func TestOmniaExecutor_ExecuteMCP_WithArgs(t *testing.T) {
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: "test-server", Version: "1.0"},
+		nil,
+	)
+	server.AddTool(&mcp.Tool{
+		Name:        "greet",
+		Description: "Greets by name",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}}}`),
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args map[string]any
+		_ = json.Unmarshal(req.Params.Arguments, &args)
+		name, _ := args["name"].(string)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Hello, %s!", name)},
+			},
+		}, nil
+	})
+
+	_, err := server.Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+
+	client := mcp.NewClient(
+		&mcp.Implementation{Name: "test-client", Version: "1.0"},
+		nil,
+	)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer session.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.mcpSessions["test-mcp"] = session
+
+	result, err := e.executeMCP(context.Background(), "greet", "test-mcp", json.RawMessage(`{"name":"Alice"}`))
+	if err != nil {
+		t.Fatalf("executeMCP: %v", err)
+	}
+	var text string
+	if err := json.Unmarshal(result, &text); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if text != "Hello, Alice!" {
+		t.Errorf("result = %q, want %q", text, "Hello, Alice!")
+	}
+}
+
+func TestOmniaExecutor_ExecuteMCP_EmptyArgs(t *testing.T) {
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	server := mcp.NewServer(
+		&mcp.Implementation{Name: "test-server", Version: "1.0"},
+		nil,
+	)
+	server.AddTool(&mcp.Tool{
+		Name:        "ping",
+		Description: "Pings",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "pong"},
+			},
+		}, nil
+	})
+
+	_, err := server.Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+
+	client := mcp.NewClient(
+		&mcp.Implementation{Name: "test-client", Version: "1.0"},
+		nil,
+	)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer session.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.mcpSessions["test-mcp"] = session
+
+	// Empty args (nil)
+	result, err := e.executeMCP(context.Background(), "ping", "test-mcp", nil)
+	if err != nil {
+		t.Fatalf("executeMCP with nil args: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+}
+
+// --- initOpenAPIHandler with mock server ---
+
+func TestOmniaExecutor_InitOpenAPIHandler_WithMockServer(t *testing.T) {
+	spec := `{
+		"openapi": "3.0.0",
+		"info": {"title": "Pet Store", "version": "1.0.0"},
+		"servers": [{"url": "http://localhost:8080"}],
+		"paths": {
+			"/pets": {
+				"get": {
+					"operationId": "listPets",
+					"summary": "List all pets",
+					"parameters": [
+						{
+							"name": "limit",
+							"in": "query",
+							"required": false,
+							"schema": {"type": "integer"}
+						}
+					],
+					"responses": {
+						"200": {"description": "A list of pets"}
+					}
+				}
+			}
+		}
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(spec))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "pet-store",
+		Type: ToolTypeOpenAPI,
+		OpenAPIConfig: &OpenAPICfg{
+			SpecURL: srv.URL + "/openapi.json",
+			BaseURL: "http://localhost:8080",
+		},
+	}
+
+	err := e.initOpenAPIHandler(context.Background(), "pet-store", h)
+	if err != nil {
+		t.Fatalf("initOpenAPIHandler: %v", err)
+	}
+
+	// Verify tool was registered
+	handlerName, ok := e.toolHandlers["listPets"]
+	if !ok {
+		t.Fatal("listPets tool not registered")
+	}
+	if handlerName != "pet-store" {
+		t.Errorf("handler = %q, want %q", handlerName, "pet-store")
+	}
+
+	// Verify operations parsed
+	ops, ok := e.openAPIOps["pet-store"]
+	if !ok {
+		t.Fatal("no operations for pet-store handler")
+	}
+	op, ok := ops["listPets"]
+	if !ok {
+		t.Fatal("listPets operation not found")
+	}
+	if op.Method != "GET" {
+		t.Errorf("method = %q, want %q", op.Method, "GET")
 	}
 }
