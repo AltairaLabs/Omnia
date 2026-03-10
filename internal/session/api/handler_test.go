@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/providers"
+	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
 // Test UUID constants for session IDs.
@@ -2524,4 +2526,57 @@ func TestWriteError_InvalidSessionID(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
+}
+
+func TestTraceLogMiddleware(t *testing.T) {
+	t.Run("injects trace_id when span present", func(t *testing.T) {
+		tp := sdktrace.NewTracerProvider()
+		defer func() { _ = tp.Shutdown(context.Background()) }()
+
+		var captured context.Context
+		inner := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			captured = r.Context()
+		})
+
+		tracer := tp.Tracer("test")
+		ctx, span := tracer.Start(context.Background(), "test-op")
+		defer span.End()
+
+		req := httptest.NewRequest("GET", "/test", nil).WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		TraceLogMiddleware(inner).ServeHTTP(rec, req)
+
+		traceID := logctx.LogrValues(captured)
+		// Should contain "trace_id" key with the span's trace ID
+		found := false
+		for i := 0; i < len(traceID)-1; i += 2 {
+			if traceID[i] == "trace_id" {
+				found = true
+				if traceID[i+1] != span.SpanContext().TraceID().String() {
+					t.Errorf("trace_id mismatch: got %v, want %s", traceID[i+1], span.SpanContext().TraceID())
+				}
+			}
+		}
+		if !found {
+			t.Error("trace_id not found in context")
+		}
+	})
+
+	t.Run("no-op without span", func(t *testing.T) {
+		var captured context.Context
+		inner := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			captured = r.Context()
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		TraceLogMiddleware(inner).ServeHTTP(rec, req)
+
+		values := logctx.LogrValues(captured)
+		if len(values) != 0 {
+			t.Errorf("expected no logctx values without span, got %v", values)
+		}
+	})
 }

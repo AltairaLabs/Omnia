@@ -230,8 +230,8 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 				DurationSeconds: data.Duration.Seconds(),
 				Success:         data.Status == "success",
 			}
-			if s.toolManager != nil {
-				if meta, ok := s.toolManager.GetToolMeta(data.ToolName); ok {
+			if s.toolExecutor != nil {
+				if meta, ok := s.toolExecutor.GetToolMeta(data.ToolName); ok {
 					tc.HandlerType = meta.HandlerType
 					tc.HandlerName = meta.HandlerName
 					tc.RegistryName = meta.RegistryName
@@ -263,8 +263,8 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 				DurationSeconds: data.Duration.Seconds(),
 				Success:         false,
 			}
-			if s.toolManager != nil {
-				if meta, ok := s.toolManager.GetToolMeta(data.ToolName); ok {
+			if s.toolExecutor != nil {
+				if meta, ok := s.toolExecutor.GetToolMeta(data.ToolName); ok {
 					tc.HandlerType = meta.HandlerType
 					tc.HandlerName = meta.HandlerName
 					tc.RegistryName = meta.RegistryName

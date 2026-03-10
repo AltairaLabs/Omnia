@@ -21,6 +21,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace/noop"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -433,6 +434,64 @@ func TestNewEvalWorker_CustomSDKRunner(t *testing.T) {
 	})
 
 	assert.Equal(t, customRunner, w.sdkRunner)
+}
+
+func TestNewEvalWorker_TracerProviderWiring(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	tp := noop.NewTracerProvider()
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient:    client,
+		ResultWriter:   &mockResultWriter{},
+		Namespaces:     []string{"ns"},
+		Logger:         testLogger(),
+		TracerProvider: tp,
+	})
+
+	assert.Equal(t, tp, w.TracerProvider(), "TracerProvider should be wired to SDKRunner")
+}
+
+func TestNewEvalWorker_NoTracerProvider(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient:  client,
+		ResultWriter: &mockResultWriter{},
+		Namespaces:   []string{"ns"},
+		Logger:       testLogger(),
+	})
+
+	assert.Nil(t, w.TracerProvider(), "TracerProvider should be nil when not configured")
+}
+
+func TestNewEvalWorker_LoggerWiring(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	logger := testLogger()
+	w := NewEvalWorker(WorkerConfig{
+		RedisClient:  client,
+		ResultWriter: &mockResultWriter{},
+		Namespaces:   []string{"ns"},
+		Logger:       logger,
+	})
+
+	require.NotNil(t, w.sdkRunner)
+	assert.Equal(t, logger, w.sdkRunner.logger, "Logger should be wired to SDKRunner")
 }
 
 func TestHostname(t *testing.T) {

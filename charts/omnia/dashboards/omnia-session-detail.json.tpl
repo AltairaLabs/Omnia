@@ -24,7 +24,12 @@
       "datasource": { "type": "tempo", "uid": "tempo" },
       "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
       "id": 1,
-      "options": {},
+      "options": {
+        "spanBar": {
+          "type": "Tag",
+          "tag": "service.name"
+        }
+      },
       "pluginVersion": "10.0.0",
       "targets": [
         {

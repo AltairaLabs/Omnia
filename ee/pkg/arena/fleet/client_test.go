@@ -164,4 +164,5 @@ func TestConnect_WorksWithoutTraceContext(t *testing.T) {
 	defer func() { _ = p.Close() }()
 
 	assert.Equal(t, "sess-no-trace", p.sessionID)
+	assert.Equal(t, "sess-no-trace", p.SessionID())
 }

@@ -161,6 +161,9 @@ func (p *Provider) SupportsStreaming() bool { return true }
 // ShouldIncludeRawOutput returns false.
 func (p *Provider) ShouldIncludeRawOutput() bool { return false }
 
+// SessionID returns the session ID assigned by the facade after Connect.
+func (p *Provider) SessionID() string { return p.sessionID }
+
 // Close closes the WebSocket connection.
 func (p *Provider) Close() error {
 	if p.conn != nil {

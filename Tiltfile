@@ -501,8 +501,8 @@ if ENABLE_ENTERPRISE:
         'enterprise.evalWorker.image.repository=omnia-eval-worker-dev',
         'enterprise.evalWorker.image.tag=latest',
         'enterprise.evalWorker.image.pullPolicy=Never',
-        # Watch all dev namespaces for eval events (not just omnia-system)
-        'enterprise.evalWorker.namespaces={dev-agents,omnia-demo}',
+        # Watch all dev namespaces plus omnia-system for eval events (e2e tests publish there)
+        'enterprise.evalWorker.namespaces={dev-agents,omnia-demo,omnia-system}',
         # Wire session-api to Redis so it publishes eval events to streams
         'sessionApi.redis.addrs=omnia-redis-master:6379',
     ])

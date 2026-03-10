@@ -31,12 +31,17 @@
       "datasource": { "type": "tempo", "uid": "tempo" },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 1 },
       "id": 1,
-      "options": {},
+      "options": {
+        "spanBar": {
+          "type": "Tag",
+          "tag": "service.name"
+        }
+      },
       "pluginVersion": "10.0.0",
       "targets": [
         {
           "limit": 100,
-          "query": "{span.arena.job=\"$job_name\"}",
+          "query": "$trace_id",
           "queryType": "traceql",
           "refId": "A",
           "tableType": "traces"

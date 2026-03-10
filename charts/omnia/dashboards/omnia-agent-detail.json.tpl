@@ -382,7 +382,12 @@
       "datasource": { "type": "tempo", "uid": "tempo" },
       "gridPos": { "h": 10, "w": {{ if .Values.loki.enabled }}12{{ else }}24{{ end }}, "x": {{ if .Values.loki.enabled }}12{{ else }}0{{ end }}, "y": 20 },
       "id": 10,
-      "options": {},
+      "options": {
+        "spanBar": {
+          "type": "Tag",
+          "tag": "service.name"
+        }
+      },
       "pluginVersion": "10.0.0",
       "targets": [
         {

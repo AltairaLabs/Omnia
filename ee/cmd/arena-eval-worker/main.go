@@ -112,7 +112,7 @@ func main() {
 
 	msgStore := redisprovider.NewFromClient(redisClient, redisprovider.DefaultOptions())
 
-	worker := evals.NewEvalWorker(evals.WorkerConfig{
+	workerCfg := evals.WorkerConfig{
 		RedisClient:  redisClient,
 		ResultWriter: sessionClient,
 		MessageStore: msgStore,
@@ -121,7 +121,11 @@ func main() {
 		K8sClient:    k8sClient,
 		PackLoader:   packLoader,
 		Metrics:      workerMetrics,
-	})
+	}
+	if tp != nil {
+		workerCfg.TracerProvider = tp.TracerProvider()
+	}
+	worker := evals.NewEvalWorker(workerCfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

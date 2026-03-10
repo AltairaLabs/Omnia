@@ -19,10 +19,12 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
@@ -106,8 +108,13 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	}, s.sdkOptions...)
 
 	// Pass Omnia's logger to the SDK so all output flows through the same Zap backend.
+	// Enrich with trace_id so PromptKit logs correlate with the active trace.
 	if s.sdkLogger != nil {
-		opts = append(opts, sdk.WithLogger(s.sdkLogger))
+		sdkLog := s.sdkLogger
+		if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+			sdkLog = sdkLog.With(slog.String("trace_id", sc.TraceID().String()))
+		}
+		opts = append(opts, sdk.WithLogger(sdkLog))
 	}
 
 	// Add provider based on configuration
@@ -144,8 +151,8 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	// Prometheus metrics are enabled.
 	if s.sessionStore != nil || s.evalMetrics != nil {
 		eventStore := NewOmniaEventStore(s.sessionStore, s.log)
-		if s.toolManager != nil {
-			eventStore.SetToolMetaFn(s.toolManager.GetToolMeta)
+		if s.toolExecutor != nil {
+			eventStore.SetToolMetaFn(s.toolExecutor.GetToolMeta)
 		}
 		if s.evalMetrics != nil {
 			eventStore.SetEvalMetrics(s.evalMetrics)

@@ -17,28 +17,6 @@ limitations under the License.
 // Package tools provides tool adapters for the runtime.
 package tools
 
-import (
-	"context"
-)
-
-// ToolAdapter is the interface for tool execution backends.
-type ToolAdapter interface {
-	// Name returns the adapter's name.
-	Name() string
-
-	// Connect establishes connection to the tool backend.
-	Connect(ctx context.Context) error
-
-	// ListTools returns available tools from this adapter.
-	ListTools(ctx context.Context) ([]ToolInfo, error)
-
-	// Call invokes a tool with the given arguments.
-	Call(ctx context.Context, name string, args map[string]any) (*ToolResult, error)
-
-	// Close closes the connection.
-	Close() error
-}
-
 // ToolInfo describes a discovered tool.
 type ToolInfo struct {
 	// Name is the tool's unique identifier.
@@ -59,14 +37,6 @@ type ToolMeta struct {
 	HandlerName       string
 	HandlerType       string // http, grpc, mcp, openapi
 	Endpoint          string
-}
-
-// HealthChecker is an optional interface that adapters can implement to
-// support endpoint health probing. The Manager uses this during Connect
-// to warn about unreachable tool backends.
-type HealthChecker interface {
-	// HealthCheck probes the tool backend and returns nil if reachable.
-	HealthCheck(ctx context.Context) error
 }
 
 // ToolHealth reports the health status of a single tool.
