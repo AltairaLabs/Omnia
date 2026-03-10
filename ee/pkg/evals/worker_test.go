@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -923,7 +924,7 @@ func TestWriteResults_Empty(t *testing.T) {
 		logger:       testLogger(),
 	}
 
-	err := w.writeResults(context.Background(), nil, "s1")
+	err := w.writeResults(context.Background(), nil, "s1", nil)
 	require.NoError(t, err)
 	assert.Empty(t, writer.written)
 }
@@ -936,7 +937,7 @@ func TestWriteResults_Success(t *testing.T) {
 	}
 
 	results := []*api.EvalResult{{EvalID: "e1"}}
-	err := w.writeResults(context.Background(), results, "s1")
+	err := w.writeResults(context.Background(), results, "s1", nil)
 	require.NoError(t, err)
 	assert.Len(t, writer.written, 1)
 }
@@ -949,7 +950,7 @@ func TestWriteResults_Error(t *testing.T) {
 	}
 
 	results := []*api.EvalResult{{EvalID: "e1"}}
-	err := w.writeResults(context.Background(), results, "s1")
+	err := w.writeResults(context.Background(), results, "s1", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db error")
 }
@@ -1096,6 +1097,21 @@ func TestToEvalResult_WithPromptPack(t *testing.T) {
 	result := toEvalResult(item, event, "agent")
 	assert.Equal(t, "pack-1", result.PromptPackName)
 	assert.Equal(t, "v1", result.PromptPackVersion)
+}
+
+func TestToEvalResult_WithDetails(t *testing.T) {
+	details := json.RawMessage(`{"explanation":"Too informal","error":"threshold exceeded"}`)
+	item := api.EvaluateResultItem{
+		EvalID:   "e1",
+		EvalType: "llm_judge",
+		Passed:   false,
+		Details:  details,
+	}
+	event := api.SessionEvent{SessionID: "s1", Namespace: "ns"}
+
+	result := toEvalResult(item, event, "agent")
+	require.NotNil(t, result.Details)
+	assert.JSONEq(t, `{"explanation":"Too informal","error":"threshold exceeded"}`, string(result.Details))
 }
 
 func TestNewEvalWorker_WithPackLoader(t *testing.T) {
@@ -1571,6 +1587,83 @@ func TestProcessAssistantMessage_SampledOut_SkipsEverything(t *testing.T) {
 	err := w.processAssistantMessage(context.Background(), event)
 	require.NoError(t, err)
 	assert.Empty(t, writer.written, "sampled-out session should produce no results")
+}
+
+func TestBuildEvalDefMap(t *testing.T) {
+	defs := []EvalDef{
+		{ID: "e1", Metric: &runtimeevals.MetricDef{Name: "response_conciseness", Type: runtimeevals.MetricBoolean}},
+		{ID: "e2"}, // no metric
+		{ID: "e3", Metric: &runtimeevals.MetricDef{Name: "session_helpfulness", Type: runtimeevals.MetricGauge}},
+	}
+
+	m := buildEvalDefMap(defs)
+	assert.Len(t, m, 2)
+	assert.Equal(t, "response_conciseness", m["e1"].Name)
+	assert.Equal(t, runtimeevals.MetricBoolean, m["e1"].Type)
+	assert.Equal(t, "session_helpfulness", m["e3"].Name)
+	assert.Equal(t, runtimeevals.MetricGauge, m["e3"].Type)
+	assert.Nil(t, m["e2"])
+}
+
+func TestRecordEvalCollectorMetric_UsesActualMetricDef(t *testing.T) {
+	collector := runtimeevals.NewMetricCollector(
+		runtimeevals.WithNamespace("omnia_eval"),
+	)
+	w := &EvalWorker{
+		evalCollector: collector,
+		logger:        testLogger(),
+	}
+
+	score := 0.85
+	r := &api.EvalResult{
+		EvalID:         "session-helpfulness",
+		EvalType:       "llm_judge",
+		Passed:         true,
+		Score:          &score,
+		AgentName:      "test-agent",
+		Namespace:      "ns",
+		PromptPackName: "pack",
+	}
+	metricDef := &runtimeevals.MetricDef{
+		Name: "session_helpfulness",
+		Type: runtimeevals.MetricGauge,
+	}
+
+	// Should not panic and should record successfully.
+	w.recordEvalCollectorMetric(r, metricDef)
+}
+
+func TestRecordEvalCollectorMetric_FallbackWhenNoMetricDef(t *testing.T) {
+	collector := runtimeevals.NewMetricCollector(
+		runtimeevals.WithNamespace("omnia_eval"),
+	)
+	w := &EvalWorker{
+		evalCollector: collector,
+		logger:        testLogger(),
+	}
+
+	r := &api.EvalResult{
+		EvalID:         "e1",
+		EvalType:       "contains",
+		Passed:         true,
+		AgentName:      "test-agent",
+		Namespace:      "ns",
+		PromptPackName: "pack",
+	}
+
+	// nil metricDef should fall back to boolean with eval ID as name.
+	w.recordEvalCollectorMetric(r, nil)
+}
+
+func TestRecordEvalCollectorMetric_NilCollector(t *testing.T) {
+	w := &EvalWorker{
+		evalCollector: nil,
+		logger:        testLogger(),
+	}
+
+	r := &api.EvalResult{EvalID: "e1"}
+	// Should not panic when collector is nil.
+	w.recordEvalCollectorMetric(r, nil)
 }
 
 // Ensure unused import suppressors compile.

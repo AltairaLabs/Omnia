@@ -159,7 +159,6 @@ func (w *recordingResponseWriter) WriteToolCall(toolCall *ToolCallInfo) error {
 
 		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
 			AddToolCalls: 1,
-			AddMessages:  1,
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for tool call")
 		}
@@ -207,11 +206,8 @@ func (w *recordingResponseWriter) WriteToolResult(result *ToolResultInfo) error 
 			w.log.Error(storeErr, "failed to record tool result")
 		}
 
-		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
-			AddMessages: 1,
-		}); storeErr != nil {
-			w.log.Error(storeErr, "failed to update session stats for tool result")
-		}
+		// Tool results are not user/assistant messages — don't increment message count.
+		// Stats update intentionally omitted.
 	})
 
 	return err
@@ -238,9 +234,8 @@ func (w *recordingResponseWriter) WriteError(code, message string) error {
 		}
 
 		if storeErr := w.store.UpdateSessionStats(ctx, w.sessionID, session.SessionStatsUpdate{
-			AddMessages: 1,
-			SetStatus:   session.SessionStatusError,
-			SetEndedAt:  time.Now(),
+			SetStatus:  session.SessionStatusError,
+			SetEndedAt: time.Now(),
 		}); storeErr != nil {
 			w.log.Error(storeErr, "failed to update session stats for error")
 		}

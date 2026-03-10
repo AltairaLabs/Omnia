@@ -12,6 +12,7 @@ package aggregator
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -335,6 +336,155 @@ func TestAggregator_ToJobResult_NoOptionalMetrics(t *testing.T) {
 	if _, ok := jobResult.Summary["totalCost"]; ok {
 		t.Error("totalCost should not be present when zero")
 	}
+}
+
+func TestAggregator_ToJobResult_IncludesDetails(t *testing.T) {
+	agg := &Aggregator{}
+
+	result := &AggregatedResult{
+		TotalItems:  3,
+		PassedItems: 2,
+		FailedItems: 1,
+		PassRate:    66.7,
+		AvgDuration: 500 * time.Millisecond,
+		ByScenario: map[string]*ScenarioStats{
+			"greeting":  {Total: 2, Passed: 2, PassRate: 100, AvgDuration: 300 * time.Millisecond, TotalTokens: 100},
+			"complaint": {Total: 1, Passed: 0, Failed: 1, PassRate: 0, AvgDuration: 700 * time.Millisecond},
+		},
+		ByProvider: map[string]*ProviderStats{
+			"fleet-agent": {Total: 3, Passed: 2, Failed: 1, PassRate: 66.7, AvgDuration: 500 * time.Millisecond},
+		},
+		Assertions: []AssertionResult{
+			{Name: "response_contains_greeting", Passed: true},
+			{Name: "response_is_polite", Passed: false, Message: "Response was rude"},
+		},
+		Errors: []ErrorSummary{
+			{Message: "assertion [response_is_polite] failed", Count: 1, WorkItemIDs: []string{"item-3"}},
+		},
+	}
+
+	jobResult := agg.ToJobResult(result)
+
+	detailsJSON, ok := jobResult.Summary["details"]
+	if !ok {
+		t.Fatal("Summary should contain 'details' key")
+	}
+
+	var details resultDetails
+	if err := json.Unmarshal([]byte(detailsJSON), &details); err != nil {
+		t.Fatalf("Failed to parse details JSON: %v", err)
+	}
+
+	if len(details.Scenarios) != 2 {
+		t.Errorf("expected 2 scenarios, got %d", len(details.Scenarios))
+	}
+	if len(details.Providers) != 1 {
+		t.Errorf("expected 1 provider, got %d", len(details.Providers))
+	}
+	if len(details.Assertions) != 2 {
+		t.Errorf("expected 2 assertion summaries, got %d", len(details.Assertions))
+	}
+	// Verify assertion summaries have correct fields
+	if len(details.Assertions) >= 2 {
+		a0 := details.Assertions[0]
+		if a0.Name != "response_contains_greeting" || a0.Total != 1 || a0.Passed != 1 ||
+			a0.Failed != 0 || a0.PassRate != 100 {
+			t.Errorf("unexpected first assertion summary: %+v", a0)
+		}
+		a1 := details.Assertions[1]
+		if a1.Name != "response_is_polite" || a1.Total != 1 || a1.Passed != 0 || a1.Failed != 1 || a1.PassRate != 0 {
+			t.Errorf("unexpected second assertion summary: %+v", a1)
+		}
+		if len(a1.Failures) != 1 || a1.Failures[0] != "Response was rude" {
+			t.Errorf("expected failure message 'Response was rude', got %v", a1.Failures)
+		}
+	}
+	if len(details.Errors) != 1 {
+		t.Errorf("expected 1 error, got %d", len(details.Errors))
+	}
+}
+
+func TestSummarizeAssertions(t *testing.T) {
+	t.Run("nil input", func(t *testing.T) {
+		result := summarizeAssertions(nil)
+		if result != nil {
+			t.Errorf("expected nil, got %v", result)
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		result := summarizeAssertions([]AssertionResult{})
+		if result != nil {
+			t.Errorf("expected nil, got %v", result)
+		}
+	})
+
+	t.Run("groups by name with pass fail counts", func(t *testing.T) {
+		assertions := []AssertionResult{
+			{Name: "check_format", Passed: true},
+			{Name: "check_format", Passed: true},
+			{Name: "check_format", Passed: false, Message: "bad format"},
+			{Name: "check_tone", Passed: false, Message: "too aggressive"},
+			{Name: "check_tone", Passed: true},
+		}
+		result := summarizeAssertions(assertions)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 summaries, got %d", len(result))
+		}
+
+		// Verify insertion order preserved
+		if result[0].Name != "check_format" {
+			t.Errorf("expected first summary to be check_format, got %s", result[0].Name)
+		}
+		if result[0].Total != 3 || result[0].Passed != 2 || result[0].Failed != 1 {
+			t.Errorf("unexpected check_format counts: %+v", result[0])
+		}
+		if result[0].PassRate != float64(2)/float64(3)*100 {
+			t.Errorf("unexpected check_format pass rate: %f", result[0].PassRate)
+		}
+		if len(result[0].Failures) != 1 || result[0].Failures[0] != "bad format" {
+			t.Errorf("unexpected check_format failures: %v", result[0].Failures)
+		}
+
+		if result[1].Name != "check_tone" {
+			t.Errorf("expected second summary to be check_tone, got %s", result[1].Name)
+		}
+		if result[1].Total != 2 || result[1].Passed != 1 || result[1].Failed != 1 {
+			t.Errorf("unexpected check_tone counts: %+v", result[1])
+		}
+	})
+
+	t.Run("deduplicates failure messages", func(t *testing.T) {
+		assertions := []AssertionResult{
+			{Name: "check_length", Passed: false, Message: "too long"},
+			{Name: "check_length", Passed: false, Message: "too long"},
+			{Name: "check_length", Passed: false, Message: "too short"},
+		}
+		result := summarizeAssertions(assertions)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 summary, got %d", len(result))
+		}
+		if len(result[0].Failures) != 2 {
+			t.Errorf("expected 2 unique failure messages, got %d: %v", len(result[0].Failures), result[0].Failures)
+		}
+	})
+
+	t.Run("all pass has no failures slice", func(t *testing.T) {
+		assertions := []AssertionResult{
+			{Name: "check_ok", Passed: true},
+			{Name: "check_ok", Passed: true},
+		}
+		result := summarizeAssertions(assertions)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 summary, got %d", len(result))
+		}
+		if result[0].PassRate != 100 {
+			t.Errorf("expected 100%% pass rate, got %f", result[0].PassRate)
+		}
+		if result[0].Failures != nil {
+			t.Errorf("expected nil failures for all-pass, got %v", result[0].Failures)
+		}
+	})
 }
 
 func TestAggregator_Aggregate_JobNotFound(t *testing.T) {

@@ -103,7 +103,7 @@ const mockSummaries = [
 ];
 
 const mockFailures = {
-  evalResults: [
+  results: [
     {
       id: "e1",
       sessionId: "s1",
@@ -116,6 +116,7 @@ const mockFailures = {
     },
   ],
   total: 1,
+  hasMore: false,
 };
 
 describe("QualityPage", () => {
@@ -189,12 +190,14 @@ describe("QualityPage", () => {
     expect(toneElements.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("agent-1")).toBeInTheDocument();
     expect(screen.getByText("0.30")).toBeInTheDocument();
+    // Pagination info
+    expect(screen.getByText(/1–1 of 1/)).toBeInTheDocument();
   });
 
   it("shows empty state when no eval data", () => {
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
     mockUseRecentEvalFailures.mockReturnValue({
-      data: { evalResults: [], total: 0 },
+      data: { results: [], total: 0, hasMore: false },
       isLoading: false,
       error: null,
     });
@@ -245,7 +248,7 @@ describe("QualityPage", () => {
       },
     ];
     mockUseEvalSummary.mockReturnValue({ data: counterSummaries, isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: { evalResults: [], total: 0 }, isLoading: false, error: null });
+    mockUseRecentEvalFailures.mockReturnValue({ data: { results: [], total: 0, hasMore: false }, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);

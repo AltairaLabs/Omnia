@@ -131,11 +131,16 @@ async function fetchMetricTypes(names: string[]): Promise<Record<string, Prometh
   }
 }
 
-/** Suffixes for infrastructure/histogram sub-metrics to exclude from discovery. */
-const EXCLUDED_SUFFIXES = ["_bucket", "_sum", "_count", "_total", "_created"];
+/** Suffixes for histogram sub-metrics to exclude from discovery. */
+const HISTOGRAM_SUFFIXES = ["_bucket", "_sum", "_count", "_created"];
 
-function isInfrastructureSuffix(name: string): boolean {
-  return EXCLUDED_SUFFIXES.some((s) => name.endsWith(s));
+/** Prefixes for infrastructure metrics that are not eval quality metrics. */
+const INFRA_PREFIXES = ["omnia_eval_worker_"];
+
+function shouldExcludeMetric(name: string): boolean {
+  if (HISTOGRAM_SUFFIXES.some((s) => name.endsWith(s))) return true;
+  if (INFRA_PREFIXES.some((p) => name.startsWith(p))) return true;
+  return false;
 }
 
 /** Discover eval metric names from Prometheus. */
@@ -148,7 +153,7 @@ async function discoverEvalMetrics(filter?: EvalFilter): Promise<string[]> {
     const names = new Set<string>();
     for (const item of resp.data.result as PrometheusVectorResult[]) {
       const name = item.metric.__name__;
-      if (name && !isInfrastructureSuffix(name)) {
+      if (name && !shouldExcludeMetric(name)) {
         names.add(name);
       }
     }

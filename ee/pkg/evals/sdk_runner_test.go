@@ -10,6 +10,7 @@ package evals
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
@@ -182,6 +183,65 @@ func TestToAnyMap_Empty(t *testing.T) {
 func TestToAnyMap_Nil(t *testing.T) {
 	result := toAnyMap(nil)
 	assert.Empty(t, result)
+}
+
+func TestBuildDetailsJSON_AllFields(t *testing.T) {
+	r := runtimeevals.EvalResult{
+		Explanation: "The response was too informal",
+		Error:       "timeout reached",
+		Message:     "eval failed",
+		Details:     map[string]any{"key": "value"},
+		Violations: []runtimeevals.EvalViolation{
+			{TurnIndex: 1, Description: "Used slang"},
+		},
+	}
+	raw := buildDetailsJSON(r)
+	require.NotNil(t, raw)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(raw, &parsed))
+	assert.Equal(t, "The response was too informal", parsed["explanation"])
+	assert.Equal(t, "timeout reached", parsed["error"])
+	assert.Equal(t, "eval failed", parsed["message"])
+	assert.NotNil(t, parsed["details"])
+	assert.NotNil(t, parsed["violations"])
+}
+
+func TestBuildDetailsJSON_Empty(t *testing.T) {
+	r := runtimeevals.EvalResult{EvalID: "e1", Passed: true}
+	raw := buildDetailsJSON(r)
+	assert.Nil(t, raw, "no diagnostic fields should return nil")
+}
+
+func TestBuildDetailsJSON_OnlyExplanation(t *testing.T) {
+	r := runtimeevals.EvalResult{Explanation: "Good tone"}
+	raw := buildDetailsJSON(r)
+	require.NotNil(t, raw)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(raw, &parsed))
+	assert.Equal(t, "Good tone", parsed["explanation"])
+	assert.Nil(t, parsed["error"])
+}
+
+func TestConvertSDKResults_CarriesDetails(t *testing.T) {
+	results := []runtimeevals.EvalResult{
+		{
+			EvalID:      "e1",
+			Type:        "llm_judge",
+			Passed:      false,
+			Explanation: "Too informal",
+			Error:       "threshold exceeded",
+		},
+	}
+	items := convertSDKResults(results)
+	require.Len(t, items, 1)
+	require.NotNil(t, items[0].Details)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(items[0].Details, &parsed))
+	assert.Equal(t, "Too informal", parsed["explanation"])
+	assert.Equal(t, "threshold exceeded", parsed["error"])
 }
 
 func TestSDKRunner_RunTurnEvals_SkipsMismatchedTrigger(t *testing.T) {

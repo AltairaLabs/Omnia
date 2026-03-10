@@ -655,6 +655,64 @@ function OverviewTab({ job }: Readonly<{ job: ArenaJob }>) {
   );
 }
 
+interface ResultDetailsScenario {
+  name: string;
+  total: number;
+  passed: number;
+  failed: number;
+  passRate: number;
+  avgDurationMs: number;
+  totalTokens?: number;
+  totalCost?: number;
+}
+interface ResultDetailsProvider {
+  name: string;
+  total: number;
+  passed: number;
+  failed: number;
+  passRate: number;
+  avgDurationMs: number;
+  totalTokens?: number;
+  totalCost?: number;
+}
+interface ResultDetailsAssertion {
+  name: string;
+  total: number;
+  passed: number;
+  failed: number;
+  passRate: number;
+  failures?: string[];
+}
+interface ResultDetailsError {
+  message: string;
+  count: number;
+  workItemIds?: string[];
+}
+interface ResultDetails {
+  scenarios?: ResultDetailsScenario[];
+  providers?: ResultDetailsProvider[];
+  assertions?: ResultDetailsAssertion[];
+  errors?: ResultDetailsError[];
+}
+
+function parseDetails(raw: string | undefined): ResultDetails | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ResultDetails;
+  } catch {
+    return null;
+  }
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatCost(cost: number): string {
+  return `$${cost.toFixed(4)}`;
+}
+
 function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
   const phase = job.status?.phase;
   const resultsUrl = job.status?.result?.url;
@@ -680,12 +738,14 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
     );
   }
 
-  // Parse result summary values
   const totalItems = resultSummary ? Number.parseInt(resultSummary.totalItems || "0", 10) : 0;
   const passedItems = resultSummary ? Number.parseInt(resultSummary.passedItems || "0", 10) : 0;
   const failedItems = resultSummary ? Number.parseInt(resultSummary.failedItems || "0", 10) : 0;
   const passRate = resultSummary?.passRate;
   const avgDurationMs = resultSummary?.avgDurationMs;
+  const totalTokens = resultSummary?.totalTokens;
+  const totalCost = resultSummary?.totalCost;
+  const details = parseDetails(resultSummary?.details);
 
   if (!resultsUrl && !resultSummary) {
     return (
@@ -699,17 +759,14 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
     );
   }
 
-  // Show results summary
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Job Results</CardTitle>
-        <CardDescription>
-          Results from {job.spec?.type} job
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Summary stats */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Total Tests</p>
@@ -717,49 +774,205 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Passed</p>
-              <p className="text-2xl font-bold text-green-600">
-                {passedItems}
-              </p>
+              <p className="text-2xl font-bold text-green-600">{passedItems}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
-              <p className="text-2xl font-bold text-red-600">
-                {failedItems}
-              </p>
+              <p className="text-2xl font-bold text-red-600">{failedItems}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Pass Rate</p>
-              <p className="text-2xl font-bold">
-                {passRate ? `${passRate}%` : "-"}
-              </p>
+              <p className="text-2xl font-bold">{passRate ? `${passRate}%` : "-"}</p>
             </div>
           </div>
-
-          {avgDurationMs && (
-            <div className="pt-4 border-t">
-              <p className="text-sm text-muted-foreground">Average Duration</p>
-              <p className="text-lg font-medium">{avgDurationMs}ms</p>
+          {(avgDurationMs || totalTokens || totalCost) && (
+            <div className="flex gap-6 pt-4 mt-4 border-t text-sm">
+              {avgDurationMs && (
+                <div>
+                  <span className="text-muted-foreground">Avg Duration: </span>
+                  <span className="font-medium">{avgDurationMs}ms</span>
+                </div>
+              )}
+              {totalTokens && (
+                <div>
+                  <span className="text-muted-foreground">Total Tokens: </span>
+                  <span className="font-medium">{Number(totalTokens).toLocaleString()}</span>
+                </div>
+              )}
+              {totalCost && (
+                <div>
+                  <span className="text-muted-foreground">Total Cost: </span>
+                  <span className="font-medium">${totalCost}</span>
+                </div>
+              )}
             </div>
           )}
+        </CardContent>
+      </Card>
 
-          {resultsUrl && (
-            <div className="pt-4 border-t">
-              <a
-                href={resultsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2"
-              >
-                <Button>
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  View Full Results
-                </Button>
-              </a>
+      {/* Scenario breakdown */}
+      {details?.scenarios && details.scenarios.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Scenarios</CardTitle>
+            <CardDescription>Per-scenario breakdown</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="pb-2 font-medium">Scenario</th>
+                    <th className="pb-2 font-medium text-right">Total</th>
+                    <th className="pb-2 font-medium text-right">Passed</th>
+                    <th className="pb-2 font-medium text-right">Failed</th>
+                    <th className="pb-2 font-medium text-right">Pass Rate</th>
+                    <th className="pb-2 font-medium text-right">Avg Duration</th>
+                    <th className="pb-2 font-medium text-right">Tokens</th>
+                    <th className="pb-2 font-medium text-right">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {details.scenarios.map((s) => (
+                    <tr key={s.name} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{s.name}</td>
+                      <td className="py-2 text-right">{s.total}</td>
+                      <td className="py-2 text-right text-green-600">{s.passed}</td>
+                      <td className="py-2 text-right text-red-600">{s.failed > 0 ? s.failed : "-"}</td>
+                      <td className="py-2 text-right">{s.passRate.toFixed(1)}%</td>
+                      <td className="py-2 text-right">{formatDurationMs(s.avgDurationMs)}</td>
+                      <td className="py-2 text-right">{s.totalTokens ? s.totalTokens.toLocaleString() : "-"}</td>
+                      <td className="py-2 text-right">{s.totalCost ? formatCost(s.totalCost) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Provider breakdown (only show if more than one provider) */}
+      {details?.providers && details.providers.length > 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Providers</CardTitle>
+            <CardDescription>Per-provider breakdown</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="pb-2 font-medium">Provider</th>
+                    <th className="pb-2 font-medium text-right">Total</th>
+                    <th className="pb-2 font-medium text-right">Passed</th>
+                    <th className="pb-2 font-medium text-right">Failed</th>
+                    <th className="pb-2 font-medium text-right">Pass Rate</th>
+                    <th className="pb-2 font-medium text-right">Avg Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {details.providers.map((p) => (
+                    <tr key={p.name} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{p.name}</td>
+                      <td className="py-2 text-right">{p.total}</td>
+                      <td className="py-2 text-right text-green-600">{p.passed}</td>
+                      <td className="py-2 text-right text-red-600">{p.failed > 0 ? p.failed : "-"}</td>
+                      <td className="py-2 text-right">{p.passRate.toFixed(1)}%</td>
+                      <td className="py-2 text-right">{formatDurationMs(p.avgDurationMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Assertions */}
+      {details?.assertions && details.assertions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Assertions</CardTitle>
+            <CardDescription>
+              {details.assertions.filter((a) => a.failed === 0).length} of {details.assertions.length} fully passing
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {details.assertions.map((a) => (
+                <div key={a.name} className="flex items-start gap-2 text-sm">
+                  {a.failed === 0 ? (
+                    <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{a.name}</span>
+                      <span className="text-muted-foreground">
+                        {a.passed}/{a.total} passed ({a.passRate.toFixed(0)}%)
+                      </span>
+                    </div>
+                    {a.failures && a.failures.length > 0 && (
+                      <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                        {a.failures.map((msg) => (
+                          <li key={msg} className="text-red-600">
+                            {msg}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Errors */}
+      {details?.errors && details.errors.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base text-red-600">Errors</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {details.errors.map((e) => (
+                <div key={e.message} className="text-sm">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                    <span className="font-medium">{e.message}</span>
+                    {e.count > 1 && (
+                      <Badge variant="secondary" className="text-xs">{e.count}x</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* External results link */}
+      {resultsUrl && (
+        <div>
+          <a
+            href={resultsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2"
+          >
+            <Button>
+              <ExternalLink className="h-4 w-4 mr-2" />
+              View Full Results
+            </Button>
+          </a>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }
 

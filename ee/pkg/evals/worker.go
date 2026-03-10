@@ -25,12 +25,14 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
+	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Constants for Redis consumer group and stream configuration.
@@ -86,6 +88,14 @@ type WorkerConfig struct {
 	// Metrics records Prometheus metrics for the eval worker.
 	// If nil, a NoOpWorkerMetrics is used.
 	Metrics WorkerMetricsRecorder
+	// EvalMetrics records per-eval Prometheus metrics (omnia_eval_*) so the
+	// quality dashboard can discover them. If nil, per-eval metrics are not emitted.
+	EvalMetrics metrics.EvalMetricsRecorder
+	// EvalCollector is a PromptKit MetricCollector that creates dynamically-named
+	// per-eval Prometheus metrics (e.g., omnia_eval_helpfulness). The quality
+	// dashboard discovers these via {__name__=~"omnia_eval_.*"}. If nil, one is
+	// created automatically.
+	EvalCollector *runtimeevals.MetricCollector
 	// TracerProvider enables OTel tracing for eval execution.
 	// When set, the SDK emits per-eval spans with GenAI attributes.
 	TracerProvider trace.TracerProvider
@@ -107,6 +117,8 @@ type EvalWorker struct {
 	packLoader        *PromptPackLoader
 	providerResolver  *ProviderResolver
 	metrics           WorkerMetricsRecorder
+	evalMetrics       metrics.EvalMetricsRecorder
+	evalCollector     *runtimeevals.MetricCollector
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
@@ -148,6 +160,13 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		metricsRecorder = &NoOpWorkerMetrics{}
 	}
 
+	evalCollector := config.EvalCollector
+	if evalCollector == nil {
+		evalCollector = runtimeevals.NewMetricCollector(
+			runtimeevals.WithNamespace("omnia_eval"),
+		)
+	}
+
 	namespaces := resolveNamespaces(config)
 	streamKeys := buildStreamKeys(namespaces)
 	consumerGroup := buildConsumerGroup(namespaces)
@@ -166,6 +185,8 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		packLoader:       config.PackLoader,
 		providerResolver: resolver,
 		metrics:          metricsRecorder,
+		evalMetrics:      config.EvalMetrics,
+		evalCollector:    evalCollector,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -412,7 +433,7 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 
 	items := w.getSDKRunner().RunTurnEvals(ctx, evals, messages, event.SessionID, turnIndex, providerSpecs)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
-	return w.writeResults(ctx, results, event.SessionID)
+	return w.writeResults(ctx, results, event.SessionID, evals)
 }
 
 // onSessionComplete is the CompletionTracker callback. It runs on_session_complete evals.
@@ -461,11 +482,13 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 
 	items := w.getSDKRunner().RunSessionEvals(ctx, evals, messages, sessionID, turnIndex, providerSpecs)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
-	return w.writeResults(ctx, results, sessionID)
+	return w.writeResults(ctx, results, sessionID, evals)
 }
 
 // writeResults writes eval results if there are any.
-func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult, sessionID string) error {
+func (w *EvalWorker) writeResults(
+	ctx context.Context, results []*api.EvalResult, sessionID string, evalDefs []EvalDef,
+) error {
 	if len(results) == 0 {
 		return nil
 	}
@@ -476,12 +499,98 @@ func (w *EvalWorker) writeResults(ctx context.Context, results []*api.EvalResult
 	}
 
 	w.getMetrics().RecordResultsWritten(len(results), true)
+	w.recordPerEvalMetrics(results, evalDefs)
 	w.logger.Info("eval results written",
 		"sessionID", sessionID,
 		"count", len(results),
 	)
 
 	return nil
+}
+
+// EvalCollector returns the PromptKit MetricCollector for per-eval-name metrics.
+// The caller (main.go) should append evalCollector.WritePrometheus(w) to /metrics.
+func (w *EvalWorker) EvalCollector() *runtimeevals.MetricCollector {
+	return w.evalCollector
+}
+
+// recordPerEvalMetrics emits omnia_eval_* Prometheus metrics for each result
+// so the quality dashboard can discover them alongside runtime-emitted metrics.
+func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult, evalDefs []EvalDef) {
+	defMap := buildEvalDefMap(evalDefs)
+	for _, r := range results {
+		if w.evalMetrics != nil {
+			w.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
+				EvalID:         r.EvalID,
+				EvalType:       r.EvalType,
+				Trigger:        r.Trigger,
+				Passed:         r.Passed,
+				Score:          r.Score,
+				DurationSec:    durationMsToSec(r.DurationMs),
+				Agent:          r.AgentName,
+				Namespace:      r.Namespace,
+				PromptPackName: r.PromptPackName,
+			})
+		}
+		w.recordEvalCollectorMetric(r, defMap[r.EvalID])
+	}
+}
+
+// buildEvalDefMap creates a lookup map from eval ID to its MetricDef.
+func buildEvalDefMap(defs []EvalDef) map[string]*runtimeevals.MetricDef {
+	m := make(map[string]*runtimeevals.MetricDef, len(defs))
+	for i := range defs {
+		if defs[i].Metric != nil {
+			m[defs[i].ID] = defs[i].Metric
+		}
+	}
+	return m
+}
+
+// recordEvalCollectorMetric records a per-eval-name metric to the PromptKit
+// MetricCollector. This creates dynamically-named metrics like
+// omnia_eval_response_conciseness that the quality dashboard discovers.
+// When the eval definition includes a MetricDef, its name and type are used;
+// otherwise falls back to using the eval ID with boolean type.
+func (w *EvalWorker) recordEvalCollectorMetric(r *api.EvalResult, metricDef *runtimeevals.MetricDef) {
+	if w.evalCollector == nil {
+		return
+	}
+	metric := metricDef
+	if metric == nil {
+		metric = &runtimeevals.MetricDef{
+			Name: r.EvalID,
+			Type: runtimeevals.MetricBoolean,
+		}
+	}
+	// Ensure standard labels are always set.
+	if metric.Labels == nil {
+		metric.Labels = make(map[string]string)
+	}
+	metric.Labels["agent"] = r.AgentName
+	metric.Labels["namespace"] = r.Namespace
+	metric.Labels["promptpack_name"] = r.PromptPackName
+
+	result := runtimeevals.EvalResult{
+		EvalID: r.EvalID,
+		Type:   r.EvalType,
+		Passed: r.Passed,
+		Score:  r.Score,
+	}
+	if err := w.evalCollector.Record(result, metric); err != nil {
+		w.logger.Warn("failed to record eval collector metric",
+			"evalID", r.EvalID,
+			"error", err,
+		)
+	}
+}
+
+// durationMsToSec converts an optional duration in milliseconds to seconds.
+func durationMsToSec(ms *int) float64 {
+	if ms == nil {
+		return 0
+	}
+	return float64(*ms) / 1000.0
 }
 
 // getMessages reads session messages from the Redis hot tier.
@@ -583,6 +692,7 @@ func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName
 		Trigger:           item.Trigger,
 		Passed:            item.Passed,
 		Score:             item.Score,
+		Details:           item.Details,
 		Source:            evalSource,
 		CreatedAt:         time.Now(),
 	}

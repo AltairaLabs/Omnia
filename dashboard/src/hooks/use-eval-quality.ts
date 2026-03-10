@@ -2,8 +2,8 @@
  * Hooks for agent quality dashboard with eval pass rates.
  *
  * useEvalSummary reads from Prometheus (eval gauge metrics).
- * useRecentEvalFailures is a placeholder -- the session-api does not yet
- * have an eval-results endpoint, so it returns empty data.
+ * useRecentEvalFailures calls the session-api eval-results endpoint
+ * with passed=false to fetch recent failures.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -15,6 +15,8 @@ import { useQuery } from "@tanstack/react-query";
 import { queryPrometheus, queryPrometheusMetadata, type PrometheusVectorResult, type PrometheusMetricType } from "@/lib/prometheus";
 import { EvalQueries, type EvalFilter } from "@/lib/prometheus-queries";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { SessionApiService } from "@/lib/data/session-api-service";
 import type { EvalResult, EvalResultSummary, EvalMetricType } from "@/types/eval";
 
 export interface EvalListParams {
@@ -29,11 +31,16 @@ export interface EvalListParams {
 /**
  * Discover eval metric names from Prometheus.
  */
-/** Suffixes for infrastructure/histogram sub-metrics to exclude from discovery. */
-const EXCLUDED_SUFFIXES = ["_bucket", "_sum", "_count", "_total", "_created"];
+/** Suffixes for histogram sub-metrics to exclude from discovery. */
+const HISTOGRAM_SUFFIXES = ["_bucket", "_sum", "_count", "_created"];
 
-function isInfrastructureSuffix(name: string): boolean {
-  return EXCLUDED_SUFFIXES.some((s) => name.endsWith(s));
+/** Prefixes for infrastructure metrics that are not eval quality metrics. */
+const INFRA_PREFIXES = ["omnia_eval_worker_"];
+
+function shouldExcludeMetric(name: string): boolean {
+  if (HISTOGRAM_SUFFIXES.some((s) => name.endsWith(s))) return true;
+  if (INFRA_PREFIXES.some((p) => name.startsWith(p))) return true;
+  return false;
 }
 
 async function discoverEvalMetrics(filter?: EvalFilter): Promise<string[]> {
@@ -45,7 +52,7 @@ async function discoverEvalMetrics(filter?: EvalFilter): Promise<string[]> {
     const names = new Set<string>();
     for (const item of resp.data.result as PrometheusVectorResult[]) {
       const name = item.metric.__name__;
-      if (name && !isInfrastructureSuffix(name)) {
+      if (name && !shouldExcludeMetric(name)) {
         names.add(name);
       }
     }
@@ -152,16 +159,28 @@ async function fetchMetricTypes(names: string[]): Promise<Record<string, EvalMet
 }
 
 /**
- * Placeholder for recent eval failures.
+ * Fetch recent eval failures from the session-api eval-results endpoint.
  *
- * The session-api does not yet expose an eval-results endpoint, so this
- * hook returns empty data. Once the Go backend adds
- * GET /api/v1/eval-results, this can be wired back up.
+ * Calls GET /api/workspaces/{name}/eval-results?passed=false with optional
+ * additional filters. Returns { results, total, hasMore } from the backend.
  */
-export function useRecentEvalFailures(_params?: EvalListParams) {
+export function useRecentEvalFailures(params?: EvalListParams) {
+  const { currentWorkspace } = useWorkspace();
+
   return useQuery({
-    queryKey: ["eval-failures"],
-    queryFn: async () => ({ evalResults: [] as EvalResult[], total: 0 }),
+    queryKey: ["eval-failures", currentWorkspace?.name, params],
+    queryFn: async () => {
+      if (!currentWorkspace) {
+        return { results: [] as EvalResult[], total: 0, hasMore: false };
+      }
+      const service = new SessionApiService();
+      return service.getEvalResults(currentWorkspace.name, {
+        ...params,
+        passed: false,
+        limit: params?.limit ?? 20,
+      });
+    },
+    enabled: !!currentWorkspace,
     staleTime: DEFAULT_STALE_TIME,
   });
 }

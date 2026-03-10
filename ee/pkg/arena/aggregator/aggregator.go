@@ -12,6 +12,7 @@ package aggregator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -130,6 +131,9 @@ func (a *Aggregator) aggregateResult(
 		}
 		a.updateProviderStats(stats, execResult)
 	}
+
+	// Collect assertions
+	result.Assertions = append(result.Assertions, execResult.Assertions...)
 }
 
 // updateScenarioStats updates statistics for a scenario.
@@ -236,6 +240,9 @@ func (a *Aggregator) finalizeResult(result *AggregatedResult, errorCounts map[st
 
 // ToJobResult converts an AggregatedResult to the CRD JobResult format.
 // This is used to populate the ArenaJob.Status.Result field.
+// The summary map contains flat key-value metrics for backward compatibility,
+// plus a "details" key with JSON-encoded structured breakdown (scenarios,
+// providers, assertions, errors).
 func (a *Aggregator) ToJobResult(result *AggregatedResult) *omniav1alpha1.JobResult {
 	if result == nil {
 		return nil
@@ -258,7 +265,135 @@ func (a *Aggregator) ToJobResult(result *AggregatedResult) *omniav1alpha1.JobRes
 		summary["totalCost"] = fmt.Sprintf("%.4f", result.TotalCost)
 	}
 
+	// Serialize structured breakdown for dashboard display
+	details := buildResultDetails(result)
+	if data, err := json.Marshal(details); err == nil {
+		summary["details"] = string(data)
+	}
+
 	return &omniav1alpha1.JobResult{
 		Summary: summary,
 	}
+}
+
+// resultDetails is the JSON-serializable breakdown stored in summary["details"].
+type resultDetails struct {
+	Scenarios  []scenarioDetail   `json:"scenarios,omitempty"`
+	Providers  []providerDetail   `json:"providers,omitempty"`
+	Assertions []assertionSummary `json:"assertions,omitempty"`
+	Errors     []ErrorSummary     `json:"errors,omitempty"`
+}
+
+// assertionSummary groups assertion results by name.
+type assertionSummary struct {
+	Name     string   `json:"name"`
+	Total    int      `json:"total"`
+	Passed   int      `json:"passed"`
+	Failed   int      `json:"failed"`
+	PassRate float64  `json:"passRate"`
+	Failures []string `json:"failures,omitempty"`
+}
+
+type scenarioDetail struct {
+	Name          string  `json:"name"`
+	Total         int     `json:"total"`
+	Passed        int     `json:"passed"`
+	Failed        int     `json:"failed"`
+	PassRate      float64 `json:"passRate"`
+	AvgDurationMs int64   `json:"avgDurationMs"`
+	TotalTokens   int64   `json:"totalTokens,omitempty"`
+	TotalCost     float64 `json:"totalCost,omitempty"`
+}
+
+type providerDetail struct {
+	Name          string  `json:"name"`
+	Total         int     `json:"total"`
+	Passed        int     `json:"passed"`
+	Failed        int     `json:"failed"`
+	PassRate      float64 `json:"passRate"`
+	AvgDurationMs int64   `json:"avgDurationMs"`
+	TotalTokens   int64   `json:"totalTokens,omitempty"`
+	TotalCost     float64 `json:"totalCost,omitempty"`
+}
+
+// summarizeAssertions groups raw assertion results by name and computes
+// pass/fail counts. Failure messages are collected (deduplicated) to help
+// diagnose what went wrong without flooding the dashboard with duplicates.
+func summarizeAssertions(assertions []AssertionResult) []assertionSummary {
+	if len(assertions) == 0 {
+		return nil
+	}
+
+	// Preserve insertion order via a separate slice of names.
+	order := make([]string, 0)
+	byName := make(map[string]*assertionSummary)
+
+	for _, a := range assertions {
+		s := byName[a.Name]
+		if s == nil {
+			s = &assertionSummary{Name: a.Name}
+			byName[a.Name] = s
+			order = append(order, a.Name)
+		}
+		s.Total++
+		if a.Passed {
+			s.Passed++
+		} else {
+			s.Failed++
+			if a.Message != "" && !containsString(s.Failures, a.Message) {
+				s.Failures = append(s.Failures, a.Message)
+			}
+		}
+	}
+
+	result := make([]assertionSummary, 0, len(order))
+	for _, name := range order {
+		s := byName[name]
+		if s.Total > 0 {
+			s.PassRate = float64(s.Passed) / float64(s.Total) * 100
+		}
+		result = append(result, *s)
+	}
+	return result
+}
+
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func buildResultDetails(result *AggregatedResult) resultDetails {
+	d := resultDetails{
+		Assertions: summarizeAssertions(result.Assertions),
+		Errors:     result.Errors,
+	}
+	for name, s := range result.ByScenario {
+		d.Scenarios = append(d.Scenarios, scenarioDetail{
+			Name:          name,
+			Total:         s.Total,
+			Passed:        s.Passed,
+			Failed:        s.Failed,
+			PassRate:      s.PassRate,
+			AvgDurationMs: s.AvgDuration.Milliseconds(),
+			TotalTokens:   s.TotalTokens,
+			TotalCost:     s.TotalCost,
+		})
+	}
+	for name, p := range result.ByProvider {
+		d.Providers = append(d.Providers, providerDetail{
+			Name:          name,
+			Total:         p.Total,
+			Passed:        p.Passed,
+			Failed:        p.Failed,
+			PassRate:      p.PassRate,
+			AvgDurationMs: p.AvgDuration.Milliseconds(),
+			TotalTokens:   p.TotalTokens,
+			TotalCost:     p.TotalCost,
+		})
+	}
+	return d
 }

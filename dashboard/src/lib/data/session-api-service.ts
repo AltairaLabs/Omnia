@@ -281,4 +281,56 @@ export class SessionApiService {
     return data.results || [];
   }
 
+  /**
+   * List eval results with filters (workspace-level, not session-specific).
+   */
+  async getEvalResults(
+    workspace: string,
+    params: EvalResultListParams = {}
+  ): Promise<EvalResultListResponse> {
+    const qs = new URLSearchParams();
+    if (params.agentName) qs.set("agentName", params.agentName);
+    if (params.evalId) qs.set("evalId", params.evalId);
+    if (params.evalType) qs.set("evalType", params.evalType);
+    if (params.passed !== undefined) qs.set("passed", String(params.passed));
+    if (params.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params.offset !== undefined) qs.set("offset", String(params.offset));
+
+    const query = qs.toString();
+    const suffix = query ? `?${query}` : "";
+    const url = `${SESSION_API_BASE}/${encodeURIComponent(workspace)}/eval-results${suffix}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return { results: [], total: 0, hasMore: false };
+      }
+      throw new Error(`Failed to fetch eval results: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return {
+      results: data.results || [],
+      total: data.total || 0,
+      hasMore: data.hasMore || false,
+    };
+  }
+
+}
+
+/** Parameters for listing eval results with filters. */
+export interface EvalResultListParams {
+  agentName?: string;
+  evalId?: string;
+  evalType?: string;
+  passed?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+/** Response shape from the eval-results list endpoint. */
+export interface EvalResultListResponse {
+  results: EvalResult[];
+  total: number;
+  hasMore: boolean;
 }

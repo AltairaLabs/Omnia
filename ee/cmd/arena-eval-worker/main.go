@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
@@ -32,6 +34,7 @@ import (
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
+	"github.com/altairalabs/omnia/pkg/metrics"
 
 	// Register PromptKit provider factories for LLM judge eval execution.
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
@@ -98,6 +101,8 @@ func main() {
 	workerMetrics := evals.NewWorkerMetrics(nil)
 	workerMetrics.Initialize()
 
+	evalMetrics := metrics.NewMultiAgentEvalMetrics(metrics.MultiAgentEvalMetricsConfig{})
+
 	redisClient := goredis.NewClient(&goredis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
@@ -121,6 +126,7 @@ func main() {
 		K8sClient:    k8sClient,
 		PackLoader:   packLoader,
 		Metrics:      workerMetrics,
+		EvalMetrics:  evalMetrics,
 	}
 	if tp != nil {
 		workerCfg.TracerProvider = tp.TracerProvider()
@@ -140,7 +146,7 @@ func main() {
 	}()
 
 	// Start HTTP server for metrics and health probes.
-	go startHTTPServer(cfg.MetricsAddr, logger)
+	go startHTTPServer(cfg.MetricsAddr, logger, worker.EvalCollector())
 
 	logger.Info("starting arena-eval-worker",
 		"namespaces", cfg.Namespaces,
@@ -223,9 +229,24 @@ func parseNamespaces() []string {
 }
 
 // startHTTPServer starts the metrics and health probe HTTP server.
-func startHTTPServer(addr string, logger *slog.Logger) {
+// The evalCollector appends per-eval-name metrics (e.g., omnia_eval_helpfulness)
+// to the /metrics response for dashboard discovery.
+func startHTTPServer(addr string, logger *slog.Logger, evalCollector *runtimeevals.MetricCollector) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+
+	// Disable compression so we can safely append SDK eval metrics after
+	// the standard Prometheus output (same pattern as cmd/runtime/main.go).
+	uncompressedHandler := promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{DisableCompression: true},
+	)
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		uncompressedHandler.ServeHTTP(w, r)
+		if evalCollector != nil {
+			_ = evalCollector.WritePrometheus(w)
+		}
+	})
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

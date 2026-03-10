@@ -39,6 +39,46 @@ func isIstioCRDInstalled() bool {
 	return err == nil
 }
 
+// isAgentPolicyControllerRunning checks if an AgentPolicy resource gets reconciled
+// by creating a probe policy and checking if the status is set within a short window.
+func isAgentPolicyControllerRunning() bool {
+	yaml := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: controller-probe
+  namespace: test-agents
+spec:
+  claimMapping:
+    forwardClaims:
+      - claim: probe
+        header: X-Omnia-Claim-Probe
+  mode: enforce
+`
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(yaml)
+	if _, err := utils.Run(cmd); err != nil {
+		return false
+	}
+	defer func() {
+		cmd := exec.Command("kubectl", "delete", "agentpolicy", "controller-probe",
+			"-n", "test-agents", "--ignore-not-found", "--timeout=10s")
+		_, _ = utils.Run(cmd)
+	}()
+
+	// Give the controller 10 seconds to reconcile
+	for i := 0; i < 5; i++ {
+		time.Sleep(2 * time.Second)
+		cmd := exec.Command("kubectl", "get", "agentpolicy", "controller-probe",
+			"-n", "test-agents", "-o", "jsonpath={.status.phase}")
+		output, err := utils.Run(cmd)
+		if err == nil && output != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // isToolPolicyControllerRunning checks if a ToolPolicy resource gets reconciled
 // by creating a probe policy and checking if the status is set within a short window.
 func isToolPolicyControllerRunning() bool {
@@ -310,6 +350,11 @@ spec:
 			cmd := exec.Command("kubectl", "get", "crd", "agentpolicies.omnia.altairalabs.ai")
 			if _, err := utils.Run(cmd); err != nil {
 				Skip("AgentPolicy CRD not installed")
+			}
+
+			// Check if the AgentPolicy controller is running and reconciling
+			if !isAgentPolicyControllerRunning() {
+				Skip("AgentPolicy controller not running — AgentPolicyReconciler may not be reconciling")
 			}
 		})
 

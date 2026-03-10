@@ -80,6 +80,7 @@ const maxItemTimeout = 10 * time.Minute
 // Execution mode constants.
 const (
 	executionModeFleet = "fleet"
+	defaultScenarioID  = "default"
 )
 
 // Config holds the worker configuration from environment variables.
@@ -505,9 +506,15 @@ func executeWorkItem(
 		defer a2aCleanup()
 	}
 
-	// For fleet mode, register the fleet provider into the engine's registry
+	// For fleet mode, register the fleet provider into both the runtime
+	// registry (so ExecuteRuns can dispatch to it) and LoadedProviders (so
+	// GenerateRunPlan includes it when building combinations). This must
+	// happen AFTER BuildEngineComponents — which would reject the unknown
+	// "fleet" type — but BEFORE NewEngine which snapshots LoadedProviders
+	// into the planner's provider map.
 	if fleetProvider != nil {
 		providerRegistry.Register(fleetProvider)
+		injectFleetProviderConfig(arenaCfg)
 	}
 
 	// Create engine with all components
@@ -534,7 +541,7 @@ func executeWorkItem(
 
 	// Determine scenario filter
 	scenarioFilter := []string{}
-	if item.ScenarioID != "" && item.ScenarioID != "default" {
+	if item.ScenarioID != "" && item.ScenarioID != defaultScenarioID {
 		scenarioFilter = []string{item.ScenarioID}
 	}
 
@@ -559,7 +566,8 @@ func executeWorkItem(
 	}
 
 	if len(plan.Combinations) == 0 {
-		result.Status = statusPass
+		result.Status = statusFail
+		result.Error = "no scenario/provider combinations generated — check scenario filter and provider config"
 		result.DurationMs = float64(time.Since(start).Milliseconds())
 		return result, nil
 	}
@@ -717,11 +725,11 @@ func buildExecutionResult(
 
 // buildFallbackResult creates a simple result when arena store is unavailable.
 func buildFallbackResult(result *ExecutionResult, runIDs []string) *ExecutionResult {
-	if len(runIDs) > 0 {
-		result.Status = statusPass
-	} else {
-		result.Status = statusFail
+	result.Status = statusFail
+	if len(runIDs) == 0 {
 		result.Error = "no runs executed"
+	} else {
+		result.Error = fmt.Sprintf("unable to read run state for %d run(s) — results unknown", len(runIDs))
 	}
 	return result
 }
@@ -870,6 +878,20 @@ func loadOverrides(path string) (*overrides.OverrideConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// injectFleetProviderConfig adds a fleet-agent entry to the arena config's
+// LoadedProviders map so that GenerateRunPlan can produce combinations for it.
+// The fleet provider is a passthrough (no credentials, no model) since the
+// target agent handles LLM calls internally.
+func injectFleetProviderConfig(arenaCfg *config.Config) {
+	if arenaCfg.LoadedProviders == nil {
+		arenaCfg.LoadedProviders = make(map[string]*config.Provider)
+	}
+	arenaCfg.LoadedProviders["fleet-agent"] = &config.Provider{
+		ID:   "fleet-agent",
+		Type: "fleet",
+	}
 }
 
 // applyProviderOverrides injects provider configs from CRD overrides into the arena config.

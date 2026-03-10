@@ -40,7 +40,7 @@ function createWrapper() {
 }
 
 const mockFailureData = {
-  evalResults: [
+  results: [
     {
       id: "er-1",
       sessionId: "sess-abc",
@@ -65,6 +65,7 @@ const mockFailureData = {
     },
   ],
   total: 2,
+  hasMore: false,
 };
 
 describe("FailingSessionsTable", () => {
@@ -92,7 +93,7 @@ describe("FailingSessionsTable", () => {
 
   it("shows 'No recent failures' when empty", () => {
     mockUseRecentEvalFailures.mockReturnValue({
-      data: { evalResults: [], total: 0 },
+      data: { results: [], total: 0, hasMore: false },
       isLoading: false,
       error: null,
     });
@@ -191,7 +192,7 @@ describe("FailingSessionsTable", () => {
 
   it("displays card header with title and description", () => {
     mockUseRecentEvalFailures.mockReturnValue({
-      data: { evalResults: [], total: 0 },
+      data: { results: [], total: 0, hasMore: false },
       isLoading: false,
       error: null,
     });
@@ -209,7 +210,7 @@ describe("FailingSessionsTable", () => {
 
   it("displays formatted eval type in description", () => {
     mockUseRecentEvalFailures.mockReturnValue({
-      data: { evalResults: [], total: 0 },
+      data: { results: [], total: 0, hasMore: false },
       isLoading: false,
       error: null,
     });

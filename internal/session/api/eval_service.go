@@ -49,13 +49,14 @@ type EvaluateRequest struct {
 
 // EvaluateResultItem represents a single eval result.
 type EvaluateResultItem struct {
-	EvalID     string   `json:"evalId"`
-	EvalType   string   `json:"evalType"`
-	Trigger    string   `json:"trigger"`
-	Passed     bool     `json:"passed"`
-	Score      *float64 `json:"score,omitempty"`
-	DurationMs int      `json:"durationMs"`
-	Source     string   `json:"source"`
+	EvalID     string          `json:"evalId"`
+	EvalType   string          `json:"evalType"`
+	Trigger    string          `json:"trigger"`
+	Passed     bool            `json:"passed"`
+	Score      *float64        `json:"score,omitempty"`
+	DurationMs int             `json:"durationMs"`
+	Source     string          `json:"source"`
+	Details    json.RawMessage `json:"details,omitempty"`
 }
 
 // EvaluateResponseSummary contains aggregate counts for an evaluation run.

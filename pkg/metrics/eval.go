@@ -45,6 +45,7 @@ type EvalMetrics struct {
 type EvalMetricsConfig struct {
 	AgentName       string
 	Namespace       string
+	PromptPackName  string
 	DurationBuckets []float64
 }
 
@@ -63,8 +64,9 @@ func NewEvalMetrics(cfg EvalMetricsConfig) *EvalMetrics {
 // Prometheus registerer. Use prometheus.NewRegistry() in tests for isolation.
 func NewEvalMetricsWithRegisterer(reg prometheus.Registerer, cfg EvalMetricsConfig) *EvalMetrics {
 	labels := prometheus.Labels{
-		"agent":     cfg.AgentName,
-		"namespace": cfg.Namespace,
+		"agent":           cfg.AgentName,
+		"namespace":       cfg.Namespace,
+		"promptpack_name": cfg.PromptPackName,
 	}
 
 	buckets := cfg.DurationBuckets
@@ -117,6 +119,12 @@ type EvalRecordMetrics struct {
 	DurationSec float64
 	Skipped     bool
 	HasError    bool
+	// Agent, Namespace, and PromptPackName are used by MultiAgentEvalMetrics
+	// as variable labels. They are ignored by the single-agent EvalMetrics
+	// (which uses const labels set at creation time).
+	Agent          string
+	Namespace      string
+	PromptPackName string
 }
 
 // RecordEval records metrics for a single eval execution.
@@ -154,6 +162,7 @@ type EvalMetricsRecorder interface {
 var (
 	_ EvalMetricsRecorder = (*EvalMetrics)(nil)
 	_ EvalMetricsRecorder = (*NoOpEvalMetrics)(nil)
+	_ EvalMetricsRecorder = (*MultiAgentEvalMetrics)(nil)
 )
 
 // NoOpEvalMetrics is a no-op implementation for when eval metrics are disabled.
@@ -161,3 +170,96 @@ type NoOpEvalMetrics struct{}
 
 // RecordEval is a no-op implementation that intentionally does nothing.
 func (n *NoOpEvalMetrics) RecordEval(_ EvalRecordMetrics) {}
+
+// MultiAgentEvalMetrics emits the same omnia_eval_* metric names as EvalMetrics
+// but uses agent, namespace, and promptpack_name as variable labels instead of
+// const labels. This is required for the eval worker which processes results
+// from many different agents.
+type MultiAgentEvalMetrics struct {
+	EvalsExecuted *prometheus.CounterVec
+	EvalScore     *prometheus.GaugeVec
+	EvalDuration  *prometheus.HistogramVec
+	EvalsPassed   *prometheus.CounterVec
+	EvalsFailed   *prometheus.CounterVec
+}
+
+// MultiAgentEvalMetricsConfig configures multi-agent eval metrics.
+type MultiAgentEvalMetricsConfig struct {
+	DurationBuckets []float64
+}
+
+// NewMultiAgentEvalMetrics creates eval metrics with agent, namespace, and
+// promptpack_name as variable labels. Use this in components that handle
+// results from multiple agents (e.g., the eval worker).
+func NewMultiAgentEvalMetrics(cfg MultiAgentEvalMetricsConfig) *MultiAgentEvalMetrics {
+	return NewMultiAgentEvalMetricsWithRegisterer(prometheus.DefaultRegisterer, cfg)
+}
+
+// NewMultiAgentEvalMetricsWithRegisterer creates multi-agent eval metrics
+// registered against the given Prometheus registerer.
+func NewMultiAgentEvalMetricsWithRegisterer(
+	reg prometheus.Registerer, cfg MultiAgentEvalMetricsConfig,
+) *MultiAgentEvalMetrics {
+	buckets := cfg.DurationBuckets
+	if buckets == nil {
+		buckets = DefaultEvalDurationBuckets
+	}
+
+	factory := promauto.With(reg)
+	typeTriggerStatus := []string{"agent", "namespace", "promptpack_name", "eval_type", "trigger", "status"}
+	typeTrigger := []string{"agent", "namespace", "promptpack_name", "eval_type", "trigger"}
+
+	return &MultiAgentEvalMetrics{
+		EvalsExecuted: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "omnia_eval_executed_total",
+			Help: "Total eval executions by eval_type, trigger, and status",
+		}, typeTriggerStatus),
+
+		EvalScore: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omnia_eval_score",
+			Help: "Latest eval score by eval_type and trigger",
+		}, typeTrigger),
+
+		EvalDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "omnia_eval_duration_seconds",
+			Help:    "Eval execution duration in seconds",
+			Buckets: buckets,
+		}, typeTrigger),
+
+		EvalsPassed: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "omnia_eval_passed_total",
+			Help: "Total passed eval executions",
+		}, typeTrigger),
+
+		EvalsFailed: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "omnia_eval_failed_total",
+			Help: "Total failed eval executions",
+		}, typeTrigger),
+	}
+}
+
+// RecordEval records metrics for a single eval execution using the Agent,
+// Namespace, and PromptPackName fields from EvalRecordMetrics as labels.
+func (m *MultiAgentEvalMetrics) RecordEval(r EvalRecordMetrics) {
+	status := StatusSuccess
+	if r.Skipped {
+		status = "skipped"
+	} else if r.HasError {
+		status = StatusError
+	}
+
+	m.EvalsExecuted.WithLabelValues(r.Agent, r.Namespace, r.PromptPackName, r.EvalType, r.Trigger, status).Inc()
+	m.EvalDuration.WithLabelValues(r.Agent, r.Namespace, r.PromptPackName, r.EvalType, r.Trigger).Observe(r.DurationSec)
+
+	if r.Score != nil {
+		m.EvalScore.WithLabelValues(r.Agent, r.Namespace, r.PromptPackName, r.EvalType, r.Trigger).Set(*r.Score)
+	}
+
+	if !r.Skipped && !r.HasError {
+		if r.Passed {
+			m.EvalsPassed.WithLabelValues(r.Agent, r.Namespace, r.PromptPackName, r.EvalType, r.Trigger).Inc()
+		} else {
+			m.EvalsFailed.WithLabelValues(r.Agent, r.Namespace, r.PromptPackName, r.EvalType, r.Trigger).Inc()
+		}
+	}
+}

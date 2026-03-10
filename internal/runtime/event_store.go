@@ -282,7 +282,7 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (session.Me
 		}
 		msg := s.buildMessage(role, content, event.Timestamp, metadata)
 		msg.ToolCallID = data.ToolResult.ID
-		return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+		return msg, session.SessionStatsUpdate{}, true
 	}
 
 	// Enrich with multimodal content metadata (not the blob data itself)
@@ -413,7 +413,7 @@ func (s *OmniaEventStore) convertConversationStarted(event *events.Event) (sessi
 	}
 
 	msg := s.buildMessage(session.RoleSystem, data.SystemPrompt, event.Timestamp, metadata)
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // Metadata key constants for tool registry enrichment.
@@ -466,7 +466,7 @@ func (s *OmniaEventStore) convertToolCallStarted(event *events.Event) (session.M
 	msg := s.buildMessage(session.RoleAssistant, string(content), event.Timestamp, metadata)
 	msg.ToolCallID = data.CallID
 
-	return msg, session.SessionStatsUpdate{AddToolCalls: 1, AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{AddToolCalls: 1}, true
 }
 
 // convertToolCallCompleted creates a tool_result status message.
@@ -502,7 +502,7 @@ func (s *OmniaEventStore) convertToolCallCompleted(event *events.Event) (session
 	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
 	msg.ToolCallID = data.CallID
 
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // convertToolCallFailed creates a tool_result message with is_error metadata.
@@ -529,7 +529,7 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (session.Me
 	msg := s.buildMessage(session.RoleSystem, errMsg, event.Timestamp, metadata)
 	msg.ToolCallID = data.CallID
 
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // --- Provider call events ---
@@ -555,7 +555,7 @@ func (s *OmniaEventStore) convertProviderCallStarted(event *events.Event) (sessi
 		"model":       data.Model,
 	})
 
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // convertProviderCallCompleted records provider call completion with tokens/cost.
@@ -588,7 +588,6 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (ses
 	msg.OutputTokens = int32(data.OutputTokens)
 
 	stats := session.SessionStatsUpdate{
-		AddMessages:     1,
 		AddInputTokens:  int32(data.InputTokens),
 		AddOutputTokens: int32(data.OutputTokens),
 		AddCostUSD:      data.Cost,
@@ -624,7 +623,7 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (sessio
 		"model":        data.Model,
 	})
 
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // --- Eval events ---
@@ -681,7 +680,7 @@ func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (session.Message
 	})
 
 	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // recordEvalMetrics records eval event data to Prometheus metrics.
@@ -720,7 +719,7 @@ func (s *OmniaEventStore) convertGenericEvent(event *events.Event) (session.Mess
 		metaKeySource: metaValueSource,
 	})
 
-	return msg, session.SessionStatsUpdate{AddMessages: 1}, true
+	return msg, session.SessionStatsUpdate{}, true
 }
 
 // --- Helpers ---
