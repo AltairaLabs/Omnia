@@ -1666,5 +1666,76 @@ func TestRecordEvalCollectorMetric_NilCollector(t *testing.T) {
 	w.recordEvalCollectorMetric(r, nil)
 }
 
+func TestProcessEvent_EvaluateRequest_RunsAllEvals(t *testing.T) {
+	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
+		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
+		{ID: "e2", Type: "contains", Trigger: "on_session_complete", Params: map[string]any{"patterns": []any{"bye"}}},
+	})
+	rw := &mockResultWriter{}
+	store := &mockMessageStore{
+		sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+		messages: toMessagePtrs([]session.Message{
+			{ID: "m1", Role: session.RoleUser, Content: "hi"},
+			{ID: "m2", Role: session.RoleAssistant, Content: "hello and bye"},
+		}),
+	}
+
+	w := &EvalWorker{
+		messageStore: store,
+		resultWriter: rw,
+		namespaces:   []string{"ns"},
+		logger:       testLogger(),
+		packLoader:   packLoader,
+	}
+
+	event := api.SessionEvent{
+		EventType:      eventTypeEvaluate,
+		SessionID:      "s1",
+		AgentName:      "test-agent",
+		Namespace:      "ns",
+		PromptPackName: "test-pack",
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+
+	// Verify results were written with source "manual".
+	require.NotEmpty(t, rw.written)
+	for _, r := range rw.written {
+		assert.Equal(t, "manual", r.Source, "evaluate results should have source=manual")
+	}
+}
+
+func TestProcessEvent_EvaluateRequest_NoPack(t *testing.T) {
+	rw := &mockResultWriter{}
+	store := &mockMessageStore{
+		sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+	}
+
+	w := &EvalWorker{
+		messageStore: store,
+		resultWriter: rw,
+		namespaces:   []string{"ns"},
+		logger:       testLogger(),
+	}
+
+	event := api.SessionEvent{
+		EventType: eventTypeEvaluate,
+		SessionID: "s1",
+		AgentName: "test-agent",
+		Namespace: "ns",
+	}
+
+	err := w.processEvent(context.Background(), event)
+	require.NoError(t, err)
+	assert.Empty(t, rw.written, "no evals should run without a pack")
+}
+
+func TestIsEvaluateEvent(t *testing.T) {
+	assert.True(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeEvaluate}))
+	assert.False(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeMessage}))
+	assert.False(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeSessionDone}))
+}
+
 // Ensure unused import suppressors compile.
 var _ = v1alpha1.GroupVersion

@@ -68,7 +68,15 @@ spec:
             {{- if .Values.workspaces.storage.storageClass }}
             - --workspace-storage-class={{ .Values.workspaces.storage.storageClass }}
             {{- end }}
+            {{- if .Values.operator.apiBindAddress }}
+            - --api-bind-address={{ .Values.operator.apiBindAddress }}
+            {{- end }}
           ports:
+            {{- if .Values.operator.apiBindAddress }}
+            - name: api
+              containerPort: {{ trimPrefix ":" .Values.operator.apiBindAddress }}
+              protocol: TCP
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

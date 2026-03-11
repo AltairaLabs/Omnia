@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
@@ -38,6 +39,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
+	"github.com/altairalabs/omnia/internal/tooltest"
 	"github.com/altairalabs/omnia/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
@@ -74,6 +76,7 @@ func main() {
 	var workspaceStorageClass string
 	var redisAddr string
 	var evalWorkerImage string
+	var apiBindAddress string
 	var tlsOpts []func(*tls.Config)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -98,6 +101,8 @@ func main() {
 		"Redis address for eval worker deployments (e.g., redis.omnia-system.svc.cluster.local:6379)")
 	flag.StringVar(&evalWorkerImage, "eval-worker-image", "",
 		"Image for the arena-eval-worker container. If not set, defaults to ghcr.io/altairalabs/arena-eval-worker:latest")
+	flag.StringVar(&apiBindAddress, "api-bind-address", "",
+		"Address for the tool test API server (e.g., :8083). If empty, the API server is not started.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -267,9 +272,29 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
+	// Start tool test API server if configured
+	var apiServer *tooltest.Server
+	if apiBindAddress != "" {
+		apiServer = tooltest.NewServer(apiBindAddress, mgr.GetClient(), ctrl.Log)
+		go func() {
+			if err := apiServer.Start(ctx); err != nil {
+				setupLog.Error(err, "tool test API server stopped")
+			}
+		}()
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
+	}
+
+	// Graceful shutdown of API server
+	if apiServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := apiServer.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "API server shutdown error")
+		}
 	}
 }

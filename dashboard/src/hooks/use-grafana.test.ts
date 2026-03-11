@@ -519,7 +519,7 @@ describe("buildSessionDashboardUrl", () => {
   };
 
   it("should return null when Grafana is disabled", () => {
-    const url = buildSessionDashboardUrl(disabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    const url = buildSessionDashboardUrl(disabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "test-agent", "default");
     expect(url).toBeNull();
   });
 
@@ -530,22 +530,24 @@ describe("buildSessionDashboardUrl", () => {
       remotePath: "/grafana/",
       orgId: 1,
     };
-    const url = buildSessionDashboardUrl(configNoUrl, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    const url = buildSessionDashboardUrl(configNoUrl, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "test-agent", "default");
     expect(url).toBeNull();
   });
 
-  it("should build dashboard URL with session_id and trace_id variables", () => {
-    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+  it("should build dashboard URL with session_id, trace_id, agent, and namespace variables", () => {
+    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "my-agent", "prod");
 
     expect(url).not.toBeNull();
     expect(url).toContain("/grafana/d/omnia-session-detail/_");
     expect(url).toContain("var-session_id=6378abc1-cda7-4f32-91b5-b311db3c7dac");
     expect(url).toContain("var-trace_id=6378abc1cda74f3291b5b311db3c7dac");
+    expect(url).toContain("var-agent=my-agent");
+    expect(url).toContain("var-namespace=prod");
     expect(url).toContain("orgId=1");
   });
 
   it("should default to 6h time range", () => {
-    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "test-agent", "default");
 
     expect(url).not.toBeNull();
     expect(url).toContain("from=now-6h");
@@ -553,7 +555,7 @@ describe("buildSessionDashboardUrl", () => {
   });
 
   it("should use custom time range", () => {
-    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", {
+    const url = buildSessionDashboardUrl(enabledConfig, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "test-agent", "default", {
       from: "now-24h",
       to: "now-1h",
     });
@@ -571,7 +573,7 @@ describe("buildSessionDashboardUrl", () => {
       orgId: 1,
     };
 
-    const url = buildSessionDashboardUrl(configWithSlash, "6378abc1-cda7-4f32-91b5-b311db3c7dac");
+    const url = buildSessionDashboardUrl(configWithSlash, "6378abc1-cda7-4f32-91b5-b311db3c7dac", "test-agent", "default");
 
     expect(url).not.toBeNull();
     expect(url).toContain("https://grafana.example.com/grafana/d/omnia-session-detail/_");

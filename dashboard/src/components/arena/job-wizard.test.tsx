@@ -173,7 +173,6 @@ describe("JobWizard", () => {
       renderWizard();
 
       expect(screen.getByText("Job Name")).toBeInTheDocument();
-      expect(screen.getByText("Job Type")).toBeInTheDocument();
     });
 
     it("pre-populates a default name", () => {
@@ -228,15 +227,6 @@ describe("JobWizard", () => {
       expect(nextButton).toBeEnabled();
     });
 
-    it("shows enterprise badge for load test and datagen types when not enterprise", () => {
-      renderWizard({ isEnterprise: false });
-
-      // Open the job type dropdown
-      const typeSelect = screen.getByRole("combobox");
-      fireEvent.click(typeSelect);
-
-      expect(screen.getAllByText("Enterprise")).toHaveLength(2);
-    });
   });
 
   describe("Step 1: Source", () => {
@@ -434,7 +424,6 @@ describe("JobWizard", () => {
 
       expect(screen.getByText("test-job")).toBeInTheDocument();
       expect(screen.getByText("test-source")).toBeInTheDocument();
-      expect(screen.getByText("Evaluation")).toBeInTheDocument();
     });
 
     it("calls onSubmit when Create Job is clicked", async () => {
@@ -553,142 +542,6 @@ describe("JobWizard", () => {
             sourceRef: { name: "test-source" },
             type: "evaluation",
             workers: { replicas: 1 },
-          })
-        );
-      });
-    });
-  });
-
-  describe("Load Test job type", () => {
-    async function navigateToOptionsWithLoadTest(user: ReturnType<typeof userEvent.setup>) {
-      // Step 0: Fill name and select loadtest type
-      const nameInput = screen.getByPlaceholderText("my-job");
-      await user.clear(nameInput);
-      await user.type(nameInput, "loadtest-job");
-
-      // Select loadtest type
-      const typeSelect = screen.getByRole("combobox");
-      await selectOption(typeSelect, "Load Test");
-
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-
-      // Step 1: Select source
-      await selectOption(screen.getByLabelText("Source"), "test-source");
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-
-      // Step 2-4: Skip execution, providers, tools
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    }
-
-    it("shows load test options for loadtest job type", async () => {
-      const user = userEvent.setup();
-      renderWizard({ isEnterprise: true });
-
-      await navigateToOptionsWithLoadTest(user);
-
-      expect(screen.getByText("Load Test Options")).toBeInTheDocument();
-      expect(screen.getByText("Ramp Up")).toBeInTheDocument();
-      expect(screen.getByText("Duration")).toBeInTheDocument();
-      expect(screen.getByText("Target RPS")).toBeInTheDocument();
-    });
-
-    it("builds loadtest spec correctly", async () => {
-      const user = userEvent.setup();
-      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
-      renderWizard({ isEnterprise: true, onSubmit });
-
-      await navigateToOptionsWithLoadTest(user);
-
-      // Modify duration
-      const durationInput = screen.getByLabelText("Duration");
-      await user.clear(durationInput);
-      await user.type(durationInput, "10m");
-
-      // Modify RPS
-      const rpsInput = screen.getByLabelText("Target RPS");
-      await user.clear(rpsInput);
-      await user.type(rpsInput, "20");
-
-      // Go to review and submit
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
-
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalledWith(
-          "loadtest-job",
-          expect.objectContaining({
-            type: "loadtest",
-            loadTest: expect.objectContaining({
-              rampUp: "30s",
-              duration: "10m",
-              targetRPS: 20,
-            }),
-          })
-        );
-      });
-    });
-  });
-
-  describe("Data Generation job type", () => {
-    async function navigateToOptionsWithDatagen(user: ReturnType<typeof userEvent.setup>) {
-      // Step 0: Fill name and select datagen type
-      const nameInput = screen.getByPlaceholderText("my-job");
-      await user.clear(nameInput);
-      await user.type(nameInput, "datagen-job");
-
-      // Select datagen type
-      const typeSelect = screen.getByRole("combobox");
-      await selectOption(typeSelect, "Data Generation");
-
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-
-      // Step 1: Select source
-      await selectOption(screen.getByLabelText("Source"), "test-source");
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-
-      // Step 2-4: Skip execution, providers, tools
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-    }
-
-    it("shows data generation options for datagen job type", async () => {
-      const user = userEvent.setup();
-      renderWizard({ isEnterprise: true });
-
-      await navigateToOptionsWithDatagen(user);
-
-      expect(screen.getByText("Data Generation Options")).toBeInTheDocument();
-      expect(screen.getByText("Sample Count")).toBeInTheDocument();
-    });
-
-    it("builds datagen spec correctly", async () => {
-      const user = userEvent.setup();
-      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
-      renderWizard({ isEnterprise: true, onSubmit });
-
-      await navigateToOptionsWithDatagen(user);
-
-      // Modify sample count
-      const samplesInput = screen.getByLabelText("Sample Count");
-      await user.clear(samplesInput);
-      await user.type(samplesInput, "200");
-
-      // Go to review and submit
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
-
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalledWith(
-          "datagen-job",
-          expect.objectContaining({
-            type: "datagen",
-            dataGen: expect.objectContaining({
-              count: 200,
-              format: "jsonl",
-            }),
           })
         );
       });
@@ -931,34 +784,6 @@ describe("JobWizard", () => {
   });
 
   describe("Validation", () => {
-    it("shows error when enterprise job type used without license", async () => {
-      const user = userEvent.setup();
-      const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);
-      renderWizard({ isEnterprise: false, onSubmit });
-
-      // Select loadtest (enterprise only) - need to do it before navigating
-      const nameInput = screen.getByPlaceholderText("my-job");
-      await user.clear(nameInput);
-      await user.type(nameInput, "test-job");
-
-      // Note: The select is disabled for non-enterprise, but we test the validation
-      // by directly setting form state through the flow
-
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      await selectOption(screen.getByLabelText("Source"), "test-source");
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /next/i }));
-      fireEvent.click(screen.getByRole("button", { name: /create job/i }));
-
-      // Should not call onSubmit for evaluation (which is allowed)
-      await waitFor(() => {
-        expect(onSubmit).toHaveBeenCalled();
-      });
-    });
-
     it("shows error when workers exceed maxWorkerReplicas", async () => {
       const user = userEvent.setup();
       const onSubmit = vi.fn().mockResolvedValue({} as ArenaJob);

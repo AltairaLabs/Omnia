@@ -44,6 +44,7 @@ const (
 	triggerOnComplete     = "on_session_complete"
 	eventTypeMessage      = "message.assistant"
 	eventTypeSessionDone  = "session.completed"
+	eventTypeEvaluate     = "session.evaluate"
 	streamPayloadField    = "payload"
 	streamReadBatchSize   = 10
 	periodicCheckInterval = 30 * time.Second
@@ -383,6 +384,10 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 		return nil
 	}
 
+	if isEvaluateEvent(event) {
+		return w.processEvaluateRequest(ctx, event)
+	}
+
 	if isAssistantMessageEvent(event) {
 		w.getTracker().RecordActivity(event.SessionID)
 		return w.processAssistantMessage(ctx, event)
@@ -483,6 +488,45 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 	items := w.getSDKRunner().RunSessionEvals(ctx, evals, messages, sessionID, turnIndex, providerSpecs)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
 	return w.writeResults(ctx, results, sessionID, evals)
+}
+
+// processEvaluateRequest handles on-demand eval requests by running all evals
+// (both per_turn and on_session_complete) on the full session. This is triggered
+// by POST /api/v1/sessions/{id}/evaluate.
+func (w *EvalWorker) processEvaluateRequest(ctx context.Context, event api.SessionEvent) error {
+	packEvals := w.loadPackEvals(ctx, event)
+	if packEvals == nil {
+		w.logger.Info("no evals to run (no pack)", "sessionID", event.SessionID)
+		return nil
+	}
+
+	messages, err := w.getMessages(ctx, event.SessionID)
+	if err != nil {
+		return err
+	}
+
+	sess, err := w.getMessageStore().GetSession(ctx, event.SessionID)
+	if err != nil {
+		return fmt.Errorf("get session: %w", err)
+	}
+
+	turnIndex := countAssistantMessages(messages)
+	providerSpecs := w.resolveProviders(ctx, event)
+	enrichedEvent := enrichEvent(event, packEvals)
+
+	// Run all evals without tier filtering — manual trigger runs everything.
+	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.Evals, messages, event.SessionID, turnIndex, providerSpecs)
+	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
+	// Mark source as "manual" to distinguish from automatic eval worker results.
+	for _, r := range results {
+		r.Source = "manual"
+	}
+	return w.writeResults(ctx, results, event.SessionID, packEvals.Evals)
+}
+
+// isEvaluateEvent returns true if the event is a manual eval trigger.
+func isEvaluateEvent(event api.SessionEvent) bool {
+	return event.EventType == eventTypeEvaluate
 }
 
 // writeResults writes eval results if there are any.

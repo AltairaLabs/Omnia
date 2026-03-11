@@ -378,16 +378,21 @@ export function buildSessionTracesUrl(
 
 /**
  * Builds a Grafana dashboard URL for the session detail dashboard.
- * Opens the omnia-session-detail dashboard with session_id pre-filled.
+ * Opens the omnia-session-detail dashboard with session_id, agent, and namespace pre-filled.
+ * The dashboard shows traces (Tempo), logs (Loki), and agent-level metrics (Prometheus).
  *
  * @param config - Grafana configuration
  * @param sessionId - UUID session ID
+ * @param agentName - Agent name (for metric filtering)
+ * @param namespace - Agent namespace (for metric filtering)
  * @param options - Optional time range
  * @returns The dashboard URL or null if Grafana is not enabled
  */
 export function buildSessionDashboardUrl(
   config: GrafanaConfig,
   sessionId: string,
+  agentName: string,
+  namespace: string,
   options: ExploreQueryOptions = {}
 ): string | null {
   if (!config.enabled || !config.baseUrl) {
@@ -402,6 +407,8 @@ export function buildSessionDashboardUrl(
   params.set("to", to);
   params.set("var-session_id", sessionId);
   params.set("var-trace_id", sessionIdToTraceId(sessionId));
+  params.set("var-agent", agentName);
+  params.set("var-namespace", namespace);
 
   const base = config.baseUrl.endsWith("/") ? config.baseUrl.slice(0, -1) : config.baseUrl;
   const path = config.remotePath.endsWith("/") ? config.remotePath.slice(0, -1) : config.remotePath;

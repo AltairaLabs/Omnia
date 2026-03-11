@@ -155,6 +155,11 @@ func TestMCPTransportConstants(t *testing.T) {
 			constant: MCPTransportStdio,
 			expected: "stdio",
 		},
+		{
+			name:     "Streamable HTTP transport",
+			constant: MCPTransportStreamableHTTP,
+			expected: "streamable-http",
+		},
 	}
 
 	for _, tt := range tests {
@@ -277,6 +282,134 @@ func TestToolRegistryWithMCPHandler(t *testing.T) {
 
 	if handler.MCPConfig.Endpoint == nil || *handler.MCPConfig.Endpoint != endpoint {
 		t.Errorf("MCPConfig.Endpoint = %v, want %v", handler.MCPConfig.Endpoint, endpoint)
+	}
+}
+
+func TestMCPToolFilter(t *testing.T) {
+	endpoint := "http://mcp-server:8080"
+
+	handler := HandlerDefinition{
+		Name: "filtered-mcp",
+		Type: HandlerTypeMCP,
+		MCPConfig: &MCPConfig{
+			Transport: MCPTransportSSE,
+			Endpoint:  &endpoint,
+			ToolFilter: &MCPToolFilter{
+				Allowlist: []string{"read_file", "write_file"},
+				Blocklist: []string{"delete_file"},
+			},
+		},
+	}
+
+	if handler.MCPConfig.ToolFilter == nil {
+		t.Fatal("MCPConfig.ToolFilter is nil")
+	}
+
+	if len(handler.MCPConfig.ToolFilter.Allowlist) != 2 {
+		t.Errorf("Allowlist length = %d, want 2", len(handler.MCPConfig.ToolFilter.Allowlist))
+	}
+
+	if handler.MCPConfig.ToolFilter.Allowlist[0] != "read_file" {
+		t.Errorf("Allowlist[0] = %v, want read_file", handler.MCPConfig.ToolFilter.Allowlist[0])
+	}
+
+	if len(handler.MCPConfig.ToolFilter.Blocklist) != 1 {
+		t.Errorf("Blocklist length = %d, want 1", len(handler.MCPConfig.ToolFilter.Blocklist))
+	}
+}
+
+func TestHTTPConfigAdvancedFields(t *testing.T) {
+	bodyMapping := "{ query: @.search_query, limit: @.max_results }"
+	responseMapping := "results[].{title: title, url: url}"
+	urlTemplate := "/users/{{.user_id}}/orders"
+
+	handler := HandlerDefinition{
+		Name: "advanced-http",
+		Type: HandlerTypeHTTP,
+		HTTPConfig: &HTTPConfig{
+			Endpoint:     "https://api.example.com",
+			Method:       "GET",
+			QueryParams:  []string{"search_query", "page"},
+			HeaderParams: map[string]string{"X-Customer-ID": "{{.customer_id}}"},
+			StaticQuery:  map[string]string{"api_key": "secret123"},
+			StaticBody: &apiextensionsv1.JSON{
+				Raw: []byte(`{"source":"omnia"}`),
+			},
+			BodyMapping:     &bodyMapping,
+			ResponseMapping: &responseMapping,
+			Redact:          []string{"api_key", "password"},
+			URLTemplate:     &urlTemplate,
+		},
+	}
+
+	cfg := handler.HTTPConfig
+
+	if len(cfg.QueryParams) != 2 {
+		t.Errorf("QueryParams length = %d, want 2", len(cfg.QueryParams))
+	}
+
+	if cfg.HeaderParams["X-Customer-ID"] != "{{.customer_id}}" {
+		t.Errorf("HeaderParams[X-Customer-ID] = %v, want {{.customer_id}}", cfg.HeaderParams["X-Customer-ID"])
+	}
+
+	if cfg.StaticQuery["api_key"] != "secret123" {
+		t.Errorf("StaticQuery[api_key] = %v, want secret123", cfg.StaticQuery["api_key"])
+	}
+
+	if cfg.StaticBody == nil {
+		t.Fatal("StaticBody is nil")
+	}
+
+	if cfg.BodyMapping == nil || *cfg.BodyMapping != bodyMapping {
+		t.Errorf("BodyMapping = %v, want %v", cfg.BodyMapping, bodyMapping)
+	}
+
+	if cfg.ResponseMapping == nil || *cfg.ResponseMapping != responseMapping {
+		t.Errorf("ResponseMapping = %v, want %v", cfg.ResponseMapping, responseMapping)
+	}
+
+	if len(cfg.Redact) != 2 {
+		t.Errorf("Redact length = %d, want 2", len(cfg.Redact))
+	}
+
+	if cfg.URLTemplate == nil || *cfg.URLTemplate != urlTemplate {
+		t.Errorf("URLTemplate = %v, want %v", cfg.URLTemplate, urlTemplate)
+	}
+}
+
+func TestOpenAPIConfigAuthFields(t *testing.T) {
+	authType := "bearer"
+
+	handler := HandlerDefinition{
+		Name: "authed-openapi",
+		Type: HandlerTypeOpenAPI,
+		OpenAPIConfig: &OpenAPIConfig{
+			SpecURL:  "https://api.example.com/openapi.json",
+			Headers:  map[string]string{"X-Custom": "value"},
+			AuthType: &authType,
+			AuthSecretRef: &SecretKeySelector{
+				Name: "api-secret",
+				Key:  "token",
+			},
+		},
+	}
+
+	cfg := handler.OpenAPIConfig
+
+	if cfg.Headers["X-Custom"] != "value" {
+		t.Errorf("Headers[X-Custom] = %v, want value", cfg.Headers["X-Custom"])
+	}
+
+	if cfg.AuthType == nil || *cfg.AuthType != "bearer" {
+		t.Errorf("AuthType = %v, want bearer", cfg.AuthType)
+	}
+
+	if cfg.AuthSecretRef == nil {
+		t.Fatal("AuthSecretRef is nil")
+	}
+
+	if cfg.AuthSecretRef.Name != "api-secret" {
+		t.Errorf("AuthSecretRef.Name = %v, want api-secret", cfg.AuthSecretRef.Name)
 	}
 }
 
