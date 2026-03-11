@@ -41,6 +41,10 @@ type ServerConfig struct {
 	// Authenticator validates incoming requests. Nil means no auth.
 	Authenticator a2aserver.Authenticator
 
+	// TaskStore is an optional custom task store (e.g., Redis-backed).
+	// If nil, the PromptKit default in-memory store is used.
+	TaskStore a2aserver.TaskStore
+
 	// SDKOptions are additional options passed to each SDK conversation.
 	SDKOptions []sdk.Option
 
@@ -70,6 +74,10 @@ func NewServer(cfg ServerConfig) *Server {
 
 	if cfg.Authenticator != nil {
 		opts = append(opts, a2aserver.WithAuthenticator(cfg.Authenticator))
+	}
+
+	if cfg.TaskStore != nil {
+		opts = append(opts, a2aserver.WithTaskStore(cfg.TaskStore))
 	}
 
 	inner := a2aserver.NewServer(opener, opts...)
