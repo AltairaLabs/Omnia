@@ -92,7 +92,7 @@ func TestResolveOneClient_ExternalURL(t *testing.T) {
 
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "my-agent"
-	ar.Namespace = "default"
+	ar.Namespace = "test-ns"
 
 	client := omniav1alpha1.A2AClientSpec{
 		Name: "external",

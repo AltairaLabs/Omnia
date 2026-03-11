@@ -40,7 +40,11 @@ func ParseResolvedClients(jsonData string) ([]ResolvedClient, error) {
 // exposeAsTools enabled. Each client becomes an sdk.WithA2AAgent option that
 // registers the remote agent's skills as local tools via the PromptKit Tool Bridge.
 func BuildA2AAgentOptions(ctx context.Context, clients []ResolvedClient, log logr.Logger) []sdk.Option {
-	var opts []sdk.Option
+	if len(clients) == 0 {
+		return nil
+	}
+
+	opts := make([]sdk.Option, 0, len(clients))
 
 	for _, c := range clients {
 		if !c.ExposeAsTools {

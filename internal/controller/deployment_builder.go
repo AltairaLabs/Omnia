@@ -423,8 +423,6 @@ func (r *AgentRuntimeReconciler) buildA2AContainer(
 }
 
 // buildA2AEnvVars creates environment variables for the A2A container.
-//
-//nolint:gocognit // env var builder with nested config checks
 func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	resolvedClients []ResolvedA2AClient,
@@ -475,57 +473,8 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 		Value: string(handlerMode),
 	})
 
-	// A2A-specific TTLs
-	if agentRuntime.Spec.A2A != nil {
-		if agentRuntime.Spec.A2A.TaskTTL != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_TASK_TTL",
-				Value: *agentRuntime.Spec.A2A.TaskTTL,
-			})
-		}
-		if agentRuntime.Spec.A2A.ConversationTTL != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_CONVERSATION_TTL",
-				Value: *agentRuntime.Spec.A2A.ConversationTTL,
-			})
-		}
-		// Auth token from secret
-		if agentRuntime.Spec.A2A.Authentication != nil && agentRuntime.Spec.A2A.Authentication.SecretRef != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name: "OMNIA_A2A_AUTH_TOKEN",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: *agentRuntime.Spec.A2A.Authentication.SecretRef,
-						Key:                  "token",
-					},
-				},
-			})
-		}
-		// Task store configuration
-		if agentRuntime.Spec.A2A.TaskStore != nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_TASK_STORE_TYPE",
-				Value: string(agentRuntime.Spec.A2A.TaskStore.Type),
-			})
-			if agentRuntime.Spec.A2A.TaskStore.RedisURL != "" {
-				envVars = append(envVars, corev1.EnvVar{
-					Name:  "OMNIA_A2A_REDIS_URL",
-					Value: agentRuntime.Spec.A2A.TaskStore.RedisURL,
-				})
-			}
-			if agentRuntime.Spec.A2A.TaskStore.RedisSecretRef != nil {
-				envVars = append(envVars, corev1.EnvVar{
-					Name: "OMNIA_A2A_REDIS_URL",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: *agentRuntime.Spec.A2A.TaskStore.RedisSecretRef,
-							Key:                  "url",
-						},
-					},
-				})
-			}
-		}
-	}
+	// A2A-specific config (TTLs, auth, task store).
+	envVars = append(envVars, buildA2AConfigEnvVars(agentRuntime.Spec.A2A)...)
 
 	// Session API URL
 	if r.SessionAPIURL != "" {
@@ -544,41 +493,113 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 		)
 	}
 
-	// Resolved A2A clients (JSON-encoded list for the facade to parse).
-	if len(resolvedClients) > 0 {
-		clientsJSON, err := marshalA2AClients(resolvedClients)
-		if err == nil {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_CLIENTS",
-				Value: clientsJSON,
-			})
-		}
-		// Per-client auth tokens from secrets.
-		for _, rc := range resolvedClients {
-			if rc.AuthTokenEnv == "" {
-				continue
-			}
-			// Find the matching client spec to get the secret ref.
-			for _, cs := range agentRuntime.Spec.A2A.Clients {
-				if cs.Name == rc.Name && cs.Authentication != nil && cs.Authentication.SecretRef != nil {
-					envVars = append(envVars, corev1.EnvVar{
-						Name: rc.AuthTokenEnv,
-						ValueFrom: &corev1.EnvVarSource{
-							SecretKeyRef: &corev1.SecretKeySelector{
-								LocalObjectReference: *cs.Authentication.SecretRef,
-								Key:                  "token",
-							},
-						},
-					})
-					break
-				}
-			}
-		}
-	}
+	// Resolved A2A clients (JSON-encoded list + per-client secret refs).
+	envVars = append(envVars, buildA2AClientEnvVars(agentRuntime, resolvedClients)...)
 
 	// Extra env vars from CRD
 	if agentRuntime.Spec.Facade.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
+	}
+
+	return envVars
+}
+
+// buildA2AConfigEnvVars creates env vars for A2A TTLs, auth, and task store config.
+func buildA2AConfigEnvVars(a2a *omniav1alpha1.A2AConfig) []corev1.EnvVar {
+	if a2a == nil {
+		return nil
+	}
+
+	var envVars []corev1.EnvVar
+
+	if a2a.TaskTTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_TASK_TTL",
+			Value: *a2a.TaskTTL,
+		})
+	}
+	if a2a.ConversationTTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_CONVERSATION_TTL",
+			Value: *a2a.ConversationTTL,
+		})
+	}
+	if a2a.Authentication != nil && a2a.Authentication.SecretRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OMNIA_A2A_AUTH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *a2a.Authentication.SecretRef,
+					Key:                  "token",
+				},
+			},
+		})
+	}
+	if a2a.TaskStore != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_TASK_STORE_TYPE",
+			Value: string(a2a.TaskStore.Type),
+		})
+		if a2a.TaskStore.RedisURL != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_A2A_REDIS_URL",
+				Value: a2a.TaskStore.RedisURL,
+			})
+		}
+		if a2a.TaskStore.RedisSecretRef != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name: "OMNIA_A2A_REDIS_URL",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: *a2a.TaskStore.RedisSecretRef,
+						Key:                  "url",
+					},
+				},
+			})
+		}
+	}
+
+	return envVars
+}
+
+// buildA2AClientEnvVars creates env vars for resolved A2A clients and their auth secrets.
+func buildA2AClientEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	resolvedClients []ResolvedA2AClient,
+) []corev1.EnvVar {
+	if len(resolvedClients) == 0 {
+		return nil
+	}
+
+	var envVars []corev1.EnvVar
+
+	clientsJSON, err := marshalA2AClients(resolvedClients)
+	if err == nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_CLIENTS",
+			Value: clientsJSON,
+		})
+	}
+
+	// Per-client auth tokens from secrets.
+	for _, rc := range resolvedClients {
+		if rc.AuthTokenEnv == "" {
+			continue
+		}
+		for _, cs := range agentRuntime.Spec.A2A.Clients {
+			if cs.Name == rc.Name && cs.Authentication != nil && cs.Authentication.SecretRef != nil {
+				envVars = append(envVars, corev1.EnvVar{
+					Name: rc.AuthTokenEnv,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: *cs.Authentication.SecretRef,
+							Key:                  "token",
+						},
+					},
+				})
+				break
+			}
+		}
 	}
 
 	return envVars
