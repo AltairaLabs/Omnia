@@ -136,11 +136,21 @@ var _ = Describe("Arena Fleet", Ordered, Label("arena"), func() {
 		output, _ = utils.Run(cmd)
 		_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n%s\n", output)
 
-		// Get arena controller logs
+		// Get arena controller logs (use component label, not control-plane)
 		cmd = exec.Command("kubectl", "logs", "-n", namespace,
-			"-l", "control-plane=arena-controller-manager", "--tail=100")
+			"-l", "app.kubernetes.io/component=arena-controller", "--tail=100")
 		output, _ = utils.Run(cmd)
 		_, _ = fmt.Fprintf(GinkgoWriter, "Arena controller logs:\n%s\n", output)
+
+		// Get worker pod logs (from the arena test namespace)
+		cmd = exec.Command("kubectl", "get", "pods", "-n", arenaNamespace,
+			"-l", "app.kubernetes.io/component=worker", "-o", "jsonpath={.items[*].metadata.name}")
+		podNames, _ := utils.Run(cmd)
+		for _, podName := range strings.Fields(podNames) {
+			cmd = exec.Command("kubectl", "logs", "-n", arenaNamespace, podName, "--tail=50")
+			output, _ = utils.Run(cmd)
+			_, _ = fmt.Fprintf(GinkgoWriter, "Worker pod %s logs:\n%s\n", podName, output)
+		}
 	}
 
 	// After each test, check for failures and dump debug info

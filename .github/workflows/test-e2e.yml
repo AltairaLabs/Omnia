@@ -164,7 +164,16 @@ jobs:
           kubectl logs -n omnia-system -l control-plane=controller-manager --tail=100 || true
           echo ""
           echo "=== Arena controller logs ==="
-          kubectl logs -n omnia-system -l control-plane=arena-controller-manager --tail=100 || true
+          kubectl logs -n omnia-system -l app.kubernetes.io/component=arena-controller --tail=100 || true
+          echo ""
+          echo "=== Events in test-arena ==="
+          kubectl get events -n test-arena --sort-by=.lastTimestamp | tail -30 || true
+          echo ""
+          echo "=== Worker pod logs ==="
+          for pod in $(kubectl get pods -n test-arena -l app.kubernetes.io/component=worker -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            echo "--- $pod ---"
+            kubectl logs -n test-arena "$pod" --tail=30 || true
+          done
           echo ""
           echo "=== Redis logs ==="
           kubectl logs -n omnia-system omnia-redis-master-0 --tail=50 || true
