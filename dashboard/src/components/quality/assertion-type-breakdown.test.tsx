@@ -50,44 +50,23 @@ describe("formatMetricName", () => {
 });
 
 describe("getMetricVariant", () => {
-  it("returns default for high gauge values (>= 0.9)", () => {
+  it("returns default for gauge metrics", () => {
     expect(getMetricVariant(0.95)).toBe("default");
-    expect(getMetricVariant(0.9)).toBe("default");
-    expect(getMetricVariant(1.0)).toBe("default");
+    expect(getMetricVariant(0.5)).toBe("default");
   });
 
-  it("returns secondary for medium gauge values (>= 0.7)", () => {
-    expect(getMetricVariant(0.7)).toBe("secondary");
-    expect(getMetricVariant(0.85)).toBe("secondary");
-  });
-
-  it("returns destructive for low gauge values (< 0.7)", () => {
-    expect(getMetricVariant(0.69)).toBe("destructive");
-    expect(getMetricVariant(0)).toBe("destructive");
-    expect(getMetricVariant(0.5)).toBe("destructive");
-  });
-
-  it("returns outline for counter metrics regardless of value", () => {
+  it("returns outline for counter metrics", () => {
     expect(getMetricVariant(47, "counter")).toBe("outline");
-    expect(getMetricVariant(0, "counter")).toBe("outline");
   });
 
-  it("returns outline for histogram metrics regardless of value", () => {
+  it("returns outline for histogram metrics", () => {
     expect(getMetricVariant(1.5, "histogram")).toBe("outline");
   });
 });
 
 describe("getMetricColor", () => {
-  it("returns green class for high values (>= 0.9)", () => {
-    expect(getMetricColor(0.95)).toContain("text-green");
-  });
-
-  it("returns yellow class for medium values (>= 0.7)", () => {
-    expect(getMetricColor(0.75)).toContain("text-yellow");
-  });
-
-  it("returns red class for low values (< 0.7)", () => {
-    expect(getMetricColor(0.5)).toContain("text-red");
+  it("returns foreground class for gauge metrics", () => {
+    expect(getMetricColor(0.95)).toContain("text-foreground");
   });
 
   it("returns muted color for counter metrics", () => {
@@ -166,7 +145,7 @@ describe("AssertionTypeBreakdown", () => {
     expect(screen.getByText("Unable to load eval metrics from Prometheus")).toBeInTheDocument();
   });
 
-  it("renders metric rows with name, value, badge", () => {
+  it("renders metric rows with name, value, and type badge", () => {
     mockUseEvalMetrics.mockReturnValue({
       data: [
         { name: "omnia_eval_tone", value: 0.95, metricType: "gauge" },
@@ -189,26 +168,9 @@ describe("AssertionTypeBreakdown", () => {
     // Values
     expect(screen.getByText("0.950")).toBeInTheDocument();
     expect(screen.getByText("0.650")).toBeInTheDocument();
-    // Badges
-    expect(screen.getByText("Passing")).toBeInTheDocument();
-    expect(screen.getByText("Failing")).toBeInTheDocument();
-  });
-
-  it("renders Warning badge for medium values", () => {
-    mockUseEvalMetrics.mockReturnValue({
-      data: [{ name: "omnia_eval_relevance", value: 0.75, metricType: "gauge" }],
-      isLoading: false,
-      error: null,
-    });
-
-    const Wrapper = createWrapper();
-    render(
-      <Wrapper>
-        <AssertionTypeBreakdown />
-      </Wrapper>
-    );
-
-    expect(screen.getByText("Warning")).toBeInTheDocument();
+    // Type badges
+    const gaugeBadges = screen.getAllByText("gauge");
+    expect(gaugeBadges.length).toBe(2);
   });
 
   it("renders counter metric with type label instead of pass/fail", () => {

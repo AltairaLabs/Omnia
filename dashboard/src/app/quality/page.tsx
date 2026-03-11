@@ -14,7 +14,6 @@ import Link from "next/link";
 import { Header } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -38,7 +37,6 @@ import {
   Bot,
   AlertCircle,
   ExternalLink,
-  CheckCircle2,
   XCircle,
   Activity,
 } from "lucide-react";
@@ -50,9 +48,6 @@ import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-brea
 import { FailingSessionsTable } from "@/components/quality/failing-sessions-table";
 import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
 
-const PASS_THRESHOLD = 90;
-const FAIL_THRESHOLD = 70;
-
 const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
   { label: "Last 1h", value: "1h" },
   { label: "Last 6h", value: "6h" },
@@ -61,34 +56,17 @@ const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
   { label: "Last 30d", value: "30d" },
 ];
 
-/** Check whether a summary represents a gauge/boolean (score-based) metric. */
-function isScoreMetric(s: EvalResultSummary): boolean {
-  return !s.metricType || s.metricType === "gauge" || s.metricType === "boolean";
+/** Format a metric value for display based on its type. */
+function formatValue(summary: EvalResultSummary): string {
+  if (summary.metricType === "counter") return summary.total.toLocaleString();
+  if (summary.metricType === "histogram") return `${(summary.avgScore ?? 0).toFixed(3)}s`;
+  if (summary.metricType === "boolean") return (summary.avgScore ?? 0) >= 0.5 ? "true" : "false";
+  return (summary.avgScore ?? 0).toFixed(3);
 }
 
-/** Compute aggregate stats from Prometheus gauge summaries. */
-function computeAggregateStats(summaries: EvalResultSummary[]) {
-  const scoreMetrics = summaries.filter(isScoreMetric);
-  const activeEvals = summaries.length;
-  const overallPassRate =
-    scoreMetrics.length > 0
-      ? scoreMetrics.reduce((sum, s) => sum + s.passRate, 0) / scoreMetrics.length
-      : 0;
-  const passing = scoreMetrics.filter((s) => s.passRate >= PASS_THRESHOLD).length;
-  const failing = scoreMetrics.filter((s) => s.passRate < FAIL_THRESHOLD).length;
-  return { activeEvals, overallPassRate, passing, failing };
-}
-
-function getPassRateColor(rate: number): string {
-  if (rate >= 90) return "text-green-600 dark:text-green-400";
-  if (rate >= 70) return "text-yellow-600 dark:text-yellow-400";
-  return "text-red-600 dark:text-red-400";
-}
-
-function getPassRateVariant(rate: number): "default" | "secondary" | "destructive" {
-  if (rate >= 90) return "default";
-  if (rate >= 70) return "secondary";
-  return "destructive";
+/** Get a display label for the metric type. */
+function metricTypeLabel(summary: EvalResultSummary): string {
+  return summary.metricType ?? "gauge";
 }
 
 function StatsCardSkeleton() {
@@ -110,9 +88,7 @@ function EvalTableSkeleton() {
     <TableRow>
       <TableCell><Skeleton className="h-4 w-24" /></TableCell>
       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-      <TableCell className="text-right"><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
+      <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
     </TableRow>
   );
 }
@@ -127,8 +103,7 @@ function SummaryCards({
 }>) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-4 gap-4">
-        <StatsCardSkeleton />
+      <div className="grid grid-cols-3 gap-4">
         <StatsCardSkeleton />
         <StatsCardSkeleton />
         <StatsCardSkeleton />
@@ -136,54 +111,45 @@ function SummaryCards({
     );
   }
 
-  const stats = computeAggregateStats(summaries);
+  const gaugeCount = summaries.filter((s) => !s.metricType || s.metricType === "gauge").length;
+  const booleanCount = summaries.filter((s) => s.metricType === "boolean").length;
+  const otherCount = summaries.length - gaugeCount - booleanCount;
 
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-3 gap-4">
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Active Evals</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.activeEvals}</p>
+          <p className="text-2xl font-bold mt-1">{summaries.length}</p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Overall Pass Rate</span>
+            <span className="text-sm text-muted-foreground">Score Metrics</span>
           </div>
-          <p className={`text-2xl font-bold mt-1 ${getPassRateColor(stats.overallPassRate)}`}>
-            {stats.overallPassRate.toFixed(1)}%
-          </p>
+          <p className="text-2xl font-bold mt-1">{gaugeCount + booleanCount}</p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <span className="text-sm text-muted-foreground">Passing</span>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Counter / Histogram</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.passing}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-2">
-            <XCircle className="h-4 w-4 text-red-500" />
-            <span className="text-sm text-muted-foreground">Failing</span>
-          </div>
-          <p className="text-2xl font-bold mt-1">{stats.failing}</p>
+          <p className="text-2xl font-bold mt-1">{otherCount}</p>
         </CardContent>
       </Card>
     </div>
   );
 }
 
-/** Per-eval pass rate table. */
-function EvalPassRateTable({
+/** Per-eval metrics table showing current values by type. */
+function EvalMetricsTable({
   summaries,
   isLoading,
 }: Readonly<{
@@ -191,7 +157,7 @@ function EvalPassRateTable({
   isLoading: boolean;
 }>) {
   const sorted = useMemo(
-    () => [...summaries].sort((a, b) => a.passRate - b.passRate),
+    () => [...summaries].sort((a, b) => a.evalId.localeCompare(b.evalId)),
     [summaries]
   );
 
@@ -203,11 +169,9 @@ function EvalPassRateTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Eval ID</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Pass Rate</TableHead>
-            <TableHead>Progress</TableHead>
-            <TableHead className="text-right">Avg Score</TableHead>
+            <TableHead>Eval</TableHead>
+            <TableHead>Metric Type</TableHead>
+            <TableHead className="text-right">Current Value</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -220,8 +184,8 @@ function EvalPassRateTable({
           )}
           {!isLoading && sorted.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                No eval data available
+              <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                No eval metrics found. Eval metrics are emitted by the runtime when evals execute.
               </TableCell>
             </TableRow>
           )}
@@ -229,37 +193,11 @@ function EvalPassRateTable({
             <TableRow key={summary.evalId}>
               <TableCell className="font-mono text-sm">{summary.evalId}</TableCell>
               <TableCell>
-                <Badge variant="outline">{summary.evalType}</Badge>
+                <Badge variant="outline">{metricTypeLabel(summary)}</Badge>
               </TableCell>
-              {isScoreMetric(summary) ? (
-                <>
-                  <TableCell>
-                    <Badge variant={getPassRateVariant(summary.passRate)}>
-                      {summary.passRate.toFixed(1)}%
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="w-[160px]">
-                    <Progress value={summary.passRate} className="h-2" />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {summary.avgScore === undefined ? "-" : summary.avgScore.toFixed(2)}
-                  </TableCell>
-                </>
-              ) : (
-                <>
-                  <TableCell>
-                    <span className="text-muted-foreground font-mono">
-                      {summary.metricType === "counter" ? summary.total.toLocaleString() : (summary.avgScore?.toFixed(3) ?? "-")}
-                    </span>
-                  </TableCell>
-                  <TableCell className="w-[160px]">
-                    <span className="text-xs text-muted-foreground">
-                      {summary.metricType === "counter" ? "count" : "duration"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right">-</TableCell>
-                </>
-              )}
+              <TableCell className="text-right font-mono">
+                {formatValue(summary)}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -475,7 +413,7 @@ export default function QualityPage() {
     <div className="flex flex-col h-full">
       <Header
         title="Quality"
-        description="Agent eval pass rates and quality metrics"
+        description="Agent eval metrics and quality scores"
       />
 
       <div className="flex-1 p-6 space-y-6">
@@ -520,7 +458,7 @@ export default function QualityPage() {
 
           <TabsContent value="overview" className="space-y-6 mt-4">
             <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
-            <EvalPassRateTable summaries={summaries} isLoading={summaryQuery.isLoading} />
+            <EvalMetricsTable summaries={summaries} isLoading={summaryQuery.isLoading} />
             <RecentFailures />
           </TabsContent>
 

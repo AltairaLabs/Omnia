@@ -17,6 +17,7 @@ import {
   Cpu,
   Zap,
   ArrowLeftRight,
+  Shield,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -67,6 +68,10 @@ const KIND_CONFIG: Record<TimelineEventKind, {
     icon: <GitBranch className="h-3.5 w-3.5" />,
     color: "text-purple-500",
   },
+  eval_event: {
+    icon: <Shield className="h-3.5 w-3.5" />,
+    color: "text-violet-500",
+  },
   workflow_completed: {
     icon: <CheckCircle2 className="h-3.5 w-3.5" />,
     color: "text-green-500",
@@ -94,11 +99,71 @@ interface PipelineGroup {
   children: TimelineEvent[];
 }
 
+/** A group of eval events sharing the same trigger type. */
+interface EvalGroup {
+  type: "eval_group";
+  trigger: string;
+  children: TimelineEvent[];
+  timestamp: string;
+}
+
 type TimelineItem =
   | { type: "event"; event: TimelineEvent }
-  | PipelineGroup;
+  | PipelineGroup
+  | EvalGroup;
 
-/** Group events into top-level items and collapsible pipeline sections. */
+/** Accumulate a single eval event into the pending map. */
+function accumulateEvalEvent(
+  event: TimelineEvent,
+  pending: Map<string, TimelineEvent[]>,
+) {
+  const trigger = event.metadata?.trigger || "unknown";
+  const existing = pending.get(trigger);
+  if (existing) {
+    existing.push(event);
+  } else {
+    pending.set(trigger, [event]);
+  }
+}
+
+/** Flush pending eval groups into the result array. */
+function flushPendingEvals(
+  pending: Map<string, TimelineEvent[]>,
+  timestamp: string,
+  result: TimelineItem[],
+) {
+  for (const [trigger, children] of pending) {
+    result.push({ type: "eval_group", trigger, children, timestamp });
+  }
+}
+
+/** Collect consecutive eval events into trigger-based groups. */
+function groupEvalEvents(items: TimelineItem[]): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  let pendingEvals = new Map<string, TimelineEvent[]>();
+  let pendingTimestamp = "";
+
+  for (const item of items) {
+    if (item.type === "event" && item.event.kind === "eval_event") {
+      if (!pendingTimestamp) pendingTimestamp = item.event.timestamp;
+      accumulateEvalEvent(item.event, pendingEvals);
+    } else {
+      if (pendingEvals.size > 0) {
+        flushPendingEvals(pendingEvals, pendingTimestamp, result);
+        pendingEvals = new Map();
+        pendingTimestamp = "";
+      }
+      result.push(item);
+    }
+  }
+  if (pendingEvals.size > 0) {
+    flushPendingEvals(pendingEvals, pendingTimestamp, result);
+  }
+
+  return result;
+}
+
+/** Group events into top-level items and collapsible pipeline/eval sections. */
 function groupIntoPipelines(events: TimelineEvent[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   let currentGroup: PipelineGroup | null = null;
@@ -124,7 +189,8 @@ function groupIntoPipelines(events: TimelineEvent[]): TimelineItem[] {
   // Close unclosed group (pipeline started but never completed)
   if (currentGroup) items.push(currentGroup);
 
-  return items;
+  // Second pass: group consecutive eval events by trigger
+  return groupEvalEvents(items);
 }
 
 function EventRow({ event, openToolCall, indent }: {
@@ -211,7 +277,7 @@ function PipelineSection({ group, openToolCall }: {
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </span>
         <span className="font-medium truncate shrink-0 max-w-48">
-          Pipeline
+          Agent Pipeline
         </span>
         <span className="text-muted-foreground text-xs">
           {group.children.length} events
@@ -233,6 +299,60 @@ function PipelineSection({ group, openToolCall }: {
       </button>
       {expanded && (
         <div className="border-l-2 border-indigo-500/20 ml-[6.5rem]">
+          {group.children.map((child) => (
+            <EventRow key={child.id} event={child} openToolCall={openToolCall} indent />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function triggerLabel(trigger: string): string {
+  if (trigger === "every_turn") return "Turn";
+  if (trigger === "on_session_complete") return "Session";
+  return trigger;
+}
+
+function EvalGroupSection({ group, openToolCall }: {
+  readonly group: EvalGroup;
+  readonly openToolCall: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const passed = group.children.filter((e) => e.status === "success").length;
+  const failed = group.children.length - passed;
+
+  return (
+    <div data-testid={`eval-group-${group.trigger}`}>
+      <button
+        type="button"
+        className={cn(
+          "flex items-center gap-3 w-full text-left px-2 py-1.5 rounded text-sm",
+          "hover:bg-muted/50 transition-colors cursor-pointer"
+        )}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="text-xs text-muted-foreground font-mono shrink-0 w-20">
+          {formatTimestamp(group.timestamp)}
+        </span>
+        <span className="shrink-0 text-violet-500">
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </span>
+        <span className="font-medium truncate shrink-0 max-w-48">
+          Evals: {triggerLabel(group.trigger)}
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0 ml-auto">
+          <span className="text-muted-foreground text-xs">{group.children.length} evals</span>
+          {passed > 0 && (
+            <Badge variant="secondary" className="text-xs px-1 py-0">{passed} OK</Badge>
+          )}
+          {failed > 0 && (
+            <Badge variant="destructive" className="text-xs px-1 py-0">{failed} Fail</Badge>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-l-2 border-violet-500/20 ml-[6.5rem]">
           {group.children.map((child) => (
             <EventRow key={child.id} event={child} openToolCall={openToolCall} indent />
           ))}
@@ -264,6 +384,15 @@ export function TimelineTab({ messages }: TimelineTabProps) {
             return (
               <PipelineSection
                 key={item.startEvent.id}
+                group={item}
+                openToolCall={openToolCall}
+              />
+            );
+          }
+          if (item.type === "eval_group") {
+            return (
+              <EvalGroupSection
+                key={`eval-${item.trigger}-${item.timestamp}`}
                 group={item}
                 openToolCall={openToolCall}
               />
