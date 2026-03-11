@@ -22,44 +22,23 @@ import (
 	"github.com/altairalabs/omnia/internal/session"
 )
 
-func TestConvertToSDKDefs(t *testing.T) {
-	defs := []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"value": "hello"}},
-		{ID: "e2", Type: "llm_judge", Trigger: "on_session_complete", Params: map[string]any{"criteria": "helpful"}},
-		{ID: "e3", Type: "custom", Trigger: "every_turn"},
+// testPackData builds a minimal pack.json with the given eval definitions.
+func testPackData(defs []runtimeevals.EvalDef) []byte {
+	pack := map[string]any{
+		"id":      "test-pack",
+		"version": "v1",
+		"evals":   defs,
+		"prompts": map[string]any{
+			"default": map[string]any{
+				"id":              "default",
+				"name":            "Default",
+				"version":         "1.0.0",
+				"system_template": "You are a helpful assistant.",
+			},
+		},
 	}
-
-	sdkDefs := convertToSDKDefs(defs)
-
-	require.Len(t, sdkDefs, 3)
-
-	assert.Equal(t, "e1", sdkDefs[0].ID)
-	assert.Equal(t, "contains", sdkDefs[0].Type)
-	assert.Equal(t, runtimeevals.TriggerEveryTurn, sdkDefs[0].Trigger)
-	assert.Equal(t, map[string]any{"value": "hello"}, sdkDefs[0].Params)
-
-	assert.Equal(t, "e2", sdkDefs[1].ID)
-	assert.Equal(t, runtimeevals.TriggerOnSessionComplete, sdkDefs[1].Trigger)
-
-	assert.Equal(t, runtimeevals.EvalTrigger("every_turn"), sdkDefs[2].Trigger)
-}
-
-func TestMapTrigger(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected runtimeevals.EvalTrigger
-	}{
-		{"per_turn", runtimeevals.TriggerEveryTurn},
-		{"on_session_complete", runtimeevals.TriggerOnSessionComplete},
-		{"every_turn", runtimeevals.EvalTrigger("every_turn")},
-		{"sample_turns", runtimeevals.EvalTrigger("sample_turns")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.expected, mapTrigger(tt.input))
-		})
-	}
+	data, _ := json.Marshal(pack)
+	return data
 }
 
 func TestConvertSDKResults(t *testing.T) {
@@ -104,20 +83,20 @@ func TestNewSDKRunner_WithTracerProvider(t *testing.T) {
 func TestSDKRunner_RunTurnEvals_ContainsHandler(t *testing.T) {
 	runner := NewSDKRunner()
 
-	defs := []EvalDef{
+	packData := testPackData([]runtimeevals.EvalDef{
 		{
 			ID:      "e1",
 			Type:    "contains",
-			Trigger: "per_turn",
+			Trigger: runtimeevals.TriggerEveryTurn,
 			Params:  map[string]any{"patterns": []any{"hello"}},
 		},
-	}
+	})
 	messages := []session.Message{
 		{ID: "m1", Role: session.RoleUser, Content: "say hello"},
 		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
 	}
 
-	items := runner.RunTurnEvals(context.Background(), defs, messages, "sess-1", 1, nil)
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil)
 	require.Len(t, items, 1)
 	assert.Equal(t, "e1", items[0].EvalID)
 	assert.True(t, items[0].Passed)
@@ -126,20 +105,20 @@ func TestSDKRunner_RunTurnEvals_ContainsHandler(t *testing.T) {
 func TestSDKRunner_RunTurnEvals_ContainsFails(t *testing.T) {
 	runner := NewSDKRunner()
 
-	defs := []EvalDef{
+	packData := testPackData([]runtimeevals.EvalDef{
 		{
 			ID:      "e1",
 			Type:    "contains",
-			Trigger: "per_turn",
+			Trigger: runtimeevals.TriggerEveryTurn,
 			Params:  map[string]any{"patterns": []any{"goodbye"}},
 		},
-	}
+	})
 	messages := []session.Message{
 		{ID: "m1", Role: session.RoleUser, Content: "say hello"},
 		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
 	}
 
-	items := runner.RunTurnEvals(context.Background(), defs, messages, "sess-1", 1, nil)
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil)
 	require.Len(t, items, 1)
 	assert.False(t, items[0].Passed)
 }
@@ -147,19 +126,19 @@ func TestSDKRunner_RunTurnEvals_ContainsFails(t *testing.T) {
 func TestSDKRunner_RunSessionEvals(t *testing.T) {
 	runner := NewSDKRunner()
 
-	defs := []EvalDef{
+	packData := testPackData([]runtimeevals.EvalDef{
 		{
 			ID:      "e1",
 			Type:    "contains",
-			Trigger: "on_session_complete",
+			Trigger: runtimeevals.TriggerOnSessionComplete,
 			Params:  map[string]any{"patterns": []any{"hello"}},
 		},
-	}
+	})
 	messages := []session.Message{
 		{ID: "m1", Role: session.RoleAssistant, Content: "hello"},
 	}
 
-	items := runner.RunSessionEvals(context.Background(), defs, messages, "sess-1", 1, nil)
+	items := runner.RunSessionEvals(context.Background(), packData, messages, "sess-1", 1, nil)
 	require.Len(t, items, 1)
 	assert.True(t, items[0].Passed)
 }
@@ -247,19 +226,19 @@ func TestConvertSDKResults_CarriesDetails(t *testing.T) {
 func TestSDKRunner_RunTurnEvals_SkipsMismatchedTrigger(t *testing.T) {
 	runner := NewSDKRunner()
 
-	defs := []EvalDef{
+	packData := testPackData([]runtimeevals.EvalDef{
 		{
 			ID:      "e1",
 			Type:    "contains",
-			Trigger: "on_session_complete",
+			Trigger: runtimeevals.TriggerOnSessionComplete,
 			Params:  map[string]any{"patterns": []any{"hello"}},
 		},
-	}
+	})
 	messages := []session.Message{
 		{ID: "m1", Role: session.RoleAssistant, Content: "hello"},
 	}
 
 	// RunTurnEvals should skip on_session_complete triggers.
-	items := runner.RunTurnEvals(context.Background(), defs, messages, "sess-1", 1, nil)
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil)
 	assert.Empty(t, items)
 }

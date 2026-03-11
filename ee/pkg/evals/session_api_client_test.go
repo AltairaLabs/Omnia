@@ -238,9 +238,9 @@ func TestHTTPSessionAPIClient_ListEvalResults_WithAllParams(t *testing.T) {
 		assert.Equal(t, "true", q.Get("passed"))
 		assert.Equal(t, "5", q.Get("limit"))
 		assert.Equal(t, "10", q.Get("offset"))
-		assert.Equal(t, "my-agent", q.Get("agent_name"))
+		assert.Equal(t, "my-agent", q.Get("agentName"))
 		assert.Equal(t, "default", q.Get("namespace"))
-		assert.Equal(t, "eval-1", q.Get("eval_id"))
+		assert.Equal(t, "eval-1", q.Get("evalId"))
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.EvalResultListResponse{Results: []*api.EvalResult{}})

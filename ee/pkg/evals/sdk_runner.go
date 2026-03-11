@@ -23,7 +23,6 @@ import (
 )
 
 // SDKRunner executes evals via the PromptKit SDK's Evaluate() function.
-// When a TracerProvider is set, the SDK emits per-eval OTel spans automatically.
 type SDKRunner struct {
 	tracerProvider trace.TracerProvider
 	logger         *slog.Logger
@@ -54,48 +53,46 @@ func WithLogger(l *slog.Logger) SDKRunnerOption {
 // RunTurnEvals executes per-turn evals via sdk.Evaluate().
 func (s *SDKRunner) RunTurnEvals(
 	ctx context.Context,
-	defs []EvalDef,
+	packData []byte,
 	messages []session.Message,
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 ) []api.EvaluateResultItem {
-	return s.evaluate(ctx, defs, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn)
+	return s.evaluate(ctx, packData, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn)
 }
 
 // RunSessionEvals executes session-complete evals via sdk.Evaluate().
 func (s *SDKRunner) RunSessionEvals(
 	ctx context.Context,
-	defs []EvalDef,
+	packData []byte,
 	messages []session.Message,
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 ) []api.EvaluateResultItem {
-	return s.evaluate(ctx, defs, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerOnSessionComplete)
+	return s.evaluate(ctx, packData, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerOnSessionComplete)
 }
 
-// evaluate calls sdk.Evaluate() with the appropriate trigger and converts results.
+// evaluate calls sdk.Evaluate() with PackData and converts results.
 func (s *SDKRunner) evaluate(
 	ctx context.Context,
-	defs []EvalDef,
+	packData []byte,
 	messages []session.Message,
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 	trigger runtimeevals.EvalTrigger,
 ) []api.EvaluateResultItem {
-	sdkDefs := convertToSDKDefs(defs)
-	typesMessages := ConvertToTypesMessages(messages)
-
 	opts := sdk.EvaluateOpts{
-		EvalDefs:       sdkDefs,
-		Messages:       typesMessages,
-		SessionID:      sessionID,
-		TurnIndex:      turnIndex,
-		Trigger:        trigger,
-		TracerProvider: s.tracerProvider,
-		Logger:         s.logger,
+		Messages:             ConvertToTypesMessages(messages),
+		SessionID:            sessionID,
+		TurnIndex:            turnIndex,
+		Trigger:              trigger,
+		TracerProvider:       s.tracerProvider,
+		Logger:               s.logger,
+		PackData:             packData,
+		SkipSchemaValidation: true,
 	}
 
 	if len(providerSpecs) > 0 {
@@ -117,33 +114,6 @@ func (s *SDKRunner) evaluate(
 	return convertSDKResults(results)
 }
 
-// convertToSDKDefs converts Omnia EvalDef to PromptKit SDK EvalDef.
-func convertToSDKDefs(defs []EvalDef) []runtimeevals.EvalDef {
-	sdkDefs := make([]runtimeevals.EvalDef, len(defs))
-	for i, d := range defs {
-		sdkDefs[i] = runtimeevals.EvalDef{
-			ID:      d.ID,
-			Type:    d.Type,
-			Trigger: mapTrigger(d.Trigger),
-			Params:  d.Params,
-			Metric:  d.Metric,
-		}
-	}
-	return sdkDefs
-}
-
-// mapTrigger converts Omnia trigger strings to SDK EvalTrigger values.
-func mapTrigger(trigger string) runtimeevals.EvalTrigger {
-	switch trigger {
-	case triggerPerTurn:
-		return runtimeevals.TriggerEveryTurn
-	case triggerOnComplete:
-		return runtimeevals.TriggerOnSessionComplete
-	default:
-		return runtimeevals.EvalTrigger(trigger)
-	}
-}
-
 // convertSDKResults converts PromptKit EvalResult to Omnia EvaluateResultItem.
 func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultItem {
 	items := make([]api.EvaluateResultItem, 0, len(results))
@@ -154,7 +124,7 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 		item := api.EvaluateResultItem{
 			EvalID:     r.EvalID,
 			EvalType:   r.Type,
-			Passed:     r.Passed,
+			Passed:     r.Passed, //nolint:staticcheck // Passed is set by SDK eval handlers; IsPassed() uses different threshold
 			DurationMs: int(r.DurationMs),
 			Source:     evalSource,
 		}
@@ -171,8 +141,7 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 }
 
 // buildDetailsJSON assembles a details JSON blob from the SDK result's
-// diagnostic fields (explanation, error, message, details, violations).
-// Returns nil if no diagnostic fields are populated.
+// diagnostic fields. Returns nil if no diagnostic fields are populated.
 func buildDetailsJSON(r runtimeevals.EvalResult) json.RawMessage {
 	details := make(map[string]any)
 	if r.Explanation != "" {

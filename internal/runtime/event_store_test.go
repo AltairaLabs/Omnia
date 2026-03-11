@@ -1208,6 +1208,87 @@ func TestOmniaEventStore_AppendEmptySessionID(t *testing.T) {
 	}
 }
 
+// TestOmniaEventStore_AppendEmptySessionID_BackfillsFromFallback verifies the
+// PromptKit#705 workaround: when the event has an empty SessionID but the store
+// has a fallback sessionID set, the event is backfilled and persisted.
+func TestOmniaEventStore_AppendEmptySessionID_BackfillsFromFallback(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetSessionID("fallback-sess")
+
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "", // empty — simulates PromptKit#705
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:   "conciseness",
+			EvalType: "contains",
+			Trigger:  "every_turn",
+			Passed:   true,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	// SessionID should be backfilled on the event itself.
+	if event.SessionID != "fallback-sess" {
+		t.Errorf("expected event.SessionID='fallback-sess', got %q", event.SessionID)
+	}
+
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["type"] != "eval_completed" {
+		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	}
+	if msg.Metadata["eval_id"] != "conciseness" {
+		t.Errorf("expected eval_id 'conciseness', got %q", msg.Metadata["eval_id"])
+	}
+}
+
+// TestOmniaEventStore_AppendPreservesExistingSessionID verifies that events
+// with an existing SessionID are NOT overwritten by the fallback.
+func TestOmniaEventStore_AppendPreservesExistingSessionID(t *testing.T) {
+	store := &mockSessionStore{}
+	es := NewOmniaEventStore(store, logr.Discard())
+	es.SetSessionID("fallback-sess")
+
+	event := &events.Event{
+		Type:      events.EventEvalCompleted,
+		SessionID: "real-sess", // already set by the pipeline emitter
+		Timestamp: time.Now(),
+		Data: &events.EvalEventData{
+			EvalID:   "e1",
+			EvalType: "contains",
+			Trigger:  "every_turn",
+			Passed:   true,
+		},
+	}
+
+	if err := es.Append(context.Background(), event); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+
+	// Must NOT overwrite the existing SessionID.
+	if event.SessionID != "real-sess" {
+		t.Errorf("expected event.SessionID='real-sess', got %q", event.SessionID)
+	}
+
+	store.waitForMessages(t, 1)
+}
+
+func TestOmniaEventStore_SetSessionID(t *testing.T) {
+	es := NewOmniaEventStore(nil, logr.Discard())
+	if es.sessionID != "" {
+		t.Error("expected empty sessionID initially")
+	}
+	es.SetSessionID("abc")
+	if es.sessionID != "abc" {
+		t.Errorf("expected sessionID='abc', got %q", es.sessionID)
+	}
+}
+
 func TestOmniaEventStore_StoreErrorsAreLoggedNotPropagated(t *testing.T) {
 	store := &mockSessionStore{
 		appendFn: func(_ context.Context, _ string, _ session.Message) error {
