@@ -55,6 +55,8 @@ const (
 	DefaultLangChainImage = "ghcr.io/altairalabs/omnia-langchain-runtime:latest"
 	// DefaultFacadePort is the default port for the WebSocket facade.
 	DefaultFacadePort = 8080
+	// DefaultA2APort is the default port for the A2A endpoint in dual-protocol mode.
+	DefaultA2APort = 9999
 	// DefaultFacadeHealthPort is the health port for the facade container.
 	DefaultFacadeHealthPort = 8081
 	// DefaultRuntimeGRPCPort is the gRPC port for the runtime container.

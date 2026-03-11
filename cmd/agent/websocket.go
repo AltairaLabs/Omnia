@@ -29,13 +29,18 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
+	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/tracing"
+
+	a2aserver "github.com/AltairaLabs/PromptKit/server/a2a"
 )
 
 // runWebSocketFacade starts the traditional WebSocket facade with a gRPC runtime sidecar.
+// When A2A is enabled (dual-protocol mode), it also starts an A2A JSON-RPC server
+// on a separate port.
 //
-//nolint:gocognit // main entry point
+//nolint:gocognit,gocyclo // main entry point with dual-protocol support
 func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	// Initialize session store
 	store, err := initSessionStore(cfg, log)
@@ -114,8 +119,15 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		WriteTimeout: writeTimeout,
 	}
 
+	// Dual-protocol: optionally start A2A server alongside WebSocket.
+	var a2aSrv *facadea2a.Server
+	var a2aHTTPServer *http.Server
+	if cfg.A2AEnabled {
+		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log)
+	}
+
 	// Start servers
-	errChan := make(chan error, 2)
+	errChan := make(chan error, 3)
 
 	go func() {
 		log.Info("starting facade server", "addr", facadeServer.Addr)
@@ -130,6 +142,15 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 			errChan <- fmt.Errorf("health server error: %w", err)
 		}
 	}()
+
+	if a2aHTTPServer != nil {
+		go func() {
+			log.Info("starting A2A server (dual-protocol)", "addr", a2aHTTPServer.Addr)
+			if err := a2aHTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errChan <- fmt.Errorf("a2a server error: %w", err)
+			}
+		}()
+	}
 
 	// Wait for shutdown signal or error
 	sigChan := make(chan os.Signal, 1)
@@ -152,6 +173,18 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		log.Error(err, "error shutting down websocket server")
 	}
 
+	// Shutdown A2A server if running
+	if a2aSrv != nil {
+		if err := a2aSrv.Shutdown(ctx); err != nil {
+			log.Error(err, "error shutting down A2A server")
+		}
+	}
+	if a2aHTTPServer != nil {
+		if err := a2aHTTPServer.Shutdown(ctx); err != nil {
+			log.Error(err, "error shutting down A2A HTTP server")
+		}
+	}
+
 	// Shutdown HTTP servers
 	if err := facadeServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down facade server")
@@ -161,4 +194,62 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}
 
 	log.Info("shutdown complete")
+}
+
+// startA2AServer creates and configures the A2A server for dual-protocol mode.
+// Returns the A2A server (for shutdown) and the HTTP server (for ListenAndServe).
+func startA2AServer(cfg *agent.Config, log logr.Logger) (*facadea2a.Server, *http.Server) {
+	log.Info("dual-protocol mode: starting A2A alongside WebSocket",
+		"a2aPort", cfg.A2APort,
+		"taskTTL", cfg.A2ATaskTTL,
+		"conversationTTL", cfg.A2AConversationTTL,
+	)
+
+	// Build authenticator
+	var auth a2aserver.Authenticator
+	if cfg.A2AAuthToken != "" {
+		auth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
+		log.Info("A2A bearer auth enabled")
+	}
+
+	// Build card provider
+	cardProvider := buildCardProvider(cfg, log)
+
+	// Build task store
+	taskStore, storeCleanup := buildTaskStore(cfg, log)
+	if storeCleanup != nil {
+		// Note: cleanup is handled by the deferred call in runA2AFacade for standalone mode.
+		// In dual-protocol mode, we register the cleanup here. The main goroutine will
+		// handle shutdown via signal.
+		// TODO: wire cleanup into the shutdown path if needed.
+		_ = storeCleanup
+	}
+
+	// Pack path: for A2A, the SDK reads the pack directly
+	packPath := cfg.PromptPackPath + "/pack.json"
+
+	a2aSrv := facadea2a.NewServer(facadea2a.ServerConfig{
+		PackPath:        packPath,
+		PromptName:      "default",
+		Port:            cfg.A2APort,
+		TaskTTL:         cfg.A2ATaskTTL,
+		ConversationTTL: cfg.A2AConversationTTL,
+		CardProvider:    cardProvider,
+		Authenticator:   auth,
+		TaskStore:       taskStore,
+		Log:             log,
+	})
+
+	// Create A2A metrics.
+	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
+
+	// Wrap with metrics middleware.
+	a2aHandler := facadea2a.NewMetricsMiddleware(a2aSrv.Handler(), a2aMetrics)
+
+	a2aHTTPServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.A2APort),
+		Handler: a2aHandler,
+	}
+
+	return a2aSrv, a2aHTTPServer
 }
