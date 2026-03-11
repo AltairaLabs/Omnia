@@ -41,7 +41,7 @@ func TestBuildA2AContainer(t *testing.T) {
 	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
 	ar.Spec.PromptPackRef.Name = "test-pack"
 
-	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 9999)
+	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 9999, nil)
 
 	if container.Name != FacadeContainerName {
 		t.Errorf("container name = %q, want %q", container.Name, FacadeContainerName)
@@ -72,7 +72,7 @@ func TestBuildA2AContainer_CustomImage(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
 
-	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 8080)
+	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 8080, nil)
 	if container.Image != "custom:latest" {
 		t.Errorf("image = %q, want %q", container.Image, "custom:latest")
 	}
@@ -85,7 +85,7 @@ func TestBuildA2AContainer_CRDImageOverride(t *testing.T) {
 	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
 	ar.Spec.Facade.Image = "crd-override:v2"
 
-	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 8080)
+	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 8080, nil)
 	if container.Image != "crd-override:v2" {
 		t.Errorf("image = %q, want %q", container.Image, "crd-override:v2")
 	}
@@ -103,7 +103,7 @@ func TestBuildA2AEnvVars(t *testing.T) {
 		ConversationTTL: strPtr("45m"),
 	}
 
-	envVars := r.buildA2AEnvVars(ar)
+	envVars := r.buildA2AEnvVars(ar, nil)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -135,7 +135,7 @@ func TestBuildA2AEnvVars_NoA2AConfig(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
 
-	envVars := r.buildA2AEnvVars(ar)
+	envVars := r.buildA2AEnvVars(ar, nil)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -162,7 +162,7 @@ func TestBuildA2AEnvVars_WithTracing(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
 
-	envVars := r.buildA2AEnvVars(ar)
+	envVars := r.buildA2AEnvVars(ar, nil)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -176,6 +176,59 @@ func TestBuildA2AEnvVars_WithTracing(t *testing.T) {
 	}
 	if envMap["OMNIA_TRACING_ENDPOINT"] != "otel-collector:4317" {
 		t.Errorf("OMNIA_TRACING_ENDPOINT = %q, want %q", envMap["OMNIA_TRACING_ENDPOINT"], "otel-collector:4317")
+	}
+}
+
+func TestBuildA2AEnvVars_WithClients(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+		Clients: []omniav1alpha1.A2AClientSpec{
+			{
+				Name:          "agent-a",
+				URL:           "http://agent-a:8080",
+				ExposeAsTools: true,
+				Authentication: &omniav1alpha1.A2AClientAuthConfig{
+					SecretRef: &corev1.LocalObjectReference{Name: "agent-a-secret"},
+				},
+			},
+		},
+	}
+
+	clients := []ResolvedA2AClient{
+		{Name: "agent-a", URL: "http://agent-a:8080", ExposeAsTools: true, AuthTokenEnv: "OMNIA_A2A_CLIENT_TOKEN_AGENT_A"},
+	}
+
+	envVars := r.buildA2AEnvVars(ar, clients)
+
+	envMap := make(map[string]string)
+	for _, ev := range envVars {
+		if ev.Value != "" {
+			envMap[ev.Name] = ev.Value
+		}
+	}
+
+	if envMap["OMNIA_A2A_CLIENTS"] == "" {
+		t.Fatal("expected OMNIA_A2A_CLIENTS to be set")
+	}
+
+	// Verify the auth token env var is injected from secret.
+	found := false
+	for _, ev := range envVars {
+		if ev.Name == "OMNIA_A2A_CLIENT_TOKEN_AGENT_A" && ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef != nil {
+			found = true
+			if ev.ValueFrom.SecretKeyRef.Name != "agent-a-secret" {
+				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, "agent-a-secret")
+			}
+			if ev.ValueFrom.SecretKeyRef.Key != "token" {
+				t.Errorf("secret key = %q, want %q", ev.ValueFrom.SecretKeyRef.Key, "token")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected OMNIA_A2A_CLIENT_TOKEN_AGENT_A env var from secret")
 	}
 }
 
@@ -236,5 +289,114 @@ func TestDefaultImageForFramework(t *testing.T) {
 				t.Errorf("defaultImageForFramework() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsDualProtocol(t *testing.T) {
+	tests := []struct {
+		name     string
+		ar       *omniav1alpha1.AgentRuntime
+		expected bool
+	}{
+		{
+			name: "websocket with A2A enabled",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+				ar.Spec.A2A = &omniav1alpha1.A2AConfig{Enabled: true}
+				return ar
+			}(),
+			expected: true,
+		},
+		{
+			name: "websocket without A2A",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+				return ar
+			}(),
+			expected: false,
+		},
+		{
+			name: "websocket with A2A disabled",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+				ar.Spec.A2A = &omniav1alpha1.A2AConfig{Enabled: false}
+				return ar
+			}(),
+			expected: false,
+		},
+		{
+			name: "A2A primary facade (not dual-protocol)",
+			ar: func() *omniav1alpha1.AgentRuntime {
+				ar := &omniav1alpha1.AgentRuntime{}
+				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+				ar.Spec.A2A = &omniav1alpha1.A2AConfig{Enabled: true}
+				return ar
+			}(),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isDualProtocol(tt.ar)
+			if got != tt.expected {
+				t.Errorf("isDualProtocol() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuildA2ADualProtocolEnvVars(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+
+	taskTTL := "2h"
+	convTTL := "45m"
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+		Enabled:         true,
+		TaskTTL:         &taskTTL,
+		ConversationTTL: &convTTL,
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:     omniav1alpha1.A2ATaskStoreRedis,
+			RedisURL: "redis://localhost:6379/0",
+		},
+	}
+
+	envVars := r.buildA2ADualProtocolEnvVars(ar)
+
+	envMap := map[string]string{}
+	for _, e := range envVars {
+		if e.Value != "" {
+			envMap[e.Name] = e.Value
+		}
+	}
+
+	if envMap["OMNIA_A2A_TASK_TTL"] != "2h" {
+		t.Errorf("expected task TTL 2h, got %s", envMap["OMNIA_A2A_TASK_TTL"])
+	}
+	if envMap["OMNIA_A2A_CONVERSATION_TTL"] != "45m" {
+		t.Errorf("expected conversation TTL 45m, got %s", envMap["OMNIA_A2A_CONVERSATION_TTL"])
+	}
+	if envMap["OMNIA_A2A_TASK_STORE_TYPE"] != "redis" {
+		t.Errorf("expected task store type redis, got %s", envMap["OMNIA_A2A_TASK_STORE_TYPE"])
+	}
+	if envMap["OMNIA_A2A_REDIS_URL"] != "redis://localhost:6379/0" {
+		t.Errorf("expected redis URL, got %s", envMap["OMNIA_A2A_REDIS_URL"])
+	}
+}
+
+func TestBuildA2ADualProtocolEnvVars_NilA2A(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	// A2A is nil.
+
+	envVars := r.buildA2ADualProtocolEnvVars(ar)
+	if len(envVars) != 0 {
+		t.Errorf("expected no env vars for nil A2A, got %d", len(envVars))
 	}
 }

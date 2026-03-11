@@ -72,6 +72,11 @@ const (
 	EnvA2ATaskTTL         = "OMNIA_A2A_TASK_TTL"
 	EnvA2AConversationTTL = "OMNIA_A2A_CONVERSATION_TTL"
 	EnvA2AAuthToken       = "OMNIA_A2A_AUTH_TOKEN"
+	EnvA2ATaskStoreType   = "OMNIA_A2A_TASK_STORE_TYPE"
+	EnvA2ARedisURL        = "OMNIA_A2A_REDIS_URL"
+	EnvA2AEnabled         = "OMNIA_A2A_ENABLED"
+	EnvA2APort            = "OMNIA_A2A_PORT"
+	EnvA2AClients         = "OMNIA_A2A_CLIENTS"
 )
 
 // Default values.
@@ -86,6 +91,7 @@ const (
 	DefaultMediaDefaultTTL     = 24 * time.Hour
 	DefaultA2ATaskTTL          = 1 * time.Hour
 	DefaultA2AConversationTTL  = 30 * time.Minute
+	DefaultA2APort             = 9999
 )
 
 // Error format strings.
@@ -201,6 +207,11 @@ type Config struct {
 	A2ATaskTTL         time.Duration
 	A2AConversationTTL time.Duration
 	A2AAuthToken       string
+	A2ATaskStoreType   string // "memory" or "redis"
+	A2ARedisURL        string // Redis URL for A2A task store
+	A2AEnabled         bool   // true when A2A is an additional endpoint (dual-protocol)
+	A2APort            int    // port for A2A in dual-protocol mode (default 9999)
+	A2AClientsJSON     string // JSON-encoded resolved client list from controller
 
 	// Health check port.
 	HealthPort int

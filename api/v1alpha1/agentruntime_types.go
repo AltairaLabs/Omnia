@@ -604,7 +604,22 @@ type MediaRequirements struct {
 }
 
 // A2AConfig configures the A2A (Agent-to-Agent) protocol facade.
+// When facade.type is "a2a", this is the primary protocol.
+// When facade.type is "websocket" or "grpc", set enabled: true to add A2A
+// as an additional endpoint alongside the primary facade.
 type A2AConfig struct {
+	// enabled adds A2A as an additional endpoint alongside the primary facade.
+	// Only meaningful when facade.type is NOT "a2a" (i.e., websocket or grpc).
+	// When facade.type is "a2a", A2A is always the primary protocol regardless of this field.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// port is the TCP port for the A2A endpoint in dual-protocol mode.
+	// Defaults to 9999. Only used when enabled is true and facade.type is not "a2a".
+	// +kubebuilder:default=9999
+	// +optional
+	Port *int32 `json:"port,omitempty"`
+
 	// agentCard configures the Agent Card served at /.well-known/agent.json.
 	// +optional
 	AgentCard *AgentCardSpec `json:"agentCard,omitempty"`
@@ -624,6 +639,47 @@ type A2AConfig struct {
 	// authentication configures request authentication for the A2A endpoint.
 	// +optional
 	Authentication *A2AAuthConfig `json:"authentication,omitempty"`
+
+	// taskStore configures the task persistence backend.
+	// Defaults to in-memory. Set type to "redis" for persistence across restarts.
+	// +optional
+	TaskStore *A2ATaskStoreConfig `json:"taskStore,omitempty"`
+
+	// clients configures connections to other A2A agents.
+	// Each client can reference an in-cluster AgentRuntime or an external URL.
+	// +optional
+	Clients []A2AClientSpec `json:"clients,omitempty"`
+}
+
+// A2ATaskStoreType represents the backend type for A2A task storage.
+// +kubebuilder:validation:Enum=memory;redis
+type A2ATaskStoreType string
+
+const (
+	// A2ATaskStoreMemory uses an in-memory task store (default).
+	A2ATaskStoreMemory A2ATaskStoreType = "memory"
+
+	// A2ATaskStoreRedis uses Redis for task persistence.
+	A2ATaskStoreRedis A2ATaskStoreType = "redis"
+)
+
+// A2ATaskStoreConfig configures the A2A task persistence backend.
+type A2ATaskStoreConfig struct {
+	// type is the task store backend type. Defaults to "memory".
+	// +kubebuilder:default="memory"
+	// +kubebuilder:validation:Enum=memory;redis
+	// +optional
+	Type A2ATaskStoreType `json:"type,omitempty"`
+
+	// redisURL is the Redis connection URL when type is "redis".
+	// Format: redis://[:password@]host:port[/db]
+	// +optional
+	RedisURL string `json:"redisURL,omitempty"`
+
+	// redisSecretRef references a Secret containing a Redis connection URL
+	// in a key named "url". Takes precedence over redisURL.
+	// +optional
+	RedisSecretRef *corev1.LocalObjectReference `json:"redisSecretRef,omitempty"`
 }
 
 // AgentCardSpec configures the A2A Agent Card.
@@ -706,6 +762,73 @@ type A2AAuthConfig struct {
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
+// A2AClientSpec configures an A2A client connection to another agent.
+type A2AClientSpec struct {
+	// name is a unique identifier for this client within the agent.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// agentRuntimeRef references another AgentRuntime in the cluster.
+	// The controller resolves this to a service URL using the target's status.
+	// Mutually exclusive with url.
+	// +optional
+	AgentRuntimeRef *AgentRuntimeClientRef `json:"agentRuntimeRef,omitempty"`
+
+	// url is the direct URL of an external A2A agent endpoint.
+	// Used instead of agentRuntimeRef for agents outside the cluster.
+	// Mutually exclusive with agentRuntimeRef.
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// exposeAsTools registers the remote agent's skills as local tools
+	// via PromptKit's A2A Tool Bridge.
+	// +optional
+	ExposeAsTools bool `json:"exposeAsTools,omitempty"`
+
+	// authentication configures credentials for outgoing calls to this agent.
+	// +optional
+	Authentication *A2AClientAuthConfig `json:"authentication,omitempty"`
+}
+
+// AgentRuntimeClientRef references another AgentRuntime resource.
+type AgentRuntimeClientRef struct {
+	// name is the AgentRuntime resource name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// namespace is the namespace of the target AgentRuntime.
+	// Defaults to the same namespace as the referencing AgentRuntime.
+	// +optional
+	Namespace *string `json:"namespace,omitempty"`
+}
+
+// A2AClientAuthConfig configures authentication for outgoing A2A calls.
+type A2AClientAuthConfig struct {
+	// secretRef references a Secret containing a bearer token (key: "token").
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+}
+
+// A2AClientStatus reports the resolution state of an A2A client connection.
+type A2AClientStatus struct {
+	// name matches the client name from the spec.
+	Name string `json:"name"`
+
+	// resolvedURL is the resolved A2A endpoint URL.
+	// +optional
+	ResolvedURL string `json:"resolvedURL,omitempty"`
+
+	// ready indicates whether the client was successfully resolved.
+	// +optional
+	Ready bool `json:"ready,omitempty"`
+
+	// error contains the resolution error message, if any.
+	// +optional
+	Error string `json:"error,omitempty"`
+}
+
 // A2AStatus holds A2A-specific status information.
 type A2AStatus struct {
 	// agentCardURL is the URL where the agent card is served.
@@ -715,6 +838,10 @@ type A2AStatus struct {
 	// endpoint is the A2A JSON-RPC endpoint URL.
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`
+
+	// clients reports the resolution status of each configured A2A client.
+	// +optional
+	Clients []A2AClientStatus `json:"clients,omitempty"`
 }
 
 // RuntimeConfig defines deployment-related settings.
@@ -884,7 +1011,10 @@ type AgentRuntimeSpec struct {
 	// +optional
 	Console *ConsoleConfig `json:"console,omitempty"`
 
-	// a2a configures the A2A (Agent-to-Agent) protocol when facade.type is "a2a".
+	// a2a configures the A2A (Agent-to-Agent) protocol.
+	// When facade.type is "a2a", this is the primary protocol configuration.
+	// When facade.type is "websocket" or "grpc", set a2a.enabled: true to add
+	// A2A as an additional endpoint on a separate port (default 9999).
 	// +optional
 	A2A *A2AConfig `json:"a2a,omitempty"`
 

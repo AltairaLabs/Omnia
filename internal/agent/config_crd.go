@@ -114,6 +114,32 @@ func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 
 	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
 
+	// Dual-protocol: A2A as additional endpoint alongside websocket/grpc.
+	cfg.A2AEnabled = ar.Spec.A2A.Enabled
+	if ar.Spec.A2A.Port != nil {
+		cfg.A2APort = int(*ar.Spec.A2A.Port)
+	} else {
+		cfg.A2APort = DefaultA2APort
+	}
+
+	// Task store config from CRD.
+	if ar.Spec.A2A.TaskStore != nil {
+		cfg.A2ATaskStoreType = string(ar.Spec.A2A.TaskStore.Type)
+		if ar.Spec.A2A.TaskStore.RedisURL != "" {
+			cfg.A2ARedisURL = ar.Spec.A2A.TaskStore.RedisURL
+		}
+		// RedisSecretRef is resolved by the operator into OMNIA_A2A_REDIS_URL env var.
+		if envURL := os.Getenv(EnvA2ARedisURL); envURL != "" {
+			cfg.A2ARedisURL = envURL
+		}
+	} else {
+		cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
+		cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
+	}
+
+	// Resolved A2A clients are injected as JSON by the operator.
+	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
+
 	return nil
 }
 
@@ -271,5 +297,16 @@ func loadA2AConfigFromEnv(cfg *Config) error {
 	}
 
 	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
+	cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
+	cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
+	cfg.A2AEnabled = os.Getenv(EnvA2AEnabled) == envValueTrue
+	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
+
+	a2aPort, err := getEnvAsInt(EnvA2APort, DefaultA2APort)
+	if err != nil {
+		return fmt.Errorf(errFmtInvalidEnv, EnvA2APort, err)
+	}
+	cfg.A2APort = a2aPort
+
 	return nil
 }
