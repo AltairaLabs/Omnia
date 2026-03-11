@@ -646,28 +646,28 @@ jobs:
         go-version-file: go.mod
 
     - name: Download unit test coverage
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       continue-on-error: true
       with:
         name: coverage-report
         path: coverage-unit
 
     - name: Download internal/controller coverage
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       continue-on-error: true
       with:
         name: internal-coverage
         path: coverage-internal
 
     - name: Download dashboard unit test coverage
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       continue-on-error: true
       with:
         name: dashboard-coverage
         path: dashboard/coverage
 
     - name: Download dashboard E2E coverage
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       continue-on-error: true
       with:
         name: dashboard-e2e-coverage
