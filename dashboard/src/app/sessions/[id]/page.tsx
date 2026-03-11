@@ -131,7 +131,63 @@ function getBubbleClassName(isUser: boolean, isSystem: boolean): string {
   return "bg-muted";
 }
 
-function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[] }>) {
+/** Compact expandable badge for inline eval results attached to assistant messages. */
+function InlineEvalsBadge({ evals }: Readonly<{ evals: ParsedEval[] }>) {
+  const [expanded, setExpanded] = useState(false);
+  const passed = evals.filter((e) => e.passed).length;
+  const failed = evals.length - passed;
+  const allPassed = failed === 0;
+
+  return (
+    <div className="mt-1">
+      <button
+        className="inline-flex items-center gap-1"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <Badge
+          variant={allPassed ? "secondary" : "destructive"}
+          className={cn(
+            "gap-1 text-xs cursor-pointer",
+            allPassed && "bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400"
+          )}
+        >
+          <Shield className="h-3 w-3" />
+          {allPassed
+            ? `${passed} eval${passed === 1 ? "" : "s"} passed`
+            : `${failed} of ${evals.length} eval${evals.length === 1 ? "" : "s"} failed`}
+        </Badge>
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-1 max-w-md">
+          {evals.map((e) => (
+            <div key={e.evalID} className="border rounded p-2 text-xs space-y-0.5">
+              <div className="flex items-center gap-2">
+                {e.passed
+                  ? <CheckCircle2 className="h-3 w-3 text-green-500" />
+                  : <XCircle className="h-3 w-3 text-red-500" />
+                }
+                <span className="font-medium font-mono">{e.evalID}</span>
+                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                  {evalTypeLabel(e.evalType)}
+                </Badge>
+                {e.score !== undefined && e.score !== null && (
+                  <span className="text-muted-foreground">{(e.score * 100).toFixed(0)}%</span>
+                )}
+                {e.durationMs !== undefined && e.durationMs > 0 && (
+                  <span className="text-muted-foreground">{e.durationMs}ms</span>
+                )}
+              </div>
+              {e.explanation && <p className="text-muted-foreground pl-5">{e.explanation}</p>}
+              {e.error && <p className="text-red-500 pl-5">{e.error}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Readonly<{ message: Message; showTimestamp?: boolean; evalResults?: EvalResult[]; inlineEvals?: ParsedEval[] }>) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -162,9 +218,14 @@ function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ messa
           <div className="whitespace-pre-wrap text-sm">{message.content}</div>
         </div>
 
-        {/* Eval results */}
+        {/* Eval results from eval_results table */}
         {evalResults && evalResults.length > 0 && (
           <EvalResultsBadge results={evalResults} />
+        )}
+
+        {/* Inline eval results from message events */}
+        {inlineEvals && inlineEvals.length > 0 && (
+          <InlineEvalsBadge evals={inlineEvals} />
         )}
 
         {/* Timestamp and tokens */}
@@ -185,11 +246,19 @@ function MessageBubble({ message, showTimestamp, evalResults }: Readonly<{ messa
 }
 
 /**
+ * Returns true if a message is an eval result event.
+ */
+function isEvalMessage(m: Message): boolean {
+  const t = m.metadata?.type;
+  return t === "eval_completed" || t === "eval_failed";
+}
+
+/**
  * Returns true if a message belongs in the conversation view.
  *
  * Conversation messages are: user/assistant messages without a metadata.type,
  * plus tool_call messages (rendered as compact indicators).
- * Everything else (pipeline events, provider calls, etc.) goes to the Debug panel.
+ * Everything else (pipeline events, eval events, provider calls, etc.) goes to the Debug panel.
  */
 function isConversationMessage(m: Message): boolean {
   if (m.role === "tool") return false;
@@ -197,6 +266,55 @@ function isConversationMessage(m: Message): boolean {
   if (m.metadata?.type) return false;
   if (m.metadata?.source === "runtime") return false;
   return true;
+}
+
+/** Parsed eval content from a message. */
+interface ParsedEval {
+  evalID: string;
+  evalType: string;
+  trigger: string;
+  passed: boolean;
+  score?: number;
+  durationMs?: number;
+  explanation?: string;
+  message?: string;
+  error?: string;
+}
+
+/** Parse the JSON content of an eval message into structured data. */
+function parseEvalContent(content: string): ParsedEval {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return { evalID: "unknown", evalType: "unknown", trigger: "", passed: false };
+  }
+}
+
+/**
+ * Collect eval messages that follow each assistant message.
+ * Returns a map from assistant message ID to the parsed eval results.
+ */
+function collectEvalsForAssistantMessages(messages: Message[]): Map<string, ParsedEval[]> {
+  const sorted = [...messages].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  const evalMap = new Map<string, ParsedEval[]>();
+  let lastAssistantId: string | null = null;
+
+  for (const m of sorted) {
+    if (m.role === "assistant" && !m.metadata?.type) {
+      lastAssistantId = m.id;
+    } else if (isEvalMessage(m) && lastAssistantId) {
+      const existing = evalMap.get(lastAssistantId);
+      const parsed = parseEvalContent(m.content);
+      if (existing) {
+        existing.push(parsed);
+      } else {
+        evalMap.set(lastAssistantId, [parsed]);
+      }
+    }
+  }
+  return evalMap;
 }
 
 const INITIAL_MESSAGE_WINDOW = 50;
@@ -221,6 +339,7 @@ function ConversationMessages({
 }>) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_MESSAGE_WINDOW);
   const evalsByMessage = groupEvalResultsByMessageId(evalResults);
+  const inlineEvalsByMessage = collectEvalsForAssistantMessages(messages);
 
   const sorted = messages
     .filter(isConversationMessage)
@@ -264,6 +383,7 @@ function ConversationMessages({
           message={message}
           showTimestamp
           evalResults={evalsByMessage.get(message.id)}
+          inlineEvals={inlineEvalsByMessage.get(message.id)}
         />
       ))}
     </div>
@@ -498,16 +618,22 @@ export default function SessionDetailPage({
             <TabsTrigger value="evals" className="gap-1">
               <Shield className="h-3.5 w-3.5" />
               Evals
-              {evalResults && evalResults.length > 0 && (
-                <Badge
-                  variant={evalResults.some((r) => !r.passed) ? "destructive" : "secondary"}
-                  className="ml-1 px-1.5 py-0 text-[10px] leading-4"
-                >
-                  {evalResults.filter((r) => !r.passed).length > 0
-                    ? `${evalResults.filter((r) => !r.passed).length} failed`
-                    : evalResults.length}
-                </Badge>
-              )}
+              {(() => {
+                const hasTableResults = evalResults && evalResults.length > 0;
+                const hasMsgResults = session.messages.some(isEvalMessage);
+                if (!hasTableResults && !hasMsgResults) return null;
+                const msgFailed = session.messages.filter((m) => m.metadata?.type === "eval_failed").length;
+                const tableFailed = evalResults?.filter((r) => !r.passed).length ?? 0;
+                const totalFailed = tableFailed + msgFailed;
+                return (
+                  <Badge
+                    variant={totalFailed > 0 ? "destructive" : "secondary"}
+                    className="ml-1 px-1.5 py-0 text-[10px] leading-4"
+                  >
+                    {totalFailed > 0 ? `${totalFailed} failed` : "pass"}
+                  </Badge>
+                );
+              })()}
             </TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
             <TabsTrigger value="metadata">Metadata</TabsTrigger>
@@ -518,7 +644,7 @@ export default function SessionDetailPage({
           </TabsContent>
 
           <TabsContent value="evals" className="mt-4">
-            <EvalResultsPanel results={evalResults || []} />
+            <EvalResultsPanel results={evalResults || []} messages={session.messages} />
           </TabsContent>
 
           <TabsContent value="metrics" className="mt-4">
@@ -676,12 +802,101 @@ function evalTypeLabel(evalType: string): string {
   return labels[evalType] || evalType;
 }
 
-/** Full eval results panel shown in the Evals tab. */
-function EvalResultsPanel({ results }: Readonly<{ results: EvalResult[] }>) {
-  const passed = results.filter((r) => r.passed);
-  const failed = results.filter((r) => !r.passed);
+/** Aggregated eval — turn evals are averaged across executions. */
+interface AggregatedEval {
+  key: string;
+  evalId: string;
+  evalType: string;
+  trigger: string;
+  passRate: number;
+  avgScore?: number;
+  avgDurationMs?: number;
+  executions: number;
+  details?: Record<string, unknown>;
+}
 
-  if (results.length === 0) {
+/** Extract and aggregate eval items from both sources. Turn evals are averaged by evalId. */
+function aggregateEvals(
+  results: EvalResult[],
+  messages: Message[],
+): { turnEvals: AggregatedEval[]; sessionEvals: AggregatedEval[] } {
+  // Collect all raw items
+  interface RawItem {
+    evalId: string;
+    evalType: string;
+    trigger: string;
+    passed: boolean;
+    score?: number;
+    durationMs?: number;
+    details?: Record<string, unknown>;
+  }
+
+  const rawItems: RawItem[] = [];
+
+  for (const r of results) {
+    rawItems.push({
+      evalId: r.evalId, evalType: r.evalType, trigger: r.trigger,
+      passed: r.passed, score: r.score, durationMs: r.durationMs, details: r.details,
+    });
+  }
+
+  for (const m of messages.filter(isEvalMessage)) {
+    const data = parseEvalContent(m.content);
+    rawItems.push({
+      evalId: data.evalID, evalType: data.evalType, trigger: data.trigger,
+      passed: data.passed, score: data.score, durationMs: data.durationMs,
+    });
+  }
+
+  // Group by evalId + trigger
+  const groups = new Map<string, RawItem[]>();
+  for (const item of rawItems) {
+    const key = `${item.evalId}:${item.trigger}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(item);
+    } else {
+      groups.set(key, [item]);
+    }
+  }
+
+  // Aggregate each group
+  const turnEvals: AggregatedEval[] = [];
+  const sessionEvals: AggregatedEval[] = [];
+
+  for (const [key, items] of groups) {
+    const passedCount = items.filter((i) => i.passed).length;
+    const scores = items.filter((i) => i.score !== undefined && i.score !== null).map((i) => i.score!);
+    const durations = items.filter((i) => i.durationMs !== undefined && i.durationMs > 0).map((i) => i.durationMs!);
+
+    const agg: AggregatedEval = {
+      key,
+      evalId: items[0].evalId,
+      evalType: items[0].evalType,
+      trigger: items[0].trigger,
+      passRate: passedCount / items.length,
+      avgScore: scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : undefined,
+      avgDurationMs: durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : undefined,
+      executions: items.length,
+      details: items[0].details,
+    };
+
+    if (agg.trigger === "on_session_complete") {
+      sessionEvals.push(agg);
+    } else {
+      turnEvals.push(agg);
+    }
+  }
+
+  return { turnEvals, sessionEvals };
+}
+
+/** Full eval results panel shown in the Evals tab. Shows aggregated results from both eval_results table and message-based eval events. */
+function EvalResultsPanel({ results, messages }: Readonly<{ results: EvalResult[]; messages: Message[] }>) {
+  const { turnEvals, sessionEvals } = aggregateEvals(results, messages);
+  const allEvals = [...turnEvals, ...sessionEvals];
+
+  if (allEvals.length === 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
@@ -691,6 +906,10 @@ function EvalResultsPanel({ results }: Readonly<{ results: EvalResult[] }>) {
     );
   }
 
+  const totalExecutions = allEvals.reduce((sum, e) => sum + e.executions, 0);
+  const totalPassed = allEvals.reduce((sum, e) => sum + Math.round(e.passRate * e.executions), 0);
+  const totalFailed = totalExecutions - totalPassed;
+
   return (
     <div className="space-y-4">
       {/* Summary cards */}
@@ -699,9 +918,10 @@ function EvalResultsPanel({ results }: Readonly<{ results: EvalResult[] }>) {
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Shield className="h-4 w-4" />
-              Total Evals
+              Unique Evals
             </div>
-            <p className="text-2xl font-bold mt-1">{results.length}</p>
+            <p className="text-2xl font-bold mt-1">{allEvals.length}</p>
+            <p className="text-xs text-muted-foreground">{totalExecutions} total executions</p>
           </CardContent>
         </Card>
         <Card>
@@ -710,7 +930,7 @@ function EvalResultsPanel({ results }: Readonly<{ results: EvalResult[] }>) {
               <CheckCircle2 className="h-4 w-4 text-green-500" />
               Passed
             </div>
-            <p className="text-2xl font-bold mt-1 text-green-600 dark:text-green-400">{passed.length}</p>
+            <p className="text-2xl font-bold mt-1 text-green-600 dark:text-green-400">{totalPassed}</p>
           </CardContent>
         </Card>
         <Card>
@@ -719,111 +939,102 @@ function EvalResultsPanel({ results }: Readonly<{ results: EvalResult[] }>) {
               <XCircle className="h-4 w-4 text-red-500" />
               Failed
             </div>
-            <p className="text-2xl font-bold mt-1 text-red-600 dark:text-red-400">{failed.length}</p>
+            <p className="text-2xl font-bold mt-1 text-red-600 dark:text-red-400">{totalFailed}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Failed evals first */}
-      {failed.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base text-red-600 dark:text-red-400 flex items-center gap-2">
-              <XCircle className="h-4 w-4" />
-              Failed Evals ({failed.length})
-            </CardTitle>
-          </CardHeader>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Eval ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Details</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {failed.map((r) => (
-                <EvalResultRow key={r.id} result={r} />
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+      {/* Turn-level evals (aggregated) */}
+      {turnEvals.length > 0 && (
+        <AggregatedEvalSection title="Turn-Level Evals" evals={turnEvals} />
       )}
 
-      {/* Passed evals */}
-      {passed.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base text-green-600 dark:text-green-400 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4" />
-              Passed Evals ({passed.length})
-            </CardTitle>
-          </CardHeader>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Eval ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Details</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {passed.map((r) => (
-                <EvalResultRow key={r.id} result={r} />
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+      {/* Session-level evals */}
+      {sessionEvals.length > 0 && (
+        <AggregatedEvalSection title="Session-Level Evals" evals={sessionEvals} />
       )}
     </div>
   );
 }
 
-/** Single eval result row with expandable details. */
-function EvalResultRow({ result }: Readonly<{ result: EvalResult }>) {
-  const [expanded, setExpanded] = useState(false);
-  const hasDetails = result.details && Object.keys(result.details).length > 0;
+/** Section that displays aggregated eval results in a table. */
+function AggregatedEvalSection({ title, evals }: Readonly<{ title: string; evals: AggregatedEval[] }>) {
+  const allPassing = evals.every((e) => e.passRate === 1);
+  const someFailing = evals.some((e) => e.passRate < 1);
 
   return (
-    <>
-      <TableRow
-        className={cn("cursor-pointer", hasDetails && "hover:bg-muted/50")}
-        onClick={() => hasDetails && setExpanded(!expanded)}
-      >
-        <TableCell className="font-mono text-sm">
-          <div className="flex items-center gap-2">
-            {result.passed
-              ? <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-              : <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-            }
-            {result.evalId}
-          </div>
-        </TableCell>
-        <TableCell>
-          <Badge variant="outline">{evalTypeLabel(result.evalType)}</Badge>
-        </TableCell>
-        <TableCell>
-          {result.score === undefined ? "-" : `${(result.score * 100).toFixed(0)}%`}
-        </TableCell>
-        <TableCell className="text-muted-foreground text-sm">
-          {hasDetails
-            ? <span className="text-primary text-xs">{expanded ? "Hide details" : "Show details"}</span>
-            : <span className="text-xs">-</span>
-          }
-        </TableCell>
-      </TableRow>
-      {expanded && hasDetails && (
-        <TableRow>
-          <TableCell colSpan={4} className="bg-muted/30 p-4">
-            <pre className="text-xs font-mono whitespace-pre-wrap overflow-auto max-h-48">
-              {JSON.stringify(result.details, null, 2)}
-            </pre>
-          </TableCell>
-        </TableRow>
-      )}
-    </>
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          {title}
+          <Badge variant={someFailing ? "destructive" : "outline"} className="text-xs font-normal">
+            {allPassing ? `${evals.length} passing` : `${evals.filter((e) => e.passRate < 1).length} with failures`}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Status</TableHead>
+            <TableHead>Eval ID</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Pass Rate</TableHead>
+            <TableHead>Avg Score</TableHead>
+            <TableHead>Avg Duration</TableHead>
+            <TableHead>Runs</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {evals
+            .sort((a, b) => a.passRate - b.passRate)
+            .map((e) => (
+              <AggregatedEvalRow key={e.key} eval_={e} />
+            ))}
+        </TableBody>
+      </Table>
+    </Card>
+  );
+}
+
+/** Single aggregated eval result row. */
+function AggregatedEvalRow({ eval_ }: Readonly<{ eval_: AggregatedEval }>) {
+  const allPassed = eval_.passRate === 1;
+  const allFailed = eval_.passRate === 0;
+
+  return (
+    <TableRow>
+      <TableCell>
+        {allPassed
+          ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+          : allFailed
+            ? <XCircle className="h-4 w-4 text-red-500" />
+            : <AlertCircle className="h-4 w-4 text-yellow-500" />
+        }
+      </TableCell>
+      <TableCell className="font-mono text-sm">{eval_.evalId}</TableCell>
+      <TableCell>
+        <Badge variant="outline">{evalTypeLabel(eval_.evalType)}</Badge>
+      </TableCell>
+      <TableCell>
+        <span className={cn(
+          "font-medium",
+          allPassed && "text-green-600 dark:text-green-400",
+          allFailed && "text-red-600 dark:text-red-400",
+          !allPassed && !allFailed && "text-yellow-600 dark:text-yellow-400",
+        )}>
+          {(eval_.passRate * 100).toFixed(0)}%
+        </span>
+      </TableCell>
+      <TableCell>
+        {eval_.avgScore === undefined ? "-" : `${(eval_.avgScore * 100).toFixed(0)}%`}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-sm">
+        {eval_.avgDurationMs === undefined ? "-" : `${eval_.avgDurationMs}ms`}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-sm">
+        {eval_.executions}
+      </TableCell>
+    </TableRow>
   );
 }
 

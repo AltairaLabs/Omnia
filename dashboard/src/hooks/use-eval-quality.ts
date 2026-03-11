@@ -37,9 +37,19 @@ const HISTOGRAM_SUFFIXES = ["_bucket", "_sum", "_count", "_created"];
 /** Prefixes for infrastructure metrics that are not eval quality metrics. */
 const INFRA_PREFIXES = ["omnia_eval_worker_"];
 
+/** Infrastructure metric names that aggregate across evals (not per-eval quality metrics). */
+const INFRA_METRIC_NAMES = new Set([
+  "omnia_eval_executed_total",
+  "omnia_eval_score",
+  "omnia_eval_duration_seconds",
+  "omnia_eval_passed_total",
+  "omnia_eval_failed_total",
+]);
+
 function shouldExcludeMetric(name: string): boolean {
   if (HISTOGRAM_SUFFIXES.some((s) => name.endsWith(s))) return true;
   if (INFRA_PREFIXES.some((p) => name.startsWith(p))) return true;
+  if (INFRA_METRIC_NAMES.has(name)) return true;
   return false;
 }
 

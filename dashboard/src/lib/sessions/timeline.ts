@@ -11,6 +11,7 @@ export type TimelineEventKind =
   | "provider_call"
   | "workflow_transition"
   | "workflow_completed"
+  | "eval_event"
   | "error";
 
 export interface TimelineEvent {
@@ -37,6 +38,7 @@ function resolveMessageKind(message: Message): TimelineEventKind {
 
   if (metadataType === "tool_call") return "tool_call";
   if (metadataType === "tool_result" || metadataType === "tool_call_completed" || message.role === "tool") return "tool_result";
+  if (metadataType === "eval_completed" || metadataType === "eval_failed") return "eval_event";
   if (metadataType === "workflow_transition") return "workflow_transition";
   if (metadataType === "workflow_completed") return "workflow_completed";
   if (metadataType === "error") return "error";
@@ -66,6 +68,16 @@ function parseToolName(content: string): string | undefined {
   }
 }
 
+/** Try to extract eval info from JSON content. */
+function parseEvalInfo(content: string): { evalID?: string; passed?: boolean } {
+  try {
+    const parsed = JSON.parse(content);
+    return { evalID: parsed.evalID, passed: parsed.passed };
+  } catch {
+    return {};
+  }
+}
+
 /** Try to extract a stage/pipeline name from JSON content. */
 function parseStageName(content: string): string | undefined {
   try {
@@ -76,25 +88,37 @@ function parseStageName(content: string): string | undefined {
   }
 }
 
+function buildStageLabel(message: Message): string {
+  const name = parseStageName(message.content);
+  const action = message.metadata?.type === "stage.started" ? "started" : "completed";
+  return name ? `Stage: ${name} ${action}` : `Stage ${action}`;
+}
+
+function buildEvalLabel(message: Message): string {
+  const evalInfo = parseEvalInfo(message.content);
+  const evalId = evalInfo.evalID || message.metadata?.eval_id || "eval";
+  const status = evalInfo.passed ? "passed" : "failed";
+  return `Eval: ${evalId} (${status})`;
+}
+
+const SIMPLE_LABELS: Partial<Record<TimelineEventKind, string>> = {
+  user_message: "User message",
+  assistant_message: "Assistant response",
+  system_message: "System message",
+  provider_call: "Provider call",
+  workflow_completed: "Workflow completed",
+  error: "Error",
+};
+
 function buildLabel(kind: TimelineEventKind, message: Message): string {
+  const simple = SIMPLE_LABELS[kind];
+  if (simple) return simple;
+
   switch (kind) {
-    case "user_message":
-      return "User message";
-    case "assistant_message":
-      return "Assistant response";
-    case "system_message":
-      return "System message";
-    case "pipeline_event": {
-      const action = message.metadata?.type === "pipeline.started" ? "started" : "completed";
-      return `Pipeline ${action}`;
-    }
-    case "stage_event": {
-      const name = parseStageName(message.content);
-      const action = message.metadata?.type === "stage.started" ? "started" : "completed";
-      return name ? `Stage: ${name} ${action}` : `Stage ${action}`;
-    }
-    case "provider_call":
-      return "Provider call";
+    case "pipeline_event":
+      return `Pipeline ${message.metadata?.type === "pipeline.started" ? "started" : "completed"}`;
+    case "stage_event":
+      return buildStageLabel(message);
     case "tool_call": {
       const tcName = parseToolName(message.content);
       return tcName ? `Tool: ${tcName}` : "Tool call";
@@ -106,13 +130,10 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
     case "workflow_transition": {
       const from = message.metadata?.from;
       const to = message.metadata?.to;
-      if (from && to) return `Workflow: ${from} → ${to}`;
-      return "Workflow transition";
+      return from && to ? `Workflow: ${from} → ${to}` : "Workflow transition";
     }
-    case "workflow_completed":
-      return "Workflow completed";
-    case "error":
-      return "Error";
+    case "eval_event":
+      return buildEvalLabel(message);
     default:
       return "Event";
   }
@@ -120,6 +141,9 @@ function buildLabel(kind: TimelineEventKind, message: Message): string {
 
 function resolveEventStatus(kind: TimelineEventKind, message: Message): TimelineEvent["status"] {
   if (kind === "error") return "error";
+  if (kind === "eval_event") {
+    return message.metadata?.passed === "true" ? "success" : "error";
+  }
   const status = message.metadata?.status;
   if (status === "success" || status === "error") return status;
   return undefined;

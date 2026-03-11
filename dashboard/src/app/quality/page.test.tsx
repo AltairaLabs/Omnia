@@ -155,16 +155,15 @@ describe("QualityPage", () => {
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    // Active Evals: 2 metrics
+    // Active Evals
     expect(screen.getByText("Active Evals")).toBeInTheDocument();
-    // Overall pass rate: mean of 85.0 and 96.0 = 90.5%
-    expect(screen.getByText("90.5%")).toBeInTheDocument();
-    // Passing: 1 (safety at 96% >= 90), Failing: 0 (none < 70)
-    expect(screen.getByText("Passing")).toBeInTheDocument();
-    expect(screen.getByText("Failing")).toBeInTheDocument();
+    // Score Metrics
+    expect(screen.getByText("Score Metrics")).toBeInTheDocument();
+    // Counter / Histogram
+    expect(screen.getByText("Counter / Histogram")).toBeInTheDocument();
   });
 
-  it("renders eval metrics table", () => {
+  it("renders eval metrics table with values", () => {
     mockUseEvalSummary.mockReturnValue({ data: mockSummaries, isLoading: false, error: null });
     mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
 
@@ -173,8 +172,8 @@ describe("QualityPage", () => {
 
     expect(screen.getByText("Eval Metrics")).toBeInTheDocument();
     expect(screen.getByText("safety")).toBeInTheDocument();
-    expect(screen.getByText("85.0%")).toBeInTheDocument();
-    expect(screen.getByText("96.0%")).toBeInTheDocument();
+    // Values shown as formatted metric values, not pass rates
+    expect(screen.getByText("0.850")).toBeInTheDocument();
   });
 
   it("renders recent failures", () => {
@@ -205,11 +204,11 @@ describe("QualityPage", () => {
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    expect(screen.getByText("No eval data available")).toBeInTheDocument();
+    expect(screen.getByText(/No eval metrics found/)).toBeInTheDocument();
     expect(screen.getByText("No recent failures")).toBeInTheDocument();
   });
 
-  it("excludes counter metrics from overall pass rate", () => {
+  it("shows counter/histogram count in summary cards", () => {
     const mixedSummaries = [
       ...mockSummaries,
       {
@@ -228,14 +227,13 @@ describe("QualityPage", () => {
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    // Overall pass rate should only average gauge metrics: (85.0 + 96.0) / 2 = 90.5%
-    // NOT (85.0 + 96.0 + 0) / 3 = 60.3%
-    expect(screen.getByText("90.5%")).toBeInTheDocument();
     // Active Evals count includes all 3
     expect(screen.getByText("3")).toBeInTheDocument();
+    // Counter / Histogram card shows 1
+    expect(screen.getByText("Counter / Histogram")).toBeInTheDocument();
   });
 
-  it("renders counter metrics with raw count instead of pass rate", () => {
+  it("renders counter metrics with raw count value", () => {
     const counterSummaries = [
       {
         evalId: "executed_total",
@@ -254,7 +252,7 @@ describe("QualityPage", () => {
     render(<Wrapper><QualityPage /></Wrapper>);
 
     expect(screen.getByText("47")).toBeInTheDocument();
-    expect(screen.getByText("count")).toBeInTheDocument();
+    expect(screen.getByText("counter")).toBeInTheDocument();
   });
 
   it("shows error alert when summary fetch fails", () => {

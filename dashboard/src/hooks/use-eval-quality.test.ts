@@ -148,11 +148,9 @@ describe("useEvalSummary", () => {
     expect(data[0].metricType).toBe("gauge");
   });
 
-  it("filters out histogram sub-metrics and worker infra metrics during discovery", async () => {
+  it("filters out histogram sub-metrics, worker infra metrics, and core infra metrics during discovery", async () => {
     mockQueryPrometheusMetadata.mockResolvedValue({
       omnia_eval_latency: "gauge",
-      omnia_eval_executed_total: "counter",
-      omnia_eval_passed_total: "counter",
     });
     mockQueryPrometheus
       .mockResolvedValueOnce({
@@ -165,22 +163,17 @@ describe("useEvalSummary", () => {
             { metric: { __name__: "omnia_eval_latency_count" }, value: [1000, "1"] },
             { metric: { __name__: "omnia_eval_executed_total" }, value: [1000, "47"] },
             { metric: { __name__: "omnia_eval_passed_total" }, value: [1000, "42"] },
+            { metric: { __name__: "omnia_eval_failed_total" }, value: [1000, "5"] },
+            { metric: { __name__: "omnia_eval_score" }, value: [1000, "0.9"] },
+            { metric: { __name__: "omnia_eval_duration_seconds" }, value: [1000, "1.2"] },
             { metric: { __name__: "omnia_eval_worker_events_received_total" }, value: [1000, "99"] },
           ],
         },
       })
-      // Three individual metric queries: executed_total, latency, passed_total (alphabetical)
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "47"] }] },
-      })
+      // Only latency survives filtering
       .mockResolvedValueOnce({
         status: "success",
         data: { result: [{ metric: {}, value: [1000, "0.5"] }] },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "42"] }] },
       });
 
     const { result } = renderHook(() => useEvalSummary(), {
@@ -188,12 +181,12 @@ describe("useEvalSummary", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // _bucket/_sum/_count excluded, omnia_eval_worker_* excluded, _total counters kept
-    expect(result.current.data).toHaveLength(3);
+    // _bucket/_sum/_count excluded, omnia_eval_worker_* excluded, infra metrics excluded
+    expect(result.current.data).toHaveLength(1);
     const evalIds = result.current.data!.map((d) => d.evalId);
-    expect(evalIds).toEqual(["executed_total", "latency", "passed_total"]);
-    // Discovery + 3 individual metric queries = 4 calls
-    expect(mockQueryPrometheus).toHaveBeenCalledTimes(4);
+    expect(evalIds).toEqual(["latency"]);
+    // Discovery + 1 individual metric query = 2 calls
+    expect(mockQueryPrometheus).toHaveBeenCalledTimes(2);
   });
 
   it("builds histogram summary with avgScore", async () => {
