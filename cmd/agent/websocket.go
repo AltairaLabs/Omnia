@@ -31,6 +31,7 @@ import (
 	"github.com/altairalabs/omnia/internal/facade"
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
 	"github.com/altairalabs/omnia/internal/media"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
 
 	a2aserver "github.com/AltairaLabs/PromptKit/server/a2a"
@@ -39,8 +40,6 @@ import (
 // runWebSocketFacade starts the traditional WebSocket facade with a gRPC runtime sidecar.
 // When A2A is enabled (dual-protocol mode), it also starts an A2A JSON-RPC server
 // on a separate port.
-//
-//nolint:gocognit,gocyclo // main entry point with dual-protocol support
 func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.Provider) {
 	// Initialize session store
 	store, err := initSessionStore(cfg, log)
@@ -59,7 +58,41 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	// Create Prometheus metrics
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
-	// Create WebSocket server with metrics
+	wsServer, mux := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider)
+
+	// Initialize media storage if configured
+	mediaStorage, mediaCleanup := initMediaStorage(cfg, log)
+	if mediaCleanup != nil {
+		defer mediaCleanup()
+	}
+	if mediaStorage != nil {
+		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
+		mediaHandler.RegisterRoutes(mux)
+		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
+	}
+
+	facadeServer := newFacadeHTTPServer(cfg, mux)
+	healthServer := newHealthHTTPServer(cfg, store, handler)
+
+	// Dual-protocol: optionally start A2A server alongside WebSocket.
+	var a2aSrv *facadea2a.Server
+	var a2aHTTPServer *http.Server
+	if cfg.A2AEnabled {
+		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log)
+	}
+
+	startAndServe(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer)
+}
+
+// buildWebSocketServer creates the WebSocket server and HTTP mux.
+func buildWebSocketServer(
+	cfg *agent.Config,
+	log logr.Logger,
+	store session.Store,
+	handler facade.MessageHandler,
+	metrics *agent.Metrics,
+	tracingProvider *tracing.Provider,
+) (*facade.Server, *http.ServeMux) {
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
 	wsConfig.PromptPackName = cfg.PromptPackName
@@ -78,55 +111,48 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}
 	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
-	// Create HTTP mux for routing
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
-	// Also handle the dashboard's expected path format for E2E testing
 	mux.Handle("/api/agents/", wsServer)
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Initialize media storage if configured
-	mediaStorage, mediaCleanup := initMediaStorage(cfg, log)
-	if mediaCleanup != nil {
-		defer mediaCleanup()
-	}
-	if mediaStorage != nil {
-		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
-		mediaHandler.RegisterRoutes(mux)
-		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
-	}
+	return wsServer, mux
+}
 
-	// Create facade HTTP server.
-	// WriteTimeout is intentionally omitted: WebSocket connections are long-lived
-	// and use ping/pong for keepalive. An HTTP WriteTimeout would kill the
-	// connection during slow LLM inference (e.g. Ollama tool-calling).
-	facadeServer := &http.Server{
+// newFacadeHTTPServer creates the facade HTTP server.
+// WriteTimeout is intentionally omitted: WebSocket connections are long-lived
+// and use ping/pong for keepalive.
+func newFacadeHTTPServer(cfg *agent.Config, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:        fmt.Sprintf(":%d", cfg.FacadePort),
-		Handler:     mux,
+		Handler:     handler,
 		ReadTimeout: readTimeout,
 		IdleTimeout: idleTimeout,
 	}
+}
 
-	// Create health check server
+// newHealthHTTPServer creates the health check HTTP server.
+func newHealthHTTPServer(cfg *agent.Config, store session.Store, handler facade.MessageHandler) *http.Server {
 	healthMux := http.NewServeMux()
 	healthMux.HandleFunc("/healthz", healthzHandler)
 	healthMux.HandleFunc("/readyz", readyzHandler(store, handler))
 
-	healthServer := &http.Server{
+	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
 		Handler:      healthMux,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 	}
+}
 
-	// Dual-protocol: optionally start A2A server alongside WebSocket.
-	var a2aSrv *facadea2a.Server
-	var a2aHTTPServer *http.Server
-	if cfg.A2AEnabled {
-		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log)
-	}
-
-	// Start servers
+// startAndServe starts all servers and blocks until shutdown signal or error.
+func startAndServe(
+	log logr.Logger,
+	wsServer *facade.Server,
+	facadeServer, healthServer *http.Server,
+	a2aSrv *facadea2a.Server,
+	a2aHTTPServer *http.Server,
+) {
 	errChan := make(chan error, 3)
 
 	go func() {
@@ -152,7 +178,6 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		}()
 	}
 
-	// Wait for shutdown signal or error
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -163,17 +188,24 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		log.Error(err, "server error")
 	}
 
-	// Graceful shutdown
+	shutdownAll(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer)
+}
+
+// shutdownAll gracefully shuts down all servers.
+func shutdownAll(
+	log logr.Logger,
+	wsServer *facade.Server,
+	facadeServer, healthServer *http.Server,
+	a2aSrv *facadea2a.Server,
+	a2aHTTPServer *http.Server,
+) {
 	log.Info("shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	// Shutdown WebSocket connections first
 	if err := wsServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down websocket server")
 	}
-
-	// Shutdown A2A server if running
 	if a2aSrv != nil {
 		if err := a2aSrv.Shutdown(ctx); err != nil {
 			log.Error(err, "error shutting down A2A server")
@@ -184,8 +216,6 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 			log.Error(err, "error shutting down A2A HTTP server")
 		}
 	}
-
-	// Shutdown HTTP servers
 	if err := facadeServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down facade server")
 	}

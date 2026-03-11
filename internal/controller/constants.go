@@ -77,6 +77,10 @@ const (
 	MockProviderAnnotation = "omnia.altairalabs.ai/mock-provider"
 	// healthzPath is the path for health probes.
 	healthzPath = "/healthz"
+	// fieldPathInstanceLabel is the downward API field path for the instance label.
+	fieldPathInstanceLabel = "metadata.labels['app.kubernetes.io/instance']"
+	// fieldPathNamespace is the downward API field path for the namespace.
+	fieldPathNamespace = "metadata.namespace"
 	// toolsConfigVolumeName is the name of the tools config volume.
 	toolsConfigVolumeName = "tools-config"
 )

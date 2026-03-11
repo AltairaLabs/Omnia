@@ -92,24 +92,8 @@ func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 		return nil
 	}
 
-	if ar.Spec.A2A.TaskTTL != nil {
-		ttl, err := time.ParseDuration(*ar.Spec.A2A.TaskTTL)
-		if err != nil {
-			return fmt.Errorf("invalid A2A task TTL %q: %w", *ar.Spec.A2A.TaskTTL, err)
-		}
-		cfg.A2ATaskTTL = ttl
-	} else {
-		cfg.A2ATaskTTL = DefaultA2ATaskTTL
-	}
-
-	if ar.Spec.A2A.ConversationTTL != nil {
-		ttl, err := time.ParseDuration(*ar.Spec.A2A.ConversationTTL)
-		if err != nil {
-			return fmt.Errorf("invalid A2A conversation TTL %q: %w", *ar.Spec.A2A.ConversationTTL, err)
-		}
-		cfg.A2AConversationTTL = ttl
-	} else {
-		cfg.A2AConversationTTL = DefaultA2AConversationTTL
+	if err := loadA2ATTLsFromCRD(cfg, ar.Spec.A2A); err != nil {
+		return err
 	}
 
 	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
@@ -122,11 +106,45 @@ func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 		cfg.A2APort = DefaultA2APort
 	}
 
-	// Task store config from CRD.
-	if ar.Spec.A2A.TaskStore != nil {
-		cfg.A2ATaskStoreType = string(ar.Spec.A2A.TaskStore.Type)
-		if ar.Spec.A2A.TaskStore.RedisURL != "" {
-			cfg.A2ARedisURL = ar.Spec.A2A.TaskStore.RedisURL
+	loadA2ATaskStoreFromCRD(cfg, ar.Spec.A2A)
+
+	// Resolved A2A clients are injected as JSON by the operator.
+	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
+
+	return nil
+}
+
+// loadA2ATTLsFromCRD parses A2A TTL durations from the CRD.
+func loadA2ATTLsFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) error {
+	if a2a.TaskTTL != nil {
+		ttl, err := time.ParseDuration(*a2a.TaskTTL)
+		if err != nil {
+			return fmt.Errorf("invalid A2A task TTL %q: %w", *a2a.TaskTTL, err)
+		}
+		cfg.A2ATaskTTL = ttl
+	} else {
+		cfg.A2ATaskTTL = DefaultA2ATaskTTL
+	}
+
+	if a2a.ConversationTTL != nil {
+		ttl, err := time.ParseDuration(*a2a.ConversationTTL)
+		if err != nil {
+			return fmt.Errorf("invalid A2A conversation TTL %q: %w", *a2a.ConversationTTL, err)
+		}
+		cfg.A2AConversationTTL = ttl
+	} else {
+		cfg.A2AConversationTTL = DefaultA2AConversationTTL
+	}
+
+	return nil
+}
+
+// loadA2ATaskStoreFromCRD populates task store config from the CRD or env fallback.
+func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
+	if a2a.TaskStore != nil {
+		cfg.A2ATaskStoreType = string(a2a.TaskStore.Type)
+		if a2a.TaskStore.RedisURL != "" {
+			cfg.A2ARedisURL = a2a.TaskStore.RedisURL
 		}
 		// RedisSecretRef is resolved by the operator into OMNIA_A2A_REDIS_URL env var.
 		if envURL := os.Getenv(EnvA2ARedisURL); envURL != "" {
@@ -136,11 +154,6 @@ func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 		cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
 		cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
 	}
-
-	// Resolved A2A clients are injected as JSON by the operator.
-	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
-
-	return nil
 }
 
 // loadSessionConfigFromCRD populates session-related config fields from the AgentRuntime CRD.

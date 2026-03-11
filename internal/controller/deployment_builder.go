@@ -437,7 +437,7 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 			Name: "OMNIA_AGENT_NAME",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+					FieldPath: fieldPathInstanceLabel,
 				},
 			},
 		},
@@ -445,7 +445,7 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 			Name: "OMNIA_NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
+					FieldPath: fieldPathNamespace,
 				},
 			},
 		},
@@ -691,7 +691,7 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Name: "OMNIA_AGENT_NAME",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+					FieldPath: fieldPathInstanceLabel,
 				},
 			},
 		},
@@ -699,7 +699,7 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Name: "OMNIA_NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
+					FieldPath: fieldPathNamespace,
 				},
 			},
 		},
@@ -787,7 +787,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			Name: "OMNIA_AGENT_NAME",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+					FieldPath: fieldPathInstanceLabel,
 				},
 			},
 		},
@@ -795,7 +795,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			Name: "OMNIA_NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
+					FieldPath: fieldPathNamespace,
 				},
 			},
 		},
