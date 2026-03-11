@@ -51,6 +51,9 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 	// Calculate secret hash for rollout triggering
 	secretHash := r.getSecretHash(ctx, agentRuntime, providers)
 
+	// Resolve A2A clients for env injection.
+	resolvedClients, _ := r.resolveA2AClients(ctx, log, agentRuntime)
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      agentRuntime.Name,
@@ -65,7 +68,7 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 		}
 
 		// Build deployment spec
-		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, secretHash)
+		r.buildDeploymentSpec(deployment, agentRuntime, promptPack, toolRegistry, secretHash, resolvedClients)
 		return nil
 	})
 
@@ -140,6 +143,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	secretHash string,
+	resolvedClients []ResolvedA2AClient,
 ) {
 	labels := map[string]string{
 		labelAppName:      labelValueOmniaAgent,
@@ -161,16 +165,41 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// Build volumes (shared between containers)
 	volumes := r.buildVolumes(agentRuntime, promptPack, toolRegistry)
 
-	// Build facade container
-	facadeContainer := r.buildFacadeContainer(agentRuntime, facadePort)
+	// A2A facade runs the SDK in-process (single container), while WebSocket/gRPC
+	// uses the traditional facade + runtime sidecar architecture.
+	var containers []corev1.Container
+	if agentRuntime.Spec.Facade.Type == omniav1alpha1.FacadeTypeA2A {
+		a2aContainer := r.buildA2AContainer(agentRuntime, promptPack, toolRegistry, facadePort, resolvedClients)
+		containers = []corev1.Container{a2aContainer}
+	} else {
+		facadeContainer := r.buildFacadeContainer(agentRuntime, facadePort)
 
-	// Build runtime container — runtime reads CRD directly for provider/session/media/eval config
-	runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
+		// Dual-protocol: add A2A port and env vars to the facade container.
+		if isDualProtocol(agentRuntime) {
+			a2aPort := int32(DefaultA2APort)
+			if agentRuntime.Spec.A2A.Port != nil {
+				a2aPort = *agentRuntime.Spec.A2A.Port
+			}
+			facadeContainer.Ports = append(facadeContainer.Ports, corev1.ContainerPort{
+				Name:          "a2a",
+				ContainerPort: a2aPort,
+				Protocol:      corev1.ProtocolTCP,
+			})
+			facadeContainer.Env = append(facadeContainer.Env,
+				corev1.EnvVar{Name: "OMNIA_A2A_ENABLED", Value: "true"},
+				corev1.EnvVar{Name: "OMNIA_A2A_PORT", Value: fmt.Sprintf("%d", a2aPort)},
+			)
+			facadeContainer.Env = append(facadeContainer.Env, r.buildA2ADualProtocolEnvVars(agentRuntime)...)
+		}
 
-	// Build pod spec with both containers
+		runtimeContainer := r.buildRuntimeContainer(agentRuntime, promptPack, toolRegistry)
+		containers = []corev1.Container{facadeContainer, runtimeContainer}
+	}
+
+	// Build pod spec
 	podSpec := corev1.PodSpec{
 		ServiceAccountName: facadeServiceAccountName(agentRuntime),
-		Containers:         []corev1.Container{facadeContainer, runtimeContainer},
+		Containers:         containers,
 		Volumes:            volumes,
 	}
 
@@ -319,6 +348,263 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 	return container
 }
 
+// buildA2AContainer creates a single container that combines the facade and runtime
+// for A2A protocol agents. The SDK runs in-process — no runtime sidecar needed.
+func (r *AgentRuntimeReconciler) buildA2AContainer(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+	facadePort int32,
+	resolvedClients []ResolvedA2AClient,
+) corev1.Container {
+	// A2A uses the facade image (which includes the SDK)
+	facadeImage := ""
+	if agentRuntime.Spec.Facade.Image != "" {
+		facadeImage = agentRuntime.Spec.Facade.Image
+	} else if r.FacadeImage != "" {
+		facadeImage = r.FacadeImage
+	} else {
+		facadeImage = DefaultFacadeImage
+	}
+
+	pullPolicy := r.FacadeImagePullPolicy
+	if pullPolicy == "" {
+		pullPolicy = corev1.PullIfNotPresent
+	}
+
+	container := corev1.Container{
+		Name:            FacadeContainerName,
+		Image:           facadeImage,
+		ImagePullPolicy: pullPolicy,
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "facade",
+				ContainerPort: facadePort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env:          r.buildA2AEnvVars(agentRuntime, resolvedClients),
+		VolumeMounts: r.buildRuntimeVolumeMounts(agentRuntime, promptPack, toolRegistry),
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/readyz",
+					Port: intstr.FromInt32(facadePort),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       10,
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: healthzPath,
+					Port: intstr.FromInt32(facadePort),
+				},
+			},
+			InitialDelaySeconds: 15,
+			PeriodSeconds:       20,
+		},
+		Lifecycle: &corev1.Lifecycle{
+			PreStop: &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"/bin/sh", "-c", "sleep 5"},
+				},
+			},
+		},
+	}
+
+	// Add resources if specified
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Resources != nil {
+		container.Resources = *agentRuntime.Spec.Runtime.Resources
+	}
+
+	return container
+}
+
+// buildA2AEnvVars creates environment variables for the A2A container.
+func (r *AgentRuntimeReconciler) buildA2AEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	resolvedClients []ResolvedA2AClient,
+) []corev1.EnvVar {
+	port := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		port = *agentRuntime.Spec.Facade.Port
+	}
+
+	envVars := []corev1.EnvVar{
+		{
+			Name: "OMNIA_AGENT_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: fieldPathInstanceLabel,
+				},
+			},
+		},
+		{
+			Name: "OMNIA_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: fieldPathNamespace,
+				},
+			},
+		},
+		{
+			Name:  "OMNIA_FACADE_TYPE",
+			Value: string(omniav1alpha1.FacadeTypeA2A),
+		},
+		{
+			Name:  "OMNIA_FACADE_PORT",
+			Value: fmt.Sprintf("%d", port),
+		},
+		{
+			Name:  "OMNIA_PROMPTPACK_PATH",
+			Value: PromptPackMountPath,
+		},
+	}
+
+	// Handler mode
+	handlerMode := omniav1alpha1.HandlerModeRuntime
+	if agentRuntime.Spec.Facade.Handler != nil {
+		handlerMode = *agentRuntime.Spec.Facade.Handler
+	}
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_HANDLER_MODE",
+		Value: string(handlerMode),
+	})
+
+	// A2A-specific config (TTLs, auth, task store).
+	envVars = append(envVars, buildA2AConfigEnvVars(agentRuntime.Spec.A2A)...)
+
+	// Session API URL
+	if r.SessionAPIURL != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "SESSION_API_URL",
+			Value: r.SessionAPIURL,
+		})
+	}
+
+	// Tracing
+	if r.TracingEnabled && r.TracingEndpoint != "" {
+		envVars = append(envVars,
+			corev1.EnvVar{Name: "OMNIA_TRACING_ENABLED", Value: "true"},
+			corev1.EnvVar{Name: "OMNIA_TRACING_ENDPOINT", Value: r.TracingEndpoint},
+			corev1.EnvVar{Name: "OMNIA_TRACING_INSECURE", Value: "true"},
+		)
+	}
+
+	// Resolved A2A clients (JSON-encoded list + per-client secret refs).
+	envVars = append(envVars, buildA2AClientEnvVars(agentRuntime, resolvedClients)...)
+
+	// Extra env vars from CRD
+	if agentRuntime.Spec.Facade.ExtraEnv != nil {
+		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
+	}
+
+	return envVars
+}
+
+// buildA2AConfigEnvVars creates env vars for A2A TTLs, auth, and task store config.
+func buildA2AConfigEnvVars(a2a *omniav1alpha1.A2AConfig) []corev1.EnvVar {
+	if a2a == nil {
+		return nil
+	}
+
+	var envVars []corev1.EnvVar
+
+	if a2a.TaskTTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_TASK_TTL",
+			Value: *a2a.TaskTTL,
+		})
+	}
+	if a2a.ConversationTTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_CONVERSATION_TTL",
+			Value: *a2a.ConversationTTL,
+		})
+	}
+	if a2a.Authentication != nil && a2a.Authentication.SecretRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OMNIA_A2A_AUTH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *a2a.Authentication.SecretRef,
+					Key:                  "token",
+				},
+			},
+		})
+	}
+	if a2a.TaskStore != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_TASK_STORE_TYPE",
+			Value: string(a2a.TaskStore.Type),
+		})
+		if a2a.TaskStore.RedisURL != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_A2A_REDIS_URL",
+				Value: a2a.TaskStore.RedisURL,
+			})
+		}
+		if a2a.TaskStore.RedisSecretRef != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name: "OMNIA_A2A_REDIS_URL",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: *a2a.TaskStore.RedisSecretRef,
+						Key:                  "url",
+					},
+				},
+			})
+		}
+	}
+
+	return envVars
+}
+
+// buildA2AClientEnvVars creates env vars for resolved A2A clients and their auth secrets.
+func buildA2AClientEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	resolvedClients []ResolvedA2AClient,
+) []corev1.EnvVar {
+	if len(resolvedClients) == 0 {
+		return nil
+	}
+
+	var envVars []corev1.EnvVar
+
+	clientsJSON, err := marshalA2AClients(resolvedClients)
+	if err == nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_CLIENTS",
+			Value: clientsJSON,
+		})
+	}
+
+	// Per-client auth tokens from secrets.
+	for _, rc := range resolvedClients {
+		if rc.AuthTokenEnv == "" {
+			continue
+		}
+		for _, cs := range agentRuntime.Spec.A2A.Clients {
+			if cs.Name == rc.Name && cs.Authentication != nil && cs.Authentication.SecretRef != nil {
+				envVars = append(envVars, corev1.EnvVar{
+					Name: rc.AuthTokenEnv,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: *cs.Authentication.SecretRef,
+							Key:                  "token",
+						},
+					},
+				})
+				break
+			}
+		}
+	}
+
+	return envVars
+}
+
 // buildRuntimeContainer creates the runtime container spec.
 // promptPack is only needed for volume mounts (the pack file mount path).
 func (r *AgentRuntimeReconciler) buildRuntimeContainer(
@@ -405,7 +691,7 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Name: "OMNIA_AGENT_NAME",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+					FieldPath: fieldPathInstanceLabel,
 				},
 			},
 		},
@@ -413,7 +699,7 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 			Name: "OMNIA_NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
+					FieldPath: fieldPathNamespace,
 				},
 			},
 		},
@@ -501,7 +787,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			Name: "OMNIA_AGENT_NAME",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.labels['app.kubernetes.io/instance']",
+					FieldPath: fieldPathInstanceLabel,
 				},
 			},
 		},
@@ -509,7 +795,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			Name: "OMNIA_NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
+					FieldPath: fieldPathNamespace,
 				},
 			},
 		},
@@ -604,4 +890,78 @@ func defaultImageForFramework(framework *omniav1alpha1.FrameworkConfig) string {
 	default:
 		return DefaultFrameworkImage
 	}
+}
+
+// isDualProtocol returns true when the AgentRuntime has A2A enabled as an
+// additional endpoint alongside a non-A2A primary facade (websocket or grpc).
+func isDualProtocol(ar *omniav1alpha1.AgentRuntime) bool {
+	return ar.Spec.Facade.Type != omniav1alpha1.FacadeTypeA2A &&
+		ar.Spec.A2A != nil &&
+		ar.Spec.A2A.Enabled
+}
+
+// buildA2ADualProtocolEnvVars returns extra env vars needed when A2A runs
+// alongside the primary facade. These are appended to the facade container's env.
+func (r *AgentRuntimeReconciler) buildA2ADualProtocolEnvVars(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) []corev1.EnvVar {
+	var envVars []corev1.EnvVar
+
+	if agentRuntime.Spec.A2A == nil {
+		return envVars
+	}
+
+	// A2A TTLs
+	if agentRuntime.Spec.A2A.TaskTTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_TASK_TTL",
+			Value: *agentRuntime.Spec.A2A.TaskTTL,
+		})
+	}
+	if agentRuntime.Spec.A2A.ConversationTTL != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_CONVERSATION_TTL",
+			Value: *agentRuntime.Spec.A2A.ConversationTTL,
+		})
+	}
+
+	// Auth token from secret
+	if agentRuntime.Spec.A2A.Authentication != nil && agentRuntime.Spec.A2A.Authentication.SecretRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OMNIA_A2A_AUTH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *agentRuntime.Spec.A2A.Authentication.SecretRef,
+					Key:                  "token",
+				},
+			},
+		})
+	}
+
+	// Task store configuration
+	if agentRuntime.Spec.A2A.TaskStore != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_A2A_TASK_STORE_TYPE",
+			Value: string(agentRuntime.Spec.A2A.TaskStore.Type),
+		})
+		if agentRuntime.Spec.A2A.TaskStore.RedisURL != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "OMNIA_A2A_REDIS_URL",
+				Value: agentRuntime.Spec.A2A.TaskStore.RedisURL,
+			})
+		}
+		if agentRuntime.Spec.A2A.TaskStore.RedisSecretRef != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name: "OMNIA_A2A_REDIS_URL",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: *agentRuntime.Spec.A2A.TaskStore.RedisSecretRef,
+						Key:                  "url",
+					},
+				},
+			})
+		}
+	}
+
+	return envVars
 }

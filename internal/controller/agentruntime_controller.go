@@ -303,6 +303,9 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// Don't fail the reconciliation for eval worker errors, just log
 	}
 
+	// Resolve A2A clients and update A2A status.
+	r.reconcileA2AStatus(ctx, log, agentRuntime)
+
 	// Update status from deployment
 	r.updateStatusFromDeployment(agentRuntime, deployment, promptPack)
 
@@ -428,17 +431,33 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 
 		service.Labels = labels
 		service.Annotations = annotations
+		ports := []corev1.ServicePort{
+			{
+				Name:       "facade",
+				Port:       port,
+				TargetPort: intstr.FromString("facade"),
+				Protocol:   corev1.ProtocolTCP,
+			},
+		}
+
+		// Dual-protocol: expose A2A port alongside the primary facade.
+		if isDualProtocol(agentRuntime) {
+			a2aPort := int32(DefaultA2APort)
+			if agentRuntime.Spec.A2A.Port != nil {
+				a2aPort = *agentRuntime.Spec.A2A.Port
+			}
+			ports = append(ports, corev1.ServicePort{
+				Name:       "a2a",
+				Port:       a2aPort,
+				TargetPort: intstr.FromString("a2a"),
+				Protocol:   corev1.ProtocolTCP,
+			})
+		}
+
 		service.Spec = corev1.ServiceSpec{
 			Selector: labels,
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "facade",
-					Port:       port,
-					TargetPort: intstr.FromString("facade"),
-					Protocol:   corev1.ProtocolTCP,
-				},
-			},
-			Type: corev1.ServiceTypeClusterIP,
+			Ports:    ports,
+			Type:     corev1.ServiceTypeClusterIP,
 		}
 
 		return nil
@@ -469,6 +488,39 @@ func (r *AgentRuntimeReconciler) updateStatusFromDeployment(
 
 	version := promptPack.Spec.Version
 	agentRuntime.Status.ActiveVersion = &version
+}
+
+// reconcileA2AStatus resolves A2A client references and populates A2A status fields.
+func (r *AgentRuntimeReconciler) reconcileA2AStatus(
+	ctx context.Context,
+	log logr.Logger,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) {
+	isA2A := agentRuntime.Spec.Facade.Type == omniav1alpha1.FacadeTypeA2A || isDualProtocol(agentRuntime)
+	if !isA2A {
+		return
+	}
+
+	port := int32(DefaultFacadePort)
+	if agentRuntime.Spec.Facade.Port != nil {
+		port = *agentRuntime.Spec.Facade.Port
+	}
+	if isDualProtocol(agentRuntime) && agentRuntime.Spec.A2A != nil && agentRuntime.Spec.A2A.Port != nil {
+		port = *agentRuntime.Spec.A2A.Port
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d",
+		agentRuntime.Name, agentRuntime.Namespace, port)
+
+	if agentRuntime.Status.A2A == nil {
+		agentRuntime.Status.A2A = &omniav1alpha1.A2AStatus{}
+	}
+	agentRuntime.Status.A2A.Endpoint = endpoint
+	agentRuntime.Status.A2A.AgentCardURL = endpoint + "/.well-known/agent.json"
+
+	// Resolve client references.
+	_, clientStatuses := r.resolveA2AClients(ctx, log, agentRuntime)
+	agentRuntime.Status.A2A.Clients = clientStatuses
 }
 
 // SetupWithManager sets up the controller with the Manager.

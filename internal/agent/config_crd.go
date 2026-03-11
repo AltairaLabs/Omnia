@@ -77,7 +77,83 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, err
 	}
 
+	if err := loadA2AConfigFromCRD(cfg, ar); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// loadA2AConfigFromCRD populates A2A-related config fields from the AgentRuntime CRD.
+func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
+	if ar.Spec.A2A == nil {
+		cfg.A2ATaskTTL = DefaultA2ATaskTTL
+		cfg.A2AConversationTTL = DefaultA2AConversationTTL
+		return nil
+	}
+
+	if err := loadA2ATTLsFromCRD(cfg, ar.Spec.A2A); err != nil {
+		return err
+	}
+
+	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
+
+	// Dual-protocol: A2A as additional endpoint alongside websocket/grpc.
+	cfg.A2AEnabled = ar.Spec.A2A.Enabled
+	if ar.Spec.A2A.Port != nil {
+		cfg.A2APort = int(*ar.Spec.A2A.Port)
+	} else {
+		cfg.A2APort = DefaultA2APort
+	}
+
+	loadA2ATaskStoreFromCRD(cfg, ar.Spec.A2A)
+
+	// Resolved A2A clients are injected as JSON by the operator.
+	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
+
+	return nil
+}
+
+// loadA2ATTLsFromCRD parses A2A TTL durations from the CRD.
+func loadA2ATTLsFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) error {
+	if a2a.TaskTTL != nil {
+		ttl, err := time.ParseDuration(*a2a.TaskTTL)
+		if err != nil {
+			return fmt.Errorf("invalid A2A task TTL %q: %w", *a2a.TaskTTL, err)
+		}
+		cfg.A2ATaskTTL = ttl
+	} else {
+		cfg.A2ATaskTTL = DefaultA2ATaskTTL
+	}
+
+	if a2a.ConversationTTL != nil {
+		ttl, err := time.ParseDuration(*a2a.ConversationTTL)
+		if err != nil {
+			return fmt.Errorf("invalid A2A conversation TTL %q: %w", *a2a.ConversationTTL, err)
+		}
+		cfg.A2AConversationTTL = ttl
+	} else {
+		cfg.A2AConversationTTL = DefaultA2AConversationTTL
+	}
+
+	return nil
+}
+
+// loadA2ATaskStoreFromCRD populates task store config from the CRD or env fallback.
+func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
+	if a2a.TaskStore != nil {
+		cfg.A2ATaskStoreType = string(a2a.TaskStore.Type)
+		if a2a.TaskStore.RedisURL != "" {
+			cfg.A2ARedisURL = a2a.TaskStore.RedisURL
+		}
+		// RedisSecretRef is resolved by the operator into OMNIA_A2A_REDIS_URL env var.
+		if envURL := os.Getenv(EnvA2ARedisURL); envURL != "" {
+			cfg.A2ARedisURL = envURL
+		}
+	} else {
+		cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
+		cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
+	}
 }
 
 // loadSessionConfigFromCRD populates session-related config fields from the AgentRuntime CRD.
@@ -202,5 +278,48 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := loadA2AConfigFromEnv(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// loadA2AConfigFromEnv populates A2A-related config fields from environment variables.
+func loadA2AConfigFromEnv(cfg *Config) error {
+	taskTTLStr := os.Getenv(EnvA2ATaskTTL)
+	if taskTTLStr != "" {
+		ttl, err := time.ParseDuration(taskTTLStr)
+		if err != nil {
+			return fmt.Errorf(errFmtInvalidEnv, EnvA2ATaskTTL, err)
+		}
+		cfg.A2ATaskTTL = ttl
+	} else {
+		cfg.A2ATaskTTL = DefaultA2ATaskTTL
+	}
+
+	convTTLStr := os.Getenv(EnvA2AConversationTTL)
+	if convTTLStr != "" {
+		ttl, err := time.ParseDuration(convTTLStr)
+		if err != nil {
+			return fmt.Errorf(errFmtInvalidEnv, EnvA2AConversationTTL, err)
+		}
+		cfg.A2AConversationTTL = ttl
+	} else {
+		cfg.A2AConversationTTL = DefaultA2AConversationTTL
+	}
+
+	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
+	cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
+	cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
+	cfg.A2AEnabled = os.Getenv(EnvA2AEnabled) == envValueTrue
+	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
+
+	a2aPort, err := getEnvAsInt(EnvA2APort, DefaultA2APort)
+	if err != nil {
+		return fmt.Errorf(errFmtInvalidEnv, EnvA2APort, err)
+	}
+	cfg.A2APort = a2aPort
+
+	return nil
 }

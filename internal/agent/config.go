@@ -67,6 +67,16 @@ const (
 	EnvTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	EnvTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
 	EnvTracingInsecure   = "OMNIA_TRACING_INSECURE"
+
+	// A2A configuration.
+	EnvA2ATaskTTL         = "OMNIA_A2A_TASK_TTL"
+	EnvA2AConversationTTL = "OMNIA_A2A_CONVERSATION_TTL"
+	EnvA2AAuthToken       = "OMNIA_A2A_AUTH_TOKEN"
+	EnvA2ATaskStoreType   = "OMNIA_A2A_TASK_STORE_TYPE"
+	EnvA2ARedisURL        = "OMNIA_A2A_REDIS_URL"
+	EnvA2AEnabled         = "OMNIA_A2A_ENABLED"
+	EnvA2APort            = "OMNIA_A2A_PORT"
+	EnvA2AClients         = "OMNIA_A2A_CLIENTS"
 )
 
 // Default values.
@@ -79,6 +89,9 @@ const (
 	DefaultMediaStoragePath    = "/var/lib/omnia/media"
 	DefaultMediaMaxFileSize    = 100 * 1024 * 1024 // 100MB
 	DefaultMediaDefaultTTL     = 24 * time.Hour
+	DefaultA2ATaskTTL          = 1 * time.Hour
+	DefaultA2AConversationTTL  = 30 * time.Minute
+	DefaultA2APort             = 9999
 )
 
 // Error format strings.
@@ -92,6 +105,7 @@ type FacadeType string
 
 const (
 	FacadeTypeWebSocket FacadeType = "websocket"
+	FacadeTypeA2A       FacadeType = "a2a"
 )
 
 // SessionType represents the type of session store.
@@ -189,6 +203,16 @@ type Config struct {
 	TracingSampleRate float64
 	TracingInsecure   bool
 
+	// A2A configuration.
+	A2ATaskTTL         time.Duration
+	A2AConversationTTL time.Duration
+	A2AAuthToken       string
+	A2ATaskStoreType   string // "memory" or "redis"
+	A2ARedisURL        string // Redis URL for A2A task store
+	A2AEnabled         bool   // true when A2A is an additional endpoint (dual-protocol)
+	A2APort            int    // port for A2A in dual-protocol mode (default 9999)
+	A2AClientsJSON     string // JSON-encoded resolved client list from controller
+
 	// Health check port.
 	HealthPort int
 }
@@ -236,7 +260,7 @@ func (c *Config) Validate() error {
 
 	// Validate facade type
 	switch c.FacadeType {
-	case FacadeTypeWebSocket:
+	case FacadeTypeWebSocket, FacadeTypeA2A:
 		// Valid
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)
