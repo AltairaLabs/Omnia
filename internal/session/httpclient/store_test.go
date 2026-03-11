@@ -142,6 +142,7 @@ func TestCreateSession(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "test-agent",
@@ -167,6 +168,7 @@ func TestCreateSession_NoTTL(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "test-agent",
@@ -185,6 +187,7 @@ func TestGetSession_Found(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Create a session first.
 	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
@@ -210,6 +213,7 @@ func TestGetSession_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	_, err := store.GetSession(context.Background(), "nonexistent")
 	if err != session.ErrSessionNotFound {
@@ -227,6 +231,7 @@ func TestGetSession_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	_, err := store.GetSession(context.Background(), "x")
 	if err == nil {
 		t.Fatal("expected error")
@@ -244,6 +249,7 @@ func TestAppendMessage_OK(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "a",
@@ -268,6 +274,7 @@ func TestAppendMessage_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	err := store.AppendMessage(context.Background(), "nonexistent", session.Message{
 		ID: "m1", Role: session.RoleUser, Content: "hi",
@@ -286,6 +293,7 @@ func TestAppendMessage_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	err := store.AppendMessage(context.Background(), "x", session.Message{
 		ID: "m1", Role: session.RoleUser, Content: "hi",
 	})
@@ -302,6 +310,7 @@ func TestUpdateSessionStats_OK(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "a",
@@ -326,6 +335,7 @@ func TestUpdateSessionStats_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	err := store.UpdateSessionStats(context.Background(), "nonexistent", session.SessionStatsUpdate{
 		AddMessages: 1,
@@ -344,6 +354,7 @@ func TestUpdateSessionStats_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	err := store.UpdateSessionStats(context.Background(), "x", session.SessionStatsUpdate{
 		AddMessages: 1,
 	})
@@ -360,6 +371,7 @@ func TestRefreshTTL_OK(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "a",
@@ -380,6 +392,7 @@ func TestRefreshTTL_NotFound(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	err := store.RefreshTTL(context.Background(), "nonexistent", time.Hour)
 	if err != session.ErrSessionNotFound {
@@ -396,6 +409,7 @@ func TestRefreshTTL_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	err := store.RefreshTTL(context.Background(), "x", time.Hour)
 	if err == nil {
 		t.Fatal("expected error")
@@ -407,6 +421,7 @@ func TestRefreshTTL_ServerError(t *testing.T) {
 
 func TestNotImplementedMethods(t *testing.T) {
 	store := NewStore("http://unused", logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 
 	if err := store.DeleteSession(ctx, "x"); err != ErrNotImplemented {
@@ -428,11 +443,20 @@ func TestClose(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close: unexpected error: %v", err)
 	}
+	// Calling Close again should not panic.
+}
+
+func TestClose_BufferDisabled(t *testing.T) {
+	store := NewStore("http://unused", logr.Discard(), WithBufferCapacity(0))
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: unexpected error: %v", err)
+	}
 }
 
 func TestConnectionError(t *testing.T) {
 	// Point to a server that doesn't exist.
 	store := NewStore("http://127.0.0.1:1", logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	_, err := store.GetSession(context.Background(), "x")
 	if err == nil {
@@ -450,6 +474,7 @@ func TestServerErrorResponses(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 
 	_, err := store.CreateSession(ctx, session.CreateSessionOptions{AgentName: "a", Namespace: "ns"})
@@ -477,6 +502,7 @@ func TestServerErrorResponses(t *testing.T) {
 
 func TestWithHTTPTimeout(t *testing.T) {
 	store := NewStore("http://unused", logr.Discard(), WithHTTPTimeout(5*time.Second))
+	t.Cleanup(func() { _ = store.Close() })
 	if store.httpClient.Timeout != 5*time.Second {
 		t.Fatalf("expected 5s timeout, got %v", store.httpClient.Timeout)
 	}
@@ -485,6 +511,7 @@ func TestWithHTTPTimeout(t *testing.T) {
 func TestWithHTTPClient(t *testing.T) {
 	custom := &http.Client{Timeout: 99 * time.Second}
 	store := NewStore("http://unused", logr.Discard(), WithHTTPClient(custom))
+	t.Cleanup(func() { _ = store.Close() })
 	if store.httpClient != custom {
 		t.Fatal("expected custom HTTP client to be used")
 	}
@@ -492,6 +519,7 @@ func TestWithHTTPClient(t *testing.T) {
 
 func TestDefaultHTTPTimeout(t *testing.T) {
 	store := NewStore("http://unused", logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	if store.httpClient.Timeout != DefaultHTTPTimeout {
 		t.Fatalf("expected default timeout %v, got %v", DefaultHTTPTimeout, store.httpClient.Timeout)
 	}
@@ -506,6 +534,7 @@ func TestReadErrorInvalidJSON(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	_, err := store.GetSession(context.Background(), "x")
 	if err == nil {
 		t.Fatal("expected error")
@@ -521,6 +550,7 @@ func TestCancelledContext(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -534,6 +564,7 @@ func TestCancelledContext(t *testing.T) {
 func TestDoJSON_RequestCreationError(t *testing.T) {
 	// Use an invalid base URL that will fail request creation.
 	store := NewStore("://invalid-url", logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "a",
@@ -549,6 +580,7 @@ func TestDoRequest_NilBody(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	// GetSession uses doRequest with nil body
 	_, err := store.GetSession(context.Background(), "nonexistent")
@@ -566,6 +598,7 @@ func TestCreateSession_InvalidResponseJSON(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "a",
 		Namespace: "ns",
@@ -587,6 +620,7 @@ func TestGetSession_InvalidResponseJSON(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	_, err := store.GetSession(context.Background(), "x")
 	if err == nil {
 		t.Fatal("expected decode error")
@@ -621,6 +655,7 @@ func TestRetry_503ThenSuccess(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	sess, err := store.GetSession(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("expected success after retries, got: %v", err)
@@ -642,6 +677,7 @@ func TestRetry_MaxRetriesExceeded(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	_, err := store.GetSession(context.Background(), "x")
 	if err == nil {
 		t.Fatal("expected error after max retries")
@@ -665,6 +701,7 @@ func TestRetry_NonRetryableStatus(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "a", Namespace: "ns",
 	})
@@ -698,6 +735,7 @@ func TestRetry_ConnectionErrorThenSuccess(t *testing.T) {
 
 	// Create a store pointed at the (now dead) server.
 	store := NewStore(srvURL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Restart the server on the same address is tricky, so instead we test
 	// that connection errors are retried by checking attempt count after failure.
@@ -722,7 +760,7 @@ func TestCircuitBreaker_OpensAfterRepeatedFailures(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := newStoreWithLowCBThreshold(srv.URL)
+	store := newStoreWithLowCBThreshold(t, srv.URL)
 
 	// Each GetSession call retries maxRetries times internally.
 	// With test config: minRequests=3, failRatio=0.6 → trips after 3 failed Execute() calls.
@@ -747,7 +785,7 @@ func TestCircuitBreaker_NormalOperationDoesNotTrip(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
 
-	store := newStoreWithLowCBThreshold(srv.URL)
+	store := newStoreWithLowCBThreshold(t, srv.URL)
 
 	// Successful requests should not trip the breaker.
 	for i := range 5 {
@@ -763,8 +801,10 @@ func TestCircuitBreaker_NormalOperationDoesNotTrip(t *testing.T) {
 
 // newStoreWithLowCBThreshold creates a store with a circuit breaker that trips
 // quickly for testing (minRequests=3 instead of 10).
-func newStoreWithLowCBThreshold(baseURL string) *Store {
+func newStoreWithLowCBThreshold(t *testing.T, baseURL string) *Store {
+	t.Helper()
 	s := NewStore(baseURL, logr.Discard())
+	t.Cleanup(func() { _ = s.Close() })
 	// Replace the circuit breaker with one that trips faster.
 	s.cb = gobreaker.NewCircuitBreaker[*http.Response](gobreaker.Settings{
 		Name:        "test-session-api",
@@ -788,6 +828,7 @@ func TestRetry_CancelledContextStopsRetry(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// Cancel after first attempt completes.
@@ -828,6 +869,7 @@ func TestCreateSession_409ConflictReturnsExisting(t *testing.T) {
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
 		AgentName: "test-agent",
 		Namespace: "default",
@@ -861,6 +903,7 @@ func TestNewStore_TransportPropagatesTraceContext(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Start a span so there's a trace context to propagate.
 	ctx, span := tp.Tracer("test").Start(context.Background(), "test-op")
