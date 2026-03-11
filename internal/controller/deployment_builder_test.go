@@ -389,6 +389,81 @@ func TestBuildA2ADualProtocolEnvVars(t *testing.T) {
 	}
 }
 
+func TestBuildA2AConfigEnvVars_FullConfig(t *testing.T) {
+	taskTTL := "1h"
+	convTTL := "30m"
+	secretRef := &corev1.LocalObjectReference{Name: "auth-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+
+	a2a := &omniav1alpha1.A2AConfig{
+		TaskTTL:         &taskTTL,
+		ConversationTTL: &convTTL,
+		Authentication: &omniav1alpha1.A2AAuthConfig{
+			SecretRef: secretRef,
+		},
+		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+			Type:           omniav1alpha1.A2ATaskStoreRedis,
+			RedisSecretRef: redisSecretRef,
+		},
+	}
+
+	envVars := buildA2AConfigEnvVars(a2a)
+
+	envMap := make(map[string]string)
+	var secretEnvNames []string
+	for _, ev := range envVars {
+		if ev.Value != "" {
+			envMap[ev.Name] = ev.Value
+		}
+		if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef != nil {
+			secretEnvNames = append(secretEnvNames, ev.Name)
+		}
+	}
+
+	if envMap["OMNIA_A2A_TASK_TTL"] != "1h" {
+		t.Errorf("task TTL = %q, want %q", envMap["OMNIA_A2A_TASK_TTL"], "1h")
+	}
+	if envMap["OMNIA_A2A_CONVERSATION_TTL"] != "30m" {
+		t.Errorf("conversation TTL = %q, want %q", envMap["OMNIA_A2A_CONVERSATION_TTL"], "30m")
+	}
+	if envMap["OMNIA_A2A_TASK_STORE_TYPE"] != "redis" {
+		t.Errorf("task store type = %q, want %q", envMap["OMNIA_A2A_TASK_STORE_TYPE"], "redis")
+	}
+
+	// Verify secret-based env vars exist.
+	foundAuth := false
+	foundRedis := false
+	for _, name := range secretEnvNames {
+		if name == "OMNIA_A2A_AUTH_TOKEN" {
+			foundAuth = true
+		}
+		if name == "OMNIA_A2A_REDIS_URL" {
+			foundRedis = true
+		}
+	}
+	if !foundAuth {
+		t.Error("expected OMNIA_A2A_AUTH_TOKEN from secret")
+	}
+	if !foundRedis {
+		t.Error("expected OMNIA_A2A_REDIS_URL from secret")
+	}
+}
+
+func TestBuildA2AConfigEnvVars_NilConfig(t *testing.T) {
+	envVars := buildA2AConfigEnvVars(nil)
+	if len(envVars) != 0 {
+		t.Errorf("expected no env vars for nil config, got %d", len(envVars))
+	}
+}
+
+func TestBuildA2AClientEnvVars_Empty(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{}
+	envVars := buildA2AClientEnvVars(ar, nil)
+	if envVars != nil {
+		t.Errorf("expected nil for empty clients, got %d env vars", len(envVars))
+	}
+}
+
 func TestBuildA2ADualProtocolEnvVars_NilA2A(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 
