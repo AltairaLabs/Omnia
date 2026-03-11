@@ -1,0 +1,188 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useWorkspace } from "@/contexts/workspace-context";
+import yaml from "js-yaml";
+
+export interface ArenaConfigPreview {
+  /** Number of scenarios declared in the arena config */
+  scenarioCount: number;
+  /** Number of providers declared in the arena config */
+  configProviderCount: number;
+  /** Whether the config was successfully parsed */
+  loaded: boolean;
+  /** Whether the config is being fetched */
+  loading: boolean;
+  /** Error message if fetch/parse failed */
+  error: string | null;
+}
+
+/**
+ * Minimal shape of the arena config YAML we need for preview.
+ * Only extracts scenario and provider counts from spec.
+ */
+interface ArenaConfigYaml {
+  spec?: {
+    scenarios?: { file?: string }[];
+    providers?: { file?: string; name?: string }[];
+  };
+}
+
+/**
+ * Fetches and parses an arena config YAML file to extract scenario and provider counts.
+ * Used to calculate optimal worker count in the job wizard.
+ *
+ * @param sourceName - ArenaSource name to read from
+ * @param configPath - Relative path to the arena config file (e.g., "config.arena.yaml")
+ */
+export function useArenaConfigPreview(
+  sourceName: string | undefined,
+  configPath: string | undefined
+): ArenaConfigPreview {
+  const { currentWorkspace } = useWorkspace();
+  const workspace = currentWorkspace?.name;
+
+  const [state, setState] = useState<ArenaConfigPreview>({
+    scenarioCount: 0,
+    configProviderCount: 0,
+    loaded: false,
+    loading: false,
+    error: null,
+  });
+
+  const fetchConfig = useCallback(async () => {
+    if (!workspace || !sourceName || !configPath) {
+      setState({
+        scenarioCount: 0,
+        configProviderCount: 0,
+        loaded: false,
+        loading: false,
+        error: null,
+      });
+      return;
+    }
+
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      const url = `/api/workspaces/${encodeURIComponent(workspace)}/arena/sources/${encodeURIComponent(sourceName)}/file?path=${encodeURIComponent(configPath)}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setState({
+            scenarioCount: 0,
+            configProviderCount: 0,
+            loaded: false,
+            loading: false,
+            error: null,
+          });
+          return;
+        }
+        throw new Error(`Failed to fetch config: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const parsed = yaml.load(data.content) as ArenaConfigYaml;
+
+      const scenarios = parsed?.spec?.scenarios ?? [];
+      const providers = parsed?.spec?.providers ?? [];
+
+      // Count only entries that have a file or name reference
+      const scenarioCount = scenarios.filter(
+        (s) => s?.file || s
+      ).length;
+      const configProviderCount = providers.filter(
+        (p) => p?.file || p?.name || p
+      ).length;
+
+      setState({
+        scenarioCount,
+        configProviderCount,
+        loaded: true,
+        loading: false,
+        error: null,
+      });
+    } catch (err) {
+      setState({
+        scenarioCount: 0,
+        configProviderCount: 0,
+        loaded: false,
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [workspace, sourceName, configPath]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  return state;
+}
+
+export interface WorkItemEstimate {
+  /** Total work items that will be created */
+  workItems: number;
+  /** Recommended worker count (= workItems, capped at maxWorkerReplicas if set) */
+  recommendedWorkers: number;
+  /** Human-readable explanation of the work item calculation */
+  description: string;
+}
+
+/**
+ * Calculates the estimated number of work items and recommended worker count.
+ *
+ * The controller creates work items differently based on the execution mode
+ * and whether provider overrides are enabled:
+ *
+ * - Direct + provider overrides: scenarios x overrideProviders matrix items
+ * - Direct + no overrides: 1 fallback item (single worker runs entire matrix)
+ * - Fleet: 1 item per scenario (no provider dimension)
+ */
+export function estimateWorkItems(
+  config: ArenaConfigPreview,
+  executionMode: string,
+  providerOverridesEnabled: boolean,
+  overrideProviderCount: number,
+  maxWorkerReplicas: number
+): WorkItemEstimate {
+  if (!config.loaded) {
+    return {
+      workItems: 1,
+      recommendedWorkers: 1,
+      description: "",
+    };
+  }
+
+  const scenarios = Math.max(config.scenarioCount, 1);
+  const plural = (n: number) => (n === 1 ? "" : "s");
+  let workItems: number;
+  let description: string;
+
+  if (executionMode === "fleet") {
+    // Fleet mode: one work item per scenario
+    workItems = scenarios;
+    description =
+      scenarios === 1
+        ? "1 scenario"
+        : `${scenarios} scenarios`;
+  } else if (providerOverridesEnabled && overrideProviderCount > 0) {
+    // Direct mode with provider overrides: scenarios x providers matrix
+    workItems = scenarios * overrideProviderCount;
+    description =
+      `${scenarios} scenario${plural(scenarios)} \u00d7 ${overrideProviderCount} provider${plural(overrideProviderCount)}`;
+  } else {
+    // Direct mode without overrides: single fallback work item
+    workItems = 1;
+    description =
+      `${scenarios} scenario${plural(scenarios)} (single work item \u2014 engine runs full matrix)`;
+  }
+
+  let recommendedWorkers = workItems;
+  if (maxWorkerReplicas > 0) {
+    recommendedWorkers = Math.min(recommendedWorkers, maxWorkerReplicas);
+  }
+
+  return { workItems, recommendedWorkers, description };
+}

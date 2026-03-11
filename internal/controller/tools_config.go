@@ -60,10 +60,18 @@ type ToolDefinition struct {
 
 // ToolHTTP represents HTTP configuration for a handler.
 type ToolHTTP struct {
-	Endpoint    string            `json:"endpoint"`
-	Method      string            `json:"method,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	ContentType string            `json:"contentType,omitempty"`
+	Endpoint        string            `json:"endpoint"`
+	Method          string            `json:"method,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	ContentType     string            `json:"contentType,omitempty"`
+	QueryParams     []string          `json:"queryParams,omitempty"`
+	HeaderParams    map[string]string `json:"headerParams,omitempty"`
+	StaticQuery     map[string]string `json:"staticQuery,omitempty"`
+	StaticBody      interface{}       `json:"staticBody,omitempty"`
+	BodyMapping     string            `json:"bodyMapping,omitempty"`
+	ResponseMapping string            `json:"responseMapping,omitempty"`
+	Redact          []string          `json:"redact,omitempty"`
+	URLTemplate     string            `json:"urlTemplate,omitempty"`
 }
 
 // ToolGRPC represents gRPC configuration for a handler.
@@ -78,19 +86,27 @@ type ToolGRPC struct {
 
 // ToolMCP represents MCP configuration for a handler.
 type ToolMCP struct {
-	Transport string            `json:"transport"`
-	Endpoint  string            `json:"endpoint,omitempty"`
-	Command   string            `json:"command,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	WorkDir   string            `json:"workDir,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
+	Transport  string            `json:"transport"`
+	Endpoint   string            `json:"endpoint,omitempty"`
+	Command    string            `json:"command,omitempty"`
+	Args       []string          `json:"args,omitempty"`
+	WorkDir    string            `json:"workDir,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	ToolFilter *ToolMCPFilter    `json:"toolFilter,omitempty"`
+}
+
+// ToolMCPFilter controls which tools from an MCP server are exposed.
+type ToolMCPFilter struct {
+	Allowlist []string `json:"allowlist,omitempty"`
+	Blocklist []string `json:"blocklist,omitempty"`
 }
 
 // ToolOpenAPI represents OpenAPI configuration for a handler.
 type ToolOpenAPI struct {
-	SpecURL         string   `json:"specURL"`
-	BaseURL         string   `json:"baseURL,omitempty"`
-	OperationFilter []string `json:"operationFilter,omitempty"`
+	SpecURL         string            `json:"specURL"`
+	BaseURL         string            `json:"baseURL,omitempty"`
+	OperationFilter []string          `json:"operationFilter,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
 }
 
 // reconcileToolsConfigMap creates or updates the tools ConfigMap from ToolRegistry.
@@ -192,12 +208,29 @@ func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) *ToolH
 	if h.HTTPConfig == nil {
 		return nil
 	}
-	return &ToolHTTP{
-		Endpoint:    endpoint,
-		Method:      h.HTTPConfig.Method,
-		Headers:     h.HTTPConfig.Headers,
-		ContentType: h.HTTPConfig.ContentType,
+	cfg := &ToolHTTP{
+		Endpoint:     endpoint,
+		Method:       h.HTTPConfig.Method,
+		Headers:      h.HTTPConfig.Headers,
+		ContentType:  h.HTTPConfig.ContentType,
+		QueryParams:  h.HTTPConfig.QueryParams,
+		HeaderParams: h.HTTPConfig.HeaderParams,
+		StaticQuery:  h.HTTPConfig.StaticQuery,
+		Redact:       h.HTTPConfig.Redact,
 	}
+	if h.HTTPConfig.StaticBody != nil {
+		cfg.StaticBody = unmarshalRawJSON(h.HTTPConfig.StaticBody.Raw)
+	}
+	if h.HTTPConfig.BodyMapping != nil {
+		cfg.BodyMapping = *h.HTTPConfig.BodyMapping
+	}
+	if h.HTTPConfig.ResponseMapping != nil {
+		cfg.ResponseMapping = *h.HTTPConfig.ResponseMapping
+	}
+	if h.HTTPConfig.URLTemplate != nil {
+		cfg.URLTemplate = *h.HTTPConfig.URLTemplate
+	}
+	return cfg
 }
 
 // buildGRPCConfig builds gRPC configuration for a handler entry.
@@ -243,6 +276,12 @@ func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) *ToolMCP {
 	if h.MCPConfig.WorkDir != nil {
 		cfg.WorkDir = *h.MCPConfig.WorkDir
 	}
+	if h.MCPConfig.ToolFilter != nil {
+		cfg.ToolFilter = &ToolMCPFilter{
+			Allowlist: h.MCPConfig.ToolFilter.Allowlist,
+			Blocklist: h.MCPConfig.ToolFilter.Blocklist,
+		}
+	}
 	return cfg
 }
 
@@ -254,6 +293,7 @@ func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) *ToolOpenAPI {
 	cfg := &ToolOpenAPI{
 		SpecURL:         h.OpenAPIConfig.SpecURL,
 		OperationFilter: h.OpenAPIConfig.OperationFilter,
+		Headers:         h.OpenAPIConfig.Headers,
 	}
 	if h.OpenAPIConfig.BaseURL != nil {
 		cfg.BaseURL = *h.OpenAPIConfig.BaseURL

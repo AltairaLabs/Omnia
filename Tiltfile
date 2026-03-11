@@ -450,6 +450,8 @@ helm_set = [
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
     'langchainRuntime.image.pullPolicy=Never',
+    # Enable operator tool test API server
+    'operator.apiBindAddress=:8083',
     # Increase dashboard resources for HMR compilation
     'dashboard.resources.limits.cpu=4000m',
     'dashboard.resources.limits.memory=4Gi',

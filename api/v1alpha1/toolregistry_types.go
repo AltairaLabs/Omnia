@@ -37,7 +37,7 @@ const (
 )
 
 // MCPTransport defines the transport type for MCP connections
-// +kubebuilder:validation:Enum=sse;stdio
+// +kubebuilder:validation:Enum=sse;stdio;streamable-http
 type MCPTransport string
 
 const (
@@ -45,7 +45,20 @@ const (
 	MCPTransportSSE MCPTransport = "sse"
 	// MCPTransportStdio indicates connection via spawned subprocess stdin/stdout
 	MCPTransportStdio MCPTransport = "stdio"
+	// MCPTransportStreamableHTTP indicates connection via Streamable HTTP transport
+	MCPTransportStreamableHTTP MCPTransport = "streamable-http"
 )
+
+// MCPToolFilter controls which tools from an MCP server are exposed
+type MCPToolFilter struct {
+	// allowlist restricts to only these tool names. If empty, all tools are allowed.
+	// +optional
+	Allowlist []string `json:"allowlist,omitempty"`
+
+	// blocklist excludes these tool names.
+	// +optional
+	Blocklist []string `json:"blocklist,omitempty"`
+}
 
 // MCPConfig contains MCP-specific handler configuration
 type MCPConfig struct {
@@ -53,7 +66,7 @@ type MCPConfig struct {
 	// +kubebuilder:validation:Required
 	Transport MCPTransport `json:"transport"`
 
-	// endpoint is the SSE server URL (required for SSE transport).
+	// endpoint is the SSE server URL (required for SSE and streamable-http transport).
 	// +optional
 	Endpoint *string `json:"endpoint,omitempty"`
 
@@ -72,6 +85,10 @@ type MCPConfig struct {
 	// env are additional environment variables for stdio transport.
 	// +optional
 	Env map[string]string `json:"env,omitempty"`
+
+	// toolFilter controls which tools from the MCP server are exposed.
+	// +optional
+	ToolFilter *MCPToolFilter `json:"toolFilter,omitempty"`
 }
 
 // OpenAPIConfig contains OpenAPI-specific handler configuration
@@ -89,6 +106,18 @@ type OpenAPIConfig struct {
 	// If empty, all operations are exposed.
 	// +optional
 	OperationFilter []string `json:"operationFilter,omitempty"`
+
+	// headers are additional HTTP headers to include in API requests.
+	// +optional
+	Headers map[string]string `json:"headers,omitempty"`
+
+	// authType specifies the authentication type (none, bearer, basic).
+	// +optional
+	AuthType *string `json:"authType,omitempty"`
+
+	// authSecretRef references a secret containing auth credentials.
+	// +optional
+	AuthSecretRef *SecretKeySelector `json:"authSecretRef,omitempty"`
 }
 
 // GRPCConfig contains gRPC-specific handler configuration
@@ -147,6 +176,46 @@ type HTTPConfig struct {
 	// authSecretRef references a secret containing auth credentials.
 	// +optional
 	AuthSecretRef *SecretKeySelector `json:"authSecretRef,omitempty"`
+
+	// queryParams lists arg names that should be sent as URL query parameters
+	// instead of in the request body.
+	// +optional
+	QueryParams []string `json:"queryParams,omitempty"`
+
+	// headerParams maps arg names to HTTP header names using template strings.
+	// Example: {"X-Customer-ID": "{{.customer_id}}"}
+	// +optional
+	HeaderParams map[string]string `json:"headerParams,omitempty"`
+
+	// staticQuery contains fixed query parameters added to every request.
+	// These are invisible to the LLM.
+	// +optional
+	StaticQuery map[string]string `json:"staticQuery,omitempty"`
+
+	// staticBody contains fixed JSON fields merged into the request body.
+	// These are invisible to the LLM.
+	// +optional
+	StaticBody *apiextensionsv1.JSON `json:"staticBody,omitempty"`
+
+	// bodyMapping is a JMESPath expression to reshape the request body
+	// before sending.
+	// +optional
+	BodyMapping *string `json:"bodyMapping,omitempty"`
+
+	// responseMapping is a JMESPath expression to filter/reshape the response
+	// before returning to the LLM.
+	// +optional
+	ResponseMapping *string `json:"responseMapping,omitempty"`
+
+	// redact lists response field names to exclude from logs and tracing.
+	// +optional
+	Redact []string `json:"redact,omitempty"`
+
+	// urlTemplate is a Go text/template for constructing the URL with path parameters.
+	// Example: "/users/{{.user_id}}/orders/{{.order_id}}"
+	// When set, overrides endpoint for URL construction; endpoint is used as the base URL.
+	// +optional
+	URLTemplate *string `json:"urlTemplate,omitempty"`
 }
 
 // SecretKeySelector selects a key from a Secret

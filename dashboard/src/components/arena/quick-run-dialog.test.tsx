@@ -41,7 +41,6 @@ describe("QuickRunDialog", () => {
     open: true,
     onOpenChange: vi.fn(),
     projectId: "proj-123",
-    type: "evaluation" as const,
   };
 
   beforeEach(() => {
@@ -82,10 +81,10 @@ describe("QuickRunDialog", () => {
     expect(excludeInput.value).toBe("wip/**");
   });
 
-  it("renders dialog title based on job type", () => {
-    render(<QuickRunDialog {...defaultProps} type="loadtest" />);
+  it("renders dialog title as Run Evaluation", () => {
+    render(<QuickRunDialog {...defaultProps} />);
 
-    expect(screen.getAllByText("Run Load Test").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Run Evaluation").length).toBeGreaterThan(0);
   });
 
   it("does not render when open is false", () => {

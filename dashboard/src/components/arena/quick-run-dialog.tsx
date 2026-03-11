@@ -25,7 +25,7 @@ import { useAgents } from "@/hooks/use-agents";
 import { useToast } from "@/hooks/use-toast";
 import { useProjectJobsWithRun, type QuickRunRequest } from "@/hooks/use-project-jobs";
 import { useProjectDeployment } from "@/hooks/use-project-deployment";
-import type { ArenaJobType, ExecutionMode } from "@/types/arena";
+import type { ExecutionMode } from "@/types/arena";
 
 export interface QuickRunInitialValues {
   name?: string;
@@ -40,22 +40,9 @@ interface QuickRunDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly projectId: string | undefined;
-  readonly type: ArenaJobType;
   readonly onJobCreated?: (jobName: string) => void;
   readonly initialValues?: QuickRunInitialValues;
 }
-
-const JOB_TYPE_LABELS: Record<ArenaJobType, string> = {
-  evaluation: "Evaluation",
-  loadtest: "Load Test",
-  datagen: "Data Generation",
-};
-
-const JOB_TYPE_DESCRIPTIONS: Record<ArenaJobType, string> = {
-  evaluation: "Run evaluation scenarios to assess agent quality, correctness, and safety.",
-  loadtest: "Stress test your agent with concurrent requests to validate performance.",
-  datagen: "Generate synthetic conversation data for training and testing.",
-};
 
 /**
  * Parse comma-separated patterns into an array, filtering empty values.
@@ -79,13 +66,12 @@ function buildScenarioFilter(include: string[], exclude: string[]): { include?: 
 }
 
 /**
- * Dialog for running jobs with custom options.
+ * Dialog for running evaluation jobs with custom options.
  */
 export function QuickRunDialog({
   open,
   onOpenChange,
   projectId,
-  type,
   onJobCreated,
   initialValues,
 }: QuickRunDialogProps) {
@@ -110,8 +96,6 @@ export function QuickRunDialog({
 
       if (!projectId) return;
 
-      // Auto-deploy if not deployed (use && so that if either endpoint
-      // confirms deployment we skip the unnecessary re-deploy)
       if (!deployed && !deploymentStatus?.deployed) {
         try {
           toast({
@@ -136,7 +120,7 @@ export function QuickRunDialog({
       const scenarioFilter = buildScenarioFilter(include, exclude);
 
       const request: QuickRunRequest = {
-        type,
+        type: "evaluation",
         verbose,
         name: trimmedName || undefined,
         scenarios: scenarioFilter,
@@ -153,7 +137,7 @@ export function QuickRunDialog({
         const result = await run(request);
         toast({
           title: "Job Started",
-          description: `${JOB_TYPE_LABELS[type]} job "${result.job.metadata.name}" created`,
+          description: `Evaluation job "${result.job.metadata.name}" created`,
         });
         onOpenChange(false);
         onJobCreated?.(result.job.metadata.name);
@@ -179,7 +163,6 @@ export function QuickRunDialog({
       deploymentStatus,
       deploy,
       run,
-      type,
       name,
       includePatterns,
       excludePatterns,
@@ -198,8 +181,8 @@ export function QuickRunDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Run {JOB_TYPE_LABELS[type]}</DialogTitle>
-          <DialogDescription>{JOB_TYPE_DESCRIPTIONS[type]}</DialogDescription>
+          <DialogTitle>Run Evaluation</DialogTitle>
+          <DialogDescription>Run evaluation scenarios to assess agent quality, correctness, and safety.</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -344,7 +327,7 @@ export function QuickRunDialog({
                   {deploying ? "Deploying..." : "Running..."}
                 </>
               ) : (
-                `Run ${JOB_TYPE_LABELS[type]}`
+                "Run Evaluation"
               )}
             </Button>
           </DialogFooter>

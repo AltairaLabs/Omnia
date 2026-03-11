@@ -17,6 +17,9 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/providers"
 )
 
 func newTestEvalHandler(store EvalStore) *http.ServeMux {
@@ -204,4 +207,64 @@ func TestParseEvalListOpts_LimitCapped(t *testing.T) {
 	opts := parseEvalListOpts(req)
 
 	assert.Equal(t, maxListLimit, opts.Limit)
+}
+
+func TestHandleEvaluateSession_Success(t *testing.T) {
+	pub := &mockEventPublisher{}
+	warm := newMockWarmStore()
+	warm.sessions["b0fda631-4057-4ba6-844c-3b4a6fe192dc"] = &session.Session{
+		ID:        "b0fda631-4057-4ba6-844c-3b4a6fe192dc",
+		AgentName: "test-agent",
+		Namespace: "test-ns",
+	}
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+
+	svc := newServiceWithPublisher(registry, pub)
+	h := NewHandler(svc, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/b0fda631-4057-4ba6-844c-3b4a6fe192dc/evaluate", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+
+	var resp EvaluateAcceptedResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "b0fda631-4057-4ba6-844c-3b4a6fe192dc", resp.SessionID)
+	assert.Equal(t, "evaluation queued", resp.Message)
+
+	// Verify event was published synchronously.
+	events := pub.getEvents()
+	require.Len(t, events, 1)
+	assert.Equal(t, "session.evaluate", events[0].EventType)
+	assert.Equal(t, "b0fda631-4057-4ba6-844c-3b4a6fe192dc", events[0].SessionID)
+	assert.Equal(t, "test-agent", events[0].AgentName)
+	assert.Equal(t, "test-ns", events[0].Namespace)
+}
+
+func TestHandleEvaluateSession_InvalidSessionID(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/not-a-uuid/evaluate", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandleEvaluateSession_NoService(t *testing.T) {
+	h := NewHandler(nil, logr.Discard())
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/b0fda631-4057-4ba6-844c-3b4a6fe192dc/evaluate", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }

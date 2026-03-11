@@ -89,6 +89,8 @@ linters:
       # Exclude runtime packages - require local PromptKit dependency (not published yet)
       - ^internal/runtime/
       - ^cmd/runtime/
+      # Exclude tooltest - imports internal/runtime/tools (PromptKit dependency)
+      - ^internal/tooltest/
 formatters:
   enable:
     - gofmt

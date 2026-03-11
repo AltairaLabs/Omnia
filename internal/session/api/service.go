@@ -523,6 +523,30 @@ func (s *SessionService) auditSearch(ctx context.Context, query, workspace strin
 	})
 }
 
+// PublishEvaluateEvent publishes a session.evaluate event to trigger
+// on-demand eval execution by the eval worker. The session must exist in the
+// warm store so that agent metadata can be resolved.
+func (s *SessionService) PublishEvaluateEvent(ctx context.Context, sessionID string) error {
+	if s.eventPublisher == nil {
+		return errors.New("event publisher not configured")
+	}
+	sess := s.lookupSessionMetadata(ctx, sessionID)
+	if sess.AgentName == "" {
+		return ErrMissingSessionID
+	}
+	event := SessionEvent{
+		EventType:         "session.evaluate",
+		SessionID:         sessionID,
+		AgentName:         sess.AgentName,
+		Namespace:         sess.Namespace,
+		PromptPackName:    sess.PromptPackName,
+		PromptPackVersion: sess.PromptPackVersion,
+		Timestamp:         time.Now().UTC().Format(time.RFC3339),
+		Traceparent:       FormatTraceparent(ctx),
+	}
+	return s.eventPublisher.PublishMessageEvent(ctx, event)
+}
+
 // --- event publishing helpers -----------------------------------------------
 
 // publishMessageEvent fires a message.assistant event asynchronously.

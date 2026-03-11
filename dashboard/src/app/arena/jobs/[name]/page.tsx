@@ -1179,12 +1179,11 @@ export default function ArenaJobDetailPage() {
         </div>
 
         {/* Clone Dialog */}
-        {projectId && job.spec?.type && (
+        {projectId && (
           <QuickRunDialog
             open={cloneDialogOpen}
             onOpenChange={setCloneDialogOpen}
             projectId={projectId}
-            type={job.spec.type}
             initialValues={buildCloneInitialValues(job)}
             onJobCreated={(newJobName) => router.push(`/arena/jobs/${newJobName}`)}
           />

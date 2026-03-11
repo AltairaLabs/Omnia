@@ -37,7 +37,6 @@ import {
   MessageSquare,
   AlertCircle,
   ExternalLink,
-  Bug,
   CheckCircle2,
   XCircle,
   Shield,
@@ -288,22 +287,6 @@ function groupEvalResultsByMessageId(results: EvalResult[]): Map<string, EvalRes
   return grouped;
 }
 
-function DebugToggleButton() {
-  const debugPanelOpen = useDebugPanelStore((s) => s.isOpen);
-  const toggle = useDebugPanelStore((s) => s.toggle);
-
-  return (
-    <Button
-      variant={debugPanelOpen ? "secondary" : "outline"}
-      size="sm"
-      onClick={toggle}
-    >
-      <Bug className="h-4 w-4 mr-2" />
-      Debug
-    </Button>
-  );
-}
-
 function DetailSkeleton() {
   return (
     <div className="flex flex-col h-full">
@@ -346,7 +329,9 @@ export default function SessionDetailPage({
   const { data: session, isLoading, error } = useSessionDetail(id);
   const { data: evalResults } = useSessionEvalResults(id);
   const grafana = useGrafana();
-  const sessionDashboardUrl = grafana.enabled ? buildSessionDashboardUrl(grafana, id) : null;
+  const sessionDashboardUrl = grafana.enabled && session
+    ? buildSessionDashboardUrl(grafana, id, session.agentName, session.agentNamespace)
+    : null;
 
   if (isLoading) {
     return <DetailSkeleton />;
@@ -458,42 +443,43 @@ export default function SessionDetailPage({
     <div className="flex flex-col h-full">
       <Header
         title={
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" asChild>
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="ghost" size="icon" className="shrink-0" asChild>
               <Link href="/sessions">
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <span>Session {session.id}</span>
-            <Button variant="ghost" size="icon" onClick={copySessionId}>
-              <Copy className="h-4 w-4" />
-            </Button>
-            {getStatusBadge(session.status)}
+            <span className="truncate">Session {session.id}</span>
           </div>
         }
-        description={
-          <div className="flex items-center gap-4 text-sm">
-            <span className="flex items-center gap-1">
-              <Bot className="h-4 w-4" />
-              {session.agentName}
-            </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-4 w-4" />
-              {formatDistanceToNow(new Date(session.startedAt), { addSuffix: true })}
-            </span>
-          </div>
-        }
-      >
+      />
+
+      {/* Session info bar */}
+      <div className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
+        <div className="flex items-center gap-4 min-w-0">
+          {getStatusBadge(session.status)}
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Bot className="h-4 w-4 shrink-0" />
+            {session.agentName}
+          </span>
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Clock className="h-4 w-4 shrink-0" />
+            {formatDistanceToNow(new Date(session.startedAt), { addSuffix: true })}
+          </span>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" onClick={copySessionId}>
+            <Copy className="h-3.5 w-3.5 mr-1.5" />
+            Copy ID
+          </Button>
+        </div>
         <div className="flex items-center gap-2">
           {sessionDashboardUrl && (
             <Button variant="outline" size="sm" asChild>
               <a href={sessionDashboardUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="h-4 w-4 mr-2" />
-                Observe
+                Grafana
               </a>
             </Button>
           )}
-          <DebugToggleButton />
           <Button variant="outline" size="sm" onClick={() => handleExport("markdown")}>
             <Download className="h-4 w-4 mr-2" />
             Export MD
@@ -503,7 +489,7 @@ export default function SessionDetailPage({
             Export JSON
           </Button>
         </div>
-      </Header>
+      </div>
 
       <div className="flex-1 flex flex-col min-h-0 p-6">
         <Tabs defaultValue={defaultTab} className="flex-1 flex flex-col min-h-0">

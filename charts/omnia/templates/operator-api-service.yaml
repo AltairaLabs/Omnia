@@ -1,0 +1,18 @@
+{{- if .Values.operator.apiBindAddress }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-operator
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator-api
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: {{ trimPrefix ":" .Values.operator.apiBindAddress }}
+      targetPort: api
+      protocol: TCP
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+{{- end }}

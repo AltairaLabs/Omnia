@@ -6,24 +6,106 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: support-tools
 spec:
-  tools:
+  handlers:
     # Tool for looking up order status
     - name: order-lookup
-      description: Look up the status of a customer order by order ID
       type: http
-      endpoint:
-        url: "http://orders-api.backend.svc.cluster.local:8080/api/v1/orders"
+      httpConfig:
+        endpoint: "https://orders-api.backend.svc.cluster.local:8443/api/v1/orders"
+        method: GET
+      tool:
+        name: order_lookup
+        description: Look up the status of a customer order by order ID
+        inputSchema:
+          type: object
+          properties:
+            order_id:
+              type: string
+              description: The unique order identifier (e.g. "ORD-12345")
+          required:
+            - order_id
+        outputSchema:
+          type: object
+          properties:
+            order_id:
+              type: string
+              description: The order identifier
+            status:
+              type: string
+              description: "Current order status: pending, processing, shipped, delivered, cancelled"
+            created_at:
+              type: string
+              description: ISO 8601 timestamp when the order was placed
+            updated_at:
+              type: string
+              description: ISO 8601 timestamp of the last status update
+            items:
+              type: array
+              description: List of items in the order
+              items:
+                type: object
+                properties:
+                  product_id:
+                    type: string
+                  name:
+                    type: string
+                  quantity:
+                    type: integer
+            tracking_number:
+              type: string
+              description: Shipping tracking number (present when shipped)
       timeout: "10s"
       retries: 2
     # Tool for checking product inventory
     - name: inventory-check
-      description: Check product availability and stock levels
       type: http
-      endpoint:
-        # Use service discovery instead of direct URL
-        selector:
-          matchLabels:
-            app: inventory-service
-          namespace: backend
-          port: "http"
+      selector:
+        matchLabels:
+          app: inventory-service
+        namespace: backend
+        port: "http"
+      httpConfig:
+        endpoint: "https://inventory.backend.svc.cluster.local:8443/api/v1/inventory"
+        method: GET
+      tool:
+        name: inventory_check
+        description: Check product availability and stock levels
+        inputSchema:
+          type: object
+          properties:
+            product_id:
+              type: string
+              description: The product identifier to check
+            warehouse:
+              type: string
+              description: Optional warehouse location to check (omit for all warehouses)
+          required:
+            - product_id
+        outputSchema:
+          type: object
+          properties:
+            product_id:
+              type: string
+              description: The product identifier
+            name:
+              type: string
+              description: Product name
+            in_stock:
+              type: boolean
+              description: Whether the product is currently in stock
+            quantity_available:
+              type: integer
+              description: Total units available across requested warehouses
+            warehouses:
+              type: array
+              description: Per-warehouse stock breakdown
+              items:
+                type: object
+                properties:
+                  location:
+                    type: string
+                    description: Warehouse location name
+                  quantity:
+                    type: integer
+                    description: Units available at this location
       timeout: "5s"
