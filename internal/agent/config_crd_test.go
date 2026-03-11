@@ -538,3 +538,145 @@ func TestLoadFromEnvFallback_InvalidHealthPort(t *testing.T) {
 		t.Fatal("expected error for invalid health port")
 	}
 }
+
+func TestLoadA2AConfigFromCRD_Defaults(t *testing.T) {
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.A2ATaskTTL != DefaultA2ATaskTTL {
+		t.Errorf("A2ATaskTTL = %v, want %v", cfg.A2ATaskTTL, DefaultA2ATaskTTL)
+	}
+	if cfg.A2AConversationTTL != DefaultA2AConversationTTL {
+		t.Errorf("A2AConversationTTL = %v, want %v", cfg.A2AConversationTTL, DefaultA2AConversationTTL)
+	}
+}
+
+func TestLoadA2AConfigFromCRD_CustomTTLs(t *testing.T) {
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
+		A2A: &v1alpha1.A2AConfig{
+			TaskTTL:         ptr.To("2h"),
+			ConversationTTL: ptr.To("45m"),
+		},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.A2ATaskTTL != 2*time.Hour {
+		t.Errorf("A2ATaskTTL = %v, want %v", cfg.A2ATaskTTL, 2*time.Hour)
+	}
+	if cfg.A2AConversationTTL != 45*time.Minute {
+		t.Errorf("A2AConversationTTL = %v, want %v", cfg.A2AConversationTTL, 45*time.Minute)
+	}
+}
+
+func TestLoadA2AConfigFromCRD_InvalidTaskTTL(t *testing.T) {
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
+		A2A: &v1alpha1.A2AConfig{
+			TaskTTL: ptr.To("not-a-duration"),
+		},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+
+	_, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err == nil {
+		t.Fatal("expected error for invalid task TTL")
+	}
+}
+
+func TestLoadA2AConfigFromCRD_InvalidConversationTTL(t *testing.T) {
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
+		A2A: &v1alpha1.A2AConfig{
+			ConversationTTL: ptr.To("not-a-duration"),
+		},
+	})
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar).Build()
+
+	_, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err == nil {
+		t.Fatal("expected error for invalid conversation TTL")
+	}
+}
+
+func TestLoadA2AConfigFromEnv_CustomTTLs(t *testing.T) {
+	t.Setenv(EnvA2ATaskTTL, "3h")
+	t.Setenv(EnvA2AConversationTTL, "15m")
+	t.Setenv(EnvA2AAuthToken, "my-secret-token")
+
+	cfg := &Config{}
+	err := loadA2AConfigFromEnv(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.A2ATaskTTL != 3*time.Hour {
+		t.Errorf("A2ATaskTTL = %v, want %v", cfg.A2ATaskTTL, 3*time.Hour)
+	}
+	if cfg.A2AConversationTTL != 15*time.Minute {
+		t.Errorf("A2AConversationTTL = %v, want %v", cfg.A2AConversationTTL, 15*time.Minute)
+	}
+	if cfg.A2AAuthToken != "my-secret-token" {
+		t.Errorf("A2AAuthToken = %q, want %q", cfg.A2AAuthToken, "my-secret-token")
+	}
+}
+
+func TestLoadA2AConfigFromEnv_Defaults(t *testing.T) {
+	cfg := &Config{}
+	err := loadA2AConfigFromEnv(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.A2ATaskTTL != DefaultA2ATaskTTL {
+		t.Errorf("A2ATaskTTL = %v, want %v", cfg.A2ATaskTTL, DefaultA2ATaskTTL)
+	}
+	if cfg.A2AConversationTTL != DefaultA2AConversationTTL {
+		t.Errorf("A2AConversationTTL = %v, want %v", cfg.A2AConversationTTL, DefaultA2AConversationTTL)
+	}
+}
+
+func TestLoadA2AConfigFromEnv_InvalidTaskTTL(t *testing.T) {
+	t.Setenv(EnvA2ATaskTTL, "bad")
+	cfg := &Config{}
+	err := loadA2AConfigFromEnv(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid A2A task TTL")
+	}
+}
+
+func TestLoadA2AConfigFromEnv_InvalidConversationTTL(t *testing.T) {
+	t.Setenv(EnvA2AConversationTTL, "bad")
+	cfg := &Config{}
+	err := loadA2AConfigFromEnv(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid A2A conversation TTL")
+	}
+}
+
+func TestConfigValidate_A2AFacadeType(t *testing.T) {
+	cfg := &Config{
+		AgentName:        "a",
+		Namespace:        "n",
+		PromptPackName:   "p",
+		FacadeType:       FacadeTypeA2A,
+		HandlerMode:      HandlerModeRuntime,
+		SessionType:      SessionTypeMemory,
+		MediaStorageType: MediaStorageTypeNone,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected A2A facade type to be valid, got: %v", err)
+	}
+}

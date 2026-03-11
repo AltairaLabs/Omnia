@@ -67,6 +67,11 @@ const (
 	EnvTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	EnvTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
 	EnvTracingInsecure   = "OMNIA_TRACING_INSECURE"
+
+	// A2A configuration.
+	EnvA2ATaskTTL         = "OMNIA_A2A_TASK_TTL"
+	EnvA2AConversationTTL = "OMNIA_A2A_CONVERSATION_TTL"
+	EnvA2AAuthToken       = "OMNIA_A2A_AUTH_TOKEN"
 )
 
 // Default values.
@@ -79,6 +84,8 @@ const (
 	DefaultMediaStoragePath    = "/var/lib/omnia/media"
 	DefaultMediaMaxFileSize    = 100 * 1024 * 1024 // 100MB
 	DefaultMediaDefaultTTL     = 24 * time.Hour
+	DefaultA2ATaskTTL          = 1 * time.Hour
+	DefaultA2AConversationTTL  = 30 * time.Minute
 )
 
 // Error format strings.
@@ -92,6 +99,7 @@ type FacadeType string
 
 const (
 	FacadeTypeWebSocket FacadeType = "websocket"
+	FacadeTypeA2A       FacadeType = "a2a"
 )
 
 // SessionType represents the type of session store.
@@ -189,6 +197,11 @@ type Config struct {
 	TracingSampleRate float64
 	TracingInsecure   bool
 
+	// A2A configuration.
+	A2ATaskTTL         time.Duration
+	A2AConversationTTL time.Duration
+	A2AAuthToken       string
+
 	// Health check port.
 	HealthPort int
 }
@@ -236,7 +249,7 @@ func (c *Config) Validate() error {
 
 	// Validate facade type
 	switch c.FacadeType {
-	case FacadeTypeWebSocket:
+	case FacadeTypeWebSocket, FacadeTypeA2A:
 		// Valid
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)

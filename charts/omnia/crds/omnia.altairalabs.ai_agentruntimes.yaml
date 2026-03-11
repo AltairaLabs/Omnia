@@ -54,6 +54,125 @@ spec:
           spec:
             description: spec defines the desired state of AgentRuntime
             properties:
+              a2a:
+                description: a2a configures the A2A (Agent-to-Agent) protocol when
+                  facade.type is "a2a".
+                properties:
+                  agentCard:
+                    description: agentCard configures the Agent Card served at /.well-known/agent.json.
+                    properties:
+                      capabilities:
+                        description: capabilities describes protocol features the
+                          agent supports.
+                        properties:
+                          pushNotifications:
+                            description: pushNotifications indicates whether the agent
+                              supports push notifications.
+                            type: boolean
+                          streaming:
+                            description: streaming indicates whether the agent supports
+                              streaming responses via SSE.
+                            type: boolean
+                        type: object
+                      defaultInputModes:
+                        description: defaultInputModes lists supported input content
+                          types (e.g., "text", "audio").
+                        items:
+                          type: string
+                        type: array
+                      defaultOutputModes:
+                        description: defaultOutputModes lists supported output content
+                          types (e.g., "text", "audio").
+                        items:
+                          type: string
+                        type: array
+                      description:
+                        description: description is a human-readable description of
+                          the agent.
+                        type: string
+                      name:
+                        description: name is the agent's display name.
+                        minLength: 1
+                        type: string
+                      organization:
+                        description: organization is the name of the organization
+                          that provides this agent.
+                        type: string
+                      skills:
+                        description: skills lists the agent's capabilities for discovery.
+                        items:
+                          description: AgentSkillSpec describes a specific skill an
+                            agent can perform.
+                          properties:
+                            description:
+                              description: description explains what this skill does.
+                              type: string
+                            examples:
+                              description: examples provides example prompts for this
+                                skill.
+                              items:
+                                type: string
+                              type: array
+                            id:
+                              description: id is the unique identifier for this skill.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: name is the human-readable name for this
+                                skill.
+                              minLength: 1
+                              type: string
+                            tags:
+                              description: tags are keywords for categorization and
+                                search.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - id
+                          - name
+                          type: object
+                        type: array
+                      version:
+                        description: version is the agent's version string.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  authentication:
+                    description: authentication configures request authentication
+                      for the A2A endpoint.
+                    properties:
+                      secretRef:
+                        description: |-
+                          secretRef references a Secret containing a bearer token.
+                          The secret should contain a key named "token".
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                  conversationTTL:
+                    default: 30m
+                    description: |-
+                      conversationTTL is how long idle conversations are retained before eviction.
+                      Uses Go duration format (e.g., "30m", "1h"). Defaults to "30m".
+                    type: string
+                  taskTTL:
+                    default: 1h
+                    description: |-
+                      taskTTL is how long completed/failed/canceled tasks are retained before eviction.
+                      Uses Go duration format (e.g., "1h", "30m"). Defaults to "1h".
+                    type: string
+                type: object
               console:
                 description: |-
                   console configures the dashboard console UI settings.
@@ -486,6 +605,7 @@ spec:
                     enum:
                     - websocket
                     - grpc
+                    - a2a
                     type: string
                 required:
                 - type
@@ -4076,6 +4196,17 @@ spec:
           status:
             description: status defines the observed state of AgentRuntime
             properties:
+              a2a:
+                description: a2a holds A2A-specific status information when facade.type
+                  is "a2a".
+                properties:
+                  agentCardURL:
+                    description: agentCardURL is the URL where the agent card is served.
+                    type: string
+                  endpoint:
+                    description: endpoint is the A2A JSON-RPC endpoint URL.
+                    type: string
+                type: object
               activeVersion:
                 description: activeVersion is the currently deployed PromptPack version.
                 type: string

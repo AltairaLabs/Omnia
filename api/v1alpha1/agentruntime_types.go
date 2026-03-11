@@ -41,7 +41,7 @@ type PromptPackRef struct {
 }
 
 // FacadeType defines the type of facade for client connections.
-// +kubebuilder:validation:Enum=websocket;grpc
+// +kubebuilder:validation:Enum=websocket;grpc;a2a
 type FacadeType string
 
 const (
@@ -49,6 +49,8 @@ const (
 	FacadeTypeWebSocket FacadeType = "websocket"
 	// FacadeTypeGRPC uses gRPC for client connections.
 	FacadeTypeGRPC FacadeType = "grpc"
+	// FacadeTypeA2A uses the A2A JSON-RPC protocol for agent-to-agent communication.
+	FacadeTypeA2A FacadeType = "a2a"
 )
 
 // HandlerMode defines the message handler mode for the facade.
@@ -601,6 +603,120 @@ type MediaRequirements struct {
 	Document *DocumentRequirements `json:"document,omitempty"`
 }
 
+// A2AConfig configures the A2A (Agent-to-Agent) protocol facade.
+type A2AConfig struct {
+	// agentCard configures the Agent Card served at /.well-known/agent.json.
+	// +optional
+	AgentCard *AgentCardSpec `json:"agentCard,omitempty"`
+
+	// taskTTL is how long completed/failed/canceled tasks are retained before eviction.
+	// Uses Go duration format (e.g., "1h", "30m"). Defaults to "1h".
+	// +kubebuilder:default="1h"
+	// +optional
+	TaskTTL *string `json:"taskTTL,omitempty"`
+
+	// conversationTTL is how long idle conversations are retained before eviction.
+	// Uses Go duration format (e.g., "30m", "1h"). Defaults to "30m".
+	// +kubebuilder:default="30m"
+	// +optional
+	ConversationTTL *string `json:"conversationTTL,omitempty"`
+
+	// authentication configures request authentication for the A2A endpoint.
+	// +optional
+	Authentication *A2AAuthConfig `json:"authentication,omitempty"`
+}
+
+// AgentCardSpec configures the A2A Agent Card.
+type AgentCardSpec struct {
+	// name is the agent's display name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// description is a human-readable description of the agent.
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// version is the agent's version string.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// organization is the name of the organization that provides this agent.
+	// +optional
+	Organization string `json:"organization,omitempty"`
+
+	// skills lists the agent's capabilities for discovery.
+	// +optional
+	Skills []AgentSkillSpec `json:"skills,omitempty"`
+
+	// capabilities describes protocol features the agent supports.
+	// +optional
+	Capabilities *AgentCapabilitiesSpec `json:"capabilities,omitempty"`
+
+	// defaultInputModes lists supported input content types (e.g., "text", "audio").
+	// +optional
+	DefaultInputModes []string `json:"defaultInputModes,omitempty"`
+
+	// defaultOutputModes lists supported output content types (e.g., "text", "audio").
+	// +optional
+	DefaultOutputModes []string `json:"defaultOutputModes,omitempty"`
+}
+
+// AgentSkillSpec describes a specific skill an agent can perform.
+type AgentSkillSpec struct {
+	// id is the unique identifier for this skill.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	ID string `json:"id"`
+
+	// name is the human-readable name for this skill.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// description explains what this skill does.
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// tags are keywords for categorization and search.
+	// +optional
+	Tags []string `json:"tags,omitempty"`
+
+	// examples provides example prompts for this skill.
+	// +optional
+	Examples []string `json:"examples,omitempty"`
+}
+
+// AgentCapabilitiesSpec describes A2A protocol features the agent supports.
+type AgentCapabilitiesSpec struct {
+	// streaming indicates whether the agent supports streaming responses via SSE.
+	// +optional
+	Streaming bool `json:"streaming,omitempty"`
+
+	// pushNotifications indicates whether the agent supports push notifications.
+	// +optional
+	PushNotifications bool `json:"pushNotifications,omitempty"`
+}
+
+// A2AAuthConfig configures authentication for A2A requests.
+type A2AAuthConfig struct {
+	// secretRef references a Secret containing a bearer token.
+	// The secret should contain a key named "token".
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+}
+
+// A2AStatus holds A2A-specific status information.
+type A2AStatus struct {
+	// agentCardURL is the URL where the agent card is served.
+	// +optional
+	AgentCardURL string `json:"agentCardURL,omitempty"`
+
+	// endpoint is the A2A JSON-RPC endpoint URL.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
 // RuntimeConfig defines deployment-related settings.
 type RuntimeConfig struct {
 	// replicas is the desired number of agent runtime pods.
@@ -768,6 +884,10 @@ type AgentRuntimeSpec struct {
 	// +optional
 	Console *ConsoleConfig `json:"console,omitempty"`
 
+	// a2a configures the A2A (Agent-to-Agent) protocol when facade.type is "a2a".
+	// +optional
+	A2A *A2AConfig `json:"a2a,omitempty"`
+
 	// extraPodAnnotations defines additional annotations to add to the agent pods.
 	// Use this for integrations like service meshes, logging agents, or monitoring tools.
 	// +optional
@@ -818,6 +938,10 @@ type AgentRuntimeStatus struct {
 	// This can be used by dashboard or other services to connect to the agent.
 	// +optional
 	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
+
+	// a2a holds A2A-specific status information when facade.type is "a2a".
+	// +optional
+	A2A *A2AStatus `json:"a2a,omitempty"`
 
 	// conditions represent the current state of the AgentRuntime resource.
 	// +listType=map
