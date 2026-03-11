@@ -80,6 +80,7 @@ type OmniaEventStore struct {
 	toolMetaFn   func(string) (tools.ToolMeta, bool)
 	evalMetrics  metrics.EvalMetricsRecorder
 	sem          chan struct{} // bounded concurrency for async writes
+	sessionID    string        // fallback sessionID for events missing it (PromptKit bug workaround)
 }
 
 // NewOmniaEventStore creates a new event store that bridges to session-api.
@@ -90,6 +91,13 @@ func NewOmniaEventStore(store session.Store, log logr.Logger) *OmniaEventStore {
 		log:          log.WithName("event-store"),
 		sem:          make(chan struct{}, defaultWriteConcurrency),
 	}
+}
+
+// SetSessionID sets the fallback session ID used when events arrive with an
+// empty SessionID. This works around a PromptKit bug where the eval middleware
+// emitter is created without a session ID (see PromptKit#705).
+func (s *OmniaEventStore) SetSessionID(id string) {
+	s.sessionID = id
 }
 
 // SetToolMetaFn sets the function used to look up registry/handler metadata for tools.
@@ -110,8 +118,14 @@ func (s *OmniaEventStore) SetEvalMetrics(m metrics.EvalMetricsRecorder) {
 // Eval events are additionally recorded to Prometheus synchronously (counter
 // increments are cheap) so metrics are never lost even if session-api is down.
 func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error {
+	// Backfill empty SessionID from the fallback — works around PromptKit#705
+	// where the eval middleware emitter is created without a session ID.
 	if event.SessionID == "" {
-		return nil
+		if s.sessionID != "" {
+			event.SessionID = s.sessionID
+		} else {
+			return nil
+		}
 	}
 
 	// Record eval metrics synchronously before the async write.

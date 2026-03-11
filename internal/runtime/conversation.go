@@ -151,6 +151,7 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	// Prometheus metrics are enabled.
 	if s.sessionStore != nil || s.evalMetrics != nil {
 		eventStore := NewOmniaEventStore(s.sessionStore, s.log)
+		eventStore.SetSessionID(sessionID)
 		if s.toolExecutor != nil {
 			eventStore.SetToolMetaFn(s.toolExecutor.GetToolMeta)
 		}

@@ -6,7 +6,6 @@ This file is part of Omnia Enterprise and is subject to the
 Functional Source License. See ee/LICENSE for details.
 */
 
-// Package evals provides eval definition loading from PromptPack ConfigMaps.
 package evals
 
 import (
@@ -15,7 +14,6 @@ import (
 	"fmt"
 	"sync"
 
-	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,57 +22,25 @@ import (
 // ConfigMap data key containing the pack definition.
 const packJSONKey = "pack.json"
 
-// EvalTypeArenaAssertion is the eval type for PromptKit arena assertions.
-const EvalTypeArenaAssertion = "arena_assertion"
-
-// EvalDef represents an eval definition from a PromptPack.
-type EvalDef struct {
-	// ID is the unique identifier for this eval.
-	ID string `json:"id" yaml:"id"`
-	// Type is the eval type (e.g. "rule", "llm_judge", "similarity").
-	Type string `json:"type" yaml:"type"`
-	// Trigger is when the eval runs (e.g. "per_turn", "on_session_complete").
-	Trigger string `json:"trigger" yaml:"trigger"`
-	// Description explains what the eval checks.
-	Description string `json:"description" yaml:"description"`
-	// Params holds type-specific configuration.
-	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
-	// JudgeName references an AgentRuntime.Spec.Evals.Judges entry.
-	JudgeName string `json:"judgeName,omitempty" yaml:"judgeName,omitempty"`
-	// Metric defines the Prometheus metric emitted for this eval.
-	// Parsed from the PromptPack "metric" field on each eval definition.
-	Metric *runtimeevals.MetricDef `json:"metric,omitempty" yaml:"metric,omitempty"`
+// CachedPack holds the cached raw pack data.
+// PackData is passed directly to sdk.Evaluate() — the SDK handles all parsing.
+type CachedPack struct {
+	PackName    string
+	PackVersion string
+	// PackData is the raw pack.json bytes passed to sdk.Evaluate().
+	PackData []byte
 }
 
-// PromptPackEvals holds the parsed eval definitions from a PromptPack.
-type PromptPackEvals struct {
-	PackName    string    `json:"packName"`
-	PackVersion string    `json:"packVersion"`
-	Evals       []EvalDef `json:"evals"`
+// packIdentity is the minimal subset of pack.json we parse (name and version only).
+type packIdentity struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
 }
 
-// PackAssertion represents a PromptKit arena assertion in a PromptPack.
-type PackAssertion struct {
-	// Type is the arena assertion type (e.g. "tools_called", "content_includes_any").
-	Type string `json:"type" yaml:"type"`
-	// Params holds assertion-specific configuration.
-	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
-	// Message is an optional human-readable description of the assertion.
-	Message string `json:"message,omitempty" yaml:"message,omitempty"`
-}
-
-// packJSON is the subset of pack.json we parse for eval definitions.
-type packJSON struct {
-	ID             string          `json:"id"`
-	Version        string          `json:"version"`
-	Evals          []EvalDef       `json:"evals"`
-	PackAssertions []PackAssertion `json:"pack_assertions"`
-}
-
-// PromptPackLoader loads and caches eval definitions from PromptPack ConfigMaps.
+// PromptPackLoader loads and caches raw pack data from PromptPack ConfigMaps.
 type PromptPackLoader struct {
 	client  client.Client
-	cache   map[string]*PromptPackEvals
+	cache   map[string]*CachedPack
 	cacheMu sync.RWMutex
 }
 
@@ -82,7 +48,7 @@ type PromptPackLoader struct {
 func NewPromptPackLoader(c client.Client) *PromptPackLoader {
 	return &PromptPackLoader{
 		client: c,
-		cache:  make(map[string]*PromptPackEvals),
+		cache:  make(map[string]*CachedPack),
 	}
 }
 
@@ -91,15 +57,12 @@ func cacheKey(namespace, packName string) string {
 	return namespace + "/" + packName
 }
 
-// LoadEvals loads eval definitions for the given PromptPack.
-// It reads the ConfigMap referenced by the PromptPack, parses the evals
-// section from pack.json, and caches the result.
+// LoadEvals loads pack data for the given PromptPack ConfigMap.
 func (l *PromptPackLoader) LoadEvals(
 	ctx context.Context, namespace, packName, packVersion string,
-) (*PromptPackEvals, error) {
+) (*CachedPack, error) {
 	key := cacheKey(namespace, packName)
 
-	// Check cache first.
 	l.cacheMu.RLock()
 	cached, ok := l.cache[key]
 	l.cacheMu.RUnlock()
@@ -108,19 +71,16 @@ func (l *PromptPackLoader) LoadEvals(
 		return cached, nil
 	}
 
-	// Fetch the ConfigMap.
 	cm := &corev1.ConfigMap{}
 	if err := l.client.Get(ctx, types.NamespacedName{Name: packName, Namespace: namespace}, cm); err != nil {
 		return nil, fmt.Errorf("failed to get ConfigMap %s/%s: %w", namespace, packName, err)
 	}
 
-	// Parse pack.json from ConfigMap data.
-	result, err := parsePackEvals(cm, packName, packVersion)
+	result, err := parsePackData(cm, packName, packVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	// Store in cache.
 	l.cacheMu.Lock()
 	l.cache[key] = result
 	l.cacheMu.Unlock()
@@ -128,85 +88,32 @@ func (l *PromptPackLoader) LoadEvals(
 	return result, nil
 }
 
-// parsePackEvals extracts eval definitions from a ConfigMap's pack.json data.
-func parsePackEvals(cm *corev1.ConfigMap, packName, packVersion string) (*PromptPackEvals, error) {
+// parsePackData extracts raw pack bytes and identity from a ConfigMap.
+func parsePackData(cm *corev1.ConfigMap, packName, packVersion string) (*CachedPack, error) {
 	raw, ok := cm.Data[packJSONKey]
 	if !ok {
 		return nil, fmt.Errorf("ConfigMap %s/%s does not contain %q key", cm.Namespace, cm.Name, packJSONKey)
 	}
 
-	var pack packJSON
-	if err := json.Unmarshal([]byte(raw), &pack); err != nil {
+	var identity packIdentity
+	if err := json.Unmarshal([]byte(raw), &identity); err != nil {
 		return nil, fmt.Errorf("failed to parse %s in ConfigMap %s/%s: %w", packJSONKey, cm.Namespace, cm.Name, err)
 	}
 
-	// Use pack.json id/version if available, fall back to provided values.
-	name := pack.ID
+	name := identity.ID
 	if name == "" {
 		name = packName
 	}
-	version := pack.Version
+	version := identity.Version
 	if version == "" {
 		version = packVersion
 	}
 
-	allEvals := pack.Evals
-	allEvals = append(allEvals, convertPackAssertions(pack.PackAssertions)...)
-
-	return &PromptPackEvals{
+	return &CachedPack{
 		PackName:    name,
 		PackVersion: version,
-		Evals:       allEvals,
+		PackData:    []byte(raw),
 	}, nil
-}
-
-// convertPackAssertions converts PackAssertions into EvalDef entries with
-// type "arena_assertion" and trigger "on_session_complete".
-func convertPackAssertions(assertions []PackAssertion) []EvalDef {
-	defs := make([]EvalDef, 0, len(assertions))
-	for i, a := range assertions {
-		params := map[string]any{
-			"assertion_type": a.Type,
-		}
-		if len(a.Params) > 0 {
-			params["assertion_params"] = a.Params
-		}
-
-		description := a.Message
-		if description == "" {
-			description = fmt.Sprintf("arena assertion: %s", a.Type)
-		}
-
-		defs = append(defs, EvalDef{
-			ID:          fmt.Sprintf("pack-assertion-%d", i),
-			Type:        EvalTypeArenaAssertion,
-			Trigger:     "on_session_complete",
-			Description: description,
-			Params:      params,
-		})
-	}
-	return defs
-}
-
-// ResolveEvals returns the evals applicable for the given trigger type.
-// If trigger is empty, all evals are returned.
-func (l *PromptPackLoader) ResolveEvals(evals *PromptPackEvals, trigger string) []EvalDef {
-	if evals == nil {
-		return nil
-	}
-	if trigger == "" {
-		result := make([]EvalDef, len(evals.Evals))
-		copy(result, evals.Evals)
-		return result
-	}
-
-	var matched []EvalDef
-	for _, e := range evals.Evals {
-		if e.Trigger == trigger {
-			matched = append(matched, e)
-		}
-	}
-	return matched
 }
 
 // InvalidateCache removes a cached pack (called when ConfigMap changes).
