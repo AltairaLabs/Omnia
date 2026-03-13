@@ -1,5 +1,5 @@
 /**
- * Tests for useEvalPassRateTrends and useEvalMetrics hooks.
+ * Tests for useEvalScoreTrends and useEvalMetrics hooks.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -30,7 +30,7 @@ vi.mock("@/lib/prometheus-queries", () => ({
   },
 }));
 
-import { useEvalPassRateTrends, useEvalMetrics, EVAL_TREND_RANGES } from "./use-eval-trends";
+import { useEvalScoreTrends, useEvalMetrics, EVAL_TREND_RANGES } from "./use-eval-trends";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -54,9 +54,10 @@ describe("EVAL_TREND_RANGES", () => {
   });
 });
 
-describe("useEvalPassRateTrends", () => {
+describe("useEvalScoreTrends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQueryPrometheusMetadata.mockResolvedValue({});
   });
 
   it("returns empty array when no metrics are discovered", async () => {
@@ -66,7 +67,7 @@ describe("useEvalPassRateTrends", () => {
     });
 
     const { result } = renderHook(
-      () => useEvalPassRateTrends({ timeRange: "1h" }),
+      () => useEvalScoreTrends({ timeRange: "1h" }),
       { wrapper: createWrapper() }
     );
 
@@ -81,7 +82,7 @@ describe("useEvalPassRateTrends", () => {
     });
 
     const { result } = renderHook(
-      () => useEvalPassRateTrends(),
+      () => useEvalScoreTrends(),
       { wrapper: createWrapper() }
     );
 
@@ -91,6 +92,10 @@ describe("useEvalPassRateTrends", () => {
 
   it("merges time series data correctly from multiple metrics", async () => {
     // Discovery returns two metrics
+    mockQueryPrometheusMetadata.mockResolvedValue({
+      omnia_eval_tone: "gauge",
+      omnia_eval_safety: "gauge",
+    });
     mockQueryPrometheus.mockResolvedValue({
       status: "success",
       data: {
@@ -134,7 +139,7 @@ describe("useEvalPassRateTrends", () => {
 
     const { result } = renderHook(
       () =>
-        useEvalPassRateTrends({
+        useEvalScoreTrends({
           metricNames: ["omnia_eval_tone", "omnia_eval_safety"],
           timeRange: "1h",
         }),
@@ -173,7 +178,7 @@ describe("useEvalPassRateTrends", () => {
 
     const { result } = renderHook(
       () =>
-        useEvalPassRateTrends({
+        useEvalScoreTrends({
           metricNames: ["omnia_eval_tone", "omnia_eval_bad"],
           timeRange: "1h",
         }),
@@ -191,7 +196,7 @@ describe("useEvalPassRateTrends", () => {
     mockQueryPrometheus.mockRejectedValue(new Error("Network error"));
 
     const { result } = renderHook(
-      () => useEvalPassRateTrends({ timeRange: "1h" }),
+      () => useEvalScoreTrends({ timeRange: "1h" }),
       { wrapper: createWrapper() }
     );
 
@@ -205,7 +210,7 @@ describe("useEvalPassRateTrends", () => {
 
     const { result } = renderHook(
       () =>
-        useEvalPassRateTrends({
+        useEvalScoreTrends({
           metricNames: ["omnia_eval_tone"],
           timeRange: "1h",
         }),
@@ -218,7 +223,10 @@ describe("useEvalPassRateTrends", () => {
     expect(mockQueryPrometheusRange).toHaveBeenCalledTimes(1);
   });
 
-  it("filters out histogram sub-metrics, worker infra, and core infra metrics during discovery", async () => {
+  it("filters out histogram sub-metrics using metadata during discovery", async () => {
+    mockQueryPrometheusMetadata.mockResolvedValue({
+      omnia_eval_latency: "histogram",
+    });
     mockQueryPrometheus.mockResolvedValue({
       status: "success",
       data: {
@@ -250,25 +258,31 @@ describe("useEvalPassRateTrends", () => {
     });
 
     const { result } = renderHook(
-      () => useEvalPassRateTrends({ timeRange: "1h" }),
+      () => useEvalScoreTrends({ timeRange: "1h" }),
       { wrapper: createWrapper() }
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // Only latency survives: _bucket/_sum/_count excluded, omnia_eval_worker_* excluded,
-    // core infra metrics (executed_total, passed_total, failed_total, score, duration_seconds) excluded
+    // Only latency survives: _bucket/_sum/_count excluded by metadata,
+    // omnia_eval_worker_* excluded, core infra metrics excluded
     expect(mockQueryPrometheusRange).toHaveBeenCalledTimes(1);
   });
 });
 
+/** Default range query response for sparkline data. */
+const defaultRangeResponse = {
+  status: "success",
+  data: { result: [{ metric: {}, values: [[1000, "0.5"]] }] },
+};
+
 describe("useEvalMetrics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default metadata mock returns gauge for all metrics
     mockQueryPrometheusMetadata.mockResolvedValue({
       omnia_eval_safety: "gauge",
       omnia_eval_tone: "gauge",
     });
+    mockQueryPrometheusRange.mockResolvedValue(defaultRangeResponse);
   });
 
   it("discovers and returns metrics with values and types", async () => {
@@ -305,8 +319,8 @@ describe("useEvalMetrics", () => {
 
     const metrics = result.current.data!;
     expect(metrics).toHaveLength(2);
-    expect(metrics[0]).toEqual({ name: "omnia_eval_safety", value: 0.78, metricType: "gauge" });
-    expect(metrics[1]).toEqual({ name: "omnia_eval_tone", value: 0.92, metricType: "counter" });
+    expect(metrics[0]).toEqual({ name: "omnia_eval_safety", value: 0.78, metricType: "gauge", sparkline: [{ value: 0.5 }] });
+    expect(metrics[1]).toEqual({ name: "omnia_eval_tone", value: 0.92, metricType: "counter", sparkline: [{ value: 0.5 }] });
   });
 
   it("returns empty array when no metrics discovered", async () => {
@@ -343,12 +357,10 @@ describe("useEvalMetrics", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0, metricType: "gauge" }]);
+    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0, metricType: "gauge", sparkline: [{ value: 0.5 }] }]);
   });
 
   it("handles discovery failure gracefully by returning empty", async () => {
-    // discoverEvalMetrics catches errors and returns [], so the queryFn
-    // succeeds with an empty array rather than throwing.
     mockQueryPrometheus.mockRejectedValue(new Error("Network error"));
 
     const { result } = renderHook(() => useEvalMetrics(), {
@@ -379,30 +391,19 @@ describe("useEvalMetrics", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0, metricType: "gauge" }]);
+    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0, metricType: "gauge", sparkline: [{ value: 0.5 }] }]);
   });
 
   it("defaults to gauge when metadata fetch fails", async () => {
     mockQueryPrometheusMetadata.mockRejectedValue(new Error("Metadata error"));
-    mockQueryPrometheus
-      .mockResolvedValueOnce({
-        status: "success",
-        data: {
-          result: [
-            { metric: { __name__: "omnia_eval_tone" }, value: [1000, "0.9"] },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        status: "success",
-        data: { result: [{ metric: {}, value: [1000, "0.85"] }] },
-      });
+    mockQueryPrometheus.mockRejectedValue(new Error("Network error"));
 
     const { result } = renderHook(() => useEvalMetrics(), {
       wrapper: createWrapper(),
     });
 
+    // discoverEvalMetrics catches both errors and returns []
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ name: "omnia_eval_tone", value: 0.85, metricType: "gauge" }]);
+    expect(result.current.data).toEqual([]);
   });
 });

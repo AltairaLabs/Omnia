@@ -1,7 +1,7 @@
 /**
- * Per-agent quality tab showing eval metrics scoped to a single agent.
+ * Per-agent quality tab showing eval scores scoped to a single agent.
  *
- * Reuses the shared quality components (breakdown, trends, failing sessions)
+ * Reuses the shared quality components (breakdown, trends)
  * with an agent-scoped EvalFilter so only metrics for this agent are shown.
  *
  * Copyright 2026 Altaira Labs.
@@ -11,12 +11,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { CheckCircle, XCircle, Activity, TrendingUp } from "lucide-react";
+import { Activity, TrendingUp, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-breakdown";
-import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
-import { FailingSessionsTable } from "@/components/quality/failing-sessions-table";
+import { EvalScoreBreakdown } from "@/components/quality/eval-score-breakdown";
+import { EvalScoreTrendChart } from "@/components/quality/eval-score-trend-chart";
 import { useEvalSummary, type EvalTrendRange } from "@/hooks";
 import type { EvalFilter } from "@/lib/prometheus-queries";
 
@@ -41,44 +40,44 @@ export function AgentQualityTab({ agentName }: Readonly<AgentQualityTabProps>) {
 
   const stats = useMemo(() => {
     if (!summaries || summaries.length === 0) {
-      return { total: 0, passing: 0, failing: 0, avgPassRate: 0 };
+      return { count: 0, avgScore: 0, lowestScore: 0, lowestName: "" };
     }
     const gauges = summaries.filter((s) => s.metricType === "gauge");
-    const passing = gauges.filter((s) => s.passRate >= 90).length;
-    const failing = gauges.filter((s) => s.passRate < 70).length;
-    const avgPassRate =
-      gauges.length > 0
-        ? gauges.reduce((sum, s) => sum + s.passRate, 0) / gauges.length
-        : 0;
-    return { total: summaries.length, passing, failing, avgPassRate };
+    const avgScore = gauges.length > 0
+      ? gauges.reduce((sum, s) => sum + s.score, 0) / gauges.length
+      : 0;
+    const lowest = gauges.length > 0
+      ? gauges.reduce((min, s) => (s.score < min.score ? s : min), gauges[0])
+      : null;
+    return {
+      count: summaries.length,
+      avgScore,
+      lowestScore: lowest?.score ?? 0,
+      lowestName: lowest?.evalId ?? "",
+    };
   }, [summaries]);
 
   return (
     <div className="space-y-4">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <SummaryCard
-          title="Active Evals"
-          value={stats.total}
+          title="Evals"
+          value={stats.count}
           icon={<Activity className="h-4 w-4 text-muted-foreground" />}
           isLoading={isLoading}
         />
         <SummaryCard
-          title="Avg Pass Rate"
-          value={`${stats.avgPassRate.toFixed(1)}%`}
+          title="Avg Score"
+          value={stats.count > 0 ? `${(stats.avgScore * 100).toFixed(0)}%` : "-"}
           icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
           isLoading={isLoading}
         />
         <SummaryCard
-          title="Passing"
-          value={stats.passing}
-          icon={<CheckCircle className="h-4 w-4 text-green-500" />}
-          isLoading={isLoading}
-        />
-        <SummaryCard
-          title="Failing"
-          value={stats.failing}
-          icon={<XCircle className="h-4 w-4 text-red-500" />}
+          title="Lowest Score"
+          value={stats.count > 0 ? `${(stats.lowestScore * 100).toFixed(0)}%` : "-"}
+          subtitle={stats.lowestName}
+          icon={<TrendingDown className="h-4 w-4 text-muted-foreground" />}
           isLoading={isLoading}
         />
       </div>
@@ -100,20 +99,13 @@ export function AgentQualityTab({ agentName }: Readonly<AgentQualityTabProps>) {
         ))}
       </div>
 
-      <PassRateTrendChart timeRange={timeRange} filter={filter} height={300} />
+      <EvalScoreTrendChart timeRange={timeRange} filter={filter} height={300} />
 
-      {/* Metrics breakdown + failing sessions */}
-      <div className="grid md:grid-cols-2 gap-4">
-        <AssertionTypeBreakdown
-          activeMetric={activeMetric}
-          onSelectMetric={setActiveMetric}
-          filter={filter}
-        />
-        <FailingSessionsTable
-          evalType={activeMetric}
-          agentName={agentName}
-        />
-      </div>
+      <EvalScoreBreakdown
+        activeMetric={activeMetric}
+        onSelectMetric={setActiveMetric}
+        filter={filter}
+      />
     </div>
   );
 }
@@ -121,11 +113,13 @@ export function AgentQualityTab({ agentName }: Readonly<AgentQualityTabProps>) {
 function SummaryCard({
   title,
   value,
+  subtitle,
   icon,
   isLoading,
 }: Readonly<{
   title: string;
   value: string | number;
+  subtitle?: string;
   icon: React.ReactNode;
   isLoading: boolean;
 }>) {
@@ -139,7 +133,12 @@ function SummaryCard({
         {isLoading ? (
           <Skeleton className="h-7 w-16" />
         ) : (
-          <div className="text-2xl font-bold">{value}</div>
+          <>
+            <div className="text-2xl font-bold">{value}</div>
+            {subtitle && (
+              <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

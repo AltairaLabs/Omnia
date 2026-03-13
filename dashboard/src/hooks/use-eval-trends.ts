@@ -15,13 +15,12 @@ import { useQuery } from "@tanstack/react-query";
 import {
   queryPrometheusRange,
   queryPrometheus,
-  queryPrometheusMetadata,
   type PrometheusMatrixResult,
-  type PrometheusVectorResult,
-  type PrometheusMetricType,
 } from "@/lib/prometheus";
 import { EvalQueries, type EvalFilter } from "@/lib/prometheus-queries";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
+import { discoverEvalMetrics } from "@/lib/eval-discovery";
+import type { EvalMetricType } from "@/types/eval";
 
 /** Time range options for trend queries. */
 export const EVAL_TREND_RANGES = {
@@ -42,15 +41,16 @@ export interface EvalTrendPoint {
 export interface EvalMetricInfo {
   name: string;
   value: number;
-  metricType: PrometheusMetricType;
+  metricType: EvalMetricType;
+  sparkline?: Array<{ value: number }>;
 }
 
 /**
- * Fetch eval pass rate trends from Prometheus as time-series data.
+ * Fetch eval score trends from Prometheus as time-series data.
  *
  * Queries all omnia_eval_* metrics using avg_over_time for trend data.
  */
-export function useEvalPassRateTrends(params?: {
+export function useEvalScoreTrends(params?: {
   metricNames?: string[];
   timeRange?: EvalTrendRange;
   filter?: EvalFilter;
@@ -66,7 +66,13 @@ export function useEvalPassRateTrends(params?: {
       const end = new Date();
       const start = new Date(end.getTime() - rangeConfig.seconds * 1000);
 
-      const names = metricNames ?? (await discoverEvalMetrics(filter));
+      let names: string[];
+      if (metricNames) {
+        names = metricNames;
+      } else {
+        const discovered = await discoverEvalMetrics(filter);
+        names = discovered.map((m) => m.name);
+      }
       if (names.length === 0) return [];
 
       const results = await Promise.all(
@@ -84,93 +90,62 @@ export function useEvalPassRateTrends(params?: {
   });
 }
 
+/** Sparkline range config — last 1h at 1m resolution. */
+const SPARKLINE_RANGE = { seconds: 3600, step: "1m" };
+
 /**
- * Discover available eval metrics from Prometheus with type metadata.
+ * Discover available eval metrics with current values, types, and sparkline data.
+ *
+ * Types come from the discovery call (metadata-resolved), not a separate fetch.
  */
 export function useEvalMetrics(filter?: EvalFilter) {
   return useQuery({
     queryKey: ["eval-metrics-discovery", filter],
     queryFn: async (): Promise<EvalMetricInfo[]> => {
-      const names = await discoverEvalMetrics(filter);
-      if (names.length === 0) return [];
+      const discovered = await discoverEvalMetrics(filter);
+      if (discovered.length === 0) return [];
 
-      const [metadata, ...valueResults] = await Promise.all([
-        fetchMetricTypes(names),
-        ...names.map(async (name) => {
-          const query = EvalQueries.metricValue(name, filter);
-          const resp = await queryPrometheus(query);
+      const end = new Date();
+      const start = new Date(end.getTime() - SPARKLINE_RANGE.seconds * 1000);
+
+      const perMetric = await Promise.all(
+        discovered.map(async (metric) => {
+          const [instant, range] = await Promise.all([
+            queryPrometheus(EvalQueries.metricValue(metric.name, filter)),
+            queryPrometheusRange(
+              EvalQueries.metricAvgOverTime(metric.name, SPARKLINE_RANGE.step, filter),
+              start, end, SPARKLINE_RANGE.step,
+            ),
+          ]);
           const value =
-            resp.status === "success" && resp.data?.result?.[0]?.value
-              ? Number.parseFloat(resp.data.result[0].value[1]) || 0
+            instant.status === "success" && instant.data?.result?.[0]?.value
+              ? Number.parseFloat(instant.data.result[0].value[1]) || 0
               : 0;
-          return { name, value };
+          const sparkline = extractSparkline(range);
+          return {
+            name: metric.name,
+            value,
+            metricType: metric.metricType,
+            sparkline,
+          };
         }),
-      ]);
+      );
 
-      return valueResults.map((r) => ({
-        ...r,
-        metricType: (metadata as Record<string, PrometheusMetricType>)[r.name] ?? "gauge",
-      }));
+      return perMetric;
     },
     staleTime: DEFAULT_STALE_TIME,
     retry: false,
   });
 }
 
-/** Fetch Prometheus type metadata for a list of metric names. */
-async function fetchMetricTypes(names: string[]): Promise<Record<string, PrometheusMetricType>> {
-  try {
-    const metadata = await queryPrometheusMetadata();
-    const result: Record<string, PrometheusMetricType> = {};
-    for (const name of names) {
-      result[name] = metadata[name] ?? "gauge";
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-/** Suffixes for histogram sub-metrics to exclude from discovery. */
-const HISTOGRAM_SUFFIXES = ["_bucket", "_sum", "_count", "_created"];
-
-/** Prefixes for infrastructure metrics that are not eval quality metrics. */
-const INFRA_PREFIXES = ["omnia_eval_worker_"];
-
-/** Infrastructure metric names that aggregate across evals (not per-eval quality metrics). */
-const INFRA_METRIC_NAMES = new Set([
-  "omnia_eval_executed_total",
-  "omnia_eval_score",
-  "omnia_eval_duration_seconds",
-  "omnia_eval_passed_total",
-  "omnia_eval_failed_total",
-]);
-
-function shouldExcludeMetric(name: string): boolean {
-  if (HISTOGRAM_SUFFIXES.some((s) => name.endsWith(s))) return true;
-  if (INFRA_PREFIXES.some((p) => name.startsWith(p))) return true;
-  if (INFRA_METRIC_NAMES.has(name)) return true;
-  return false;
-}
-
-/** Discover eval metric names from Prometheus. */
-async function discoverEvalMetrics(filter?: EvalFilter): Promise<string[]> {
-  try {
-    const query = EvalQueries.discoverMetrics(filter);
-    const resp = await queryPrometheus(query);
-    if (resp.status !== "success" || !resp.data?.result) return [];
-
-    const names = new Set<string>();
-    for (const item of resp.data.result as PrometheusVectorResult[]) {
-      const name = item.metric.__name__;
-      if (name && !shouldExcludeMetric(name)) {
-        names.add(name);
-      }
-    }
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  } catch {
-    return [];
-  }
+/** Extract sparkline points from a Prometheus range query response. */
+function extractSparkline(
+  resp: { status: string; data?: { result: PrometheusMatrixResult[] } },
+): Array<{ value: number }> {
+  if (resp.status !== "success" || !resp.data?.result?.[0]?.values) return [];
+  return resp.data.result[0].values.map(([, v]: [number, string]) => ({
+    value: Number.parseFloat(v) || 0,
+  }));
 }
 
 /** Merge multiple time series into a unified array of points. */

@@ -16,7 +16,7 @@ export interface EvalResult {
   evalId: string;
   evalType: string;
   trigger: string;
-  passed: boolean;
+  passed?: boolean;
   score?: number;
   details?: Record<string, unknown>;
   durationMs?: number;
@@ -28,15 +28,3 @@ export interface EvalResult {
 
 /** Prometheus metric type used for type-aware rendering. */
 export type EvalMetricType = "gauge" | "counter" | "histogram" | "boolean";
-
-export interface EvalResultSummary {
-  evalId: string;
-  evalType: string;
-  total: number;
-  passed: number;
-  failed: number;
-  passRate: number;
-  avgScore?: number;
-  avgDurationMs?: number;
-  metricType?: EvalMetricType;
-}
