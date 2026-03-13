@@ -117,7 +117,7 @@ func main() {
 	evalRegistry := prometheus.NewRegistry()
 	evalCollector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
 		Registerer:     evalRegistry,
-		Namespace:      "omnia_eval",
+		Namespace:      "omnia",
 		InstanceLabels: []string{"agent", "namespace", "promptpack_name"},
 	})
 
