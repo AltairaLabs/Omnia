@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/extra/redisotel/v9"
@@ -34,7 +34,6 @@ import (
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
-	"github.com/altairalabs/omnia/pkg/metrics"
 
 	// Register PromptKit provider factories for LLM judge eval execution.
 	_ "github.com/AltairaLabs/PromptKit/runtime/providers/claude"
@@ -101,8 +100,6 @@ func main() {
 	workerMetrics := evals.NewWorkerMetrics(nil)
 	workerMetrics.Initialize()
 
-	evalMetrics := metrics.NewMultiAgentEvalMetrics(metrics.MultiAgentEvalMetricsConfig{})
-
 	redisClient := goredis.NewClient(&goredis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
@@ -117,16 +114,32 @@ func main() {
 
 	msgStore := redisprovider.NewFromClient(redisClient, redisprovider.DefaultOptions())
 
+	evalRegistry := prometheus.NewRegistry()
+	evalCollector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+		Registerer:     evalRegistry,
+		Namespace:      "omnia_eval",
+		InstanceLabels: []string{"agent", "namespace", "promptpack_name"},
+	})
+
+	var runnerOpts []evals.SDKRunnerOption
+	runnerOpts = append(runnerOpts, evals.WithEvalCollector(evalCollector))
+	runnerOpts = append(runnerOpts, evals.WithLogger(logger))
+	if tp != nil {
+		runnerOpts = append(runnerOpts, evals.WithTracerProvider(tp.TracerProvider()))
+	}
+	sdkRunner := evals.NewSDKRunner(runnerOpts...)
+
 	workerCfg := evals.WorkerConfig{
-		RedisClient:  redisClient,
-		ResultWriter: sessionClient,
-		MessageStore: msgStore,
-		Namespaces:   cfg.Namespaces,
-		Logger:       logger,
-		K8sClient:    k8sClient,
-		PackLoader:   packLoader,
-		Metrics:      workerMetrics,
-		EvalMetrics:  evalMetrics,
+		RedisClient:   redisClient,
+		ResultWriter:  sessionClient,
+		MessageStore:  msgStore,
+		Namespaces:    cfg.Namespaces,
+		Logger:        logger,
+		K8sClient:     k8sClient,
+		PackLoader:    packLoader,
+		Metrics:       workerMetrics,
+		SDKRunner:     sdkRunner,
+		EvalCollector: evalCollector,
 	}
 	if tp != nil {
 		workerCfg.TracerProvider = tp.TracerProvider()
@@ -146,7 +159,7 @@ func main() {
 	}()
 
 	// Start HTTP server for metrics and health probes.
-	go startHTTPServer(cfg.MetricsAddr, logger, worker.EvalCollector())
+	go startHTTPServer(cfg.MetricsAddr, logger, evalRegistry)
 
 	logger.Info("starting arena-eval-worker",
 		"namespaces", cfg.Namespaces,
@@ -229,23 +242,14 @@ func parseNamespaces() []string {
 }
 
 // startHTTPServer starts the metrics and health probe HTTP server.
-// The evalCollector appends per-eval-name metrics (e.g., omnia_eval_helpfulness)
-// to the /metrics response for dashboard discovery.
-func startHTTPServer(addr string, logger *slog.Logger, evalCollector *runtimeevals.MetricCollector) {
+// The evalRegistry holds per-eval-name metrics (e.g., omnia_eval_helpfulness)
+// that are merged with the default Prometheus registry for /metrics.
+func startHTTPServer(addr string, logger *slog.Logger, evalRegistry *prometheus.Registry) {
 	mux := http.NewServeMux()
 
-	// Disable compression so we can safely append SDK eval metrics after
-	// the standard Prometheus output (same pattern as cmd/runtime/main.go).
-	uncompressedHandler := promhttp.HandlerFor(
-		prometheus.DefaultGatherer,
-		promhttp.HandlerOpts{DisableCompression: true},
-	)
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		uncompressedHandler.ServeHTTP(w, r)
-		if evalCollector != nil {
-			_ = evalCollector.WritePrometheus(w)
-		}
-	})
+	// Merge default Prometheus metrics with the eval collector's isolated registry.
+	gatherers := prometheus.Gatherers{prometheus.DefaultGatherer, evalRegistry}
+	mux.Handle("/metrics", promhttp.HandlerFor(gatherers, promhttp.HandlerOpts{}))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

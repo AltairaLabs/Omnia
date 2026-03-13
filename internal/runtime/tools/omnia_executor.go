@@ -250,8 +250,9 @@ func marshalSchema(v any) json.RawMessage {
 // buildDescriptor creates a PromptKit ToolDescriptor for a tool.
 func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktools.ToolDescriptor {
 	desc := &pktools.ToolDescriptor{
-		Name: toolName,
-		Mode: executorName,
+		Name:   toolName,
+		Mode:   executorName,
+		Labels: e.buildToolLabels(toolName, h),
 	}
 
 	// For HTTP tools, the tool definition comes from the handler config
@@ -270,6 +271,24 @@ func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktoo
 	}
 
 	return desc
+}
+
+// buildToolLabels creates labels from the tool's registry metadata.
+// These labels propagate through PromptKit events, metrics, and OTel traces.
+func (e *OmniaExecutor) buildToolLabels(toolName string, h *HandlerEntry) map[string]string {
+	labels := map[string]string{
+		"handler_type": h.Type,
+		"handler_name": h.Name,
+	}
+	if meta, ok := e.toolMeta[toolName]; ok {
+		if meta.RegistryName != "" {
+			labels["registry_name"] = meta.RegistryName
+		}
+		if meta.RegistryNamespace != "" {
+			labels["registry_namespace"] = meta.RegistryNamespace
+		}
+	}
+	return labels
 }
 
 // buildMCPDescriptor populates the descriptor from discovered MCP tools.

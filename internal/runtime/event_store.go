@@ -31,7 +31,6 @@ import (
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
-	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Metadata key constants to avoid string duplication (SonarCloud go:S1192).
@@ -65,9 +64,6 @@ func asPtr[T any](data any) (*T, bool) {
 // This is the Pattern C integration point: the SDK's EventBus publishes
 // events here, and we persist them as session messages.
 //
-// Eval events (EventEvalCompleted, EventEvalFailed) are additionally recorded
-// to Prometheus via the evalMetrics recorder, replacing the old ResultWriter path.
-//
 // Every event the SDK emits is recorded — matching the fidelity of
 // PromptKit's FileEventStore.
 
@@ -78,7 +74,6 @@ type OmniaEventStore struct {
 	sessionStore session.Store
 	log          logr.Logger
 	toolMetaFn   func(string) (tools.ToolMeta, bool)
-	evalMetrics  metrics.EvalMetricsRecorder
 	sem          chan struct{} // bounded concurrency for async writes
 	sessionID    string        // fallback sessionID for events missing it (PromptKit bug workaround)
 }
@@ -105,18 +100,9 @@ func (s *OmniaEventStore) SetToolMetaFn(fn func(string) (tools.ToolMeta, bool)) 
 	s.toolMetaFn = fn
 }
 
-// SetEvalMetrics sets the Prometheus metrics recorder for eval events.
-// When set, eval events are recorded to Prometheus in addition to session-api.
-func (s *OmniaEventStore) SetEvalMetrics(m metrics.EvalMetricsRecorder) {
-	s.evalMetrics = m
-}
-
 // Append adds an event to the store by converting it to a session message
 // and writing it to session-api. Writes are fire-and-forget (goroutines with
 // logged errors), matching the facade's async recording pattern.
-//
-// Eval events are additionally recorded to Prometheus synchronously (counter
-// increments are cheap) so metrics are never lost even if session-api is down.
 func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error {
 	// Backfill empty SessionID from the fallback — works around PromptKit#705
 	// where the eval middleware emitter is created without a session ID.
@@ -126,11 +112,6 @@ func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error
 		} else {
 			return nil
 		}
-	}
-
-	// Record eval metrics synchronously before the async write.
-	if s.evalMetrics != nil && isEvalEvent(event.Type) {
-		s.recordEvalMetrics(event)
 	}
 
 	msg, stats, ok := s.convertEvent(event)
@@ -642,11 +623,6 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (sessio
 
 // --- Eval events ---
 
-// isEvalEvent returns true for eval lifecycle event types.
-func isEvalEvent(t events.EventType) bool {
-	return t == events.EventEvalCompleted || t == events.EventEvalFailed
-}
-
 // convertEvalEvent creates a session message from an eval completed/failed event.
 func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
 	data, ok := asPtr[events.EvalEventData](event.Data)
@@ -695,25 +671,6 @@ func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (session.Message
 
 	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
 	return msg, session.SessionStatsUpdate{}, true
-}
-
-// recordEvalMetrics records eval event data to Prometheus metrics.
-func (s *OmniaEventStore) recordEvalMetrics(event *events.Event) {
-	data, ok := asPtr[events.EvalEventData](event.Data)
-	if !ok {
-		return
-	}
-
-	s.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
-		EvalID:      data.EvalID,
-		EvalType:    data.EvalType,
-		Trigger:     data.Trigger,
-		Passed:      data.Passed,
-		Score:       data.Score,
-		DurationSec: float64(data.DurationMs) / 1000.0,
-		Skipped:     data.Skipped,
-		HasError:    data.Error != "",
-	})
 }
 
 // --- Generic event handler ---

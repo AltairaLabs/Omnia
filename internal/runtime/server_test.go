@@ -28,8 +28,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
+	"github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/altairalabs/omnia/internal/tracing"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestNewServer(t *testing.T) {
@@ -94,28 +96,11 @@ func TestServerOptions(t *testing.T) {
 		assert.Nil(t, server.tracingProvider)
 	})
 
-	t.Run("WithMetrics", func(t *testing.T) {
-		// Create metrics and set them
-		metrics := NewMetrics(MetricsConfig{AgentName: "test-agent", Namespace: "test-ns"})
-		server := NewServer(
-			WithMetrics(metrics),
-		)
-		assert.NotNil(t, server.metrics)
-		assert.Equal(t, metrics, server.metrics)
-	})
-
-	t.Run("WithRuntimeMetrics", func(t *testing.T) {
-		// Create runtime metrics and set them
-		runtimeMetrics := NewRuntimeMetrics("test-agent", "test-ns")
-		server := NewServer(
-			WithRuntimeMetrics(runtimeMetrics),
-		)
-		assert.NotNil(t, server.runtimeMetrics)
-		assert.Equal(t, runtimeMetrics, server.runtimeMetrics)
-	})
-
 	t.Run("WithEvalCollector", func(t *testing.T) {
-		collector := evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+		collector := metrics.NewEvalOnlyCollector(metrics.CollectorOpts{
+			Registerer: prometheus.NewRegistry(),
+			Namespace:  "omnia_eval",
+		})
 		server := NewServer(
 			WithEvalCollector(collector),
 		)
@@ -586,16 +571,6 @@ func writeTestFile(t *testing.T, path, content string) error {
 	defer f.Close()
 	_, err = f.WriteString(content)
 	return err
-}
-
-func TestNewMetrics(t *testing.T) {
-	metrics := NewMetrics(MetricsConfig{AgentName: "test-agent", Namespace: "test-namespace"})
-	require.NotNil(t, metrics)
-}
-
-func TestNewRuntimeMetrics(t *testing.T) {
-	runtimeMetrics := NewRuntimeMetrics("test-agent", "test-namespace")
-	require.NotNil(t, runtimeMetrics)
 }
 
 func TestServer_InitializeTools_NoConfig(t *testing.T) {

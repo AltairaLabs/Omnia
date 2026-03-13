@@ -367,6 +367,82 @@ func TestOmniaExecutor_BuildDescriptor_MCPTool(t *testing.T) {
 	}
 }
 
+// --- buildToolLabels ---
+
+func TestOmniaExecutor_BuildToolLabels_WithoutRegistryInfo(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	h := &HandlerEntry{
+		Name: "weather-api",
+		Type: ToolTypeHTTP,
+	}
+
+	labels := e.buildToolLabels("get-weather", h)
+	if labels["handler_type"] != "http" {
+		t.Errorf("handler_type = %q, want %q", labels["handler_type"], "http")
+	}
+	if labels["handler_name"] != "weather-api" {
+		t.Errorf("handler_name = %q, want %q", labels["handler_name"], "weather-api")
+	}
+	if _, ok := labels["registry_name"]; ok {
+		t.Error("registry_name should not be set without SetRegistryInfo")
+	}
+}
+
+func TestOmniaExecutor_BuildToolLabels_WithRegistryInfo(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.toolHandlers["get-weather"] = "weather-api"
+	e.handlers["weather-api"] = &HandlerEntry{
+		Name:     "weather-api",
+		Type:     ToolTypeHTTP,
+		Endpoint: "http://weather.example.com",
+	}
+	e.SetRegistryInfo("my-tools", "production", []HandlerEntry{
+		{Name: "weather-api", Type: ToolTypeHTTP, Endpoint: "http://weather.example.com"},
+	})
+
+	labels := e.buildToolLabels("get-weather", e.handlers["weather-api"])
+	if labels["handler_type"] != "http" {
+		t.Errorf("handler_type = %q, want %q", labels["handler_type"], "http")
+	}
+	if labels["handler_name"] != "weather-api" {
+		t.Errorf("handler_name = %q, want %q", labels["handler_name"], "weather-api")
+	}
+	if labels["registry_name"] != "my-tools" {
+		t.Errorf("registry_name = %q, want %q", labels["registry_name"], "my-tools")
+	}
+	if labels["registry_namespace"] != "production" {
+		t.Errorf("registry_namespace = %q, want %q", labels["registry_namespace"], "production")
+	}
+}
+
+func TestOmniaExecutor_ToolDescriptors_IncludeLabels(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.handlers["h1"] = &HandlerEntry{
+		Name: "h1",
+		Type: ToolTypeGRPC,
+		Tool: &ToolDefCfg{Name: "grpc-tool", Description: "a tool"},
+	}
+	e.toolHandlers["grpc-tool"] = "h1"
+	e.SetRegistryInfo("reg", "ns", []HandlerEntry{
+		{Name: "h1", Type: ToolTypeGRPC, Endpoint: "localhost:50051"},
+	})
+
+	descs := e.ToolDescriptors()
+	if len(descs) != 1 {
+		t.Fatalf("ToolDescriptors count = %d, want 1", len(descs))
+	}
+	d := descs[0]
+	if d.Labels == nil {
+		t.Fatal("Labels is nil, want non-nil")
+	}
+	if d.Labels["handler_type"] != "grpc" {
+		t.Errorf("handler_type = %q, want %q", d.Labels["handler_type"], "grpc")
+	}
+	if d.Labels["registry_name"] != "reg" {
+		t.Errorf("registry_name = %q, want %q", d.Labels["registry_name"], "reg")
+	}
+}
+
 // --- GetToolMeta / SetRegistryInfo ---
 
 func TestOmniaExecutor_ToolMeta_RoundTrip(t *testing.T) {

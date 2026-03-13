@@ -31,7 +31,6 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // mockSessionStore implements session.Store for testing.
@@ -1620,31 +1619,9 @@ func TestOmniaEventStore_ToolCallWithoutMetaFn(t *testing.T) {
 
 // --- Eval events ---
 
-// mockEvalRecorder captures RecordEval calls for assertions.
-type mockEvalRecorder struct {
-	mu    sync.Mutex
-	calls []metrics.EvalRecordMetrics
-}
-
-func (r *mockEvalRecorder) RecordEval(m metrics.EvalRecordMetrics) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = append(r.calls, m)
-}
-
-func (r *mockEvalRecorder) getCalls() []metrics.EvalRecordMetrics {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	result := make([]metrics.EvalRecordMetrics, len(r.calls))
-	copy(result, r.calls)
-	return result
-}
-
 func TestOmniaEventStore_EvalCompleted(t *testing.T) {
 	store := &mockSessionStore{}
-	recorder := &mockEvalRecorder{}
 	es := NewOmniaEventStore(store, logr.Discard())
-	es.SetEvalMetrics(recorder)
 
 	score := 0.85
 	event := &events.Event{
@@ -1666,31 +1643,6 @@ func TestOmniaEventStore_EvalCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	// Verify Prometheus metrics recorded synchronously
-	calls := recorder.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
-	}
-	c := calls[0]
-	if c.EvalID != "conciseness" {
-		t.Errorf("expected EvalID 'conciseness', got %q", c.EvalID)
-	}
-	if c.EvalType != "regex" {
-		t.Errorf("expected EvalType 'regex', got %q", c.EvalType)
-	}
-	if c.Trigger != "every_turn" {
-		t.Errorf("expected Trigger 'every_turn', got %q", c.Trigger)
-	}
-	if !c.Passed {
-		t.Error("expected Passed=true")
-	}
-	if c.Score == nil || *c.Score != 0.85 {
-		t.Errorf("expected Score 0.85, got %v", c.Score)
-	}
-	if c.DurationSec != 0.005 {
-		t.Errorf("expected DurationSec 0.005, got %f", c.DurationSec)
-	}
-
 	// Verify session message recorded async
 	store.waitForMessages(t, 1)
 	msg := store.getMessages()[0]
@@ -1707,9 +1659,7 @@ func TestOmniaEventStore_EvalCompleted(t *testing.T) {
 
 func TestOmniaEventStore_EvalFailed(t *testing.T) {
 	store := &mockSessionStore{}
-	recorder := &mockEvalRecorder{}
 	es := NewOmniaEventStore(store, logr.Discard())
-	es.SetEvalMetrics(recorder)
 
 	event := &events.Event{
 		Type:      events.EventEvalFailed,
@@ -1731,17 +1681,6 @@ func TestOmniaEventStore_EvalFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	calls := recorder.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
-	}
-	if calls[0].Passed {
-		t.Error("expected Passed=false")
-	}
-	if calls[0].DurationSec != 2.5 {
-		t.Errorf("expected DurationSec 2.5, got %f", calls[0].DurationSec)
-	}
-
 	store.waitForMessages(t, 1)
 	msg := store.getMessages()[0]
 	if msg.Metadata["type"] != "eval_failed" {
@@ -1751,9 +1690,7 @@ func TestOmniaEventStore_EvalFailed(t *testing.T) {
 
 func TestOmniaEventStore_EvalSkipped(t *testing.T) {
 	store := &mockSessionStore{}
-	recorder := &mockEvalRecorder{}
 	es := NewOmniaEventStore(store, logr.Discard())
-	es.SetEvalMetrics(recorder)
 
 	event := &events.Event{
 		Type:      events.EventEvalCompleted,
@@ -1772,14 +1709,6 @@ func TestOmniaEventStore_EvalSkipped(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	calls := recorder.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
-	if !calls[0].Skipped {
-		t.Error("expected Skipped=true")
-	}
-
 	store.waitForMessages(t, 1)
 	msg := store.getMessages()[0]
 	if msg.Metadata["skipped"] != "true" {
@@ -1792,9 +1721,7 @@ func TestOmniaEventStore_EvalSkipped(t *testing.T) {
 
 func TestOmniaEventStore_EvalWithError(t *testing.T) {
 	store := &mockSessionStore{}
-	recorder := &mockEvalRecorder{}
 	es := NewOmniaEventStore(store, logr.Discard())
-	es.SetEvalMetrics(recorder)
 
 	event := &events.Event{
 		Type:      events.EventEvalFailed,
@@ -1813,14 +1740,6 @@ func TestOmniaEventStore_EvalWithError(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	calls := recorder.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
-	if !calls[0].HasError {
-		t.Error("expected HasError=true")
-	}
-
 	store.waitForMessages(t, 1)
 	msg := store.getMessages()[0]
 	if msg.Metadata["is_error"] != "true" {
@@ -1828,10 +1747,9 @@ func TestOmniaEventStore_EvalWithError(t *testing.T) {
 	}
 }
 
-func TestOmniaEventStore_EvalNoMetricsRecorder(t *testing.T) {
+func TestOmniaEventStore_EvalPersistsToSessionAPI(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())
-	// No SetEvalMetrics — should still persist to session-api without panic
 
 	event := &events.Event{
 		Type:      events.EventEvalCompleted,
@@ -1856,44 +1774,10 @@ func TestOmniaEventStore_EvalNoMetricsRecorder(t *testing.T) {
 	}
 }
 
-func TestOmniaEventStore_EvalMetricsOnlyMode(t *testing.T) {
-	// No session store — only eval metrics recording
-	recorder := &mockEvalRecorder{}
-	es := NewOmniaEventStore(nil, logr.Discard())
-	es.SetEvalMetrics(recorder)
-
-	event := &events.Event{
-		Type:      events.EventEvalCompleted,
-		SessionID: "test-session",
-		Timestamp: time.Now(),
-		Data: &events.EvalEventData{
-			EvalID:   "test-eval",
-			EvalType: "contains",
-			Trigger:  "every_turn",
-			Passed:   true,
-		},
-	}
-
-	if err := es.Append(context.Background(), event); err != nil {
-		t.Fatalf("Append() error = %v", err)
-	}
-
-	// Metrics should be recorded synchronously
-	calls := recorder.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
-	}
-	if calls[0].EvalID != "test-eval" {
-		t.Errorf("expected EvalID 'test-eval', got %q", calls[0].EvalID)
-	}
-}
-
 func TestOmniaEventStore_EvalValueTypedData(t *testing.T) {
 	// Verify asPtr handles value-typed EvalEventData (not just *EvalEventData)
 	store := &mockSessionStore{}
-	recorder := &mockEvalRecorder{}
 	es := NewOmniaEventStore(store, logr.Discard())
-	es.SetEvalMetrics(recorder)
 
 	event := &events.Event{
 		Type:      events.EventEvalCompleted,
@@ -1911,11 +1795,12 @@ func TestOmniaEventStore_EvalValueTypedData(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	calls := recorder.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 RecordEval call, got %d", len(calls))
+	store.waitForMessages(t, 1)
+	msg := store.getMessages()[0]
+	if msg.Metadata["type"] != "eval_completed" {
+		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
 	}
-	if calls[0].EvalID != "value-typed" {
-		t.Errorf("expected EvalID 'value-typed', got %q", calls[0].EvalID)
+	if msg.Metadata["eval_id"] != "value-typed" {
+		t.Errorf("expected eval_id 'value-typed', got %q", msg.Metadata["eval_id"])
 	}
 }

@@ -106,10 +106,10 @@ func (s *Server) buildEvalOptions() []sdk.Option {
 
 	s.log.V(1).Info("eval options built",
 		"evalDefCount", len(s.evalDefs),
-		"registeredTypes", registry.Types(),
-		"hasEvalMetrics", s.evalMetrics != nil)
+		"registeredTypes", registry.Types())
 
 	return []sdk.Option{
 		sdk.WithEvalRunner(runner),
+		sdk.WithMetrics(s.evalCollector, nil),
 	}
 }
