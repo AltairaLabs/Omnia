@@ -825,7 +825,7 @@ function aggregateEvals(
     evalId: string;
     evalType: string;
     trigger: string;
-    passed: boolean;
+    passed?: boolean;
     score?: number;
     durationMs?: number;
     details?: Record<string, unknown>;

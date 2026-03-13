@@ -1,5 +1,5 @@
 /**
- * Tests for AssertionTypeBreakdown component.
+ * Tests for EvalScoreBreakdown component.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -18,12 +18,13 @@ vi.mock("@/hooks", () => ({
 }));
 
 import {
-  AssertionTypeBreakdown,
+  EvalScoreBreakdown,
   formatMetricName,
-  formatMetricValue,
-  getMetricVariant,
-  getMetricColor,
-} from "./assertion-type-breakdown";
+  getGaugeColor,
+  getGaugeBarClass,
+} from "./eval-score-breakdown";
+
+const sampleSparkline = Array.from({ length: 10 }, (_, i) => ({ value: 0.8 + i * 0.02 }));
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -49,46 +50,35 @@ describe("formatMetricName", () => {
   });
 });
 
-describe("getMetricVariant", () => {
-  it("returns default for gauge metrics", () => {
-    expect(getMetricVariant(0.95)).toBe("default");
-    expect(getMetricVariant(0.5)).toBe("default");
+describe("getGaugeColor", () => {
+  it("returns green for high values", () => {
+    expect(getGaugeColor(0.95)).toContain("green");
   });
 
-  it("returns outline for counter metrics", () => {
-    expect(getMetricVariant(47, "counter")).toBe("outline");
+  it("returns yellow for medium values", () => {
+    expect(getGaugeColor(0.75)).toContain("yellow");
   });
 
-  it("returns outline for histogram metrics", () => {
-    expect(getMetricVariant(1.5, "histogram")).toBe("outline");
-  });
-});
-
-describe("getMetricColor", () => {
-  it("returns foreground class for gauge metrics", () => {
-    expect(getMetricColor(0.95)).toContain("text-foreground");
-  });
-
-  it("returns muted color for counter metrics", () => {
-    expect(getMetricColor(47, "counter")).toContain("text-muted");
+  it("returns red for low values", () => {
+    expect(getGaugeColor(0.5)).toContain("red");
   });
 });
 
-describe("formatMetricValue", () => {
-  it("formats gauge values as decimal", () => {
-    expect(formatMetricValue(0.95, "gauge")).toBe("0.950");
+describe("getGaugeBarClass", () => {
+  it("returns green class for high values", () => {
+    expect(getGaugeBarClass(0.95)).toContain("green");
   });
 
-  it("formats counter values as rounded integers", () => {
-    expect(formatMetricValue(47, "counter")).toBe("47");
+  it("returns yellow class for medium values", () => {
+    expect(getGaugeBarClass(0.75)).toContain("yellow");
   });
 
-  it("formats histogram values with seconds suffix", () => {
-    expect(formatMetricValue(1.5, "histogram")).toBe("1.500s");
+  it("returns red class for low values", () => {
+    expect(getGaugeBarClass(0.5)).toContain("red");
   });
 });
 
-describe("AssertionTypeBreakdown", () => {
+describe("EvalScoreBreakdown", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -103,7 +93,7 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     const { container } = render(
       <Wrapper>
-        <AssertionTypeBreakdown />
+        <EvalScoreBreakdown />
       </Wrapper>
     );
 
@@ -121,7 +111,7 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown />
+        <EvalScoreBreakdown />
       </Wrapper>
     );
 
@@ -138,18 +128,18 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown />
+        <EvalScoreBreakdown />
       </Wrapper>
     );
 
     expect(screen.getByText("Unable to load eval metrics from Prometheus")).toBeInTheDocument();
   });
 
-  it("renders metric rows with name, value, and type badge", () => {
+  it("renders gauge metrics with progress bar, percentage, and sparkline", () => {
     mockUseEvalMetrics.mockReturnValue({
       data: [
-        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge" },
-        { name: "omnia_eval_safety", value: 0.65, metricType: "gauge" },
+        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge", sparkline: sampleSparkline },
+        { name: "omnia_eval_safety", value: 0.65, metricType: "gauge", sparkline: sampleSparkline },
       ],
       isLoading: false,
       error: null,
@@ -158,24 +148,23 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown />
+        <EvalScoreBreakdown />
       </Wrapper>
     );
 
-    // Metric names with prefix stripped
     expect(screen.getByText("tone")).toBeInTheDocument();
     expect(screen.getByText("safety")).toBeInTheDocument();
-    // Values
-    expect(screen.getByText("0.950")).toBeInTheDocument();
-    expect(screen.getByText("0.650")).toBeInTheDocument();
-    // Type badges
-    const gaugeBadges = screen.getAllByText("gauge");
-    expect(gaugeBadges.length).toBe(2);
+    expect(screen.getByText("95%")).toBeInTheDocument();
+    expect(screen.getByText("65%")).toBeInTheDocument();
+    expect(screen.getAllByTestId("gauge-display")).toHaveLength(2);
   });
 
-  it("renders counter metric with type label instead of pass/fail", () => {
+  it("sorts metrics worst-first (ascending by value)", () => {
     mockUseEvalMetrics.mockReturnValue({
-      data: [{ name: "omnia_eval_executed_total", value: 47, metricType: "counter" }],
+      data: [
+        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge", sparkline: sampleSparkline },
+        { name: "omnia_eval_safety", value: 0.65, metricType: "gauge", sparkline: sampleSparkline },
+      ],
       isLoading: false,
       error: null,
     });
@@ -183,18 +172,19 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown />
+        <EvalScoreBreakdown />
       </Wrapper>
     );
 
-    expect(screen.getByText("47")).toBeInTheDocument();
-    expect(screen.getByText("counter")).toBeInTheDocument();
+    const buttons = screen.getAllByRole("button");
+    // safety (0.65) should come before tone (0.95)
+    expect(buttons[0]).toHaveTextContent("safety");
+    expect(buttons[1]).toHaveTextContent("tone");
   });
 
-  it("calls onSelectMetric when row is clicked", () => {
-    const onSelectMetric = vi.fn();
+  it("renders counter metric as plain number", () => {
     mockUseEvalMetrics.mockReturnValue({
-      data: [{ name: "omnia_eval_tone", value: 0.95, metricType: "gauge" }],
+      data: [{ name: "omnia_eval_executed_total", value: 47, metricType: "counter", sparkline: sampleSparkline }],
       isLoading: false,
       error: null,
     });
@@ -202,7 +192,42 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown onSelectMetric={onSelectMetric} />
+        <EvalScoreBreakdown />
+      </Wrapper>
+    );
+
+    expect(screen.getByTestId("counter-display")).toHaveTextContent("47");
+  });
+
+  it("renders histogram metric with seconds suffix", () => {
+    mockUseEvalMetrics.mockReturnValue({
+      data: [{ name: "omnia_eval_latency", value: 1.5, metricType: "histogram", sparkline: sampleSparkline }],
+      isLoading: false,
+      error: null,
+    });
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <EvalScoreBreakdown />
+      </Wrapper>
+    );
+
+    expect(screen.getByTestId("histogram-display")).toHaveTextContent("1.500s");
+  });
+
+  it("calls onSelectMetric when card is clicked", () => {
+    const onSelectMetric = vi.fn();
+    mockUseEvalMetrics.mockReturnValue({
+      data: [{ name: "omnia_eval_tone", value: 0.95, metricType: "gauge", sparkline: sampleSparkline }],
+      isLoading: false,
+      error: null,
+    });
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <EvalScoreBreakdown onSelectMetric={onSelectMetric} />
       </Wrapper>
     );
 
@@ -210,11 +235,11 @@ describe("AssertionTypeBreakdown", () => {
     expect(onSelectMetric).toHaveBeenCalledWith("omnia_eval_tone");
   });
 
-  it("highlights active metric row", () => {
+  it("highlights active metric card", () => {
     mockUseEvalMetrics.mockReturnValue({
       data: [
-        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge" },
-        { name: "omnia_eval_safety", value: 0.8, metricType: "gauge" },
+        { name: "omnia_eval_tone", value: 0.95, metricType: "gauge", sparkline: sampleSparkline },
+        { name: "omnia_eval_safety", value: 0.8, metricType: "gauge", sparkline: sampleSparkline },
       ],
       isLoading: false,
       error: null,
@@ -223,18 +248,16 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown activeMetric="omnia_eval_tone" />
+        <EvalScoreBreakdown activeMetric="omnia_eval_tone" />
       </Wrapper>
     );
 
-    // The active row should have the standalone "bg-muted" class (not hover:bg-muted/50)
-    const toneRow = screen.getByText("tone").closest("tr");
-    const toneClasses = toneRow?.className.split(" ") ?? [];
+    const toneCard = screen.getByText("tone").closest("[role='button']");
+    const toneClasses = toneCard?.className.split(" ") ?? [];
     expect(toneClasses).toContain("bg-muted");
 
-    // The non-active row should not have "bg-muted" as a standalone class
-    const safetyRow = screen.getByText("safety").closest("tr");
-    const safetyClasses = safetyRow?.className.split(" ") ?? [];
+    const safetyCard = screen.getByText("safety").closest("[role='button']");
+    const safetyClasses = safetyCard?.className.split(" ") ?? [];
     expect(safetyClasses).not.toContain("bg-muted");
   });
 
@@ -250,7 +273,7 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown filter={filter} />
+        <EvalScoreBreakdown filter={filter} />
       </Wrapper>
     );
 
@@ -267,10 +290,10 @@ describe("AssertionTypeBreakdown", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <AssertionTypeBreakdown />
+        <EvalScoreBreakdown />
       </Wrapper>
     );
 
-    expect(screen.getByText("Eval Metrics Breakdown")).toBeInTheDocument();
+    expect(screen.getByText("Eval Breakdown")).toBeInTheDocument();
   });
 });

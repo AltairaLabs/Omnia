@@ -1,7 +1,8 @@
 /**
  * Agent quality dashboard page.
  *
- * Shows aggregate eval pass rates, agent comparison, and recent failures.
+ * Shows aggregate eval scores — no pass/fail concepts.
+ * Single view with summary cards, score trend chart, and breakdown.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -10,10 +11,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Link from "next/link";
 import { Header } from "@/components/layout";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -21,32 +20,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Activity, TrendingUp, AlertCircle, ExternalLink, TrendingDown } from "lucide-react";
 import {
-  TrendingUp,
-  Bot,
-  AlertCircle,
-  ExternalLink,
-  XCircle,
-  Activity,
-} from "lucide-react";
-import { useEvalSummary, useRecentEvalFailures, useEvalFilter, type EvalTrendRange, useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
+  useEvalSummary,
+  useEvalFilter,
+  useGrafana,
+  buildDashboardUrl,
+  GRAFANA_DASHBOARDS,
+  type EvalTrendRange,
+  type EvalScoreSummary,
+} from "@/hooks";
 import { Button } from "@/components/ui/button";
-import { formatDistanceToNow } from "date-fns";
-import type { EvalResultSummary } from "@/types/eval";
-import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-breakdown";
-import { FailingSessionsTable } from "@/components/quality/failing-sessions-table";
-import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
+import { EvalScoreBreakdown } from "@/components/quality/eval-score-breakdown";
+import { EvalScoreTrendChart } from "@/components/quality/eval-score-trend-chart";
 
 const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
   { label: "Last 1h", value: "1h" },
@@ -55,19 +43,6 @@ const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
   { label: "Last 7d", value: "7d" },
   { label: "Last 30d", value: "30d" },
 ];
-
-/** Format a metric value for display based on its type. */
-function formatValue(summary: EvalResultSummary): string {
-  if (summary.metricType === "counter") return summary.total.toLocaleString();
-  if (summary.metricType === "histogram") return `${(summary.avgScore ?? 0).toFixed(3)}s`;
-  if (summary.metricType === "boolean") return (summary.avgScore ?? 0) >= 0.5 ? "true" : "false";
-  return (summary.avgScore ?? 0).toFixed(3);
-}
-
-/** Get a display label for the metric type. */
-function metricTypeLabel(summary: EvalResultSummary): string {
-  return summary.metricType ?? "gauge";
-}
 
 function StatsCardSkeleton() {
   return (
@@ -83,24 +58,33 @@ function StatsCardSkeleton() {
   );
 }
 
-function EvalTableSkeleton() {
-  return (
-    <TableRow>
-      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-      <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
-    </TableRow>
-  );
-}
-
-/** Summary cards showing overall stats. */
+/** Summary cards: Evals count, Avg Score, Lowest Score. */
 function SummaryCards({
   summaries,
   isLoading,
 }: Readonly<{
-  summaries: EvalResultSummary[];
+  summaries: EvalScoreSummary[];
   isLoading: boolean;
 }>) {
+  const stats = useMemo(() => {
+    if (summaries.length === 0) {
+      return { count: 0, avgScore: 0, lowestScore: 0, lowestName: "" };
+    }
+    const gauges = summaries.filter((s) => s.metricType === "gauge");
+    const avgScore = gauges.length > 0
+      ? gauges.reduce((sum, s) => sum + s.score, 0) / gauges.length
+      : 0;
+    const lowest = gauges.length > 0
+      ? gauges.reduce((min, s) => (s.score < min.score ? s : min), gauges[0])
+      : null;
+    return {
+      count: summaries.length,
+      avgScore,
+      lowestScore: lowest?.score ?? 0,
+      lowestName: lowest?.evalId ?? "",
+    };
+  }, [summaries]);
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-3 gap-4">
@@ -111,216 +95,43 @@ function SummaryCards({
     );
   }
 
-  const gaugeCount = summaries.filter((s) => !s.metricType || s.metricType === "gauge").length;
-  const booleanCount = summaries.filter((s) => s.metricType === "boolean").length;
-  const otherCount = summaries.length - gaugeCount - booleanCount;
-
   return (
     <div className="grid grid-cols-3 gap-4">
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Active Evals</span>
+            <span className="text-sm text-muted-foreground">Evals</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{summaries.length}</p>
+          <p className="text-2xl font-bold mt-1">{stats.count}</p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Score Metrics</span>
+            <span className="text-sm text-muted-foreground">Avg Score</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{gaugeCount + booleanCount}</p>
+          <p className="text-2xl font-bold mt-1">
+            {stats.count > 0 ? `${(stats.avgScore * 100).toFixed(0)}%` : "-"}
+          </p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Counter / Histogram</span>
+            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Lowest Score</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{otherCount}</p>
+          <p className="text-2xl font-bold mt-1">
+            {stats.count > 0 ? `${(stats.lowestScore * 100).toFixed(0)}%` : "-"}
+          </p>
+          {stats.lowestName && (
+            <p className="text-xs text-muted-foreground mt-0.5">{stats.lowestName}</p>
+          )}
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-/** Per-eval metrics table showing current values by type. */
-function EvalMetricsTable({
-  summaries,
-  isLoading,
-}: Readonly<{
-  summaries: EvalResultSummary[];
-  isLoading: boolean;
-}>) {
-  const sorted = useMemo(
-    () => [...summaries].sort((a, b) => a.evalId.localeCompare(b.evalId)),
-    [summaries]
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Eval Metrics</CardTitle>
-      </CardHeader>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Eval</TableHead>
-            <TableHead>Metric Type</TableHead>
-            <TableHead className="text-right">Current Value</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <>
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-            </>
-          )}
-          {!isLoading && sorted.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
-                No eval metrics found. Eval metrics are emitted by the runtime when evals execute.
-              </TableCell>
-            </TableRow>
-          )}
-          {!isLoading && sorted.map((summary) => (
-            <TableRow key={summary.evalId}>
-              <TableCell className="font-mono text-sm">{summary.evalId}</TableCell>
-              <TableCell>
-                <Badge variant="outline">{metricTypeLabel(summary)}</Badge>
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {formatValue(summary)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
-  );
-}
-
-const FAILURES_PAGE_SIZE = 10;
-
-/** Recent eval failures table with pagination. */
-function RecentFailures() {
-  const [page, setPage] = useState(0);
-  const offset = page * FAILURES_PAGE_SIZE;
-  const { data, isLoading, error } = useRecentEvalFailures({
-    limit: FAILURES_PAGE_SIZE,
-    offset,
-  });
-
-  const failures = data?.results || [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / FAILURES_PAGE_SIZE));
-  const showFrom = total > 0 ? offset + 1 : 0;
-  const showTo = Math.min(offset + FAILURES_PAGE_SIZE, total);
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base">Recent Failures</CardTitle>
-        {total > 0 && (
-          <span className="text-sm text-muted-foreground">
-            {showFrom}&ndash;{showTo} of {total}
-          </span>
-        )}
-      </CardHeader>
-      {error && (
-        <CardContent>
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>Failed to load recent failures</AlertDescription>
-          </Alert>
-        </CardContent>
-      )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Eval ID</TableHead>
-            <TableHead>Agent</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Score</TableHead>
-            <TableHead>Time</TableHead>
-            <TableHead></TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <>
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-            </>
-          )}
-          {!isLoading && failures.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                No recent failures
-              </TableCell>
-            </TableRow>
-          )}
-          {!isLoading && failures.map((result) => (
-            <TableRow key={result.id}>
-              <TableCell className="font-mono text-sm">
-                <div className="flex items-center gap-2">
-                  <XCircle className="h-4 w-4 text-red-500" />
-                  {result.evalId}
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-muted-foreground" />
-                  {result.agentName}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Badge variant="outline">{result.evalType}</Badge>
-              </TableCell>
-              <TableCell>{result.score === undefined ? "-" : result.score.toFixed(2)}</TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatDistanceToNow(new Date(result.createdAt), { addSuffix: true })}
-              </TableCell>
-              <TableCell>
-                <Link href={`/sessions/${result.sessionId}?tab=evals`} className="text-primary hover:underline">
-                  <ExternalLink className="h-4 w-4" />
-                </Link>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 p-4 pt-0">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page === 0}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Previous
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Page {page + 1} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!data?.hasMore}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      )}
-    </Card>
   );
 }
 
@@ -450,35 +261,18 @@ export default function QualityPage() {
           </Alert>
         )}
 
-        <Tabs defaultValue="overview">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="assertions">Assertions</TabsTrigger>
-          </TabsList>
+        <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
 
-          <TabsContent value="overview" className="space-y-6 mt-4">
-            <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
-            <EvalMetricsTable summaries={summaries} isLoading={summaryQuery.isLoading} />
-            <RecentFailures />
-          </TabsContent>
+        <EvalScoreTrendChart
+          timeRange={trendTimeRange}
+          filter={filter}
+        />
 
-          <TabsContent value="assertions" className="space-y-6 mt-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <AssertionTypeBreakdown
-                activeMetric={activeMetric}
-                onSelectMetric={setActiveMetric}
-                filter={filter}
-              />
-              <FailingSessionsTable
-                evalType={activeMetric}
-              />
-            </div>
-            <PassRateTrendChart
-              timeRange={trendTimeRange}
-              filter={filter}
-            />
-          </TabsContent>
-        </Tabs>
+        <EvalScoreBreakdown
+          activeMetric={activeMetric}
+          onSelectMetric={setActiveMetric}
+          filter={filter}
+        />
       </div>
     </div>
   );

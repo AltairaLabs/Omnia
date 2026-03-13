@@ -1,8 +1,8 @@
 /**
- * Pass rate trend chart using Prometheus eval metrics.
+ * Eval score trend chart using Prometheus eval metrics.
  *
  * Renders a Recharts AreaChart with one area per eval metric,
- * showing how metric values change over time.
+ * showing how metric scores change over time. Y axis fixed [0, 1].
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -23,7 +23,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { useEvalPassRateTrends, type EvalTrendRange, type EvalTrendPoint } from "@/hooks";
+import { useEvalScoreTrends, type EvalTrendRange, type EvalTrendPoint } from "@/hooks";
 import type { EvalFilter } from "@/lib/prometheus-queries";
 
 /** Color palette for eval metric lines. */
@@ -36,20 +36,20 @@ export function getEvalColor(index: number): string {
   return CHART_COLORS[index % CHART_COLORS.length];
 }
 
-interface PassRateTrendChartProps {
+interface EvalScoreTrendChartProps {
   timeRange: EvalTrendRange;
   metricNames?: string[];
   filter?: EvalFilter;
   height?: number;
 }
 
-export function PassRateTrendChart({
+export function EvalScoreTrendChart({
   timeRange,
   metricNames,
   filter,
   height = 350,
-}: Readonly<PassRateTrendChartProps>) {
-  const { data: trends, isLoading } = useEvalPassRateTrends({
+}: Readonly<EvalScoreTrendChartProps>) {
+  const { data: trends, isLoading } = useEvalScoreTrends({
     metricNames,
     timeRange,
     filter,
@@ -82,8 +82,8 @@ export function PassRateTrendChart({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Eval Metric Trends</CardTitle>
-        <CardDescription>Metric values over time from Prometheus</CardDescription>
+        <CardTitle className="text-base">Eval Scores</CardTitle>
+        <CardDescription>Score trends over the selected time range</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading && (
@@ -127,7 +127,7 @@ export function PassRateTrendChart({
                   tickLine={false}
                   axisLine={false}
                   className="text-muted-foreground"
-                  domain={[0, "auto"]}
+                  domain={[0, 1]}
                 />
                 <Tooltip
                   contentStyle={{
@@ -137,7 +137,7 @@ export function PassRateTrendChart({
                     fontSize: "12px",
                   }}
                   labelStyle={{ color: "hsl(var(--foreground))" }}
-                  formatter={(value) => (value as number).toFixed(3)}
+                  formatter={(value) => `${((value as number) * 100).toFixed(0)}%`}
                 />
                 <Legend
                   wrapperStyle={{ fontSize: "12px" }}
