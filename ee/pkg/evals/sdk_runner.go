@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"go.opentelemetry.io/otel/trace"
@@ -26,6 +27,7 @@ import (
 type SDKRunner struct {
 	tracerProvider trace.TracerProvider
 	logger         *slog.Logger
+	evalCollector  *sdkmetrics.Collector
 }
 
 // NewSDKRunner creates an SDKRunner. Options can configure tracing and logging.
@@ -50,6 +52,24 @@ func WithLogger(l *slog.Logger) SDKRunnerOption {
 	return func(r *SDKRunner) { r.logger = l }
 }
 
+// WithEvalCollector sets the unified PromptKit metrics Collector so sdk.Evaluate()
+// records per-eval Prometheus metrics (e.g., omnia_eval_helpfulness).
+func WithEvalCollector(c *sdkmetrics.Collector) SDKRunnerOption {
+	return func(r *SDKRunner) { r.evalCollector = c }
+}
+
+// EvalCollector returns the unified metrics Collector, if any.
+func (s *SDKRunner) EvalCollector() *sdkmetrics.Collector {
+	return s.evalCollector
+}
+
+// EvalLabels carries per-evaluation instance label values for metrics binding.
+type EvalLabels struct {
+	Agent          string
+	Namespace      string
+	PromptPackName string
+}
+
 // RunTurnEvals executes per-turn evals via sdk.Evaluate().
 func (s *SDKRunner) RunTurnEvals(
 	ctx context.Context,
@@ -58,8 +78,9 @@ func (s *SDKRunner) RunTurnEvals(
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
+	labels EvalLabels,
 ) []api.EvaluateResultItem {
-	return s.evaluate(ctx, packData, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn)
+	return s.evaluate(ctx, packData, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn, labels)
 }
 
 // RunSessionEvals executes session-complete evals via sdk.Evaluate().
@@ -70,8 +91,10 @@ func (s *SDKRunner) RunSessionEvals(
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
+	labels EvalLabels,
 ) []api.EvaluateResultItem {
-	return s.evaluate(ctx, packData, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerOnSessionComplete)
+	return s.evaluate(ctx, packData, messages, sessionID, turnIndex,
+		providerSpecs, runtimeevals.TriggerOnSessionComplete, labels)
 }
 
 // evaluate calls sdk.Evaluate() with PackData and converts results.
@@ -83,6 +106,7 @@ func (s *SDKRunner) evaluate(
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 	trigger runtimeevals.EvalTrigger,
+	labels EvalLabels,
 ) []api.EvaluateResultItem {
 	opts := sdk.EvaluateOpts{
 		Messages:             ConvertToTypesMessages(messages),
@@ -93,6 +117,15 @@ func (s *SDKRunner) evaluate(
 		Logger:               s.logger,
 		PackData:             packData,
 		SkipSchemaValidation: true,
+	}
+
+	if s.evalCollector != nil {
+		opts.MetricsCollector = s.evalCollector
+		opts.MetricsInstanceLabels = map[string]string{
+			"agent":           labels.Agent,
+			"namespace":       labels.Namespace,
+			"promptpack_name": labels.PromptPackName,
+		}
 	}
 
 	if len(providerSpecs) > 0 {
@@ -111,11 +144,11 @@ func (s *SDKRunner) evaluate(
 		return nil
 	}
 
-	return convertSDKResults(results)
+	return convertSDKResults(results, trigger)
 }
 
 // convertSDKResults converts PromptKit EvalResult to Omnia EvaluateResultItem.
-func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultItem {
+func convertSDKResults(results []runtimeevals.EvalResult, trigger runtimeevals.EvalTrigger) []api.EvaluateResultItem {
 	items := make([]api.EvaluateResultItem, 0, len(results))
 	for _, r := range results {
 		if r.Skipped {
@@ -124,6 +157,7 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 		item := api.EvaluateResultItem{
 			EvalID:     r.EvalID,
 			EvalType:   r.Type,
+			Trigger:    string(trigger),
 			Passed:     r.Passed, //nolint:staticcheck // Passed is set by SDK eval handlers; IsPassed() uses different threshold
 			DurationMs: int(r.DurationMs),
 			Source:     evalSource,

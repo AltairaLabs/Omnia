@@ -50,7 +50,7 @@ func TestConvertSDKResults(t *testing.T) {
 		{EvalID: "e4", Type: "contains", Passed: true, Error: "handler panic", DurationMs: 1},
 	}
 
-	items := convertSDKResults(results)
+	items := convertSDKResults(results, runtimeevals.TriggerEveryTurn)
 
 	require.Len(t, items, 3, "skipped results should be filtered out")
 
@@ -59,12 +59,15 @@ func TestConvertSDKResults(t *testing.T) {
 	assert.Equal(t, &score, items[0].Score)
 	assert.Equal(t, 5, items[0].DurationMs)
 	assert.Equal(t, evalSource, items[0].Source)
+	assert.Equal(t, "every_turn", items[0].Trigger)
 
 	assert.Equal(t, "e2", items[1].EvalID)
 	assert.False(t, items[1].Passed)
+	assert.Equal(t, "every_turn", items[1].Trigger)
 
 	assert.Equal(t, "e4", items[2].EvalID)
 	assert.False(t, items[2].Passed, "error should force passed=false")
+	assert.Equal(t, "every_turn", items[2].Trigger)
 }
 
 func TestNewSDKRunner(t *testing.T) {
@@ -96,7 +99,7 @@ func TestSDKRunner_RunTurnEvals_ContainsHandler(t *testing.T) {
 		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
 	}
 
-	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil)
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
 	require.Len(t, items, 1)
 	assert.Equal(t, "e1", items[0].EvalID)
 	assert.True(t, items[0].Passed)
@@ -118,7 +121,7 @@ func TestSDKRunner_RunTurnEvals_ContainsFails(t *testing.T) {
 		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
 	}
 
-	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil)
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
 	require.Len(t, items, 1)
 	assert.False(t, items[0].Passed)
 }
@@ -138,7 +141,7 @@ func TestSDKRunner_RunSessionEvals(t *testing.T) {
 		{ID: "m1", Role: session.RoleAssistant, Content: "hello"},
 	}
 
-	items := runner.RunSessionEvals(context.Background(), packData, messages, "sess-1", 1, nil)
+	items := runner.RunSessionEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
 	require.Len(t, items, 1)
 	assert.True(t, items[0].Passed)
 }
@@ -213,9 +216,10 @@ func TestConvertSDKResults_CarriesDetails(t *testing.T) {
 			Error:       "threshold exceeded",
 		},
 	}
-	items := convertSDKResults(results)
+	items := convertSDKResults(results, runtimeevals.TriggerOnSessionComplete)
 	require.Len(t, items, 1)
 	require.NotNil(t, items[0].Details)
+	assert.Equal(t, "on_session_complete", items[0].Trigger)
 
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(items[0].Details, &parsed))
@@ -239,6 +243,6 @@ func TestSDKRunner_RunTurnEvals_SkipsMismatchedTrigger(t *testing.T) {
 	}
 
 	// RunTurnEvals should skip on_session_complete triggers.
-	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil)
+	items := runner.RunTurnEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
 	assert.Empty(t, items)
 }

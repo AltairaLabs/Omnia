@@ -18,7 +18,9 @@ import (
 	"time"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1506,37 +1508,28 @@ func TestProviderResolverWithFakeK8s(t *testing.T) {
 	assert.Nil(t, specs)
 }
 
-func TestRecordEvalCollectorMetric(t *testing.T) {
-	collector := runtimeevals.NewMetricCollector(
-		runtimeevals.WithNamespace("omnia_eval"),
-	)
+func TestEvalCollector_DelegatesToSDKRunner(t *testing.T) {
+	collector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+		Registerer: prometheus.NewRegistry(),
+		Namespace:  "omnia_eval",
+	})
+	runner := NewSDKRunner(WithEvalCollector(collector))
 	w := &EvalWorker{
-		evalCollector: collector,
-		logger:        testLogger(),
+		sdkRunner: runner,
+		logger:    testLogger(),
 	}
 
-	r := &api.EvalResult{
-		EvalID:         "e1",
-		EvalType:       "contains",
-		Passed:         true,
-		AgentName:      "test-agent",
-		Namespace:      "ns",
-		PromptPackName: "pack",
-	}
-
-	// Should not panic and should record successfully.
-	w.recordEvalCollectorMetric(r)
+	assert.Equal(t, collector, w.EvalCollector())
 }
 
-func TestRecordEvalCollectorMetric_NilCollector(t *testing.T) {
+func TestEvalCollector_NilWhenRunnerHasNone(t *testing.T) {
+	runner := NewSDKRunner()
 	w := &EvalWorker{
-		evalCollector: nil,
-		logger:        testLogger(),
+		sdkRunner: runner,
+		logger:    testLogger(),
 	}
 
-	r := &api.EvalResult{EvalID: "e1"}
-	// Should not panic when collector is nil.
-	w.recordEvalCollectorMetric(r)
+	assert.Nil(t, w.EvalCollector())
 }
 
 func TestProcessEvent_EvaluateRequest_RunsAllEvals(t *testing.T) {

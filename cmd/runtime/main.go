@@ -43,6 +43,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register default eval type handlers
 	"github.com/AltairaLabs/PromptKit/runtime/logger"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
@@ -53,7 +54,6 @@ import (
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
-	pkmetrics "github.com/altairalabs/omnia/pkg/metrics"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -101,8 +101,20 @@ func main() {
 		"evalEnabled", cfg.EvalEnabled,
 		"sessionAPIURL", cfg.SessionAPIURL)
 
+	// Create PromptKit Collector for all pipeline + eval metrics.
+	// This replaces the old hand-rolled LLMMetrics, RuntimeMetrics, and EvalMetrics.
+	collectorRegistry := prometheus.NewRegistry()
+	collector := sdkmetrics.NewCollector(sdkmetrics.CollectorOpts{
+		Registerer: collectorRegistry,
+		Namespace:  "omnia",
+		ConstLabels: prometheus.Labels{
+			"agent":           cfg.AgentName,
+			"namespace":       cfg.Namespace,
+			"promptpack_name": cfg.PromptPackName,
+		},
+	})
+
 	// Load eval definitions and create collector if evals are enabled
-	var evalCollector *evals.MetricCollector
 	var evalDefs []evals.EvalDef
 	if cfg.EvalEnabled {
 		// Load ALL eval definitions (pack-level + prompt-level) so that
@@ -112,14 +124,6 @@ func main() {
 			log.Error(err, "failed to load eval definitions from pack, continuing without evals")
 		} else {
 			evalDefs = defs
-			evalCollector = evals.NewMetricCollector(
-				evals.WithNamespace("omnia_eval"),
-				evals.WithLabels(map[string]string{
-					"agent":           cfg.AgentName,
-					"namespace":       cfg.Namespace,
-					"promptpack_name": cfg.PromptPackName,
-				}),
-			)
 			log.Info("evals enabled", "evalCount", len(evalDefs))
 		}
 
@@ -210,22 +214,6 @@ func main() {
 		}
 	}
 
-	// Create Prometheus metrics
-	metrics := pkruntime.NewMetrics(pkruntime.MetricsConfig{
-		AgentName:            cfg.AgentName,
-		Namespace:            cfg.Namespace,
-		PromptPackName:       cfg.PromptPackName,
-		PromptPackNamespace:  cfg.PromptPackNamespace,
-		ProviderRefName:      cfg.ProviderRefName,
-		ProviderRefNamespace: cfg.ProviderRefNamespace,
-	})
-	runtimeMetrics := pkruntime.NewRuntimeMetrics(cfg.AgentName, cfg.Namespace)
-
-	// Debug: Log metric creation and create a test gauge
-	log.Info("prometheus metrics created",
-		"metricsNil", metrics == nil,
-		"runtimeMetricsNil", runtimeMetrics == nil)
-
 	// Test gauge to verify Prometheus registration is working
 	testGauge := promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "omnia_runtime_info",
@@ -249,8 +237,6 @@ func main() {
 		pkruntime.WithMockProvider(cfg.MockProvider),
 		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
 		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
-		pkruntime.WithMetrics(metrics),
-		pkruntime.WithRuntimeMetrics(runtimeMetrics),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
 		pkruntime.WithBaseURL(cfg.BaseURL),
 		pkruntime.WithContextWindow(cfg.ContextWindow),
@@ -269,17 +255,11 @@ func main() {
 		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
 	}
 
-	if evalCollector != nil {
-		evalM := pkmetrics.NewEvalMetrics(pkmetrics.EvalMetricsConfig{
-			AgentName:      cfg.AgentName,
-			Namespace:      cfg.Namespace,
-			PromptPackName: cfg.PromptPackName,
-		})
-		serverOpts = append(serverOpts,
-			pkruntime.WithEvalCollector(evalCollector),
-			pkruntime.WithEvalDefs(evalDefs),
-			pkruntime.WithEvalMetrics(evalM),
-		)
+	// Always wire the Collector so pipeline metrics (provider, tool, validation)
+	// are recorded for every conversation, not just eval runs.
+	serverOpts = append(serverOpts, pkruntime.WithEvalCollector(collector))
+	if len(evalDefs) > 0 {
+		serverOpts = append(serverOpts, pkruntime.WithEvalDefs(evalDefs))
 	}
 	runtimeServer := pkruntime.NewServer(serverOpts...)
 	defer func() { _ = runtimeServer.Close() }()
@@ -349,23 +329,9 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	if evalCollector != nil {
-		// Disable compression so we can safely append SDK eval metrics after
-		// the standard Prometheus output. promhttp.Handler() negotiates gzip
-		// with the client; appending raw bytes after a gzip stream corrupts
-		// the response ("gzip: invalid header").
-		uncompressedHandler := promhttp.HandlerFor(
-			prometheus.DefaultGatherer,
-			promhttp.HandlerOpts{DisableCompression: true},
-		)
-		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-			uncompressedHandler.ServeHTTP(w, r)
-			// Append SDK-internal eval metrics for backward compatibility
-			_ = evalCollector.WritePrometheus(w)
-		})
-	} else {
-		healthMux.Handle("/metrics", promhttp.Handler())
-	}
+	// Merge default Prometheus metrics with the Collector's isolated registry.
+	gatherers := prometheus.Gatherers{prometheus.DefaultGatherer, collectorRegistry}
+	healthMux.Handle("/metrics", promhttp.HandlerFor(gatherers, promhttp.HandlerOpts{}))
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.HealthPort),

@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
+	pkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 
 	// Register all providers via blank imports
@@ -43,7 +44,6 @@ import (
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
-	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -77,16 +77,13 @@ type Server struct {
 	tracingProvider *tracing.Provider
 
 	// Evals
-	evalCollector *evals.MetricCollector
+	evalCollector *pkmetrics.Collector
 	evalDefs      []evals.EvalDef
-	evalMetrics   metrics.EvalMetricsRecorder
 
-	// Metrics
-	metrics        *Metrics
-	runtimeMetrics *RuntimeMetrics
-	providerType   string
-	model          string
-	baseURL        string // Custom base URL for provider (e.g., Ollama endpoint)
+	// Provider info (for logging)
+	providerType string
+	model        string
+	baseURL      string // Custom base URL for provider (e.g., Ollama endpoint)
 
 	// Session recording (Pattern C)
 	sessionStore session.Store
@@ -195,21 +192,6 @@ func WithTracingProvider(provider *tracing.Provider) ServerOption {
 	}
 }
 
-// WithMetrics sets the Prometheus metrics collector for the server.
-func WithMetrics(metrics *Metrics) ServerOption {
-	return func(s *Server) {
-		s.metrics = metrics
-	}
-}
-
-// WithRuntimeMetrics sets the runtime Prometheus metrics collector for the server.
-// This tracks tool calls and pipeline executions.
-func WithRuntimeMetrics(metrics *RuntimeMetrics) ServerOption {
-	return func(s *Server) {
-		s.runtimeMetrics = metrics
-	}
-}
-
 // WithProviderInfo sets the provider type and model for metrics labels.
 func WithProviderInfo(providerType, model string) ServerOption {
 	return func(s *Server) {
@@ -225,8 +207,8 @@ func WithBaseURL(baseURL string) ServerOption {
 	}
 }
 
-// WithEvalCollector sets the eval metric collector for the server.
-func WithEvalCollector(c *evals.MetricCollector) ServerOption {
+// WithEvalCollector sets the unified PromptKit metrics collector for eval metrics.
+func WithEvalCollector(c *pkmetrics.Collector) ServerOption {
 	return func(s *Server) {
 		s.evalCollector = c
 	}
@@ -236,13 +218,6 @@ func WithEvalCollector(c *evals.MetricCollector) ServerOption {
 func WithEvalDefs(defs []evals.EvalDef) ServerOption {
 	return func(s *Server) {
 		s.evalDefs = defs
-	}
-}
-
-// WithEvalMetrics sets the eval Prometheus metrics recorder for the server.
-func WithEvalMetrics(m metrics.EvalMetricsRecorder) ServerOption {
-	return func(s *Server) {
-		s.evalMetrics = m
 	}
 }
 
@@ -296,15 +271,6 @@ func NewServer(opts ...ServerOption) *Server {
 
 	for _, opt := range opts {
 		opt(s)
-	}
-
-	// Initialize metrics with known label values so they appear in /metrics immediately.
-	// CounterVec and HistogramVec only show up in Prometheus output after being observed.
-	if s.metrics != nil && s.providerType != "" && s.model != "" {
-		s.metrics.Initialize(s.providerType, s.model)
-	}
-	if s.runtimeMetrics != nil {
-		s.runtimeMetrics.Initialize()
 	}
 
 	return s
