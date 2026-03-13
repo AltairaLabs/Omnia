@@ -297,7 +297,7 @@ func TestEvalIntegration_ContainsEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.True(t, results[0].Passed)
+		assert.Equal(t, true, results[0].Value)
 		assert.Empty(t, results[0].Error)
 	})
 
@@ -308,7 +308,7 @@ func TestEvalIntegration_ContainsEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.False(t, results[0].Passed)
+		assert.Equal(t, false, results[0].Value)
 	})
 }
 
@@ -338,7 +338,7 @@ func TestEvalIntegration_RegexEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.True(t, results[0].Passed, "no URLs = no match = pass (expect_match=false)")
+		assert.Equal(t, true, results[0].Value, "no URLs = no match = pass (expect_match=false)")
 	})
 
 	t.Run("fails for any URL", func(t *testing.T) {
@@ -348,7 +348,7 @@ func TestEvalIntegration_RegexEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.False(t, results[0].Passed, "URL matches = fail (expect_match=false)")
+		assert.Equal(t, false, results[0].Value, "URL matches = fail (expect_match=false)")
 	})
 }
 
@@ -529,8 +529,8 @@ func TestEvalIntegration_ResultWriterCapture(t *testing.T) {
 
 	captured := writer.Results()
 	assert.Len(t, captured, 2)
-	assert.True(t, captured[0].Passed)
-	assert.False(t, captured[1].Passed)
+	assert.Equal(t, true, captured[0].Value)
+	assert.Equal(t, false, captured[1].Value)
 }
 
 // TestEvalIntegration_PrometheusMetrics exercises the full pipeline and verifies

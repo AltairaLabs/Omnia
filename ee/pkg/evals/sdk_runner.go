@@ -158,20 +158,32 @@ func convertSDKResults(results []runtimeevals.EvalResult, trigger runtimeevals.E
 			EvalID:     r.EvalID,
 			EvalType:   r.Type,
 			Trigger:    string(trigger),
-			Passed:     r.Passed, //nolint:staticcheck // Passed is set by SDK eval handlers; IsPassed() uses different threshold
+			Passed:     derivePassedFromResult(r),
 			DurationMs: int(r.DurationMs),
 			Source:     evalSource,
 		}
 		if r.Score != nil {
 			item.Score = r.Score
 		}
-		if r.Error != "" {
-			item.Passed = false
-		}
 		item.Details = buildDetailsJSON(r)
 		items = append(items, item)
 	}
 	return items
+}
+
+// derivePassedFromResult determines pass/fail from an EvalResult.
+// Boolean evals store pass/fail in Value; score evals pass if score > 0.
+func derivePassedFromResult(r runtimeevals.EvalResult) bool {
+	if r.Error != "" {
+		return false
+	}
+	if b, ok := r.Value.(bool); ok {
+		return b
+	}
+	if r.Score != nil {
+		return *r.Score > 0
+	}
+	return false
 }
 
 // buildDetailsJSON assembles a details JSON blob from the SDK result's

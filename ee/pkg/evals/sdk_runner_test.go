@@ -44,10 +44,10 @@ func testPackData(defs []runtimeevals.EvalDef) []byte {
 func TestConvertSDKResults(t *testing.T) {
 	score := 0.85
 	results := []runtimeevals.EvalResult{
-		{EvalID: "e1", Type: "contains", Passed: true, Score: &score, DurationMs: 5},
-		{EvalID: "e2", Type: "regex", Passed: false, DurationMs: 3},
+		{EvalID: "e1", Type: "contains", Value: true, Score: &score, DurationMs: 5},
+		{EvalID: "e2", Type: "regex", Value: false, DurationMs: 3},
 		{EvalID: "e3", Type: "llm_judge", Skipped: true, SkipReason: "sampling"},
-		{EvalID: "e4", Type: "contains", Passed: true, Error: "handler panic", DurationMs: 1},
+		{EvalID: "e4", Type: "contains", Value: true, Error: "handler panic", DurationMs: 1},
 	}
 
 	items := convertSDKResults(results, runtimeevals.TriggerEveryTurn)
@@ -190,7 +190,7 @@ func TestBuildDetailsJSON_AllFields(t *testing.T) {
 }
 
 func TestBuildDetailsJSON_Empty(t *testing.T) {
-	r := runtimeevals.EvalResult{EvalID: "e1", Passed: true}
+	r := runtimeevals.EvalResult{EvalID: "e1", Value: true}
 	raw := buildDetailsJSON(r)
 	assert.Nil(t, raw, "no diagnostic fields should return nil")
 }
@@ -211,7 +211,7 @@ func TestConvertSDKResults_CarriesDetails(t *testing.T) {
 		{
 			EvalID:      "e1",
 			Type:        "llm_judge",
-			Passed:      false,
+			Value:       false,
 			Explanation: "Too informal",
 			Error:       "threshold exceeded",
 		},
