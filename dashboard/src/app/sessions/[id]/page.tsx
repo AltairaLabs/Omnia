@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Markdown } from "@/components/console/markdown";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -215,7 +216,7 @@ function MessageBubble({ message, showTimestamp, evalResults, inlineEvals }: Rea
             getBubbleClassName(isUser, isSystem)
           )}
         >
-          <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+          <Markdown content={message.content} className={cn("text-sm", isUser && "prose-invert")} />
         </div>
 
         {/* Eval results from eval_results table */}
