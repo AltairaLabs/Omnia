@@ -521,7 +521,7 @@ roleRef:
     {
       "id": "greeting-check",
       "type": "contains",
-      "trigger": "per_turn",
+      "trigger": "every_turn",
       "description": "Check if response contains a greeting",
       "params": {
         "patterns": ["hello"]
