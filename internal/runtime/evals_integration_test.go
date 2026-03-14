@@ -19,7 +19,6 @@ limitations under the License.
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -32,7 +31,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers" // Register default eval handlers
-	"github.com/altairalabs/omnia/pkg/metrics"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -298,7 +297,7 @@ func TestEvalIntegration_ContainsEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.True(t, results[0].Passed)
+		assert.Equal(t, true, results[0].Value)
 		assert.Empty(t, results[0].Error)
 	})
 
@@ -309,7 +308,7 @@ func TestEvalIntegration_ContainsEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.False(t, results[0].Passed)
+		assert.Equal(t, false, results[0].Value)
 	})
 }
 
@@ -339,7 +338,7 @@ func TestEvalIntegration_RegexEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.True(t, results[0].Passed, "no URLs = no match = pass (expect_match=false)")
+		assert.Equal(t, true, results[0].Value, "no URLs = no match = pass (expect_match=false)")
 	})
 
 	t.Run("fails for any URL", func(t *testing.T) {
@@ -349,7 +348,7 @@ func TestEvalIntegration_RegexEval(t *testing.T) {
 		}
 		results := runner.RunTurnEvals(context.Background(), evalDefs, evalCtx)
 		require.Len(t, results, 1)
-		assert.False(t, results[0].Passed, "URL matches = fail (expect_match=false)")
+		assert.Equal(t, false, results[0].Value, "URL matches = fail (expect_match=false)")
 	})
 }
 
@@ -393,7 +392,11 @@ func TestEvalIntegration_FullPipelineWithMockProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, evalDefs, 3, "should load 1 pack + 2 prompt evals")
 
-	collector := evals.NewMetricCollector(evals.WithNamespace("test_eval"))
+	evalReg := prometheus.NewRegistry()
+	collector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+		Registerer: evalReg,
+		Namespace:  "test_eval",
+	})
 
 	server := NewServer(
 		WithLogger(logr.Discard()),
@@ -419,19 +422,22 @@ func TestEvalIntegration_FullPipelineWithMockProvider(t *testing.T) {
 
 	// Verify eval pipeline was wired correctly
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 1, "should have WithEvalRunner option")
+	assert.Len(t, opts, 2, "should have WithEvalRunner and WithMetrics options")
 
 	// Verify eval metrics were actually recorded in the collector.
 	// This proves the full pipeline: SDK middleware → dispatcher → runner → writer → collector.
-	var buf bytes.Buffer
-	err = collector.WritePrometheus(&buf)
-	require.NoError(t, err)
-	metricsOutput := buf.String()
+	gathered, gatherErr := evalReg.Gather()
+	require.NoError(t, gatherErr)
+
+	metricNames := make(map[string]bool)
+	for _, mf := range gathered {
+		metricNames[mf.GetName()] = true
+	}
 
 	// Turn-level evals (regex, contains) should have produced boolean metrics
-	assert.Contains(t, metricsOutput, "no_hallucinated_urls",
+	assert.True(t, metricNames["test_eval_no_hallucinated_urls"],
 		"regex URL hallucination eval should have recorded a metric")
-	assert.Contains(t, metricsOutput, "response_contains_expected",
+	assert.True(t, metricNames["test_eval_response_contains_expected"],
 		"contains eval should have recorded a metric")
 }
 
@@ -523,8 +529,8 @@ func TestEvalIntegration_ResultWriterCapture(t *testing.T) {
 
 	captured := writer.Results()
 	assert.Len(t, captured, 2)
-	assert.True(t, captured[0].Passed)
-	assert.False(t, captured[1].Passed)
+	assert.Equal(t, true, captured[0].Value)
+	assert.Equal(t, false, captured[1].Value)
 }
 
 // TestEvalIntegration_PrometheusMetrics exercises the full pipeline and verifies
@@ -540,13 +546,10 @@ func TestEvalIntegration_PrometheusMetrics(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, evalDefs, 3)
 
-	collector := evals.NewMetricCollector(evals.WithNamespace("test_prom_eval"))
-
-	// Create Prometheus eval metrics with isolated registry
-	reg := prometheus.NewRegistry()
-	evalM := metrics.NewEvalMetricsWithRegisterer(reg, metrics.EvalMetricsConfig{
-		AgentName: "test-agent",
-		Namespace: "test-ns",
+	evalReg := prometheus.NewRegistry()
+	collector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+		Registerer: evalReg,
+		Namespace:  "test_prom_eval",
 	})
 
 	server := NewServer(
@@ -556,7 +559,6 @@ func TestEvalIntegration_PrometheusMetrics(t *testing.T) {
 		WithMockProvider(true),
 		WithEvalCollector(collector),
 		WithEvalDefs(evalDefs),
-		WithEvalMetrics(evalM),
 	)
 	defer func() { _ = server.Close() }()
 
@@ -572,8 +574,8 @@ func TestEvalIntegration_PrometheusMetrics(t *testing.T) {
 	// Give async eval dispatch time to complete
 	time.Sleep(500 * time.Millisecond)
 
-	// Gather Prometheus metrics from our isolated registry
-	gathered, err := reg.Gather()
+	// Verify eval metrics were recorded via the PromptKit Collector's registry
+	gathered, err := evalReg.Gather()
 	require.NoError(t, err)
 
 	metricNames := make(map[string]bool)
@@ -581,15 +583,9 @@ func TestEvalIntegration_PrometheusMetrics(t *testing.T) {
 		metricNames[mf.GetName()] = true
 	}
 
-	// Turn-level evals (regex, contains) should have produced Prometheus metrics
-	assert.True(t, metricNames["omnia_eval_executed_total"],
-		"omnia_eval_executed_total should be recorded")
-	assert.True(t, metricNames["omnia_eval_duration_seconds"],
-		"omnia_eval_duration_seconds should be recorded")
-
-	// At least one eval should have passed or failed
-	hasPassed := metricNames["omnia_eval_passed_total"]
-	hasFailed := metricNames["omnia_eval_failed_total"]
-	assert.True(t, hasPassed || hasFailed,
-		"should have at least one passed or failed eval metric")
+	// Turn-level evals (regex, contains) should have produced dynamic metrics
+	assert.True(t, metricNames["test_prom_eval_no_hallucinated_urls"],
+		"regex URL hallucination eval should have recorded a metric")
+	assert.True(t, metricNames["test_prom_eval_response_contains_expected"],
+		"contains eval should have recorded a metric")
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,7 @@ import {
   type LabelSelectorValue,
 } from "@/components/ui/k8s-label-selector";
 import { useArenaSourceContent } from "@/hooks/use-arena-source-content";
+import { useArenaConfigPreview, estimateWorkItems } from "@/hooks/use-arena-config-preview";
 import { useProviderPreview, useToolRegistryPreview, useAgents } from "@/hooks";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -33,7 +34,7 @@ import {
   Check,
   AlertCircle,
   AlertTriangle,
-  Lock,
+  Info,
   Settings,
   Plus,
   X,
@@ -44,7 +45,6 @@ import type {
   ArenaSource,
   ArenaJob,
   ArenaJobSpec,
-  ArenaJobType,
   ExecutionMode,
   ProviderGroupSelector,
   ToolRegistrySelector,
@@ -54,18 +54,8 @@ import type {
 // Types
 // =============================================================================
 
-const JOB_TYPES: {
-  value: ArenaJobType;
-  label: string;
-  enterprise: boolean;
-}[] = [
-  { value: "evaluation", label: "Evaluation", enterprise: false },
-  { value: "loadtest", label: "Load Test", enterprise: true },
-  { value: "datagen", label: "Data Generation", enterprise: true },
-];
-
 const ALL_STEPS = [
-  { key: "basic", title: "Basic Info", description: "Name and type" },
+  { key: "basic", title: "Basic Info", description: "Job name" },
   { key: "source", title: "Source", description: "Source and configuration" },
   { key: "execution", title: "Execution", description: "Direct or fleet mode" },
   { key: "providers", title: "Providers", description: "Provider overrides" },
@@ -79,7 +69,6 @@ const DEFAULT_PROVIDER_GROUPS = ["default", "evaluation", "judge", "selfplay"];
 interface JobWizardFormState {
   // Step 0: Basic Info
   name: string;
-  type: ArenaJobType;
 
   // Step 1: Source
   sourceRef: string;
@@ -103,20 +92,11 @@ interface JobWizardFormState {
   // Step 5: Options
   workers: string;
   verbose: boolean;
-
-  // Load test options
-  rampUp: string;
-  duration: string;
-  targetRPS: string;
-
-  // Data gen options
-  sampleCount: string;
 }
 
 function getInitialFormState(preselectedSource?: string): JobWizardFormState {
   return {
     name: generateName(),
-    type: "evaluation",
     sourceRef: preselectedSource || "",
     rootPath: "",
     arenaFileName: "config.arena.yaml",
@@ -130,10 +110,6 @@ function getInitialFormState(preselectedSource?: string): JobWizardFormState {
     toolRegistryOverride: {},
     workers: "1",
     verbose: false,
-    rampUp: "30s",
-    duration: "5m",
-    targetRPS: "10",
-    sampleCount: "100",
   };
 }
 
@@ -152,28 +128,8 @@ export interface JobWizardProps {
 // Helper Functions
 // =============================================================================
 
-function validateJobTypeOptions(form: JobWizardFormState): string | null {
-  switch (form.type) {
-    case "evaluation":
-      return null;
-    case "loadtest": {
-      const rps = Number.parseInt(form.targetRPS, 10);
-      const isValidRps = !Number.isNaN(rps) && rps >= 1;
-      return isValidRps ? null : "Target RPS must be a positive integer";
-    }
-    case "datagen": {
-      const count = Number.parseInt(form.sampleCount, 10);
-      const isValidCount = !Number.isNaN(count) && count >= 1;
-      return isValidCount ? null : "Sample count must be a positive integer";
-    }
-    default:
-      return null;
-  }
-}
-
 function validateForm(
   form: JobWizardFormState,
-  isEnterprise: boolean,
   maxWorkerReplicas: number
 ): string | null {
   if (!form.name.trim()) {
@@ -190,11 +146,6 @@ function validateForm(
     return "Target agent is required for fleet mode";
   }
 
-  const jobType = JOB_TYPES.find((t) => t.value === form.type);
-  if (jobType?.enterprise && !isEnterprise) {
-    return `${jobType.label} requires an Enterprise license`;
-  }
-
   const workers = Number.parseInt(form.workers, 10);
   if (Number.isNaN(workers) || workers < 1) {
     return "Workers must be a positive integer";
@@ -204,7 +155,7 @@ function validateForm(
     return `Open Core is limited to ${maxWorkerReplicas} worker(s)`;
   }
 
-  return validateJobTypeOptions(form);
+  return null;
 }
 
 function buildArenaFilePath(rootPath: string, fileName: string): string | undefined {
@@ -268,14 +219,16 @@ function buildSpec(form: JobWizardFormState): ArenaJobSpec {
   const spec: ArenaJobSpec = {
     sourceRef: { name: form.sourceRef },
     arenaFile: arenaFile || undefined,
-    type: form.type,
+    type: "evaluation",
     workers: {
       replicas: Number.parseInt(form.workers, 10),
     },
     verbose: form.verbose || undefined,
-    // Provider/tool overrides only apply in direct mode
     providerOverrides: isFleet ? undefined : buildProviderOverrides(form),
     toolRegistryOverride: isFleet ? undefined : buildToolRegistryOverride(form),
+    evaluation: {
+      outputFormats: ["json", "junit"],
+    },
   };
 
   if (isFleet) {
@@ -285,23 +238,6 @@ function buildSpec(form: JobWizardFormState): ArenaJobSpec {
         agentRuntimeRef: { name: form.targetAgent },
         namespace: form.targetNamespace || undefined,
       },
-    };
-  }
-
-  if (form.type === "evaluation") {
-    spec.evaluation = {
-      outputFormats: ["json", "junit"],
-    };
-  } else if (form.type === "loadtest") {
-    spec.loadTest = {
-      rampUp: form.rampUp,
-      duration: form.duration,
-      targetRPS: Number.parseInt(form.targetRPS, 10),
-    };
-  } else if (form.type === "datagen") {
-    spec.dataGen = {
-      count: Number.parseInt(form.sampleCount, 10),
-      format: "jsonl",
     };
   }
 
@@ -583,7 +519,6 @@ function ExecutionStep({
 export function JobWizard({
   sources,
   preselectedSource,
-  isEnterprise,
   maxWorkerReplicas,
   loading,
   onSubmit,
@@ -618,8 +553,41 @@ export function JobWizard({
   } = useArenaSourceContent(formState.sourceRef || undefined);
 
   // Get available labels for providers and tool registries
-  const { availableLabels: providerLabels } = useProviderPreview(undefined);
+  const { availableLabels: providerLabels, totalCount: totalProviderCount } = useProviderPreview(undefined);
   const { availableLabels: toolRegistryLabels } = useToolRegistryPreview(undefined);
+
+  // Fetch arena config for work item estimation
+  const arenaFilePath = buildArenaFilePath(formState.rootPath, formState.arenaFileName);
+  const configPreview = useArenaConfigPreview(
+    formState.sourceRef || undefined,
+    arenaFilePath
+  );
+  const workEstimate = useMemo(
+    () =>
+      estimateWorkItems(
+        configPreview,
+        formState.executionMode,
+        formState.providerOverridesEnabled,
+        totalProviderCount,
+        maxWorkerReplicas
+      ),
+    [configPreview, formState.executionMode, formState.providerOverridesEnabled, totalProviderCount, maxWorkerReplicas]
+  );
+
+  // Auto-update workers when the recommended count changes
+  const prevRecommended = useRef(workEstimate.recommendedWorkers);
+  useEffect(() => {
+    if (
+      configPreview.loaded &&
+      workEstimate.recommendedWorkers !== prevRecommended.current
+    ) {
+      prevRecommended.current = workEstimate.recommendedWorkers;
+      setFormState((prev) => ({
+        ...prev,
+        workers: String(workEstimate.recommendedWorkers),
+      }));
+    }
+  }, [configPreview.loaded, workEstimate.recommendedWorkers]);
 
   // Agents are fetched inside ExecutionStep based on selected namespace
 
@@ -736,7 +704,7 @@ export function JobWizard({
       setError(null);
       setIsSubmitting(true);
 
-      const validationError = validateForm(formState, isEnterprise, maxWorkerReplicas);
+      const validationError = validateForm(formState, maxWorkerReplicas);
       if (validationError) {
         setError(validationError);
         setIsSubmitting(false);
@@ -778,42 +746,6 @@ export function JobWizard({
               <p className="text-xs text-muted-foreground">
                 Lowercase letters, numbers, and hyphens only
               </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="type">Job Type</Label>
-              <Select
-                value={formState.type}
-                onValueChange={(v) => updateField("type", v as ArenaJobType)}
-              >
-                <SelectTrigger id="type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {JOB_TYPES.map((jobType) => {
-                    const isLocked = jobType.enterprise && !isEnterprise;
-                    return (
-                      <SelectItem
-                        key={jobType.value}
-                        value={jobType.value}
-                        disabled={isLocked}
-                      >
-                        <div className="flex items-center gap-2">
-                          {isLocked && (
-                            <Lock className="h-3 w-3 text-muted-foreground" />
-                          )}
-                          {jobType.label}
-                          {isLocked && (
-                            <Badge variant="outline" className="ml-1 text-xs">
-                              Enterprise
-                            </Badge>
-                          )}
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
             </div>
           </div>
         );
@@ -1056,6 +988,14 @@ export function JobWizard({
                     {maxWorkerReplicas === 1 ? "" : "s"} (upgrade for more)
                   </p>
                 )}
+                {configPreview.loaded && workEstimate.description && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Info className="h-3 w-3 shrink-0" />
+                    {workEstimate.workItems === 1
+                      ? `${workEstimate.description}. Additional workers won\u2019t improve speed.`
+                      : `${workEstimate.workItems} work items (${workEstimate.description}). Workers beyond ${workEstimate.workItems} won\u2019t improve speed.`}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1073,82 +1013,6 @@ export function JobWizard({
               />
             </div>
 
-            {/* Type-specific options */}
-            {formState.type === "loadtest" && (
-              <div className="space-y-4 pt-2 border-t">
-                <Label className="text-sm font-medium">Load Test Options</Label>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="rampUp"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Ramp Up
-                    </Label>
-                    <Input
-                      id="rampUp"
-                      placeholder="30s"
-                      value={formState.rampUp}
-                      onChange={(e) => updateField("rampUp", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="duration"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Duration
-                    </Label>
-                    <Input
-                      id="duration"
-                      placeholder="5m"
-                      value={formState.duration}
-                      onChange={(e) => updateField("duration", e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="rps"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Target RPS
-                    </Label>
-                    <Input
-                      id="rps"
-                      type="number"
-                      min="1"
-                      value={formState.targetRPS}
-                      onChange={(e) => updateField("targetRPS", e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {formState.type === "datagen" && (
-              <div className="space-y-4 pt-2 border-t">
-                <Label className="text-sm font-medium">
-                  Data Generation Options
-                </Label>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="samples"
-                    className="text-xs text-muted-foreground"
-                  >
-                    Sample Count
-                  </Label>
-                  <Input
-                    id="samples"
-                    type="number"
-                    min="1"
-                    value={formState.sampleCount}
-                    onChange={(e) =>
-                      updateField("sampleCount", e.target.value)
-                    }
-                  />
-                </div>
-              </div>
-            )}
           </div>
         );
 
@@ -1173,11 +1037,6 @@ export function JobWizard({
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <div className="text-muted-foreground">Job Type</div>
-                  <div>
-                    {JOB_TYPES.find((t) => t.value === formState.type)?.label}
-                  </div>
-
                   <div className="text-muted-foreground">Source</div>
                   <div>{formState.sourceRef}</div>
 

@@ -390,9 +390,13 @@ if ENABLE_ENTERPRISE:
         './ee/internal',
         './ee/pkg',
         './ee/api',
+        './internal',
+        './pkg',
         './go.mod',
         './go.sum',
     ]
+    if _promptkit_local_exists:
+        eval_worker_deps.append('./promptkit-local')
     local_resource(
         'eval-worker-image',
         cmd='docker build -t omnia-eval-worker-dev:latest -f ./ee/Dockerfile.eval-worker .',
@@ -450,6 +454,8 @@ helm_set = [
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
     'langchainRuntime.image.pullPolicy=Never',
+    # Enable operator tool test API server
+    'operator.apiBindAddress=:8083',
     # Increase dashboard resources for HMR compilation
     'dashboard.resources.limits.cpu=4000m',
     'dashboard.resources.limits.memory=4Gi',
@@ -695,6 +701,51 @@ k8s_resource(
 k8s_resource(
     'omnia-session-api',
     labels=['session-api'],
+    resource_deps=['omnia-postgres'],
+)
+
+# pgweb — lightweight Postgres web UI for inspecting session data, eval results, etc.
+k8s_yaml(blob('''
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omnia-pgweb
+  namespace: omnia-system
+  labels:
+    app.kubernetes.io/name: pgweb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgweb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pgweb
+    spec:
+      containers:
+        - name: pgweb
+          image: sosedoff/pgweb:latest
+          args:
+            - "--bind=0.0.0.0"
+            - "--listen=8081"
+            - "--url=postgres://omnia:omnia@omnia-postgres:5432/omnia?sslmode=disable"
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+'''))
+
+k8s_resource(
+    'omnia-pgweb',
+    labels=['session-api'],
+    port_forwards=['8081:8081'],  # pgweb UI
     resource_deps=['omnia-postgres'],
 )
 

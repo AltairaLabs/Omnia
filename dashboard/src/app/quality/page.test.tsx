@@ -12,14 +12,12 @@ import React from "react";
 
 // Mock hooks
 const mockUseEvalSummary = vi.fn();
-const mockUseRecentEvalFailures = vi.fn();
 const mockUseEvalFilter = vi.fn();
 const mockUseGrafana = vi.fn();
 const mockBuildDashboardUrl = vi.fn();
 
 vi.mock("@/hooks", () => ({
   useEvalSummary: (...args: unknown[]) => mockUseEvalSummary(...args),
-  useRecentEvalFailures: (...args: unknown[]) => mockUseRecentEvalFailures(...args),
   useEvalFilter: () => mockUseEvalFilter(),
   useGrafana: () => mockUseGrafana(),
   buildDashboardUrl: (...args: unknown[]) => mockBuildDashboardUrl(...args),
@@ -35,26 +33,12 @@ vi.mock("@/components/layout", () => ({
   ),
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
+vi.mock("@/components/quality/eval-score-breakdown", () => ({
+  EvalScoreBreakdown: () => React.createElement("div", { "data-testid": "score-breakdown" }, "EvalScoreBreakdown"),
 }));
 
-vi.mock("date-fns", () => ({
-  formatDistanceToNow: () => "2 hours ago",
-}));
-
-vi.mock("@/components/quality/assertion-type-breakdown", () => ({
-  AssertionTypeBreakdown: () => React.createElement("div", { "data-testid": "assertion-breakdown" }, "AssertionTypeBreakdown"),
-}));
-
-vi.mock("@/components/quality/failing-sessions-table", () => ({
-  FailingSessionsTable: () => React.createElement("div", { "data-testid": "failing-sessions" }, "FailingSessionsTable"),
-}));
-
-vi.mock("@/components/quality/pass-rate-trend-chart", () => ({
-  PassRateTrendChart: () => React.createElement("div", { "data-testid": "trend-chart" }, "PassRateTrendChart"),
+vi.mock("@/components/quality/eval-score-trend-chart", () => ({
+  EvalScoreTrendChart: () => React.createElement("div", { "data-testid": "trend-chart" }, "EvalScoreTrendChart"),
 }));
 
 import QualityPage from "./page";
@@ -83,41 +67,15 @@ function createWrapper() {
 const mockSummaries = [
   {
     evalId: "tone",
-    evalType: "llm_judge",
-    total: 100,
-    passed: 85,
-    failed: 15,
-    passRate: 85.0,
-    avgScore: 0.85,
+    score: 0.85,
     metricType: "gauge" as const,
   },
   {
     evalId: "safety",
-    evalType: "rule",
-    total: 50,
-    passed: 48,
-    failed: 2,
-    passRate: 96.0,
+    score: 0.96,
     metricType: "gauge" as const,
   },
 ];
-
-const mockFailures = {
-  results: [
-    {
-      id: "e1",
-      sessionId: "s1",
-      agentName: "agent-1",
-      evalId: "tone",
-      evalType: "llm_judge",
-      passed: false,
-      score: 0.3,
-      createdAt: new Date().toISOString(),
-    },
-  ],
-  total: 1,
-  hasMore: false,
-};
 
 describe("QualityPage", () => {
   beforeEach(() => {
@@ -128,7 +86,6 @@ describe("QualityPage", () => {
 
   it("renders header with title", () => {
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
@@ -138,123 +95,51 @@ describe("QualityPage", () => {
 
   it("shows loading skeletons while data is fetching", () => {
     mockUseEvalSummary.mockReturnValue({ data: undefined, isLoading: true, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: true, error: null });
 
     const Wrapper = createWrapper();
     const { container } = render(<Wrapper><QualityPage /></Wrapper>);
 
-    // Skeleton elements should be present
     const skeletons = container.querySelectorAll('[class*="animate-pulse"], [data-slot="skeleton"]');
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
-  it("renders summary stats when data is loaded", () => {
+  it("renders summary cards with score data", () => {
     mockUseEvalSummary.mockReturnValue({ data: mockSummaries, isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    // Active Evals: 2 metrics
-    expect(screen.getByText("Active Evals")).toBeInTheDocument();
-    // Overall pass rate: mean of 85.0 and 96.0 = 90.5%
-    expect(screen.getByText("90.5%")).toBeInTheDocument();
-    // Passing: 1 (safety at 96% >= 90), Failing: 0 (none < 70)
-    expect(screen.getByText("Passing")).toBeInTheDocument();
-    expect(screen.getByText("Failing")).toBeInTheDocument();
+    expect(screen.getByText("Evals")).toBeInTheDocument();
+    expect(screen.getByText("Avg Score")).toBeInTheDocument();
+    expect(screen.getByText("Lowest Score")).toBeInTheDocument();
+    // 2 evals
+    expect(screen.getByText("2")).toBeInTheDocument();
+    // Avg score: (85+96)/2 = 90.5 -> 91%
+    expect(screen.getByText("91%")).toBeInTheDocument();
+    // Lowest score: 85%
+    expect(screen.getByText("85%")).toBeInTheDocument();
+    // Lowest eval name
+    expect(screen.getByText("tone")).toBeInTheDocument();
   });
 
-  it("renders eval metrics table", () => {
+  it("renders trend chart and breakdown components", () => {
     mockUseEvalSummary.mockReturnValue({ data: mockSummaries, isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    expect(screen.getByText("Eval Metrics")).toBeInTheDocument();
-    expect(screen.getByText("safety")).toBeInTheDocument();
-    expect(screen.getByText("85.0%")).toBeInTheDocument();
-    expect(screen.getByText("96.0%")).toBeInTheDocument();
+    expect(screen.getByTestId("trend-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("score-breakdown")).toBeInTheDocument();
   });
 
-  it("renders recent failures", () => {
-    mockUseEvalSummary.mockReturnValue({ data: mockSummaries, isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
-
-    const Wrapper = createWrapper();
-    render(<Wrapper><QualityPage /></Wrapper>);
-
-    expect(screen.getByText("Recent Failures")).toBeInTheDocument();
-    // "tone" appears in both eval table and failures — use getAllByText
-    const toneElements = screen.getAllByText("tone");
-    expect(toneElements.length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("agent-1")).toBeInTheDocument();
-    expect(screen.getByText("0.30")).toBeInTheDocument();
-    // Pagination info
-    expect(screen.getByText(/1–1 of 1/)).toBeInTheDocument();
-  });
-
-  it("shows empty state when no eval data", () => {
+  it("shows dash values when no eval data", () => {
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({
-      data: { results: [], total: 0, hasMore: false },
-      isLoading: false,
-      error: null,
-    });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    expect(screen.getByText("No eval data available")).toBeInTheDocument();
-    expect(screen.getByText("No recent failures")).toBeInTheDocument();
-  });
-
-  it("excludes counter metrics from overall pass rate", () => {
-    const mixedSummaries = [
-      ...mockSummaries,
-      {
-        evalId: "executed_total",
-        evalType: "counter",
-        total: 47,
-        passed: 0,
-        failed: 0,
-        passRate: 0,
-        metricType: "counter" as const,
-      },
-    ];
-    mockUseEvalSummary.mockReturnValue({ data: mixedSummaries, isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: mockFailures, isLoading: false, error: null });
-
-    const Wrapper = createWrapper();
-    render(<Wrapper><QualityPage /></Wrapper>);
-
-    // Overall pass rate should only average gauge metrics: (85.0 + 96.0) / 2 = 90.5%
-    // NOT (85.0 + 96.0 + 0) / 3 = 60.3%
-    expect(screen.getByText("90.5%")).toBeInTheDocument();
-    // Active Evals count includes all 3
-    expect(screen.getByText("3")).toBeInTheDocument();
-  });
-
-  it("renders counter metrics with raw count instead of pass rate", () => {
-    const counterSummaries = [
-      {
-        evalId: "executed_total",
-        evalType: "counter",
-        total: 47,
-        passed: 0,
-        failed: 0,
-        passRate: 0,
-        metricType: "counter" as const,
-      },
-    ];
-    mockUseEvalSummary.mockReturnValue({ data: counterSummaries, isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: { results: [], total: 0, hasMore: false }, isLoading: false, error: null });
-
-    const Wrapper = createWrapper();
-    render(<Wrapper><QualityPage /></Wrapper>);
-
-    expect(screen.getByText("47")).toBeInTheDocument();
-    expect(screen.getByText("count")).toBeInTheDocument();
+    const dashes = screen.getAllByText("-");
+    expect(dashes).toHaveLength(2); // Avg Score and Lowest Score both show "-"
   });
 
   it("shows error alert when summary fetch fails", () => {
@@ -263,7 +148,6 @@ describe("QualityPage", () => {
       isLoading: false,
       error: new Error("Failed to fetch"),
     });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
@@ -274,12 +158,10 @@ describe("QualityPage", () => {
 
   it("renders time range selector", () => {
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
-    // Default time range is 24h
     expect(screen.getByText("Last 24h")).toBeInTheDocument();
   });
 
@@ -287,7 +169,6 @@ describe("QualityPage", () => {
     mockBuildDashboardUrl.mockReturnValue("https://grafana.local/grafana/d/omnia-quality/_?orgId=1");
     mockUseGrafana.mockReturnValue({ enabled: true, baseUrl: "https://grafana.local", remotePath: "/grafana/", orgId: 1 });
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
@@ -301,7 +182,6 @@ describe("QualityPage", () => {
   it("does not render View in Grafana link when Grafana is disabled", () => {
     mockBuildDashboardUrl.mockReturnValue(null);
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
@@ -315,11 +195,20 @@ describe("QualityPage", () => {
       agents: ["chatbot", "support"],
     });
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
-    mockUseRecentEvalFailures.mockReturnValue({ data: undefined, isLoading: false, error: null });
 
     const Wrapper = createWrapper();
     render(<Wrapper><QualityPage /></Wrapper>);
 
     expect(screen.getByText("All agents")).toBeInTheDocument();
+  });
+
+  it("does not render tabs", () => {
+    mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false, error: null });
+
+    const Wrapper = createWrapper();
+    render(<Wrapper><QualityPage /></Wrapper>);
+
+    expect(screen.queryByText("Overview")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assertions")).not.toBeInTheDocument();
   });
 });

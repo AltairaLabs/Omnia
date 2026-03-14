@@ -35,16 +35,40 @@ export interface ToolRegistrySpec {
       };
       /** authType specifies the authentication type (none, bearer, basic). */
       authType?: string;
+      /** bodyMapping is a JMESPath expression to reshape the request body
+       * before sending. */
+      bodyMapping?: string;
       /** contentType is the Content-Type header value.
        * Defaults to "application/json". */
       contentType?: string;
       /** endpoint is the HTTP endpoint URL. */
       endpoint: string;
+      /** headerParams maps arg names to HTTP header names using template strings.
+       * Example: {"X-Customer-ID": "{{.customer_id}}"} */
+      headerParams?: Record<string, string>;
       /** headers are additional HTTP headers to include in requests. */
       headers?: Record<string, string>;
       /** method is the HTTP method to use (GET, POST, PUT, DELETE).
        * Defaults to POST. */
       method?: string;
+      /** queryParams lists arg names that should be sent as URL query parameters
+       * instead of in the request body. */
+      queryParams?: string[];
+      /** redact lists response field names to exclude from logs and tracing. */
+      redact?: string[];
+      /** responseMapping is a JMESPath expression to filter/reshape the response
+       * before returning to the LLM. */
+      responseMapping?: string;
+      /** staticBody contains fixed JSON fields merged into the request body.
+       * These are invisible to the LLM. */
+      staticBody?: unknown;
+      /** staticQuery contains fixed query parameters added to every request.
+       * These are invisible to the LLM. */
+      staticQuery?: Record<string, string>;
+      /** urlTemplate is a Go text/template for constructing the URL with path parameters.
+       * Example: "/users/{{.user_id}}/orders/{{.order_id}}"
+       * When set, overrides endpoint for URL construction; endpoint is used as the base URL. */
+      urlTemplate?: string;
     };
     /** mcpConfig contains MCP-specific configuration.
      * Required when type is "mcp". */
@@ -53,12 +77,19 @@ export interface ToolRegistrySpec {
       args?: string[];
       /** command is the command to run for stdio transport. */
       command?: string;
-      /** endpoint is the SSE server URL (required for SSE transport). */
+      /** endpoint is the SSE server URL (required for SSE and streamable-http transport). */
       endpoint?: string;
       /** env are additional environment variables for stdio transport. */
       env?: Record<string, string>;
+      /** toolFilter controls which tools from the MCP server are exposed. */
+      toolFilter?: {
+        /** allowlist restricts to only these tool names. If empty, all tools are allowed. */
+        allowlist?: string[];
+        /** blocklist excludes these tool names. */
+        blocklist?: string[];
+      };
       /** transport specifies the MCP transport type. */
-      transport: "sse" | "stdio";
+      transport: "sse" | "stdio" | "streamable-http";
       /** workDir is the working directory for stdio transport. */
       workDir?: string;
     };
@@ -67,9 +98,20 @@ export interface ToolRegistrySpec {
     /** openAPIConfig contains OpenAPI-specific configuration.
      * Required when type is "openapi". */
     openAPIConfig?: {
+      /** authSecretRef references a secret containing auth credentials. */
+      authSecretRef?: {
+        /** key is the key in the secret to select. */
+        key: string;
+        /** name is the name of the secret. */
+        name: string;
+      };
+      /** authType specifies the authentication type (none, bearer, basic). */
+      authType?: string;
       /** baseURL overrides the base URL from the OpenAPI spec.
        * If not specified, uses the first server URL from the spec. */
       baseURL?: string;
+      /** headers are additional HTTP headers to include in API requests. */
+      headers?: Record<string, string>;
       /** operationFilter limits which operations are exposed as tools.
        * If empty, all operations are exposed. */
       operationFilter?: string[];

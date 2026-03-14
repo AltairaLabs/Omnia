@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"go.opentelemetry.io/otel/trace"
@@ -23,10 +24,10 @@ import (
 )
 
 // SDKRunner executes evals via the PromptKit SDK's Evaluate() function.
-// When a TracerProvider is set, the SDK emits per-eval OTel spans automatically.
 type SDKRunner struct {
 	tracerProvider trace.TracerProvider
 	logger         *slog.Logger
+	evalCollector  *sdkmetrics.Collector
 }
 
 // NewSDKRunner creates an SDKRunner. Options can configure tracing and logging.
@@ -51,51 +52,80 @@ func WithLogger(l *slog.Logger) SDKRunnerOption {
 	return func(r *SDKRunner) { r.logger = l }
 }
 
+// WithEvalCollector sets the unified PromptKit metrics Collector so sdk.Evaluate()
+// records per-eval Prometheus metrics (e.g., omnia_eval_helpfulness).
+func WithEvalCollector(c *sdkmetrics.Collector) SDKRunnerOption {
+	return func(r *SDKRunner) { r.evalCollector = c }
+}
+
+// EvalCollector returns the unified metrics Collector, if any.
+func (s *SDKRunner) EvalCollector() *sdkmetrics.Collector {
+	return s.evalCollector
+}
+
+// EvalLabels carries per-evaluation instance label values for metrics binding.
+type EvalLabels struct {
+	Agent          string
+	Namespace      string
+	PromptPackName string
+}
+
 // RunTurnEvals executes per-turn evals via sdk.Evaluate().
 func (s *SDKRunner) RunTurnEvals(
 	ctx context.Context,
-	defs []EvalDef,
+	packData []byte,
 	messages []session.Message,
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
+	labels EvalLabels,
 ) []api.EvaluateResultItem {
-	return s.evaluate(ctx, defs, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn)
+	return s.evaluate(ctx, packData, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerEveryTurn, labels)
 }
 
 // RunSessionEvals executes session-complete evals via sdk.Evaluate().
 func (s *SDKRunner) RunSessionEvals(
 	ctx context.Context,
-	defs []EvalDef,
+	packData []byte,
 	messages []session.Message,
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
+	labels EvalLabels,
 ) []api.EvaluateResultItem {
-	return s.evaluate(ctx, defs, messages, sessionID, turnIndex, providerSpecs, runtimeevals.TriggerOnSessionComplete)
+	return s.evaluate(ctx, packData, messages, sessionID, turnIndex,
+		providerSpecs, runtimeevals.TriggerOnSessionComplete, labels)
 }
 
-// evaluate calls sdk.Evaluate() with the appropriate trigger and converts results.
+// evaluate calls sdk.Evaluate() with PackData and converts results.
 func (s *SDKRunner) evaluate(
 	ctx context.Context,
-	defs []EvalDef,
+	packData []byte,
 	messages []session.Message,
 	sessionID string,
 	turnIndex int,
 	providerSpecs map[string]providers.ProviderSpec,
 	trigger runtimeevals.EvalTrigger,
+	labels EvalLabels,
 ) []api.EvaluateResultItem {
-	sdkDefs := convertToSDKDefs(defs)
-	typesMessages := ConvertToTypesMessages(messages)
-
 	opts := sdk.EvaluateOpts{
-		EvalDefs:       sdkDefs,
-		Messages:       typesMessages,
-		SessionID:      sessionID,
-		TurnIndex:      turnIndex,
-		Trigger:        trigger,
-		TracerProvider: s.tracerProvider,
-		Logger:         s.logger,
+		Messages:             ConvertToTypesMessages(messages),
+		SessionID:            sessionID,
+		TurnIndex:            turnIndex,
+		Trigger:              trigger,
+		TracerProvider:       s.tracerProvider,
+		Logger:               s.logger,
+		PackData:             packData,
+		SkipSchemaValidation: true,
+	}
+
+	if s.evalCollector != nil {
+		opts.MetricsCollector = s.evalCollector
+		opts.MetricsInstanceLabels = map[string]string{
+			"agent":           labels.Agent,
+			"namespace":       labels.Namespace,
+			"promptpack_name": labels.PromptPackName,
+		}
 	}
 
 	if len(providerSpecs) > 0 {
@@ -114,38 +144,11 @@ func (s *SDKRunner) evaluate(
 		return nil
 	}
 
-	return convertSDKResults(results)
-}
-
-// convertToSDKDefs converts Omnia EvalDef to PromptKit SDK EvalDef.
-func convertToSDKDefs(defs []EvalDef) []runtimeevals.EvalDef {
-	sdkDefs := make([]runtimeevals.EvalDef, len(defs))
-	for i, d := range defs {
-		sdkDefs[i] = runtimeevals.EvalDef{
-			ID:      d.ID,
-			Type:    d.Type,
-			Trigger: mapTrigger(d.Trigger),
-			Params:  d.Params,
-			Metric:  d.Metric,
-		}
-	}
-	return sdkDefs
-}
-
-// mapTrigger converts Omnia trigger strings to SDK EvalTrigger values.
-func mapTrigger(trigger string) runtimeevals.EvalTrigger {
-	switch trigger {
-	case triggerPerTurn:
-		return runtimeevals.TriggerEveryTurn
-	case triggerOnComplete:
-		return runtimeevals.TriggerOnSessionComplete
-	default:
-		return runtimeevals.EvalTrigger(trigger)
-	}
+	return convertSDKResults(results, trigger)
 }
 
 // convertSDKResults converts PromptKit EvalResult to Omnia EvaluateResultItem.
-func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultItem {
+func convertSDKResults(results []runtimeevals.EvalResult, trigger runtimeevals.EvalTrigger) []api.EvaluateResultItem {
 	items := make([]api.EvaluateResultItem, 0, len(results))
 	for _, r := range results {
 		if r.Skipped {
@@ -154,15 +157,13 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 		item := api.EvaluateResultItem{
 			EvalID:     r.EvalID,
 			EvalType:   r.Type,
-			Passed:     r.Passed,
+			Trigger:    string(trigger),
+			Passed:     derivePassedFromResult(r),
 			DurationMs: int(r.DurationMs),
 			Source:     evalSource,
 		}
 		if r.Score != nil {
 			item.Score = r.Score
-		}
-		if r.Error != "" {
-			item.Passed = false
 		}
 		item.Details = buildDetailsJSON(r)
 		items = append(items, item)
@@ -170,9 +171,23 @@ func convertSDKResults(results []runtimeevals.EvalResult) []api.EvaluateResultIt
 	return items
 }
 
+// derivePassedFromResult determines pass/fail from an EvalResult.
+// Boolean evals (contains, regex) store pass/fail in Value; score evals pass if score > 0.
+func derivePassedFromResult(r runtimeevals.EvalResult) bool {
+	if r.Error != "" {
+		return false
+	}
+	if b, ok := r.Value.(bool); ok {
+		return b
+	}
+	if r.Score != nil {
+		return *r.Score > 0
+	}
+	return false
+}
+
 // buildDetailsJSON assembles a details JSON blob from the SDK result's
-// diagnostic fields (explanation, error, message, details, violations).
-// Returns nil if no diagnostic fields are populated.
+// diagnostic fields. Returns nil if no diagnostic fields are populated.
 func buildDetailsJSON(r runtimeevals.EvalResult) json.RawMessage {
 	details := make(map[string]any)
 	if r.Explanation != "" {

@@ -509,11 +509,19 @@ roleRef:
 			packJSON := `{
   "id": "eval-e2e-pack",
   "version": "1.0.0",
+  "prompts": {
+    "default": {
+      "id": "default",
+      "name": "Default",
+      "version": "1.0.0",
+      "system_template": "You are a helpful assistant."
+    }
+  },
   "evals": [
     {
       "id": "greeting-check",
       "type": "contains",
-      "trigger": "per_turn",
+      "trigger": "every_turn",
       "description": "Check if response contains a greeting",
       "params": {
         "patterns": ["hello"]

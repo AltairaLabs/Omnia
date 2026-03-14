@@ -60,6 +60,13 @@ const (
 	cbFailRatio   = 0.6              // failure ratio to trip the breaker
 )
 
+// Write buffer defaults.
+const (
+	defaultBufferCapacity      = 1000            // max queued writes
+	defaultBufferFlushInterval = 5 * time.Second // how often to try flushing
+	defaultBufferMaxAge        = 5 * time.Minute // max age before dropping a buffered item
+)
+
 // StoreOption is a functional option for configuring the HTTP session store.
 type StoreOption func(*Store)
 
@@ -77,14 +84,50 @@ func WithHTTPClient(c *http.Client) StoreOption {
 	}
 }
 
+// WithBufferCapacity sets the write buffer capacity. Set to 0 to disable
+// buffering entirely (failed writes return errors immediately). Defaults to 1000.
+func WithBufferCapacity(n int) StoreOption {
+	return func(s *Store) {
+		s.bufCapacity = n
+	}
+}
+
+// WithBufferFlushInterval sets how often the background goroutine attempts to
+// flush buffered writes. Defaults to 5s.
+func WithBufferFlushInterval(d time.Duration) StoreOption {
+	return func(s *Store) {
+		s.flushInterval = d
+	}
+}
+
+// WithBufferMaxAge sets the maximum age of a buffered write before it is
+// dropped without retrying. Defaults to 5m.
+func WithBufferMaxAge(d time.Duration) StoreOption {
+	return func(s *Store) {
+		s.bufferMaxAge = d
+	}
+}
+
 // Store implements session.Store by calling the session-api over HTTP.
 // It is used by the facade's recordingResponseWriter for session persistence.
+//
+// Write operations (AppendMessage, UpdateSessionStats, RefreshTTL) are buffered
+// on transient failure and retried automatically when session-api recovers.
 type Store struct {
 	baseURL      string
 	httpClient   *http.Client
 	healthClient *http.Client // uninstrumented client for Ping — avoids trace noise from K8s probes
 	cb           *gobreaker.CircuitBreaker[*http.Response]
 	log          logr.Logger
+
+	// Write buffer for transient failures.
+	buf           *writeBuffer
+	bufCapacity   int
+	flushInterval time.Duration
+	bufferMaxAge  time.Duration
+	flushNotify   chan struct{}
+	stopCh        chan struct{}
+	flushStopped  chan struct{}
 }
 
 // NewStore creates a new HTTP-backed session store.
@@ -94,7 +137,11 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 		httpClient: &http.Client{
 			Timeout: DefaultHTTPTimeout,
 		},
-		log: log.WithName("session-httpclient"),
+		log:           log.WithName("session-httpclient"),
+		bufCapacity:   defaultBufferCapacity,
+		flushInterval: defaultBufferFlushInterval,
+		bufferMaxAge:  defaultBufferMaxAge,
+		flushNotify:   make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -120,9 +167,28 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 		OnStateChange: func(name string, from, to gobreaker.State) {
 			s.log.Info("circuit breaker state change",
 				"name", name, "from", from.String(), "to", to.String())
+			s.notifyFlush(to)
 		},
 	})
+
+	if s.bufCapacity > 0 {
+		s.buf = newWriteBuffer(s.bufCapacity)
+		s.stopCh = make(chan struct{})
+		s.flushStopped = make(chan struct{})
+		go s.flushLoop()
+	}
 	return s
+}
+
+// notifyFlush wakes the flush goroutine when the circuit breaker recovers.
+func (s *Store) notifyFlush(state gobreaker.State) {
+	if state != gobreaker.StateHalfOpen && state != gobreaker.StateClosed {
+		return
+	}
+	select {
+	case s.flushNotify <- struct{}{}:
+	default:
+	}
 }
 
 // createSessionRequest mirrors the session-api CreateSessionRequest.
@@ -147,6 +213,7 @@ type refreshTTLRequest struct {
 }
 
 // CreateSession creates a new session via POST /api/v1/sessions.
+// This is NOT buffered — callers need the session ID synchronously.
 func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
 	id := uuid.New().String()
 	reqBody := createSessionRequest{
@@ -207,10 +274,17 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (*session.Sess
 }
 
 // AppendMessage appends a message via POST /api/v1/sessions/{sessionID}/messages.
+// On transient failure, the write is buffered and retried automatically.
 func (s *Store) AppendMessage(ctx context.Context, sessionID string, msg session.Message) error {
-	resp, err := s.doJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v1/sessions/%s/messages", sessionID), &msg)
+	path := fmt.Sprintf("/api/v1/sessions/%s/messages", sessionID)
+	body, err := json.Marshal(&msg)
 	if err != nil {
-		return fmt.Errorf("append message: %w", err)
+		return fmt.Errorf("append message: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -224,10 +298,17 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, msg session
 }
 
 // UpdateSessionStats sends incremental updates via PATCH /api/v1/sessions/{sessionID}/stats.
+// On transient failure, the write is buffered and retried automatically.
 func (s *Store) UpdateSessionStats(ctx context.Context, sessionID string, update session.SessionStatsUpdate) error {
-	resp, err := s.doJSON(ctx, http.MethodPatch, fmt.Sprintf("/api/v1/sessions/%s/stats", sessionID), &update)
+	path := fmt.Sprintf("/api/v1/sessions/%s/stats", sessionID)
+	body, err := json.Marshal(&update)
 	if err != nil {
-		return fmt.Errorf("update session stats: %w", err)
+		return fmt.Errorf("update session stats: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPatch, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPatch, path, body)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -241,11 +322,17 @@ func (s *Store) UpdateSessionStats(ctx context.Context, sessionID string, update
 }
 
 // RefreshTTL extends session expiry via POST /api/v1/sessions/{sessionID}/ttl.
+// On transient failure, the write is buffered and retried automatically.
 func (s *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
-	reqBody := refreshTTLRequest{TTLSeconds: int(ttl.Seconds())}
-	resp, err := s.doJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v1/sessions/%s/ttl", sessionID), reqBody)
+	path := fmt.Sprintf("/api/v1/sessions/%s/ttl", sessionID)
+	body, err := json.Marshal(refreshTTLRequest{TTLSeconds: int(ttl.Seconds())})
 	if err != nil {
-		return fmt.Errorf("refresh TTL: %w", err)
+		return fmt.Errorf("refresh TTL: encode: %w", err)
+	}
+
+	resp, err := s.doWithRetry(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return s.bufferWrite(err, http.MethodPost, path, body)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -277,8 +364,35 @@ func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Close is a no-op for the HTTP client store.
-func (s *Store) Close() error { return nil }
+// Close stops the buffer flush goroutine and logs any remaining buffered writes.
+func (s *Store) Close() error {
+	if s.buf != nil {
+		close(s.stopCh)
+		<-s.flushStopped
+		remaining := s.buf.len()
+		if remaining > 0 {
+			s.log.Info("closing with buffered writes pending",
+				"remaining", remaining, "dropped", s.buf.dropped.Load())
+		}
+	}
+	return nil
+}
+
+// Buffered returns the number of writes currently queued in the buffer.
+func (s *Store) Buffered() int {
+	if s.buf == nil {
+		return 0
+	}
+	return s.buf.len()
+}
+
+// Dropped returns the total number of buffered writes dropped due to capacity.
+func (s *Store) Dropped() int64 {
+	if s.buf == nil {
+		return 0
+	}
+	return s.buf.dropped.Load()
+}
 
 // --- Methods not used by the facade — return ErrNotImplemented ---
 
@@ -300,6 +414,88 @@ func (s *Store) SetState(_ context.Context, _, _, _ string) error {
 // GetState is not used by the facade.
 func (s *Store) GetState(_ context.Context, _, _ string) (string, error) {
 	return "", ErrNotImplemented
+}
+
+// --- Write buffer ---
+
+// bufferWrite enqueues a failed write for later retry. Returns nil so callers
+// (which typically swallow errors) don't need to handle the failure.
+// If buffering is disabled, returns the original error.
+func (s *Store) bufferWrite(origErr error, method, path string, body []byte) error {
+	if s.buf == nil {
+		return origErr
+	}
+	dropped := s.buf.enqueue(bufferedRequest{
+		method: method,
+		path:   path,
+		body:   body,
+		queued: time.Now(),
+	})
+	s.log.V(1).Info("write buffered",
+		"method", method, "path", path,
+		"bufferLen", s.buf.len(), "dropped", dropped)
+	return nil
+}
+
+// flushLoop periodically drains the write buffer. It also wakes when the
+// circuit breaker transitions to half-open or closed.
+func (s *Store) flushLoop() {
+	defer close(s.flushStopped)
+	ticker := time.NewTicker(s.flushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopCh:
+			s.drainBuffer()
+			return
+		case <-s.flushNotify:
+			s.drainBuffer()
+		case <-ticker.C:
+			s.drainBuffer()
+		}
+	}
+}
+
+// drainBuffer replays buffered writes until the buffer is empty or a write fails.
+func (s *Store) drainBuffer() {
+	for {
+		item, ok := s.buf.peek()
+		if !ok {
+			return
+		}
+		if time.Since(item.queued) > s.bufferMaxAge {
+			s.buf.dequeue()
+			s.log.V(1).Info("buffer item expired",
+				"method", item.method, "path", item.path,
+				"age", time.Since(item.queued).Round(time.Second).String())
+			continue
+		}
+		if !s.tryFlushItem(item) {
+			return
+		}
+		s.buf.dequeue()
+	}
+}
+
+// tryFlushItem attempts to replay a single buffered write. Returns true if the
+// item was successfully sent (or permanently rejected), false if the service is
+// still unavailable and flushing should stop.
+func (s *Store) tryFlushItem(item bufferedRequest) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultHTTPTimeout)
+	defer cancel()
+
+	resp, err := s.doWithRetry(ctx, item.method, item.path, item.body)
+	if err != nil {
+		s.log.V(1).Info("buffer flush failed",
+			"method", item.method, "path", item.path, "error", err.Error())
+		return false
+	}
+	status := resp.StatusCode
+	_ = drainAndClose(resp.Body)
+	s.log.V(1).Info("buffer item flushed",
+		"method", item.method, "path", item.path, "status", status)
+	return true
 }
 
 // --- HTTP helpers ---

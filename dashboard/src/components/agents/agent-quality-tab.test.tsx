@@ -1,3 +1,10 @@
+/**
+ * Tests for AgentQualityTab component.
+ *
+ * Copyright 2026 Altaira Labs.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,21 +17,15 @@ vi.mock("@/hooks", () => ({
 }));
 
 // Mock quality components to isolate unit tests
-vi.mock("@/components/quality/assertion-type-breakdown", () => ({
-  AssertionTypeBreakdown: ({ filter }: { filter?: { agent?: string } }) => (
-    <div data-testid="assertion-breakdown" data-agent={filter?.agent} />
+vi.mock("@/components/quality/eval-score-breakdown", () => ({
+  EvalScoreBreakdown: ({ filter }: { filter?: { agent?: string } }) => (
+    <div data-testid="score-breakdown" data-agent={filter?.agent} />
   ),
 }));
 
-vi.mock("@/components/quality/pass-rate-trend-chart", () => ({
-  PassRateTrendChart: ({ filter, timeRange }: { filter?: { agent?: string }; timeRange?: string }) => (
+vi.mock("@/components/quality/eval-score-trend-chart", () => ({
+  EvalScoreTrendChart: ({ filter, timeRange }: { filter?: { agent?: string }; timeRange?: string }) => (
     <div data-testid="trend-chart" data-agent={filter?.agent} data-range={timeRange} />
-  ),
-}));
-
-vi.mock("@/components/quality/failing-sessions-table", () => ({
-  FailingSessionsTable: ({ agentName }: { agentName?: string }) => (
-    <div data-testid="failing-sessions" data-agent={agentName} />
   ),
 }));
 
@@ -45,19 +46,17 @@ describe("AgentQualityTab", () => {
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false });
   });
 
-  it("renders summary cards", () => {
+  it("renders summary cards with score labels", () => {
     renderTab();
-    expect(screen.getByText("Active Evals")).toBeInTheDocument();
-    expect(screen.getByText("Avg Pass Rate")).toBeInTheDocument();
-    expect(screen.getByText("Passing")).toBeInTheDocument();
-    expect(screen.getByText("Failing")).toBeInTheDocument();
+    expect(screen.getByText("Evals")).toBeInTheDocument();
+    expect(screen.getByText("Avg Score")).toBeInTheDocument();
+    expect(screen.getByText("Lowest Score")).toBeInTheDocument();
   });
 
   it("passes agent filter to child components", () => {
     renderTab("test-agent");
-    expect(screen.getByTestId("assertion-breakdown")).toHaveAttribute("data-agent", "test-agent");
+    expect(screen.getByTestId("score-breakdown")).toHaveAttribute("data-agent", "test-agent");
     expect(screen.getByTestId("trend-chart")).toHaveAttribute("data-agent", "test-agent");
-    expect(screen.getByTestId("failing-sessions")).toHaveAttribute("data-agent", "test-agent");
   });
 
   it("passes agent filter to useEvalSummary", () => {
@@ -65,39 +64,37 @@ describe("AgentQualityTab", () => {
     expect(mockUseEvalSummary).toHaveBeenCalledWith({ agent: "test-agent" });
   });
 
-  it("computes stats from summaries", () => {
+  it("computes score stats from summaries", () => {
     mockUseEvalSummary.mockReturnValue({
       data: [
-        { evalId: "a", passRate: 95, metricType: "gauge" },
-        { evalId: "b", passRate: 60, metricType: "gauge" },
-        { evalId: "c", passRate: 80, metricType: "gauge" },
-        { evalId: "d", passRate: 100, metricType: "counter" },
+        { evalId: "a", score: 0.95, metricType: "gauge" },
+        { evalId: "b", score: 0.60, metricType: "gauge" },
+        { evalId: "c", score: 0.80, metricType: "gauge" },
+        { evalId: "d", score: 100, metricType: "counter" },
       ],
       isLoading: false,
     });
     renderTab();
     // 4 total evals
     expect(screen.getByText("4")).toBeInTheDocument();
-    // avg pass rate of gauges: (95+60+80)/3 = 78.3%
-    expect(screen.getByText("78.3%")).toBeInTheDocument();
-    // 1 passing (>=90) and 1 failing (<70) — both render "1"
-    const ones = screen.getAllByText("1");
-    expect(ones).toHaveLength(2);
+    // avg score of gauges: (95+60+80)/3 = 78.3 -> 78%
+    expect(screen.getByText("78%")).toBeInTheDocument();
+    // lowest score: 60%
+    expect(screen.getByText("60%")).toBeInTheDocument();
+    // lowest eval name
+    expect(screen.getByText("b")).toBeInTheDocument();
   });
 
   it("shows loading skeletons", () => {
     mockUseEvalSummary.mockReturnValue({ data: undefined, isLoading: true });
     const { container } = renderTab();
-    // Should have skeleton elements for the 4 summary cards
     const skeletons = container.querySelectorAll("[class*='skeleton' i], [data-slot='skeleton']");
-    expect(skeletons.length).toBeGreaterThanOrEqual(4);
+    expect(skeletons.length).toBeGreaterThanOrEqual(3);
   });
 
   it("changes time range on button click", () => {
     renderTab();
-    // Default is 24h
     expect(screen.getByTestId("trend-chart")).toHaveAttribute("data-range", "24h");
-    // Click 7d
     fireEvent.click(screen.getByText("7d"));
     expect(screen.getByTestId("trend-chart")).toHaveAttribute("data-range", "7d");
   });
@@ -105,6 +102,7 @@ describe("AgentQualityTab", () => {
   it("handles empty summaries gracefully", () => {
     mockUseEvalSummary.mockReturnValue({ data: [], isLoading: false });
     renderTab();
-    expect(screen.getByText("0.0%")).toBeInTheDocument();
+    const dashes = screen.getAllByText("-");
+    expect(dashes).toHaveLength(2); // Avg Score and Lowest Score
   });
 });

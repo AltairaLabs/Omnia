@@ -111,6 +111,11 @@ spec:
                           description: authType specifies the authentication type
                             (none, bearer, basic).
                           type: string
+                        bodyMapping:
+                          description: |-
+                            bodyMapping is a JMESPath expression to reshape the request body
+                            before sending.
+                          type: string
                         contentType:
                           default: application/json
                           description: |-
@@ -120,6 +125,13 @@ spec:
                         endpoint:
                           description: endpoint is the HTTP endpoint URL.
                           type: string
+                        headerParams:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            headerParams maps arg names to HTTP header names using template strings.
+                            Example: {"X-Customer-ID": "{{.customer_id}}"}
+                          type: object
                         headers:
                           additionalProperties:
                             type: string
@@ -131,6 +143,42 @@ spec:
                           description: |-
                             method is the HTTP method to use (GET, POST, PUT, DELETE).
                             Defaults to POST.
+                          type: string
+                        queryParams:
+                          description: |-
+                            queryParams lists arg names that should be sent as URL query parameters
+                            instead of in the request body.
+                          items:
+                            type: string
+                          type: array
+                        redact:
+                          description: redact lists response field names to exclude
+                            from logs and tracing.
+                          items:
+                            type: string
+                          type: array
+                        responseMapping:
+                          description: |-
+                            responseMapping is a JMESPath expression to filter/reshape the response
+                            before returning to the LLM.
+                          type: string
+                        staticBody:
+                          description: |-
+                            staticBody contains fixed JSON fields merged into the request body.
+                            These are invisible to the LLM.
+                          x-kubernetes-preserve-unknown-fields: true
+                        staticQuery:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            staticQuery contains fixed query parameters added to every request.
+                            These are invisible to the LLM.
+                          type: object
+                        urlTemplate:
+                          description: |-
+                            urlTemplate is a Go text/template for constructing the URL with path parameters.
+                            Example: "/users/{{.user_id}}/orders/{{.order_id}}"
+                            When set, overrides endpoint for URL construction; endpoint is used as the base URL.
                           type: string
                       required:
                       - endpoint
@@ -150,7 +198,7 @@ spec:
                           type: string
                         endpoint:
                           description: endpoint is the SSE server URL (required for
-                            SSE transport).
+                            SSE and streamable-http transport).
                           type: string
                         env:
                           additionalProperties:
@@ -158,11 +206,28 @@ spec:
                           description: env are additional environment variables for
                             stdio transport.
                           type: object
+                        toolFilter:
+                          description: toolFilter controls which tools from the MCP
+                            server are exposed.
+                          properties:
+                            allowlist:
+                              description: allowlist restricts to only these tool
+                                names. If empty, all tools are allowed.
+                              items:
+                                type: string
+                              type: array
+                            blocklist:
+                              description: blocklist excludes these tool names.
+                              items:
+                                type: string
+                              type: array
+                          type: object
                         transport:
                           description: transport specifies the MCP transport type.
                           enum:
                           - sse
                           - stdio
+                          - streamable-http
                           type: string
                         workDir:
                           description: workDir is the working directory for stdio
@@ -182,11 +247,35 @@ spec:
                         openAPIConfig contains OpenAPI-specific configuration.
                         Required when type is "openapi".
                       properties:
+                        authSecretRef:
+                          description: authSecretRef references a secret containing
+                            auth credentials.
+                          properties:
+                            key:
+                              description: key is the key in the secret to select.
+                              type: string
+                            name:
+                              description: name is the name of the secret.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        authType:
+                          description: authType specifies the authentication type
+                            (none, bearer, basic).
+                          type: string
                         baseURL:
                           description: |-
                             baseURL overrides the base URL from the OpenAPI spec.
                             If not specified, uses the first server URL from the spec.
                           type: string
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: headers are additional HTTP headers to include
+                            in API requests.
+                          type: object
                         operationFilter:
                           description: |-
                             operationFilter limits which operations are exposed as tools.

@@ -19,15 +19,13 @@ package runtime
 import (
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	"github.com/AltairaLabs/PromptKit/sdk"
-
-	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
-// subscribeToEventBusMetrics subscribes to PromptKit event bus events to capture metrics.
-// This allows us to observe fine-grained metrics emitted during conversation execution.
+// subscribeToEventBusLogging subscribes to PromptKit event bus events to capture structured logs.
+// Pipeline and provider metrics are handled by the PromptKit Collector via EventBus subscription.
 // Unsubscribe functions are stored in s.unsubscribeFns[sessionID] and called when the
 // conversation is removed, preventing leaked subscriptions.
-func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversation) {
+func (s *Server) subscribeToEventBusLogging(sessionID string, conv *sdk.Conversation) {
 	eventBus := conv.EventBus()
 	if eventBus == nil {
 		s.log.V(1).Info("event bus unavailable",
@@ -36,31 +34,15 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 	}
 
 	s.log.V(1).Info("event bus subscribed",
-		"sessionID", sessionID,
-		"hasMetrics", s.metrics != nil,
-		"hasRuntimeMetrics", s.runtimeMetrics != nil)
+		"sessionID", sessionID)
 
 	var unsubs []func()
 
-	// Subscribe to provider call completed events to record Prometheus metrics
+	// Subscribe to provider call completed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventProviderCallCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.ProviderCallCompletedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record metrics to Prometheus
-		if s.metrics != nil {
-			s.metrics.RecordRequest(metrics.LLMRequestMetrics{
-				Provider:        data.Provider,
-				Model:           data.Model,
-				InputTokens:     data.InputTokens,
-				OutputTokens:    data.OutputTokens,
-				CacheHits:       data.CachedTokens,
-				CostUSD:         data.Cost,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         true,
-			})
 		}
 
 		s.log.V(1).Info("event: provider call completed",
@@ -76,21 +58,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to provider call failed events to record failures
+	// Subscribe to provider call failed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventProviderCallFailed, func(e *events.Event) {
 		data, ok := asPtr[events.ProviderCallFailedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record failed request metric
-		if s.metrics != nil {
-			s.metrics.RecordRequest(metrics.LLMRequestMetrics{
-				Provider:        data.Provider,
-				Model:           data.Model,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         false,
-			})
 		}
 
 		s.log.V(1).Info("event: provider call failed",
@@ -102,31 +74,18 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to pipeline started events
-	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineStarted, func(e *events.Event) {
-		// Record pipeline start for active pipeline gauge
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordPipelineStart()
-		}
-
+	// Subscribe to pipeline started events for logging
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineStarted, func(_ *events.Event) {
 		s.log.V(1).Info("event: pipeline started",
 			"sessionID", sessionID,
 		)
 	}))
 
-	// Subscribe to pipeline completed events for overall visibility
+	// Subscribe to pipeline completed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.PipelineCompletedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record pipeline completion metrics
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordPipelineEnd(metrics.PipelineMetrics{
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         true,
-			})
 		}
 
 		s.log.V(0).Info("event: pipeline completed",
@@ -141,19 +100,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to pipeline failed events
+	// Subscribe to pipeline failed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventPipelineFailed, func(e *events.Event) {
 		data, ok := asPtr[events.PipelineFailedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record pipeline failure metrics
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordPipelineEnd(metrics.PipelineMetrics{
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         false,
-			})
 		}
 
 		s.log.V(0).Info("event: pipeline failed",
@@ -163,21 +114,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to stage completed events
+	// Subscribe to stage completed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventStageCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.StageCompletedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record stage metrics
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordStage(metrics.StageMetrics{
-				StageName:       data.Name,
-				StageType:       data.StageType,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         true,
-			})
 		}
 
 		s.log.V(1).Info("event: stage completed",
@@ -189,21 +130,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to stage failed events
+	// Subscribe to stage failed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventStageFailed, func(e *events.Event) {
 		data, ok := asPtr[events.StageFailedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record stage failure metrics
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordStage(metrics.StageMetrics{
-				StageName:       data.Name,
-				StageType:       data.StageType,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         false,
-			})
 		}
 
 		s.log.V(1).Info("event: stage failed",
@@ -216,28 +147,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to tool call completed events (tool metrics)
+	// Subscribe to tool call completed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.ToolCallCompletedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record tool call metrics
-		if s.runtimeMetrics != nil {
-			tc := metrics.ToolCallMetrics{
-				ToolName:        data.ToolName,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         data.Status == "success",
-			}
-			if s.toolExecutor != nil {
-				if meta, ok := s.toolExecutor.GetToolMeta(data.ToolName); ok {
-					tc.HandlerType = meta.HandlerType
-					tc.HandlerName = meta.HandlerName
-					tc.RegistryName = meta.RegistryName
-				}
-			}
-			s.runtimeMetrics.RecordToolCall(tc)
 		}
 
 		s.log.V(1).Info("event: tool call completed",
@@ -249,28 +163,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to tool call failed events
+	// Subscribe to tool call failed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventToolCallFailed, func(e *events.Event) {
 		data, ok := asPtr[events.ToolCallFailedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record tool call failure metrics
-		if s.runtimeMetrics != nil {
-			tc := metrics.ToolCallMetrics{
-				ToolName:        data.ToolName,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         false,
-			}
-			if s.toolExecutor != nil {
-				if meta, ok := s.toolExecutor.GetToolMeta(data.ToolName); ok {
-					tc.HandlerType = meta.HandlerType
-					tc.HandlerName = meta.HandlerName
-					tc.RegistryName = meta.RegistryName
-				}
-			}
-			s.runtimeMetrics.RecordToolCall(tc)
 		}
 
 		s.log.V(1).Info("event: tool call failed",
@@ -282,21 +179,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to validation passed events
+	// Subscribe to validation passed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventValidationPassed, func(e *events.Event) {
 		data, ok := asPtr[events.ValidationPassedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record validation metrics
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordValidation(metrics.ValidationMetrics{
-				ValidatorName:   data.ValidatorName,
-				ValidatorType:   data.ValidatorType,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         true,
-			})
 		}
 
 		s.log.V(1).Info("event: validation passed",
@@ -307,21 +194,11 @@ func (s *Server) subscribeToEventBusMetrics(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
-	// Subscribe to validation failed events
+	// Subscribe to validation failed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventValidationFailed, func(e *events.Event) {
 		data, ok := asPtr[events.ValidationFailedData](e.Data)
 		if !ok {
 			return
-		}
-
-		// Record validation failure metrics
-		if s.runtimeMetrics != nil {
-			s.runtimeMetrics.RecordValidation(metrics.ValidationMetrics{
-				ValidatorName:   data.ValidatorName,
-				ValidatorType:   data.ValidatorType,
-				DurationSeconds: data.Duration.Seconds(),
-				Success:         false,
-			})
 		}
 
 		s.log.V(1).Info("event: validation failed",

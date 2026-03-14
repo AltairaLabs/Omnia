@@ -74,6 +74,32 @@ data:
                 "name": "triage_accuracy",
                 "type": "boolean"
               }
+            },
+            {
+              "id": "triage-concise",
+              "type": "max_length",
+              "trigger": "every_turn",
+              "description": "Triage should be brief — classify and summarize, not resolve",
+              "params": {
+                "max_characters": 500
+              },
+              "metric": {
+                "name": "triage_concise",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "triage-min-length",
+              "type": "min_length",
+              "trigger": "every_turn",
+              "description": "Triage must provide at least a category and brief summary",
+              "params": {
+                "min_characters": 20
+              },
+              "metric": {
+                "name": "triage_min_length",
+                "type": "boolean"
+              }
             }
           ]
         },
@@ -150,6 +176,44 @@ data:
                 "name": "billing_pii_safe",
                 "type": "boolean"
               }
+            },
+            {
+              "id": "billing-tools-called",
+              "type": "tools_called",
+              "trigger": "on_session_complete",
+              "description": "Billing agent should use lookup tools before answering",
+              "params": {
+                "tool_names": ["lookup_order", "lookup_subscription"]
+              },
+              "metric": {
+                "name": "billing_tools_used",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "billing-no-tool-errors",
+              "type": "no_tool_errors",
+              "trigger": "on_session_complete",
+              "description": "All billing tool calls should complete without errors",
+              "params": {},
+              "metric": {
+                "name": "billing_tool_errors",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "billing-tool-efficiency",
+              "type": "tool_efficiency",
+              "trigger": "on_session_complete",
+              "description": "Billing agent should not make excessive tool calls",
+              "params": {
+                "max_calls": 8,
+                "max_error_rate": 0.2
+              },
+              "metric": {
+                "name": "billing_tool_efficiency",
+                "type": "boolean"
+              }
             }
           ]
         },
@@ -192,6 +256,56 @@ data:
                 "name": "tech_resolution_rate",
                 "type": "gauge",
                 "range": { "min": 0, "max": 1 }
+              }
+            },
+            {
+              "id": "tech-kb-search",
+              "type": "tools_called",
+              "trigger": "on_session_complete",
+              "description": "Technical agent should search the knowledge base before answering",
+              "params": {
+                "tool_names": ["search_knowledge_base"]
+              },
+              "metric": {
+                "name": "tech_kb_used",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "tech-no-forbidden-tools",
+              "type": "tools_not_called",
+              "trigger": "on_session_complete",
+              "description": "Technical agent should not use billing tools",
+              "params": {
+                "tool_names": ["lookup_order", "lookup_subscription"]
+              },
+              "metric": {
+                "name": "tech_no_billing_tools",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "tech-tool-chain",
+              "type": "tool_call_chain",
+              "trigger": "on_session_complete",
+              "description": "Agent should search KB before creating tickets (search first, then escalate)",
+              "params": {
+                "chain": ["search_knowledge_base", "create_ticket"]
+              },
+              "metric": {
+                "name": "tech_tool_order",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "tech-no-tool-errors",
+              "type": "no_tool_errors",
+              "trigger": "on_session_complete",
+              "description": "Technical tool calls should complete without errors",
+              "params": {},
+              "metric": {
+                "name": "tech_tool_errors",
+                "type": "boolean"
               }
             }
           ]
@@ -318,6 +432,33 @@ data:
           },
           "metric": {
             "name": "response_length_ok",
+            "type": "boolean"
+          }
+        },
+        {
+          "id": "no-forbidden-content",
+          "type": "content_excludes",
+          "trigger": "every_turn",
+          "description": "Responses must not contain competitor names or off-brand language",
+          "params": {
+            "patterns": ["competitor", "I cannot help", "I don't know"]
+          },
+          "metric": {
+            "name": "no_forbidden_content",
+            "type": "boolean"
+          }
+        },
+        {
+          "id": "no-hallucinated-urls",
+          "type": "regex",
+          "trigger": "every_turn",
+          "description": "Support agents should not fabricate URLs",
+          "params": {
+            "pattern": "https?://[a-zA-Z0-9.-]+\\.[a-z]{2,}",
+            "expect_match": false
+          },
+          "metric": {
+            "name": "no_hallucinated_urls",
             "type": "boolean"
           }
         }

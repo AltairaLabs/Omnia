@@ -34,6 +34,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useToolRegistry, useAgents } from "@/hooks";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { ToolTestPanel } from "@/components/tools/tool-test-panel";
 import type { DiscoveredTool, HandlerDefinition } from "@/types";
 
 interface PageProps {
@@ -94,6 +96,7 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
   const searchParams = useSearchParams();
   const namespace = searchParams.get("namespace") || "production";
 
+  const { currentWorkspace } = useWorkspace();
   const { data: registry, isLoading } = useToolRegistry(name, namespace);
   const { data: agents } = useAgents();
 
@@ -168,6 +171,7 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="tools">Tools ({totalCount})</TabsTrigger>
             <TabsTrigger value="handlers">Handlers ({handlers.length})</TabsTrigger>
+            <TabsTrigger value="test">Test</TabsTrigger>
             <TabsTrigger value="usage">Usage ({usedByAgents?.length || 0})</TabsTrigger>
             <TabsTrigger value="config">Config</TabsTrigger>
           </TabsList>
@@ -448,6 +452,21 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
                 </Accordion>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Test Tab */}
+          <TabsContent value="test" className="space-y-6">
+            {currentWorkspace ? (
+              <ToolTestPanel registry={registry} workspaceName={currentWorkspace.name} />
+            ) : (
+              <Card>
+                <CardContent className="py-8">
+                  <p className="text-sm text-muted-foreground text-center">
+                    Select a workspace to test tools
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           {/* Usage Tab */}

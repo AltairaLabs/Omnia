@@ -1,5 +1,5 @@
 /**
- * Tests for PassRateTrendChart component.
+ * Tests for EvalScoreTrendChart component.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -11,10 +11,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 
 // Mock hooks
-const mockUseEvalPassRateTrends = vi.fn();
+const mockUseEvalScoreTrends = vi.fn();
 
 vi.mock("@/hooks", () => ({
-  useEvalPassRateTrends: (...args: unknown[]) => mockUseEvalPassRateTrends(...args),
+  useEvalScoreTrends: (...args: unknown[]) => mockUseEvalScoreTrends(...args),
 }));
 
 // Mock recharts - render minimal DOM to test logic without SVG rendering
@@ -37,7 +37,7 @@ vi.mock("recharts", () => ({
   Legend: () => <div data-testid="legend" />,
 }));
 
-import { PassRateTrendChart, getEvalColor } from "./pass-rate-trend-chart";
+import { EvalScoreTrendChart, getEvalColor } from "./eval-score-trend-chart";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -62,13 +62,13 @@ describe("getEvalColor", () => {
   });
 });
 
-describe("PassRateTrendChart", () => {
+describe("EvalScoreTrendChart", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("shows skeleton when loading", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: undefined,
       isLoading: true,
     });
@@ -76,7 +76,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     const { container } = render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -85,7 +85,7 @@ describe("PassRateTrendChart", () => {
   });
 
   it("shows 'No trend data available' when no data", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: [],
       isLoading: false,
     });
@@ -93,7 +93,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -101,7 +101,7 @@ describe("PassRateTrendChart", () => {
   });
 
   it("shows 'No trend data available' when data is undefined", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: undefined,
       isLoading: false,
     });
@@ -109,7 +109,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -117,7 +117,7 @@ describe("PassRateTrendChart", () => {
   });
 
   it("renders chart when data is available", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: [
         {
           timestamp: new Date("2026-01-01T10:00:00Z"),
@@ -134,20 +134,18 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
-    // Chart should be rendered
     expect(screen.getByTestId("area-chart")).toBeInTheDocument();
     expect(screen.getByTestId("responsive-container")).toBeInTheDocument();
-    // One Area per series name (sorted alphabetically)
     expect(screen.getByTestId("area-safety")).toBeInTheDocument();
     expect(screen.getByTestId("area-tone")).toBeInTheDocument();
   });
 
   it("does not show chart or empty state while loading", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: undefined,
       isLoading: true,
     });
@@ -155,7 +153,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
@@ -164,7 +162,7 @@ describe("PassRateTrendChart", () => {
   });
 
   it("renders card header with title and description", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: [],
       isLoading: false,
     });
@@ -172,16 +170,16 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
-    expect(screen.getByText("Eval Metric Trends")).toBeInTheDocument();
-    expect(screen.getByText("Metric values over time from Prometheus")).toBeInTheDocument();
+    expect(screen.getByText("Eval Scores")).toBeInTheDocument();
+    expect(screen.getByText("Score trends over the selected time range")).toBeInTheDocument();
   });
 
-  it("passes correct parameters to useEvalPassRateTrends", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+  it("passes correct parameters to useEvalScoreTrends", () => {
+    mockUseEvalScoreTrends.mockReturnValue({
       data: undefined,
       isLoading: true,
     });
@@ -189,22 +187,22 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart
+        <EvalScoreTrendChart
           timeRange="7d"
           metricNames={["omnia_eval_tone"]}
         />
       </Wrapper>
     );
 
-    expect(mockUseEvalPassRateTrends).toHaveBeenCalledWith({
+    expect(mockUseEvalScoreTrends).toHaveBeenCalledWith({
       metricNames: ["omnia_eval_tone"],
       timeRange: "7d",
       filter: undefined,
     });
   });
 
-  it("passes filter to useEvalPassRateTrends", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+  it("passes filter to useEvalScoreTrends", () => {
+    mockUseEvalScoreTrends.mockReturnValue({
       data: [],
       isLoading: false,
     });
@@ -213,11 +211,11 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" filter={filter} />
+        <EvalScoreTrendChart timeRange="24h" filter={filter} />
       </Wrapper>
     );
 
-    expect(mockUseEvalPassRateTrends).toHaveBeenCalledWith({
+    expect(mockUseEvalScoreTrends).toHaveBeenCalledWith({
       metricNames: undefined,
       timeRange: "24h",
       filter,
@@ -225,7 +223,7 @@ describe("PassRateTrendChart", () => {
   });
 
   it("extracts and sorts unique series names from trend data", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: [
         {
           timestamp: new Date("2026-01-01T10:00:00Z"),
@@ -238,17 +236,16 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="24h" />
+        <EvalScoreTrendChart timeRange="24h" />
       </Wrapper>
     );
 
-    // Both series should be rendered as Area components
     expect(screen.getByTestId("area-alpha")).toBeInTheDocument();
     expect(screen.getByTestId("area-zeta")).toBeInTheDocument();
   });
 
   it("handles single data point", () => {
-    mockUseEvalPassRateTrends.mockReturnValue({
+    mockUseEvalScoreTrends.mockReturnValue({
       data: [
         {
           timestamp: new Date("2026-01-01T10:00:00Z"),
@@ -261,7 +258,7 @@ describe("PassRateTrendChart", () => {
     const Wrapper = createWrapper();
     render(
       <Wrapper>
-        <PassRateTrendChart timeRange="1h" />
+        <EvalScoreTrendChart timeRange="1h" />
       </Wrapper>
     );
 

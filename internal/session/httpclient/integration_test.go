@@ -192,7 +192,9 @@ func startIntegrationServer(t *testing.T, warmStore providers.WarmStoreProvider)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	return httpclient.NewStore(srv.URL, logr.Discard())
+	store := httpclient.NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+	return store
 }
 
 // TestIntegration_FullRecordingChain verifies the complete data flow:
@@ -347,6 +349,7 @@ func TestIntegration_NoWarmStore(t *testing.T) {
 	defer srv.Close()
 
 	store := httpclient.NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 
 	// All operations should fail with meaningful errors, not panic or hang.

@@ -615,12 +615,11 @@ export default function ArenaJobsPage() {
       />
 
       {/* Clone Dialog */}
-      {cloneJob?.spec?.type && (
+      {cloneJob && (
         <QuickRunDialog
           open={!!cloneJob}
           onOpenChange={(open) => { if (!open) setCloneJob(null); }}
           projectId={cloneJob.metadata?.labels?.["arena.omnia.altairalabs.ai/project-id"]}
-          type={cloneJob.spec.type}
           initialValues={{
             executionMode: cloneJob.spec.execution?.mode ?? "direct",
             targetAgent: cloneJob.spec.execution?.target?.agentRuntimeRef?.name ?? "",

@@ -138,6 +138,38 @@ func (e *OmniaExecutor) LoadConfig(path string) error {
 	return nil
 }
 
+// LoadConfigFromEntries loads handler configuration from pre-built entries.
+// This is used by the tool tester to create a short-lived executor without
+// needing a tools.yaml file.
+func (e *OmniaExecutor) LoadConfigFromEntries(entries []HandlerEntry) error {
+	e.config = &ToolConfig{Handlers: entries}
+	for i := range entries {
+		h := &e.config.Handlers[i]
+		e.handlers[h.Name] = h
+	}
+	return nil
+}
+
+// ExecuteTool executes a single tool by name with the given arguments.
+// This is a convenience method for testing that bypasses the PromptKit
+// registry dispatch.
+func (e *OmniaExecutor) ExecuteTool(
+	ctx context.Context,
+	toolName string,
+	args json.RawMessage,
+) (json.RawMessage, error) {
+	e.mu.RLock()
+	handlerName, ok := e.toolHandlers[toolName]
+	if !ok {
+		e.mu.RUnlock()
+		return nil, fmt.Errorf("tool %q not found", toolName)
+	}
+	handler := e.handlers[handlerName]
+	e.mu.RUnlock()
+
+	return e.dispatch(ctx, toolName, handlerName, handler, args)
+}
+
 // Initialize connects all configured backends and discovers tools.
 func (e *OmniaExecutor) Initialize(ctx context.Context) error {
 	e.mu.Lock()
@@ -218,8 +250,9 @@ func marshalSchema(v any) json.RawMessage {
 // buildDescriptor creates a PromptKit ToolDescriptor for a tool.
 func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktools.ToolDescriptor {
 	desc := &pktools.ToolDescriptor{
-		Name: toolName,
-		Mode: executorName,
+		Name:   toolName,
+		Mode:   executorName,
+		Labels: e.buildToolLabels(toolName, h),
 	}
 
 	// For HTTP tools, the tool definition comes from the handler config
@@ -238,6 +271,24 @@ func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktoo
 	}
 
 	return desc
+}
+
+// buildToolLabels creates labels from the tool's registry metadata.
+// These labels propagate through PromptKit events, metrics, and OTel traces.
+func (e *OmniaExecutor) buildToolLabels(toolName string, h *HandlerEntry) map[string]string {
+	labels := map[string]string{
+		"handler_type": h.Type,
+		"handler_name": h.Name,
+	}
+	if meta, ok := e.toolMeta[toolName]; ok {
+		if meta.RegistryName != "" {
+			labels["registry_name"] = meta.RegistryName
+		}
+		if meta.RegistryNamespace != "" {
+			labels["registry_namespace"] = meta.RegistryNamespace
+		}
+	}
+	return labels
 }
 
 // buildMCPDescriptor populates the descriptor from discovered MCP tools.

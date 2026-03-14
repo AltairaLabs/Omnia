@@ -30,7 +30,7 @@ interface ToolCallsTabProps {
 }
 
 function RenderValue({ value }: Readonly<{ value: unknown }>) {
-  return <JsonBlock data={value} />;
+  return <JsonBlock data={value} className="bg-transparent rounded-none border-0 h-full" />;
 }
 
 function tryParseJSON(text: string): unknown {
@@ -141,11 +141,11 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
       </ScrollArea>
 
       {/* Right detail */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 flex flex-col min-h-0">
         {selectedTc ? (
-          <div className="p-4 space-y-4" data-testid="toolcall-detail">
+          <div className="flex flex-col h-full p-4 gap-4" data-testid="toolcall-detail">
             {(selectedTc.handlerType || selectedTc.registryName) && (
-              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm" data-testid="toolcall-registry-info">
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm shrink-0" data-testid="toolcall-registry-info">
                 {selectedTc.handlerType && (
                   <div className="contents">
                     <span className="font-medium text-muted-foreground">Handler</span>
@@ -160,28 +160,34 @@ export function ToolCallsTab({ messages }: ToolCallsTabProps) {
                 )}
               </div>
             )}
-            <div>
-              <h4 className="text-sm font-medium text-muted-foreground mb-2">Arguments</h4>
-              <RenderValue value={selectedTc.arguments} />
-            </div>
-            {selectedTc.result !== undefined && (
-              <div>
-                <h4 className={cn(
-                  "text-sm font-medium mb-2",
-                  selectedTc.resultIsError ? "text-destructive" : "text-muted-foreground"
-                )}>
-                  {selectedTc.resultIsError ? "Error" : "Result"}
-                </h4>
-                <RenderValue value={tryParseJSON(selectedTc.result)} />
+            <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+              <div className="min-w-0 flex flex-col">
+                <h4 className="text-sm font-medium text-muted-foreground mb-2 shrink-0">Arguments</h4>
+                <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
+                  <RenderValue value={selectedTc.arguments} />
+                </div>
               </div>
-            )}
+              {selectedTc.result !== undefined && (
+                <div className="min-w-0 flex flex-col">
+                  <h4 className={cn(
+                    "text-sm font-medium mb-2 shrink-0",
+                    selectedTc.resultIsError ? "text-destructive" : "text-muted-foreground"
+                  )}>
+                    {selectedTc.resultIsError ? "Error" : "Result"}
+                  </h4>
+                  <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
+                    <RenderValue value={tryParseJSON(selectedTc.result)} />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-muted-foreground" data-testid="toolcall-no-selection">
             Select a tool call to view details
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }

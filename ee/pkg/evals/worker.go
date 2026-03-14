@@ -25,14 +25,12 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 
-	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 	redisprovider "github.com/altairalabs/omnia/internal/session/providers/redis"
-	"github.com/altairalabs/omnia/pkg/metrics"
 )
 
 // Constants for Redis consumer group and stream configuration.
@@ -40,10 +38,9 @@ const (
 	consumerGroupPrefix   = "omnia-eval-workers-"
 	blockTimeout          = 5 * time.Second
 	evalSource            = "worker"
-	triggerPerTurn        = "per_turn"
-	triggerOnComplete     = "on_session_complete"
 	eventTypeMessage      = "message.assistant"
 	eventTypeSessionDone  = "session.completed"
+	eventTypeEvaluate     = "session.evaluate"
 	streamPayloadField    = "payload"
 	streamReadBatchSize   = 10
 	periodicCheckInterval = 30 * time.Second
@@ -88,14 +85,11 @@ type WorkerConfig struct {
 	// Metrics records Prometheus metrics for the eval worker.
 	// If nil, a NoOpWorkerMetrics is used.
 	Metrics WorkerMetricsRecorder
-	// EvalMetrics records per-eval Prometheus metrics (omnia_eval_*) so the
-	// quality dashboard can discover them. If nil, per-eval metrics are not emitted.
-	EvalMetrics metrics.EvalMetricsRecorder
-	// EvalCollector is a PromptKit MetricCollector that creates dynamically-named
+	// EvalCollector is a unified PromptKit metrics Collector that creates dynamically-named
 	// per-eval Prometheus metrics (e.g., omnia_eval_helpfulness). The quality
 	// dashboard discovers these via {__name__=~"omnia_eval_.*"}. If nil, one is
-	// created automatically.
-	EvalCollector *runtimeevals.MetricCollector
+	// created automatically with the default Prometheus registerer.
+	EvalCollector *sdkmetrics.Collector
 	// TracerProvider enables OTel tracing for eval execution.
 	// When set, the SDK emits per-eval spans with GenAI attributes.
 	TracerProvider trace.TracerProvider
@@ -117,12 +111,17 @@ type EvalWorker struct {
 	packLoader        *PromptPackLoader
 	providerResolver  *ProviderResolver
 	metrics           WorkerMetricsRecorder
-	evalMetrics       metrics.EvalMetricsRecorder
-	evalCollector     *runtimeevals.MetricCollector
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
 func NewEvalWorker(config WorkerConfig) *EvalWorker {
+	evalCollector := config.EvalCollector
+	if evalCollector == nil {
+		evalCollector = sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+			Namespace: "omnia_eval",
+		})
+	}
+
 	sdkRunner := config.SDKRunner
 	if sdkRunner == nil {
 		var runnerOpts []SDKRunnerOption
@@ -132,6 +131,7 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		if config.Logger != nil {
 			runnerOpts = append(runnerOpts, WithLogger(config.Logger))
 		}
+		runnerOpts = append(runnerOpts, WithEvalCollector(evalCollector))
 		sdkRunner = NewSDKRunner(runnerOpts...)
 	}
 
@@ -160,13 +160,6 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		metricsRecorder = &NoOpWorkerMetrics{}
 	}
 
-	evalCollector := config.EvalCollector
-	if evalCollector == nil {
-		evalCollector = runtimeevals.NewMetricCollector(
-			runtimeevals.WithNamespace("omnia_eval"),
-		)
-	}
-
 	namespaces := resolveNamespaces(config)
 	streamKeys := buildStreamKeys(namespaces)
 	consumerGroup := buildConsumerGroup(namespaces)
@@ -185,8 +178,6 @@ func NewEvalWorker(config WorkerConfig) *EvalWorker {
 		packLoader:       config.PackLoader,
 		providerResolver: resolver,
 		metrics:          metricsRecorder,
-		evalMetrics:      config.EvalMetrics,
-		evalCollector:    evalCollector,
 	}
 
 	w.completionTracker = NewCompletionTracker(timeout, w.onSessionComplete, config.Logger)
@@ -383,6 +374,10 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 		return nil
 	}
 
+	if isEvaluateEvent(event) {
+		return w.processEvaluateRequest(ctx, event)
+	}
+
 	if isAssistantMessageEvent(event) {
 		w.getTracker().RecordActivity(event.SessionID)
 		return w.processAssistantMessage(ctx, event)
@@ -397,23 +392,9 @@ func (w *EvalWorker) processEvent(ctx context.Context, event api.SessionEvent) e
 
 // processAssistantMessage handles assistant message events by running per-turn evals.
 func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.SessionEvent) error {
-	// Resolve eval tiers from event (pre-computed) or compute from agent config.
-	tiers := w.resolveEvalTiers(ctx, event)
-	if len(tiers) == 0 {
-		w.logger.Debug("session sampled out", "sessionID", event.SessionID)
-		return nil
-	}
-
 	packEvals := w.loadPackEvals(ctx, event)
 	if packEvals == nil {
 		w.logger.Debug("no per_turn evals to run (no pack)", "sessionID", event.SessionID)
-		return nil
-	}
-
-	// Filter evals to only those matching the sampled tiers.
-	evals := FilterEvalsByTiers(packEvals.Evals, tiers)
-	if len(evals) == 0 {
-		w.logger.Debug("no per_turn evals after tier filtering", "sessionID", event.SessionID, "tiers", tiers)
 		return nil
 	}
 
@@ -431,9 +412,15 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 	providerSpecs := w.resolveProviders(ctx, event)
 	enrichedEvent := enrichEvent(event, packEvals)
 
-	items := w.getSDKRunner().RunTurnEvals(ctx, evals, messages, event.SessionID, turnIndex, providerSpecs)
+	labels := EvalLabels{
+		Agent:          sess.AgentName,
+		Namespace:      event.Namespace,
+		PromptPackName: packEvals.PackName,
+	}
+	items := w.getSDKRunner().RunTurnEvals(ctx, packEvals.PackData, messages,
+		event.SessionID, turnIndex, providerSpecs, labels)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
-	return w.writeResults(ctx, results, event.SessionID, evals)
+	return w.writeResults(ctx, results, event.SessionID)
 }
 
 // onSessionComplete is the CompletionTracker callback. It runs on_session_complete evals.
@@ -453,21 +440,9 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		PromptPackVersion: sess.PromptPackVersion,
 	}
 
-	tiers := w.resolveEvalTiers(ctx, event)
-	if len(tiers) == 0 {
-		w.logger.Debug("session sampled out for completion evals", "sessionID", sessionID)
-		return nil
-	}
-
 	packEvals := w.loadPackEvals(ctx, event)
 	if packEvals == nil {
 		w.logger.Debug("no on_session_complete evals to run (no pack)", "sessionID", sessionID)
-		return nil
-	}
-
-	evals := FilterEvalsByTiers(packEvals.Evals, tiers)
-	if len(evals) == 0 {
-		w.logger.Debug("no on_session_complete evals after tier filtering", "sessionID", sessionID, "tiers", tiers)
 		return nil
 	}
 
@@ -480,14 +455,65 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 	providerSpecs := w.resolveProviders(ctx, event)
 	enrichedEvent := enrichEvent(event, packEvals)
 
-	items := w.getSDKRunner().RunSessionEvals(ctx, evals, messages, sessionID, turnIndex, providerSpecs)
+	labels := EvalLabels{
+		Agent:          sess.AgentName,
+		Namespace:      event.Namespace,
+		PromptPackName: packEvals.PackName,
+	}
+	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.PackData, messages,
+		sessionID, turnIndex, providerSpecs, labels)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
-	return w.writeResults(ctx, results, sessionID, evals)
+	return w.writeResults(ctx, results, sessionID)
+}
+
+// processEvaluateRequest handles on-demand eval requests by running all evals
+// (both per_turn and on_session_complete) on the full session. This is triggered
+// by POST /api/v1/sessions/{id}/evaluate.
+func (w *EvalWorker) processEvaluateRequest(ctx context.Context, event api.SessionEvent) error {
+	packEvals := w.loadPackEvals(ctx, event)
+	if packEvals == nil {
+		w.logger.Info("no evals to run (no pack)", "sessionID", event.SessionID)
+		return nil
+	}
+
+	messages, err := w.getMessages(ctx, event.SessionID)
+	if err != nil {
+		return err
+	}
+
+	sess, err := w.getMessageStore().GetSession(ctx, event.SessionID)
+	if err != nil {
+		return fmt.Errorf("get session: %w", err)
+	}
+
+	turnIndex := countAssistantMessages(messages)
+	providerSpecs := w.resolveProviders(ctx, event)
+	enrichedEvent := enrichEvent(event, packEvals)
+
+	labels := EvalLabels{
+		Agent:          sess.AgentName,
+		Namespace:      event.Namespace,
+		PromptPackName: packEvals.PackName,
+	}
+	// Run all evals without tier filtering — manual trigger runs everything.
+	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.PackData, messages,
+		event.SessionID, turnIndex, providerSpecs, labels)
+	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
+	// Mark source as "manual" to distinguish from automatic eval worker results.
+	for _, r := range results {
+		r.Source = "manual"
+	}
+	return w.writeResults(ctx, results, event.SessionID)
+}
+
+// isEvaluateEvent returns true if the event is a manual eval trigger.
+func isEvaluateEvent(event api.SessionEvent) bool {
+	return event.EventType == eventTypeEvaluate
 }
 
 // writeResults writes eval results if there are any.
 func (w *EvalWorker) writeResults(
-	ctx context.Context, results []*api.EvalResult, sessionID string, evalDefs []EvalDef,
+	ctx context.Context, results []*api.EvalResult, sessionID string,
 ) error {
 	if len(results) == 0 {
 		return nil
@@ -499,7 +525,6 @@ func (w *EvalWorker) writeResults(
 	}
 
 	w.getMetrics().RecordResultsWritten(len(results), true)
-	w.recordPerEvalMetrics(results, evalDefs)
 	w.logger.Info("eval results written",
 		"sessionID", sessionID,
 		"count", len(results),
@@ -508,89 +533,10 @@ func (w *EvalWorker) writeResults(
 	return nil
 }
 
-// EvalCollector returns the PromptKit MetricCollector for per-eval-name metrics.
-// The caller (main.go) should append evalCollector.WritePrometheus(w) to /metrics.
-func (w *EvalWorker) EvalCollector() *runtimeevals.MetricCollector {
-	return w.evalCollector
-}
-
-// recordPerEvalMetrics emits omnia_eval_* Prometheus metrics for each result
-// so the quality dashboard can discover them alongside runtime-emitted metrics.
-func (w *EvalWorker) recordPerEvalMetrics(results []*api.EvalResult, evalDefs []EvalDef) {
-	defMap := buildEvalDefMap(evalDefs)
-	for _, r := range results {
-		if w.evalMetrics != nil {
-			w.evalMetrics.RecordEval(metrics.EvalRecordMetrics{
-				EvalID:         r.EvalID,
-				EvalType:       r.EvalType,
-				Trigger:        r.Trigger,
-				Passed:         r.Passed,
-				Score:          r.Score,
-				DurationSec:    durationMsToSec(r.DurationMs),
-				Agent:          r.AgentName,
-				Namespace:      r.Namespace,
-				PromptPackName: r.PromptPackName,
-			})
-		}
-		w.recordEvalCollectorMetric(r, defMap[r.EvalID])
-	}
-}
-
-// buildEvalDefMap creates a lookup map from eval ID to its MetricDef.
-func buildEvalDefMap(defs []EvalDef) map[string]*runtimeevals.MetricDef {
-	m := make(map[string]*runtimeevals.MetricDef, len(defs))
-	for i := range defs {
-		if defs[i].Metric != nil {
-			m[defs[i].ID] = defs[i].Metric
-		}
-	}
-	return m
-}
-
-// recordEvalCollectorMetric records a per-eval-name metric to the PromptKit
-// MetricCollector. This creates dynamically-named metrics like
-// omnia_eval_response_conciseness that the quality dashboard discovers.
-// When the eval definition includes a MetricDef, its name and type are used;
-// otherwise falls back to using the eval ID with boolean type.
-func (w *EvalWorker) recordEvalCollectorMetric(r *api.EvalResult, metricDef *runtimeevals.MetricDef) {
-	if w.evalCollector == nil {
-		return
-	}
-	metric := metricDef
-	if metric == nil {
-		metric = &runtimeevals.MetricDef{
-			Name: r.EvalID,
-			Type: runtimeevals.MetricBoolean,
-		}
-	}
-	// Ensure standard labels are always set.
-	if metric.Labels == nil {
-		metric.Labels = make(map[string]string)
-	}
-	metric.Labels["agent"] = r.AgentName
-	metric.Labels["namespace"] = r.Namespace
-	metric.Labels["promptpack_name"] = r.PromptPackName
-
-	result := runtimeevals.EvalResult{
-		EvalID: r.EvalID,
-		Type:   r.EvalType,
-		Passed: r.Passed,
-		Score:  r.Score,
-	}
-	if err := w.evalCollector.Record(result, metric); err != nil {
-		w.logger.Warn("failed to record eval collector metric",
-			"evalID", r.EvalID,
-			"error", err,
-		)
-	}
-}
-
-// durationMsToSec converts an optional duration in milliseconds to seconds.
-func durationMsToSec(ms *int) float64 {
-	if ms == nil {
-		return 0
-	}
-	return float64(*ms) / 1000.0
+// EvalCollector returns the unified PromptKit metrics Collector for per-eval-name metrics.
+// The caller (main.go) uses the Collector's Registry() for merged Prometheus gathering.
+func (w *EvalWorker) EvalCollector() *sdkmetrics.Collector {
+	return w.getSDKRunner().EvalCollector()
 }
 
 // getMessages reads session messages from the Redis hot tier.
@@ -707,7 +653,7 @@ func toEvalResult(item api.EvaluateResultItem, event api.SessionEvent, agentName
 
 // loadPackEvals loads eval definitions from the PromptPack referenced in the event.
 // Returns nil if no pack loader is configured or the event has no PromptPack name.
-func (w *EvalWorker) loadPackEvals(ctx context.Context, event api.SessionEvent) *PromptPackEvals {
+func (w *EvalWorker) loadPackEvals(ctx context.Context, event api.SessionEvent) *CachedPack {
 	if w.packLoader == nil || event.PromptPackName == "" {
 		return nil
 	}
@@ -726,7 +672,7 @@ func (w *EvalWorker) loadPackEvals(ctx context.Context, event api.SessionEvent) 
 }
 
 // enrichEvent copies the event and adds PromptPack metadata for result attribution.
-func enrichEvent(event api.SessionEvent, packEvals *PromptPackEvals) api.SessionEvent {
+func enrichEvent(event api.SessionEvent, packEvals *CachedPack) api.SessionEvent {
 	event.PromptPackName = packEvals.PackName
 	event.PromptPackVersion = packEvals.PackVersion
 	return event
@@ -792,25 +738,6 @@ func restoreTraceContext(ctx context.Context, event api.SessionEvent) context.Co
 		return ctx
 	}
 	return trace.ContextWithRemoteSpanContext(ctx, sc)
-}
-
-// resolveEvalTiers determines which eval tiers should run for the given event's session.
-// If the event already has EvalTiers set (pre-computed by publisher), those are used.
-// Otherwise, sampling config is resolved from the AgentRuntime CRD.
-func (w *EvalWorker) resolveEvalTiers(ctx context.Context, event api.SessionEvent) []string {
-	// If EvalTiers is set on the event (non-nil), use it directly.
-	// A non-nil empty slice means the session was explicitly sampled out.
-	if event.EvalTiers != nil {
-		return event.EvalTiers
-	}
-
-	var samplingConfig *v1alpha1.EvalSampling
-	if w.providerResolver != nil && event.AgentName != "" && event.Namespace != "" {
-		samplingConfig = w.providerResolver.ResolveSamplingConfig(ctx, event.AgentName, event.Namespace)
-	}
-
-	sampler := NewSampler(samplingConfig)
-	return sampler.EvalTiersForSession(event.SessionID)
 }
 
 // resolveProviders resolves provider specs from the AgentRuntime CRD.

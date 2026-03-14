@@ -27,6 +27,11 @@ vi.mock("@/stores/results-panel-store", () => ({
   useResultsPanelStore: () => vi.fn(),
 }));
 
+// Mock useAgents (used by QuickRunDialog)
+vi.mock("@/hooks/use-agents", () => ({
+  useAgents: () => ({ data: [], isLoading: false }),
+}));
+
 describe("ProjectToolbar", () => {
   const mockProject: ArenaProject = {
     id: "project-1",

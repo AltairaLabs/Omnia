@@ -1,7 +1,8 @@
 /**
  * Agent quality dashboard page.
  *
- * Shows aggregate eval pass rates, agent comparison, and recent failures.
+ * Shows aggregate eval scores — no pass/fail concepts.
+ * Single view with summary cards, score trend chart, and breakdown.
  *
  * Copyright 2026 Altaira Labs.
  * SPDX-License-Identifier: Apache-2.0
@@ -10,11 +11,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Link from "next/link";
 import { Header } from "@/components/layout";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -22,36 +20,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Activity, TrendingUp, AlertCircle, ExternalLink, TrendingDown } from "lucide-react";
 import {
-  TrendingUp,
-  Bot,
-  AlertCircle,
-  ExternalLink,
-  CheckCircle2,
-  XCircle,
-  Activity,
-} from "lucide-react";
-import { useEvalSummary, useRecentEvalFailures, useEvalFilter, type EvalTrendRange, useGrafana, buildDashboardUrl, GRAFANA_DASHBOARDS } from "@/hooks";
+  useEvalSummary,
+  useEvalFilter,
+  useGrafana,
+  buildDashboardUrl,
+  GRAFANA_DASHBOARDS,
+  type EvalTrendRange,
+  type EvalScoreSummary,
+} from "@/hooks";
 import { Button } from "@/components/ui/button";
-import { formatDistanceToNow } from "date-fns";
-import type { EvalResultSummary } from "@/types/eval";
-import { AssertionTypeBreakdown } from "@/components/quality/assertion-type-breakdown";
-import { FailingSessionsTable } from "@/components/quality/failing-sessions-table";
-import { PassRateTrendChart } from "@/components/quality/pass-rate-trend-chart";
-
-const PASS_THRESHOLD = 90;
-const FAIL_THRESHOLD = 70;
+import { EvalScoreBreakdown } from "@/components/quality/eval-score-breakdown";
+import { EvalScoreTrendChart } from "@/components/quality/eval-score-trend-chart";
 
 const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
   { label: "Last 1h", value: "1h" },
@@ -60,36 +43,6 @@ const TIME_RANGE_OPTIONS: { label: string; value: EvalTrendRange }[] = [
   { label: "Last 7d", value: "7d" },
   { label: "Last 30d", value: "30d" },
 ];
-
-/** Check whether a summary represents a gauge/boolean (score-based) metric. */
-function isScoreMetric(s: EvalResultSummary): boolean {
-  return !s.metricType || s.metricType === "gauge" || s.metricType === "boolean";
-}
-
-/** Compute aggregate stats from Prometheus gauge summaries. */
-function computeAggregateStats(summaries: EvalResultSummary[]) {
-  const scoreMetrics = summaries.filter(isScoreMetric);
-  const activeEvals = summaries.length;
-  const overallPassRate =
-    scoreMetrics.length > 0
-      ? scoreMetrics.reduce((sum, s) => sum + s.passRate, 0) / scoreMetrics.length
-      : 0;
-  const passing = scoreMetrics.filter((s) => s.passRate >= PASS_THRESHOLD).length;
-  const failing = scoreMetrics.filter((s) => s.passRate < FAIL_THRESHOLD).length;
-  return { activeEvals, overallPassRate, passing, failing };
-}
-
-function getPassRateColor(rate: number): string {
-  if (rate >= 90) return "text-green-600 dark:text-green-400";
-  if (rate >= 70) return "text-yellow-600 dark:text-yellow-400";
-  return "text-red-600 dark:text-red-400";
-}
-
-function getPassRateVariant(rate: number): "default" | "secondary" | "destructive" {
-  if (rate >= 90) return "default";
-  if (rate >= 70) return "secondary";
-  return "destructive";
-}
 
 function StatsCardSkeleton() {
   return (
@@ -105,30 +58,36 @@ function StatsCardSkeleton() {
   );
 }
 
-function EvalTableSkeleton() {
-  return (
-    <TableRow>
-      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-      <TableCell className="text-right"><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
-    </TableRow>
-  );
-}
-
-/** Summary cards showing overall stats. */
+/** Summary cards: Evals count, Avg Score, Lowest Score. */
 function SummaryCards({
   summaries,
   isLoading,
 }: Readonly<{
-  summaries: EvalResultSummary[];
+  summaries: EvalScoreSummary[];
   isLoading: boolean;
 }>) {
+  const stats = useMemo(() => {
+    if (summaries.length === 0) {
+      return { count: 0, avgScore: 0, lowestScore: 0, lowestName: "" };
+    }
+    const gauges = summaries.filter((s) => s.metricType === "gauge");
+    const avgScore = gauges.length > 0
+      ? gauges.reduce((sum, s) => sum + s.score, 0) / gauges.length
+      : 0;
+    const lowest = gauges.length > 0
+      ? gauges.reduce((min, s) => (s.score < min.score ? s : min), gauges[0])
+      : null;
+    return {
+      count: summaries.length,
+      avgScore,
+      lowestScore: lowest?.score ?? 0,
+      lowestName: lowest?.evalId ?? "",
+    };
+  }, [summaries]);
+
   if (isLoading) {
     return (
-      <div className="grid grid-cols-4 gap-4">
-        <StatsCardSkeleton />
+      <div className="grid grid-cols-3 gap-4">
         <StatsCardSkeleton />
         <StatsCardSkeleton />
         <StatsCardSkeleton />
@@ -136,253 +95,43 @@ function SummaryCards({
     );
   }
 
-  const stats = computeAggregateStats(summaries);
-
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-3 gap-4">
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Active Evals</span>
+            <span className="text-sm text-muted-foreground">Evals</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.activeEvals}</p>
+          <p className="text-2xl font-bold mt-1">{stats.count}</p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Overall Pass Rate</span>
+            <span className="text-sm text-muted-foreground">Avg Score</span>
           </div>
-          <p className={`text-2xl font-bold mt-1 ${getPassRateColor(stats.overallPassRate)}`}>
-            {stats.overallPassRate.toFixed(1)}%
+          <p className="text-2xl font-bold mt-1">
+            {stats.count > 0 ? `${(stats.avgScore * 100).toFixed(0)}%` : "-"}
           </p>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-            <span className="text-sm text-muted-foreground">Passing</span>
+            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Lowest Score</span>
           </div>
-          <p className="text-2xl font-bold mt-1">{stats.passing}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-2">
-            <XCircle className="h-4 w-4 text-red-500" />
-            <span className="text-sm text-muted-foreground">Failing</span>
-          </div>
-          <p className="text-2xl font-bold mt-1">{stats.failing}</p>
+          <p className="text-2xl font-bold mt-1">
+            {stats.count > 0 ? `${(stats.lowestScore * 100).toFixed(0)}%` : "-"}
+          </p>
+          {stats.lowestName && (
+            <p className="text-xs text-muted-foreground mt-0.5">{stats.lowestName}</p>
+          )}
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-/** Per-eval pass rate table. */
-function EvalPassRateTable({
-  summaries,
-  isLoading,
-}: Readonly<{
-  summaries: EvalResultSummary[];
-  isLoading: boolean;
-}>) {
-  const sorted = useMemo(
-    () => [...summaries].sort((a, b) => a.passRate - b.passRate),
-    [summaries]
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Eval Metrics</CardTitle>
-      </CardHeader>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Eval ID</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Pass Rate</TableHead>
-            <TableHead>Progress</TableHead>
-            <TableHead className="text-right">Avg Score</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <>
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-            </>
-          )}
-          {!isLoading && sorted.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                No eval data available
-              </TableCell>
-            </TableRow>
-          )}
-          {!isLoading && sorted.map((summary) => (
-            <TableRow key={summary.evalId}>
-              <TableCell className="font-mono text-sm">{summary.evalId}</TableCell>
-              <TableCell>
-                <Badge variant="outline">{summary.evalType}</Badge>
-              </TableCell>
-              {isScoreMetric(summary) ? (
-                <>
-                  <TableCell>
-                    <Badge variant={getPassRateVariant(summary.passRate)}>
-                      {summary.passRate.toFixed(1)}%
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="w-[160px]">
-                    <Progress value={summary.passRate} className="h-2" />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {summary.avgScore === undefined ? "-" : summary.avgScore.toFixed(2)}
-                  </TableCell>
-                </>
-              ) : (
-                <>
-                  <TableCell>
-                    <span className="text-muted-foreground font-mono">
-                      {summary.metricType === "counter" ? summary.total.toLocaleString() : (summary.avgScore?.toFixed(3) ?? "-")}
-                    </span>
-                  </TableCell>
-                  <TableCell className="w-[160px]">
-                    <span className="text-xs text-muted-foreground">
-                      {summary.metricType === "counter" ? "count" : "duration"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right">-</TableCell>
-                </>
-              )}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
-  );
-}
-
-const FAILURES_PAGE_SIZE = 10;
-
-/** Recent eval failures table with pagination. */
-function RecentFailures() {
-  const [page, setPage] = useState(0);
-  const offset = page * FAILURES_PAGE_SIZE;
-  const { data, isLoading, error } = useRecentEvalFailures({
-    limit: FAILURES_PAGE_SIZE,
-    offset,
-  });
-
-  const failures = data?.results || [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / FAILURES_PAGE_SIZE));
-  const showFrom = total > 0 ? offset + 1 : 0;
-  const showTo = Math.min(offset + FAILURES_PAGE_SIZE, total);
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base">Recent Failures</CardTitle>
-        {total > 0 && (
-          <span className="text-sm text-muted-foreground">
-            {showFrom}&ndash;{showTo} of {total}
-          </span>
-        )}
-      </CardHeader>
-      {error && (
-        <CardContent>
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>Failed to load recent failures</AlertDescription>
-          </Alert>
-        </CardContent>
-      )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Eval ID</TableHead>
-            <TableHead>Agent</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Score</TableHead>
-            <TableHead>Time</TableHead>
-            <TableHead></TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <>
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-              <EvalTableSkeleton />
-            </>
-          )}
-          {!isLoading && failures.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                No recent failures
-              </TableCell>
-            </TableRow>
-          )}
-          {!isLoading && failures.map((result) => (
-            <TableRow key={result.id}>
-              <TableCell className="font-mono text-sm">
-                <div className="flex items-center gap-2">
-                  <XCircle className="h-4 w-4 text-red-500" />
-                  {result.evalId}
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-muted-foreground" />
-                  {result.agentName}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Badge variant="outline">{result.evalType}</Badge>
-              </TableCell>
-              <TableCell>{result.score === undefined ? "-" : result.score.toFixed(2)}</TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatDistanceToNow(new Date(result.createdAt), { addSuffix: true })}
-              </TableCell>
-              <TableCell>
-                <Link href={`/sessions/${result.sessionId}?tab=evals`} className="text-primary hover:underline">
-                  <ExternalLink className="h-4 w-4" />
-                </Link>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 p-4 pt-0">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page === 0}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Previous
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Page {page + 1} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!data?.hasMore}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      )}
-    </Card>
   );
 }
 
@@ -475,7 +224,7 @@ export default function QualityPage() {
     <div className="flex flex-col h-full">
       <Header
         title="Quality"
-        description="Agent eval pass rates and quality metrics"
+        description="Agent eval metrics and quality scores"
       />
 
       <div className="flex-1 p-6 space-y-6">
@@ -512,35 +261,18 @@ export default function QualityPage() {
           </Alert>
         )}
 
-        <Tabs defaultValue="overview">
-          <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="assertions">Assertions</TabsTrigger>
-          </TabsList>
+        <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
 
-          <TabsContent value="overview" className="space-y-6 mt-4">
-            <SummaryCards summaries={summaries} isLoading={summaryQuery.isLoading} />
-            <EvalPassRateTable summaries={summaries} isLoading={summaryQuery.isLoading} />
-            <RecentFailures />
-          </TabsContent>
+        <EvalScoreTrendChart
+          timeRange={trendTimeRange}
+          filter={filter}
+        />
 
-          <TabsContent value="assertions" className="space-y-6 mt-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <AssertionTypeBreakdown
-                activeMetric={activeMetric}
-                onSelectMetric={setActiveMetric}
-                filter={filter}
-              />
-              <FailingSessionsTable
-                evalType={activeMetric}
-              />
-            </div>
-            <PassRateTrendChart
-              timeRange={trendTimeRange}
-              filter={filter}
-            />
-          </TabsContent>
-        </Tabs>
+        <EvalScoreBreakdown
+          activeMetric={activeMetric}
+          onSelectMetric={setActiveMetric}
+          filter={filter}
+        />
       </div>
     </div>
   );

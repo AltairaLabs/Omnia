@@ -109,6 +109,43 @@ func (h *Handler) handleListEvalResults(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleEvaluateSession triggers eval execution for a stored session.
+// POST /api/v1/sessions/{sessionID}/evaluate
+// Returns 202 Accepted. Results are written asynchronously by the eval worker
+// and can be retrieved via GET /api/v1/sessions/{sessionID}/eval-results.
+func (h *Handler) handleEvaluateSession(w http.ResponseWriter, r *http.Request) {
+	sessionID, err := sessionIDFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if h.service == nil {
+		w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "session service not configured"})
+		return
+	}
+
+	if err := h.service.PublishEvaluateEvent(r.Context(), sessionID); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(EvaluateAcceptedResponse{
+		SessionID: sessionID,
+		Message:   "evaluation queued",
+	})
+}
+
+// EvaluateAcceptedResponse is the JSON response for accepted eval requests.
+type EvaluateAcceptedResponse struct {
+	SessionID string `json:"sessionId"`
+	Message   string `json:"message"`
+}
+
 // parseEvalListOpts extracts query parameters for eval result listing.
 func parseEvalListOpts(r *http.Request) EvalResultListOpts {
 	q := r.URL.Query()

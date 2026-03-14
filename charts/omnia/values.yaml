@@ -295,6 +295,12 @@ affinity:
                   - operator
           topologyKey: kubernetes.io/hostname
 
+# Operator API server configuration
+operator:
+  # -- Bind address for the operator API server (tool testing).
+  # Set to a port like ":8083" to enable, or leave empty to disable.
+  apiBindAddress: ""
+
 # Leader election configuration
 leaderElection:
   # -- Enable leader election for HA

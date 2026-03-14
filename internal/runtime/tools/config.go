@@ -74,12 +74,20 @@ type ToolEntry struct {
 
 // HTTPCfg represents HTTP configuration for a tool.
 type HTTPCfg struct {
-	Endpoint    string            `json:"endpoint" yaml:"endpoint"`
-	Method      string            `json:"method,omitempty" yaml:"method,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	ContentType string            `json:"contentType,omitempty" yaml:"contentType,omitempty"`
-	AuthType    string            `json:"authType,omitempty" yaml:"authType,omitempty"`
-	AuthToken   string            `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	Endpoint        string            `json:"endpoint" yaml:"endpoint"`
+	Method          string            `json:"method,omitempty" yaml:"method,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	ContentType     string            `json:"contentType,omitempty" yaml:"contentType,omitempty"`
+	AuthType        string            `json:"authType,omitempty" yaml:"authType,omitempty"`
+	AuthToken       string            `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	QueryParams     []string          `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
+	HeaderParams    map[string]string `json:"headerParams,omitempty" yaml:"headerParams,omitempty"`
+	StaticQuery     map[string]string `json:"staticQuery,omitempty" yaml:"staticQuery,omitempty"`
+	StaticBody      interface{}       `json:"staticBody,omitempty" yaml:"staticBody,omitempty"`
+	BodyMapping     string            `json:"bodyMapping,omitempty" yaml:"bodyMapping,omitempty"`
+	ResponseMapping string            `json:"responseMapping,omitempty" yaml:"responseMapping,omitempty"`
+	Redact          []string          `json:"redact,omitempty" yaml:"redact,omitempty"`
+	URLTemplate     string            `json:"urlTemplate,omitempty" yaml:"urlTemplate,omitempty"`
 }
 
 // GRPCCfg represents gRPC configuration for a tool.
@@ -94,12 +102,19 @@ type GRPCCfg struct {
 
 // MCPCfg represents MCP configuration for a tool.
 type MCPCfg struct {
-	Transport string            `json:"transport" yaml:"transport"`
-	Endpoint  string            `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	Command   string            `json:"command,omitempty" yaml:"command,omitempty"`
-	Args      []string          `json:"args,omitempty" yaml:"args,omitempty"`
-	WorkDir   string            `json:"workDir,omitempty" yaml:"workDir,omitempty"`
-	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Transport  string            `json:"transport" yaml:"transport"`
+	Endpoint   string            `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Command    string            `json:"command,omitempty" yaml:"command,omitempty"`
+	Args       []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	WorkDir    string            `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	ToolFilter *MCPToolFilterCfg `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
+}
+
+// MCPToolFilterCfg controls which tools from an MCP server are exposed.
+type MCPToolFilterCfg struct {
+	Allowlist []string `json:"allowlist,omitempty" yaml:"allowlist,omitempty"`
+	Blocklist []string `json:"blocklist,omitempty" yaml:"blocklist,omitempty"`
 }
 
 // OpenAPICfg represents OpenAPI configuration for a tool.
@@ -147,4 +162,6 @@ const (
 	MCPTransportSSE MCPTransportType = "sse"
 	// MCPTransportStdio indicates connection via subprocess stdin/stdout.
 	MCPTransportStdio MCPTransportType = "stdio"
+	// MCPTransportStreamableHTTP indicates connection via Streamable HTTP transport.
+	MCPTransportStreamableHTTP MCPTransportType = "streamable-http"
 )

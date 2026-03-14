@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
+	"github.com/AltairaLabs/PromptKit/runtime/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -100,7 +102,10 @@ func TestBuildEvalOptions_NilCollector(t *testing.T) {
 }
 
 func TestBuildEvalOptions_WithCollector(t *testing.T) {
-	collector := evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+	collector := metrics.NewEvalOnlyCollector(metrics.CollectorOpts{
+		Registerer: prometheus.NewRegistry(),
+		Namespace:  "omnia_eval",
+	})
 	server := NewServer(
 		WithEvalCollector(collector),
 		WithEvalDefs([]evals.EvalDef{
@@ -109,15 +114,20 @@ func TestBuildEvalOptions_WithCollector(t *testing.T) {
 	)
 
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 1, "should return WithEvalRunner option")
+	require.NotNil(t, opts)
+	assert.Len(t, opts, 2, "should return WithEvalRunner and WithMetrics options")
 }
 
 func TestBuildEvalOptions_EmptyDefs(t *testing.T) {
-	collector := evals.NewMetricCollector(evals.WithNamespace("omnia_eval"))
+	collector := metrics.NewEvalOnlyCollector(metrics.CollectorOpts{
+		Registerer: prometheus.NewRegistry(),
+		Namespace:  "omnia_eval",
+	})
 	server := NewServer(
 		WithEvalCollector(collector),
 	)
 
 	opts := server.buildEvalOptions()
-	assert.Len(t, opts, 1, "should return options even with empty defs")
+	require.NotNil(t, opts)
+	assert.Len(t, opts, 2, "should return options even with empty defs")
 }

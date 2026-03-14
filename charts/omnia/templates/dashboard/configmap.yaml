@@ -13,6 +13,13 @@ data:
   OPERATOR_API_URL: "http://{{ include "omnia.fullname" . }}-arena-controller:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}"
   {{- end }}
 
+  # Operator tool test API URL (server-side for tool testing proxy)
+  {{- if .Values.dashboard.operatorToolTestUrl }}
+  OPERATOR_TOOL_TEST_URL: {{ .Values.dashboard.operatorToolTestUrl | quote }}
+  {{- else if .Values.operator.apiBindAddress }}
+  OPERATOR_TOOL_TEST_URL: "http://{{ include "omnia.fullname" . }}-operator:{{ trimPrefix ":" .Values.operator.apiBindAddress }}"
+  {{- end }}
+
   # Session API URL (server-side for session history proxy)
   {{- if .Values.sessionApi.enabled }}
   SESSION_API_URL: "http://{{ include "omnia.sessionApi.fullname" . }}:{{ .Values.sessionApi.service.port }}"

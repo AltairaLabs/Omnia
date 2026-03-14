@@ -18,7 +18,9 @@ import (
 	"time"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
+	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,14 +78,41 @@ func (m *mockMessageStore) GetRecentMessages(_ context.Context, _ string, _ int)
 	return m.messages, nil
 }
 
+// containsEvalDef builds a contains-type EvalDef with the given params.
+func containsEvalDef(
+	id string, trigger runtimeevals.EvalTrigger, patterns ...string,
+) runtimeevals.EvalDef {
+	p := make([]any, len(patterns))
+	for i, s := range patterns {
+		p[i] = s
+	}
+	return runtimeevals.EvalDef{
+		ID:      id,
+		Type:    "contains",
+		Trigger: trigger,
+		Params:  map[string]any{"patterns": p},
+	}
+}
+
 // newTestPackLoader creates a PromptPackLoader backed by a fake K8s client
 // with a ConfigMap containing the given eval definitions.
-func newTestPackLoader(namespace, packName string, evalDefs []EvalDef) *PromptPackLoader {
-	packData, _ := json.Marshal(packJSON{
-		ID:      packName,
-		Version: "v1",
-		Evals:   evalDefs,
-	})
+func newTestPackLoader(evalDefs []runtimeevals.EvalDef) *PromptPackLoader {
+	const namespace = "ns"
+	const packName = "test-pack"
+	pack := map[string]any{
+		"id":      packName,
+		"version": "v1",
+		"evals":   evalDefs,
+		"prompts": map[string]any{
+			"default": map[string]any{
+				"id":              "default",
+				"name":            "Default",
+				"version":         "1.0.0",
+				"system_template": "You are a helpful assistant.",
+			},
+		},
+	}
+	packData, _ := json.Marshal(pack)
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      packName,
@@ -158,8 +187,8 @@ func TestProcessEvent_GetMessagesError(t *testing.T) {
 		getMsgsErr: fmt.Errorf("redis connection refused"),
 	}
 
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
 	})
 
 	w := &EvalWorker{
@@ -508,8 +537,8 @@ func TestProcessStreams(t *testing.T) {
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer func() { _ = client.Close() }()
 
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
 	})
 
 	msgs := []session.Message{
@@ -577,8 +606,8 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
 	defer func() { _ = client.Close() }()
 
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
 	})
 
 	msgs := []session.Message{
@@ -655,8 +684,8 @@ func TestAckMessage(t *testing.T) {
 }
 
 func TestProcessEvent_WriteEvalResults(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"world"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "world"),
 	})
 
 	msgs := []session.Message{
@@ -697,8 +726,8 @@ func TestProcessEvent_WriteEvalResults(t *testing.T) {
 }
 
 func TestProcessEvent_WriteError(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
 	})
 
 	msgs := []session.Message{
@@ -888,8 +917,8 @@ func TestOnSessionComplete_GetSessionError(t *testing.T) {
 }
 
 func TestOnSessionComplete_GetMessagesError(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "on_session_complete", Params: map[string]any{"patterns": []any{"hello"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerOnSessionComplete, "hello"),
 	})
 
 	store := &mockMessageStore{
@@ -924,7 +953,7 @@ func TestWriteResults_Empty(t *testing.T) {
 		logger:       testLogger(),
 	}
 
-	err := w.writeResults(context.Background(), nil, "s1", nil)
+	err := w.writeResults(context.Background(), nil, "s1")
 	require.NoError(t, err)
 	assert.Empty(t, writer.written)
 }
@@ -937,7 +966,7 @@ func TestWriteResults_Success(t *testing.T) {
 	}
 
 	results := []*api.EvalResult{{EvalID: "e1"}}
-	err := w.writeResults(context.Background(), results, "s1", nil)
+	err := w.writeResults(context.Background(), results, "s1")
 	require.NoError(t, err)
 	assert.Len(t, writer.written, 1)
 }
@@ -950,7 +979,7 @@ func TestWriteResults_Error(t *testing.T) {
 	}
 
 	results := []*api.EvalResult{{EvalID: "e1"}}
-	err := w.writeResults(context.Background(), results, "s1", nil)
+	err := w.writeResults(context.Background(), results, "s1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db error")
 }
@@ -1025,8 +1054,8 @@ func TestNewEvalWorker_WithRateLimiter(t *testing.T) {
 }
 
 func TestLoadPackEvals_WithPack(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn"},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		{ID: "e1", Type: "contains", Trigger: runtimeevals.TriggerEveryTurn},
 	})
 
 	w := &EvalWorker{
@@ -1043,7 +1072,7 @@ func TestLoadPackEvals_WithPack(t *testing.T) {
 
 	result := w.loadPackEvals(context.Background(), event)
 	require.NotNil(t, result)
-	assert.Len(t, result.Evals, 1)
+	assert.NotEmpty(t, result.PackData)
 }
 
 func TestLoadPackEvals_NoPackLoader(t *testing.T) {
@@ -1070,7 +1099,7 @@ func TestLoadPackEvals_NoPackName(t *testing.T) {
 
 func TestEnrichEvent(t *testing.T) {
 	event := api.SessionEvent{SessionID: "s1"}
-	packEvals := &PromptPackEvals{
+	packEvals := &CachedPack{
 		PackName:    "my-pack",
 		PackVersion: "v2",
 	}
@@ -1139,9 +1168,9 @@ func TestNewEvalWorker_WithPackLoader(t *testing.T) {
 }
 
 func TestProcessAssistantMessage_WithPackEvals(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
-		{ID: "e2", Type: "regex", Trigger: "per_turn", Params: map[string]any{"pattern": "world"}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
+		{ID: "e2", Type: "regex", Trigger: runtimeevals.TriggerEveryTurn, Params: map[string]any{"pattern": "world"}},
 	})
 
 	msgs := []session.Message{
@@ -1190,7 +1219,7 @@ func TestProcessAssistantMessage_NoPackName_SkipsEvals(t *testing.T) {
 		messageStore: store,
 		namespaces:   []string{"ns"},
 		logger:       testLogger(),
-		packLoader:   newTestPackLoader("ns", "test-pack", []EvalDef{}),
+		packLoader:   newTestPackLoader([]runtimeevals.EvalDef{}),
 	}
 
 	event := api.SessionEvent{
@@ -1209,8 +1238,8 @@ func TestProcessAssistantMessage_NoPackName_SkipsEvals(t *testing.T) {
 }
 
 func TestOnSessionComplete_WithPackEvals(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "on_session_complete", Params: map[string]any{"patterns": []any{"hello"}}},
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerOnSessionComplete, "hello"),
 	})
 
 	msgs := []session.Message{
@@ -1479,191 +1508,99 @@ func TestProviderResolverWithFakeK8s(t *testing.T) {
 	assert.Nil(t, specs)
 }
 
-func TestResolveEvalTiers_UsesEventTiersIfSet(t *testing.T) {
-	w := &EvalWorker{logger: testLogger()}
-	event := api.SessionEvent{
-		SessionID: "s1",
-		EvalTiers: []string{TierLightweight},
-	}
-	tiers := w.resolveEvalTiers(context.Background(), event)
-	assert.Equal(t, []string{TierLightweight}, tiers)
-}
-
-func TestResolveEvalTiers_ComputesFromDefaults(t *testing.T) {
-	w := &EvalWorker{logger: testLogger()}
-	event := api.SessionEvent{
-		SessionID: "s1",
-		AgentName: "agent",
-		Namespace: "ns",
-	}
-	tiers := w.resolveEvalTiers(context.Background(), event)
-	// Default config: defaultRate=100 → always includes lightweight
-	assert.Contains(t, tiers, TierLightweight)
-}
-
-func TestResolveEvalTiers_NoResolver_UsesDefaults(t *testing.T) {
-	w := &EvalWorker{logger: testLogger()}
-	event := api.SessionEvent{SessionID: "s1"}
-	tiers := w.resolveEvalTiers(context.Background(), event)
-	assert.Contains(t, tiers, TierLightweight)
-}
-
-func TestProcessAssistantMessage_FiltersExtendedEvals(t *testing.T) {
-	packLoader := newTestPackLoader("ns", "test-pack", []EvalDef{
-		{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
-		{ID: "e2", Type: "llm_judge", Trigger: "per_turn"},
+func TestEvalCollector_DelegatesToSDKRunner(t *testing.T) {
+	collector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
+		Registerer: prometheus.NewRegistry(),
+		Namespace:  "omnia_eval",
 	})
-
-	msgs := []session.Message{
-		{ID: "m1", Role: session.RoleUser, Content: "test"},
-		{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
-	}
-
-	writer := &mockResultWriter{}
-	store := &mockMessageStore{
-		sess:     &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
-		messages: toMessagePtrs(msgs),
-	}
-
-	// Use a sampler that only allows lightweight evals (extendedRate=0).
+	runner := NewSDKRunner(WithEvalCollector(collector))
 	w := &EvalWorker{
-		resultWriter: writer,
+		sdkRunner: runner,
+		logger:    testLogger(),
+	}
+
+	assert.Equal(t, collector, w.EvalCollector())
+}
+
+func TestEvalCollector_NilWhenRunnerHasNone(t *testing.T) {
+	runner := NewSDKRunner()
+	w := &EvalWorker{
+		sdkRunner: runner,
+		logger:    testLogger(),
+	}
+
+	assert.Nil(t, w.EvalCollector())
+}
+
+func TestProcessEvent_EvaluateRequest_RunsAllEvals(t *testing.T) {
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("e1", runtimeevals.TriggerEveryTurn, "hello"),
+		containsEvalDef("e2", runtimeevals.TriggerOnSessionComplete, "bye"),
+	})
+	rw := &mockResultWriter{}
+	store := &mockMessageStore{
+		sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+		messages: toMessagePtrs([]session.Message{
+			{ID: "m1", Role: session.RoleUser, Content: "hi"},
+			{ID: "m2", Role: session.RoleAssistant, Content: "hello and bye"},
+		}),
+	}
+
+	w := &EvalWorker{
 		messageStore: store,
+		resultWriter: rw,
 		namespaces:   []string{"ns"},
 		logger:       testLogger(),
 		packLoader:   packLoader,
 	}
 
 	event := api.SessionEvent{
-		EventType:         eventTypeMessage,
-		SessionID:         "s1",
-		AgentName:         "test-agent",
-		Namespace:         "ns",
-		MessageID:         "m2",
-		MessageRole:       "assistant",
-		PromptPackName:    "test-pack",
-		PromptPackVersion: "v1",
-		EvalTiers:         []string{TierLightweight}, // Only lightweight
+		EventType:      eventTypeEvaluate,
+		SessionID:      "s1",
+		AgentName:      "test-agent",
+		Namespace:      "ns",
+		PromptPackName: "test-pack",
 	}
 
-	err := w.processAssistantMessage(context.Background(), event)
+	err := w.processEvent(context.Background(), event)
 	require.NoError(t, err)
 
-	// Only lightweight eval (e1) should have run, not llm_judge (e2).
-	require.NotEmpty(t, writer.written)
-	for _, r := range writer.written {
-		assert.NotEqual(t, "e2", r.EvalID, "extended eval should be filtered out")
+	// Verify results were written with source "manual".
+	require.NotEmpty(t, rw.written)
+	for _, r := range rw.written {
+		assert.Equal(t, "manual", r.Source, "evaluate results should have source=manual")
 	}
 }
 
-func TestProcessAssistantMessage_SampledOut_SkipsEverything(t *testing.T) {
-	writer := &mockResultWriter{}
+func TestProcessEvent_EvaluateRequest_NoPack(t *testing.T) {
+	rw := &mockResultWriter{}
 	store := &mockMessageStore{
 		sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
 	}
 
 	w := &EvalWorker{
-		resultWriter: writer,
 		messageStore: store,
+		resultWriter: rw,
 		namespaces:   []string{"ns"},
 		logger:       testLogger(),
-		packLoader: newTestPackLoader("ns", "test-pack", []EvalDef{
-			{ID: "e1", Type: "contains", Trigger: "per_turn", Params: map[string]any{"patterns": []any{"hello"}}},
-		}),
 	}
 
 	event := api.SessionEvent{
-		EventType:         eventTypeMessage,
-		SessionID:         "s1",
-		AgentName:         "test-agent",
-		Namespace:         "ns",
-		MessageID:         "m2",
-		MessageRole:       "assistant",
-		PromptPackName:    "test-pack",
-		PromptPackVersion: "v1",
-		EvalTiers:         []string{}, // Sampled out — empty tiers
+		EventType: eventTypeEvaluate,
+		SessionID: "s1",
+		AgentName: "test-agent",
+		Namespace: "ns",
 	}
 
-	err := w.processAssistantMessage(context.Background(), event)
+	err := w.processEvent(context.Background(), event)
 	require.NoError(t, err)
-	assert.Empty(t, writer.written, "sampled-out session should produce no results")
+	assert.Empty(t, rw.written, "no evals should run without a pack")
 }
 
-func TestBuildEvalDefMap(t *testing.T) {
-	defs := []EvalDef{
-		{ID: "e1", Metric: &runtimeevals.MetricDef{Name: "response_conciseness", Type: runtimeevals.MetricBoolean}},
-		{ID: "e2"}, // no metric
-		{ID: "e3", Metric: &runtimeevals.MetricDef{Name: "session_helpfulness", Type: runtimeevals.MetricGauge}},
-	}
-
-	m := buildEvalDefMap(defs)
-	assert.Len(t, m, 2)
-	assert.Equal(t, "response_conciseness", m["e1"].Name)
-	assert.Equal(t, runtimeevals.MetricBoolean, m["e1"].Type)
-	assert.Equal(t, "session_helpfulness", m["e3"].Name)
-	assert.Equal(t, runtimeevals.MetricGauge, m["e3"].Type)
-	assert.Nil(t, m["e2"])
-}
-
-func TestRecordEvalCollectorMetric_UsesActualMetricDef(t *testing.T) {
-	collector := runtimeevals.NewMetricCollector(
-		runtimeevals.WithNamespace("omnia_eval"),
-	)
-	w := &EvalWorker{
-		evalCollector: collector,
-		logger:        testLogger(),
-	}
-
-	score := 0.85
-	r := &api.EvalResult{
-		EvalID:         "session-helpfulness",
-		EvalType:       "llm_judge",
-		Passed:         true,
-		Score:          &score,
-		AgentName:      "test-agent",
-		Namespace:      "ns",
-		PromptPackName: "pack",
-	}
-	metricDef := &runtimeevals.MetricDef{
-		Name: "session_helpfulness",
-		Type: runtimeevals.MetricGauge,
-	}
-
-	// Should not panic and should record successfully.
-	w.recordEvalCollectorMetric(r, metricDef)
-}
-
-func TestRecordEvalCollectorMetric_FallbackWhenNoMetricDef(t *testing.T) {
-	collector := runtimeevals.NewMetricCollector(
-		runtimeevals.WithNamespace("omnia_eval"),
-	)
-	w := &EvalWorker{
-		evalCollector: collector,
-		logger:        testLogger(),
-	}
-
-	r := &api.EvalResult{
-		EvalID:         "e1",
-		EvalType:       "contains",
-		Passed:         true,
-		AgentName:      "test-agent",
-		Namespace:      "ns",
-		PromptPackName: "pack",
-	}
-
-	// nil metricDef should fall back to boolean with eval ID as name.
-	w.recordEvalCollectorMetric(r, nil)
-}
-
-func TestRecordEvalCollectorMetric_NilCollector(t *testing.T) {
-	w := &EvalWorker{
-		evalCollector: nil,
-		logger:        testLogger(),
-	}
-
-	r := &api.EvalResult{EvalID: "e1"}
-	// Should not panic when collector is nil.
-	w.recordEvalCollectorMetric(r, nil)
+func TestIsEvaluateEvent(t *testing.T) {
+	assert.True(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeEvaluate}))
+	assert.False(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeMessage}))
+	assert.False(t, isEvaluateEvent(api.SessionEvent{EventType: eventTypeSessionDone}))
 }
 
 // Ensure unused import suppressors compile.

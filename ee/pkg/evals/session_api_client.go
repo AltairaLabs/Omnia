@@ -186,13 +186,16 @@ func encodeEvalListQuery(opts api.EvalResultListOpts) string {
 		q.Set("offset", strconv.Itoa(opts.Offset))
 	}
 	if opts.AgentName != "" {
-		q.Set("agent_name", opts.AgentName)
+		q.Set("agentName", opts.AgentName)
 	}
 	if opts.Namespace != "" {
 		q.Set("namespace", opts.Namespace)
 	}
 	if opts.EvalID != "" {
-		q.Set("eval_id", opts.EvalID)
+		q.Set("evalId", opts.EvalID)
+	}
+	if opts.EvalType != "" {
+		q.Set("evalType", opts.EvalType)
 	}
 	return q.Encode()
 }

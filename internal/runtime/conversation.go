@@ -93,8 +93,8 @@ func (s *Server) createConversation(ctx context.Context, sessionID string) (*sdk
 		}
 	}
 
-	// Subscribe to event bus metrics for observability
-	s.subscribeToEventBusMetrics(sessionID, conv)
+	// Subscribe to event bus logging for observability
+	s.subscribeToEventBusLogging(sessionID, conv)
 
 	return conv, nil
 }
@@ -146,21 +146,16 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		"evalDefCount", len(s.evalDefs))
 	opts = append(opts, evalOpts...)
 
-	// Wire event store for session recording (Pattern C) and/or eval metrics.
-	// The event store is needed when either session-api recording or eval
-	// Prometheus metrics are enabled.
-	if s.sessionStore != nil || s.evalMetrics != nil {
+	// Wire event store for session recording (Pattern C).
+	if s.sessionStore != nil {
 		eventStore := NewOmniaEventStore(s.sessionStore, s.log)
+		eventStore.SetSessionID(sessionID)
 		if s.toolExecutor != nil {
 			eventStore.SetToolMetaFn(s.toolExecutor.GetToolMeta)
 		}
-		if s.evalMetrics != nil {
-			eventStore.SetEvalMetrics(s.evalMetrics)
-		}
 		opts = append(opts, sdk.WithEventStore(eventStore))
 		log.V(1).Info("event store wired",
-			"hasSessionStore", s.sessionStore != nil,
-			"hasEvalMetrics", s.evalMetrics != nil)
+			"hasSessionStore", s.sessionStore != nil)
 	}
 
 	// Wire tracing provider into SDK for span propagation

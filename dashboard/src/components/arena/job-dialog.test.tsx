@@ -341,7 +341,7 @@ describe("JobDialog", () => {
       expect(screen.getByText("Job Name")).toBeInTheDocument();
     });
 
-    it("uses license info from useLicense hook", () => {
+    it("renders wizard without job type selector", () => {
       render(
         <TestWrapper>
           <JobDialog
@@ -352,15 +352,9 @@ describe("JobDialog", () => {
         </TestWrapper>
       );
 
-      // With isEnterprise: true, loadtest and datagen should be available
-      // The license hook is used to determine enterprise status
-      const typeSelect = screen.getByRole("combobox");
-      fireEvent.click(typeSelect);
-
-      // All options should be available (Evaluation, Load Test, Data Generation)
-      // Using queryAllByText to verify multiple elements with "Evaluation" exist (in select and options)
-      const evaluationTexts = screen.getAllByText("Evaluation");
-      expect(evaluationTexts.length).toBeGreaterThan(0);
+      // Job wizard shows name field but no type selector
+      expect(screen.getByText("Job Name")).toBeInTheDocument();
+      expect(screen.queryByText("Job Type")).not.toBeInTheDocument();
     });
   });
 
