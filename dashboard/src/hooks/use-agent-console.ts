@@ -24,6 +24,8 @@ interface UseAgentConsoleReturn extends ConsoleState {
   connect: () => void;
   disconnect: () => void;
   clearMessages: () => void;
+  approveToolCall: (callId: string, result: unknown) => void;
+  rejectToolCall: (callId: string, reason: string) => void;
 }
 
 /**
@@ -91,6 +93,40 @@ function extractAttachmentsFromParts(parts: ContentPart[]): FileAttachment[] {
         dataUrl,
       };
     });
+}
+
+/**
+ * Build the final content and attachments from a done message.
+ */
+function buildDoneContent(message: ServerMessage) {
+  const hasParts = message.parts && message.parts.length > 0;
+  const textFromParts = hasParts ? extractTextFromParts(message.parts!) : "";
+  const attachments = hasParts ? extractAttachmentsFromParts(message.parts!) : [];
+  return { finalContent: textFromParts || message.content || "", attachments };
+}
+
+/**
+ * Check if the last message in the list is a streaming assistant message.
+ */
+function isLastMessageStreamingAssistant(messages: ConsoleMessage[]): boolean {
+  const last = messages[messages.length - 1];
+  return !!last?.isStreaming && last.role === "assistant";
+}
+
+/**
+ * Build a ToolCallWithResult entry from a server tool_call message.
+ */
+function buildToolCallEntry(tc: NonNullable<ServerMessage["tool_call"]>) {
+  const isClient = tc.execution === "client";
+  return {
+    id: tc.id,
+    name: tc.name,
+    arguments: tc.arguments,
+    execution: tc.execution,
+    consent_message: tc.consent_message,
+    categories: tc.categories,
+    status: isClient ? "awaiting_consent" as const : "pending" as const,
+  };
 }
 
 /**
@@ -182,9 +218,7 @@ export function useAgentConsole({
 
       case "chunk": {
         // Append to existing streaming message or create new
-        const lastMsg = messagesRef.current[messagesRef.current.length - 1];
-        const isStreamingAssistant = lastMsg?.isStreaming && lastMsg.role === "assistant";
-        if (isStreamingAssistant) {
+        if (isLastMessageStreamingAssistant(messagesRef.current)) {
           updateLastMessageInStore((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
         } else {
           addMessageToStore({
@@ -200,12 +234,7 @@ export function useAgentConsole({
       }
 
       case "done": {
-        // Mark message as complete, with multi-modal content support
-        const hasParts = message.parts && message.parts.length > 0;
-        const textFromParts = hasParts ? extractTextFromParts(message.parts!) : "";
-        const attachments = hasParts ? extractAttachmentsFromParts(message.parts!) : [];
-        const finalContent = textFromParts || message.content || "";
-
+        const { finalContent, attachments } = buildDoneContent(message);
         updateLastMessageInStore((msg) => ({
           ...msg,
           isStreaming: false,
@@ -215,19 +244,26 @@ export function useAgentConsole({
         break;
       }
 
-      case "tool_call":
-        // Add tool call to current message
+      case "tool_call": {
         if (!message.tool_call) break;
+        const entry = buildToolCallEntry(message.tool_call);
+        // Ensure there's a streaming assistant message to attach the tool call to
+        if (!isLastMessageStreamingAssistant(messagesRef.current)) {
+          addMessageToStore({
+            id: generateId(),
+            role: "assistant",
+            content: "",
+            timestamp: new Date(message.timestamp),
+            isStreaming: true,
+            toolCalls: [],
+          });
+        }
         updateLastMessageInStore((msg) => ({
           ...msg,
-          toolCalls: [...(msg.toolCalls || []), {
-            id: message.tool_call!.id,
-            name: message.tool_call!.name,
-            arguments: message.tool_call!.arguments,
-            status: "pending" as const,
-          }],
+          toolCalls: [...(msg.toolCalls || []), entry],
         }));
         break;
+      }
 
       case "tool_result":
         // Update tool call with result
@@ -329,6 +365,33 @@ export function useAgentConsole({
     }
   }, [addMessageToStore, setStatus]);
 
+  // Approve a client-side tool call
+  const approveToolCall = useCallback((callId: string, result: unknown) => {
+    if (connectionRef.current?.sendToolResult) {
+      connectionRef.current.sendToolResult(callId, result);
+    }
+    updateLastMessageInStore((msg) => ({
+      ...msg,
+      toolCalls: msg.toolCalls?.map((tc) =>
+        tc.id === callId ? { ...tc, status: "success" as const, result } : tc
+      ),
+    }));
+  }, [updateLastMessageInStore]);
+
+  // Reject a client-side tool call
+  const rejectToolCall = useCallback((callId: string, reason: string) => {
+    if (connectionRef.current?.sendToolResult) {
+      connectionRef.current.sendToolResult(callId, undefined, reason);
+    }
+    // Update tool call status to error
+    updateLastMessageInStore((msg) => ({
+      ...msg,
+      toolCalls: msg.toolCalls?.map((tc) =>
+        tc.id === callId ? { ...tc, status: "error" as const, error: `Rejected: ${reason}` } : tc
+      ),
+    }));
+  }, [updateLastMessageInStore]);
+
   // Clear messages and reset session
   const clearMessages = useCallback(() => {
     storeClearMessages(tabId);
@@ -355,5 +418,7 @@ export function useAgentConsole({
     connect,
     disconnect,
     clearMessages,
+    approveToolCall,
+    rejectToolCall,
   };
 }

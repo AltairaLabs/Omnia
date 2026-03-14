@@ -12,6 +12,7 @@ import { AttachmentPreview } from "./attachment-preview";
 import { ImageCropDialog } from "./image-crop-dialog";
 import { isAllowedType, formatFileSize, needsResize } from "./attachment-utils";
 import { blobToDataUrl, getImageDimensions } from "@/lib/image-processor";
+import { getClientToolHandler, isAutoApproved, setAutoApproved } from "@/lib/client-tools";
 import type { FileAttachment } from "@/types/websocket";
 
 /**
@@ -115,6 +116,8 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     connect,
     disconnect,
     clearMessages,
+    approveToolCall,
+    rejectToolCall,
   } = useAgentConsole({
     agentName,
     namespace,
@@ -126,6 +129,40 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     connect();
     return () => disconnect();
   }, [connect, disconnect]);
+
+  // Execute a client-side tool and send the result
+  const executeClientTool = useCallback((callId: string, toolName: string, args?: Record<string, unknown>) => {
+    const handler = getClientToolHandler(toolName);
+    if (handler) {
+      handler(args)
+        .then((result) => approveToolCall(callId, result))
+        .catch((err) => rejectToolCall(callId, err instanceof Error ? err.message : String(err)));
+    } else {
+      approveToolCall(callId, { approved: true });
+    }
+  }, [approveToolCall, rejectToolCall]);
+
+  const handleApproveToolCall = useCallback((callId: string, toolName: string, args?: Record<string, unknown>) => {
+    executeClientTool(callId, toolName, args);
+  }, [executeClientTool]);
+
+  const handleAlwaysApproveToolCall = useCallback((callId: string, toolName: string, args?: Record<string, unknown>) => {
+    setAutoApproved(toolName);
+    executeClientTool(callId, toolName, args);
+  }, [executeClientTool]);
+
+  // Auto-execute client tools that have been previously "Always Allow"-ed
+  const autoExecutedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const msg of messages) {
+      for (const tc of msg.toolCalls || []) {
+        if (tc.status === "awaiting_consent" && tc.execution === "client" && !autoExecutedRef.current.has(tc.id) && isAutoApproved(tc.name)) {
+          autoExecutedRef.current.add(tc.id);
+          executeClientTool(tc.id, tc.name, tc.arguments);
+        }
+      }
+    }
+  }, [messages, executeClientTool]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -495,7 +532,13 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
         ) : (
           <div className="flex flex-col gap-4" data-testid="message-list">
             {messages.map((message) => (
-              <ConsoleMessage key={message.id} message={message} />
+              <ConsoleMessage
+                key={message.id}
+                message={message}
+                onApproveToolCall={handleApproveToolCall}
+                onAlwaysApproveToolCall={handleAlwaysApproveToolCall}
+                onRejectToolCall={rejectToolCall}
+              />
             ))}
             {/* Thinking indicator while waiting for response */}
             {isWaitingForResponse && <ThinkingIndicator />}

@@ -28,12 +28,23 @@ export type MessageType =
 
 // Client → Server message
 export interface ClientMessage {
-  type: "message";
+  type: "message" | "tool_result";
   session_id?: string;
   content: string;
   /** Multi-modal content parts (images, audio, etc.). Takes precedence over content. */
   parts?: ContentPart[];
   metadata?: Record<string, string>;
+}
+
+// Client → Server: client-side tool result
+export interface ClientToolResultMessage {
+  type: "tool_result";
+  session_id?: string;
+  tool_result: {
+    call_id: string;
+    result?: unknown;
+    error?: string;
+  };
 }
 
 // Connection capabilities for binary frame support
@@ -120,6 +131,9 @@ export interface ToolCallInfo {
   id: string;
   name: string;
   arguments?: Record<string, unknown>;
+  execution?: "server" | "client";
+  consent_message?: string;
+  categories?: string[];
 }
 
 export interface ToolResultInfo {
@@ -162,7 +176,10 @@ export interface ToolCallWithResult {
   arguments?: Record<string, unknown>;
   result?: unknown;
   error?: string;
-  status: "pending" | "success" | "error";
+  status: "pending" | "awaiting_consent" | "success" | "error";
+  execution?: "server" | "client";
+  consent_message?: string;
+  categories?: string[];
 }
 
 // Connection status

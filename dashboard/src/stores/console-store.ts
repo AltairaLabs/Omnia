@@ -102,6 +102,13 @@ export const useConsoleStore = create<ConsoleStore>()(
       createTab: () => {
         const state = get();
 
+        // If there's already a tab in "selecting" state, switch to it
+        const existingSelector = state.tabs.find((t) => t.state === "selecting");
+        if (existingSelector) {
+          set({ activeTabId: existingSelector.id });
+          return existingSelector.id;
+        }
+
         // Enforce max tab limit - remove oldest inactive tab if at limit
         let tabs = state.tabs;
         if (tabs.length >= MAX_TABS) {

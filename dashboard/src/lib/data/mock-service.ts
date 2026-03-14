@@ -359,6 +359,10 @@ export class MockAgentConnection implements AgentConnection {
     this.simulateResponse(content);
   }
 
+  sendToolResult(_callId: string, _result?: unknown, _error?: string): void {
+    // No-op in mock mode
+  }
+
   onMessage(handler: (message: ServerMessage) => void): () => void {
     this.messageHandlers.push(handler);
     return () => {

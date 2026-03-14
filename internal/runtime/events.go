@@ -147,6 +147,25 @@ func (s *Server) subscribeToEventBusLogging(sessionID string, conv *sdk.Conversa
 		)
 	}))
 
+	// Subscribe to client tool request events for logging
+	unsubs = append(unsubs, eventBus.Subscribe(events.EventClientToolRequest, func(e *events.Event) {
+		data, ok := asPtr[events.ClientToolRequestData](e.Data)
+		if !ok {
+			return
+		}
+
+		s.log.V(1).Info("event: client tool requested",
+			"sessionID", sessionID,
+			"toolName", data.ToolName,
+			"callID", data.CallID,
+			"consentMsg", data.ConsentMsg,
+			"categories", data.Categories,
+		)
+	}))
+
+	// NOTE: EventClientToolResolved subscription will be added when the
+	// published PromptKit SDK includes the tool.client.resolved event type.
+
 	// Subscribe to tool call completed events for logging
 	unsubs = append(unsubs, eventBus.Subscribe(events.EventToolCallCompleted, func(e *events.Event) {
 		data, ok := asPtr[events.ToolCallCompletedData](e.Data)

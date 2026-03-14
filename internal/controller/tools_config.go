@@ -40,14 +40,21 @@ type ToolConfig struct {
 type HandlerEntry struct {
 	Name          string          `json:"name"`
 	Type          string          `json:"type"`
-	Endpoint      string          `json:"endpoint"`
-	Tool          *ToolDefinition `json:"tool,omitempty"` // For http/grpc handlers
+	Endpoint      string          `json:"endpoint,omitempty"`
+	Tool          *ToolDefinition `json:"tool,omitempty"` // For http/grpc/client handlers
 	HTTPConfig    *ToolHTTP       `json:"httpConfig,omitempty"`
 	GRPCConfig    *ToolGRPC       `json:"grpcConfig,omitempty"`
 	MCPConfig     *ToolMCP        `json:"mcpConfig,omitempty"`
 	OpenAPIConfig *ToolOpenAPI    `json:"openAPIConfig,omitempty"`
+	ClientConfig  *ToolClient     `json:"clientConfig,omitempty"`
 	Timeout       string          `json:"timeout,omitempty"`
 	Retries       int32           `json:"retries,omitempty"`
+}
+
+// ToolClient contains client-side tool configuration for the runtime.
+type ToolClient struct {
+	ConsentMessage string   `json:"consentMessage,omitempty"`
+	Categories     []string `json:"categories,omitempty"`
 }
 
 // ToolDefinition represents the tool interface for HTTP/gRPC handlers.
@@ -326,6 +333,14 @@ func buildHandlerEntry(h *omniav1alpha1.HandlerDefinition, endpoint string) Hand
 		entry.MCPConfig = buildMCPConfig(h)
 	case omniav1alpha1.HandlerTypeOpenAPI:
 		entry.OpenAPIConfig = buildOpenAPIConfig(h)
+	case omniav1alpha1.HandlerTypeClient:
+		entry.Tool = buildToolDefinition(h.Tool)
+		if h.ClientConfig != nil {
+			entry.ClientConfig = &ToolClient{
+				ConsentMessage: h.ClientConfig.ConsentMessage,
+				Categories:     h.ClientConfig.Categories,
+			}
+		}
 	}
 
 	return entry
@@ -338,6 +353,11 @@ func (r *AgentRuntimeReconciler) buildToolsConfig(toolRegistry *omniav1alpha1.To
 	}
 
 	for _, h := range toolRegistry.Spec.Handlers {
+		// Client handlers have no backend endpoint
+		if h.Type == omniav1alpha1.HandlerTypeClient {
+			config.Handlers = append(config.Handlers, buildHandlerEntry(&h, ""))
+			continue
+		}
 		endpoint := findEndpoint(toolRegistry, h.Name)
 		if endpoint == "" {
 			continue

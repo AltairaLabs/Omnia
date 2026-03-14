@@ -97,6 +97,14 @@ type MessageHandler interface {
 	HandleMessage(ctx context.Context, sessionID string, msg *ClientMessage, writer ResponseWriter) error
 }
 
+// ClientToolRouter routes client-side tool results to the active handler.
+// Implemented by handlers that support bidirectional client tool execution.
+type ClientToolRouter interface {
+	// SendToolResult delivers a client tool result to the handler waiting for it.
+	// Returns true if the result was routed to an active handler, false otherwise.
+	SendToolResult(sessionID string, result *ClientToolResultInfo) bool
+}
+
 // ResponseWriter allows sending responses back to the client.
 type ResponseWriter interface {
 	// WriteChunk sends a chunk of the response.

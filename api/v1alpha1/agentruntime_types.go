@@ -97,6 +97,11 @@ type FacadeConfig struct {
 	// Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
 	// +optional
 	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+
+	// clientToolTimeout is the max time to wait for client tool responses per turn.
+	// Defaults to 60s.
+	// +optional
+	ClientToolTimeout *metav1.Duration `json:"clientToolTimeout,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.

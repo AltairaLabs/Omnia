@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -83,10 +84,19 @@ func (s *Server) processMessage(ctx context.Context, stream runtimev1.RuntimeSer
 	sendOpts := buildSendOptions(msg.GetParts(), log)
 
 	// Stream response and collect results
-	finalResponse, accumulatedContent, err := s.streamResponse(ctx, stream, conv, messageContent, sendOpts)
+	finalResponse, accumulatedContent, pendingTools, err := s.streamResponse(ctx, stream, conv, messageContent, sendOpts)
 	if err != nil {
 		tracing.RecordError(span, err)
 		return err
+	}
+
+	// If there are pending client tools, process the tool loop
+	if len(pendingTools) > 0 {
+		finalResponse, accumulatedContent, err = s.processClientTools(ctx, stream, conv, pendingTools, log)
+		if err != nil {
+			tracing.RecordError(span, err)
+			return err
+		}
 	}
 
 	// Build and send the done message
@@ -134,7 +144,8 @@ func (s *Server) prepareMessageContent(content string, scenario string, log logr
 }
 
 // streamResponse streams the LLM response and sends chunks to the client.
-func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, content string, opts []sdk.SendOption) (*sdk.Response, string, error) {
+// Returns pending client tools if the stream yielded ChunkClientTool chunks.
+func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, content string, opts []sdk.SendOption) (*sdk.Response, string, []*sdk.PendingClientTool, error) {
 	log := logctx.LoggerWithContext(s.log, ctx)
 	log.V(1).Info("stream starting",
 		"hasEvalCollector", s.evalCollector != nil,
@@ -156,8 +167,26 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 		"traceID", trace.SpanFromContext(ctx).SpanContext().TraceID().String(),
 		"spanID", trace.SpanFromContext(ctx).SpanContext().SpanID().String())
 	streamCh := conv.Stream(ctx, content, opts...)
+
+	finalResponse, accContent, pendingTools, err := s.consumeStream(ctx, stream, streamCh, log, llmSpan)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return finalResponse, accContent, pendingTools, nil
+}
+
+// consumeStream drains a stream channel, forwarding chunks and collecting pending client tools.
+func (s *Server) consumeStream(
+	ctx context.Context,
+	stream runtimev1.RuntimeService_ConverseServer,
+	streamCh <-chan sdk.StreamChunk,
+	log logr.Logger,
+	llmSpan trace.Span,
+) (*sdk.Response, string, []*sdk.PendingClientTool, error) {
 	var finalResponse *sdk.Response
 	var accumulatedContent strings.Builder
+	var pendingTools []*sdk.PendingClientTool
 
 	for chunk := range streamCh {
 		if chunk.Error != nil {
@@ -166,34 +195,23 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 			if llmSpan != nil {
 				tracing.RecordError(llmSpan, chunk.Error)
 			}
-			return nil, "", fmt.Errorf("failed to send message: provider stream failed: %w", chunk.Error)
+			return nil, "", nil, fmt.Errorf("failed to send message: provider stream failed: %w", chunk.Error)
 		}
 
 		switch chunk.Type {
 		case sdk.ChunkText:
-			if chunk.Text != "" {
-				accumulatedContent.WriteString(chunk.Text)
-				if err := stream.Send(&runtimev1.ServerMessage{
-					Message: &runtimev1.ServerMessage_Chunk{
-						Chunk: &runtimev1.Chunk{Content: chunk.Text},
-					},
-				}); err != nil {
-					return nil, "", fmt.Errorf("failed to send chunk: %w", err)
-				}
+			if err := s.handleChunkText(stream, chunk.Text, &accumulatedContent); err != nil {
+				return nil, "", nil, err
 			}
 		case sdk.ChunkMedia:
-			if chunk.Media != nil {
-				mediaChunk, err := buildMediaChunk(ctx, s, chunk.Media)
-				if err != nil {
-					log.Error(err, "failed to build media chunk")
-					continue
-				}
-				if err := stream.Send(&runtimev1.ServerMessage{
-					Message: &runtimev1.ServerMessage_MediaChunk{
-						MediaChunk: mediaChunk,
-					},
-				}); err != nil {
-					return nil, "", fmt.Errorf("failed to send media chunk: %w", err)
+			if err := s.handleChunkMedia(ctx, stream, chunk.Media, log); err != nil {
+				return nil, "", nil, err
+			}
+		case sdk.ChunkClientTool:
+			if chunk.ClientTool != nil {
+				pendingTools = append(pendingTools, chunk.ClientTool)
+				if err := sendClientToolCall(stream, chunk.ClientTool); err != nil {
+					return nil, "", nil, err
 				}
 			}
 		case sdk.ChunkDone:
@@ -210,9 +228,128 @@ func (s *Server) streamResponse(ctx context.Context, stream runtimev1.RuntimeSer
 
 	log.V(1).Info("stream complete",
 		"hasResponse", finalResponse != nil,
-		"responseLength", accumulatedContent.Len())
+		"responseLength", accumulatedContent.Len(),
+		"pendingClientTools", len(pendingTools))
 
-	return finalResponse, accumulatedContent.String(), nil
+	return finalResponse, accumulatedContent.String(), pendingTools, nil
+}
+
+// handleChunkText sends a text chunk on the gRPC stream.
+func (s *Server) handleChunkText(stream runtimev1.RuntimeService_ConverseServer, text string, acc *strings.Builder) error {
+	if text == "" {
+		return nil
+	}
+	acc.WriteString(text)
+	return stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_Chunk{
+			Chunk: &runtimev1.Chunk{Content: text},
+		},
+	})
+}
+
+// handleChunkMedia sends a media chunk on the gRPC stream.
+func (s *Server) handleChunkMedia(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, media *types.MediaContent, log logr.Logger) error {
+	if media == nil {
+		return nil
+	}
+	mediaChunk, err := buildMediaChunk(ctx, s, media)
+	if err != nil {
+		log.Error(err, "failed to build media chunk")
+		return nil // non-fatal
+	}
+	return stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_MediaChunk{
+			MediaChunk: mediaChunk,
+		},
+	})
+}
+
+// sendClientToolCall sends a ToolCall with execution=CLIENT on the gRPC stream.
+func sendClientToolCall(stream runtimev1.RuntimeService_ConverseServer, pending *sdk.PendingClientTool) error {
+	argsJSON, _ := json.Marshal(pending.Args)
+	return stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_ToolCall{
+			ToolCall: &runtimev1.ToolCall{
+				Id:             pending.CallID,
+				Name:           pending.ToolName,
+				ArgumentsJson:  string(argsJSON),
+				Execution:      runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+				ConsentMessage: pending.ConsentMsg,
+				Categories:     pending.Categories,
+			},
+		},
+	})
+}
+
+// processClientTools handles the client tool loop: collects results from the
+// gRPC stream, resolves them in the SDK, then resumes the conversation.
+// Loops until no more client tools are pending.
+func (s *Server) processClientTools(
+	ctx context.Context,
+	stream runtimev1.RuntimeService_ConverseServer,
+	conv *sdk.Conversation,
+	pendingTools []*sdk.PendingClientTool,
+	log logr.Logger,
+) (*sdk.Response, string, error) {
+	for len(pendingTools) > 0 {
+		// Collect results from the facade for each pending tool
+		if err := s.collectClientToolResults(ctx, stream, conv, len(pendingTools), log); err != nil {
+			return nil, "", err
+		}
+
+		// Resume the conversation — may yield more client tools
+		resumeCh := conv.ResumeStream(ctx)
+		finalResp, accContent, newPending, err := s.consumeStream(ctx, stream, resumeCh, log, nil)
+		if err != nil {
+			return nil, "", err
+		}
+
+		if len(newPending) == 0 {
+			return finalResp, accContent, nil
+		}
+		pendingTools = newPending
+	}
+	return nil, "", nil
+}
+
+// collectClientToolResults reads tool results from the gRPC stream and resolves them in the SDK.
+func (s *Server) collectClientToolResults(
+	ctx context.Context,
+	stream runtimev1.RuntimeService_ConverseServer,
+	conv *sdk.Conversation,
+	count int,
+	log logr.Logger,
+) error {
+	for i := 0; i < count; i++ {
+		msg, err := stream.Recv()
+		if err != nil {
+			return fmt.Errorf("failed to receive client tool result: %w", err)
+		}
+
+		result := msg.GetClientToolResult()
+		if result == nil {
+			return fmt.Errorf("expected ClientToolResult, got other message type")
+		}
+
+		if result.IsRejected {
+			log.V(1).Info("client tool rejected",
+				"callID", result.CallId,
+				"reason", result.RejectionReason)
+			conv.RejectClientTool(ctx, result.CallId, result.RejectionReason)
+		} else {
+			log.V(1).Info("client tool resolved",
+				"callID", result.CallId)
+			// Parse the JSON string so the SDK doesn't double-encode it
+			var parsed interface{}
+			if err := json.Unmarshal([]byte(result.ResultJson), &parsed); err != nil {
+				parsed = result.ResultJson // fall back to raw string
+			}
+			if err := conv.SendToolResult(ctx, result.CallId, parsed); err != nil {
+				return fmt.Errorf("failed to send tool result to SDK: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 // buildMediaChunk converts a PromptKit MediaContent into a gRPC MediaChunk.

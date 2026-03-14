@@ -61,6 +61,24 @@ spec:
                   description: HandlerDefinition defines a tool handler that exposes
                     one or more tools
                   properties:
+                    clientConfig:
+                      description: |-
+                        clientConfig contains client-side tool configuration.
+                        Used when type is "client".
+                      properties:
+                        categories:
+                          description: |-
+                            categories are semantic consent categories (e.g., "location", "camera").
+                            Clients can use these to remember consent preferences per category.
+                          items:
+                            type: string
+                          type: array
+                        consentMessage:
+                          description: |-
+                            consentMessage is a human-readable message shown to the user before
+                            the tool is executed. If empty, the tool runs without a consent prompt.
+                          type: string
+                      type: object
                     grpcConfig:
                       description: |-
                         grpcConfig contains gRPC-specific configuration.
@@ -361,6 +379,7 @@ spec:
                       - openapi
                       - grpc
                       - mcp
+                      - client
                       type: string
                   required:
                   - name

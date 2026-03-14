@@ -19,10 +19,10 @@ package runtime
 import (
 	"context"
 
+	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 	"github.com/AltairaLabs/PromptKit/sdk"
 
-	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
-
+	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/pkg/logctx"
 )
 
@@ -49,10 +49,14 @@ func (s *Server) registerToolsWithConversation(ctx context.Context, conv *sdk.Co
 	var updated, registered int
 	for _, name := range toolNames {
 		if desc := registry.Get(name); desc != nil {
+			// Determine the mode from the executor's descriptor
+			mode := s.toolExecutor.Name()
+			if d, ok := descriptorsByName[name]; ok && d.Mode == tools.ToolTypeClient {
+				mode = tools.ToolTypeClient
+			}
 			// Tool already exists in the pack — update its mode so the
-			// registry dispatches it through our executor instead of the
-			// default local executor.
-			desc.Mode = s.toolExecutor.Name()
+			// registry dispatches it through our executor (or "client" for client tools).
+			desc.Mode = mode
 			updated++
 			continue
 		}

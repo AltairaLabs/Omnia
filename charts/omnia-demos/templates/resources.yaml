@@ -444,7 +444,7 @@ data:
           "name": "Tools Assistant",
           "version": "1.1.0",
           "system_template": {{ .Values.toolsDemo.promptPack.systemPrompt | toJson }},
-          "tools": ["search_places", "get_weather", "calculate"],
+          "tools": ["search_places", "get_weather", "calculate", "get_user_location"],
           "parameters": {
             "temperature": 0.7
           },
@@ -618,6 +618,20 @@ data:
             },
             "required": ["expr"]
           }
+        },
+        "get_user_location": {
+          "name": "get_user_location",
+          "description": "Get the user's current location from their device. Use this when the user asks about weather, restaurants, or services near them without specifying a city.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "accuracy": {
+                "type": "string",
+                "enum": ["high", "low"],
+                "description": "GPS accuracy level — high for precise, low for approximate"
+              }
+            }
+          }
         }
       },
 
@@ -790,6 +804,22 @@ spec:
         outputSchema:
           type: string
           description: The computed result as a string (e.g. "14", "4", "1")
+    - name: user-location
+      type: client
+      clientConfig:
+        consentMessage: "This agent wants to access your location to provide local results."
+        categories:
+          - location
+      tool:
+        name: get_user_location
+        description: Get the user's current location from their device. Use this when the user asks about weather, restaurants, or services near them without specifying a city.
+        inputSchema:
+          type: object
+          properties:
+            accuracy:
+              type: string
+              enum: ["high", "low"]
+              description: GPS accuracy level — high for precise, low for approximate
 ---
 # Tools Demo AgentRuntime using llama3.2 with tool capabilities
 apiVersion: omnia.altairalabs.ai/v1alpha1

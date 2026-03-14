@@ -536,6 +536,11 @@ spec:
               facade:
                 description: facade configures the client-facing connection interface.
                 properties:
+                  clientToolTimeout:
+                    description: |-
+                      clientToolTimeout is the max time to wait for client tool responses per turn.
+                      Defaults to 60s.
+                    type: string
                   extraEnv:
                     description: |-
                       extraEnv defines additional environment variables for the facade container.

@@ -207,6 +207,25 @@ export class LiveAgentConnection implements AgentConnection {
     this.ws.send(JSON.stringify(message));
   }
 
+  sendToolResult(callId: string, result?: unknown, error?: string): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      console.warn("Cannot send tool result: not connected");
+      return;
+    }
+
+    const message = {
+      type: "tool_result" as const,
+      session_id: this.sessionId || undefined,
+      tool_result: {
+        call_id: callId,
+        result,
+        error,
+      },
+    };
+
+    this.ws.send(JSON.stringify(message));
+  }
+
   onMessage(handler: (message: ServerMessage) => void): () => void {
     this.messageHandlers.push(handler);
     return () => {

@@ -250,7 +250,7 @@ toolsDemo:
       Use the available tools when they can help answer the user's question.
       Always explain what you're doing when using tools.
 
-      For weather queries: first use search_places to find the location's coordinates, then use get_weather with those coordinates.
+      For weather queries: if the user says "near me" or doesn't specify a city, use get_user_location first, then get_weather with those coordinates. If they name a city, use search_places to find coordinates, then get_weather.
       For math: use the calculate tool with mathematical expressions.
 
       Be concise and helpful in your responses.

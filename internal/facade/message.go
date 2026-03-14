@@ -73,10 +73,32 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 		return
 	}
 
+	// Route client-side tool results to the active handler
+	if clientMsg.Type == MessageTypeToolResult && clientMsg.ToolResult != nil {
+		if router, ok := s.handler.(ClientToolRouter); ok {
+			if router.SendToolResult(c.sessionID, clientMsg.ToolResult) {
+				return
+			}
+		}
+		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "no pending tool call")
+		return
+	}
+
 	s.metrics.RequestStarted()
+
+	// Process the message asynchronously so the read loop can continue
+	// reading tool_result messages while HandleMessage blocks waiting
+	// for client tool responses.
+	go s.processAndRecordMessage(ctx, c, &clientMsg, log)
+}
+
+// processAndRecordMessage processes a client message and records metrics.
+// Runs in a goroutine from handleClientMessage so the WebSocket read loop
+// stays alive to receive tool_result messages during client tool execution.
+func (s *Server) processAndRecordMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) {
 	startTime := time.Now()
 
-	err := s.processMessage(ctx, c, &clientMsg, log)
+	err := s.processMessage(ctx, c, msg, log)
 
 	duration := time.Since(startTime).Seconds()
 	status := "success"

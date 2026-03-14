@@ -14,6 +14,9 @@ import type { ConsoleMessage as ConsoleMessageType, FileAttachment } from "@/typ
 interface ConsoleMessageProps {
   message: ConsoleMessageType;
   className?: string;
+  onApproveToolCall?: (callId: string, toolName: string, args?: Record<string, unknown>) => void;
+  onAlwaysApproveToolCall?: (callId: string, toolName: string, args?: Record<string, unknown>) => void;
+  onRejectToolCall?: (callId: string, reason: string) => void;
 }
 
 function isImageType(type: string): boolean {
@@ -32,7 +35,7 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ConsoleMessage({ message, className }: Readonly<ConsoleMessageProps>) {
+export function ConsoleMessage({ message, className, onApproveToolCall, onAlwaysApproveToolCall, onRejectToolCall }: Readonly<ConsoleMessageProps>) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
@@ -221,7 +224,13 @@ export function ConsoleMessage({ message, className }: Readonly<ConsoleMessagePr
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="flex flex-col gap-2 w-full">
             {message.toolCalls.map((toolCall) => (
-              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+              <ToolCallCard
+                key={toolCall.id}
+                toolCall={toolCall}
+                onApprove={onApproveToolCall ? (id) => onApproveToolCall(id, toolCall.name, toolCall.arguments) : undefined}
+                onAlwaysApprove={onAlwaysApproveToolCall ? (id) => onAlwaysApproveToolCall(id, toolCall.name, toolCall.arguments) : undefined}
+                onReject={onRejectToolCall}
+              />
             ))}
           </div>
         )}
