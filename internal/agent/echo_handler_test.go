@@ -34,6 +34,10 @@ type mockResponseWriter struct {
 	mediaChunks []*facade.MediaChunkInfo
 	errors      []struct{ code, message string }
 	err         error
+
+	// toolCallCh is an optional channel that signals when a tool call is received.
+	// Tests that read toolCalls concurrently should use this for synchronization.
+	toolCallCh chan *facade.ToolCallInfo
 }
 
 func (m *mockResponseWriter) WriteChunk(content string) error {
@@ -73,6 +77,9 @@ func (m *mockResponseWriter) WriteToolCall(info *facade.ToolCallInfo) error {
 		return m.err
 	}
 	m.toolCalls = append(m.toolCalls, info)
+	if m.toolCallCh != nil {
+		m.toolCallCh <- info
+	}
 	return nil
 }
 

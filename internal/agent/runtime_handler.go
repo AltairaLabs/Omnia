@@ -204,8 +204,19 @@ func (h *RuntimeHandler) handleRecvResult(
 		return h.handleClientToolCall(ctx, stream, writer, result.resp, toolResultCh)
 	}
 
+	// Check if this is a Done message — the conversation turn is complete.
+	// Without this, both sides block on Recv() (deadlock): the runtime loops
+	// back to read the next client message while the facade waits for more
+	// server messages. The old code avoided this by calling CloseSend()
+	// before reading, but the client-tool flow needs the stream open.
+	_, isDone := result.resp.Message.(*runtimev1.ServerMessage_Done)
+
 	if err := h.forwardResponse(result.resp, writer); err != nil {
 		return fmt.Errorf("error forwarding response: %w", err)
+	}
+
+	if isDone {
+		return errStreamDone
 	}
 	return nil
 }
@@ -354,11 +365,14 @@ func (h *RuntimeHandler) forwardToolCall(tc *runtimev1.ToolCall, writer facade.R
 		Arguments: args,
 	}
 
-	// Add client tool fields
+	// Add client tool fields — copy Categories to avoid sharing the proto slice.
 	if tc.Execution == runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT {
 		info.Execution = "client"
 		info.ConsentMessage = tc.ConsentMessage
-		info.Categories = tc.Categories
+		if len(tc.Categories) > 0 {
+			info.Categories = make([]string, len(tc.Categories))
+			copy(info.Categories, tc.Categories)
+		}
 	}
 
 	return writer.WriteToolCall(info)
