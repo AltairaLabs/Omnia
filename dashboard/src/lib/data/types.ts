@@ -489,4 +489,7 @@ export interface AgentConnection {
    * Files larger than this should use the upload mechanism.
    */
   getMaxPayloadSize(): number | null;
+
+  /** Send a client-side tool result back to the agent */
+  sendToolResult?(callId: string, result?: unknown, error?: string): void;
 }

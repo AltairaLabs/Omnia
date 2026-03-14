@@ -200,6 +200,8 @@ func (e *OmniaExecutor) initHandler(ctx context.Context, name string, h *Handler
 		return e.initGRPCHandler(ctx, name, h)
 	case ToolTypeOpenAPI:
 		return e.initOpenAPIHandler(ctx, name, h)
+	case ToolTypeClient:
+		return e.initClientHandler(name, h)
 	default:
 		e.log.Info("unknown handler type", "handler", name, "type", h.Type)
 		return nil
@@ -268,6 +270,10 @@ func (e *OmniaExecutor) buildDescriptor(toolName string, h *HandlerEntry) *pktoo
 		e.buildOpenAPIDescriptor(desc, toolName, h.Name)
 	case ToolTypeGRPC:
 		e.buildGRPCDescriptor(desc, toolName, h.Name)
+	case ToolTypeClient:
+		// Client tools use mode="client" so the SDK emits ChunkClientTool
+		// instead of executing them server-side.
+		desc.Mode = ToolTypeClient
 	}
 
 	return desc
@@ -535,6 +541,19 @@ func (e *OmniaExecutor) Close() error {
 }
 
 // --- HTTP handler ---
+
+// initClientHandler registers a client-side tool. No backend connection needed —
+// the SDK handles routing to the client via ChunkClientTool.
+func (e *OmniaExecutor) initClientHandler(name string, h *HandlerEntry) error {
+	if h.Tool == nil {
+		e.log.Info("skipping client handler without tool definition", "handler", name)
+		return nil
+	}
+	toolName := h.Tool.Name
+	e.toolHandlers[toolName] = name
+	e.log.V(1).Info("registered client tool", "tool", toolName, "handler", name)
+	return nil
+}
 
 func (e *OmniaExecutor) initHTTPHandler(name string, h *HandlerEntry) error {
 	if h.HTTPConfig == nil || h.Tool == nil {

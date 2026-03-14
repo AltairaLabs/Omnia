@@ -173,6 +173,11 @@ func (s *OmniaEventStore) convertEvent(event *events.Event) (session.Message, se
 	case events.EventToolCallFailed:
 		return s.convertToolCallFailed(event)
 
+	// Client tool calls
+	case events.EventClientToolRequest:
+		return s.convertClientToolRequest(event)
+	// NOTE: EventClientToolResolved will be added when the published SDK includes it.
+
 	// Provider calls
 	case events.EventProviderCallStarted:
 		return s.convertProviderCallStarted(event)
@@ -526,6 +531,41 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (session.Me
 
 	return msg, session.SessionStatsUpdate{}, true
 }
+
+// --- Client tool events ---
+
+// convertClientToolRequest records a client-side tool request awaiting fulfillment.
+func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (session.Message, session.SessionStatsUpdate, bool) {
+	data, ok := asPtr[events.ClientToolRequestData](event.Data)
+	if !ok {
+		return session.Message{}, session.SessionStatsUpdate{}, false
+	}
+
+	content, err := json.Marshal(map[string]interface{}{
+		"name":      data.ToolName,
+		"arguments": data.Args,
+		"execution": "client",
+	})
+	if err != nil {
+		s.log.Error(err, "failed to marshal client tool request")
+		return session.Message{}, session.SessionStatsUpdate{}, false
+	}
+
+	metadata := map[string]string{
+		metaKeyType:   "tool_call",
+		metaKeySource: metaValueSource,
+		"execution":   "client",
+	}
+	s.enrichToolMeta(metadata, data.ToolName)
+
+	msg := s.buildMessage(session.RoleAssistant, string(content), event.Timestamp, metadata)
+	msg.ToolCallID = data.CallID
+
+	return msg, session.SessionStatsUpdate{AddToolCalls: 1}, true
+}
+
+// NOTE: convertClientToolResolved will be added when the published PromptKit SDK
+// includes EventClientToolResolved and ClientToolResolvedData types.
 
 // --- Provider call events ---
 

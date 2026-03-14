@@ -7,6 +7,16 @@ export interface ToolRegistrySpec {
   /** handlers defines the list of tool handlers in this registry.
    * Each handler can expose one or more tools. */
   handlers: {
+    /** clientConfig contains client-side tool configuration.
+     * Used when type is "client". */
+    clientConfig?: {
+      /** categories are semantic consent categories (e.g., "location", "camera").
+       * Clients can use these to remember consent preferences per category. */
+      categories?: string[];
+      /** consentMessage is a human-readable message shown to the user before
+       * the tool is executed. If empty, the tool runs without a consent prompt. */
+      consentMessage?: string;
+    };
     /** grpcConfig contains gRPC-specific configuration.
      * Required when type is "grpc". */
     grpcConfig?: {
@@ -148,7 +158,7 @@ export interface ToolRegistrySpec {
       outputSchema?: unknown;
     };
     /** type specifies the handler protocol. */
-    type: "http" | "openapi" | "grpc" | "mcp";
+    type: "http" | "openapi" | "grpc" | "mcp" | "client";
   }[];
 }
 

@@ -129,11 +129,6 @@ func TestRuntimeHandler_HandleMessage_ToolCall(t *testing.T) {
 				Name:          "weather",
 				ArgumentsJson: `{"location": "Denver"}`,
 			}}},
-			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
-				Id:         "call-1",
-				ResultJson: `{"temp": 72}`,
-				IsError:    false,
-			}}},
 			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "It's 72°F"}}},
 		},
 		healthy: true,
@@ -163,9 +158,6 @@ func TestRuntimeHandler_HandleMessage_ToolCall(t *testing.T) {
 	assert.Equal(t, "call-1", writer.toolCalls[0].ID)
 	assert.Equal(t, "weather", writer.toolCalls[0].Name)
 	assert.Equal(t, "Denver", writer.toolCalls[0].Arguments["location"])
-
-	require.Len(t, writer.toolResults, 1)
-	assert.Equal(t, "call-1", writer.toolResults[0].ID)
 
 	assert.Equal(t, "It's 72°F", writer.doneMsg)
 }
@@ -367,15 +359,17 @@ func TestRuntimeHandler_HandleMessage_ToolCallEmptyArgs(t *testing.T) {
 	assert.Nil(t, writer.toolCalls[0].Arguments)
 }
 
-func TestRuntimeHandler_HandleMessage_ToolResultInvalidJSON(t *testing.T) {
+func TestRuntimeHandler_HandleMessage_ToolCallServerSidePassthrough(t *testing.T) {
+	// Server-side tool calls should pass through without waiting
 	mock := &mockRuntimeServer{
 		responses: []*runtimev1.ServerMessage{
-			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
-				Id:         "call-1",
-				ResultJson: "not valid json",
-				IsError:    false,
+			{Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
+				Id:            "st-1",
+				Name:          "weather",
+				ArgumentsJson: `{"city":"Denver"}`,
+				Execution:     runtimev1.ToolExecution_TOOL_EXECUTION_SERVER,
 			}}},
-			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "72°F"}}},
 		},
 		healthy: true,
 	}
@@ -393,88 +387,15 @@ func TestRuntimeHandler_HandleMessage_ToolResultInvalidJSON(t *testing.T) {
 	handler := NewRuntimeHandler(client)
 	writer := &mockResponseWriter{}
 
-	msg := &facade.ClientMessage{Content: "Hello"}
-
-	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
+	err = handler.HandleMessage(context.Background(), "session-123", &facade.ClientMessage{
+		Content: "Weather?",
+	}, writer)
 	require.NoError(t, err)
 
-	require.Len(t, writer.toolResults, 1)
-	assert.Equal(t, "call-1", writer.toolResults[0].ID)
-	// Invalid JSON should use raw string as result
-	assert.Equal(t, "not valid json", writer.toolResults[0].Result)
-}
-
-func TestRuntimeHandler_HandleMessage_ToolResultEmptyJSON(t *testing.T) {
-	mock := &mockRuntimeServer{
-		responses: []*runtimev1.ServerMessage{
-			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
-				Id:         "call-1",
-				ResultJson: "",
-				IsError:    false,
-			}}},
-			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
-		},
-		healthy: true,
-	}
-
-	addr, cleanup := startMockServer(t, mock)
-	defer cleanup()
-
-	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
-		Address:     addr,
-		DialTimeout: 5 * time.Second,
-	})
-	require.NoError(t, err)
-	defer func() { _ = client.Close() }()
-
-	handler := NewRuntimeHandler(client)
-	writer := &mockResponseWriter{}
-
-	msg := &facade.ClientMessage{Content: "Hello"}
-
-	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
-	require.NoError(t, err)
-
-	require.Len(t, writer.toolResults, 1)
-	assert.Equal(t, "call-1", writer.toolResults[0].ID)
-	assert.Nil(t, writer.toolResults[0].Result)
-}
-
-func TestRuntimeHandler_HandleMessage_ToolResultIsError(t *testing.T) {
-	mock := &mockRuntimeServer{
-		responses: []*runtimev1.ServerMessage{
-			{Message: &runtimev1.ServerMessage_ToolResult{ToolResult: &runtimev1.ToolResult{
-				Id:         "call-1",
-				ResultJson: `"Something went wrong"`,
-				IsError:    true,
-			}}},
-			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
-		},
-		healthy: true,
-	}
-
-	addr, cleanup := startMockServer(t, mock)
-	defer cleanup()
-
-	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
-		Address:     addr,
-		DialTimeout: 5 * time.Second,
-	})
-	require.NoError(t, err)
-	defer func() { _ = client.Close() }()
-
-	handler := NewRuntimeHandler(client)
-	writer := &mockResponseWriter{}
-
-	msg := &facade.ClientMessage{Content: "Hello"}
-
-	err = handler.HandleMessage(context.Background(), "session-123", msg, writer)
-	require.NoError(t, err)
-
-	require.Len(t, writer.toolResults, 1)
-	assert.Equal(t, "call-1", writer.toolResults[0].ID)
-	assert.Nil(t, writer.toolResults[0].Result)
-	assert.Equal(t, "Something went wrong", writer.toolResults[0].Error)
+	// Server tool calls pass through as informational (no waiting)
+	require.Len(t, writer.toolCalls, 1)
+	assert.Empty(t, writer.toolCalls[0].Execution)
+	assert.Equal(t, "72°F", writer.doneMsg)
 }
 
 func TestRuntimeHandler_HandleMessage_MultimodalResponse(t *testing.T) {
@@ -716,4 +637,225 @@ func (s *capturingRuntimeServer) Converse(stream runtimev1.RuntimeService_Conver
 		}
 	}
 	return nil
+}
+
+// clientToolRuntimeServer simulates a runtime that sends a client-side tool call,
+// waits for the result, then sends the final response.
+type clientToolRuntimeServer struct {
+	runtimev1.UnimplementedRuntimeServiceServer
+	toolCall       *runtimev1.ToolCall
+	afterResume    []*runtimev1.ServerMessage
+	receivedResult *runtimev1.ClientToolResult
+}
+
+func (s *clientToolRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	// Receive initial message
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+
+	// Send client tool call
+	if err := stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_ToolCall{ToolCall: s.toolCall},
+	}); err != nil {
+		return err
+	}
+
+	// Wait for client tool result
+	msg, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	s.receivedResult = msg.GetClientToolResult()
+
+	// Send remaining responses (after resume)
+	for _, resp := range s.afterResume {
+		if err := stream.Send(resp); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *clientToolRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
+}
+
+func TestRuntimeHandler_ClientToolCall(t *testing.T) {
+	mock := &clientToolRuntimeServer{
+		toolCall: &runtimev1.ToolCall{
+			Id:             "ct-1",
+			Name:           "get_location",
+			ArgumentsJson:  `{"query":"current"}`,
+			Execution:      runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+			ConsentMessage: "Allow location access?",
+			Categories:     []string{"location"},
+		},
+		afterResume: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Chunk{Chunk: &runtimev1.Chunk{Content: "Your location is Denver"}}},
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Your location is Denver"}}},
+		},
+	}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(server, mock)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(func() { server.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+	sessionID := "session-ct-1"
+
+	// Start HandleMessage in a goroutine — it will block waiting for the tool result
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{
+			Content: "Where am I?",
+		}, writer)
+	}()
+
+	// Give the handler time to receive and forward the tool call
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify the tool call was forwarded to the writer
+	require.Len(t, writer.toolCalls, 1)
+	assert.Equal(t, "ct-1", writer.toolCalls[0].ID)
+	assert.Equal(t, "get_location", writer.toolCalls[0].Name)
+	assert.Equal(t, "client", writer.toolCalls[0].Execution)
+	assert.Equal(t, "Allow location access?", writer.toolCalls[0].ConsentMessage)
+	assert.Equal(t, []string{"location"}, writer.toolCalls[0].Categories)
+
+	// Send tool result via the ClientToolRouter interface
+	routed := handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{
+		CallID: "ct-1",
+		Result: map[string]string{"city": "Denver"},
+	})
+	assert.True(t, routed)
+
+	// Wait for HandleMessage to complete
+	err = <-errCh
+	require.NoError(t, err)
+
+	// Verify the final response was forwarded
+	assert.Equal(t, []string{"Your location is Denver"}, writer.chunks)
+	assert.Equal(t, "Your location is Denver", writer.doneMsg)
+
+	// Verify the runtime received the tool result
+	require.NotNil(t, mock.receivedResult)
+	assert.Equal(t, "ct-1", mock.receivedResult.CallId)
+	assert.False(t, mock.receivedResult.IsRejected)
+	assert.Contains(t, mock.receivedResult.ResultJson, "Denver")
+}
+
+func TestRuntimeHandler_ClientToolCall_Rejected(t *testing.T) {
+	mock := &clientToolRuntimeServer{
+		toolCall: &runtimev1.ToolCall{
+			Id:        "ct-2",
+			Name:      "read_file",
+			Execution: runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+		},
+		afterResume: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Tool was denied"}}},
+		},
+	}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(server, mock)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(func() { server.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+	sessionID := "session-ct-2"
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{
+			Content: "Read my file",
+		}, writer)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Reject the tool call
+	routed := handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{
+		CallID: "ct-2",
+		Error:  "User denied",
+	})
+	assert.True(t, routed)
+
+	err = <-errCh
+	require.NoError(t, err)
+
+	// Verify rejection was sent to runtime
+	require.NotNil(t, mock.receivedResult)
+	assert.True(t, mock.receivedResult.IsRejected)
+	assert.Equal(t, "User denied", mock.receivedResult.RejectionReason)
+}
+
+func TestRuntimeHandler_ClientToolCall_Timeout(t *testing.T) {
+	mock := &clientToolRuntimeServer{
+		toolCall: &runtimev1.ToolCall{
+			Id:        "ct-3",
+			Name:      "slow_tool",
+			Execution: runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+		},
+		afterResume: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "Done"}}},
+		},
+	}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(server, mock)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(func() { server.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	handler.SetClientToolTimeout(200 * time.Millisecond)
+	writer := &mockResponseWriter{}
+
+	err = handler.HandleMessage(context.Background(), "session-ct-3", &facade.ClientMessage{
+		Content: "Do something slow",
+	}, writer)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "client tool timeout")
+}
+
+func TestRuntimeHandler_SendToolResult_NoActiveHandler(t *testing.T) {
+	handler := NewRuntimeHandler(nil)
+	// No active session — should return false
+	routed := handler.SendToolResult("nonexistent", &facade.ClientToolResultInfo{
+		CallID: "ct-x",
+		Result: "test",
+	})
+	assert.False(t, routed)
 }

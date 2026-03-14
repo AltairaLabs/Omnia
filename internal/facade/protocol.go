@@ -97,11 +97,15 @@ const (
 	MessageTypeMessage       MessageType = "message"
 	MessageTypeUploadRequest MessageType = "upload_request"
 
+	// Bidirectional message types
+	// Server → Client: tool execution result (informational)
+	// Client → Server: client-side tool result (response to a client ToolCall)
+	MessageTypeToolResult MessageType = "tool_result"
+
 	// Server to Client message types
 	MessageTypeChunk          MessageType = "chunk"
 	MessageTypeDone           MessageType = "done"
 	MessageTypeToolCall       MessageType = "tool_call"
-	MessageTypeToolResult     MessageType = "tool_result"
 	MessageTypeError          MessageType = "error"
 	MessageTypeConnected      MessageType = "connected"
 	MessageTypeUploadReady    MessageType = "upload_ready"
@@ -109,9 +113,19 @@ const (
 	MessageTypeMediaChunk     MessageType = "media_chunk"
 )
 
+// ClientToolResultInfo contains the client's response to a client-side tool call.
+type ClientToolResultInfo struct {
+	// CallID matches the ToolCallInfo.ID that this result is for.
+	CallID string `json:"call_id"`
+	// Result is the tool execution result (JSON-serializable).
+	Result interface{} `json:"result,omitempty"`
+	// Error is set when the client rejects or fails the tool call.
+	Error string `json:"error,omitempty"`
+}
+
 // ClientMessage represents a message sent from client to server.
 type ClientMessage struct {
-	// Type is the message type ("message" or "upload_request").
+	// Type is the message type ("message", "upload_request", or "tool_result").
 	Type MessageType `json:"type"`
 	// SessionID is the optional session ID for resuming a session.
 	SessionID string `json:"session_id,omitempty"`
@@ -125,6 +139,8 @@ type ClientMessage struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// UploadRequest contains upload request details (for type "upload_request").
 	UploadRequest *UploadRequestInfo `json:"upload_request,omitempty"`
+	// ToolResult contains the client's response to a client-side tool call.
+	ToolResult *ClientToolResultInfo `json:"tool_result,omitempty"`
 }
 
 // ServerMessage represents a message sent from server to client.
@@ -165,6 +181,12 @@ type ToolCallInfo struct {
 	Name string `json:"name"`
 	// Arguments are the arguments passed to the tool.
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	// Execution indicates where the tool runs: "server" or "client".
+	Execution string `json:"execution,omitempty"`
+	// ConsentMessage is a human-readable consent prompt for client-side tools.
+	ConsentMessage string `json:"consent_message,omitempty"`
+	// Categories are semantic consent categories (e.g., "location", "filesystem").
+	Categories []string `json:"categories,omitempty"`
 }
 
 // ToolResultInfo contains information about a tool result.

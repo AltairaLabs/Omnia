@@ -22,7 +22,7 @@ import (
 )
 
 // HandlerType defines the type of tool handler
-// +kubebuilder:validation:Enum=http;openapi;grpc;mcp
+// +kubebuilder:validation:Enum=http;openapi;grpc;mcp;client
 type HandlerType string
 
 const (
@@ -34,6 +34,10 @@ const (
 	HandlerTypeGRPC HandlerType = "grpc"
 	// HandlerTypeMCP indicates a Model Context Protocol server (self-describing)
 	HandlerTypeMCP HandlerType = "mcp"
+	// HandlerTypeClient indicates a client-side tool executed by the connected client (browser).
+	// The runtime sends the tool call to the facade, which forwards it to the WebSocket client.
+	// The client must respond with a result before the conversation continues.
+	HandlerTypeClient HandlerType = "client"
 )
 
 // MCPTransport defines the transport type for MCP connections
@@ -218,6 +222,19 @@ type HTTPConfig struct {
 	URLTemplate *string `json:"urlTemplate,omitempty"`
 }
 
+// ClientToolConfig contains configuration for client-side tools.
+type ClientToolConfig struct {
+	// consentMessage is a human-readable message shown to the user before
+	// the tool is executed. If empty, the tool runs without a consent prompt.
+	// +optional
+	ConsentMessage string `json:"consentMessage,omitempty"`
+
+	// categories are semantic consent categories (e.g., "location", "camera").
+	// Clients can use these to remember consent preferences per category.
+	// +optional
+	Categories []string `json:"categories,omitempty"`
+}
+
 // SecretKeySelector selects a key from a Secret
 type SecretKeySelector struct {
 	// name is the name of the secret.
@@ -308,6 +325,11 @@ type HandlerDefinition struct {
 	// Required when type is "mcp".
 	// +optional
 	MCPConfig *MCPConfig `json:"mcpConfig,omitempty"`
+
+	// clientConfig contains client-side tool configuration.
+	// Used when type is "client".
+	// +optional
+	ClientConfig *ClientToolConfig `json:"clientConfig,omitempty"`
 
 	// timeout specifies the maximum duration for tool invocation.
 	// Defaults to "30s".

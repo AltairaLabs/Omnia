@@ -24,6 +24,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ToolExecution indicates where a tool is executed.
+type ToolExecution int32
+
+const (
+	// TOOL_EXECUTION_SERVER means the tool runs server-side in the runtime.
+	ToolExecution_TOOL_EXECUTION_SERVER ToolExecution = 0
+	// TOOL_EXECUTION_CLIENT means the tool must be fulfilled by the client.
+	ToolExecution_TOOL_EXECUTION_CLIENT ToolExecution = 1
+)
+
+// Enum value maps for ToolExecution.
+var (
+	ToolExecution_name = map[int32]string{
+		0: "TOOL_EXECUTION_SERVER",
+		1: "TOOL_EXECUTION_CLIENT",
+	}
+	ToolExecution_value = map[string]int32{
+		"TOOL_EXECUTION_SERVER": 0,
+		"TOOL_EXECUTION_CLIENT": 1,
+	}
+)
+
+func (x ToolExecution) Enum() *ToolExecution {
+	p := new(ToolExecution)
+	*p = x
+	return p
+}
+
+func (x ToolExecution) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ToolExecution) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_proto_runtime_v1_runtime_proto_enumTypes[0].Descriptor()
+}
+
+func (ToolExecution) Type() protoreflect.EnumType {
+	return &file_api_proto_runtime_v1_runtime_proto_enumTypes[0]
+}
+
+func (x ToolExecution) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ToolExecution.Descriptor instead.
+func (ToolExecution) EnumDescriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{0}
+}
+
 // ClientMessage represents a message from the client to the runtime.
 type ClientMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -36,9 +85,12 @@ type ClientMessage struct {
 	Metadata map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// parts contains multimodal content parts (text, images, audio, video, files).
 	// If non-empty, this takes precedence over the content field.
-	Parts         []*ContentPart `protobuf:"bytes,4,rep,name=parts,proto3" json:"parts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Parts []*ContentPart `protobuf:"bytes,4,rep,name=parts,proto3" json:"parts,omitempty"`
+	// client_tool_result carries the result of a client-side tool execution.
+	// Set when responding to a ToolCall with execution=CLIENT.
+	ClientToolResult *ClientToolResult `protobuf:"bytes,5,opt,name=client_tool_result,json=clientToolResult,proto3" json:"client_tool_result,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ClientMessage) Reset() {
@@ -99,6 +151,86 @@ func (x *ClientMessage) GetParts() []*ContentPart {
 	return nil
 }
 
+func (x *ClientMessage) GetClientToolResult() *ClientToolResult {
+	if x != nil {
+		return x.ClientToolResult
+	}
+	return nil
+}
+
+// ClientToolResult carries the client's response to a client-side tool call.
+type ClientToolResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// call_id matches the ToolCall.id that this result is for.
+	CallId string `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	// result_json contains the tool result as a JSON string.
+	ResultJson string `protobuf:"bytes,2,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	// is_rejected indicates the client rejected the tool call.
+	IsRejected bool `protobuf:"varint,3,opt,name=is_rejected,json=isRejected,proto3" json:"is_rejected,omitempty"`
+	// rejection_reason explains why the client rejected the tool call.
+	RejectionReason string `protobuf:"bytes,4,opt,name=rejection_reason,json=rejectionReason,proto3" json:"rejection_reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ClientToolResult) Reset() {
+	*x = ClientToolResult{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClientToolResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClientToolResult) ProtoMessage() {}
+
+func (x *ClientToolResult) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClientToolResult.ProtoReflect.Descriptor instead.
+func (*ClientToolResult) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ClientToolResult) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *ClientToolResult) GetResultJson() string {
+	if x != nil {
+		return x.ResultJson
+	}
+	return ""
+}
+
+func (x *ClientToolResult) GetIsRejected() bool {
+	if x != nil {
+		return x.IsRejected
+	}
+	return false
+}
+
+func (x *ClientToolResult) GetRejectionReason() string {
+	if x != nil {
+		return x.RejectionReason
+	}
+	return ""
+}
+
 // ServerMessage represents a message from the runtime to the client.
 // Uses oneof to ensure only one message type is sent at a time.
 type ServerMessage struct {
@@ -107,7 +239,6 @@ type ServerMessage struct {
 	//
 	//	*ServerMessage_Chunk
 	//	*ServerMessage_ToolCall
-	//	*ServerMessage_ToolResult
 	//	*ServerMessage_Done
 	//	*ServerMessage_Error
 	//	*ServerMessage_MediaChunk
@@ -118,7 +249,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[1]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -130,7 +261,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[1]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -143,7 +274,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{1}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ServerMessage) GetMessage() isServerMessage_Message {
@@ -166,15 +297,6 @@ func (x *ServerMessage) GetToolCall() *ToolCall {
 	if x != nil {
 		if x, ok := x.Message.(*ServerMessage_ToolCall); ok {
 			return x.ToolCall
-		}
-	}
-	return nil
-}
-
-func (x *ServerMessage) GetToolResult() *ToolResult {
-	if x != nil {
-		if x, ok := x.Message.(*ServerMessage_ToolResult); ok {
-			return x.ToolResult
 		}
 	}
 	return nil
@@ -217,16 +339,12 @@ type ServerMessage_Chunk struct {
 }
 
 type ServerMessage_ToolCall struct {
-	// tool_call is informational, indicating a tool is being invoked.
-	// The client/facade can display "Calling weather API..." but actual
-	// tool execution happens entirely in the runtime.
+	// tool_call notifies the facade of a client-side tool invocation.
+	// The facade forwards this to the WebSocket client, which must respond
+	// with a ClientToolResult before the conversation can continue.
+	// Server-side tool calls are handled internally by the runtime and
+	// are not sent on this stream.
 	ToolCall *ToolCall `protobuf:"bytes,2,opt,name=tool_call,json=toolCall,proto3,oneof"`
-}
-
-type ServerMessage_ToolResult struct {
-	// tool_result is informational, containing the result of a tool call.
-	// This allows the UI to display tool results to the user.
-	ToolResult *ToolResult `protobuf:"bytes,3,opt,name=tool_result,json=toolResult,proto3,oneof"`
 }
 
 type ServerMessage_Done struct {
@@ -250,8 +368,6 @@ func (*ServerMessage_Chunk) isServerMessage_Message() {}
 
 func (*ServerMessage_ToolCall) isServerMessage_Message() {}
 
-func (*ServerMessage_ToolResult) isServerMessage_Message() {}
-
 func (*ServerMessage_Done) isServerMessage_Message() {}
 
 func (*ServerMessage_Error) isServerMessage_Message() {}
@@ -269,7 +385,7 @@ type Chunk struct {
 
 func (x *Chunk) Reset() {
 	*x = Chunk{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[2]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -281,7 +397,7 @@ func (x *Chunk) String() string {
 func (*Chunk) ProtoMessage() {}
 
 func (x *Chunk) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[2]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -294,7 +410,7 @@ func (x *Chunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Chunk.ProtoReflect.Descriptor instead.
 func (*Chunk) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{2}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Chunk) GetContent() string {
@@ -304,7 +420,9 @@ func (x *Chunk) GetContent() string {
 	return ""
 }
 
-// ToolCall represents a tool invocation (informational for UI display).
+// ToolCall represents a tool invocation.
+// For server-side tools this is informational (UI display only).
+// For client-side tools the client must send back a ClientToolResult.
 type ToolCall struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// id is a unique identifier for this tool call.
@@ -313,13 +431,19 @@ type ToolCall struct {
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// arguments_json contains the tool arguments as a JSON string.
 	ArgumentsJson string `protobuf:"bytes,3,opt,name=arguments_json,json=argumentsJson,proto3" json:"arguments_json,omitempty"`
+	// execution indicates whether this tool runs server-side or client-side.
+	Execution ToolExecution `protobuf:"varint,4,opt,name=execution,proto3,enum=omnia.runtime.v1.ToolExecution" json:"execution,omitempty"`
+	// consent_message is a human-readable consent prompt for client-side tools.
+	ConsentMessage string `protobuf:"bytes,5,opt,name=consent_message,json=consentMessage,proto3" json:"consent_message,omitempty"`
+	// categories are semantic consent categories (e.g., "location", "filesystem").
+	Categories    []string `protobuf:"bytes,6,rep,name=categories,proto3" json:"categories,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ToolCall) Reset() {
 	*x = ToolCall{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[3]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -331,7 +455,7 @@ func (x *ToolCall) String() string {
 func (*ToolCall) ProtoMessage() {}
 
 func (x *ToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[3]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -344,7 +468,7 @@ func (x *ToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCall.ProtoReflect.Descriptor instead.
 func (*ToolCall) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{3}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ToolCall) GetId() string {
@@ -368,6 +492,27 @@ func (x *ToolCall) GetArgumentsJson() string {
 	return ""
 }
 
+func (x *ToolCall) GetExecution() ToolExecution {
+	if x != nil {
+		return x.Execution
+	}
+	return ToolExecution_TOOL_EXECUTION_SERVER
+}
+
+func (x *ToolCall) GetConsentMessage() string {
+	if x != nil {
+		return x.ConsentMessage
+	}
+	return ""
+}
+
+func (x *ToolCall) GetCategories() []string {
+	if x != nil {
+		return x.Categories
+	}
+	return nil
+}
+
 // ToolResult contains the result of a tool execution (informational for UI display).
 type ToolResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -383,7 +528,7 @@ type ToolResult struct {
 
 func (x *ToolResult) Reset() {
 	*x = ToolResult{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[4]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -395,7 +540,7 @@ func (x *ToolResult) String() string {
 func (*ToolResult) ProtoMessage() {}
 
 func (x *ToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[4]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -408,7 +553,7 @@ func (x *ToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResult.ProtoReflect.Descriptor instead.
 func (*ToolResult) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{4}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ToolResult) GetId() string {
@@ -450,7 +595,7 @@ type Done struct {
 
 func (x *Done) Reset() {
 	*x = Done{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[5]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -462,7 +607,7 @@ func (x *Done) String() string {
 func (*Done) ProtoMessage() {}
 
 func (x *Done) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[5]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -475,7 +620,7 @@ func (x *Done) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Done.ProtoReflect.Descriptor instead.
 func (*Done) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{5}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Done) GetFinalContent() string {
@@ -514,7 +659,7 @@ type ContentPart struct {
 
 func (x *ContentPart) Reset() {
 	*x = ContentPart{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[6]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -526,7 +671,7 @@ func (x *ContentPart) String() string {
 func (*ContentPart) ProtoMessage() {}
 
 func (x *ContentPart) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[6]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -539,7 +684,7 @@ func (x *ContentPart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContentPart.ProtoReflect.Descriptor instead.
 func (*ContentPart) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{6}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ContentPart) GetType() string {
@@ -578,7 +723,7 @@ type MediaContent struct {
 
 func (x *MediaContent) Reset() {
 	*x = MediaContent{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[7]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +735,7 @@ func (x *MediaContent) String() string {
 func (*MediaContent) ProtoMessage() {}
 
 func (x *MediaContent) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[7]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +748,7 @@ func (x *MediaContent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaContent.ProtoReflect.Descriptor instead.
 func (*MediaContent) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{7}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MediaContent) GetData() string {
@@ -642,7 +787,7 @@ type Usage struct {
 
 func (x *Usage) Reset() {
 	*x = Usage{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[8]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -654,7 +799,7 @@ func (x *Usage) String() string {
 func (*Usage) ProtoMessage() {}
 
 func (x *Usage) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[8]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -667,7 +812,7 @@ func (x *Usage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Usage.ProtoReflect.Descriptor instead.
 func (*Usage) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{8}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Usage) GetInputTokens() int32 {
@@ -704,7 +849,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[9]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -716,7 +861,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[9]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -729,7 +874,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{9}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Error) GetCode() string {
@@ -766,7 +911,7 @@ type MediaChunk struct {
 
 func (x *MediaChunk) Reset() {
 	*x = MediaChunk{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[10]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -778,7 +923,7 @@ func (x *MediaChunk) String() string {
 func (*MediaChunk) ProtoMessage() {}
 
 func (x *MediaChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[10]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -791,7 +936,7 @@ func (x *MediaChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaChunk.ProtoReflect.Descriptor instead.
 func (*MediaChunk) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{10}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MediaChunk) GetMediaId() string {
@@ -838,7 +983,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -850,7 +995,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -863,7 +1008,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{11}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{12}
 }
 
 // HealthResponse contains the health status of the runtime.
@@ -879,7 +1024,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -891,7 +1036,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -904,7 +1049,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{12}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HealthResponse) GetHealthy() bool {
@@ -925,32 +1070,43 @@ var File_api_proto_runtime_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\x85\x02\n" +
+	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\xd7\x02\n" +
 	"\rClientMessage\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12I\n" +
 	"\bmetadata\x18\x03 \x03(\v2-.omnia.runtime.v1.ClientMessage.MetadataEntryR\bmetadata\x123\n" +
-	"\x05parts\x18\x04 \x03(\v2\x1d.omnia.runtime.v1.ContentPartR\x05parts\x1a;\n" +
+	"\x05parts\x18\x04 \x03(\v2\x1d.omnia.runtime.v1.ContentPartR\x05parts\x12P\n" +
+	"\x12client_tool_result\x18\x05 \x01(\v2\".omnia.runtime.v1.ClientToolResultR\x10clientToolResult\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe7\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x98\x01\n" +
+	"\x10ClientToolResult\x12\x17\n" +
+	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x1f\n" +
+	"\vresult_json\x18\x02 \x01(\tR\n" +
+	"resultJson\x12\x1f\n" +
+	"\vis_rejected\x18\x03 \x01(\bR\n" +
+	"isRejected\x12)\n" +
+	"\x10rejection_reason\x18\x04 \x01(\tR\x0frejectionReason\"\xa6\x02\n" +
 	"\rServerMessage\x12/\n" +
 	"\x05chunk\x18\x01 \x01(\v2\x17.omnia.runtime.v1.ChunkH\x00R\x05chunk\x129\n" +
-	"\ttool_call\x18\x02 \x01(\v2\x1a.omnia.runtime.v1.ToolCallH\x00R\btoolCall\x12?\n" +
-	"\vtool_result\x18\x03 \x01(\v2\x1c.omnia.runtime.v1.ToolResultH\x00R\n" +
-	"toolResult\x12,\n" +
+	"\ttool_call\x18\x02 \x01(\v2\x1a.omnia.runtime.v1.ToolCallH\x00R\btoolCall\x12,\n" +
 	"\x04done\x18\x04 \x01(\v2\x16.omnia.runtime.v1.DoneH\x00R\x04done\x12/\n" +
 	"\x05error\x18\x05 \x01(\v2\x17.omnia.runtime.v1.ErrorH\x00R\x05error\x12?\n" +
 	"\vmedia_chunk\x18\x06 \x01(\v2\x1c.omnia.runtime.v1.MediaChunkH\x00R\n" +
 	"mediaChunkB\t\n" +
 	"\amessage\"!\n" +
 	"\x05Chunk\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\tR\acontent\"U\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\"\xdd\x01\n" +
 	"\bToolCall\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
-	"\x0earguments_json\x18\x03 \x01(\tR\rargumentsJson\"X\n" +
+	"\x0earguments_json\x18\x03 \x01(\tR\rargumentsJson\x12=\n" +
+	"\texecution\x18\x04 \x01(\x0e2\x1f.omnia.runtime.v1.ToolExecutionR\texecution\x12'\n" +
+	"\x0fconsent_message\x18\x05 \x01(\tR\x0econsentMessage\x12\x1e\n" +
+	"\n" +
+	"categories\x18\x06 \x03(\tR\n" +
+	"categories\"X\n" +
 	"\n" +
 	"ToolResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
@@ -986,7 +1142,10 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\rHealthRequest\"B\n" +
 	"\x0eHealthResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status2\xaf\x01\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status*E\n" +
+	"\rToolExecution\x12\x19\n" +
+	"\x15TOOL_EXECUTION_SERVER\x10\x00\x12\x19\n" +
+	"\x15TOOL_EXECUTION_CLIENT\x10\x012\xaf\x01\n" +
 	"\x0eRuntimeService\x12P\n" +
 	"\bConverse\x12\x1f.omnia.runtime.v1.ClientMessage\x1a\x1f.omnia.runtime.v1.ServerMessage(\x010\x01\x12K\n" +
 	"\x06Health\x12\x1f.omnia.runtime.v1.HealthRequest\x1a .omnia.runtime.v1.HealthResponseB7Z5github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1b\x06proto3"
@@ -1003,44 +1162,48 @@ func file_api_proto_runtime_v1_runtime_proto_rawDescGZIP() []byte {
 	return file_api_proto_runtime_v1_runtime_proto_rawDescData
 }
 
-var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_api_proto_runtime_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
-	(*ClientMessage)(nil),  // 0: omnia.runtime.v1.ClientMessage
-	(*ServerMessage)(nil),  // 1: omnia.runtime.v1.ServerMessage
-	(*Chunk)(nil),          // 2: omnia.runtime.v1.Chunk
-	(*ToolCall)(nil),       // 3: omnia.runtime.v1.ToolCall
-	(*ToolResult)(nil),     // 4: omnia.runtime.v1.ToolResult
-	(*Done)(nil),           // 5: omnia.runtime.v1.Done
-	(*ContentPart)(nil),    // 6: omnia.runtime.v1.ContentPart
-	(*MediaContent)(nil),   // 7: omnia.runtime.v1.MediaContent
-	(*Usage)(nil),          // 8: omnia.runtime.v1.Usage
-	(*Error)(nil),          // 9: omnia.runtime.v1.Error
-	(*MediaChunk)(nil),     // 10: omnia.runtime.v1.MediaChunk
-	(*HealthRequest)(nil),  // 11: omnia.runtime.v1.HealthRequest
-	(*HealthResponse)(nil), // 12: omnia.runtime.v1.HealthResponse
-	nil,                    // 13: omnia.runtime.v1.ClientMessage.MetadataEntry
+	(ToolExecution)(0),       // 0: omnia.runtime.v1.ToolExecution
+	(*ClientMessage)(nil),    // 1: omnia.runtime.v1.ClientMessage
+	(*ClientToolResult)(nil), // 2: omnia.runtime.v1.ClientToolResult
+	(*ServerMessage)(nil),    // 3: omnia.runtime.v1.ServerMessage
+	(*Chunk)(nil),            // 4: omnia.runtime.v1.Chunk
+	(*ToolCall)(nil),         // 5: omnia.runtime.v1.ToolCall
+	(*ToolResult)(nil),       // 6: omnia.runtime.v1.ToolResult
+	(*Done)(nil),             // 7: omnia.runtime.v1.Done
+	(*ContentPart)(nil),      // 8: omnia.runtime.v1.ContentPart
+	(*MediaContent)(nil),     // 9: omnia.runtime.v1.MediaContent
+	(*Usage)(nil),            // 10: omnia.runtime.v1.Usage
+	(*Error)(nil),            // 11: omnia.runtime.v1.Error
+	(*MediaChunk)(nil),       // 12: omnia.runtime.v1.MediaChunk
+	(*HealthRequest)(nil),    // 13: omnia.runtime.v1.HealthRequest
+	(*HealthResponse)(nil),   // 14: omnia.runtime.v1.HealthResponse
+	nil,                      // 15: omnia.runtime.v1.ClientMessage.MetadataEntry
 }
 var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
-	13, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
-	6,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
-	2,  // 2: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
-	3,  // 3: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
-	4,  // 4: omnia.runtime.v1.ServerMessage.tool_result:type_name -> omnia.runtime.v1.ToolResult
-	5,  // 5: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
-	9,  // 6: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
-	10, // 7: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
-	8,  // 8: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
-	6,  // 9: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
-	7,  // 10: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
-	0,  // 11: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
-	11, // 12: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
-	1,  // 13: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
-	12, // 14: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
-	13, // [13:15] is the sub-list for method output_type
-	11, // [11:13] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	15, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
+	8,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
+	2,  // 2: omnia.runtime.v1.ClientMessage.client_tool_result:type_name -> omnia.runtime.v1.ClientToolResult
+	4,  // 3: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
+	5,  // 4: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
+	7,  // 5: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
+	11, // 6: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
+	12, // 7: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
+	0,  // 8: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
+	10, // 9: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
+	8,  // 10: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
+	9,  // 11: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
+	1,  // 12: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
+	13, // 13: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
+	3,  // 14: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
+	14, // 15: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
+	14, // [14:16] is the sub-list for method output_type
+	12, // [12:14] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_runtime_v1_runtime_proto_init() }
@@ -1048,10 +1211,9 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 	if File_api_proto_runtime_v1_runtime_proto != nil {
 		return
 	}
-	file_api_proto_runtime_v1_runtime_proto_msgTypes[1].OneofWrappers = []any{
+	file_api_proto_runtime_v1_runtime_proto_msgTypes[2].OneofWrappers = []any{
 		(*ServerMessage_Chunk)(nil),
 		(*ServerMessage_ToolCall)(nil),
-		(*ServerMessage_ToolResult)(nil),
 		(*ServerMessage_Done)(nil),
 		(*ServerMessage_Error)(nil),
 		(*ServerMessage_MediaChunk)(nil),
@@ -1061,13 +1223,14 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_runtime_v1_runtime_proto_rawDesc), len(file_api_proto_runtime_v1_runtime_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   14,
+			NumEnums:      1,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_api_proto_runtime_v1_runtime_proto_goTypes,
 		DependencyIndexes: file_api_proto_runtime_v1_runtime_proto_depIdxs,
+		EnumInfos:         file_api_proto_runtime_v1_runtime_proto_enumTypes,
 		MessageInfos:      file_api_proto_runtime_v1_runtime_proto_msgTypes,
 	}.Build()
 	File_api_proto_runtime_v1_runtime_proto = out.File

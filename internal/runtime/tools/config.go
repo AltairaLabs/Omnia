@@ -154,6 +154,9 @@ const ToolTypeMCP = "mcp"
 // ToolTypeOpenAPI is the OpenAPI tool type.
 const ToolTypeOpenAPI = "openapi"
 
+// ToolTypeClient is the client-side tool type (executed by the connected client/browser).
+const ToolTypeClient = "client"
+
 // MCPTransportType defines the transport type for MCP connections.
 type MCPTransportType string
 

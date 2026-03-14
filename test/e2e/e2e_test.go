@@ -1948,6 +1948,369 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 
+		It("should handle client-side tool execution", func() {
+			By("creating ConfigMaps for client-tool PromptPack and mock config")
+			clientToolPackManifest := `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: client-tool-pack-config
+  namespace: test-agents
+data:
+  pack.json: |
+    {
+      "id": "client-tool-test",
+      "name": "client-tool-test",
+      "version": "1.0.0",
+      "template_engine": {"version": "v1", "syntax": "{{variable}}"},
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.0",
+          "system_template": "You are a test assistant. When asked about location, use the get_location tool.",
+          "tools": ["get_location"]
+        }
+      },
+      "tools": {
+        "get_location": {
+          "name": "get_location",
+          "description": "Get user GPS location",
+          "mode": "client",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "accuracy": {"type": "string", "enum": ["high", "low"]}
+            }
+          },
+          "client": {
+            "consent": {
+              "required": true,
+              "message": "Allow location access?",
+              "decline_strategy": "graceful"
+            }
+          }
+        }
+      }
+    }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: client-tool-prompts
+  namespace: test-agents
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: client-tool-pack-config
+  rollout:
+    type: immediate
+`
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(clientToolPackManifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create client-tool PromptPack ConfigMap")
+
+			clientToolMockManifest := `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: client-tool-mock-config
+  namespace: test-agents
+data:
+  mock-responses.yaml: |
+    defaultResponse: "I can help with location questions."
+    scenarios:
+      "":
+        turns:
+          1:
+            type: tool_calls
+            content: ""
+            tool_calls:
+              - name: get_location
+                arguments:
+                  accuracy: "high"
+          2: "Based on your coordinates, you are in Denver, Colorado."
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(clientToolMockManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create client-tool mock config")
+
+			By("creating an AgentRuntime with runtime handler for client tool testing")
+			clientToolAgentManifest := `
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: client-tool-agent
+  namespace: test-agents
+spec:
+  promptPackRef:
+    name: client-tool-prompts
+  facade:
+    type: websocket
+    port: 8080
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+    volumes:
+    - name: mock-config
+      configMap:
+        name: client-tool-mock-config
+    volumeMounts:
+    - name: mock-config
+      mountPath: /etc/omnia/mock
+  provider:
+    type: mock
+    secretRef:
+      name: test-provider
+    additionalConfig:
+      mock_config: "/etc/omnia/mock/mock-responses.yaml"
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(clientToolAgentManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create client-tool-agent")
+
+			By("waiting for the client-tool-agent pod to be running")
+			verifyClientToolAgentRunning := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=client-tool-agent",
+					"-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}
+			Eventually(verifyClientToolAgentRunning, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("waiting for all containers to be ready")
+			verifyClientToolContainersReady := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods",
+					"-n", agentsNamespace,
+					"-l", "app.kubernetes.io/instance=client-tool-agent",
+					"-o", "jsonpath={.items[0].status.containerStatuses[*].ready}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true true"), "Both containers should be ready")
+			}
+			Eventually(verifyClientToolContainersReady, 5*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("waiting for service endpoint to be ready")
+			verifyClientToolServiceEndpoint := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "endpoints", "client-tool-agent",
+					"-n", agentsNamespace, "-o", "jsonpath={.subsets[0].addresses[0].ip}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "Service endpoint should have an IP")
+			}
+			Eventually(verifyClientToolServiceEndpoint, time.Minute, 2*time.Second).Should(Succeed())
+
+			By("creating a test pod to verify client-side tool execution")
+			clientToolTestManifest := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client-tool-test
+  namespace: test-agents
+spec:
+  restartPolicy: Never
+  containers:
+  - name: python
+    image: python:3.11-slim
+    command: ["sh", "-c"]
+    args:
+    - |
+      pip install websockets --quiet
+      python3 << 'PYTHON_SCRIPT'
+      import asyncio
+      import json
+      import websockets
+      import sys
+
+      async def send_and_handle_client_tool(ws, message, tool_result_fn):
+          """Helper: send a message, handle client tool call, return done content."""
+          await ws.send(json.dumps({"type": "message", "content": message}))
+          session_id = None
+          tool_call_info = None
+          done_content = None
+
+          for _ in range(100):
+              raw = await asyncio.wait_for(ws.recv(), timeout=120)
+              msg = json.loads(raw)
+              msg_type = msg.get("type")
+              if msg.get("session_id"):
+                  session_id = msg["session_id"]
+
+              if msg_type == "connected":
+                  continue
+
+              if msg_type == "tool_call":
+                  tc = msg.get("tool_call", {})
+                  if tc.get("execution") == "client":
+                      tool_call_info = tc
+                      result_payload = tool_result_fn(tc)
+                      result_msg = {
+                          "type": "tool_result",
+                          "session_id": session_id,
+                          "tool_result": result_payload,
+                      }
+                      await ws.send(json.dumps(result_msg))
+
+              elif msg_type == "done":
+                  done_content = msg.get("content", "")
+                  break
+
+              elif msg_type == "error":
+                  raise Exception(f"Server error: {msg.get('error')}")
+
+          return tool_call_info, done_content
+
+      async def test_client_tool_approve():
+          """Test: client approves tool call, LLM uses the result."""
+          uri = "ws://client-tool-agent.test-agents.svc.cluster.local:8080/ws?agent=client-tool-agent"
+          async with websockets.connect(uri, ping_interval=None, open_timeout=30) as ws:
+              def approve(tc):
+                  # Verify consent fields
+                  cm = tc.get("consent_message", "")
+                  assert "location" in cm.lower() or "fulfillment" in cm.lower(), \
+                      f"Expected consent message about location, got: {cm}"
+                  return {"call_id": tc["id"], "result": {"latitude": 39.7392, "longitude": -104.9903}}
+
+              tc, done = await send_and_handle_client_tool(ws, "Where am I?", approve)
+
+              assert tc is not None, "Never received client-side tool call"
+              assert tc.get("name") == "get_user_location", f"Wrong tool: {tc.get('name')}"
+              assert tc.get("execution") == "client", f"Wrong execution: {tc.get('execution')}"
+              assert done is not None, "Never received done"
+
+              print(f"APPROVE: done={done[:120]}")
+              print("APPROVE TEST PASSED")
+              return True
+
+      async def test_client_tool_reject():
+          """Test: client rejects tool call, conversation completes gracefully."""
+          uri = "ws://client-tool-agent.test-agents.svc.cluster.local:8080/ws?agent=client-tool-agent"
+          async with websockets.connect(uri, ping_interval=None, open_timeout=30) as ws:
+              def reject(tc):
+                  return {"call_id": tc["id"], "error": "User denied location access"}
+
+              tc, done = await send_and_handle_client_tool(ws, "Where am I?", reject)
+
+              assert tc is not None, "Never received client-side tool call"
+              assert done is not None, "Never received done after rejection"
+
+              print(f"REJECT: done={done[:120]}")
+              print("REJECT TEST PASSED")
+              return True
+
+      async def test_client_tool_immediate_response():
+          """Test: client responds immediately (simulates auto-approve / always allow)."""
+          uri = "ws://client-tool-agent.test-agents.svc.cluster.local:8080/ws?agent=client-tool-agent"
+          async with websockets.connect(uri, ping_interval=None, open_timeout=30) as ws:
+              # First call
+              def auto_approve(tc):
+                  return {"call_id": tc["id"], "result": {"latitude": 51.5074, "longitude": -0.1278}}
+
+              tc1, done1 = await send_and_handle_client_tool(ws, "Weather near me?", auto_approve)
+              assert tc1 is not None, "First call: never received client tool"
+              assert done1 is not None, "First call: never received done"
+              print(f"AUTO 1: done={done1[:120]}")
+
+              # Second call on the same connection (simulates always-allow)
+              tc2, done2 = await send_and_handle_client_tool(ws, "What about restaurants near me?", auto_approve)
+              assert tc2 is not None, "Second call: never received client tool"
+              assert done2 is not None, "Second call: never received done"
+              print(f"AUTO 2: done={done2[:120]}")
+
+              print("IMMEDIATE RESPONSE TEST PASSED")
+              return True
+
+      async def main():
+          try:
+              approve_ok = await test_client_tool_approve()
+              if not approve_ok:
+                  sys.exit(1)
+
+              reject_ok = await test_client_tool_reject()
+              if not reject_ok:
+                  sys.exit(1)
+
+              immediate_ok = await test_client_tool_immediate_response()
+              if not immediate_ok:
+                  sys.exit(1)
+
+              print("\nTEST PASSED: All client tool tests passed")
+          except Exception as e:
+              print(f"ERROR: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+
+      asyncio.run(main())
+      PYTHON_SCRIPT
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(clientToolTestManifest)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create client tool test pod")
+
+			By("waiting for the client tool test to complete")
+			verifyClientToolTest := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", "client-tool-test",
+					"-n", agentsNamespace, "-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyClientToolTest, 5*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("checking the client tool test logs")
+			cmd = exec.Command("kubectl", "logs", "client-tool-test", "-n", agentsNamespace)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			_, _ = fmt.Fprintf(GinkgoWriter, "Client tool test output:\n%s\n", output)
+			Expect(output).To(ContainSubstring("TEST PASSED"), "Client tool test should pass")
+			Expect(output).To(ContainSubstring("APPROVE TEST PASSED"), "Approve flow should pass")
+			Expect(output).To(ContainSubstring("REJECT TEST PASSED"), "Reject flow should pass")
+			Expect(output).To(ContainSubstring("IMMEDIATE RESPONSE TEST PASSED"), "Immediate/auto-approve flow should pass")
+
+			By("cleaning up client tool test resources")
+			cmd = exec.Command("kubectl", "delete", "pod", "client-tool-test",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "agentruntime", "client-tool-agent",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "promptpack", "client-tool-prompts",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "configmap", "client-tool-pack-config",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "configmap", "client-tool-mock-config",
+				"-n", agentsNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
 		// Note: Runtime metrics (omnia_runtime_*) are exposed on port 9001 via the health endpoint.
 		// The metrics implementation is tested via unit tests in pkg/metrics/runtime_test.go.
 		// E2E testing of the metrics endpoint in Kind clusters has networking limitations.

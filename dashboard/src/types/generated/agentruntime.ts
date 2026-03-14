@@ -230,6 +230,9 @@ export interface AgentRuntimeSpec {
   extraPodAnnotations?: Record<string, string>;
   /** facade configures the client-facing connection interface. */
   facade: {
+    /** clientToolTimeout is the max time to wait for client tool responses per turn.
+     * Defaults to 60s. */
+    clientToolTimeout?: string;
     /** extraEnv defines additional environment variables for the facade container.
      * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
     extraEnv?: {

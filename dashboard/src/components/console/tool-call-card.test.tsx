@@ -1,7 +1,27 @@
+/**
+ * @vitest-environment jsdom
+ */
+import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { ToolCallCard } from "./tool-call-card";
 import type { ToolCallWithResult } from "@/types/websocket";
+
+// Mock shadcn UI components that depend on Radix/CVA (not resolvable in vitest)
+vi.mock("@/components/ui/button", () => {
+  return {
+    Button: React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
+      function MockButton({ children, ...props }, ref) {
+        return React.createElement("button", { ...props, ref }, children);
+      },
+    ),
+  };
+});
+vi.mock("@/components/ui/json-block", () => ({
+  JsonBlock: ({ data }: { data: unknown }) =>
+    React.createElement("pre", { "data-testid": "json-block" }, JSON.stringify(data)),
+}));
+
+import { ToolCallCard } from "./tool-call-card";
 
 describe("ToolCallCard", () => {
   beforeEach(() => {

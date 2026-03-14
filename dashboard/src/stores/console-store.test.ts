@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
@@ -55,8 +58,11 @@ describe("useConsoleStore", () => {
       const store = useConsoleStore.getState();
 
       act(() => {
-        store.createTab();
-        store.createTab();
+        const id1 = store.createTab();
+        // Transition first tab to active so next createTab creates a new one
+        store.updateTab(id1, { state: "active", agentName: "agent-1", namespace: "ns" });
+        const id2 = store.createTab();
+        store.updateTab(id2, { state: "active", agentName: "agent-2", namespace: "ns" });
         store.createTab();
       });
 
@@ -88,6 +94,7 @@ describe("useConsoleStore", () => {
 
       act(() => {
         tabId1 = store.createTab();
+        store.updateTab(tabId1, { state: "active", agentName: "a1", namespace: "ns" });
         tabId2 = store.createTab();
       });
 
@@ -107,6 +114,7 @@ describe("useConsoleStore", () => {
 
       act(() => {
         tabId1 = store.createTab();
+        store.updateTab(tabId1, { state: "active", agentName: "a1", namespace: "ns" });
         store.createTab(); // Create second tab to have something to switch from
       });
 
@@ -229,10 +237,12 @@ describe("useConsoleStore", () => {
       const store = useConsoleStore.getState();
       const tabIds: string[] = [];
 
-      // Create 10 tabs (max limit)
+      // Create 10 tabs (max limit) — activate each before creating next
       act(() => {
         for (let i = 0; i < 10; i++) {
-          tabIds.push(store.createTab());
+          const id = store.createTab();
+          tabIds.push(id);
+          store.updateTab(id, { state: "active", agentName: `agent-${i}`, namespace: "ns" });
         }
       });
 

@@ -18,6 +18,7 @@ package facade
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -264,6 +265,136 @@ func TestToolCallInfoJSON(t *testing.T) {
 	}
 	if decoded.Name != info.Name {
 		t.Errorf("Name = %v, want %v", decoded.Name, info.Name)
+	}
+}
+
+func TestToolCallInfoClientFieldsJSON(t *testing.T) {
+	info := ToolCallInfo{
+		ID:             "call-456",
+		Name:           "get_location",
+		Execution:      "client",
+		ConsentMessage: "Allow location access?",
+		Categories:     []string{"location", "privacy"},
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded ToolCallInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.Execution != "client" {
+		t.Errorf("Execution = %v, want 'client'", decoded.Execution)
+	}
+	if decoded.ConsentMessage != info.ConsentMessage {
+		t.Errorf("ConsentMessage = %v, want %v", decoded.ConsentMessage, info.ConsentMessage)
+	}
+	if len(decoded.Categories) != 2 {
+		t.Fatalf("Categories length = %v, want 2", len(decoded.Categories))
+	}
+	if decoded.Categories[0] != "location" {
+		t.Errorf("Categories[0] = %v, want 'location'", decoded.Categories[0])
+	}
+}
+
+func TestToolCallInfoServerOmitsClientFields(t *testing.T) {
+	// Server-side tool calls should omit client fields via omitempty
+	info := ToolCallInfo{
+		ID:   "call-789",
+		Name: "weather",
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	jsonStr := string(data)
+	if strings.Contains(jsonStr, "execution") {
+		t.Error("Server-side tool call should not include 'execution' field")
+	}
+	if strings.Contains(jsonStr, "consent_message") {
+		t.Error("Server-side tool call should not include 'consent_message' field")
+	}
+	if strings.Contains(jsonStr, "categories") {
+		t.Error("Server-side tool call should not include 'categories' field")
+	}
+}
+
+func TestClientToolResultInfoJSON(t *testing.T) {
+	info := ClientToolResultInfo{
+		CallID: "ct-1",
+		Result: map[string]string{"city": "Denver"},
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded ClientToolResultInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.CallID != "ct-1" {
+		t.Errorf("CallID = %v, want 'ct-1'", decoded.CallID)
+	}
+}
+
+func TestClientToolResultInfoWithError(t *testing.T) {
+	info := ClientToolResultInfo{
+		CallID: "ct-2",
+		Error:  "User denied",
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded ClientToolResultInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.Error != "User denied" {
+		t.Errorf("Error = %v, want 'User denied'", decoded.Error)
+	}
+}
+
+func TestClientMessageToolResultJSON(t *testing.T) {
+	msg := ClientMessage{
+		Type:      MessageTypeToolResult,
+		SessionID: "session-1",
+		ToolResult: &ClientToolResultInfo{
+			CallID: "ct-1",
+			Result: "location data",
+		},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var decoded ClientMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if decoded.Type != MessageTypeToolResult {
+		t.Errorf("Type = %v, want %v", decoded.Type, MessageTypeToolResult)
+	}
+	if decoded.ToolResult == nil {
+		t.Fatal("ToolResult should not be nil")
+	}
+	if decoded.ToolResult.CallID != "ct-1" {
+		t.Errorf("ToolResult.CallID = %v, want 'ct-1'", decoded.ToolResult.CallID)
 	}
 }
 

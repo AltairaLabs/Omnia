@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/altairalabs/omnia/internal/facade"
@@ -33,21 +34,50 @@ import (
 // when the LLM provider stalls mid-response.
 const defaultStreamInactivityTimeout = 120 * time.Second
 
+// defaultClientToolTimeout is the maximum time to wait for a client tool response.
+const defaultClientToolTimeout = 60 * time.Second
+
 // RuntimeHandler delegates message handling to the runtime sidecar via gRPC.
+// It implements facade.ClientToolRouter to support client-side tool execution.
 type RuntimeHandler struct {
-	client *facade.RuntimeClient
+	client            *facade.RuntimeClient
+	clientToolTimeout time.Duration
+
+	// toolResultChannels maps sessionID → channel for receiving client tool results.
+	toolResultChannels sync.Map
 }
 
 // NewRuntimeHandler creates a new RuntimeHandler with the given client.
 func NewRuntimeHandler(client *facade.RuntimeClient) *RuntimeHandler {
 	return &RuntimeHandler{
-		client: client,
+		client:            client,
+		clientToolTimeout: defaultClientToolTimeout,
 	}
 }
 
 // Name returns the handler name for metrics.
 func (h *RuntimeHandler) Name() string {
 	return "runtime"
+}
+
+// SetClientToolTimeout overrides the default timeout for client tool responses.
+func (h *RuntimeHandler) SetClientToolTimeout(d time.Duration) {
+	h.clientToolTimeout = d
+}
+
+// SendToolResult delivers a client tool result to the handler waiting for it.
+// Returns true if the result was routed successfully, false if no handler is waiting.
+func (h *RuntimeHandler) SendToolResult(sessionID string, result *facade.ClientToolResultInfo) bool {
+	ch, ok := h.toolResultChannels.Load(sessionID)
+	if !ok {
+		return false
+	}
+	select {
+	case ch.(chan *facade.ClientToolResultInfo) <- result:
+		return true
+	default:
+		return false
+	}
 }
 
 // HandleMessage sends the message to the runtime and streams responses back.
@@ -62,6 +92,14 @@ func (h *RuntimeHandler) HandleMessage(
 	if err != nil {
 		return fmt.Errorf("failed to open stream to runtime: %w", err)
 	}
+
+	// Register a tool result channel for this session
+	toolResultCh := make(chan *facade.ClientToolResultInfo, 1)
+	h.toolResultChannels.Store(sessionID, toolResultCh)
+	defer h.toolResultChannels.Delete(sessionID)
+
+	// Defer CloseSend — stream stays open for client tool results
+	defer func() { _ = stream.CloseSend() }()
 
 	// Convert metadata to string map
 	metadata := make(map[string]string)
@@ -81,12 +119,7 @@ func (h *RuntimeHandler) HandleMessage(
 		return fmt.Errorf("failed to send message to runtime: %w", err)
 	}
 
-	// Close send side to signal we're done sending
-	if err := stream.CloseSend(); err != nil {
-		return fmt.Errorf("failed to close send: %w", err)
-	}
-
-	return h.receiveResponses(stream, writer)
+	return h.receiveResponses(ctx, stream, writer, toolResultCh)
 }
 
 // recvResult holds the result of a single gRPC Recv call.
@@ -96,10 +129,13 @@ type recvResult struct {
 }
 
 // receiveResponses reads from the gRPC stream with an inactivity timeout.
-// If no message arrives within defaultStreamInactivityTimeout, it returns an error.
+// When a client-side tool call arrives, it forwards it to the WebSocket client,
+// waits for the result, and sends it back on the gRPC stream.
 func (h *RuntimeHandler) receiveResponses(
+	ctx context.Context,
 	stream runtimev1.RuntimeService_ConverseClient,
 	writer facade.ResponseWriter,
+	toolResultCh <-chan *facade.ClientToolResultInfo,
 ) error {
 	inactivityTimer := time.NewTimer(defaultStreamInactivityTimeout)
 	defer inactivityTimer.Stop()
@@ -108,40 +144,143 @@ func (h *RuntimeHandler) receiveResponses(
 	done := make(chan struct{})
 	defer close(done)
 
-	// Start a single goroutine that continuously reads from the stream
-	// and sends results to ch. The goroutine exits when the stream ends
-	// or when done is closed (on timeout).
-	go func() {
-		for {
-			resp, err := stream.Recv()
-			select {
-			case ch <- recvResult{resp, err}:
-			case <-done:
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
+	go h.startRecvLoop(stream, ch, done)
 
 	for {
 		select {
 		case result := <-ch:
-			if result.err == io.EOF {
+			err := h.handleRecvResult(ctx, stream, writer, result, toolResultCh, inactivityTimer)
+			if err == errStreamDone {
 				return nil
 			}
-			if result.err != nil {
-				return fmt.Errorf("error receiving from runtime: %w", result.err)
-			}
-			resetTimer(inactivityTimer, defaultStreamInactivityTimeout)
-			if err := h.forwardResponse(result.resp, writer); err != nil {
-				return fmt.Errorf("error forwarding response: %w", err)
+			if err != nil {
+				return err
 			}
 		case <-inactivityTimer.C:
 			return fmt.Errorf("runtime stream inactivity timeout (%s)", defaultStreamInactivityTimeout)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+}
+
+// errStreamDone is a sentinel indicating the gRPC stream ended normally.
+var errStreamDone = fmt.Errorf("stream done")
+
+// startRecvLoop continuously reads from the gRPC stream and sends results to ch.
+func (h *RuntimeHandler) startRecvLoop(stream runtimev1.RuntimeService_ConverseClient, ch chan<- recvResult, done <-chan struct{}) {
+	for {
+		resp, err := stream.Recv()
+		select {
+		case ch <- recvResult{resp, err}:
+		case <-done:
+			return
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// handleRecvResult processes a single received gRPC message.
+// Returns errStreamDone on EOF, nil to continue, or an error to abort.
+func (h *RuntimeHandler) handleRecvResult(
+	ctx context.Context,
+	stream runtimev1.RuntimeService_ConverseClient,
+	writer facade.ResponseWriter,
+	result recvResult,
+	toolResultCh <-chan *facade.ClientToolResultInfo,
+	inactivityTimer *time.Timer,
+) error {
+	if result.err == io.EOF {
+		return errStreamDone
+	}
+	if result.err != nil {
+		return fmt.Errorf("error receiving from runtime: %w", result.err)
+	}
+	resetTimer(inactivityTimer, defaultStreamInactivityTimeout)
+
+	if isClientToolCall(result.resp) {
+		return h.handleClientToolCall(ctx, stream, writer, result.resp, toolResultCh)
+	}
+
+	if err := h.forwardResponse(result.resp, writer); err != nil {
+		return fmt.Errorf("error forwarding response: %w", err)
+	}
+	return nil
+}
+
+// isClientToolCall returns true if the message is a ToolCall with CLIENT execution.
+func isClientToolCall(resp *runtimev1.ServerMessage) bool {
+	tc, ok := resp.Message.(*runtimev1.ServerMessage_ToolCall)
+	return ok && tc.ToolCall.Execution == runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT
+}
+
+// handleClientToolCall forwards a client tool call to the WebSocket client,
+// waits for the result, and sends it back on the gRPC stream.
+func (h *RuntimeHandler) handleClientToolCall(
+	ctx context.Context,
+	stream runtimev1.RuntimeService_ConverseClient,
+	writer facade.ResponseWriter,
+	resp *runtimev1.ServerMessage,
+	toolResultCh <-chan *facade.ClientToolResultInfo,
+) error {
+	// Forward the tool call to the WebSocket client with execution=client
+	if err := h.forwardResponse(resp, writer); err != nil {
+		return fmt.Errorf("error forwarding client tool call: %w", err)
+	}
+
+	// Wait for the client to send back a result
+	result, err := h.waitForToolResult(ctx, toolResultCh)
+	if err != nil {
+		return fmt.Errorf("error waiting for client tool result: %w", err)
+	}
+
+	// Send the result back to the runtime on the gRPC stream
+	return h.sendToolResultToRuntime(stream, result)
+}
+
+// waitForToolResult waits for a client tool result with a configurable timeout.
+func (h *RuntimeHandler) waitForToolResult(
+	ctx context.Context,
+	toolResultCh <-chan *facade.ClientToolResultInfo,
+) (*facade.ClientToolResultInfo, error) {
+	timer := time.NewTimer(h.clientToolTimeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-toolResultCh:
+		return result, nil
+	case <-timer.C:
+		return nil, fmt.Errorf("client tool timeout (%s)", h.clientToolTimeout)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// sendToolResultToRuntime sends a ClientToolResult back on the gRPC stream.
+func (h *RuntimeHandler) sendToolResultToRuntime(
+	stream runtimev1.RuntimeService_ConverseClient,
+	result *facade.ClientToolResultInfo,
+) error {
+	grpcResult := &runtimev1.ClientToolResult{
+		CallId: result.CallID,
+	}
+
+	if result.Error != "" {
+		grpcResult.IsRejected = true
+		grpcResult.RejectionReason = result.Error
+	} else {
+		resultJSON, err := json.Marshal(result.Result)
+		if err != nil {
+			return fmt.Errorf("failed to marshal tool result: %w", err)
+		}
+		grpcResult.ResultJson = string(resultJSON)
+	}
+
+	return stream.Send(&runtimev1.ClientMessage{
+		ClientToolResult: grpcResult,
+	})
 }
 
 // resetTimer safely resets a timer, draining the channel if needed.
@@ -179,37 +318,7 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		return writer.WriteDone(msg.Done.FinalContent)
 
 	case *runtimev1.ServerMessage_ToolCall:
-		// Parse arguments JSON to map
-		var args map[string]interface{}
-		if msg.ToolCall.ArgumentsJson != "" {
-			if json.Unmarshal([]byte(msg.ToolCall.ArgumentsJson), &args) != nil {
-				// If parsing fails, use raw JSON as single argument
-				args = map[string]interface{}{"raw": msg.ToolCall.ArgumentsJson}
-			}
-		}
-		return writer.WriteToolCall(&facade.ToolCallInfo{
-			ID:        msg.ToolCall.Id,
-			Name:      msg.ToolCall.Name,
-			Arguments: args,
-		})
-
-	case *runtimev1.ServerMessage_ToolResult:
-		// Parse result JSON
-		var result interface{}
-		if msg.ToolResult.ResultJson != "" {
-			if json.Unmarshal([]byte(msg.ToolResult.ResultJson), &result) != nil {
-				result = msg.ToolResult.ResultJson
-			}
-		}
-		toolResult := &facade.ToolResultInfo{
-			ID:     msg.ToolResult.Id,
-			Result: result,
-		}
-		if msg.ToolResult.IsError {
-			toolResult.Error = fmt.Sprintf("%v", result)
-			toolResult.Result = nil
-		}
-		return writer.WriteToolResult(toolResult)
+		return h.forwardToolCall(msg.ToolCall, writer)
 
 	case *runtimev1.ServerMessage_MediaChunk:
 		mc := msg.MediaChunk
@@ -228,6 +337,31 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 		// Unknown message type, ignore
 		return nil
 	}
+}
+
+// forwardToolCall translates a gRPC ToolCall to a facade ToolCallInfo.
+func (h *RuntimeHandler) forwardToolCall(tc *runtimev1.ToolCall, writer facade.ResponseWriter) error {
+	var args map[string]interface{}
+	if tc.ArgumentsJson != "" {
+		if json.Unmarshal([]byte(tc.ArgumentsJson), &args) != nil {
+			args = map[string]interface{}{"raw": tc.ArgumentsJson}
+		}
+	}
+
+	info := &facade.ToolCallInfo{
+		ID:        tc.Id,
+		Name:      tc.Name,
+		Arguments: args,
+	}
+
+	// Add client tool fields
+	if tc.Execution == runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT {
+		info.Execution = "client"
+		info.ConsentMessage = tc.ConsentMessage
+		info.Categories = tc.Categories
+	}
+
+	return writer.WriteToolCall(info)
 }
 
 // Client returns the underlying runtime client for health checks.
