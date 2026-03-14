@@ -713,7 +713,8 @@ func TestRuntimeHandler_ClientToolCall(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	handler := NewRuntimeHandler(client)
-	writer := &mockResponseWriter{}
+	toolCallCh := make(chan *facade.ToolCallInfo, 1)
+	writer := &mockResponseWriter{toolCallCh: toolCallCh}
 	sessionID := "session-ct-1"
 
 	// Start HandleMessage in a goroutine — it will block waiting for the tool result
@@ -724,16 +725,20 @@ func TestRuntimeHandler_ClientToolCall(t *testing.T) {
 		}, writer)
 	}()
 
-	// Give the handler time to receive and forward the tool call
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the tool call to be forwarded to the writer
+	var tc *facade.ToolCallInfo
+	select {
+	case tc = <-toolCallCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for tool call")
+	}
 
-	// Verify the tool call was forwarded to the writer
-	require.Len(t, writer.toolCalls, 1)
-	assert.Equal(t, "ct-1", writer.toolCalls[0].ID)
-	assert.Equal(t, "get_location", writer.toolCalls[0].Name)
-	assert.Equal(t, "client", writer.toolCalls[0].Execution)
-	assert.Equal(t, "Allow location access?", writer.toolCalls[0].ConsentMessage)
-	assert.Equal(t, []string{"location"}, writer.toolCalls[0].Categories)
+	// Verify the tool call fields
+	assert.Equal(t, "ct-1", tc.ID)
+	assert.Equal(t, "get_location", tc.Name)
+	assert.Equal(t, "client", tc.Execution)
+	assert.Equal(t, "Allow location access?", tc.ConsentMessage)
+	assert.Equal(t, []string{"location"}, tc.Categories)
 
 	// Send tool result via the ClientToolRouter interface
 	routed := handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{
@@ -784,7 +789,8 @@ func TestRuntimeHandler_ClientToolCall_Rejected(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	handler := NewRuntimeHandler(client)
-	writer := &mockResponseWriter{}
+	toolCallCh := make(chan *facade.ToolCallInfo, 1)
+	writer := &mockResponseWriter{toolCallCh: toolCallCh}
 	sessionID := "session-ct-2"
 
 	errCh := make(chan error, 1)
@@ -794,7 +800,12 @@ func TestRuntimeHandler_ClientToolCall_Rejected(t *testing.T) {
 		}, writer)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the tool call to arrive
+	select {
+	case <-toolCallCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for tool call")
+	}
 
 	// Reject the tool call
 	routed := handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{
