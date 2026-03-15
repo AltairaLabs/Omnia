@@ -154,6 +154,19 @@ func (s *OmniaEventStore) Append(ctx context.Context, event *events.Event) error
 	return nil
 }
 
+// OnEvent is a Listener-compatible method for wiring the store as a bus subscriber.
+// Events without a SessionID are silently skipped.
+func (s *OmniaEventStore) OnEvent(event *events.Event) {
+	if event.SessionID == "" {
+		if s.sessionID != "" {
+			event.SessionID = s.sessionID
+		} else {
+			return
+		}
+	}
+	_ = s.Append(context.Background(), event)
+}
+
 // Query is a no-op — OmniaEventStore is write-only (session-api is the read path).
 func (s *OmniaEventStore) Query(_ context.Context, _ *events.EventFilter) ([]*events.Event, error) {
 	return nil, nil
