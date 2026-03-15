@@ -45,8 +45,9 @@
 - Route paths are normalized (UUIDs → `:id`) to prevent cardinality explosion
 
 **Traces** (OpenTelemetry):
-- OTLP trace ingestion endpoint (optional) — receives and stores traces from other services
-- Does NOT create its own trace spans for API requests
+- Inherits trace context from incoming HTTP requests (propagated from Facade/Runtime)
+- Redis provider creates spans for cache operations
+- OTLP trace ingestion endpoint (optional) — receives traces from Runtime/Facade and transforms them into session-linked records for dashboard display
 
 **Audit** (enterprise, prefix `omnia_audit_`):
 - `audit_events_total`, `audit_write_duration_seconds`, `audit_buffer_drops_total`

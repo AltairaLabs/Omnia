@@ -44,8 +44,10 @@
 - Media transfer: `uploads_total`, `upload_bytes_total`, `downloads_total`, `media_chunks_total`
 
 **Traces** (OpenTelemetry):
-- Propagates W3C trace context to Runtime via gRPC
-- Does NOT create its own spans — the Runtime owns conversation-level tracing
+- `omnia.facade.message` — per-message span wrapping the full request lifecycle
+- Derives trace ID from session UUID (lossless 128-bit mapping) so all spans in a session share one trace — enables Tempo lookup by session ID
+- Links to caller's W3C traceparent (e.g., from arena-worker) as a span link for cross-referencing
+- Propagates trace context to Runtime via gRPC and to Session API via HTTP
 
 ## Dependencies
 - Runtime gRPC server (default `localhost:9000`)

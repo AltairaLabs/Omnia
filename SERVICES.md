@@ -97,6 +97,40 @@ This document maps every deployable service, how they communicate, and where to 
 | Compaction | PostgreSQL/Redis/Cold | Direct | Data lifecycle management |
 | Policy Proxy | K8s API | K8s client | Policy watching |
 
+## Distributed Tracing
+
+All services that handle conversation traffic share a single trace per session. The **Facade** derives the trace ID from the session UUID (lossless 128-bit mapping), so looking up a session ID in Tempo returns the full trace.
+
+### Trace Flow
+
+```
+Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP──▶ Session API
+                         │                 │                  │
+                  omnia.facade.      omnia.runtime.     (inherits
+                  message            conversation.turn   trace ctx)
+                                         │
+                                    genai.chat
+                                         │
+                                    omnia.tool.call
+```
+
+### Span Inventory
+
+| Span Name | Created By | Parent | Key Attributes |
+|-----------|-----------|--------|----------------|
+| `omnia.facade.message` | Facade | (root, trace ID = session UUID) | session.id, omnia.agent.name, omnia.agent.namespace |
+| `omnia.runtime.conversation.turn` | Runtime | facade.message (via gRPC context) | session.id, omnia.turn.index, omnia.promptpack.name/version |
+| `genai.chat` | Runtime | conversation.turn | gen_ai.system, gen_ai.request.model, gen_ai.usage.* |
+| `omnia.tool.call` | Runtime | genai.chat | tool.name, tool.duration_ms, tool.request/response.bytes |
+
+### Tracing Responsibilities
+
+- **Facade**: Creates root span, derives trace ID from session UUID, links to caller's W3C traceparent if present (e.g., arena-worker). Propagates context to Runtime (gRPC) and Session API (HTTP).
+- **Runtime**: Creates conversation turn, LLM, and tool spans. Records token usage, cost, and tool execution metrics on spans.
+- **Session API**: Inherits trace context from HTTP requests. Optional OTLP ingestion endpoint transforms traces into session-linked records for dashboard display.
+- **Eval Worker**: Inherits trace context from session events when available.
+- **Operator, Compaction, Policy Proxy, LSP**: No OTel spans.
+
 ## Key Architectural Rules
 
 1. **Server-side tool calls are opaque to the facade.** The runtime handles them internally; the facade only sees client-side tool calls.
