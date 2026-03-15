@@ -2000,6 +2000,7 @@ metadata:
   name: client-tool-prompts
   namespace: test-agents
 spec:
+  version: "1.0.0"
   source:
     type: configmap
     configMapRef:
