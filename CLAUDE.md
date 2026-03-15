@@ -20,6 +20,27 @@ If you find a bug or need a change in PromptKit, **do not fix it here**. Instead
 - When continuing a previous session, check `git status`, `git log --oneline -5`, and any existing plan files before taking action.
 - **Never manually resolve conflicts in generated files** (`zz_generated.deepcopy.go`, `go.sum`, `package-lock.json`, `dashboard/src/types/generated/*.ts`). After merging, re-run `make generate && make manifests && go mod tidy` (and `cd dashboard && npm install` for dashboard changes). The `.gitattributes` merge drivers will auto-accept "ours" for these files.
 
+## Keeping Documentation In Sync
+
+Architecture docs are only useful if they reflect reality. When your changes affect service boundaries, update the docs as part of the same PR — not as a follow-up.
+
+**When to update `SERVICE.md`** (in the service's `cmd/` or `ee/cmd/` directory):
+- Adding or removing an input/output (new API endpoint, new gRPC method, new message type)
+- Changing what a service owns or does NOT own
+- Adding or removing Prometheus metrics or OpenTelemetry trace spans
+- Adding or changing dependencies (new external service, database, cache)
+
+**When to update `SERVICES.md`** (repo root):
+- Adding a new deployable service
+- Changing how services communicate (new protocol, new connection between services)
+- Adding or removing trace spans (update the span inventory table and trace flow diagram)
+
+**When to update `api/CHANGELOG.md`**:
+- Any change to REST, gRPC, or WebSocket message schemas
+
+**When to update `api/websocket/asyncapi.yaml`**:
+- Adding/removing/changing WebSocket message types or payload schemas
+
 ## Pre-commit Hooks
 
 The repo has a pre-commit hook at `hack/pre-commit` that runs on every commit. **Run checks locally before committing to avoid retry cycles.**

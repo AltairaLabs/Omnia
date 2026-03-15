@@ -61,8 +61,13 @@ _Complete if this PR touches multiple services or API surfaces._
 - [ ] WebSocket types: `make generate-websocket-types` run
 - [ ] New PromptKit types: verified with `GOWORK=off go build ./...`
 - [ ] Boundary test added or updated (`test/integration/`)
-- [ ] SERVICE.md updated if ownership changed
 - [ ] `api/CHANGELOG.md` updated for API surface changes
+
+**Documentation (update if your changes affect any of these):**
+- [ ] `SERVICE.md` — ownership, inputs/outputs, or dependencies changed
+- [ ] `SERVICE.md` — new metrics or trace spans added/removed
+- [ ] `SERVICES.md` — new service added, communication protocol changed, or trace flow updated
+- [ ] `api/websocket/asyncapi.yaml` — WebSocket message types or schemas changed
 
 ## Testing
 
