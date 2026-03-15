@@ -740,6 +740,12 @@ components:
         sequenceNum:
           type: integer
           format: int32
+        hasMedia:
+          type: boolean
+        mediaTypes:
+          type: array
+          items:
+            type: string
 
     ToolCall:
       type: object

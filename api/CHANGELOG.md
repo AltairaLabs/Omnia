@@ -9,6 +9,9 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 ---
 
 ## 2026-03-15
+- **Session API**: Added structured multi-modal fields to `Message` schema (`hasMedia`, `mediaTypes`)
+  - Migration `000019_structured_multimodal` adds `has_media`/`media_types` to messages and queryable columns to message_artifacts
+  - Enables queries like "sessions with voice input" without parsing JSON metadata
 - **Session API**: Added runtime events endpoints (`POST/GET /api/v1/sessions/{sessionID}/events`)
   - New `RuntimeEvent` schema in OpenAPI spec
   - Stores PromptKit lifecycle events (pipeline, stage, middleware, validation, workflow) in dedicated `runtime_events` table instead of as system messages

@@ -1097,6 +1097,14 @@ func TestOmniaEventStore_AppendMessageCreated_WithImageParts(t *testing.T) {
 	if msg.Content != "What's in this image?" {
 		t.Errorf("expected text content preserved, got %s", msg.Content)
 	}
+
+	// Structured multi-modal fields should be set
+	if !msg.HasMedia {
+		t.Error("expected HasMedia=true")
+	}
+	if len(msg.MediaTypes) != 1 || msg.MediaTypes[0] != "image" {
+		t.Errorf("expected MediaTypes=[image], got %v", msg.MediaTypes)
+	}
 }
 
 func TestOmniaEventStore_AppendMessageCreated_WithAudioPart(t *testing.T) {
@@ -1167,6 +1175,14 @@ func TestOmniaEventStore_AppendMessageCreated_WithAudioPart(t *testing.T) {
 	}
 	if !p.HasData {
 		t.Error("expected has_data=true since URL was present")
+	}
+
+	// Structured multi-modal fields
+	if !msg.HasMedia {
+		t.Error("expected HasMedia=true")
+	}
+	if len(msg.MediaTypes) != 1 || msg.MediaTypes[0] != "audio" {
+		t.Errorf("expected MediaTypes=[audio], got %v", msg.MediaTypes)
 	}
 }
 

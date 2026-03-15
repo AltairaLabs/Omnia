@@ -151,6 +151,7 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 		&m.ID, &m.Role, &m.Content, &m.Timestamp,
 		&inputTokens, &outputTokens,
 		&toolCallID, &metadataJSON, &m.SequenceNum,
+		&m.HasMedia, &m.MediaTypes,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: scan message: %w", err)
@@ -163,6 +164,9 @@ func scanMessage(row pgx.Row) (*session.Message, error) {
 	}
 	if outputTokens != nil {
 		m.OutputTokens = *outputTokens
+	}
+	if m.MediaTypes == nil {
+		m.MediaTypes = []string{}
 	}
 	return &m, nil
 }
@@ -344,13 +348,19 @@ func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *ses
 		return err
 	}
 
-	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	query := `INSERT INTO messages (id, session_id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num, has_media, media_types)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+
+	mediaTypes := msg.MediaTypes
+	if mediaTypes == nil {
+		mediaTypes = []string{}
+	}
 
 	_, err := p.pool.Exec(ctx, query,
 		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp,
 		pgutil.NullInt32(msg.InputTokens), pgutil.NullInt32(msg.OutputTokens),
 		pgutil.NullString(msg.ToolCallID), pgutil.MarshalJSONB(msg.Metadata), msg.SequenceNum,
+		msg.HasMedia, mediaTypes,
 	)
 	if err != nil {
 		// FK violation (code 23503) means the session_id does not exist.
@@ -386,7 +396,7 @@ func (p *Provider) GetMessages(ctx context.Context, sessionID string, opts provi
 		sort = "DESC"
 	}
 
-	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num
+	query := `SELECT id, role, content, timestamp, input_tokens, output_tokens, tool_call_id, metadata, sequence_num, has_media, media_types
 		FROM messages WHERE 1=1` + qb.Where() + ` ORDER BY sequence_num ` + sort
 	query = qb.AppendPagination(query, opts.Limit, opts.Offset)
 
@@ -786,8 +796,9 @@ func (p *Provider) GetRuntimeEvents(ctx context.Context, sessionID string) ([]*s
 
 func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact) error {
 	query := `INSERT INTO message_artifacts (id, message_id, session_id, artifact_type, mime_type,
-		storage_uri, size_bytes, filename, checksum_sha256, metadata, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+		storage_uri, size_bytes, filename, checksum_sha256, metadata, created_at,
+		width, height, duration_ms, channels, sample_rate)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 
 	_, err := p.pool.Exec(ctx, query,
 		artifact.ID, artifact.MessageID, artifact.SessionID,
@@ -795,6 +806,9 @@ func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact)
 		pgutil.NullInt64(artifact.SizeBytes), pgutil.NullString(artifact.Filename),
 		pgutil.NullString(artifact.Checksum), pgutil.MarshalJSONB(artifact.Metadata),
 		artifact.CreatedAt,
+		pgutil.NullInt32(artifact.Width), pgutil.NullInt32(artifact.Height),
+		pgutil.NullInt32(artifact.DurationMs), pgutil.NullInt32(artifact.Channels),
+		pgutil.NullInt32(artifact.SampleRate),
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: save artifact: %w", err)
@@ -804,7 +818,8 @@ func (p *Provider) SaveArtifact(ctx context.Context, artifact *session.Artifact)
 
 func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*session.Artifact, error) {
 	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
-		size_bytes, filename, checksum_sha256, metadata, created_at
+		size_bytes, filename, checksum_sha256, metadata, created_at,
+		width, height, duration_ms, channels, sample_rate
 		FROM message_artifacts WHERE message_id=$1 ORDER BY created_at ASC`
 
 	rows, err := p.pool.Query(ctx, query, messageID)
@@ -817,7 +832,8 @@ func (p *Provider) GetArtifacts(ctx context.Context, messageID string) ([]*sessi
 func (p *Provider) GetSessionArtifacts(ctx context.Context, sessionID string) ([]*session.Artifact, error) {
 	const maxSessionArtifacts = 1000
 	query := `SELECT id, message_id, session_id, artifact_type, mime_type, storage_uri,
-		size_bytes, filename, checksum_sha256, metadata, created_at
+		size_bytes, filename, checksum_sha256, metadata, created_at,
+		width, height, duration_ms, channels, sample_rate
 		FROM message_artifacts WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2`
 
 	rows, err := p.pool.Query(ctx, query, sessionID, maxSessionArtifacts)
@@ -840,10 +856,12 @@ func scanArtifact(row pgx.Row) (*session.Artifact, error) {
 	var sizeBytes *int64
 	var filename, checksum *string
 	var metadataJSON []byte
+	var width, height, durationMs, channels, sampleRate *int32
 
 	err := row.Scan(
 		&a.ID, &a.MessageID, &a.SessionID, &a.Type, &a.MIMEType, &a.StorageURI,
 		&sizeBytes, &filename, &checksum, &metadataJSON, &a.CreatedAt,
+		&width, &height, &durationMs, &channels, &sampleRate,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -858,6 +876,21 @@ func scanArtifact(row pgx.Row) (*session.Artifact, error) {
 	a.Filename = pgutil.DerefString(filename)
 	a.Checksum = pgutil.DerefString(checksum)
 	a.Metadata = pgutil.UnmarshalJSONB(metadataJSON)
+	if width != nil {
+		a.Width = *width
+	}
+	if height != nil {
+		a.Height = *height
+	}
+	if durationMs != nil {
+		a.DurationMs = *durationMs
+	}
+	if channels != nil {
+		a.Channels = *channels
+	}
+	if sampleRate != nil {
+		a.SampleRate = *sampleRate
+	}
 	return &a, nil
 }
 

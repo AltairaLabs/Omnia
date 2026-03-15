@@ -87,6 +87,10 @@ type Message struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 	// SequenceNum is the ordering position within the session.
 	SequenceNum int32 `json:"sequenceNum,omitempty"`
+	// HasMedia indicates whether this message contains media attachments.
+	HasMedia bool `json:"hasMedia,omitempty"`
+	// MediaTypes lists the distinct media types (e.g., ["image", "audio"]).
+	MediaTypes []string `json:"mediaTypes,omitempty"`
 }
 
 // Artifact represents a binary attachment (image, audio, video, etc.) associated
@@ -112,6 +116,16 @@ type Artifact struct {
 	Checksum string `json:"checksum,omitempty"`
 	// Metadata contains optional additional data.
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// Width is the media width in pixels (images/video).
+	Width int32 `json:"width,omitempty"`
+	// Height is the media height in pixels (images/video).
+	Height int32 `json:"height,omitempty"`
+	// DurationMs is the media duration in milliseconds (audio/video).
+	DurationMs int32 `json:"durationMs,omitempty"`
+	// Channels is the number of audio channels.
+	Channels int32 `json:"channels,omitempty"`
+	// SampleRate is the audio sample rate in Hz.
+	SampleRate int32 `json:"sampleRate,omitempty"`
 	// CreatedAt is when the artifact was created.
 	CreatedAt time.Time `json:"createdAt"`
 }

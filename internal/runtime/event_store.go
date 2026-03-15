@@ -304,6 +304,8 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 	}
 
 	// Enrich with multimodal content metadata (not the blob data itself)
+	var hasMedia bool
+	var mediaTypes []string
 	if len(data.Parts) > 0 {
 		partsMeta := extractPartsMetadata(data.Parts)
 		if len(partsMeta) > 0 {
@@ -313,10 +315,14 @@ func (s *OmniaEventStore) convertMessageCreated(event *events.Event) (eventActio
 				metadata["multimodal"] = "true"
 				metadata["part_count"] = strconv.Itoa(len(data.Parts))
 			}
+			hasMedia = true
+			mediaTypes = extractMediaTypes(partsMeta)
 		}
 	}
 
 	msg := s.buildMessage(role, content, event.Timestamp, metadata)
+	msg.HasMedia = hasMedia
+	msg.MediaTypes = mediaTypes
 	return eventAction{
 		message: &msg,
 		stats:   session.SessionStatsUpdate{AddMessages: 1},
@@ -338,6 +344,19 @@ type partMetadata struct {
 	Caption  string `json:"caption,omitempty"`   // Optional caption
 	Detail   string `json:"detail,omitempty"`    // Vision model detail level
 	HasData  bool   `json:"has_data,omitempty"`  // Whether blob data was present (but stripped)
+}
+
+// extractMediaTypes returns distinct media types from part metadata.
+func extractMediaTypes(metas []partMetadata) []string {
+	seen := make(map[string]struct{})
+	var types []string
+	for _, m := range metas {
+		if _, ok := seen[m.Type]; !ok {
+			seen[m.Type] = struct{}{}
+			types = append(types, m.Type)
+		}
+	}
+	return types
 }
 
 // textFromParts returns concatenated text content from content parts.

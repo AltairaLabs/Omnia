@@ -67,6 +67,8 @@ export interface Message {
     output?: number;
   };
   sequenceNum?: number; // ordering within session, used for pagination cursors
+  hasMedia?: boolean;
+  mediaTypes?: string[];
 }
 
 export interface Session {
