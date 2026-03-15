@@ -150,6 +150,12 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	if s.sessionStore != nil {
 		eventStore := NewOmniaEventStore(s.sessionStore, s.log)
 		eventStore.SetSessionID(sessionID)
+		eventStore.SetAgentMeta(AgentMeta{
+			AgentName:         s.agentName,
+			Namespace:         s.namespace,
+			PromptPackName:    s.promptPackName,
+			PromptPackVersion: s.promptPackVersion,
+		})
 		if s.toolExecutor != nil {
 			eventStore.SetToolMetaFn(s.toolExecutor.GetToolMeta)
 		}

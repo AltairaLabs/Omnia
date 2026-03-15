@@ -96,6 +96,7 @@ type OmniaEventStore struct {
 	sessionStore     session.Store
 	log              logr.Logger
 	toolMetaFn       func(string) (tools.ToolMeta, bool)
+	agentMeta        AgentMeta
 	sem              chan struct{} // bounded concurrency for async writes
 	sessionID        string        // fallback sessionID for events missing it (PromptKit bug workaround)
 	toolCallKeys     sync.Map      // callID → callKey (for tool call upsert correlation)
@@ -117,6 +118,19 @@ func NewOmniaEventStore(store session.Store, log logr.Logger) *OmniaEventStore {
 // emitter is created without a session ID (see PromptKit#705).
 func (s *OmniaEventStore) SetSessionID(id string) {
 	s.sessionID = id
+}
+
+// AgentMeta holds agent identity fields for enriching eval results.
+type AgentMeta struct {
+	AgentName         string
+	Namespace         string
+	PromptPackName    string
+	PromptPackVersion string
+}
+
+// SetAgentMeta sets agent identity metadata used to enrich eval results.
+func (s *OmniaEventStore) SetAgentMeta(meta AgentMeta) {
+	s.agentMeta = meta
 }
 
 // SetToolMetaFn sets the function used to look up registry/handler metadata for tools.
@@ -669,14 +683,18 @@ func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (eventAction, bo
 
 	durationMs := int(data.DurationMs)
 	result := session.EvalResult{
-		EvalID:    data.EvalID,
-		EvalType:  data.EvalType,
-		Trigger:   data.Trigger,
-		Passed:    data.Passed,
-		Score:     data.Score,
-		Details:   details,
-		Source:    metaValueSource,
-		CreatedAt: event.Timestamp,
+		EvalID:            data.EvalID,
+		EvalType:          data.EvalType,
+		Trigger:           data.Trigger,
+		Passed:            data.Passed,
+		Score:             data.Score,
+		Details:           details,
+		AgentName:         s.agentMeta.AgentName,
+		Namespace:         s.agentMeta.Namespace,
+		PromptPackName:    s.agentMeta.PromptPackName,
+		PromptPackVersion: s.agentMeta.PromptPackVersion,
+		Source:            metaValueSource,
+		CreatedAt:         event.Timestamp,
 	}
 	if durationMs > 0 {
 		result.DurationMs = &durationMs
