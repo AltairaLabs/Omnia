@@ -93,14 +93,13 @@ func asPtr[T any](data any) (*T, bool) {
 const defaultWriteConcurrency = 100
 
 type OmniaEventStore struct {
-	sessionStore     session.Store
-	log              logr.Logger
-	toolMetaFn       func(string) (tools.ToolMeta, bool)
-	agentMeta        AgentMeta
-	sem              chan struct{} // bounded concurrency for async writes
-	sessionID        string        // fallback sessionID for events missing it (PromptKit bug workaround)
-	toolCallKeys     sync.Map      // callID → callKey (for tool call upsert correlation)
-	providerCallKeys sync.Map      // callID → callKey (for provider call upsert correlation)
+	sessionStore session.Store
+	log          logr.Logger
+	toolMetaFn   func(string) (tools.ToolMeta, bool)
+	agentMeta    AgentMeta
+	sem          chan struct{} // bounded concurrency for async writes
+	sessionID    string        // fallback sessionID for events missing it (PromptKit bug workaround)
+	toolCallKeys sync.Map      // callID → callKey (for tool call upsert correlation)
 }
 
 // NewOmniaEventStore creates a new event store that bridges to session-api.
@@ -568,15 +567,16 @@ func (s *OmniaEventStore) convertToolCallFailed(event *events.Event) (eventActio
 
 // convertClientToolRequest updates an existing tool call to mark it as client-side.
 // The SDK emits ToolCallStarted (server) first, then ClientToolRequest when the tool
-// is delegated to the client. We upsert the same row to avoid duplicates.
+// is delegated to the client. We upsert the same row but keep the key in toolCallKeys
+// so the eventual ToolCallCompleted can also find it.
 func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.ClientToolRequestData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	// Reuse the ID from the started event so the upsert updates the same row.
-	tc := s.buildToolCallUpsert(data.CallID, data.ToolName, event.Timestamp)
+	// Load without deleting — the completed/failed event still needs this key.
+	tc := s.buildToolCallLookup(data.CallID, data.ToolName, event.Timestamp)
 	tc.Arguments = data.Args
 	tc.Status = session.ToolCallStatusPending
 	tc.Execution = session.ToolCallExecutionClient
@@ -589,28 +589,12 @@ func (s *OmniaEventStore) convertClientToolRequest(event *events.Event) (eventAc
 
 // --- Provider call events ---
 
-// convertProviderCallStarted records the start of a provider call.
-func (s *OmniaEventStore) convertProviderCallStarted(event *events.Event) (eventAction, bool) {
-	data, ok := asPtr[events.ProviderCallStartedData](event.Data)
-	if !ok {
-		return eventAction{}, false
-	}
-
-	pcID := uuid.New().String()
-	pc := session.ProviderCall{
-		ID:        pcID,
-		Provider:  data.Provider,
-		Model:     data.Model,
-		Status:    session.ProviderCallStatusPending,
-		CreatedAt: event.Timestamp,
-	}
-
-	// Build a stable call key. ProviderCallStartedData has no CallID,
-	// so we key on "provider:model:timestamp" to correlate with completed/failed.
-	key := data.Provider + ":" + data.Model + ":" + event.Timestamp.Format(time.RFC3339Nano)
-	s.providerCallKeys.Store(key, callKey{id: pcID, createdAt: event.Timestamp})
-
-	return eventAction{providerCall: &pc}, true
+// convertProviderCallStarted is a no-op — we only record provider calls on
+// completion/failure when we have tokens, cost, and duration. The started event
+// has no useful data and creating a "pending" row causes duplicates since
+// ProviderCallStartedData has no CallID for upsert correlation.
+func (s *OmniaEventStore) convertProviderCallStarted(_ *events.Event) (eventAction, bool) {
+	return eventAction{}, false
 }
 
 // convertProviderCallCompleted records provider call completion.
@@ -620,14 +604,20 @@ func (s *OmniaEventStore) convertProviderCallCompleted(event *events.Event) (eve
 		return eventAction{}, false
 	}
 
-	pc := s.buildProviderCallUpsert(data.Provider, data.Model, event.Timestamp)
-	pc.Status = session.ProviderCallStatusCompleted
-	pc.InputTokens = int64(data.InputTokens)
-	pc.OutputTokens = int64(data.OutputTokens)
-	pc.CachedTokens = int64(data.CachedTokens)
-	pc.CostUSD = data.Cost
-	pc.DurationMs = data.Duration.Milliseconds()
-	pc.FinishReason = data.FinishReason
+	pc := session.ProviderCall{
+		ID:            uuid.New().String(),
+		Provider:      data.Provider,
+		Model:         data.Model,
+		Status:        session.ProviderCallStatusCompleted,
+		InputTokens:   int64(data.InputTokens),
+		OutputTokens:  int64(data.OutputTokens),
+		CachedTokens:  int64(data.CachedTokens),
+		CostUSD:       data.Cost,
+		DurationMs:    data.Duration.Milliseconds(),
+		FinishReason:  data.FinishReason,
+		ToolCallCount: int32(data.ToolCallCount),
+		CreatedAt:     event.Timestamp,
+	}
 
 	return eventAction{
 		providerCall: &pc,
@@ -652,10 +642,15 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 		errMsg = data.Error.Error()
 	}
 
-	pc := s.buildProviderCallUpsert(data.Provider, data.Model, event.Timestamp)
-	pc.Status = session.ProviderCallStatusFailed
-	pc.DurationMs = data.Duration.Milliseconds()
-	pc.ErrorMessage = errMsg
+	pc := session.ProviderCall{
+		ID:           uuid.New().String(),
+		Provider:     data.Provider,
+		Model:        data.Model,
+		Status:       session.ProviderCallStatusFailed,
+		DurationMs:   data.Duration.Milliseconds(),
+		ErrorMessage: errMsg,
+		CreatedAt:    event.Timestamp,
+	}
 
 	return eventAction{providerCall: &pc}, true
 }
@@ -841,6 +836,29 @@ func (s *OmniaEventStore) resolveEventType(action eventAction) string {
 
 // buildToolCallUpsert creates a ToolCall for an upsert (completed/failed),
 // reusing the ID from the started event if available.
+// buildToolCallLookup creates a ToolCall reusing the started event's ID without
+// consuming the key. Used for intermediate events (ClientToolRequest) where the
+// key must remain for the eventual completed/failed event.
+func (s *OmniaEventStore) buildToolCallLookup(callID, toolName string, ts time.Time) session.ToolCall {
+	tc := session.ToolCall{
+		CallID:    callID,
+		Name:      toolName,
+		CreatedAt: ts,
+		Execution: session.ToolCallExecutionServer,
+	}
+
+	if v, ok := s.toolCallKeys.Load(callID); ok {
+		ck := v.(callKey)
+		tc.ID = ck.id
+		tc.CreatedAt = ck.createdAt
+	} else {
+		tc.ID = uuid.New().String()
+	}
+
+	s.enrichToolCallLabels(&tc, toolName)
+	return tc
+}
+
 func (s *OmniaEventStore) buildToolCallUpsert(callID, toolName string, ts time.Time) session.ToolCall {
 	tc := session.ToolCall{
 		CallID:    callID,
@@ -859,27 +877,6 @@ func (s *OmniaEventStore) buildToolCallUpsert(callID, toolName string, ts time.T
 
 	s.enrichToolCallLabels(&tc, toolName)
 	return tc
-}
-
-// buildProviderCallUpsert creates a ProviderCall for an upsert (completed/failed),
-// reusing the ID from the started event if available.
-func (s *OmniaEventStore) buildProviderCallUpsert(provider, model string, ts time.Time) session.ProviderCall {
-	pc := session.ProviderCall{
-		Provider:  provider,
-		Model:     model,
-		CreatedAt: ts,
-	}
-
-	key := provider + ":" + model + ":" + ts.Format(time.RFC3339Nano)
-	if v, ok := s.providerCallKeys.LoadAndDelete(key); ok {
-		ck := v.(callKey)
-		pc.ID = ck.id
-		pc.CreatedAt = ck.createdAt
-	} else {
-		pc.ID = uuid.New().String()
-	}
-
-	return pc
 }
 
 // enrichToolCallLabels adds tool registry metadata as labels on the ToolCall.

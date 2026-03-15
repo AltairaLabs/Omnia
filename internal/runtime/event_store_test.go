@@ -521,22 +521,14 @@ func TestOmniaEventStore_AppendProviderCallStarted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	// No legacy message — only first-class provider call record.
-	store.waitForProviderCalls(t, 1)
-	msgs := store.getMessages()
-	if len(msgs) != 0 {
-		t.Errorf("expected no messages for provider call started, got %d", len(msgs))
+	// ProviderCallStarted is a no-op — we only record on completion.
+	// Give async writer a moment, then verify nothing was written.
+	time.Sleep(100 * time.Millisecond)
+	if len(store.getProviderCalls()) != 0 {
+		t.Error("expected no provider calls for started event")
 	}
-
-	pcs := store.getProviderCalls()
-	if pcs[0].Provider != "claude" {
-		t.Errorf("expected provider=claude, got %s", pcs[0].Provider)
-	}
-	if pcs[0].Model != "claude-3-sonnet" {
-		t.Errorf("expected model=claude-3-sonnet, got %s", pcs[0].Model)
-	}
-	if pcs[0].Status != session.ProviderCallStatusPending {
-		t.Errorf("expected status pending, got %s", pcs[0].Status)
+	if len(store.getMessages()) != 0 {
+		t.Error("expected no messages for started event")
 	}
 }
 
@@ -1586,7 +1578,7 @@ func TestOmniaEventStore_ValueTypeToolCallCompleted(t *testing.T) {
 }
 
 // TestOmniaEventStore_ValueTypeProviderCallStarted verifies provider call
-// started events passed as values are handled.
+// started events are silently dropped (no-op).
 func TestOmniaEventStore_ValueTypeProviderCallStarted(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())
@@ -1607,10 +1599,10 @@ func TestOmniaEventStore_ValueTypeProviderCallStarted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForProviderCalls(t, 1)
-	pcs := store.getProviderCalls()
-	if pcs[0].Provider != "ollama" {
-		t.Errorf("expected provider=ollama, got %s", pcs[0].Provider)
+	// Started is a no-op.
+	time.Sleep(100 * time.Millisecond)
+	if len(store.getProviderCalls()) != 0 {
+		t.Error("expected no provider calls for started event")
 	}
 }
 
