@@ -1086,7 +1086,7 @@ function ConversationWithDebugPanel({
             {conversationContent}
           </ScrollArea>
         </Card>
-        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} />
+        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} evalResults={evalResults} />
       </div>
     );
   }
@@ -1102,7 +1102,7 @@ function ConversationWithDebugPanel({
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize={30} minSize={15}>
-        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} />
+        <DebugPanel messages={messages} session={session} toolCalls={toolCalls} providerCalls={providerCalls} runtimeEvents={runtimeEvents} evalResults={evalResults} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

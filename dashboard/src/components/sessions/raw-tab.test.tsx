@@ -47,8 +47,15 @@ describe("RawTab", () => {
 
     fireEvent.click(screen.getByTestId("raw-copy-button"));
 
+    const expected = {
+      ...mockSession,
+      toolCalls: [],
+      providerCalls: [],
+      runtimeEvents: [],
+      evalResults: [],
+    };
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      JSON.stringify(mockSession, null, 2)
+      JSON.stringify(expected, null, 2)
     );
   });
 
