@@ -200,6 +200,7 @@ function runtimeEventKind(eventType: string): TimelineEventKind {
   if (eventType.startsWith("validation.")) return "stage_event";
   if (eventType === "workflow.completed") return "workflow_completed";
   if (eventType.startsWith("workflow.")) return "workflow_transition";
+  if (eventType === "eval.completed" || eventType === "eval.failed") return "eval_event";
   if (eventType === "context_built" || eventType === "token_budget_exceeded") return "system_message";
   if (eventType === "state_loaded" || eventType === "state_saved") return "system_message";
   if (eventType === "stream_interrupted") return "error";
@@ -207,23 +208,39 @@ function runtimeEventKind(eventType: string): TimelineEventKind {
 }
 
 /** Build a human-readable label for a runtime event. */
+/** Simple static labels for runtime events. */
+const RUNTIME_EVENT_LABELS: Record<string, string> = {
+  [EVENT_PIPELINE_STARTED]: "Pipeline started",
+  [EVENT_PIPELINE_COMPLETED]: "Pipeline completed",
+  "pipeline.failed": "Pipeline failed",
+  "workflow.completed": "Workflow completed",
+  "context_built": "Context built",
+  "token_budget_exceeded": "Token budget exceeded",
+  "state_loaded": "State loaded",
+  "state_saved": "State saved",
+  "stream_interrupted": "Stream interrupted",
+};
+
 function runtimeEventLabel(eventType: string, data?: Record<string, unknown>): string {
+  const simple = RUNTIME_EVENT_LABELS[eventType];
+  if (simple) return simple;
+
   const name = data?.Name || data?.name;
   const nameStr = typeof name === "string" ? `: ${name}` : "";
+  const parts = eventType.split(".");
+  const prefix = parts[0];
+  const action = parts[1] || "";
 
-  if (eventType === EVENT_PIPELINE_STARTED) return "Pipeline started";
-  if (eventType === EVENT_PIPELINE_COMPLETED) return "Pipeline completed";
-  if (eventType === "pipeline.failed") return "Pipeline failed";
-  if (eventType.startsWith("stage.")) return `Stage${nameStr} ${eventType.split(".")[1]}`;
-  if (eventType.startsWith("middleware.")) return `Middleware${nameStr} ${eventType.split(".")[1]}`;
-  if (eventType.startsWith("validation.")) return `Validation${nameStr} ${eventType.split(".")[1]}`;
+  if (prefix === "stage" || prefix === "middleware" || prefix === "validation") {
+    const label = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+    return `${label}${nameStr} ${action}`;
+  }
   if (eventType === "workflow.transitioned") return `Workflow transition${nameStr}`;
-  if (eventType === "workflow.completed") return "Workflow completed";
-  if (eventType === "context_built") return "Context built";
-  if (eventType === "token_budget_exceeded") return "Token budget exceeded";
-  if (eventType === "state_loaded") return "State loaded";
-  if (eventType === "state_saved") return "State saved";
-  if (eventType === "stream_interrupted") return "Stream interrupted";
+  if (prefix === "eval") {
+    const evalId = data?.eval_id || "eval";
+    const status = eventType === "eval.completed" && data?.passed ? "passed" : "failed";
+    return `Eval: ${evalId} (${status})`;
+  }
   return eventType;
 }
 
@@ -256,6 +273,7 @@ const RUNTIME_EVENT_KINDS = new Set<TimelineEventKind>([
   "stage_event",
   "workflow_transition",
   "workflow_completed",
+  "eval_event",
 ]);
 
 /** Check whether a message-based event should be skipped because first-class records replace it. */

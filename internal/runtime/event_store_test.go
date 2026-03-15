@@ -1352,13 +1352,13 @@ func TestOmniaEventStore_AppendEmptySessionID_BackfillsFromFallback(t *testing.T
 		t.Errorf("expected event.SessionID='fallback-sess', got %q", event.SessionID)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["type"] != "eval_completed" {
-		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
+	if evt.EventType != "eval.completed" {
+		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
 	}
-	if msg.Metadata["eval_id"] != "conciseness" {
-		t.Errorf("expected eval_id 'conciseness', got %q", msg.Metadata["eval_id"])
+	if evt.Data["eval_id"] != "conciseness" {
+		t.Errorf("expected eval_id 'conciseness', got %v", evt.Data["eval_id"])
 	}
 }
 
@@ -1390,7 +1390,7 @@ func TestOmniaEventStore_AppendPreservesExistingSessionID(t *testing.T) {
 		t.Errorf("expected event.SessionID='real-sess', got %q", event.SessionID)
 	}
 
-	store.waitForMessages(t, 1)
+	store.waitForRuntimeEvents(t, 1)
 }
 
 func TestOmniaEventStore_SetSessionID(t *testing.T) {
@@ -1757,17 +1757,25 @@ func TestOmniaEventStore_EvalCompleted(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	// Verify session message recorded async
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["type"] != "eval_completed" {
-		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	// Eval events now go to runtime_events, not messages.
+	store.waitForRuntimeEvents(t, 1)
+	msgs := store.getMessages()
+	if len(msgs) != 0 {
+		t.Errorf("expected no messages for eval event, got %d", len(msgs))
 	}
-	if msg.Metadata["eval_id"] != "conciseness" {
-		t.Errorf("expected eval_id 'conciseness', got %q", msg.Metadata["eval_id"])
+
+	evt := store.getRuntimeEvents()[0]
+	if evt.EventType != "eval.completed" {
+		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
 	}
-	if msg.Metadata["passed"] != "true" {
-		t.Errorf("expected passed 'true', got %q", msg.Metadata["passed"])
+	if evt.Data["eval_id"] != "conciseness" {
+		t.Errorf("expected EvalID 'conciseness', got %v", evt.Data["eval_id"])
+	}
+	if evt.Data["passed"] != true {
+		t.Errorf("expected Passed true, got %v", evt.Data["passed"])
+	}
+	if evt.DurationMs != 5 {
+		t.Errorf("expected DurationMs=5, got %d", evt.DurationMs)
 	}
 }
 
@@ -1795,10 +1803,17 @@ func TestOmniaEventStore_EvalFailed(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["type"] != "eval_failed" {
-		t.Errorf("expected type 'eval_failed', got %q", msg.Metadata["type"])
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
+	if evt.EventType != "eval.failed" {
+		t.Errorf("expected eventType 'eval.failed', got %q", evt.EventType)
+	}
+	// Explanation should be preserved in the runtime event data.
+	if evt.Data["explanation"] != "Score was 0.3, threshold is 0.7" {
+		t.Errorf("expected explanation preserved, got %v", evt.Data["explanation"])
+	}
+	if evt.DurationMs != 2500 {
+		t.Errorf("expected DurationMs=2500, got %d", evt.DurationMs)
 	}
 }
 
@@ -1823,13 +1838,13 @@ func TestOmniaEventStore_EvalSkipped(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["skipped"] != "true" {
-		t.Errorf("expected skipped 'true', got %q", msg.Metadata["skipped"])
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
+	if evt.Data["skipped"] != true {
+		t.Errorf("expected Skipped true, got %v", evt.Data["skipped"])
 	}
-	if msg.Metadata["skip_reason"] != "sampling" {
-		t.Errorf("expected skip_reason 'sampling', got %q", msg.Metadata["skip_reason"])
+	if evt.Data["skip_reason"] != "sampling" {
+		t.Errorf("expected SkipReason 'sampling', got %v", evt.Data["skip_reason"])
 	}
 }
 
@@ -1854,14 +1869,14 @@ func TestOmniaEventStore_EvalWithError(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["is_error"] != "true" {
-		t.Errorf("expected is_error 'true', got %q", msg.Metadata["is_error"])
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
+	if evt.ErrorMessage != "invalid regex pattern" {
+		t.Errorf("expected errorMessage 'invalid regex pattern', got %q", evt.ErrorMessage)
 	}
 }
 
-func TestOmniaEventStore_EvalPersistsToSessionAPI(t *testing.T) {
+func TestOmniaEventStore_EvalPersistsAsRuntimeEvent(t *testing.T) {
 	store := &mockSessionStore{}
 	es := NewOmniaEventStore(store, logr.Discard())
 
@@ -1881,10 +1896,10 @@ func TestOmniaEventStore_EvalPersistsToSessionAPI(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["type"] != "eval_completed" {
-		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
+	if evt.EventType != "eval.completed" {
+		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
 	}
 }
 
@@ -1909,12 +1924,12 @@ func TestOmniaEventStore_EvalValueTypedData(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	store.waitForMessages(t, 1)
-	msg := store.getMessages()[0]
-	if msg.Metadata["type"] != "eval_completed" {
-		t.Errorf("expected type 'eval_completed', got %q", msg.Metadata["type"])
+	store.waitForRuntimeEvents(t, 1)
+	evt := store.getRuntimeEvents()[0]
+	if evt.EventType != "eval.completed" {
+		t.Errorf("expected eventType 'eval.completed', got %q", evt.EventType)
 	}
-	if msg.Metadata["eval_id"] != "value-typed" {
-		t.Errorf("expected eval_id 'value-typed', got %q", msg.Metadata["eval_id"])
+	if evt.Data["eval_id"] != "value-typed" {
+		t.Errorf("expected EvalID 'value-typed', got %v", evt.Data["eval_id"])
 	}
 }

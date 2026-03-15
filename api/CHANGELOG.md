@@ -9,6 +9,10 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 ---
 
 ## 2026-03-15
+- **Session API**: Fixed `eval_results.session_id` type from TEXT to UUID (migration 000020)
+  - Added `(session_id, message_id)` composite index for faster lookups
+  - Removed `::text` cast from cascade delete trigger
+  - Eval events from runtime now written to `runtime_events` instead of messages
 - **Session API**: Added structured multi-modal fields to `Message` schema (`hasMedia`, `mediaTypes`)
   - Migration `000019_structured_multimodal` adds `has_media`/`media_types` to messages and queryable columns to message_artifacts
   - Enables queries like "sessions with voice input" without parsing JSON metadata

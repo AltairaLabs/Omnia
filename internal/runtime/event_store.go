@@ -638,54 +638,38 @@ func (s *OmniaEventStore) convertProviderCallFailed(event *events.Event) (eventA
 
 // --- Eval events ---
 
-// convertEvalEvent creates a session message from an eval completed/failed event.
+// convertEvalEvent records an eval completed/failed event as a RuntimeEvent.
+// The authoritative eval_results record is written by the arena eval worker;
+// this RuntimeEvent preserves timeline visibility without polluting messages.
 func (s *OmniaEventStore) convertEvalEvent(event *events.Event) (eventAction, bool) {
 	data, ok := asPtr[events.EvalEventData](event.Data)
 	if !ok {
 		return eventAction{}, false
 	}
 
-	evtType := "eval_completed"
-	if event.Type == events.EventEvalFailed {
-		evtType = "eval_failed"
+	// Round-trip through JSON to convert typed struct to map[string]any.
+	var evtData map[string]any
+	raw, err := json.Marshal(data)
+	if err == nil {
+		_ = json.Unmarshal(raw, &evtData)
 	}
 
-	metadata := map[string]string{
-		metaKeyType:   evtType,
-		metaKeySource: metaValueSource,
-		"eval_id":     data.EvalID,
-		"eval_type":   data.EvalType,
-		"trigger":     data.Trigger,
-		"passed":      strconv.FormatBool(data.Passed),
-	}
-	if data.DurationMs > 0 {
-		metadata[metaKeyDurationMs] = strconv.FormatInt(data.DurationMs, 10)
-	}
+	evtType := string(event.Type)
+	var errMsg string
 	if data.Error != "" {
-		metadata[metaKeyIsError] = "true"
-	}
-	if data.Skipped {
-		metadata["skipped"] = "true"
-		metadata["skip_reason"] = data.SkipReason
+		errMsg = data.Error
 	}
 
-	content, _ := json.Marshal(map[string]interface{}{
-		"evalID":      data.EvalID,
-		"evalType":    data.EvalType,
-		"trigger":     data.Trigger,
-		"passed":      data.Passed,
-		"score":       data.Score,
-		"durationMs":  data.DurationMs,
-		"explanation": data.Explanation,
-		"message":     data.Message,
-		"violations":  data.Violations,
-		"skipped":     data.Skipped,
-		"skipReason":  data.SkipReason,
-		"error":       data.Error,
-	})
+	evt := session.RuntimeEvent{
+		ID:           uuid.New().String(),
+		EventType:    evtType,
+		Data:         evtData,
+		DurationMs:   data.DurationMs,
+		ErrorMessage: errMsg,
+		Timestamp:    event.Timestamp,
+	}
 
-	msg := s.buildMessage(session.RoleSystem, string(content), event.Timestamp, metadata)
-	return eventAction{message: &msg}, true
+	return eventAction{event: &evt}, true
 }
 
 // --- Generic event handler ---

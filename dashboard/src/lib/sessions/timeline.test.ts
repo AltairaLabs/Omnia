@@ -553,6 +553,33 @@ describe("runtimeEventsToTimelineEvents", () => {
     expect(result[0].kind).toBe("system_message");
     expect(result[0].label).toBe("custom.event");
   });
+
+  it("converts eval events with explanation", () => {
+    const events: RuntimeEvent[] = [
+      {
+        id: "re1", sessionId: "s1", eventType: "eval.completed",
+        data: { eval_id: "accuracy", passed: true, explanation: "Score 0.9 above threshold" },
+        durationMs: 500, timestamp: "2024-01-01T00:00:00Z",
+      },
+      {
+        id: "re2", sessionId: "s1", eventType: "eval.failed",
+        data: { eval_id: "safety", passed: false, explanation: "Harmful content detected" },
+        errorMessage: "safety check failed",
+        timestamp: "2024-01-01T00:00:01Z",
+      },
+    ];
+
+    const result = runtimeEventsToTimelineEvents(events);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].kind).toBe("eval_event");
+    expect(result[0].label).toBe("Eval: accuracy (passed)");
+    expect(result[0].status).toBe("success");
+    expect(result[1].kind).toBe("eval_event");
+    expect(result[1].label).toBe("Eval: safety (failed)");
+    expect(result[1].status).toBe("error");
+    expect(result[1].detail).toBe("safety check failed");
+  });
 });
 
 describe("extractTimelineEvents with runtimeEvents", () => {
